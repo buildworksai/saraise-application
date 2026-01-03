@@ -35,7 +35,11 @@ jobs:
 
       - name: "Regression guard: forbid Jest flags in CI commands"
         run: |
-          if grep -R --line-number --fixed-strings -- '--watchAll' .github/workflows/*.yml; then
+          matches="$(grep -R --line-number --fixed-strings -- '--watchAll' .github/workflows/*.yml || true)"
+          # Ignore this guard's own grep invocation line(s).
+          matches="$(printf '%s\n' "$matches" | grep -v --fixed-strings "-- '--watchAll'" || true)"
+          if [ -n "$matches" ]; then
+            echo "$matches"
             echo "❌ Jest flag '--watchAll' found in workflow commands"
             exit 1
           fi
