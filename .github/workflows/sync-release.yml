@@ -116,9 +116,7 @@ jobs:
           fi
 
           echo "💾 Creating commit..."
-          git commit -m "Release: ${{ github.event.inputs.version }}
-
-          ${{ github.event.inputs.release_notes }}"
+          git commit -m "Release: ${{ github.event.inputs.version }}" -m "${{ github.event.inputs.release_notes }}"
 
           # Create or update tag
           echo "🏷️ Creating tag..."
