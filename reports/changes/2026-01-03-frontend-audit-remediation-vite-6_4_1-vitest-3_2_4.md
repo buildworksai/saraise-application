@@ -33,8 +33,16 @@ Resolved versions evidence:
 - Existing `vite.config.ts` and `vitest.config.ts` continued to work.
 
 ## CI compatibility addendum
-- Removed Jest-only `--watchAll=false` from CI test commands (Vitest rejects this flag).
-- Added explicit Vitest 3 coverage configuration and dependency so CI receives `coverage/coverage-summary.json`.
+- CI workflows run frontend checks via npm scripts:
+  - `npm ci`
+  - `npm run typecheck`
+  - `npm run lint`
+  - `npm test -- --coverage`
+- Removed Jest-only flags (e.g., `--watchAll=false`) from CI test commands (Vitest rejects them).
+- Pinned Vitest coverage output (explicit `provider`, `reporter`, `reportsDirectory`, `include`, `exclude`) so CI reliably produces `coverage/coverage-summary.json`.
+- Added regression guards so CI fails if:
+  - Jest-only flags (e.g., `--watchAll`) appear in workflow commands.
+  - `coverage/coverage-summary.json` is missing after tests.
 
 ## Rollback
 - Revert `frontend/package.json` and `frontend/package-lock.json` to the last known good versions.

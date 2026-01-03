@@ -28,6 +28,14 @@ jobs:
         working-directory: ./frontend
     steps:
       - uses: actions/checkout@v4
+
+      - name: Regression guard: forbid Jest flags in CI commands
+        working-directory: .
+        run: |
+          if grep -R --line-number --fixed-strings -- '--watchAll' .github/workflows/*.yml; then
+            echo "❌ Jest flag '--watchAll' found in workflow commands"
+            exit 1
+          fi
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,11 +48,11 @@ jobs:
         run: npm ci
 
       - name: "🔒 TypeScript Strict Check (SARAISE-04002)"
-        run: npx tsc --noEmit
+        run: npm run typecheck
         # Must pass with ZERO errors. No exclusions allowed.
 
       - name: "🔒 ESLint Strict Check (SARAISE-04001)"
-        run: npx eslint . --ext .ts,.tsx --max-warnings 0
+        run: npm run lint
         # ZERO tolerance for warnings or unused imports.
 
       - name: "🔒 Unit Tests & Coverage (SARAISE-01002)"
