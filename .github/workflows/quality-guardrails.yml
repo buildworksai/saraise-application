@@ -29,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Regression guard: forbid Jest flags in CI commands
+      - name: "Regression guard: forbid Jest flags in CI commands"
         working-directory: .
         run: |
           if grep -R --line-number --fixed-strings -- '--watchAll' .github/workflows/*.yml; then
