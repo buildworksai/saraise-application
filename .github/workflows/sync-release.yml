@@ -1,0 +1,146 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Sync Release to Public Repo
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        type: string
+      release_notes:
+        description: 'Release notes (optional)'
+        required: false
+        type: string
+
+jobs:
+  sync-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1  # Only fetch latest commit, not full history
+
+      - name: Verify release repo access
+        run: |
+          echo "Verifying access to release repository..."
+          if [ -z "${{ secrets.RELEASE_REPO_TOKEN }}" ]; then
+            echo "❌ RELEASE_REPO_TOKEN secret is not set"
+            exit 1
+          fi
+          echo "✅ Token is set (length: ${#RELEASE_REPO_TOKEN})"
+
+      - name: Initialize or checkout release repository
+        run: |
+          if [ -d "release-repo" ]; then
+            rm -rf release-repo
+          fi
+
+          # Try to clone the repository
+          if git clone --depth 1 https://${{ secrets.RELEASE_REPO_TOKEN }}@github.com/buildworksai/saraise.release.git release-repo 2>/dev/null; then
+            echo "✅ Repository cloned successfully"
+            cd release-repo
+            # Check if main branch exists, if not create it
+            if ! git rev-parse --verify main >/dev/null 2>&1; then
+              echo "Creating main branch..."
+              git checkout -b main || git checkout -b main
+            else
+              git checkout main
+            fi
+          else
+            echo "⚠️ Repository is empty or doesn't exist, initializing..."
+            mkdir -p release-repo
+            cd release-repo
+            git init
+            git remote add origin https://${{ secrets.RELEASE_REPO_TOKEN }}@github.com/buildworksai/saraise.release.git
+            git checkout -b main
+          fi
+
+      - name: Sync files to release repo
+        timeout-minutes: 10
+        run: |
+          echo "🔄 Starting file sync (this may take a few minutes for large repositories)..."
+          echo "📊 Estimated files to sync: ~3,000 files"
+          # Copy files (excluding sensitive data and development files)
+          # CRITICAL FIX: --exclude='release-repo/' prevents recursive copy bug
+          # OPTIMIZATION: --filter=':- .gitignore' automatically respects .gitignore (4x faster)
+          # OPTIMIZATION: --whole-file for local transfers (faster than delta)
+          # OPTIMIZATION: --prune-empty-dirs skips empty directories
+          rsync -av --delete --whole-file --prune-empty-dirs --info=progress2 \
+            --exclude='release-repo/' \
+            --filter=':- .gitignore' \
+            --exclude='.git' \
+            --exclude='.github/workflows/' \
+            --exclude='.env*' \
+            --exclude='SARAISE-LOGO*' \
+            --exclude='docs/' \
+            --exclude='.cursor/' \
+            --exclude='.windsurf/' \
+            --exclude='.claude/' \
+            ./ release-repo/
+          echo "✅ File sync completed successfully"
+
+      - name: Configure git for release repo
+        run: |
+          cd release-repo
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git remote set-url origin https://${{ secrets.RELEASE_REPO_TOKEN }}@github.com/buildworksai/saraise.release.git
+
+          # Ensure we're on main branch
+          if ! git rev-parse --verify main >/dev/null 2>&1; then
+            git checkout -b main
+          else
+            git checkout main
+          fi
+
+      - name: Create release commit
+        run: |
+          cd release-repo
+          echo "📦 Staging files..."
+          git add .
+
+          # Check if there are changes to commit
+          if git diff --staged --quiet; then
+            echo "ℹ️ No changes to commit"
+            # Still create/update tag even if no changes
+            git tag -f -a "${{ github.event.inputs.version }}" -m "Release ${{ github.event.inputs.version }}" 2>/dev/null || true
+            echo "🚀 Pushing tags..."
+            git push origin main --tags --force || git push -u origin main --tags
+            exit 0
+          fi
+
+          echo "💾 Creating commit..."
+          git commit -m "Release: ${{ github.event.inputs.version }}
+
+          ${{ github.event.inputs.release_notes }}"
+
+          # Create or update tag
+          echo "🏷️ Creating tag..."
+          git tag -f -a "${{ github.event.inputs.version }}" -m "Release ${{ github.event.inputs.version }}"
+
+          # Push branch and tags (use -u for first push, --force for updates)
+          echo "🚀 Pushing to release repository (this may take a few minutes)..."
+          git push origin main --tags --force || git push -u origin main --tags
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: Release ${{ github.event.inputs.version }}
+          body: |
+            ## Release ${{ github.event.inputs.version }}
+
+            ${{ github.event.inputs.release_notes }}
+
+            This release was automatically synced from the main repository.
+          draft: false
+          prerelease: false
+          repository: buildworksai/saraise.release

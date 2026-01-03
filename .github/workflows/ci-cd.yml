@@ -1,0 +1,196 @@
+# SPDX-License-Identifier: Apache-2.0
+name: SARAISE CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  DOCKER_REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Quality Gates - SARAISE-04001, SARAISE-04002, SARAISE-02013
+  quality-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18.19.1'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # Backend Quality Checks
+      - name: Install Python dependencies
+        run: |
+          cd backend
+          pip install -e .
+          pip install -e .[dev,test]
+
+      - name: Run Python linting (flake8)
+        run: |
+          cd backend
+          flake8 src/ --max-line-length=120 --exclude=__pycache__ --ignore=E203,W503
+
+      - name: Run Python formatting check (black)
+        run: |
+          cd backend
+          black --check src/
+
+      - name: Run Python import sorting check (isort)
+        run: |
+          cd backend
+          isort --check-only src/
+
+      - name: MyPy Type Check (Baseline + Ratcheting) - SARAISE-02013
+        run: |
+          cd backend
+          ./scripts/mypy-baseline.sh check
+        continue-on-error: false
+
+      - name: Run Python tests with coverage
+        run: |
+          cd backend
+          pytest tests/ --cov=src --cov-report=xml --cov-report=term
+        continue-on-error: false
+
+      - name: Check Python coverage threshold (≥90%) - SARAISE-01002
+        run: |
+          cd backend
+          coverage report --fail-under=90 || (echo "❌ Coverage below 90% threshold" && exit 1)
+
+      # Frontend Quality Checks
+      - name: Install Node.js dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: TypeScript Check (Zero Errors) - SARAISE-04002
+        run: |
+          cd frontend
+          npx tsc --noEmit
+        continue-on-error: false
+
+      - name: ESLint Check (Zero Warnings) - SARAISE-04001
+        run: |
+          cd frontend
+          npx eslint . --ext .ts,.tsx --max-warnings 0
+        continue-on-error: false
+
+      - name: Run frontend tests with coverage
+        run: |
+          cd frontend
+          npm test -- --coverage --watchAll=false
+        continue-on-error: false
+
+      - name: Check frontend coverage threshold (≥90%) - SARAISE-01002
+        run: |
+          cd frontend
+          if [ -f "coverage/coverage-summary.json" ]; then
+            node -e "const s=require('./coverage/coverage-summary.json');const cov=s.total.lines.pct||0;if(cov<90){console.error('❌ Frontend coverage '+cov+'% is below 90% threshold');process.exit(1)}else{console.log('✅ Frontend coverage: '+cov+'%')}"
+          else
+            echo "⚠️ Coverage file not found, skipping check"
+          fi
+
+      # Security Scanning - SARAISE-01003, SARAISE-01004
+      - name: Python security audit (safety)
+        run: |
+          cd backend
+          pip install safety
+          safety check || (echo "❌ Security vulnerabilities found" && exit 1)
+
+      - name: Node.js security audit
+        run: |
+          cd frontend
+          npm audit --audit-level moderate || (echo "❌ Security vulnerabilities found" && exit 1)
+
+  # Build and Test
+  build-and-test:
+    needs: quality-gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build backend image
+      - name: Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: false
+          tags: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}-api:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Build frontend image
+      - name: Build frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: false
+          tags: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Deploy to Staging
+  deploy-staging:
+    if: github.ref == 'refs/heads/develop'
+    needs: [quality-gates, build-and-test]
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to staging
+        run: |
+          chmod +x scripts/deploy-staging.sh
+          ./scripts/deploy-staging.sh
+        env:
+          DOCKER_REGISTRY: ${{ env.DOCKER_REGISTRY }}
+          STAGING_POSTGRES_CONNECTION_STRING: ${{ secrets.STAGING_POSTGRES_CONNECTION_STRING }}
+          STAGING_REDIS_URL: ${{ secrets.STAGING_REDIS_URL }}
+
+  # Deploy to Production
+  deploy-production:
+    if: github.ref == 'refs/heads/main'
+    needs: [quality-gates, build-and-test]
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to production
+        run: |
+          chmod +x scripts/deploy-production.sh
+          ./scripts/deploy-production.sh
+        env:
+          DOCKER_REGISTRY: ${{ env.DOCKER_REGISTRY }}
+          POSTGRES_CONNECTION_STRING: ${{ secrets.PRODUCTION_POSTGRES_CONNECTION_STRING }}
+          REDIS_URL: ${{ secrets.PRODUCTION_REDIS_URL }}
+          SESSION_SECRET_KEY: ${{ secrets.PRODUCTION_SESSION_SECRET_KEY }}
+

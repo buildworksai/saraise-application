@@ -1,0 +1,116 @@
+name: Strict Quality Guardrails
+
+# Enforces AGENT.md Pre-Commit Rules in CI
+# Blocking workflow - must pass before merge
+
+on:
+  push:
+    branches: [main, develop, "release/*", "hotfix/*"]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------
+  # Frontend Quality Gate
+  # SARAISE-04002: TypeScript (Zero Errors)
+  # SARAISE-04001: ESLint (Zero Warnings)
+  # SARAISE-01002: Test Coverage (≥90%)
+  # ------------------------------------------------------------------
+  frontend-guardrails:
+    name: Frontend Quality Guardrails
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18.19.1'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: 🔒 TypeScript Strict Check (SARAISE-04002)
+        run: npx tsc --noEmit
+        # Must pass with ZERO errors. No exclusions allowed.
+
+      - name: 🔒 ESLint Strict Check (SARAISE-04001)
+        run: npx eslint . --ext .ts,.tsx --max-warnings 0
+        # ZERO tolerance for warnings or unused imports.
+
+      - name: 🔒 Unit Tests & Coverage (SARAISE-01002)
+        run: npm test -- --coverage --watchAll=false
+      
+      - name: Verify Coverage Threshold
+        run: |
+          if [ -f "coverage/coverage-summary.json" ]; then
+            node -e "const s=require('./coverage/coverage-summary.json');const cov=s.total.lines.pct||0;if(cov<90){console.error('❌ Coverage '+cov+'% < 90%');process.exit(1)}else{console.log('✅ Coverage: '+cov+'%')}"
+          else
+            echo "❌ Coverage report missing - Test run failed to generate artifacts"
+            exit 1
+          fi
+
+      - name: Security Audit
+        run: npm audit --audit-level moderate
+
+  # ------------------------------------------------------------------
+  # Backend Quality Gate
+  # SARAISE-02013: MyPy Type Check
+  # PEP8: Flake8, Black, Isort
+  # SARAISE-01002: Test Coverage (≥90%)
+  # ------------------------------------------------------------------
+  backend-guardrails:
+    name: Backend Quality Guardrails
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .[dev,test]
+          pip install safety
+
+      - name: 🔒 Lint: Flake8 (Line Length 120)
+        run: flake8 src/ tests/ --max-line-length=120 --exclude=__pycache__,migrations --extend-ignore=E203
+
+      - name: 🔒 Formatting: Black
+        run: black --check src/ tests/
+
+      - name: 🔒 Imports: Isort
+        run: isort --check-only src/ tests/
+
+      - name: 🔒 Type Check: MyPy (SARAISE-02013)
+        run: |
+          # Enforces type safety. Configuration in backend/pyproject.toml or mypy.ini
+          # New files must be strict.
+          mypy src
+
+      - name: 🔒 Unit Tests & Coverage (SARAISE-01002)
+        run: pytest tests/ --cov=src --cov-report=xml --cov-report=term
+
+      - name: Verify Coverage Threshold
+        run: |
+          coverage report --fail-under=90 || (echo "❌ Coverage below 90% threshold" && exit 1)
+
+      - name: Security Audit
+        run: safety check
+

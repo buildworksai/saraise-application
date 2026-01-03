@@ -1,0 +1,217 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# ===================================
+# SARAISE Project .gitignore
+# ===================================
+
+# ====================
+# Python
+# ====================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+backend/venv/
+backend/env/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+*.cover
+*.py,cover
+.hypothesis/
+nosetests.xml
+coverage.xml
+*.mo
+*.pot
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# Django Migrations
+# Do NOT ignore migrations - they are source controlled
+# backend/src/modules/*/migrations/*.py
+
+# ====================
+# Node / Frontend
+# ====================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+*.local
+
+# Testing
+frontend/coverage/
+
+# ====================
+# IDEs
+# ====================
+.vscode/
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.AppleDouble
+.LSOverride
+*.sublime-project
+*.sublime-workspace
+
+# ====================
+# Environment & Secrets
+# ====================
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+.env.test
+*.key
+*.pem
+*.crt
+secrets/
+config/secrets/
+
+# ====================
+# Logs
+# ====================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ====================
+# Database
+# ====================
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# ====================
+# OS
+# ====================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ====================
+# Build artifacts
+# ====================
+*.pyc
+*.pyo
+*.egg
+*.egg-info
+dist/
+build/
+*.whl
+
+# ====================
+# Documentation builds
+# ====================
+docs/_build/
+site/
+
+# ====================
+# Temporary files
+# ====================
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+.cache/
+
+# ====================
+# Redis / Session storage (dev)
+# ====================
+dump.rdb
+*.rdb
+
+# ====================
+# Docker
+# ====================
+.dockerignore
+docker-compose.override.yml
+
+# ====================
+# CI/CD
+# ====================
+.github/workflows/*.local.yml
+
+# ====================
+# Reports (Keep structure, ignore temp)
+# ====================
+reports/*.tmp
+reports/*.temp
+
+# ====================
+# Terraform / Infrastructure
+# ====================
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfvars
+
+# ====================
+# Keep important files
+# ====================
+!.gitkeep
+!.gitignore
+!.pre-commit-config.yaml
+!.github/

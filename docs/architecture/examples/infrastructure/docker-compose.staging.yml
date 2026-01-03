@@ -1,0 +1,86 @@
+# ✅ APPROVED: Staging environment setup
+# docker-compose.staging.yml
+# Reference: docs/architecture/operational-runbooks.md § 0 (Container Orchestration)
+# CRITICAL NOTES:
+# - Staging environment MUST mirror production configuration as closely as possible
+# - All environment variables sourced from staging vault (operational-runbooks.md § 1.2)
+# - Session configuration MUST enforce security-model.md § 3.2 (HTTP-only cookies, SameSite attributes)
+# - Health checks MUST validate Row-Level Multitenancy enforcement (application-architecture.md § 4.1)
+# - All logs captured to centralized logging system for security analysis
+# - Backup services MUST function identically to production (immutability, audit logging)
+# - TLS endpoints MUST be present for all service-to-service communication
+# Source: docs/architecture/operational-runbooks.md § 0
+
+version: '3.8'
+
+services:
+  # Backend API
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "${API_HOST_PORT:-30000}:${API_CONTAINER_PORT:-30000}"
+    environment:
+      - DATABASE_URL=${STAGING_DATABASE_URL}
+      - REDIS_URL=${STAGING_REDIS_URL}
+      - OPENSEARCH_URL=${STAGING_OPENSEARCH_URL}
+      - APP_ENV=staging
+      - LOG_LEVEL=${LOG_LEVEL_STAGING:-INFO}
+      - SESSION_SECRET_KEY=${STAGING_SESSION_SECRET_KEY}
+      - SESSION_TIMEOUT=${SESSION_TIMEOUT:-7200}
+    depends_on:
+      - db
+      - redis
+      - opensearch
+    restart: unless-stopped
+    networks:
+      - ${NETWORK_STAGING:-saraise-staging}
+
+  # Frontend
+  ui:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "${FRONTEND_HOST_PORT:-15000}:${FRONTEND_CONTAINER_PORT:-15000}"
+    environment:
+      - VITE_API_URL=${STAGING_API_URL}
+    restart: unless-stopped
+    networks:
+      - ${NETWORK_STAGING:-saraise-staging}
+
+  # Database
+  db:
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
+    ports:
+      - "${POSTGRES_HOST_PORT:-25432}:${POSTGRES_CONTAINER_PORT:-5432}"
+    environment:
+      - POSTGRES_DB=${STAGING_POSTGRES_DB}
+      - POSTGRES_USER=${STAGING_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${STAGING_POSTGRES_PASSWORD}
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - ${NETWORK_STAGING:-saraise-staging}
+
+  # Redis
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    ports:
+      - "${REDIS_HOST_PORT:-26379}:${REDIS_CONTAINER_PORT:-6379}"
+    volumes:
+      - redis_staging_data:/data
+    restart: unless-stopped
+    networks:
+      - ${NETWORK_STAGING:-saraise-staging}
+
+volumes:
+  postgres_staging_data:
+  redis_staging_data:
+
+networks:
+  ${NETWORK_STAGING:-saraise-staging}:
+    driver: bridge
+

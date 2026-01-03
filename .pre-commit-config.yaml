@@ -1,0 +1,141 @@
+# SPDX-License-Identifier: Apache-2.0
+# ===================================
+# SARAISE Pre-Commit Configuration
+# ===================================
+# MANDATORY — ALL COMMITS MUST PASS
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+# ===================================
+
+repos:
+  # ===================================
+  # Python Code Quality
+  # ===================================
+  - repo: https://github.com/psf/black
+    rev: 24.1.1
+    hooks:
+      - id: black
+        name: "Python: Black Formatter"
+        language_version: python3.11
+        args: ["--line-length=120"]
+        files: ^backend/
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        name: "Python: Import Sorting"
+        args: ["--profile=black", "--line-length=120"]
+        files: ^backend/
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        name: "Python: Flake8 Linting"
+        args: ["--max-line-length=120", "--extend-ignore=E203,W503"]
+        files: ^backend/
+        exclude: ^backend/src/modules/.*/migrations/
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        name: "Python: Type Checking (MyPy)"
+        args: ["--ignore-missing-imports", "--exclude=tests/"]
+        files: ^backend/src/
+        additional_dependencies: 
+          - types-redis
+          - types-requests
+          - django-stubs>=5.0.2
+
+  # ===================================
+  # TypeScript / Frontend Quality
+  # ===================================
+  - repo: local
+    hooks:
+      - id: typescript-check
+        name: "TypeScript: Type Check (ZERO ERRORS)"
+        entry: bash -c 'cd frontend && npx tsc --noEmit'
+        language: system
+        files: ^frontend/src/.*\.(ts|tsx)$
+        pass_filenames: false
+
+      - id: eslint-check
+        name: "TypeScript: ESLint (ZERO WARNINGS)"
+        entry: bash -c 'cd frontend && npx eslint src --ext .ts,.tsx --max-warnings 0'
+        language: system
+        files: ^frontend/src/.*\.(ts|tsx)$
+        pass_filenames: false
+
+  # ===================================
+  # File Quality Checks
+  # ===================================
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        name: "File: Remove Trailing Whitespace"
+        args: [--markdown-linebreak-ext=md]
+
+      - id: end-of-file-fixer
+        name: "File: Ensure EOF Newline"
+
+      - id: check-yaml
+        name: "File: YAML Validation"
+        args: ["--allow-multiple-documents"]
+
+      - id: check-json
+        name: "File: JSON Validation"
+
+      - id: check-toml
+        name: "File: TOML Validation"
+
+      - id: check-merge-conflict
+        name: "File: Merge Conflict Detection"
+
+      - id: check-added-large-files
+        name: "File: Large File Detection"
+        args: ["--maxkb=1000"]
+
+      - id: check-case-conflict
+        name: "File: Case Conflict Detection"
+
+      - id: mixed-line-ending
+        name: "File: Line Ending Consistency"
+        args: ["--fix=lf"]
+
+  # ===================================
+  # Security Checks
+  # ===================================
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        name: "Security: Secret Detection"
+        args: ["--baseline", ".secrets.baseline"]
+        exclude: package-lock.json
+
+# ===================================
+# Configuration
+# ===================================
+default_language_version:
+  python: python3.11
+  node: 20.10.0
+
+fail_fast: false
+
+# ===================================
+# CI Configuration
+# ===================================
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: monthly
+  skip: [typescript-check, eslint-check]
+  submodules: false

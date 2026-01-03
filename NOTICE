@@ -1,0 +1,73 @@
+SARAISE ERP Platform
+Copyright 2025-2026 BuildWorks.AI
+
+This product includes software licensed under the Apache License, Version 2.0.
+
+================================================================================
+
+SARAISE - Secure and Reliable AI Symphony ERP
+
+This product is a comprehensive, multi-tenant, modular ERP platform designed
+for enterprises across multiple industries.
+
+Copyright 2025-2026 BuildWorks.AI
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+================================================================================
+
+This product includes third-party software components with their own licenses:
+
+Frontend Dependencies:
+- React (MIT License) - https://reactjs.org/
+- TypeScript (Apache License 2.0) - https://www.typescriptlang.org/
+- Vite (MIT License) - https://vitejs.dev/
+- TanStack Query (MIT License) - https://tanstack.com/query
+- Radix UI (MIT License) - https://www.radix-ui.com/
+- Tailwind CSS (MIT License) - https://tailwindcss.com/
+- Zustand (MIT License) - https://github.com/pmndrs/zustand
+- React Router DOM (MIT License) - https://reactrouter.com/
+- Zod (MIT License) - https://zod.dev/
+- React Hook Form (MIT License) - https://react-hook-form.com/
+
+Backend Dependencies:
+- Django (BSD-3-Clause License) - https://www.djangoproject.com/
+- Django REST Framework (BSD-3-Clause License) - https://www.django-rest-framework.org/
+- PostgreSQL (PostgreSQL License) - https://www.postgresql.org/
+- Redis (BSD-3-Clause License) - https://redis.io/
+- Celery (BSD-3-Clause License) - https://docs.celeryproject.org/
+- Gunicorn (MIT License) - https://gunicorn.org/
+- psycopg (LGPL-3.0 License) - https://www.psycopg.org/
+
+Infrastructure Dependencies:
+- PostgreSQL 17 (PostgreSQL License) - https://www.postgresql.org/
+- Redis (BSD-3-Clause License) - https://redis.io/
+- OpenSearch (Apache License 2.0) - https://opensearch.org/
+- Kong (Apache License 2.0) - https://konghq.com/
+- MinIO (AGPL-3.0 License / Commercial License) - https://min.io/
+- Prometheus (Apache License 2.0) - https://prometheus.io/
+- Grafana (AGPL-3.0 License) - https://grafana.com/
+- Loki (AGPL-3.0 License) - https://grafana.com/oss/loki/
+
+For a complete list of dependencies and their licenses, see:
+- backend/pyproject.toml
+- frontend/package.json
+- .agents/rules/03-tech-stack.md (authoritative tech stack)
+
+================================================================================
+
+TRADEMARK NOTICE
+
+"SARAISE" is a trademark of BuildWorks.AI. Use of the SARAISE trademark is
+subject to BuildWorks.AI's trademark policy.
+
+================================================================================

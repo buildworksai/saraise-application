@@ -1,0 +1,89 @@
+# CODEOWNERS
+# ============================================================================
+# Code Ownership Configuration for SARAISE
+# Reference: docs/architecture/engineering-governance-and-pr-controls.md § 3
+# ============================================================================
+#
+# This file defines code ownership for automatic review assignment.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# GOVERNANCE RULES (engineering-governance-and-pr-controls.md § 3):
+# - Each repository MUST have Primary and Secondary owners
+# - Tier 0 (Critical) owners must be senior engineers approved by leadership
+# - Owners are responsible for reviewing architectural compliance
+# - Owners can block unsafe changes and escalate violations
+
+# ============================================================================
+# TIER 0 — Critical (Highest Control)
+# Direct impact on security, isolation, or correctness
+# Changes can affect all tenants
+# Minimum 2 senior reviewers required
+# ============================================================================
+
+# Authentication & Session Management (FROZEN ARCHITECTURE)
+/backend/src/core/session_manager.py          @saraise/security-team @saraise/platform-owners
+/backend/src/core/auth*.py                    @saraise/security-team @saraise/platform-owners
+/backend/src/modules/auth/                    @saraise/security-team @saraise/platform-owners
+
+# Policy Engine (FROZEN ARCHITECTURE)
+/backend/src/core/policy_engine*.py           @saraise/security-team @saraise/platform-owners
+
+# Control Plane
+/backend/src/core/control_plane/              @saraise/platform-owners
+
+# Runtime Plane
+/backend/src/core/runtime/                    @saraise/platform-owners
+
+# Core Security
+/backend/src/core/sod_rules.py                @saraise/security-team @saraise/platform-owners
+/backend/src/core/role_hierarchy.py           @saraise/security-team @saraise/platform-owners
+
+# ============================================================================
+# TIER 1 — Platform Supporting
+# Observability, Infrastructure, CI/CD
+# ============================================================================
+
+# Infrastructure & DevOps
+/.github/                                      @saraise/platform-ops @saraise/platform-owners
+/docker-compose*.yml                          @saraise/platform-ops
+/Dockerfile*                                  @saraise/platform-ops
+/scripts/                                     @saraise/platform-ops
+
+# CI/CD Configuration
+/.github/workflows/                           @saraise/platform-ops @saraise/platform-owners
+
+# Observability
+/backend/src/core/logging*.py                 @saraise/platform-ops
+/backend/src/core/metrics*.py                 @saraise/platform-ops
+
+# ============================================================================
+# TIER 2 — Application & Modules
+# ERP modules, industry packages, UI applications
+# ============================================================================
+
+# Backend Modules
+/backend/src/modules/                         @saraise/backend-team
+
+# Frontend Application
+/frontend/src/                                @saraise/frontend-team
+
+# ============================================================================
+# DOCUMENTATION & ARCHITECTURE
+# Architecture docs require platform owner review
+# ============================================================================
+
+# Architecture Documentation (FROZEN DOMAINS)
+/docs/architecture/                           @saraise/platform-owners @saraise/architects
+
+# Agent Rules
+/.agents/rules/                               @saraise/platform-owners @saraise/architects
+
+# Module Documentation
+/docs/modules/                                @saraise/backend-team @saraise/architects
+
+# ============================================================================
+# DEFAULT OWNERSHIP
+# All files not matched above require at least one reviewer
+# ============================================================================
+
+*                                             @saraise/platform-owners

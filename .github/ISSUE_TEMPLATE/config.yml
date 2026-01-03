@@ -1,0 +1,26 @@
+# Issue Template Configuration
+# See: https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/configuring-issue-templates-for-your-repository
+
+blank_issues_enabled: false
+contact_links:
+  - name: 🐛 Bug Report
+    url: https://github.com/buildworksai/saraise.release/issues/new?template=bug_report.md
+    about: Report a bug or unexpected behavior
+  - name: 💡 Feature Request
+    url: https://github.com/buildworksai/saraise.release/issues/new?template=feature_request.md
+    about: Suggest a new feature or enhancement
+  - name: 🔒 Security Vulnerability
+    url: https://github.com/buildworksai/saraise.release/issues/new?template=security_vulnerability.md
+    about: Report a security vulnerability (see SECURITY.md for private reporting)
+  - name: 🧩 Module Request
+    url: https://github.com/buildworksai/saraise.release/issues/new?template=module_request.md
+    about: Request a new module for SARAISE
+  - name: 📚 Documentation Issue
+    url: https://github.com/buildworksai/saraise.release/issues/new?template=documentation.md
+    about: Report a documentation problem or suggest improvements
+  - name: 💬 Community Question
+    url: https://github.com/buildworksai/saraise.release/discussions
+    about: Ask a question or start a discussion
+  - name: 🆘 Support Request
+    url: https://github.com/buildworksai/saraise.release/issues/new
+    about: Get help with SARAISE (see SUPPORT.md for support channels)

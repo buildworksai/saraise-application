@@ -1,0 +1,65 @@
+# ✅ APPROVED: Environment-aware pre-commit configuration
+# Reference: docs/architecture/engineering-governance-and-pr-controls.md § 2.1 (Enforcement Gates)
+# CRITICAL NOTES:
+# - ALL pre-commit hooks MUST pass locally before git commit (engineering-governance-and-pr-controls.md § 2.1)
+# - TypeScript MUST have ZERO type errors (engineering-governance-and-pr-controls.md § 2.1: tsc --noEmit must succeed)
+# - ESLint MUST have ZERO warnings with --max-warnings 0 (engineering-governance-and-pr-controls.md § 2.1)
+# - Python mypy baseline: 4,540 errors maximum (engineering-governance-and-pr-controls.md § 2.2 baseline ratcheting)
+# - No bypassing pre-commit hooks - violations block commits immediately
+# - Development environment enforcement slightly relaxed vs production for developer velocity
+# - All code committed to version control has been pre-commit verified
+# Source: docs/architecture/engineering-governance-and-pr-controls.md § 2.1, .pre-commit-config.yaml
+
+repos:
+  - repo: local
+    hooks:
+      # Basic checks for all environments
+      - id: typescript-check
+        name: TypeScript Check
+        entry: npx tsc --noEmit
+        language: system
+        files: \.(ts|tsx)$
+        pass_filenames: false
+
+      - id: eslint-check
+        name: ESLint Check
+        entry: npx eslint
+        language: system
+        files: \.(ts|tsx|js|jsx)$
+        args: [--max-warnings, 0]
+
+      # Development-specific checks
+      - id: dev-security-check
+        name: Development Security Check
+        entry: npm run lint:security:basic
+        language: system
+        files: \.(ts|tsx)$
+        stages: [commit]
+        if: '[[ "$NODE_ENV" == "development" ]]'
+
+      # Staging-specific checks
+      - id: staging-security-check
+        name: Staging Security Check
+        entry: npm run lint:security:strict
+        language: system
+        files: \.(ts|tsx)$
+        stages: [commit]
+        if: '[[ "$NODE_ENV" == "staging" ]]'
+
+      # Production-specific checks
+      - id: prod-security-check
+        name: Production Security Check
+        entry: npm run lint:security:maximum
+        language: system
+        files: \.(ts|tsx)$
+        stages: [commit]
+        if: '[[ "$NODE_ENV" == "production" ]]'
+
+      - id: sast-scan
+        name: SAST Security Scan
+        entry: npm run sast:scan
+        language: system
+        files: \.(ts|tsx|js|jsx)$
+        stages: [commit]
+        if: '[[ "$NODE_ENV" == "production" ]]'
+
