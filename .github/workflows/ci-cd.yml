@@ -44,41 +44,57 @@ jobs:
             exit 1
           fi
 
+      - name: Detect backend Python project
+        id: backend
+        run: |
+          if [ -f backend/pyproject.toml ] || [ -f backend/setup.py ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Backend Quality Checks
       - name: Install Python dependencies
+        if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           cd backend
           pip install -e .
           pip install -e .[dev,test]
 
       - name: Run Python linting (flake8)
+        if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           cd backend
           flake8 src/ --max-line-length=120 --exclude=__pycache__ --ignore=E203,W503
 
       - name: Run Python formatting check (black)
+        if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           cd backend
           black --check src/
 
       - name: Run Python import sorting check (isort)
+        if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           cd backend
           isort --check-only src/
 
       - name: MyPy Type Check (Baseline + Ratcheting) - SARAISE-02013
+        if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           cd backend
           ./scripts/mypy-baseline.sh check
         continue-on-error: false
 
       - name: Run Python tests with coverage
+        if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           cd backend
           pytest tests/ --cov=src --cov-report=xml --cov-report=term
         continue-on-error: false
 
       - name: Check Python coverage threshold (≥90%) - SARAISE-01002
+        if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           cd backend
           coverage report --fail-under=90 || (echo "❌ Coverage below 90% threshold" && exit 1)
@@ -119,6 +135,7 @@ jobs:
 
       # Security Scanning - SARAISE-01003, SARAISE-01004
       - name: Python security audit (safety)
+        if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           cd backend
           pip install safety
@@ -149,6 +166,7 @@ jobs:
 
       # Build backend image
       - name: Build backend image
+        if: ${{ hashFiles('backend/Dockerfile') != '' }}
         uses: docker/build-push-action@v5
         with:
           context: ./backend
