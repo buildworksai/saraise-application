@@ -13,6 +13,7 @@
 ## Changes (exact pins)
 - `vite`: `5.1.4` → `6.4.1`
 - `vitest`: `1.6.0` → `1.6.1` (patch fix for critical) → `3.2.4` (final)
+- `@vitest/coverage-v8`: `3.2.4` (enables coverage reporters for CI)
 
 ## Lockfile
 - Regenerated `frontend/package-lock.json` from scratch under the new pins.
@@ -30,6 +31,10 @@ Resolved versions evidence:
 ## Config impact
 - No config changes required for this minimal scaffold.
 - Existing `vite.config.ts` and `vitest.config.ts` continued to work.
+
+## CI compatibility addendum
+- Removed Jest-only `--watchAll=false` from CI test commands (Vitest rejects this flag).
+- Added explicit Vitest 3 coverage configuration and dependency so CI receives `coverage/coverage-summary.json`.
 
 ## Rollback
 - Revert `frontend/package.json` and `frontend/package-lock.json` to the last known good versions.

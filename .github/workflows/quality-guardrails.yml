@@ -48,7 +48,7 @@ jobs:
         # ZERO tolerance for warnings or unused imports.
 
       - name: 🔒 Unit Tests & Coverage (SARAISE-01002)
-        run: npm test -- --coverage --watchAll=false
+        run: npm test -- --coverage
       
       - name: Verify Coverage Threshold
         run: |

@@ -93,7 +93,7 @@ jobs:
       - name: Run frontend tests with coverage
         run: |
           cd frontend
-          npm test -- --coverage --watchAll=false
+          npm test -- --coverage
         continue-on-error: false
 
       - name: Check frontend coverage threshold (≥90%) - SARAISE-01002
