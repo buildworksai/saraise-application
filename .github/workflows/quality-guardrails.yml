@@ -39,15 +39,15 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: 🔒 TypeScript Strict Check (SARAISE-04002)
+      - name: "🔒 TypeScript Strict Check (SARAISE-04002)"
         run: npx tsc --noEmit
         # Must pass with ZERO errors. No exclusions allowed.
 
-      - name: 🔒 ESLint Strict Check (SARAISE-04001)
+      - name: "🔒 ESLint Strict Check (SARAISE-04001)"
         run: npx eslint . --ext .ts,.tsx --max-warnings 0
         # ZERO tolerance for warnings or unused imports.
 
-      - name: 🔒 Unit Tests & Coverage (SARAISE-01002)
+      - name: "🔒 Unit Tests & Coverage (SARAISE-01002)"
         run: npm test -- --coverage
       
       - name: Verify Coverage Threshold
@@ -89,22 +89,22 @@ jobs:
           pip install -e .[dev,test]
           pip install safety
 
-      - name: 🔒 Lint: Flake8 (Line Length 120)
+      - name: "🔒 Lint: Flake8 (Line Length 120)"
         run: flake8 src/ tests/ --max-line-length=120 --exclude=__pycache__,migrations --extend-ignore=E203
 
-      - name: 🔒 Formatting: Black
+      - name: "🔒 Formatting: Black"
         run: black --check src/ tests/
 
-      - name: 🔒 Imports: Isort
+      - name: "🔒 Imports: Isort"
         run: isort --check-only src/ tests/
 
-      - name: 🔒 Type Check: MyPy (SARAISE-02013)
+      - name: "🔒 Type Check: MyPy (SARAISE-02013)"
         run: |
           # Enforces type safety. Configuration in backend/pyproject.toml or mypy.ini
           # New files must be strict.
           mypy src
 
-      - name: 🔒 Unit Tests & Coverage (SARAISE-01002)
+      - name: "🔒 Unit Tests & Coverage (SARAISE-01002)"
         run: pytest tests/ --cov=src --cov-report=xml --cov-report=term
 
       - name: Verify Coverage Threshold
