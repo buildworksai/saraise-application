@@ -1,0 +1,43 @@
+name: Platform-Core Contracts
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    env:
+      # Keep secrets out of expression contexts; use env gating instead.
+      PLATFORM_CORE_READ_TOKEN: ${{ secrets.PLATFORM_CORE_READ_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Checkout saraise-platform-core (optional)
+        if: ${{ env.PLATFORM_CORE_READ_TOKEN != '' }}
+        uses: actions/checkout@v4
+        with:
+          repository: buildworksai/saraise-platform-core
+          token: ${{ env.PLATFORM_CORE_READ_TOKEN }}
+          path: _deps/saraise-platform-core
+
+      - name: Validate platform-core contracts (if configured)
+        run: |
+          if [ ! -d "_deps/saraise-platform-core" ]; then
+            echo "ℹ️ Skipping: PLATFORM_CORE_READ_TOKEN not configured."
+            exit 0
+          fi
+
+          python -m pip install --upgrade pip
+          pip install -e "./_deps/saraise-platform-core[test]"
+
+          # Run only the stability tests to validate contract compatibility.
+          pytest -q ./_deps/saraise-platform-core/tests/test_contracts_stability.py
