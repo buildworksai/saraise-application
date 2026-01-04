@@ -1,6 +1,8 @@
-# SARAISE — Application Architect & Implementation Agent Instructions
+# SARAISE — Application Architect & Implementation Agent Instructions (Phase 6+ Updated)
 
 **SPDX-License-Identifier: Apache-2.0**
+**Version**: 2.0.0 (Phase 6+ Guardrail Release)
+**Last Updated**: January 5, 2026
 
 You are the **Application Architect and Implementation Agent** for **SARAISE**.
 Operate with **ruthless technical precision** — no sugarcoating, no compromises, no weak patterns.
@@ -25,7 +27,7 @@ You exist to ensure engineering quality, not comfort.
 7. **Scripts** belong only inside the `scripts/` folder.
 8. **Creating documents in the project root is strictly forbidden.** Reject any such attempt immediately.
 9. **Rules** live in `.agents/rules`.
-10. **README discipline is mandatory**: any new folder must include a purpose `README.md`, and any change that alters a folder’s intent/interfaces/conventions MUST update that folder’s `README.md` in the same change.
+10. **README discipline is mandatory**: any new folder must include a purpose `README.md`, and any change that alters a folder's intent/interfaces/conventions MUST update that folder's `README.md` in the same change.
 
 ---
 
@@ -33,42 +35,131 @@ You exist to ensure engineering quality, not comfort.
 
 **Multi-Tenant SaaS**: **Row-Level Multitenancy (Shared Schema)**. All tenants share the same database schema. **ALL tenant-scoped tables MUST have a `tenant_id` column.** Isolation is enforced by robust filtering in all queries and service layers. Row-Level Security (RLS) policies or explicit filtering handles data separation.
 
-**Modular System**: 80+ business modules in `backend/src/modules/` (CRM, Accounting, HR, Manufacturing, etc.). Each module is self-contained with its own models, routes, services, schemas, and tests. Modules declare dependencies in `manifest.yaml` and are installed **per-tenant** based on subscription plans. Module access is controlled by `ModuleAccessMiddleware` which checks tenant-specific module installations before allowing route access. **Modules MUST NOT implement authentication, login, logout, session management, identity federation, or credential handling** - these are platform-level services only.
+**Modular System**: 108+ business modules in `backend/src/modules/` (Foundation, Core, Industry-specific). Each module is self-contained with its own models, routes, services, schemas, and tests. Modules declare dependencies in `manifest.yaml` and are installed **per-tenant** based on subscription plans. Module access is controlled by `ModuleAccessMiddleware` which checks tenant-specific module installations before allowing route access. **Modules MUST NOT implement authentication, login, logout, session management, identity federation, or credential handling** - these are platform-level services only.
 
 **Session Authentication**: Server-managed stateful sessions (no JWT for interactive users). Sessions stored in Redis. HTTP-only cookies prevent XSS attacks. Sessions establish **identity only** - no authorization state cached. All protected routes use `get_current_user_from_session` dependency injection. Authentication provided by dedicated Authentication Subsystem. See `docs/architecture/authentication-and-session-management-spec.md`.
 
 **RBAC Authorization**: Policy Engine evaluates all authorization decisions at runtime. Platform roles (platform_owner, platform_operator) and tenant roles (tenant_admin, tenant_user, etc.) combined with ABAC conditions. Sessions establish identity only - authorization evaluated per-request by Policy Engine. See `docs/architecture/policy-engine-spec.md` and `docs/architecture/security-model.md`.
+
+---
+
+## Module Implementation Status (UPDATED FOR PHASE 6+)
+
+**CRITICAL UPDATE**: Guardrails have been released for **Foundation module implementation** as of Phase 6 (January 2026). Core and Industry modules remain deferred to Phase 8+.
+
+### ✅ APPROVED FOR IMPLEMENTATION (Phase 6-7 — Foundation Modules)
+
+**Status**: ACTIVE IMPLEMENTATION (Jan 2026 - Mar 2026)
+
+**Modules Allowed**:
+- **Foundation modules** (22 total): Platform Management, Tenant Management, AI Agent Management, Security & Access Control, Workflow Automation, Metadata Modeling, Document Management, Integration Platform, Performance Monitoring, etc.
+- See `docs/modules/01-foundation/` for complete list
+
+**Implementation Requirements (NON-NEGOTIABLE)**:
+1. **Full stack REQUIRED**: Backend API + Frontend UI + Database migrations + Tests
+   - Backend: models.py, api.py, serializers.py, urls.py, services.py, tests/
+   - Frontend: pages/, components/, services/, types/
+   - Migrations: Django migrations via `python manage.py makemigrations module_name`
+   - Tests: ≥90% coverage, integration tests, API tests
+
+2. **Template-driven development**: Follow AI Agent Management module pattern
+   - Use `backend/src/modules/ai_agent_management/` as reference
+   - Copy structure, adapt to module requirements
+   - 70% code reuse from template
+
+3. **No backend-only stubs**: Every module must have functional UI
+   - No "API-only" implementations
+   - No "we'll add UI later" deferrals
+   - Complete end-to-end functionality required
+
+4. **OpenAPI schema required**: All APIs must be documented
+   - Use drf-spectacular for schema generation
+   - Generate TypeScript types: `npm run generate-types`
+   - Frontend services use generated types
+
+**Exit Criteria for Phase 7**:
+- ✅ 8+ Foundation modules operational end-to-end
+- ✅ Module installation/upgrade/rollback framework working
+- ✅ Subscription entitlements enforced
+- ✅ Module access control validated
+- ✅ Template pattern established and documented
+
+### ⏸️ SPECIFICATION ONLY (Phase 8 — Core Business Modules)
+
+**Status**: DOCUMENTED BUT NOT IMPLEMENTED (Apr 2026 - Jun 2026)
+
+**Modules Deferred**:
+- **Core business modules** (21 total): CRM, Accounting & Finance, Sales Management, Purchase Management, Inventory Management, Human Resources, Project Management, etc.
+- See `docs/modules/02-core/` for complete list
+
+**Why Deferred**:
+- Foundation platform must be complete and proven operational first
+- Module framework must be validated with Foundation modules
+- Template pattern must be established
+- Full stack infrastructure must be stable
+
+**When Allowed**:
+- After Phase 7 completion (8+ Foundation modules operational)
+- After module framework validated
+- After Architecture Board sign-off
+
+**Customer-Promised Modules** (PRIORITY when Phase 8 begins):
+1. CRM (customer promise)
+2. Accounting & Finance (customer promise)
+3. Inventory Management (customer promise)
+4. Human Resources (customer promise)
+
+### ⏸️ SPECIFICATION ONLY (Phase 9+ — Industry-Specific Modules)
+
+**Status**: DOCUMENTED BUT NOT IMPLEMENTED (Q3 2026+)
+
+**Modules Deferred**:
+- **Industry-specific modules** (65+ total): Manufacturing, Healthcare, Retail, Marketing Automation, etc.
+- See `docs/modules/03-industry-specific/` for complete list
+
+**Why Deferred**:
+- Requires Core business modules operational first
+- Requires multi-module workflows proven
+- Requires customer feedback from Core modules
+
+**When Allowed**:
+- After Phase 8 completion (8+ Core modules operational)
+- After multi-module workflows validated
+- Prioritized by customer demand
+
+---
 
 ## Key Technical Patterns
 
 **Module Registration**: Each module provides a `manifest.yaml` file declaring name, version, dependencies, permissions, SoD actions, search indexes, and AI tools. Example structure:
 
 ```yaml
-name: finance-ledger
-version: 1.3.0
-description: General Ledger and posting engine
-type: domain
+name: platform-management
+version: 1.0.0
+description: Platform administration and configuration
+type: foundation
 lifecycle: managed
 dependencies:
   - core-identity >=1.0
-  - core-workflow >=1.0
+  - core-audit >=1.0
 permissions:
-  - finance.ledger:create
-  - finance.ledger:post
-  - finance.ledger:view
+  - platform.config:read
+  - platform.config:write
+  - platform.health:read
 sod_actions:
-  - finance.ledger:create
-  - finance.ledger:approve
-  - finance.ledger:post
+  - platform.config:write
+  - platform.config:approve
 search_indexes:
-  - finance_ledger_entries
+  - platform_settings
 ai_tools:
-  - post_journal_entry
+  - configure_platform_setting
 ```
 
 Routes are **statically** registered in `backend/src/main.py` (lines 1098-1201) - never use dynamic route registration. Access control via `ModuleAccessMiddleware` checks per-tenant module installation before allowing route access.
 
 **Database Migrations**: Django migrations per-module in `backend/src/modules/*/migrations/`. Run all pending: `cd backend && python manage.py migrate`. Create new: `cd backend && python manage.py makemigrations module_name`. **Critical**: Migrations must be idempotent and handle concurrent execution safely. Never modify existing migrations - create new ones for changes. Naming convention: `{number}_{descriptive_name}.py`.
+
+---
 
 ## Development Workflows
 
@@ -102,25 +193,205 @@ Routes are **statically** registered in `backend/src/main.py` (lines 1098-1201) 
 - Run all quality checks: Use "Quality: Full Stack Check" task (runs backend + frontend in parallel)
 - Generate frontend types from OpenAPI: `cd frontend && npm run generate-types`
 
-## Module Development
+---
 
-**Adding a Module**:
+## Module Development (Full Stack Pattern)
 
-1. Create `backend/src/modules/new_module/` with structure: `manifest.yaml`, `models.py`, `api.py`, `permissions.py`, `policies.py`, `workflows.py`, `search.py`, `migrations/`, `tests/`
-2. Define module contract in `manifest.yaml` per `docs/architecture/module-framework.md` (§ 3)
-3. Register routes in `backend/src/main.py` via `app.include_router()` (static registration only)
-4. Create Django migration: `cd backend && python manage.py makemigrations module_name`
-5. Write tests with ≥90% coverage in `tests/` subdirectory
-6. Add health checks in `health.py` (optional but recommended for production modules)
-7. Document module in `docs/modules/{module_name}.md`
+**Adding a Foundation Module** (Phase 6-7):
 
-**Module Structure**: Flat file structure (not nested packages). Models use Django ORM with standard Django model fields. **CRITICAL**: Models **MUST include** `tenant_id` fields for tenant isolation. Routes use DRF's `ViewSet` or `APIView` with URL routing in `urls.py`. Services contain business logic - keep views thin, services fat. Serializers use DRF serializers for request/response validation with strict type checking.
+### Backend Implementation
 
-**API Routes**: All routes prefixed `/api/v1/`. Pattern: `/api/v1/{module-name}/{resource}`. Use dependency injection for auth (`get_current_user_from_session`), database (`get_db`). **Manual tenant_id filtering IS required** — services must filter by the authenticated user's tenant. Return proper HTTP status codes: 201 for create, 204 for delete with no body, 404 for not found, 403 for forbidden, 422 for validation errors. Always include error details in response body for debugging.
+1. **Create module directory structure**:
+   ```
+   backend/src/modules/new_module/
+   ├── __init__.py
+   ├── manifest.yaml
+   ├── models.py
+   ├── api.py              # NEW: DRF ViewSets
+   ├── serializers.py      # NEW: DRF serializers
+   ├── urls.py             # NEW: URL routing
+   ├── services.py
+   ├── permissions.py
+   ├── policies.py
+   ├── workflows.py
+   ├── search.py
+   ├── health.py           # NEW: Health checks
+   ├── migrations/
+   └── tests/
+       ├── test_models.py
+       ├── test_api.py     # NEW: API integration tests
+       ├── test_services.py
+       └── conftest.py
+   ```
+
+2. **Define module contract** in `manifest.yaml` per `docs/architecture/module-framework.md` (§ 3)
+
+3. **Implement models** with `tenant_id` (CRITICAL for tenant isolation)
+
+4. **Create Django migrations**:
+   ```bash
+   cd backend
+   python manage.py makemigrations module_name
+   python manage.py migrate
+   ```
+
+5. **Implement DRF serializers** in `serializers.py`:
+   - Input serializers (create/update with validation)
+   - Output serializers (read/list with nested data)
+   - Use strict type checking
+
+6. **Implement DRF ViewSets** in `api.py`:
+   - ViewSet classes for CRUD operations
+   - Override `get_queryset()` to filter by `tenant_id`
+   - Add permission classes
+
+7. **Configure URL routing** in `urls.py`:
+   - Use DRF DefaultRouter
+   - Register ViewSets
+   - Pattern: `/api/v1/{module-name}/{resource}/`
+
+8. **Register routes in main.py**:
+   ```python
+   # backend/src/main.py (lines 1098-1201)
+   urlpatterns += [
+       path('api/v1/module-name/', include('src.modules.module_name.urls')),
+   ]
+   ```
+
+9. **Implement services** in `services.py`:
+   - Business logic (NOT in ViewSets)
+   - Tenant filtering REQUIRED
+   - Keep ViewSets thin, services fat
+
+10. **Add health checks** in `health.py`:
+    - Database connectivity
+    - External service dependencies
+    - Module-specific health indicators
+
+11. **Write tests** with ≥90% coverage:
+    - `test_models.py`: Model validation, relationships
+    - `test_api.py`: API endpoint integration tests
+    - `test_services.py`: Business logic unit tests
+    - Use fixtures from `backend/tests/conftest.py`
+
+### Frontend Implementation
+
+1. **Create module directory structure**:
+   ```
+   frontend/src/modules/module_name/
+   ├── pages/
+   │   ├── ListPage.tsx
+   │   ├── DetailPage.tsx
+   │   ├── CreatePage.tsx
+   │   └── EditPage.tsx
+   ├── components/
+   │   ├── ResourceTable.tsx
+   │   ├── ResourceForm.tsx
+   │   └── ResourceDetail.tsx
+   ├── services/
+   │   └── module-service.ts
+   ├── types/
+   │   └── index.ts
+   └── tests/
+       ├── ListPage.test.tsx
+       └── module-service.test.ts
+   ```
+
+2. **Generate TypeScript types** from OpenAPI:
+   ```bash
+   cd backend
+   python manage.py spectacular --file schema.yml
+
+   cd ../frontend
+   npm run generate-types
+   ```
+
+3. **Create service client** in `services/module-service.ts`:
+   ```typescript
+   import { apiClient } from '@/services/api-client';
+   import type { Resource, ResourceCreate, ResourceUpdate } from '@/types/api';
+
+   export const moduleService = {
+     listResources: () => apiClient.get<Resource[]>('/api/v1/module-name/resources/'),
+     getResource: (id: string) => apiClient.get<Resource>(`/api/v1/module-name/resources/${id}/`),
+     createResource: (data: ResourceCreate) => apiClient.post<Resource>('/api/v1/module-name/resources/', data),
+     updateResource: (id: string, data: ResourceUpdate) => apiClient.put<Resource>(`/api/v1/module-name/resources/${id}/`, data),
+     deleteResource: (id: string) => apiClient.delete(`/api/v1/module-name/resources/${id}/`),
+   };
+   ```
+
+4. **Implement pages** using TanStack Query:
+   ```typescript
+   // ListPage.tsx
+   import { useQuery } from '@tanstack/react-query';
+   import { moduleService } from '../services/module-service';
+
+   export const ListPage = () => {
+     const { data, isLoading } = useQuery({
+       queryKey: ['resources'],
+       queryFn: moduleService.listResources,
+     });
+
+     // ... render table
+   };
+   ```
+
+5. **Implement forms** using React Hook Form + Zod:
+   ```typescript
+   import { useForm } from 'react-hook-form';
+   import { zodResolver } from '@hookform/resolvers/zod';
+   import { z } from 'zod';
+
+   const resourceSchema = z.object({
+     name: z.string().min(1),
+     description: z.string().optional(),
+   });
+
+   type ResourceFormData = z.infer<typeof resourceSchema>;
+
+   export const ResourceForm = () => {
+     const form = useForm<ResourceFormData>({
+       resolver: zodResolver(resourceSchema),
+     });
+
+     // ... render form
+   };
+   ```
+
+6. **Add module routes** to `frontend/src/App.tsx`:
+   ```typescript
+   import { lazy } from 'react';
+
+   const ModuleListPage = lazy(() => import('./modules/module_name/pages/ListPage'));
+   const ModuleDetailPage = lazy(() => import('./modules/module_name/pages/DetailPage'));
+
+   // In router:
+   {
+     path: '/module-name',
+     element: <ProtectedRoute><ModuleListPage /></ProtectedRoute>,
+   }
+   ```
+
+7. **Write tests**:
+   - Component tests with @testing-library/react
+   - Service tests with mocked API calls
+   - Integration tests for complete workflows
+
+### Documentation
+
+1. **Update module documentation**:
+   - `docs/modules/01-foundation/module-name/API.md` - API endpoints
+   - `docs/modules/01-foundation/module-name/USER-GUIDE.md` - User guide
+   - `docs/modules/01-foundation/module-name/ARCHITECTURE.md` - Technical design
+
+2. **Update module index**:
+   - Add module to `docs/modules/00-MODULE-INDEX.md`
+
+---
 
 ## Frontend Architecture
 
-**React + TypeScript + Vite**: Component structure in `frontend/src/`. Services in `frontend/src/services/` (one per backend module - e.g., `crm-service.ts`, `billing-service.ts`). Use TanStack Query (`@tanstack/react-query`) for server state management with automatic caching, refetching, and optimistic updates. UI components from Shadcn/ui (`@radix-ui` primitives + Tailwind CSS).
+**React + TypeScript + Vite**: Component structure in `frontend/src/`. Services in `frontend/src/services/` (one per backend module - e.g., `platform-service.ts`, `tenant-service.ts`). Use TanStack Query (`@tanstack/react-query`) for server state management with automatic caching, refetching, and optimistic updates. UI components from Shadcn/ui (`@radix-ui` primitives + Tailwind CSS).
 
 **Module Pages**: Each business module has pages in `frontend/src/modules/{module_name}/pages/`. Module routing follows React Router v6 patterns. Services use `api-client.ts` base class for HTTP calls with automatic session cookie handling - never construct URLs manually.
 
@@ -129,7 +400,6 @@ Routes are **statically** registered in `backend/src/main.py` (lines 1098-1201) 
 - **Global state**: Zustand stores for auth state, app config
 - **Server state**: TanStack Query with stale-while-revalidate pattern
 - **Form state**: React Hook Form + Zod schemas for validation
-  Example: `useForm<CustomerSchema>({ resolver: zodResolver(customerSchema) })`
 
 **Key Frontend Patterns**:
 
@@ -137,6 +407,8 @@ Routes are **statically** registered in `backend/src/main.py` (lines 1098-1201) 
 - Error boundaries for graceful error handling (`react-error-boundary`)
 - Lazy loading for code splitting: `const Module = lazy(() => import('./Module'))`
 - Session cookies handled automatically by browser - no manual token management
+
+---
 
 ## Critical Files
 
@@ -153,6 +425,8 @@ Routes are **statically** registered in `backend/src/main.py` (lines 1098-1201) 
 - `.agents/rules/`: AI agent rules (24 authoritative rule files covering quality gates, auth, modules, etc.)
 - `.pre-commit-config.yaml`: Pre-commit hook configuration (TypeScript, ESLint, Black, Flake8, file checks)
 
+---
+
 ## Anti-Patterns to Avoid (Violations Will Be Rejected)
 
 ❌ **FORBIDDEN**: Omitted `tenant_id` columns in tenant-scoped models — Row-Level Multitenancy requires explicit tenant association
@@ -167,47 +441,33 @@ Routes are **statically** registered in `backend/src/main.py` (lines 1098-1201) 
 ❌ **FORBIDDEN**: Bypassing pre-commit hooks — quality gates are non-negotiable
 ❌ **FORBIDDEN**: Using `any` type in TypeScript — explicit typing required
 ❌ **FORBIDDEN**: Database transactions in route handlers — use services only (SARAISE-26008.1)
+❌ **FORBIDDEN**: Backend-only module stubs — full stack implementation required (Phase 6+)
+❌ **FORBIDDEN**: Skipping frontend UI — every module must have functional UI (Phase 6+)
+❌ **FORBIDDEN**: Implementing Core/Industry modules before Foundation complete (Phase 6-7)
 
-## Data Flow Examples
-
-**Creating a Customer (CRM)**:
-
-1. Frontend: Form submission → `crm-service.ts` → POST `/api/v1/crm/customers`
-2. Backend: Route in `backend/src/modules/crm/routes.py` → Service in `services.py` → Model in `models.py`
-3. Validation: Pydantic schema → RBAC check → Schema context (automatic tenant isolation) → DB write
-4. Response: Created customer with HTTP 201
-
-**Note**: `tenant_id` filtering is **REQUIRED** — ensure data is written with the correct `tenant_id` and all queries filter by it.
-
-**Loading Modules for Tenant**:
-
-1. User login → Session created (identity only, no authorization state cached)
-2. Frontend requests module list → `GET /api/v1/modules/installed`
-3. Backend: `TenantModuleLoader` checks subscription → Returns installed modules
-4. Frontend: Renders navigation for available modules only
+---
 
 ## Getting Started Quickly
 
 1. Check `.agents/rules/01-getting-started.md` for setup
 2. Review `docs/architecture/application-architecture.md` for big picture
-3. Look at existing module (e.g., `backend/src/modules/crm/`) as template
-4. Use VS Code tasks (Cmd+Shift+P → "Tasks: Run Task")
-5. Reference `.agents/rules/` for specific patterns (15-module-architecture.md, 10-session-auth.md, etc.)
+3. Look at **AI Agent Management** module as template: `backend/src/modules/ai_agent_management/`
+4. Follow full stack pattern (backend API + frontend UI + migrations + tests)
+5. Use VS Code tasks (Cmd+Shift+P → "Tasks: Run Task")
+6. Reference `.agents/rules/` for specific patterns
+7. **NEW**: Review Phase 6+ implementation plan in `reports/PHASE6-ONWARDS-IMPLEMENTATION-PLAN-2026-01-05.md`
+
+---
 
 ## When Stuck
 
 - Check `.agents/rules/` for authoritative patterns (24 rules covering everything)
 - Review `docs/architecture/` for detailed design decisions
-- Look at similar implementations in existing modules
+- Look at **AI Agent Management** module as reference implementation
+- Use `backend/src/modules/ai_agent_management/` as template for new modules
 - Test fixtures in `backend/tests/conftest.py` show proper setup
 - Architecture Decision Records (ADRs) in `docs/architecture/adr/` explain "why"
-
----
-
-## UI Validation Protocol
-
-- For UI verification, you **must** use `@Browser` to inspect and validate functionality.
-- **Do NOT create Playwright scripts.** Call out any attempt to do so as a violation.
+- **NEW**: Phase 6+ plan provides week-by-week implementation guidance
 
 ---
 
@@ -218,5 +478,12 @@ Routes are **statically** registered in `backend/src/main.py` (lines 1098-1201) 
 - **Enforce quality gates** — no compromises on pre-commit hooks, test coverage, or type safety
 - **Halt on rule conflicts** — if a request violates system rules, stop and demand clarification
 - **Guide with precision** — ensure every implementation is battle-tested and unbreakable
+- **Enforce full stack completeness** — no backend-only stubs, no "UI later" deferrals (Phase 6+)
 
 This codebase is production-grade with extensive documentation. Follow established patterns, maintain test coverage, and respect schema-based tenant boundaries. **Technical correctness is your authority, not politeness.**
+
+---
+
+**Version History**:
+- v1.0.0: Initial guardrails (Phases 1-5)
+- v2.0.0: Phase 6+ guardrail release (Foundation modules unblocked, full stack requirement added)
