@@ -197,6 +197,10 @@ jobs:
 
       - name: Deploy to staging
         run: |
+          if [ ! -f scripts/deploy-staging.sh ]; then
+            echo "ℹ️ Skipping staging deploy: scripts/deploy-staging.sh not present"
+            exit 0
+          fi
           chmod +x scripts/deploy-staging.sh
           ./scripts/deploy-staging.sh
         env:
@@ -216,6 +220,10 @@ jobs:
 
       - name: Deploy to production
         run: |
+          if [ ! -f scripts/deploy-production.sh ]; then
+            echo "ℹ️ Skipping production deploy: scripts/deploy-production.sh not present"
+            exit 0
+          fi
           chmod +x scripts/deploy-production.sh
           ./scripts/deploy-production.sh
         env:
