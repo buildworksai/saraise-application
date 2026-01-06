@@ -31,3 +31,30 @@ class CsrfExemptSessionAuthentication(SessionAuthentication):
         """
         return  # Disable CSRF check
 
+
+class RelaxedCsrfSessionAuthentication(SessionAuthentication):
+    """
+    SessionAuthentication with relaxed CSRF enforcement for safe methods.
+    
+    Per Django/DRF best practices:
+    - GET, HEAD, OPTIONS are safe methods and don't require CSRF tokens
+    - POST, PUT, PATCH, DELETE require CSRF tokens
+    
+    This allows GET requests to work immediately after login while maintaining
+    CSRF protection for state-changing operations.
+    """
+    
+    def enforce_csrf(self, request):
+        """
+        Enforce CSRF only for unsafe HTTP methods.
+        
+        Safe methods (GET, HEAD, OPTIONS) don't require CSRF tokens
+        because they don't change server state.
+        """
+        # Safe methods don't require CSRF protection
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return
+        
+        # For unsafe methods, enforce CSRF (call parent)
+        return super().enforce_csrf(request)
+

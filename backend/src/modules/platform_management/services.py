@@ -125,22 +125,16 @@ class AnalyticsService:
         if response_times:
             sorted_times = sorted(response_times)
             avg = sum(sorted_times) / len(sorted_times)
-            p95 = sorted_times[int(0.95 * (len(sorted_times) - 1))]
-            p99 = sorted_times[int(0.99 * (len(sorted_times) - 1))]
         else:
             avg = 0
-            p95 = 0
-            p99 = 0
 
         error_rate = (errors / total) * 100 if total else 0
 
+        # Mapped to frontend interface: ApiMetrics
         return {
-            "total_requests": total,
-            "error_count": errors,
+            "total_api_calls_30d": total,
             "error_rate_percent": round(error_rate, 2),
-            "avg_response_time_ms": round(avg, 2),
-            "p95_response_time_ms": round(p95, 2),
-            "p99_response_time_ms": round(p99, 2),
+            "average_response_time_ms": round(avg, 2),
         }
 
     def get_tenant_metrics(self) -> dict:
@@ -148,17 +142,36 @@ class AnalyticsService:
         try:
             from src.modules.tenant_management.models import Tenant
         except Exception:
-            return {"total_tenants": 0, "active_tenants": 0}
+            return {
+                "total": 0, 
+                "active_30d": 0, 
+                "new_this_month": 0, 
+                "churned_this_month": 0
+            }
 
         total = Tenant.objects.count()
         active = Tenant.objects.filter(status=Tenant.TenantStatus.ACTIVE).count()
-        return {"total_tenants": total, "active_tenants": active}
+        
+        # Placeholder for time-based metrics until history tracking implemented
+        return {
+            "total": total,
+            "active_30d": active,
+            "new_this_month": 0,
+            "churned_this_month": 0,
+        }
 
     def get_user_metrics(self) -> dict:
         """Collect user metrics from auth user model."""
         user_model = get_user_model()
         total = user_model.objects.count()
-        return {"total_users": total}
+        
+        # Placeholder for activity metrics
+        return {
+            "total": total,
+            "active_7d": 0,
+            "active_30d": 0,
+            "new_this_month": 0,
+        }
 
     def get_revenue_metrics(self) -> dict:
         """Placeholder revenue metrics until billing module is wired."""

@@ -40,75 +40,13 @@ const ApprovalQueuePage = lazy(() =>
   }))
 );
 
-const PlatformDashboard = lazy(() =>
-  import('./pages/platform/PlatformDashboard').then((m) => ({
-    default: m.PlatformDashboard,
-  }))
-);
+// ⚠️ ARCHITECTURAL NOTE: Platform Management UI removed
+// Platform dashboards, settings, and feature flags MUST be in a separate
+// platform frontend (saraise-platform/frontend/), not in the application frontend.
+// The application frontend serves tenant-scoped users only.
 
-// Platform Management Dashboards
-const OperationsDashboard = lazy(() =>
-  import('./modules/platform_management/pages/OperationsDashboard').then((m) => ({
-    default: m.OperationsDashboard,
-  }))
-);
-
-const InfrastructureDashboard = lazy(() =>
-  import('./modules/platform_management/pages/InfrastructureDashboard').then((m) => ({
-    default: m.InfrastructureDashboard,
-  }))
-);
-
-const BusinessDashboard = lazy(() =>
-  import('./modules/platform_management/pages/BusinessDashboard').then((m) => ({
-    default: m.BusinessDashboard,
-  }))
-);
-
-const SecurityDashboard = lazy(() =>
-  import('./modules/platform_management/pages/SecurityDashboard').then((m) => ({
-    default: m.SecurityDashboard,
-  }))
-);
-
-const TenantHealthDashboard = lazy(() =>
-  import('./modules/platform_management/pages/TenantHealthDashboard').then((m) => ({
-    default: m.TenantHealthDashboard,
-  }))
-);
-
-const CostDashboard = lazy(() =>
-  import('./modules/platform_management/pages/CostDashboard').then((m) => ({
-    default: m.CostDashboard,
-  }))
-);
-
-// Platform Management Pages
-const SettingsPage = lazy(() =>
-  import('./modules/platform_management/pages/SettingsPage').then((m) => ({
-    default: m.SettingsPage,
-  }))
-);
-
-const FeatureFlagsPage = lazy(() =>
-  import('./modules/platform_management/pages/FeatureFlagsPage').then((m) => ({
-    default: m.FeatureFlagsPage,
-  }))
-);
-
-const HealthPage = lazy(() =>
-  import('./modules/platform_management/pages/HealthPage').then((m) => ({
-    default: m.HealthPage,
-  }))
-);
-
-const AuditLogPage = lazy(() =>
-  import('./modules/platform_management/pages/AuditLogPage').then((m) => ({
-    default: m.AuditLogPage,
-  }))
-);
-
-// Tenant Management Pages
+// Tenant Management Pages (READ-ONLY - for display only)
+// Tenant lifecycle operations MUST be performed via Control Plane APIs
 const TenantListPage = lazy(() =>
   import('./modules/tenant_management/pages/TenantListPage').then((m) => ({
     default: m.TenantListPage,
@@ -118,12 +56,6 @@ const TenantListPage = lazy(() =>
 const TenantDetailPage = lazy(() =>
   import('./modules/tenant_management/pages/TenantDetailPage').then((m) => ({
     default: m.TenantDetailPage,
-  }))
-);
-
-const TenantCreatePage = lazy(() =>
-  import('./modules/tenant_management/pages/TenantCreatePage').then((m) => ({
-    default: m.TenantCreatePage,
   }))
 );
 
@@ -187,77 +119,10 @@ function AnimatedRoutes() {
           <Route path="/forgot-password" element={<ForgotPasswordForm />} />
           <Route path="/reset-password" element={<ResetPasswordForm />} />
 
-          {/* Platform Management Dashboards (for platform owners) */}
-          <Route
-            path="/platform/dashboard"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <PlatformDashboard />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/platform/operations"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <OperationsDashboard />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/platform/infrastructure"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <InfrastructureDashboard />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/platform/business"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <BusinessDashboard />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/platform/security"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <SecurityDashboard />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/platform/tenant-health"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <TenantHealthDashboard />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/platform/cost"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CostDashboard />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
+          {/* ⚠️ ARCHITECTURAL ENFORCEMENT: Platform Management UI removed
+              Platform dashboards and management UI MUST be in a separate
+              platform frontend (saraise-platform/frontend/), not here.
+              The application frontend serves tenant-scoped users only. */}
 
           {/* Protected routes with ModuleLayout */}
           <Route
@@ -347,65 +212,19 @@ function AnimatedRoutes() {
             }
           />
 
-          {/* Platform Management routes */}
-          <Route
-            path="/platform/settings"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <SettingsPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/platform/feature-flags"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <FeatureFlagsPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/platform/health"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <HealthPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/platform/audit-log"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <AuditLogPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
+          {/* ⚠️ ARCHITECTURAL ENFORCEMENT: Platform Management routes removed
+              Platform settings, feature flags, health, and audit logs MUST be
+              in a separate platform frontend (saraise-platform/frontend/). */}
 
-          {/* Tenant Management routes */}
+          {/* Tenant Management routes (READ-ONLY - for display only)
+              ⚠️ Tenant lifecycle operations (create, update, delete) MUST be
+              performed via Control Plane APIs (saraise-platform/saraise-control-plane/) */}
           <Route
             path="/tenant-management"
             element={
               <ProtectedRoute>
                 <ModuleLayout>
                   <TenantListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/tenant-management/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <TenantCreatePage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

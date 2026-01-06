@@ -3,9 +3,12 @@ Django management command to seed default users for development.
 
 Creates:
 - admin@saraise.com / admin@134 - Platform Owner
+- operator@saraise.com / admin@134 - Platform Operator
 - admin@buildworks.ai / admin@134 - Tenant Admin
+- user@buildworks.ai / admin@134 - Tenant User
 
 This command is idempotent - it will not create duplicate users.
+All passwords are set to 'admin@134' for developer ease.
 """
 
 from django.core.management.base import BaseCommand
@@ -15,9 +18,12 @@ from src.core.user_models import UserProfile
 
 User = get_user_model()
 
+# Common password for all users (developer ease)
+COMMON_PASSWORD = 'admin@134'
+
 
 class Command(BaseCommand):
-    help = 'Seed default users for development (platform owner and tenant admin)'
+    help = 'Seed default users for development (platform and tenant users)'
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -31,55 +37,83 @@ class Command(BaseCommand):
         force = options.get('force', False)
         
         self.stdout.write(self.style.SUCCESS('🌱 Seeding default users...'))
+        self.stdout.write(f'   Password for all users: {COMMON_PASSWORD}\n')
 
-        # Platform Owner User
-        platform_email = 'admin@saraise.com'
-        platform_password = 'admin@134'
+        # ===== Platform Users =====
         
-        platform_user, created = self._create_or_update_user(
-            email=platform_email,
-            password=platform_password,
-            username=platform_email,
+        # Platform Owner
+        platform_owner_email = 'admin@saraise.com'
+        platform_owner_user, created = self._create_or_update_user(
+            email=platform_owner_email,
+            password=COMMON_PASSWORD,
+            username=platform_owner_email,
             is_staff=True,
             is_superuser=True,
             platform_role='platform_owner',
-            tenant_id=None,  # Platform users don't belong to a tenant
+            tenant_id=None,
+            tenant_role=None,
             force=force,
         )
         
         if created:
             self.stdout.write(
                 self.style.SUCCESS(
-                    f'✅ Created platform owner: {platform_email}'
+                    f'✅ Created platform owner: {platform_owner_email}'
                 )
             )
         else:
             self.stdout.write(
                 self.style.WARNING(
-                    f'ℹ️  Platform owner already exists: {platform_email}'
+                    f'ℹ️  Platform owner already exists: {platform_owner_email}'
                 )
             )
 
-        # Tenant Admin User
-        tenant_email = 'admin@buildworks.ai'
-        tenant_password = 'admin@134'
+        # Platform Operator
+        platform_operator_email = 'operator@saraise.com'
+        platform_operator_user, created = self._create_or_update_user(
+            email=platform_operator_email,
+            password=COMMON_PASSWORD,
+            username=platform_operator_email,
+            is_staff=True,
+            is_superuser=False,
+            platform_role='platform_operator',
+            tenant_id=None,
+            tenant_role=None,
+            force=force,
+        )
+        
+        if created:
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f'✅ Created platform operator: {platform_operator_email}'
+                )
+            )
+        else:
+            self.stdout.write(
+                self.style.WARNING(
+                    f'ℹ️  Platform operator already exists: {platform_operator_email}'
+                )
+            )
 
+        # ===== Tenant Users =====
+        
         # Ensure a real Tenant exists (Tenant Management module)
         tenant_id = None
+        tenant_slug = "buildworks"
         try:
             from src.modules.tenant_management.models import Tenant  # type: ignore
 
             # Idempotent: ensure stable dev tenant exists
             tenant_obj, tenant_created = Tenant.objects.get_or_create(
-                slug="buildworks",
+                slug=tenant_slug,
                 defaults={
                     "name": "BuildWorks AI",
-                    "subdomain": "buildworks",
+                    "subdomain": tenant_slug,
                     "status": Tenant.TenantStatus.ACTIVE,
                     "primary_contact_name": "BuildWorks Admin",
-                    "primary_contact_email": tenant_email,
-                    "billing_email": tenant_email,
-                    "technical_email": tenant_email,
+                    "primary_contact_email": "admin@buildworks.ai",
+                    "billing_email": "admin@buildworks.ai",
+                    "technical_email": "admin@buildworks.ai",
                     "timezone": "UTC",
                     "default_language": "en",
                     "default_currency": "USD",
@@ -89,44 +123,122 @@ class Command(BaseCommand):
                     "created_by": None,
                 },
             )
-            tenant_id = tenant_obj.id
+            tenant_id = str(tenant_obj.id)  # Ensure string format
             if tenant_created:
-                self.stdout.write(self.style.SUCCESS(f'✅ Created default tenant: {tenant_obj.name} ({tenant_obj.slug})'))
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f'✅ Created default tenant: {tenant_obj.name} ({tenant_obj.slug})'
+                    )
+                )
             else:
-                self.stdout.write(self.style.WARNING(f'ℹ️  Default tenant already exists: {tenant_obj.name} ({tenant_obj.slug})'))
+                self.stdout.write(
+                    self.style.WARNING(
+                        f'ℹ️  Default tenant already exists: {tenant_obj.name} ({tenant_obj.slug})'
+                    )
+                )
         except Exception as e:
             # Keep seeding users functional even if tenant module isn't available for some reason
-            self.stdout.write(self.style.ERROR(f'⚠️  Could not create default tenant (Tenant Management): {e}'))
-        
-        tenant_user, created = self._create_or_update_user(
-            email=tenant_email,
-            password=tenant_password,
-            username=tenant_email,
-            is_staff=False,
-            is_superuser=False,
-            platform_role=None,
-            tenant_id=tenant_id,
-            tenant_role='tenant_admin',
-            force=force,
-        )
-        
-        if created:
             self.stdout.write(
-                self.style.SUCCESS(
-                    f'✅ Created tenant admin: {tenant_email} (tenant: {tenant_id})'
+                self.style.ERROR(
+                    f'⚠️  Could not create default tenant (Tenant Management): {e}'
                 )
             )
-        else:
             self.stdout.write(
                 self.style.WARNING(
-                    f'ℹ️  Tenant admin already exists: {tenant_email}'
+                    '⚠️  Tenant users will not be created without a valid tenant.'
                 )
             )
+        
+        if tenant_id:
+            # Define tenant users to create
+            # Note: UserProfile.tenant_role only supports 'tenant_admin' and 'tenant_user'
+            # Other functional roles (developer, operator, billing_manager, auditor, viewer)
+            # are managed through the Role model in security_access_control module
+            tenant_users = [
+                {
+                    'email': 'admin@buildworks.ai',
+                    'role': 'tenant_admin',
+                    'description': 'Tenant Admin',
+                },
+                {
+                    'email': 'user@buildworks.ai',
+                    'role': 'tenant_user',
+                    'description': 'Tenant User',
+                },
+                {
+                    'email': 'developer@buildworks.ai',
+                    'role': 'tenant_user',  # Functional roles managed via Role model
+                    'description': 'Tenant User (Developer)',
+                },
+                {
+                    'email': 'operator@buildworks.ai',
+                    'role': 'tenant_user',  # Functional roles managed via Role model
+                    'description': 'Tenant User (Operator)',
+                },
+                {
+                    'email': 'billing@buildworks.ai',
+                    'role': 'tenant_user',  # Functional roles managed via Role model
+                    'description': 'Tenant User (Billing Manager)',
+                },
+                {
+                    'email': 'auditor@buildworks.ai',
+                    'role': 'tenant_user',  # Functional roles managed via Role model
+                    'description': 'Tenant User (Auditor)',
+                },
+                {
+                    'email': 'viewer@buildworks.ai',
+                    'role': 'tenant_user',  # Functional roles managed via Role model
+                    'description': 'Tenant User (Viewer)',
+                },
+            ]
+            
+            for user_config in tenant_users:
+                user_email = user_config['email']
+                user_role = user_config['role']
+                user_description = user_config['description']
+                
+                user, created = self._create_or_update_user(
+                    email=user_email,
+                    password=COMMON_PASSWORD,
+                    username=user_email,
+                    is_staff=False,
+                    is_superuser=False,
+                    platform_role=None,
+                    tenant_id=tenant_id,
+                    tenant_role=user_role,
+                    force=force,
+                )
+                
+                if created:
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            f'✅ Created {user_description}: {user_email} (tenant: {tenant_id})'
+                        )
+                    )
+                else:
+                    self.stdout.write(
+                        self.style.WARNING(
+                            f'ℹ️  {user_description} already exists: {user_email}'
+                        )
+                    )
 
+        # Summary
         self.stdout.write(self.style.SUCCESS('\n✅ Default users seeded successfully!'))
-        self.stdout.write('\n📋 Login Credentials:')
-        self.stdout.write(f'   Platform Owner: {platform_email} / {platform_password}')
-        self.stdout.write(f'   Tenant Admin: {tenant_email} / {tenant_password}')
+        self.stdout.write('\n📋 Login Credentials (Password for all: admin@134):')
+        self.stdout.write('\n   Platform Users:')
+        self.stdout.write(f'     - {platform_owner_email} (Platform Owner)')
+        self.stdout.write(f'     - {platform_operator_email} (Platform Operator)')
+        if tenant_id:
+            self.stdout.write('\n   Tenant Users (buildworks.ai):')
+            self.stdout.write('     - admin@buildworks.ai (Tenant Admin)')
+            self.stdout.write('     - user@buildworks.ai (Tenant User)')
+            self.stdout.write('     - developer@buildworks.ai (Tenant User)')
+            self.stdout.write('     - operator@buildworks.ai (Tenant User)')
+            self.stdout.write('     - billing@buildworks.ai (Tenant User)')
+            self.stdout.write('     - auditor@buildworks.ai (Tenant User)')
+            self.stdout.write('     - viewer@buildworks.ai (Tenant User)')
+            self.stdout.write('\n   Note: Functional roles (developer, operator, billing, auditor, viewer)')
+            self.stdout.write('         are managed via Role model in security_access_control module.')
 
     def _create_or_update_user(
         self,
@@ -153,15 +265,25 @@ class Command(BaseCommand):
                 user.set_password(password)
                 user.save()
             
-            # Get or create user profile
-            profile, profile_created = UserProfile.objects.get_or_create(
-                user=user,
-                defaults={
-                    'tenant_id': tenant_id,
-                    'platform_role': platform_role,
-                    'tenant_role': tenant_role,
-                }
-            )
+            # Get or create user profile (handle race conditions and duplicates gracefully)
+            profiles = UserProfile.objects.filter(user=user)
+            if profiles.count() > 1:
+                # Handle duplicates - keep first, delete rest
+                profile = profiles.first()
+                for dup in profiles[1:]:
+                    dup.delete()
+            elif profiles.count() == 1:
+                profile = profiles.first()
+            else:
+                # Profile doesn't exist, create it
+                profile = None
+            if profile is None:
+                profile = UserProfile.objects.create(
+                    user=user,
+                    tenant_id=tenant_id,
+                    platform_role=platform_role,
+                    tenant_role=tenant_role,
+                )
             
             # Always reconcile provided values (idempotent, and enforces guardrails)
             if tenant_id is not None or platform_role or tenant_role or force:
@@ -184,14 +306,25 @@ class Command(BaseCommand):
             )
             
             # Create user profile
-            profile, _ = UserProfile.objects.get_or_create(
-                user=user,
-                defaults={
-                    'tenant_id': tenant_id,
-                    'platform_role': platform_role,
-                    'tenant_role': tenant_role,
-                }
-            )
+            # Get or create user profile (handle race conditions and duplicates gracefully)
+            profiles = UserProfile.objects.filter(user=user)
+            if profiles.count() > 1:
+                # Handle duplicates - keep first, delete rest
+                profile = profiles.first()
+                for dup in profiles[1:]:
+                    dup.delete()
+            elif profiles.count() == 1:
+                profile = profiles.first()
+            else:
+                # Profile doesn't exist, create it
+                profile = None
+            if profile is None:
+                profile = UserProfile.objects.create(
+                    user=user,
+                    tenant_id=tenant_id,
+                    platform_role=platform_role,
+                    tenant_role=tenant_role,
+                )
             
             # Update profile deterministically (enforces guardrails)
             profile.tenant_id = tenant_id

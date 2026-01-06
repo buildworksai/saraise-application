@@ -32,6 +32,23 @@ You exist to ensure engineering quality, not comfort.
 
 ## Architecture Foundation (FROZEN — NON-NEGOTIABLE)
 
+### Control Plane / Runtime Plane Separation (CRITICAL — NON-NEGOTIABLE)
+
+**THIS IS THE MOST IMPORTANT ARCHITECTURAL RULE. VIOLATIONS WILL BE REJECTED IMMEDIATELY.**
+
+#### Repository Structure
+- **Platform Repository** (`saraise-platform/`): Control Plane services (Auth, Policy Engine, Control Plane, Runtime Service)
+- **Application Repository** (`saraise-application/`): Runtime Plane (Django backend, React frontend, business modules)
+
+#### Critical Rules
+1. **Application backend MUST NOT implement tenant lifecycle** (create, suspend, terminate) → Use Control Plane
+2. **Application backend MUST NOT manage platform configuration** → Use Control Plane
+3. **Application frontend MUST NOT serve platform management UI** → Separate platform frontend
+4. **Platform services MUST NOT serve end-user traffic** → Only internal orchestration APIs
+5. **Runtime Plane MUST delegate policy decisions** → Call Policy Engine (Platform service)
+
+**Reference**: `docs/architecture/control-plane-runtime-plane-separation.md`
+
 ### Multi-Tenant SaaS (Row-Level Multitenancy)
 
 All tenants share the same database schema. **ALL tenant-scoped tables MUST have a `tenant_id` column.**
@@ -284,7 +301,18 @@ npx tsc --noEmit && npx eslint src --ext .ts,.tsx --max-warnings 0
 
 ## Anti-Patterns (VIOLATIONS WILL BE REJECTED)
 
-### Forbidden Patterns
+### Forbidden Patterns (Architectural Violations)
+
+#### Control Plane / Runtime Plane Violations (CRITICAL — IMMEDIATE REJECTION)
+
+❌ **Tenant lifecycle in Application layer** — `TenantManagementService.create_tenant()` in `saraise-application/backend/` → **MUST BE IN `saraise-platform/saraise-control-plane/`**  
+❌ **Platform configuration in Application layer** — `PlatformSettingViewSet` in `saraise-application/backend/` → **MUST BE IN `saraise-platform/saraise-control-plane/`**  
+❌ **Platform UI in Application frontend** — Platform dashboards in `saraise-application/frontend/` → **MUST BE IN SEPARATE `saraise-platform/frontend/`**  
+❌ **End-user traffic in Platform services** — Public APIs in `saraise-platform/` services → **PLATFORM SERVICES ARE INTERNAL ONLY**  
+❌ **Policy decisions in Runtime Plane** — Permission checks in `saraise-application/backend/` → **MUST DELEGATE TO POLICY ENGINE**  
+❌ **Business logic in Platform layer** — ERP modules in `saraise-platform/` → **MUST BE IN `saraise-application/backend/`**
+
+#### Security & Quality Violations
 
 ❌ **Omitted `tenant_id`** in tenant-scoped models — Row-Level Multitenancy requires explicit tenant association  
 ❌ **Missing tenant filtering** in queries — data leakage is a critical security risk  

@@ -7,7 +7,7 @@ from src.core.metrics import metrics
 
 urlpatterns = [
     # Health check endpoint
-    path('health/', lambda request: None),
+    path('health/', lambda request: __import__('django.http').http.JsonResponse({'status': 'ok'})),
     path('metrics/', metrics),
     
     # OpenAPI Schema

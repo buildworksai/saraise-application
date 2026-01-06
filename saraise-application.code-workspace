@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../saraise-platform",
+			"name": "saraise-platform"
+		},
+		{
+			"path": "../saraise-application",
+			"name": "saraise-application"
+		}
+	],
+	"settings": {}
+}

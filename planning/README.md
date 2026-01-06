@@ -17,11 +17,25 @@ This document defines the **complete implementation roadmap** for SARAISE from c
 |------------|-------------|
 | Phase Duration | ≤5 weeks each |
 | Architecture | Django + DRF (FROZEN) |
+| **Control Plane / Runtime Plane** | **STRICT SEPARATION (NON-NEGOTIABLE)** |
 | Multi-tenancy | Row-level with `tenant_id` |
 | Authentication | Session-based only (NO JWT) |
 | Authorization | Policy Engine (deny-by-default) |
 | Test Coverage | ≥90% per module |
 | Pre-commit | MUST pass all hooks |
+
+### Repository Structure (MANDATORY)
+
+- **Platform Repository** (`saraise-platform/`): Control Plane services
+  - Tenant lifecycle, policy distribution, module enablement
+  - **NEVER serves end-user traffic**
+  
+- **Application Repository** (`saraise-application/`): Runtime Plane
+  - Business modules, Django backend, React frontend
+  - **Serves all end-user traffic**
+  - **NEVER implements tenant lifecycle or platform configuration**
+
+**Reference**: `docs/architecture/control-plane-runtime-plane-separation.md`
 
 ---
 
@@ -31,8 +45,17 @@ This document defines the **complete implementation roadmap** for SARAISE from c
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| Phase 1-5 | ✅ Complete | Platform infrastructure (saraise-auth, saraise-policy-engine, etc.) |
-| Phase 6 | ✅ Complete | AI Agent Management module (template established) |
+| Phase 1-5 | ✅ Complete | Platform infrastructure (`saraise-platform/`: Auth, Policy Engine, Control Plane, Runtime Service) |
+| Phase 6 | ✅ Complete | AI Agent Management module (template established in `saraise-application/`) |
+
+### Architectural Separation Status
+
+**⚠️ CRITICAL**: The following modules in `saraise-application/backend/` are **ARCHITECTURAL VIOLATIONS** and MUST be moved to `saraise-platform/saraise-control-plane/`:
+
+- ❌ `backend/src/modules/tenant_management/` → **MUST MOVE TO PLATFORM**
+- ❌ `backend/src/modules/platform_management/` → **MUST MOVE TO PLATFORM**
+
+**Migration Required**: These modules implement Control Plane operations but are incorrectly placed in the Application layer.
 
 ### Active Reference Implementation
 
@@ -339,11 +362,13 @@ pytest --cov-fail-under=80  # VIOLATION
 
 ### Architecture (Frozen)
 
-- `docs/architecture/application-architecture.md`
-- `docs/architecture/security-model.md`
-- `docs/architecture/authentication-and-session-management-spec.md`
-- `docs/architecture/policy-engine-spec.md`
-- `docs/architecture/module-framework.md`
+- `docs/architecture/control-plane-runtime-plane-separation.md` — **CRITICAL: Architectural boundaries**
+- `docs/architecture/control-plane-and-runtime-plane-deep-spec.md` — Control Plane responsibilities
+- `docs/architecture/application-architecture.md` — System overview
+- `docs/architecture/security-model.md` — Security architecture
+- `docs/architecture/authentication-and-session-management-spec.md` — Session auth
+- `docs/architecture/policy-engine-spec.md` — Authorization
+- `docs/architecture/module-framework.md` — Module patterns
 
 ### Quality Standards
 

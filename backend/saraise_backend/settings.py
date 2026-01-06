@@ -99,9 +99,16 @@ SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_AGE = 86400  # 24 hours
 
 # CORS configuration
+# Application frontend: 25173 (2xxxx port convention)
+# Platform frontend: 17000 (1xxxx port convention)
+# Also allow standard Vite dev server port for local development
 CORS_ALLOWED_ORIGINS = [
-    'http://localhost:15173',
-    'http://localhost:5173',
+    'http://localhost:25173',  # Application frontend (Runtime Plane)
+    'http://localhost:17000',  # Platform frontend (Control Plane UI)
+    'http://localhost:15173',  # Legacy/alternative port
+    'http://localhost:5173',   # Standard Vite dev server port
+    'http://127.0.0.1:25173',
+    'http://127.0.0.1:17000',
     'http://127.0.0.1:15173',
     'http://127.0.0.1:5173',
 ]
@@ -121,8 +128,12 @@ CORS_ALLOW_HEADERS = [
 
 # CSRF configuration
 CSRF_TRUSTED_ORIGINS = [
-    'http://localhost:15173',
-    'http://localhost:5173',
+    'http://localhost:25173',  # Application frontend (Runtime Plane)
+    'http://localhost:17000',  # Platform frontend (Control Plane UI)
+    'http://localhost:15173',  # Legacy/alternative port
+    'http://localhost:5173',   # Standard Vite dev server port
+    'http://127.0.0.1:25173',
+    'http://127.0.0.1:17000',
     'http://127.0.0.1:15173',
     'http://127.0.0.1:5173',
 ]
@@ -154,7 +165,7 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.SessionAuthentication',
+        'src.core.authentication.RelaxedCsrfSessionAuthentication',  # GET requests don't need CSRF
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',

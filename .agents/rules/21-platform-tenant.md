@@ -14,19 +14,40 @@ alwaysApply: true
 
 # 🏛️ SARAISE Platform Management
 
-**⚠️ CRITICAL**: All platform management operations MUST follow these patterns for consistency, security, and auditability.
+**⚠️ CRITICAL ARCHITECTURAL RULE**: Platform management operations MUST be in `saraise-platform/` (Control Plane), NOT in `saraise-application/` (Runtime Plane).
+
+**VIOLATION**: If you see `platform_management` or `tenant_management` modules in `saraise-application/backend/`, this is an architectural defect that MUST be fixed.
 
 **Related Documentation:**
+- Control Plane / Runtime Plane Separation: `docs/architecture/control-plane-runtime-plane-separation.md`
 - Application Architecture: `docs/architecture/application-architecture.md`
 - Module Framework: `docs/architecture/module-framework.md`
 
 ## SARAISE-32001 Platform Management Overview
 
-### Core Principles
-- **Platform Isolation**: Platform operations are separate from tenant operations
+### Core Principles (NON-NEGOTIABLE)
+- **Platform operations are in Control Plane** (`saraise-platform/saraise-control-plane/`)
+- **Application layer NEVER manages platform configuration** → **REJECT IMMEDIATELY**
+- **Platform services NEVER serve end-user traffic** → Internal orchestration APIs only
 - **Platform Roles**: Only platform roles can perform platform operations
 - **Audit Logging**: All platform operations must be audited
 - **Multi-Tenant Support**: Platform manages multiple tenants
+
+### Architectural Boundaries (MANDATORY)
+
+**❌ FORBIDDEN in Application Layer (`saraise-application/`):**
+- Tenant lifecycle operations (create, suspend, terminate)
+- Platform configuration management
+- Module enablement decisions
+- Shard placement decisions
+- Policy definition or mutation
+
+**✅ REQUIRED in Platform Layer (`saraise-platform/`):**
+- All tenant lifecycle operations
+- All platform configuration
+- All module enablement
+- All policy distribution
+- All orchestration logic
 
 ## SARAISE-32002 Platform Configuration
 
@@ -134,23 +155,39 @@ See [Platform Tests](docs/architecture/examples/backend/tests/test_platform.py) 
 
 # 🏢 SARAISE Tenant Management
 
-**⚠️ CRITICAL**: All tenant management operations MUST follow these patterns for tenant isolation, security, and scalability.
+**⚠️ CRITICAL ARCHITECTURAL RULE**: Tenant lifecycle operations MUST be in `saraise-platform/saraise-control-plane/` (Control Plane), NOT in `saraise-application/backend/` (Runtime Plane).
+
+**VIOLATION**: If you see `TenantManagementService.create_tenant()` in `saraise-application/backend/`, this is an architectural defect that MUST be fixed.
 
 **Related Documentation:**
-- Application Architecture: `docs/architecture/application-architecture.md`
+- Control Plane / Runtime Plane Separation: `docs/architecture/control-plane-runtime-plane-separation.md`
 - Application Architecture: `docs/architecture/application-architecture.md`
 
 ## SARAISE-33001 Tenant Management Overview
 
 ### Core Principles (FROZEN ARCHITECTURE - DO NOT DEVIATE)
+
+#### Control Plane Responsibilities (Platform Layer)
+- **Tenant Lifecycle**: Creation, activation, suspension, termination → **MUST BE IN `saraise-platform/saraise-control-plane/`**
+- **Shard Provisioning**: Tenant placement and routing → **MUST BE IN `saraise-platform/saraise-control-plane/`**
+- **Module Enablement**: Enabling/disabling modules per tenant → **MUST BE IN `saraise-platform/saraise-control-plane/`**
+- **Quota Management**: Setting and enforcing quotas → **MUST BE IN `saraise-platform/saraise-control-plane/`**
+
+#### Runtime Plane Responsibilities (Application Layer)
+- **Tenant Data Operations**: CRUD operations on tenant-scoped business data → **IN `saraise-application/backend/`**
+- **Tenant Filtering**: All queries MUST filter by `tenant_id` → **IN `saraise-application/backend/`**
+- **Tenant Status Reading**: Reading tenant status for filtering → **IN `saraise-application/backend/` (READ-ONLY)**
+
+#### Data Model Principles
 - **Row-Level Multitenancy (Shared Schema)**: ALL tenants share the same database schema. **ALL tenant-scoped tables MUST have a `tenant_id` column**.
 - **Tenant Isolation**: Isolation enforced by mandatory `tenant_id` filtering in all queries and service layers.
 - **No Schema-per-Tenant**: Tenants do NOT have separate schemas. Shared schema with row-level security.
-- **Tenant Lifecycle**: Clear lifecycle: creation → activation → suspension → deletion
 - **User Quotas**: User limits based on subscription tier
 - **Rate Limiting**: API rate limits based on subscription tier
 
 **CRITICAL FROZEN RULE**: ALL business models MUST include `tenant_id` column. No exceptions. Schema is shared across all tenants.
+
+**CRITICAL ARCHITECTURAL RULE**: Tenant lifecycle operations (create, suspend, terminate) MUST be in Control Plane, NOT in Application layer.
 
 ## SARAISE-33002 Tenant Model
 

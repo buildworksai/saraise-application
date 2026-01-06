@@ -32,6 +32,31 @@ You exist to ensure engineering quality, not comfort.
 
 ## Architecture Foundation (FROZEN — NON-NEGOTIABLE)
 
+### Control Plane / Runtime Plane Separation (CRITICAL — NON-NEGOTIABLE)
+
+**THIS IS THE MOST IMPORTANT ARCHITECTURAL RULE. VIOLATIONS WILL BE REJECTED IMMEDIATELY.**
+
+#### Platform Repository (`saraise-platform/`)
+- **Purpose**: Control Plane services that orchestrate and govern
+- **Contains**: Auth, Policy Engine, Runtime Service, Control Plane
+- **Responsibilities**: Tenant lifecycle, policy distribution, module enablement, orchestration
+- **FORBIDDEN**: ❌ Serving end-user traffic, ❌ Business logic, ❌ ERP modules
+
+#### Application Repository (`saraise-application/`)
+- **Purpose**: Runtime Plane that executes business logic
+- **Contains**: Django backend, React frontend, business modules
+- **Responsibilities**: Request handling, authorization enforcement, workflow execution, data persistence
+- **FORBIDDEN**: ❌ Tenant lifecycle operations, ❌ Policy definition, ❌ Platform configuration
+
+**CRITICAL RULES:**
+1. **Application backend MUST NOT implement tenant lifecycle** (create, suspend, terminate) → Use Control Plane
+2. **Application backend MUST NOT manage platform configuration** → Use Control Plane
+3. **Application frontend MUST NOT serve platform management UI** → Separate platform frontend
+4. **Platform services MUST NOT serve end-user traffic** → Only internal orchestration APIs
+5. **Runtime Plane MUST delegate policy decisions** → Call Policy Engine (Platform service)
+
+**Reference**: `docs/architecture/control-plane-runtime-plane-separation.md`
+
 ### Multi-Tenant SaaS (Row-Level Multitenancy)
 
 All tenants share the same database schema. **ALL tenant-scoped tables MUST have a `tenant_id` column.**
@@ -46,13 +71,14 @@ All tenants share the same database schema. **ALL tenant-scoped tables MUST have
 - HTTP-only cookies prevent XSS attacks
 - Sessions establish **identity only** — no authorization state cached
 - All protected routes use `get_current_user_from_session` dependency injection
-- Authentication provided by dedicated Authentication Subsystem
+- Authentication provided by dedicated Authentication Subsystem (Platform service)
 
 **Reference**: `docs/architecture/authentication-and-session-management-spec.md`
 
 ### Policy Engine Authorization
 
-- Policy Engine evaluates all authorization decisions at runtime
+- Policy Engine (Platform service) evaluates all authorization decisions
+- Runtime Plane delegates authorization to Policy Engine — never makes policy decisions
 - Sessions contain identity snapshot: `roles[]`, `groups[]`, `jit_grants[]`, `policy_version`
 - Sessions MUST NOT cache permissions or authorization decisions
 - Deny-by-default: every route requires explicit authorization
@@ -66,6 +92,7 @@ All tenants share the same database schema. **ALL tenant-scoped tables MUST have
 - Modules declare dependencies in `manifest.yaml`
 - Module access controlled by `ModuleAccessMiddleware`
 - **Modules MUST NOT implement authentication, login, logout, session management, or credential handling**
+- **Modules MUST NOT implement tenant lifecycle or platform configuration** → Use Control Plane
 
 **Reference**: `docs/architecture/module-framework.md`
 
@@ -284,7 +311,18 @@ npx tsc --noEmit && npx eslint src --ext .ts,.tsx --max-warnings 0
 
 ## Anti-Patterns (VIOLATIONS WILL BE REJECTED)
 
-### Forbidden Patterns
+### Forbidden Patterns (Architectural Violations)
+
+#### Control Plane / Runtime Plane Violations (CRITICAL — IMMEDIATE REJECTION)
+
+❌ **Tenant lifecycle in Application layer** — `TenantManagementService.create_tenant()` in `saraise-application/backend/` → **MUST BE IN `saraise-platform/saraise-control-plane/`**  
+❌ **Platform configuration in Application layer** — `PlatformSettingViewSet` in `saraise-application/backend/` → **MUST BE IN `saraise-platform/saraise-control-plane/`**  
+❌ **Platform UI in Application frontend** — Platform dashboards in `saraise-application/frontend/` → **MUST BE IN SEPARATE `saraise-platform/frontend/`**  
+❌ **End-user traffic in Platform services** — Public APIs in `saraise-platform/` services → **PLATFORM SERVICES ARE INTERNAL ONLY**  
+❌ **Policy decisions in Runtime Plane** — Permission checks in `saraise-application/backend/` → **MUST DELEGATE TO POLICY ENGINE**  
+❌ **Business logic in Platform layer** — ERP modules in `saraise-platform/` → **MUST BE IN `saraise-application/backend/`**
+
+#### Security & Quality Violations
 
 ❌ **Omitted `tenant_id`** in tenant-scoped models — Row-Level Multitenancy requires explicit tenant association  
 ❌ **Missing tenant filtering** in queries — data leakage is a critical security risk  

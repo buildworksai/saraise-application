@@ -12,11 +12,12 @@ from rest_framework.decorators import api_view, permission_classes, authenticati
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.authentication import SessionAuthentication
 from django.core.exceptions import ValidationError
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth import get_user_model
 from django.views.decorators.csrf import ensure_csrf_cookie
-from src.core.authentication import CsrfExemptSessionAuthentication
+from src.core.authentication import CsrfExemptSessionAuthentication, RelaxedCsrfSessionAuthentication
 from src.core.user_models import UserProfile
 import uuid
 
@@ -104,6 +105,7 @@ def login_view(request):
 
 
 @api_view(['POST'])
+@authentication_classes([SessionAuthentication])
 @permission_classes([IsAuthenticated])
 def logout_view(request):
     """
@@ -116,11 +118,19 @@ def logout_view(request):
 
 
 @api_view(['GET'])
+@authentication_classes([RelaxedCsrfSessionAuthentication])  # GET requests don't need CSRF
 @permission_classes([IsAuthenticated])
 def current_user_view(request):
     """
     Get current authenticated user.
     """
+    # Debug: Check authentication state
+    if not request.user or not request.user.is_authenticated:
+        return Response(
+            {'error': 'Not authenticated', 'user_type': str(type(request.user))},
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+    
     user = request.user
     
     # Get user profile
@@ -155,6 +165,7 @@ def current_user_view(request):
 
 
 @api_view(['POST'])
+@authentication_classes([SessionAuthentication])
 @permission_classes([IsAuthenticated])
 def refresh_session_view(request):
     """

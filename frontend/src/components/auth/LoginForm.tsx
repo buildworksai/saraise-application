@@ -85,10 +85,14 @@ export function LoginForm() {
 
       // Navigate based on roles
       if (response.user.platform_role === 'platform_owner') {
-        navigate('/platform/dashboard', { replace: true })
+        // Platform owners should use platform frontend, not application frontend
+        // But if they login here, redirect to root which will use RoleBasedRedirect
+        navigate('/', { replace: true })
       } else if (response.user.tenant_role) {
-        navigate('/ai-agents', { replace: true })
+        // Tenant users should go to tenant dashboard
+        navigate('/tenant/dashboard', { replace: true })
       } else {
+        // Default: use RoleBasedRedirect to determine appropriate route
         navigate('/', { replace: true })
       }
     } catch (err) {

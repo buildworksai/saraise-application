@@ -17,7 +17,21 @@ export class ApiClient {
   private readonly baseUrl: string;
 
   constructor(options: ApiClientOptions = {}) {
-    this.baseUrl = options.baseUrl ?? (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:18000');
+    this.baseUrl = options.baseUrl ?? (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:28000'); // Application backend port: 2xxxx
+  }
+
+  /**
+   * Get CSRF token from cookie
+   */
+  private getCsrfToken(): string | null {
+    // CSRF token is stored in cookie named 'saraise_csrftoken'
+    const name = 'saraise_csrftoken';
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) {
+      return parts.pop()?.split(';').shift() || null;
+    }
+    return null;
   }
 
   private async request<T>(
@@ -30,6 +44,13 @@ export class ApiClient {
       'Content-Type': 'application/json',
       ...init.headers,
     };
+
+    // Add CSRF token for authenticated requests (all except login)
+    // Login endpoint uses CsrfExemptSessionAuthentication
+    const csrfToken = this.getCsrfToken();
+    if (csrfToken && path !== '/api/v1/auth/login/') {
+      headers['X-CSRFToken'] = csrfToken;
+    }
 
     const config: RequestInit = {
       ...init,

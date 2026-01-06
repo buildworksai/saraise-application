@@ -1,16 +1,24 @@
 """
 DRF ViewSets for Tenant Management module.
 
-CRITICAL: These are PLATFORM-LEVEL ViewSets (NO tenant_id).
-Only platform owners can access these endpoints.
-Tenant Management manages tenants themselves, which are platform-level entities.
+⚠️ ARCHITECTURAL NOTE: This module is READ-ONLY in the Application layer.
+Tenant lifecycle operations (create, suspend, terminate) MUST be performed
+via Control Plane services in saraise-platform/saraise-control-plane/.
+
+This ViewSet provides read-only access for:
+- Filtering tenant-scoped queries
+- Reading tenant status for authorization
+- Displaying tenant information in UI
+
+CRITICAL: Only platform owners can access these endpoints.
+Tenant lifecycle operations are FORBIDDEN here - use Control Plane APIs.
 """
 
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, MethodNotAllowed
 from django.db.models import Q
 
 from src.core.auth_utils import get_user_platform_role
@@ -32,7 +40,21 @@ from .serializers import (
 )
 
 
-class TenantViewSet(viewsets.ModelViewSet):
+class TenantViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    READ-ONLY ViewSet for Tenant information.
+    
+    ⚠️ ARCHITECTURAL VIOLATION PREVENTION:
+    - CREATE operations: Use Control Plane API (saraise-platform/saraise-control-plane/)
+    - UPDATE operations: Use Control Plane API
+    - DELETE operations: Use Control Plane API
+    
+    This ViewSet only provides:
+    - LIST: Read tenant list (platform owners only)
+    - RETRIEVE: Read tenant details (platform owners only)
+    
+    Tenant lifecycle operations are FORBIDDEN in Application layer.
+    """
     """
     ViewSet for Tenant CRUD operations.
 
@@ -84,55 +106,10 @@ class TenantViewSet(viewsets.ModelViewSet):
             return TenantListSerializer
         return TenantSerializer
 
-    def perform_create(self, serializer):
-        """Set created_by from authenticated user."""
-        if get_user_platform_role(self.request.user) != "platform_owner":
-            raise PermissionDenied("Only platform owners can create tenants.")
-        serializer.save(created_by=str(self.request.user.id))
-
-    def perform_update(self, serializer):
-        """Set updated_by from authenticated user."""
-        if get_user_platform_role(self.request.user) != "platform_owner":
-            raise PermissionDenied("Only platform owners can update tenants.")
-        serializer.save(updated_by=str(self.request.user.id))
-
-    def perform_destroy(self, instance):
-        """Check permissions before deletion."""
-        if get_user_platform_role(self.request.user) != "platform_owner":
-            raise PermissionDenied("Only platform owners can delete tenants.")
-        # Prevent deletion of active tenants without explicit confirmation
-        if instance.status == Tenant.TenantStatus.ACTIVE:
-            raise PermissionDenied(
-                "Cannot delete active tenant. Suspend or cancel first."
-            )
-        instance.delete()
-
-    @action(detail=True, methods=["post"])
-    def suspend(self, request, pk=None):
-        """Suspend a tenant."""
-        tenant = self.get_object()
-        if get_user_platform_role(request.user) != "platform_owner":
-            raise PermissionDenied("Only platform owners can suspend tenants.")
-        tenant.status = Tenant.TenantStatus.SUSPENDED
-        tenant.save()
-        return Response(
-            {
-                "status": "suspended",
-                "message": f"Tenant {tenant.name} has been suspended.",
-            }
-        )
-
-    @action(detail=True, methods=["post"])
-    def activate(self, request, pk=None):
-        """Activate a tenant."""
-        tenant = self.get_object()
-        if get_user_platform_role(request.user) != "platform_owner":
-            raise PermissionDenied("Only platform owners can activate tenants.")
-        tenant.status = Tenant.TenantStatus.ACTIVE
-        tenant.save()
-        return Response(
-            {"status": "active", "message": f"Tenant {tenant.name} has been activated."}
-        )
+    # ⚠️ ARCHITECTURAL ENFORCEMENT: Lifecycle operations removed
+    # Tenant lifecycle (create, update, delete, suspend, activate) MUST be performed
+    # via Control Plane services in saraise-platform/saraise-control-plane/
+    # This ViewSet is READ-ONLY for filtering and display purposes only.
 
     @action(detail=True, methods=["get"])
     def modules(self, request, pk=None):
@@ -179,11 +156,19 @@ class TenantViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-class TenantModuleViewSet(viewsets.ModelViewSet):
+class TenantModuleViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    ViewSet for Tenant Module management.
-
-    CRITICAL: Platform-level operations - only platform owners can access.
+    READ-ONLY ViewSet for Tenant Module information.
+    
+    ⚠️ ARCHITECTURAL VIOLATION PREVENTION:
+    - Module enablement/disablement: Use Control Plane API (saraise-platform/saraise-control-plane/)
+    - Module installation: Use Control Plane API
+    
+    This ViewSet only provides:
+    - LIST: Read tenant modules (platform owners only)
+    - RETRIEVE: Read tenant module details (platform owners only)
+    
+    Module lifecycle operations are FORBIDDEN in Application layer.
     """
 
     serializer_class = TenantModuleSerializer
@@ -213,41 +198,9 @@ class TenantModuleViewSet(viewsets.ModelViewSet):
 
         return queryset.order_by("tenant__name", "module_name")
 
-    def perform_create(self, serializer):
-        """Set created_by from authenticated user."""
-        if get_user_platform_role(self.request.user) != "platform_owner":
-            raise PermissionDenied("Only platform owners can manage tenant modules.")
-        serializer.save(installed_by=str(self.request.user.id))
-
-    @action(detail=True, methods=["post"])
-    def enable(self, request, pk=None):
-        """Enable a module for a tenant."""
-        tenant_module = self.get_object()
-        if get_user_platform_role(request.user) != "platform_owner":
-            raise PermissionDenied("Only platform owners can enable modules.")
-        tenant_module.is_enabled = True
-        tenant_module.save()
-        return Response(
-            {
-                "status": "enabled",
-                "message": f"Module {tenant_module.module_name} enabled for {tenant_module.tenant.name}.",
-            }
-        )
-
-    @action(detail=True, methods=["post"])
-    def disable(self, request, pk=None):
-        """Disable a module for a tenant."""
-        tenant_module = self.get_object()
-        if get_user_platform_role(request.user) != "platform_owner":
-            raise PermissionDenied("Only platform owners can disable modules.")
-        tenant_module.is_enabled = False
-        tenant_module.save()
-        return Response(
-            {
-                "status": "disabled",
-                "message": f"Module {tenant_module.module_name} disabled for {tenant_module.tenant.name}.",
-            }
-        )
+    # ⚠️ ARCHITECTURAL ENFORCEMENT: Module lifecycle operations removed
+    # Module enablement/disablement MUST be performed via Control Plane services
+    # in saraise-platform/saraise-control-plane/
 
 
 class TenantResourceUsageViewSet(viewsets.ReadOnlyModelViewSet):
@@ -284,11 +237,18 @@ class TenantResourceUsageViewSet(viewsets.ReadOnlyModelViewSet):
         return queryset.order_by("-date", "tenant__name")
 
 
-class TenantSettingsViewSet(viewsets.ModelViewSet):
+class TenantSettingsViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    ViewSet for Tenant Settings management.
-
-    CRITICAL: Platform-level operations - only platform owners can access.
+    READ-ONLY ViewSet for Tenant Settings information.
+    
+    ⚠️ ARCHITECTURAL VIOLATION PREVENTION:
+    - Setting creation/update: Use Control Plane API (saraise-platform/saraise-control-plane/)
+    
+    This ViewSet only provides:
+    - LIST: Read tenant settings (platform owners only)
+    - RETRIEVE: Read tenant setting details (platform owners only)
+    
+    Setting management operations are FORBIDDEN in Application layer.
     """
 
     serializer_class = TenantSettingsSerializer
@@ -313,17 +273,9 @@ class TenantSettingsViewSet(viewsets.ModelViewSet):
 
         return queryset.order_by("tenant__name", "category", "key")
 
-    def perform_create(self, serializer):
-        """Set created_by from authenticated user."""
-        if get_user_platform_role(self.request.user) != "platform_owner":
-            raise PermissionDenied("Only platform owners can manage tenant settings.")
-        serializer.save(created_by=str(self.request.user.id))
-
-    def perform_update(self, serializer):
-        """Set updated_by from authenticated user."""
-        if get_user_platform_role(self.request.user) != "platform_owner":
-            raise PermissionDenied("Only platform owners can update tenant settings.")
-        serializer.save(updated_by=str(self.request.user.id))
+    # ⚠️ ARCHITECTURAL ENFORCEMENT: Setting management operations removed
+    # Setting creation/update MUST be performed via Control Plane services
+    # in saraise-platform/saraise-control-plane/
 
 
 class TenantHealthScoreViewSet(viewsets.ReadOnlyModelViewSet):

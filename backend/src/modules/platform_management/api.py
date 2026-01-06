@@ -1,6 +1,17 @@
 """
 Platform Management API ViewSets
-DRF ViewSets with tenant isolation and Policy Engine authorization
+
+⚠️ ARCHITECTURAL NOTE: These ViewSets are READ-ONLY in the Application layer.
+Platform configuration management (create, update, delete) MUST be performed
+via Control Plane services in saraise-platform/saraise-control-plane/.
+
+This module provides read-only access for:
+- Reading platform settings for feature flags
+- Reading system health status
+- Reading audit events
+- Reading platform metrics
+
+CRITICAL: Platform configuration mutations are FORBIDDEN here - use Control Plane APIs.
 """
 
 from rest_framework import viewsets, status
@@ -13,6 +24,7 @@ from django.utils import timezone
 import uuid
 
 from src.core.auth_utils import get_user_tenant_id
+from src.core.authentication import RelaxedCsrfSessionAuthentication
 
 from .models import (
     PlatformSetting,
@@ -34,16 +46,23 @@ from .serializers import (
 from .services import PlatformManagementService, AnalyticsService
 
 
-class PlatformSettingViewSet(viewsets.ModelViewSet):
+class PlatformSettingViewSet(viewsets.ReadOnlyModelViewSet):
     """
-    API endpoints for platform settings.
-
-    Architecture Compliance:
-    - ✅ Tenant filtering in get_queryset
-    - ✅ tenant_id set on create
-    - ✅ Audit logging on mutations
+    READ-ONLY API endpoints for platform settings.
+    
+    ⚠️ ARCHITECTURAL VIOLATION PREVENTION:
+    - CREATE operations: Use Control Plane API (saraise-platform/saraise-control-plane/)
+    - UPDATE operations: Use Control Plane API
+    - DELETE operations: Use Control Plane API
+    
+    This ViewSet only provides:
+    - LIST: Read platform settings (filtered by tenant if applicable)
+    - RETRIEVE: Read platform setting details
+    
+    Platform configuration management is FORBIDDEN in Application layer.
     """
 
+    authentication_classes = [RelaxedCsrfSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get_serializer_class(self):
@@ -52,7 +71,16 @@ class PlatformSettingViewSet(viewsets.ModelViewSet):
         return PlatformSettingSerializer
 
     def get_queryset(self):
-        """Filter settings by tenant_id for tenant-specific settings."""
+        """Filter settings by tenant_id. Platform owners can see all settings."""
+        from src.core.auth_utils import get_user_platform_role
+        
+        platform_role = get_user_platform_role(self.request.user)
+        
+        # Platform owners can see all platform settings (platform-wide and tenant-specific)
+        if platform_role == 'platform_owner':
+            return PlatformSetting.objects.all()
+        
+        # Other users only see settings for their tenant or platform-wide
         tenant_id_str = get_user_tenant_id(self.request.user)
 
         # Return platform-wide settings + tenant-specific settings
@@ -73,16 +101,11 @@ class PlatformSettingViewSet(viewsets.ModelViewSet):
         return queryset
 
     def get_object(self):
-        """Override to ensure tenant isolation on detail view."""
-        # Get tenant_id first for explicit check
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = None
-        if tenant_id_str:
-            try:
-                tenant_id = uuid.UUID(tenant_id_str)
-            except (ValueError, TypeError):
-                tenant_id = None
-
+        """Override to ensure tenant isolation on detail view. Platform owners can access any setting."""
+        from src.core.auth_utils import get_user_platform_role
+        
+        platform_role = get_user_platform_role(self.request.user)
+        
         # Get lookup value
         lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
         lookup_value = self.kwargs.get(lookup_url_kwarg)
@@ -96,7 +119,19 @@ class PlatformSettingViewSet(viewsets.ModelViewSet):
         except PlatformSetting.DoesNotExist:
             raise NotFound("Not found.")
 
-        # CRITICAL: Explicit tenant isolation check
+        # Platform owners can access any platform setting
+        if platform_role == 'platform_owner':
+            return obj
+
+        # CRITICAL: Explicit tenant isolation check for non-platform owners
+        tenant_id_str = get_user_tenant_id(self.request.user)
+        tenant_id = None
+        if tenant_id_str:
+            try:
+                tenant_id = uuid.UUID(tenant_id_str)
+            except (ValueError, TypeError):
+                tenant_id = None
+
         # If object has tenant_id, user MUST have matching tenant_id
         if obj.tenant_id is not None:
             if tenant_id is None:
@@ -112,49 +147,44 @@ class PlatformSettingViewSet(viewsets.ModelViewSet):
 
         return obj
 
-    def perform_create(self, serializer):
-        """Set tenant_id and audit on create."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
-
-        instance = serializer.save(tenant_id=tenant_id, created_by=self.request.user.id)
-        # Audit logging
-        PlatformManagementService.log_audit_event(
-            action="platform.setting.created",
-            actor_id=self.request.user.id,
-            resource_type="PlatformSetting",
-            resource_id=instance.id,
-            tenant_id=tenant_id,
-            details={"key": instance.key},
-        )
-
-    def perform_update(self, serializer):
-        """Audit on update."""
-        instance = serializer.save(updated_by=self.request.user.id)
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
-        PlatformManagementService.log_audit_event(
-            action="platform.setting.updated",
-            actor_id=self.request.user.id,
-            resource_type="PlatformSetting",
-            resource_id=instance.id,
-            tenant_id=tenant_id,
-            details={"key": instance.key},
-        )
+    # ⚠️ ARCHITECTURAL ENFORCEMENT: Platform setting management operations removed
+    # Platform setting creation/update MUST be performed via Control Plane services
+    # in saraise-platform/saraise-control-plane/
 
 
-class FeatureFlagViewSet(viewsets.ModelViewSet):
-    """API endpoints for feature flags."""
+class FeatureFlagViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    READ-ONLY API endpoints for feature flags.
+    
+    ⚠️ ARCHITECTURAL VIOLATION PREVENTION:
+    - CREATE operations: Use Control Plane API (saraise-platform/saraise-control-plane/)
+    - UPDATE operations: Use Control Plane API
+    - TOGGLE operations: Use Control Plane API
+    
+    This ViewSet only provides:
+    - LIST: Read feature flags (filtered by tenant if applicable)
+    - RETRIEVE: Read feature flag details
+    
+    Feature flag management is FORBIDDEN in Application layer.
+    """
 
+    authentication_classes = [RelaxedCsrfSessionAuthentication]
     permission_classes = [IsAuthenticated]
 
     def get_serializer_class(self):
-        if self.action in ["create", "update", "partial_update"]:
-            return FeatureFlagCreateSerializer
         return FeatureFlagSerializer
 
     def get_queryset(self):
-        """Filter flags by tenant_id."""
+        """Filter flags by tenant_id. Platform owners can see all flags."""
+        from src.core.auth_utils import get_user_platform_role
+        
+        platform_role = get_user_platform_role(self.request.user)
+        
+        # Platform owners can see all feature flags (platform-wide and tenant-specific)
+        if platform_role == 'platform_owner':
+            return FeatureFlag.objects.all()
+        
+        # Other users only see flags for their tenant or platform-wide
         tenant_id_str = get_user_tenant_id(self.request.user)
 
         if tenant_id_str:
@@ -171,16 +201,11 @@ class FeatureFlagViewSet(viewsets.ModelViewSet):
         return queryset
 
     def get_object(self):
-        """Override to ensure tenant isolation on detail view."""
-        # Get tenant_id first for explicit check
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = None
-        if tenant_id_str:
-            try:
-                tenant_id = uuid.UUID(tenant_id_str)
-            except (ValueError, TypeError):
-                tenant_id = None
-
+        """Override to ensure tenant isolation on detail view. Platform owners can access any flag."""
+        from src.core.auth_utils import get_user_platform_role
+        
+        platform_role = get_user_platform_role(self.request.user)
+        
         # Get lookup value
         lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
         lookup_value = self.kwargs.get(lookup_url_kwarg)
@@ -194,7 +219,19 @@ class FeatureFlagViewSet(viewsets.ModelViewSet):
         except FeatureFlag.DoesNotExist:
             raise NotFound("Not found.")
 
-        # CRITICAL: Explicit tenant isolation check
+        # Platform owners can access any feature flag
+        if platform_role == 'platform_owner':
+            return obj
+
+        # CRITICAL: Explicit tenant isolation check for non-platform owners
+        tenant_id_str = get_user_tenant_id(self.request.user)
+        tenant_id = None
+        if tenant_id_str:
+            try:
+                tenant_id = uuid.UUID(tenant_id_str)
+            except (ValueError, TypeError):
+                tenant_id = None
+
         if obj.tenant_id is not None:
             if tenant_id is None:
                 raise NotFound("Not found.")
@@ -203,35 +240,15 @@ class FeatureFlagViewSet(viewsets.ModelViewSet):
 
         return obj
 
-    def perform_create(self, serializer):
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
-        serializer.save(tenant_id=tenant_id)
-
-    @action(detail=True, methods=["post"])
-    def toggle(self, request, pk=None):
-        """Toggle feature flag on/off."""
-        flag = self.get_object()
-        flag.enabled = not flag.enabled
-        flag.save()
-
-        tenant_id_str = get_user_tenant_id(request.user)
-        tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
-        PlatformManagementService.log_audit_event(
-            action="platform.feature_flag.toggled",
-            actor_id=request.user.id,
-            resource_type="FeatureFlag",
-            resource_id=flag.id,
-            tenant_id=tenant_id,
-            details={"name": flag.name, "enabled": flag.enabled},
-        )
-
-        return Response(FeatureFlagSerializer(flag).data)
+    # ⚠️ ARCHITECTURAL ENFORCEMENT: Feature flag management operations removed
+    # Feature flag creation/update/toggle MUST be performed via Control Plane services
+    # in saraise-platform/saraise-control-plane/
 
 
 class SystemHealthViewSet(viewsets.ReadOnlyModelViewSet):
     """API endpoints for system health (read-only)."""
 
+    authentication_classes = [RelaxedCsrfSessionAuthentication]
     permission_classes = [IsAuthenticated]
     serializer_class = SystemHealthSerializer
     queryset = SystemHealth.objects.all()
@@ -267,11 +284,25 @@ class PlatformAuditEventViewSet(viewsets.ReadOnlyModelViewSet):
     CRITICAL: No create/update/delete allowed.
     """
 
+    authentication_classes = [RelaxedCsrfSessionAuthentication]
     permission_classes = [IsAuthenticated]
     serializer_class = PlatformAuditEventSerializer
 
     def get_queryset(self):
-        """Filter audit events by tenant_id."""
+        """Filter audit events by tenant_id. Platform owners can see all events."""
+        from src.core.auth_utils import get_user_platform_role
+        
+        # Ensure user is authenticated
+        if not self.request.user or not self.request.user.is_authenticated:
+            return PlatformAuditEvent.objects.none()
+        
+        platform_role = get_user_platform_role(self.request.user)
+        
+        # Platform owners can see all audit events
+        if platform_role == 'platform_owner':
+            return PlatformAuditEvent.objects.all().order_by("-timestamp")
+        
+        # Other users only see events for their tenant or platform-wide
         tenant_id_str = get_user_tenant_id(self.request.user)
 
         if tenant_id_str:
@@ -292,16 +323,11 @@ class PlatformAuditEventViewSet(viewsets.ReadOnlyModelViewSet):
         return queryset
 
     def get_object(self):
-        """Override to ensure tenant isolation on detail view."""
-        # Get tenant_id first for explicit check
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = None
-        if tenant_id_str:
-            try:
-                tenant_id = uuid.UUID(tenant_id_str)
-            except (ValueError, TypeError):
-                tenant_id = None
-
+        """Override to ensure tenant isolation on detail view. Platform owners can access any event."""
+        from src.core.auth_utils import get_user_platform_role
+        
+        platform_role = get_user_platform_role(self.request.user)
+        
         # Get lookup value
         lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
         lookup_value = self.kwargs.get(lookup_url_kwarg)
@@ -315,7 +341,19 @@ class PlatformAuditEventViewSet(viewsets.ReadOnlyModelViewSet):
         except PlatformAuditEvent.DoesNotExist:
             raise NotFound("Not found.")
 
-        # CRITICAL: Explicit tenant isolation check
+        # Platform owners can access any audit event
+        if platform_role == 'platform_owner':
+            return obj
+
+        # CRITICAL: Explicit tenant isolation check for non-platform owners
+        tenant_id_str = get_user_tenant_id(self.request.user)
+        tenant_id = None
+        if tenant_id_str:
+            try:
+                tenant_id = uuid.UUID(tenant_id_str)
+            except (ValueError, TypeError):
+                tenant_id = None
+
         if obj.tenant_id is not None:
             if tenant_id is None:
                 raise NotFound("Not found.")

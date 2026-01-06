@@ -1,16 +1,29 @@
 # SARAISE Consolidated Development Docker Compose
 # All services (Phase 1-6) in single network with port standardization
-# External ports start with "1" prefix (18000, 15173, etc.)
+# 
+# PORT CONVENTION:
+# - Platform containers: 1xxxx (e.g., 18000:8000)
+# - Application containers: 2xxxx (e.g., 28000:8000)
 
 services:
   # ===== Infrastructure Services =====
+  # NOTE: For development, we use the shared postgres/redis from platform docker-compose.
+  # These are defined here with different container names to avoid conflicts,
+  # but in practice, the platform's postgres/redis are used via the shared network.
   
-  # PostgreSQL Database
+  # PostgreSQL Database (shared with platform via network)
+  # Application port convention: 2xxxx (e.g., 25432:5432)
   postgres:
     image: postgres:17-alpine
-    container_name: saraise-db
+    container_name: application-db
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
     ports:
-      - "15432:5432"  # External port with "1" prefix
+      - "25432:5432"  # Application: 2xxxx
     environment:
       - POSTGRES_DB=saraise
       - POSTGRES_USER=postgres
@@ -25,12 +38,19 @@ services:
     networks:
       - saraise-network
 
-  # Redis Cache & Session Store
+  # Redis Cache & Session Store (shared with platform via network)
+  # Application port convention: 2xxxx (e.g., 26379:6379)
   redis:
     image: redis:7-alpine
-    container_name: saraise-redis
+    container_name: application-redis
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
     ports:
-      - "16379:6379"  # External port with "1" prefix
+      - "26379:6379"  # Application: 2xxxx
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -39,149 +59,36 @@ services:
     networks:
       - saraise-network
 
-  # ===== Phase 2 Services =====
+  # ===== Platform Services (Control Plane) =====
+  # NOTE: Platform services (auth, policy-engine, runtime, control-plane) are managed
+  # by saraise-platform/docker-compose.dev.yml and run on 1xxxx ports.
+  # They are NOT included here to avoid container name conflicts.
+  # Access platform services via: http://localhost:18001, 18002, 18003, 18004
   
-  # Auth Service
-  auth:
-    build:
-      context: ../saraise-phase1
-      dockerfile: saraise-auth/Dockerfile
-    container_name: saraise-auth
-    ports:
-      - "18001:8001"  # External port with "1" prefix
-      - "19101:8001"  # Metrics endpoint
-    environment:
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=INFO
-      - PORT=8001
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    networks:
-      - saraise-network
-    volumes:
-      - ../saraise-phase1/saraise-auth/src:/app/src:ro
-      - ../saraise-phase1/saraise-auth/tests:/app/tests:ro
-
-  # Policy Engine
-  policy-engine:
-    build:
-      context: ../saraise-phase1
-      dockerfile: saraise-policy-engine/Dockerfile
-    container_name: saraise-policy-engine
-    ports:
-      - "18003:8003"  # External port with "1" prefix
-      - "19103:8003"  # Metrics endpoint
-    environment:
-      - LOG_LEVEL=INFO
-      - PORT=8003
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    networks:
-      - saraise-network
-    volumes:
-      - ../saraise-phase1/saraise-policy-engine/src:/app/src:ro
-      - ../saraise-phase1/saraise-policy-engine/tests:/app/tests:ro
-
-  # Runtime Service
-  runtime:
-    build:
-      context: ../saraise-phase1
-      dockerfile: saraise-runtime/Dockerfile
-    container_name: saraise-runtime
-    ports:
-      - "18002:8002"  # External port with "1" prefix
-      - "19102:8002"  # Metrics endpoint
-    environment:
-      - AUTH_SERVICE_URL=http://auth:8001
-      - POLICY_ENGINE_URL=http://policy-engine:8003
-      - CONTROL_PLANE_URL=http://control-plane:8004
-      - LOG_LEVEL=INFO
-      - PORT=8002
-    depends_on:
-      auth:
-        condition: service_healthy
-      policy-engine:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    networks:
-      - saraise-network
-    volumes:
-      - ../saraise-phase1/saraise-runtime/src:/app/src:ro
-      - ../saraise-phase1/saraise-runtime/tests:/app/tests:ro
-
-  # Control Plane
-  control-plane:
-    build:
-      context: ../saraise-phase1
-      dockerfile: saraise-control-plane/Dockerfile
-    container_name: saraise-control-plane
-    ports:
-      - "18004:8004"  # External port with "1" prefix
-      - "19104:8004"  # Metrics endpoint
-    environment:
-      - LOG_LEVEL=INFO
-      - PORT=8004
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    networks:
-      - saraise-network
-    volumes:
-      - ../saraise-phase1/saraise-control-plane/src:/app/src:ro
-      - ../saraise-phase1/saraise-control-plane/tests:/app/tests:ro
+  # Platform services (auth, policy-engine, runtime, control-plane) are managed
+  # by saraise-platform/docker-compose.dev.yml and run on 1xxxx ports.
+  # They are NOT included here to avoid container name conflicts.
+  # Access platform services via: http://localhost:18001, 18002, 18003, 18004
 
   # ===== Phase 4/5: Django Backend (Legacy) =====
-  
-  backend-legacy:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: saraise-backend-legacy
-    ports:
-      - "18005:8005"  # External port with "1" prefix
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/saraise
-      - DB_NAME=saraise
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - REDIS_URL=redis://redis:6379/0
-      - DJANGO_SETTINGS_MODULE=saraise_backend.settings
-      - PYTHONPATH=/app
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    networks:
-      - saraise-network
-    command: python manage.py runserver 0.0.0.0:8005
+  # NOTE: This legacy backend service has been removed.
+  # Use the main backend service instead (saraise-application-backend on port 28000).
 
-  # ===== Phase 6: Django Platform API =====
+  # ===== Application Layer (Runtime Plane) =====
+  # This is the Django backend that serves end-user traffic
+  # It executes business logic and enforces policies from Control Plane
   
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: saraise-backend
+    container_name: api
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/saraise
       - DB_NAME=saraise
@@ -196,7 +103,7 @@ services:
       - DEBUG=True
       - ALLOWED_HOSTS=localhost,backend,0.0.0.0
     ports:
-      - "${BACKEND_PORT:-18000}:8000"  # External port with "1" prefix
+      - "28000:8000"  # Application: 2xxxx (fixed port)
     volumes:
       - ./backend:/app
       - backend_venv:/app/venv
@@ -215,18 +122,25 @@ services:
     networks:
       - saraise-network
 
-  # ===== Phase 6: React Frontend =====
+  # ===== Application Frontend (Runtime Plane) =====
+  # React UI for tenant users - serves application layer only
   
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
-    container_name: saraise-frontend
+    container_name: ui-web
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
     environment:
-      - VITE_API_BASE_URL=http://localhost:${BACKEND_PORT:-18000}
+      - VITE_API_BASE_URL=http://localhost:28000
       - NODE_ENV=development
     ports:
-      - "${FRONTEND_PORT:-15173}:5173"  # External port with "1" prefix
+      - "25173:5173"  # Application: 2xxxx (fixed port)
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
@@ -239,11 +153,18 @@ services:
   # ===== Observability Services =====
   
   # Prometheus for metrics collection
+  # Application port convention: 2xxxx (e.g., 29090:9090)
   prometheus:
     image: prom/prometheus:latest
-    container_name: saraise-prometheus
+    container_name: application-prometheus
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
     ports:
-      - "19090:9090"  # External port with "1" prefix
+      - "29090:9090"  # Application: 2xxxx
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
@@ -257,29 +178,37 @@ services:
       - saraise-network
 
   # Jaeger for distributed tracing
+  # Application port convention: 2xxxx
   jaeger:
     image: jaegertracing/all-in-one:latest
-    container_name: saraise-jaeger
+    container_name: application-jaeger
     ports:
-      - "15775:5775/udp"
-      - "16831:6831/udp"
-      - "16832:6832/udp"
-      - "15778:5778"
-      - "16686:16686"  # Jaeger UI (keep standard port, already starts with 1)
-      - "14268:14268"
-      - "14250:14250"
-      - "19411:9411"
+      - "25775:5775/udp"  # Application: 2xxxx
+      - "26831:6831/udp"  # Application: 2xxxx
+      - "26832:6832/udp"  # Application: 2xxxx
+      - "25778:5778"  # Application: 2xxxx
+      - "26686:16686"  # Jaeger UI (Application: 2xxxx)
+      - "24268:14268"  # Application: 2xxxx
+      - "24250:14250"  # Application: 2xxxx
+      - "29411:9411"  # Application: 2xxxx
     environment:
       - COLLECTOR_ZIPKIN_HOST_PORT=:9411
     networks:
       - saraise-network
 
   # Grafana for dashboards
+  # Application port convention: 2xxxx (e.g., 23000:3000)
   grafana:
     image: grafana/grafana:latest
-    container_name: saraise-grafana
+    container_name: application-grafana
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
     ports:
-      - "13000:3000"  # External port with "1" prefix
+      - "23000:3000"  # Application: 2xxxx
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
@@ -295,11 +224,18 @@ services:
       - saraise-network
 
   # Alertmanager for alert routing
+  # Application port convention: 2xxxx (e.g., 29093:9093)
   alertmanager:
     image: prom/alertmanager:latest
-    container_name: saraise-alertmanager
+    container_name: application-alertmanager
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
     ports:
-      - "19093:9093"  # External port with "1" prefix
+      - "29093:9093"  # Application: 2xxxx
     volumes:
       - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     command:
@@ -309,11 +245,12 @@ services:
 
 networks:
   saraise-network:
-    driver: bridge
+    external: true
     name: saraise-network
 
 volumes:
   postgres_data:
+    external: true
     name: saraise-postgres-data
   prometheus_data:
   grafana_data:

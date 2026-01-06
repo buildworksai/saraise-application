@@ -1,10 +1,18 @@
 """
 Tenant Management Services
 
-Business logic for tenant lifecycle management, module installation,
-resource tracking, and health scoring.
+⚠️ ARCHITECTURAL NOTE: This module is READ-ONLY in the Application layer.
+Tenant lifecycle operations (create, suspend, terminate, module installation)
+MUST be performed via Control Plane services in saraise-platform/saraise-control-plane/.
 
-CRITICAL: Platform-level operations - these services manage tenants themselves.
+This service provides read-only operations for:
+- Reading tenant information for filtering
+- Reading tenant status for authorization
+- Reading tenant modules for access control
+- Reading tenant resource usage for display
+- Reading tenant health scores for monitoring
+
+CRITICAL: Tenant lifecycle operations are FORBIDDEN here - use Control Plane APIs.
 """
 
 from typing import Optional, Dict, Any
@@ -21,132 +29,28 @@ from .models import (
 
 
 class TenantManagementService:
-    """Business logic for tenant management operations."""
+    """
+    READ-ONLY business logic for tenant information.
+    
+    ⚠️ ARCHITECTURAL ENFORCEMENT: All lifecycle operations removed.
+    Tenant lifecycle MUST be performed via Control Plane services.
+    """
 
-    @staticmethod
-    def create_tenant(
-        name: str, slug: str, created_by: Optional[str] = None, **kwargs
-    ) -> Tenant:
-        """
-        Create a new tenant with default configuration.
+    # ⚠️ ARCHITECTURAL ENFORCEMENT: Lifecycle operations removed
+    # - create_tenant() → Use Control Plane
+    # - activate_tenant() → Use Control Plane
+    # - suspend_tenant() → Use Control Plane
+    # - cancel_tenant() → Use Control Plane
+    # - archive_tenant() → Use Control Plane
+    # - install_module() → Use Control Plane
+    # - uninstall_module() → Use Control Plane
+    # - enable_module() → Use Control Plane
+    # - disable_module() → Use Control Plane
 
-        Args:
-            name: Tenant organization name
-            slug: URL-safe identifier
-            created_by: User ID who created the tenant
-            **kwargs: Additional tenant fields
-
-        Returns:
-            Created Tenant instance
-        """
-        tenant = Tenant.objects.create(
-            name=name,
-            slug=slug,
-            created_by=created_by,
-            onboarded_by=created_by,
-            **kwargs
-        )
-        return tenant
-
-    @staticmethod
-    def activate_tenant(tenant_id: str) -> Tenant:
-        """Activate a tenant (change status to ACTIVE)."""
-        tenant = Tenant.objects.get(id=tenant_id)
-        tenant.status = Tenant.TenantStatus.ACTIVE
-        tenant.save()
-        return tenant
-
-    @staticmethod
-    def suspend_tenant(tenant_id: str) -> Tenant:
-        """Suspend a tenant (change status to SUSPENDED)."""
-        tenant = Tenant.objects.get(id=tenant_id)
-        tenant.status = Tenant.TenantStatus.SUSPENDED
-        tenant.save()
-        return tenant
-
-    @staticmethod
-    def cancel_tenant(tenant_id: str) -> Tenant:
-        """Cancel a tenant (change status to CANCELLED)."""
-        tenant = Tenant.objects.get(id=tenant_id)
-        tenant.status = Tenant.TenantStatus.CANCELLED
-        tenant.save()
-        return tenant
-
-    @staticmethod
-    def archive_tenant(tenant_id: str) -> Tenant:
-        """Archive a tenant (change status to ARCHIVED)."""
-        tenant = Tenant.objects.get(id=tenant_id)
-        tenant.status = Tenant.TenantStatus.ARCHIVED
-        tenant.save()
-        return tenant
-
-    @staticmethod
-    def install_module(
-        tenant_id: str,
-        module_name: str,
-        installed_by: Optional[str] = None,
-        version: Optional[str] = None,
-        configuration: Optional[Dict[str, Any]] = None,
-    ) -> TenantModule:
-        """
-        Install a module for a tenant.
-
-        Args:
-            tenant_id: Tenant ID
-            module_name: Module identifier
-            installed_by: User ID who installed the module
-            version: Module version
-            configuration: Module-specific configuration
-
-        Returns:
-            TenantModule instance
-        """
-        tenant = Tenant.objects.get(id=tenant_id)
-        tenant_module, created = TenantModule.objects.get_or_create(
-            tenant=tenant,
-            module_name=module_name,
-            defaults={
-                "installed_by": installed_by,
-                "version": version or "1.0.0",
-                "configuration": configuration or {},
-                "is_enabled": True,
-            },
-        )
-        if not created:
-            # Update existing module
-            tenant_module.is_enabled = True
-            tenant_module.version = version or tenant_module.version
-            if configuration:
-                tenant_module.configuration.update(configuration)
-            tenant_module.save()
-        return tenant_module
-
-    @staticmethod
-    def uninstall_module(tenant_id: str, module_name: str) -> None:
-        """Uninstall a module for a tenant."""
-        tenant = Tenant.objects.get(id=tenant_id)
-        TenantModule.objects.filter(tenant=tenant, module_name=module_name).delete()
-
-    @staticmethod
-    def enable_module(tenant_id: str, module_name: str) -> TenantModule:
-        """Enable a module for a tenant."""
-        tenant_module = TenantModule.objects.get(
-            tenant_id=tenant_id, module_name=module_name
-        )
-        tenant_module.is_enabled = True
-        tenant_module.save()
-        return tenant_module
-
-    @staticmethod
-    def disable_module(tenant_id: str, module_name: str) -> TenantModule:
-        """Disable a module for a tenant."""
-        tenant_module = TenantModule.objects.get(
-            tenant_id=tenant_id, module_name=module_name
-        )
-        tenant_module.is_enabled = False
-        tenant_module.save()
-        return tenant_module
-
+    # ⚠️ ARCHITECTURAL NOTE: record_resource_usage() kept for metrics collection
+    # This is data persistence (metrics), not tenant lifecycle management.
+    # Metrics recording is acceptable in Runtime Plane.
+    
     @staticmethod
     def record_resource_usage(
         tenant_id: str,
@@ -163,6 +67,9 @@ class TenantManagementService:
     ) -> TenantResourceUsage:
         """
         Record daily resource usage for a tenant.
+        
+        NOTE: This is metrics/data persistence, not tenant lifecycle management.
+        Metrics recording is acceptable in Runtime Plane.
 
         Args:
             tenant_id: Tenant ID
@@ -249,41 +156,8 @@ class TenantManagementService:
             or None,
         }
 
-    @staticmethod
-    def set_tenant_setting(
-        tenant_id: str,
-        category: str,
-        key: str,
-        value: Any,
-        updated_by: Optional[str] = None,
-        is_encrypted: bool = False,
-    ) -> TenantSettings:
-        """
-        Set a tenant setting.
-
-        Args:
-            tenant_id: Tenant ID
-            category: Setting category
-            key: Setting key
-            value: Setting value (will be JSON-encoded)
-            updated_by: User ID who updated the setting
-            is_encrypted: Whether the value is encrypted
-
-        Returns:
-            TenantSettings instance
-        """
-        tenant = Tenant.objects.get(id=tenant_id)
-        setting, created = TenantSettings.objects.update_or_create(
-            tenant=tenant,
-            category=category,
-            key=key,
-            defaults={
-                "value": value,
-                "is_encrypted": is_encrypted,
-                "updated_by": updated_by,
-            },
-        )
-        return setting
+    # ⚠️ ARCHITECTURAL ENFORCEMENT: Setting management removed
+    # - set_tenant_setting() → Use Control Plane
 
     @staticmethod
     def get_tenant_setting(
@@ -310,12 +184,19 @@ class TenantManagementService:
         except (Tenant.DoesNotExist, TenantSettings.DoesNotExist):
             return default
 
+    # ⚠️ ARCHITECTURAL NOTE: calculate_health_score() kept for analytics
+    # This is analytics/metrics calculation, not tenant lifecycle management.
+    # Health score calculation is acceptable in Runtime Plane.
+    
     @staticmethod
     def calculate_health_score(
         tenant_id: str, target_date: Optional[date] = None
     ) -> TenantHealthScore:
         """
         Calculate health score for a tenant.
+        
+        NOTE: This is analytics/metrics calculation, not tenant lifecycle management.
+        Health score calculation is acceptable in Runtime Plane.
 
         Health score is based on:
         - Usage score: Active users, API calls, feature usage
