@@ -196,8 +196,11 @@ docker-compose.override.yml
 # ====================
 # Reports (Keep structure, ignore temp)
 # ====================
+# Reports folder is tracked - all investigation reports belong here
+# Only ignore temporary files
 reports/*.tmp
 reports/*.temp
+reports/*.bak
 
 # ====================
 # Terraform / Infrastructure
