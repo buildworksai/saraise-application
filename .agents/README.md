@@ -6,7 +6,7 @@ This folder contains configuration, commands, and skills for AI agents working i
 
 ```
 .agents/
-├── rules/          # Linting and code compliance rules
+├── rules/          # Code compliance and architecture rules (26 files)
 ├── commands/       # Slash commands for quick agent instructions
 ├── skills/         # Reusable agent skills and expertise
 └── README.md       # This file
@@ -14,24 +14,72 @@ This folder contains configuration, commands, and skills for AI agents working i
 
 ---
 
-## 📋 Rules
+## 📋 Rules Index
 
 **Location:** `.agents/rules/`
 
-Define code compliance and linting rules that are automatically enforced by AgentHub.
+These rules define the authoritative standards for SARAISE development. Rules with `alwaysApply: true` are enforced automatically.
 
-**Format:** Markdown (.md), YAML (.yaml), or JSON (.json)
+### Core & Getting Started
 
-**Example:** `.agents/rules/coding-standards.md`
-```markdown
-error: No console.log in production code :: console\.log\(
-warn: TODO must reference ticket :: TODO(?!\(JIRA-\d+\))
-```
+| Rule | Purpose | Always Apply |
+|------|---------|--------------|
+| `00-core-principles.md` | Fundamental architecture principles | ✅ |
+| `01-getting-started.md` | Development setup and workflows | ❌ |
 
-**Features:**
-- Real-time diagnostics while coding
-- Configurable save blocking
-- Build integration via `npm run check-rules`
+### Quality & Standards
+
+| Rule | Purpose | Always Apply |
+|------|---------|--------------|
+| `02-quality-enforcement.md` | Test coverage, code quality gates | ✅ |
+| `03-tech-stack.md` | Technology stack registry | ✅ |
+| `04-backend-standards.md` | Python/Django coding standards | ❌ |
+| `05-frontend-standards.md` | TypeScript/React coding standards | ❌ |
+| `06-automated-enforcement.md` | CI/CD quality gates | ✅ |
+
+### Security & Authentication
+
+| Rule | Purpose | Always Apply |
+|------|---------|--------------|
+| `07-rbac-security.md` | Role-based access control | ✅ |
+| `08-secrets-management.md` | Secrets and configuration | ✅ |
+| `10-session-auth.md` | Session-based authentication (FROZEN) | ✅ |
+| `11-audit-logging.md` | Immutable audit logs | ✅ |
+| `12-auth-enforcement.md` | Authorization enforcement patterns | ✅ |
+
+### Infrastructure & Operations
+
+| Rule | Purpose | Always Apply |
+|------|---------|--------------|
+| `09-infrastructure-config.md` | Infrastructure patterns | ❌ |
+| `13-performance-optimization.md` | Performance patterns | ❌ |
+| `14-troubleshooting.md` | Debugging and troubleshooting | ❌ |
+| `19-service-monitoring.md` | Observability and monitoring | ❌ |
+
+### Module Development
+
+| Rule | Purpose | Always Apply |
+|------|---------|--------------|
+| `15-module-architecture.md` | Module structure and dependencies | ✅ |
+| `16-frontend.md` | Frontend module patterns | ❌ |
+| `17-module-lifecycle-metadata.md` | Module manifest and lifecycle | ✅ |
+| `20-module-development.md` | Module implementation standards | ✅ |
+
+### Platform & Business
+
+| Rule | Purpose | Always Apply |
+|------|---------|--------------|
+| `18-pricing.md` | Subscription and pricing patterns | ❌ |
+| `21-platform-tenant.md` | Multi-tenancy patterns | ✅ |
+| `22-billing.md` | Billing integration patterns | ❌ |
+| `23-resource-quotas.md` | Resource quota enforcement | ❌ |
+
+### Advanced Architecture (NEW)
+
+| Rule | Purpose | Always Apply |
+|------|---------|--------------|
+| `24-performance-slas.md` | Performance SLA enforcement | ❌ |
+| `25-event-architecture.md` | Event-driven patterns | ❌ |
 
 ---
 
@@ -39,26 +87,15 @@ warn: TODO must reference ticket :: TODO(?!\(JIRA-\d+\))
 
 **Location:** `.agents/commands/`
 
-Quick slash command instructions that agents can execute. Type `/` in the editor to see available commands.
+Quick slash command instructions that agents can execute.
 
-**Format:** Markdown (.md)
+| Command | Purpose |
+|---------|---------|
+| `approval.md` | Architecture approval workflow |
+| `investigate.md` | Investigation and debugging |
+| `review.md` | Code review checklist |
 
-**Example:** `.agents/commands/review.md`
-```markdown
-# Code Review Command
-
-You are a senior code reviewer. When reviewing code:
-1. Check architectural correctness
-2. Verify error handling
-3. Ensure tests exist
-4. Validate documentation
-5. Check performance implications
-```
-
-**Usage:**
-- Type `/` in editor → Select command → Agent executes instruction
-- Commands are context-specific instructions, not shell scripts
-- Can reference project-specific patterns and standards
+**Usage:** Type `/` in editor → Select command → Agent executes instruction
 
 ---
 
@@ -66,89 +103,99 @@ You are a senior code reviewer. When reviewing code:
 
 **Location:** `.agents/skills/`
 
-Reusable agent expertise and knowledge patterns. Skills provide specialized guidance for specific tasks.
+Reusable agent expertise and knowledge patterns.
 
-**Format:** Markdown (.md) with frontmatter
+| Skill | Purpose |
+|-------|---------|
+| `react-best-practices/` | React 18 + TypeScript best practices |
+| `security-audit/` | Security audit checklist |
+| `testing-patterns/` | Testing strategies and patterns |
 
-**Example:** `.agents/skills/react-best-practices/skill.md`
-```markdown
----
-name: react-best-practices
-description: React 18 + TypeScript best practices
-status: ✅ Working
 ---
 
-# React Best Practices
+## 🔗 Related Documentation
 
-## Component Design
-- Keep components small and focused
-- Prefer functional components
-- Extract reusable logic into custom hooks
-...
-```
+### Architecture (Frozen)
 
-**Types:**
-- **Knowledge Skills:** Load specialized expertise into context
-- **Automation Skills:** Execute specific procedures or validations
+- `docs/architecture/application-architecture.md` — System overview
+- `docs/architecture/security-model.md` — Security architecture
+- `docs/architecture/authentication-and-session-management-spec.md` — Session auth
+- `docs/architecture/policy-engine-spec.md` — Authorization
+- `docs/architecture/module-framework.md` — Module patterns
+
+### New Architecture Documents
+
+- `docs/architecture/performance-slas.md` — Performance targets
+- `docs/architecture/test-architecture.md` — Test patterns
+- `docs/architecture/event-driven-architecture.md` — Event patterns
+- `docs/architecture/realtime-architecture.md` — WebSocket patterns
+
+### Agent Instructions
+
+- `AGENTS.md` — Root agent instructions
+- `CLAUDE.md` — Claude-specific instructions (identical to AGENTS.md)
+- `.github/copilot-instructions.md` — Copilot-specific instructions
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Add Rules
+### 1. Setup Development Environment
 
-Create `.agents/rules/my-rules.md`:
-```markdown
-error: No hardcoded secrets :: (api[_-]?key|secret)[\s]*=\s*['"][^'"]{20,}['"]
-warn: Prefer const over let :: \blet\b
+```bash
+# Backend
+cd backend && pip install -e .[dev] && pre-commit install
+
+# Frontend
+cd frontend && npm ci
 ```
 
-### 2. Add Commands
+### 2. Run Quality Checks
 
-Create `.agents/commands/deploy.md`:
-```markdown
-# Deploy Command
+```bash
+# Pre-commit hooks
+pre-commit run --all-files
 
-Deploy to staging environment:
-1. Run tests: npm test
-2. Build: npm run build
-3. Deploy: npm run deploy:staging
+# Backend
+cd backend && black src tests && flake8 src tests && mypy src && pytest tests/
+
+# Frontend
+cd frontend && npx tsc --noEmit && npx eslint src --max-warnings 0 && npm test
 ```
 
-### 3. Add Skills
+### 3. Reference Rules When Developing
 
-Create `.agents/skills/testing/skill.md`:
-```markdown
----
-name: testing-best-practices
-description: Testing patterns and strategies
----
-
-# Testing Best Practices
-- Write tests first (TDD)
-- Test behavior, not implementation
-...
-```
-
-### 4. Use Commands
-
-Type `/` in editor → Select command → Agent executes
+- Before making changes, check relevant rules in `.agents/rules/`
+- For architecture changes, reference `docs/architecture/`
+- For module development, use `backend/src/modules/ai_agent_management/` as template
 
 ---
 
-## 📖 References
+## ⚠️ Critical Rules Summary
 
-- **AgentHub:** VS Code extension enforcing rules and managing agent workspace
-- **Settings:** Configure via VS Code Settings → AgentHub
-- **Build Integration:** Run `npm run check-rules` in CI/CD
+### Non-Negotiable Architecture
+
+1. **Multi-Tenancy**: ALL tenant-scoped tables MUST have `tenant_id`
+2. **Session Auth**: NO JWT for interactive users (session-based only)
+3. **Policy Engine**: ALL authorization via Policy Engine (deny-by-default)
+4. **Modules**: MUST have `manifest.yaml`, NO auth implementation in modules
+
+### Quality Gates
+
+1. **Test Coverage**: ≥90% required
+2. **TypeScript**: ZERO errors
+3. **ESLint**: ZERO warnings
+4. **Pre-commit**: MUST pass all hooks
+
+### Forbidden Patterns
+
+- Missing `tenant_id` in tenant-scoped models
+- Missing tenant filtering in queries
+- JWT tokens for interactive users
+- Backend-only module stubs
+- Bypassing pre-commit hooks
 
 ---
 
-**Built with ❤️ by [BuildWorks.AI](https://buildworks.ai)**
-
-*Enterprise AI • Open Source First*
-
-- 🌐 [Website](https://buildworks.ai)
-- 💻 [GitHub](https://github.com/buildworksai)
-- 💼 [LinkedIn](https://www.linkedin.com/company/buildworks-ai/)
-- 📧 [info@buildworks.ai](mailto:info@buildworks.ai)
+**Version:** 3.0.0  
+**Last Updated:** January 5, 2026

@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  # Session store (Redis)
+  redis:
+    image: redis:7-alpine
+    container_name: saraise-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - saraise-phase2
+
+  # Auth service
+  saraise-auth:
+    build:
+      context: ../saraise-phase1/saraise-auth
+      dockerfile: Dockerfile
+    container_name: saraise-auth
+    ports:
+      - "8001:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+      - METRICS_PORT=8001
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - saraise-phase2
+    volumes:
+      - ../saraise-phase1/saraise-auth/src:/app/src:ro
+      - ../saraise-phase1/saraise-auth/tests:/app/tests:ro
+
+  # Runtime service
+  saraise-runtime:
+    build:
+      context: ../saraise-phase1/saraise-runtime
+      dockerfile: Dockerfile
+    container_name: saraise-runtime
+    ports:
+      - "8002:8000"
+    environment:
+      - AUTH_SERVICE_URL=http://saraise-auth:8000
+      - POLICY_ENGINE_URL=http://saraise-policy-engine:8000
+      - CONTROL_PLANE_URL=http://saraise-control-plane:8000
+      - LOG_LEVEL=INFO
+      - METRICS_PORT=8002
+    depends_on:
+      saraise-auth:
+        condition: service_healthy
+      saraise-policy-engine:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - saraise-phase2
+    volumes:
+      - ../saraise-phase1/saraise-runtime/src:/app/src:ro
+      - ../saraise-phase1/saraise-runtime/tests:/app/tests:ro
+
+  # Policy engine service
+  saraise-policy-engine:
+    build:
+      context: ../saraise-phase1/saraise-policy-engine
+      dockerfile: Dockerfile
+    container_name: saraise-policy-engine
+    ports:
+      - "8003:8000"
+    environment:
+      - LOG_LEVEL=INFO
+      - METRICS_PORT=8003
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - saraise-phase2
+    volumes:
+      - ../saraise-phase1/saraise-policy-engine/src:/app/src:ro
+      - ../saraise-phase1/saraise-policy-engine/tests:/app/tests:ro
+
+  # Control plane service
+  saraise-control-plane:
+    build:
+      context: ../saraise-phase1/saraise-control-plane
+      dockerfile: Dockerfile
+    container_name: saraise-control-plane
+    ports:
+      - "8004:8000"
+    environment:
+      - LOG_LEVEL=INFO
+      - METRICS_PORT=8004
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - saraise-phase2
+    volumes:
+      - ../saraise-phase1/saraise-control-plane/src:/app/src:ro
+      - ../saraise-phase1/saraise-control-plane/tests:/app/tests:ro
+
+networks:
+  saraise-phase2:
+    driver: bridge
+    name: saraise-phase2-network

@@ -1,0 +1,11 @@
+apiVersion: 1
+
+dashboards:
+  - name: saraise-core
+    orgId: 1
+    folder: SARAISE
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards

@@ -1,0 +1,27 @@
+name: tenant-management
+version: 1.0.0
+description: Multi-tenant lifecycle management, subscription management, and tenant administration
+type: foundation
+lifecycle: managed
+dependencies:
+  - core-identity >=1.0
+  - core-audit >=1.0
+permissions:
+  - tenant:read
+  - tenant:write
+  - tenant:delete
+  - tenant.module:read
+  - tenant.module:write
+  - tenant.settings:read
+  - tenant.settings:write
+sod_actions:
+  - tenant:delete
+  - tenant.suspend
+search_indexes:
+  - tenants
+ai_tools:
+  - create_tenant
+  - list_tenants
+  - get_tenant_health
+  - manage_tenant_modules
+

@@ -1,0 +1,18 @@
+# SARAISE Alertmanager configuration
+# Reference: docs/architecture/operational-runbooks.md § 4.1
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default
+  group_by: ['alertname', 'job']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 2h
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://localhost:9099/alerts
+        send_resolved: true

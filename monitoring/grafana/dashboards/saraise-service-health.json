@@ -1,0 +1,90 @@
+{
+  "uid": "saraise-service-health",
+  "title": "SARAISE Service Health",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "tags": ["saraise", "ops"],
+  "templating": {
+    "list": [
+      {
+        "name": "job",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(up, job)",
+        "multi": true,
+        "includeAll": true,
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Service Up",
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "targets": [
+        {
+          "expr": "sum(up{job=~\"$job\"})",
+          "legendFormat": "up"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "green", "value": 1}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Request Rate (RPS)",
+      "gridPos": {"x": 6, "y": 0, "w": 9, "h": 4},
+      "targets": [
+        {
+          "expr": "sum(rate(http_requests_total{job=~\"$job\"}[5m])) by (job)",
+          "legendFormat": "{{job}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "5xx Error Ratio",
+      "gridPos": {"x": 15, "y": 0, "w": 9, "h": 4},
+      "targets": [
+        {
+          "expr": "job:http_requests_total:error_ratio{job=~\"$job\"}",
+          "legendFormat": "{{job}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "p99 Latency (s)",
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 5},
+      "targets": [
+        {
+          "expr": "job:http_request_duration_seconds:p99{job=~\"$job\"}",
+          "legendFormat": "{{job}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Active DB Connections",
+      "gridPos": {"x": 12, "y": 4, "w": 12, "h": 5},
+      "targets": [
+        {
+          "expr": "sum(active_connections{job=~\"$job\"}) by (job)",
+          "legendFormat": "{{job}}"
+        }
+      ]
+    }
+  ]
+}

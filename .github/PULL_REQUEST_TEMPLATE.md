@@ -41,13 +41,14 @@ Related to #
 - [ ] Unit tests added/updated
 - [ ] Integration tests added/updated
 - [ ] E2E tests added/updated (if applicable)
+- [ ] Tenant isolation tests added (for new models)
 - [ ] Manual testing completed
 
 ### Test Results
 
 ```bash
 # Backend tests
-cd backend && pytest
+cd backend && pytest tests/ --cov=src --cov-report=term
 # Results: [Pass/Fail with details]
 
 # Frontend tests
@@ -61,6 +62,41 @@ cd frontend && npm test
 - **Target Coverage**: 90%+
 - **Coverage Report**: [Link if available]
 
+## Architecture Compliance (FROZEN ARCHITECTURE)
+
+<!-- These are non-negotiable. Verify ALL applicable items. -->
+
+### Multi-Tenancy (REQUIRED)
+
+- [ ] All tenant-scoped models have `tenant_id` column
+- [ ] All queries filter by `tenant_id`
+- [ ] Tenant isolation tests included for new models
+- [ ] No cross-tenant data access possible
+
+### Authentication (FROZEN)
+
+- [ ] Uses session-based authentication (NO JWT for interactive users)
+- [ ] No auth implementation in modules (platform-level only)
+- [ ] Sessions contain identity snapshot only
+
+### Authorization (FROZEN)
+
+- [ ] Uses Policy Engine for authorization (deny-by-default)
+- [ ] RBAC properly enforced
+- [ ] No permissions cached in sessions
+
+### Module Standards (REQUIRED for module changes)
+
+- [ ] `manifest.yaml` present and valid
+- [ ] Full stack implementation (backend + frontend + tests)
+- [ ] No backend-only stubs
+
+**Reference Architecture Documents:**
+- `docs/architecture/authentication-and-session-management-spec.md`
+- `docs/architecture/policy-engine-spec.md`
+- `docs/architecture/module-framework.md`
+- `docs/architecture/security-model.md`
+
 ## Security Considerations
 
 <!-- Mark all that apply -->
@@ -71,7 +107,6 @@ cd frontend && npm test
 - [ ] XSS prevention verified
 - [ ] CSRF protection verified
 - [ ] Audit logging added (if applicable)
-- [ ] RBAC properly enforced (if applicable)
 - [ ] Tenant isolation verified (if applicable)
 - [ ] Security rules followed (see `.agents/rules/`)
 
@@ -83,15 +118,7 @@ cd frontend && npm test
 - [ ] Rate limiting considered (if applicable)
 - [ ] Error messages don't expose sensitive information
 
-## Architecture Compliance
-
-<!-- Verify compliance with SARAISE architecture principles (FROZEN ARCHITECTURE) -->
-
-- [ ] Follows modular architecture (see `.agents/rules/15-module-architecture.md`)
-- [ ] Uses session-based authentication (no JWT) - see `.agents/rules/10-session-auth.md`
-- [ ] Implements RBAC with deny-by-default - see `.agents/rules/12-auth-enforcement.md`
-- [ ] Maintains tenant isolation - see `.agents/rules/21-platform-tenant.md`
-- [ ] Includes audit logging for sensitive operations - see `.agents/rules/11-audit-logging.md`
+**Reference**: `.agents/rules/07-rbac-security.md`, `.agents/rules/08-secrets-management.md`
 
 ## Code Quality
 
@@ -102,7 +129,7 @@ cd frontend && npm test
 - [ ] Code formatted with Black
 - [ ] Linting passes (Flake8)
 - [ ] No `# type: ignore` without justification
-- [ ] Async/await used for I/O operations
+- [ ] Business logic in services (not route handlers)
 
 ### Frontend (TypeScript/React)
 
@@ -113,22 +140,45 @@ cd frontend && npm test
 - [ ] ESLint passes with zero warnings
 - [ ] No console.log statements in production code
 
+**Reference**: `.agents/rules/04-backend-standards.md`, `.agents/rules/05-frontend-standards.md`
+
+## Performance
+
+<!-- Verify compliance with performance SLAs -->
+
+- [ ] API latency within targets (p99 ≤200ms for writes, ≤50ms for reads)
+- [ ] Database queries optimized
+- [ ] N+1 queries avoided
+- [ ] Indexes added for `tenant_id` and frequently queried fields
+- [ ] Caching considered (if applicable)
+- [ ] Frontend bundle size checked
+
+**Reference**: `docs/architecture/performance-slas.md`
+
 ## Documentation
 
 - [ ] Code comments added for complex logic
 - [ ] Docstrings added to public functions/classes
-- [ ] README updated (if applicable)
+- [ ] README updated (if new folder created)
 - [ ] API documentation updated (if applicable)
 - [ ] Architecture docs updated (if applicable)
 - [ ] Changelog updated (if applicable)
 
-## Performance
+## Pre-Commit Checks
 
-- [ ] Database queries optimized
-- [ ] N+1 queries avoided
-- [ ] Caching considered (if applicable)
-- [ ] Frontend bundle size checked
-- [ ] Performance impact assessed
+```bash
+# Run pre-commit hooks
+pre-commit run --all-files
+
+# Backend quality checks
+cd backend && black src tests && flake8 src tests && mypy src
+
+# Frontend quality checks
+cd frontend && npx tsc --noEmit && npx eslint src --ext .ts,.tsx --max-warnings 0
+```
+
+- [ ] All pre-commit hooks pass
+- [ ] No quality gate bypasses
 
 ## Breaking Changes
 
@@ -166,11 +216,19 @@ cd frontend && npm test
 
 **Reviewer Guidelines**:
 
-- Verify all checklist items are completed
-- Check code quality and architecture compliance
-- Ensure tests are comprehensive
-- Verify security considerations are addressed
-- Confirm documentation is updated
+1. Verify all checklist items are completed
+2. Check architecture compliance (multi-tenancy, session auth, policy engine)
+3. Verify tenant isolation tests for new models
+4. Ensure tests are comprehensive (≥90% coverage)
+5. Confirm security considerations are addressed
+6. Verify performance SLAs are met
+7. Confirm documentation is updated
+
+**Key Architecture Documents to Reference:**
+- `docs/architecture/application-architecture.md`
+- `docs/architecture/security-model.md`
+- `docs/architecture/performance-slas.md`
+- `docs/architecture/test-architecture.md`
 
 ---
 

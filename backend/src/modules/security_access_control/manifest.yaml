@@ -1,0 +1,35 @@
+name: security-access-control
+version: 1.0.0
+description: Enterprise-grade identity and access management with RBAC, permissions, field-level and row-level security, security profiles, and comprehensive audit logs
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+permissions:
+  - security.roles:create
+  - security.roles:read
+  - security.roles:update
+  - security.roles:delete
+  - security.permissions:read
+  - security.permission-sets:create
+  - security.permission-sets:read
+  - security.permission-sets:update
+  - security.permission-sets:delete
+  - security.security-profiles:create
+  - security.security-profiles:read
+  - security.security-profiles:update
+  - security.security-profiles:delete
+  - security.audit-logs:read
+sod_actions:
+  - security.roles:delete
+  - security.security-profiles:update
+search_indexes:
+  - security_roles
+  - security_permissions
+  - security_audit_logs
+ai_tools:
+  - assign_role
+  - revoke_role
+  - grant_permission_set
+  - check_user_permissions
+

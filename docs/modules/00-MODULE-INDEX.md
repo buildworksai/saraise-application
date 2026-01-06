@@ -2,7 +2,7 @@
 # SARAISE Module Architecture - Authoritative Index
 
 **Document Version:** 2.0.0  
-**Last Updated:** 2026-01-03  
+**Last Updated:** 2026-01-07  
 **Status:** Architectural Baseline  
 **Authority:** Strict architectural adherence required
 
@@ -76,6 +76,8 @@ This document serves as the **authoritative master index** for all SARAISE ERP m
 **IMPLEMENTATION STATUS:** ✅ **ACTIVE IMPLEMENTATION - Phase 1-5**
 **CURRENT PHASE:** Phase 1 (Platform Foundations)
 **WHEN:** NOW (Platform infrastructure priority)
+
+**2026-01-07 Update:** Platform Management, Tenant Management, and Security & Access Control have been stabilized with ≥90% module test coverage and validated migrations.
 
 **Purpose**: Core platform capabilities that enable multi-tenancy, customization, AI, workflow, security, and platform operations.
 
@@ -440,11 +442,27 @@ ai_tools:
 
 ## References
 
+### Core Architecture (Frozen)
+
 - **[Module Framework](../architecture/module-framework.md)** - Detailed module architecture specification
 - **[Application Architecture](../architecture/application-architecture.md)** - Overall system architecture
 - **[Security Model](../architecture/security-model.md)** - Security, RBAC, ABAC, SoD specifications
 - **[Authentication Spec](../architecture/authentication-and-session-management-spec.md)** - Session authentication details
 - **[Policy Engine Spec](../architecture/policy-engine-spec.md)** - Authorization policy engine
+
+### Quality & Operations
+
+- **[Performance SLAs](../architecture/performance-slas.md)** - Non-negotiable performance targets
+- **[Test Architecture](../architecture/test-architecture.md)** - Test strategy and patterns
+- **[Event-Driven Architecture](../architecture/event-driven-architecture.md)** - Event sourcing patterns
+- **[Real-Time Architecture](../architecture/realtime-architecture.md)** - WebSocket and live updates
+
+### Agent Rules
+
+- `.agents/rules/15-module-architecture.md` - Module structure rules
+- `.agents/rules/20-module-development.md` - Module development standards
+- `.agents/rules/24-performance-slas.md` - Performance enforcement
+- `.agents/rules/25-event-architecture.md` - Event patterns
 
 ---
 

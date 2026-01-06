@@ -86,6 +86,44 @@ Severity determines response authority and escalation path.
 
 ---
 
+## 4A) Database Failover Runbook
+
+### Detection
+- Primary DB health check failures
+- Replication lag breaches
+- Connection pool failures
+
+### Response
+1. Freeze writes at control plane
+2. Promote replica (if pre-approved)
+3. Redirect runtime connections
+4. Verify data consistency checks
+
+### Recovery
+- Rebuild failed primary
+- Audit failover event
+- Post-mortem mandatory
+
+---
+
+## 4B) Policy Lag Runbook
+
+### Detection
+- Policy version drift between runtime and control plane
+- Authorization decisions using stale policy version
+
+### Response
+1. Fail closed for affected policy scopes
+2. Force policy cache refresh
+3. Block policy writes until consistency restored
+
+### Recovery
+- Validate policy version convergence
+- Re-enable authorization traffic
+- Post-mortem mandatory
+
+---
+
 ## 5) Tenant Isolation Runbook
 
 ### Triggers

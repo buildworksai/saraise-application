@@ -1,0 +1,26 @@
+name: platform-management
+version: 1.0.0
+description: Platform administration, health monitoring, and configuration management
+type: foundation
+lifecycle: platform
+dependencies: []
+permissions:
+  - platform.settings:create
+  - platform.settings:read
+  - platform.settings:update
+  - platform.settings:delete
+  - platform.feature-flags:create
+  - platform.feature-flags:read
+  - platform.feature-flags:update
+  - platform.feature-flags:delete
+  - platform.health:read
+  - platform.audit:read
+sod_actions:
+  - platform.settings:update
+  - platform.settings:approve
+search_indexes:
+  - platform_settings
+  - platform_audit_events
+ai_tools:
+  - update_platform_setting
+  - toggle_feature_flag

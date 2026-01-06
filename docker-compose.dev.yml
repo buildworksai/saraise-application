@@ -1,0 +1,321 @@
+# SARAISE Consolidated Development Docker Compose
+# All services (Phase 1-6) in single network with port standardization
+# External ports start with "1" prefix (18000, 15173, etc.)
+
+services:
+  # ===== Infrastructure Services =====
+  
+  # PostgreSQL Database
+  postgres:
+    image: postgres:17-alpine
+    container_name: saraise-db
+    ports:
+      - "15432:5432"  # External port with "1" prefix
+    environment:
+      - POSTGRES_DB=saraise
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - saraise-network
+
+  # Redis Cache & Session Store
+  redis:
+    image: redis:7-alpine
+    container_name: saraise-redis
+    ports:
+      - "16379:6379"  # External port with "1" prefix
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - saraise-network
+
+  # ===== Phase 2 Services =====
+  
+  # Auth Service
+  auth:
+    build:
+      context: ../saraise-phase1
+      dockerfile: saraise-auth/Dockerfile
+    container_name: saraise-auth
+    ports:
+      - "18001:8001"  # External port with "1" prefix
+      - "19101:8001"  # Metrics endpoint
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+      - PORT=8001
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - saraise-network
+    volumes:
+      - ../saraise-phase1/saraise-auth/src:/app/src:ro
+      - ../saraise-phase1/saraise-auth/tests:/app/tests:ro
+
+  # Policy Engine
+  policy-engine:
+    build:
+      context: ../saraise-phase1
+      dockerfile: saraise-policy-engine/Dockerfile
+    container_name: saraise-policy-engine
+    ports:
+      - "18003:8003"  # External port with "1" prefix
+      - "19103:8003"  # Metrics endpoint
+    environment:
+      - LOG_LEVEL=INFO
+      - PORT=8003
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - saraise-network
+    volumes:
+      - ../saraise-phase1/saraise-policy-engine/src:/app/src:ro
+      - ../saraise-phase1/saraise-policy-engine/tests:/app/tests:ro
+
+  # Runtime Service
+  runtime:
+    build:
+      context: ../saraise-phase1
+      dockerfile: saraise-runtime/Dockerfile
+    container_name: saraise-runtime
+    ports:
+      - "18002:8002"  # External port with "1" prefix
+      - "19102:8002"  # Metrics endpoint
+    environment:
+      - AUTH_SERVICE_URL=http://auth:8001
+      - POLICY_ENGINE_URL=http://policy-engine:8003
+      - CONTROL_PLANE_URL=http://control-plane:8004
+      - LOG_LEVEL=INFO
+      - PORT=8002
+    depends_on:
+      auth:
+        condition: service_healthy
+      policy-engine:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - saraise-network
+    volumes:
+      - ../saraise-phase1/saraise-runtime/src:/app/src:ro
+      - ../saraise-phase1/saraise-runtime/tests:/app/tests:ro
+
+  # Control Plane
+  control-plane:
+    build:
+      context: ../saraise-phase1
+      dockerfile: saraise-control-plane/Dockerfile
+    container_name: saraise-control-plane
+    ports:
+      - "18004:8004"  # External port with "1" prefix
+      - "19104:8004"  # Metrics endpoint
+    environment:
+      - LOG_LEVEL=INFO
+      - PORT=8004
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - saraise-network
+    volumes:
+      - ../saraise-phase1/saraise-control-plane/src:/app/src:ro
+      - ../saraise-phase1/saraise-control-plane/tests:/app/tests:ro
+
+  # ===== Phase 4/5: Django Backend (Legacy) =====
+  
+  backend-legacy:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: saraise-backend-legacy
+    ports:
+      - "18005:8005"  # External port with "1" prefix
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/saraise
+      - DB_NAME=saraise
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+      - DJANGO_SETTINGS_MODULE=saraise_backend.settings
+      - PYTHONPATH=/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    networks:
+      - saraise-network
+    command: python manage.py runserver 0.0.0.0:8005
+
+  # ===== Phase 6: Django Platform API =====
+  
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: saraise-backend
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/saraise
+      - DB_NAME=saraise
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+      - DJANGO_SETTINGS_MODULE=saraise_backend.settings
+      - PYTHONPATH=/app
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - DEBUG=True
+      - ALLOWED_HOSTS=localhost,backend,0.0.0.0
+    ports:
+      - "${BACKEND_PORT:-18000}:8000"  # External port with "1" prefix
+    volumes:
+      - ./backend:/app
+      - backend_venv:/app/venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "
+        pip install -r requirements.txt &&
+        python manage.py migrate &&
+        python manage.py seed_default_users &&
+        python manage.py runserver 0.0.0.0:8000
+      "
+    networks:
+      - saraise-network
+
+  # ===== Phase 6: React Frontend =====
+  
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: saraise-frontend
+    environment:
+      - VITE_API_BASE_URL=http://localhost:${BACKEND_PORT:-18000}
+      - NODE_ENV=development
+    ports:
+      - "${FRONTEND_PORT:-15173}:5173"  # External port with "1" prefix
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - backend
+    command: npm run dev
+    networks:
+      - saraise-network
+
+  # ===== Observability Services =====
+  
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: saraise-prometheus
+    ports:
+      - "19090:9090"  # External port with "1" prefix
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - saraise-network
+
+  # Jaeger for distributed tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: saraise-jaeger
+    ports:
+      - "15775:5775/udp"
+      - "16831:6831/udp"
+      - "16832:6832/udp"
+      - "15778:5778"
+      - "16686:16686"  # Jaeger UI (keep standard port, already starts with 1)
+      - "14268:14268"
+      - "14250:14250"
+      - "19411:9411"
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+    networks:
+      - saraise-network
+
+  # Grafana for dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: saraise-grafana
+    ports:
+      - "13000:3000"  # External port with "1" prefix
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - saraise-network
+
+  # Alertmanager for alert routing
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: saraise-alertmanager
+    ports:
+      - "19093:9093"  # External port with "1" prefix
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+    networks:
+      - saraise-network
+
+networks:
+  saraise-network:
+    driver: bridge
+    name: saraise-network
+
+volumes:
+  postgres_data:
+    name: saraise-postgres-data
+  prometheus_data:
+  grafana_data:
+  backend_venv:
+  frontend_node_modules:

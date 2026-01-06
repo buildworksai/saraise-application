@@ -1,0 +1,57 @@
+# SARAISE Prometheus alert rules
+# Reference: docs/architecture/performance-slas.md § 9
+
+groups:
+  - name: saraise-recording
+    rules:
+      - record: job:http_request_duration_seconds:p99
+        expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, job))
+      - record: job:http_requests_total:error_ratio
+        expr: sum(rate(http_requests_total{status=~"5.."}[5m])) by (job) / sum(rate(http_requests_total[5m])) by (job)
+
+  - name: saraise-alerts
+    rules:
+      - alert: ServiceDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Service down ({{ $labels.job }})"
+          description: "Prometheus target is down for {{ $labels.job }}"
+
+      - alert: HighErrorRateWarning
+        expr: job:http_requests_total:error_ratio > 0.0002
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High 5xx error rate ({{ $labels.job }})"
+          description: "5xx error ratio > 0.02% for {{ $labels.job }}"
+
+      - alert: HighErrorRateCritical
+        expr: job:http_requests_total:error_ratio > 0.0005
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical 5xx error rate ({{ $labels.job }})"
+          description: "5xx error ratio > 0.05% for {{ $labels.job }}"
+
+      - alert: HighP99LatencyWarning
+        expr: job:http_request_duration_seconds:p99 > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High p99 latency ({{ $labels.job }})"
+          description: "p99 latency > 200ms for {{ $labels.job }}"
+
+      - alert: HighP99LatencyCritical
+        expr: job:http_request_duration_seconds:p99 > 0.4
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical p99 latency ({{ $labels.job }})"
+          description: "p99 latency > 400ms for {{ $labels.job }}"

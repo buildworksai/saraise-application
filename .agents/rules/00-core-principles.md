@@ -13,6 +13,10 @@ alwaysApply: true
 - Module Framework: `docs/architecture/module-framework.md`
 - Authentication & Session Management: `docs/architecture/authentication-and-session-management-spec.md`
 - Policy Engine: `docs/architecture/policy-engine-spec.md`
+- Performance SLAs: `docs/architecture/performance-slas.md`
+- Test Architecture: `docs/architecture/test-architecture.md`
+- Event-Driven Architecture: `docs/architecture/event-driven-architecture.md`
+- Real-Time Architecture: `docs/architecture/realtime-architecture.md`
 
 ## SARAISE-00001 Modular Architecture
 

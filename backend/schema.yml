@@ -1,0 +1,3668 @@
+openapi: 3.0.3
+info:
+  title: SARAISE API
+  version: 1.0.0
+  description: SARAISE Multi-Tenant SaaS Platform API
+paths:
+  /api/v1/ai-agents/agents/:
+    get:
+      operationId: ai_agents_agents_list
+      description: |-
+        ViewSet for Agent CRUD operations.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/agents/ - List all agents
+        - POST /api/v1/ai-agents/agents/ - Create agent
+        - GET /api/v1/ai-agents/agents/{id}/ - Get agent detail
+        - PUT /api/v1/ai-agents/agents/{id}/ - Update agent
+        - PATCH /api/v1/ai-agents/agents/{id}/ - Partial update agent
+        - DELETE /api/v1/ai-agents/agents/{id}/ - Delete agent
+        - POST /api/v1/ai-agents/agents/{id}/execute/ - Execute agent
+        - POST /api/v1/ai-agents/agents/{id}/pause/ - Pause agent
+        - POST /api/v1/ai-agents/agents/{id}/resume/ - Resume agent
+        - POST /api/v1/ai-agents/agents/{id}/terminate/ - Terminate agent
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Agent'
+          description: ''
+    post:
+      operationId: ai_agents_agents_create
+      description: |-
+        ViewSet for Agent CRUD operations.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/agents/ - List all agents
+        - POST /api/v1/ai-agents/agents/ - Create agent
+        - GET /api/v1/ai-agents/agents/{id}/ - Get agent detail
+        - PUT /api/v1/ai-agents/agents/{id}/ - Update agent
+        - PATCH /api/v1/ai-agents/agents/{id}/ - Partial update agent
+        - DELETE /api/v1/ai-agents/agents/{id}/ - Delete agent
+        - POST /api/v1/ai-agents/agents/{id}/execute/ - Execute agent
+        - POST /api/v1/ai-agents/agents/{id}/pause/ - Pause agent
+        - POST /api/v1/ai-agents/agents/{id}/resume/ - Resume agent
+        - POST /api/v1/ai-agents/agents/{id}/terminate/ - Terminate agent
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+          description: ''
+  /api/v1/ai-agents/agents/{id}/:
+    get:
+      operationId: ai_agents_agents_retrieve
+      description: |-
+        ViewSet for Agent CRUD operations.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/agents/ - List all agents
+        - POST /api/v1/ai-agents/agents/ - Create agent
+        - GET /api/v1/ai-agents/agents/{id}/ - Get agent detail
+        - PUT /api/v1/ai-agents/agents/{id}/ - Update agent
+        - PATCH /api/v1/ai-agents/agents/{id}/ - Partial update agent
+        - DELETE /api/v1/ai-agents/agents/{id}/ - Delete agent
+        - POST /api/v1/ai-agents/agents/{id}/execute/ - Execute agent
+        - POST /api/v1/ai-agents/agents/{id}/pause/ - Pause agent
+        - POST /api/v1/ai-agents/agents/{id}/resume/ - Resume agent
+        - POST /api/v1/ai-agents/agents/{id}/terminate/ - Terminate agent
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this agent.
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+          description: ''
+    put:
+      operationId: ai_agents_agents_update
+      description: |-
+        ViewSet for Agent CRUD operations.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/agents/ - List all agents
+        - POST /api/v1/ai-agents/agents/ - Create agent
+        - GET /api/v1/ai-agents/agents/{id}/ - Get agent detail
+        - PUT /api/v1/ai-agents/agents/{id}/ - Update agent
+        - PATCH /api/v1/ai-agents/agents/{id}/ - Partial update agent
+        - DELETE /api/v1/ai-agents/agents/{id}/ - Delete agent
+        - POST /api/v1/ai-agents/agents/{id}/execute/ - Execute agent
+        - POST /api/v1/ai-agents/agents/{id}/pause/ - Pause agent
+        - POST /api/v1/ai-agents/agents/{id}/resume/ - Resume agent
+        - POST /api/v1/ai-agents/agents/{id}/terminate/ - Terminate agent
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this agent.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+          description: ''
+    patch:
+      operationId: ai_agents_agents_partial_update
+      description: |-
+        ViewSet for Agent CRUD operations.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/agents/ - List all agents
+        - POST /api/v1/ai-agents/agents/ - Create agent
+        - GET /api/v1/ai-agents/agents/{id}/ - Get agent detail
+        - PUT /api/v1/ai-agents/agents/{id}/ - Update agent
+        - PATCH /api/v1/ai-agents/agents/{id}/ - Partial update agent
+        - DELETE /api/v1/ai-agents/agents/{id}/ - Delete agent
+        - POST /api/v1/ai-agents/agents/{id}/execute/ - Execute agent
+        - POST /api/v1/ai-agents/agents/{id}/pause/ - Pause agent
+        - POST /api/v1/ai-agents/agents/{id}/resume/ - Resume agent
+        - POST /api/v1/ai-agents/agents/{id}/terminate/ - Terminate agent
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this agent.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedAgentRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+          description: ''
+    delete:
+      operationId: ai_agents_agents_destroy
+      description: |-
+        ViewSet for Agent CRUD operations.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/agents/ - List all agents
+        - POST /api/v1/ai-agents/agents/ - Create agent
+        - GET /api/v1/ai-agents/agents/{id}/ - Get agent detail
+        - PUT /api/v1/ai-agents/agents/{id}/ - Update agent
+        - PATCH /api/v1/ai-agents/agents/{id}/ - Partial update agent
+        - DELETE /api/v1/ai-agents/agents/{id}/ - Delete agent
+        - POST /api/v1/ai-agents/agents/{id}/execute/ - Execute agent
+        - POST /api/v1/ai-agents/agents/{id}/pause/ - Pause agent
+        - POST /api/v1/ai-agents/agents/{id}/resume/ - Resume agent
+        - POST /api/v1/ai-agents/agents/{id}/terminate/ - Terminate agent
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this agent.
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/ai-agents/agents/{id}/execute/:
+    post:
+      operationId: ai_agents_agents_execute_create
+      description: Execute agent.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this agent.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+          description: ''
+  /api/v1/ai-agents/agents/{id}/pause/:
+    post:
+      operationId: ai_agents_agents_pause_create
+      description: Pause agent execution.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this agent.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+          description: ''
+  /api/v1/ai-agents/agents/{id}/resume/:
+    post:
+      operationId: ai_agents_agents_resume_create
+      description: Resume agent execution.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this agent.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+          description: ''
+  /api/v1/ai-agents/agents/{id}/terminate/:
+    post:
+      operationId: ai_agents_agents_terminate_create
+      description: Terminate agent execution.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this agent.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+          description: ''
+  /api/v1/ai-agents/approvals/:
+    get:
+      operationId: ai_agents_approvals_list
+      description: |-
+        ViewSet for ApprovalRequest.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/approvals/ - List approval requests
+        - GET /api/v1/ai-agents/approvals/{id}/ - Get approval detail
+        - POST /api/v1/ai-agents/approvals/ - Create approval request
+        - POST /api/v1/ai-agents/approvals/{id}/approve/ - Approve request
+        - POST /api/v1/ai-agents/approvals/{id}/reject/ - Reject request
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalRequest'
+          description: ''
+    post:
+      operationId: ai_agents_approvals_create
+      description: |-
+        ViewSet for ApprovalRequest.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/approvals/ - List approval requests
+        - GET /api/v1/ai-agents/approvals/{id}/ - Get approval detail
+        - POST /api/v1/ai-agents/approvals/ - Create approval request
+        - POST /api/v1/ai-agents/approvals/{id}/approve/ - Approve request
+        - POST /api/v1/ai-agents/approvals/{id}/reject/ - Reject request
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequestRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRequest'
+          description: ''
+  /api/v1/ai-agents/approvals/{id}/:
+    get:
+      operationId: ai_agents_approvals_retrieve
+      description: |-
+        ViewSet for ApprovalRequest.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/approvals/ - List approval requests
+        - GET /api/v1/ai-agents/approvals/{id}/ - Get approval detail
+        - POST /api/v1/ai-agents/approvals/ - Create approval request
+        - POST /api/v1/ai-agents/approvals/{id}/approve/ - Approve request
+        - POST /api/v1/ai-agents/approvals/{id}/reject/ - Reject request
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this approval request.
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRequest'
+          description: ''
+    put:
+      operationId: ai_agents_approvals_update
+      description: |-
+        ViewSet for ApprovalRequest.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/approvals/ - List approval requests
+        - GET /api/v1/ai-agents/approvals/{id}/ - Get approval detail
+        - POST /api/v1/ai-agents/approvals/ - Create approval request
+        - POST /api/v1/ai-agents/approvals/{id}/approve/ - Approve request
+        - POST /api/v1/ai-agents/approvals/{id}/reject/ - Reject request
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this approval request.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequestRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRequest'
+          description: ''
+    patch:
+      operationId: ai_agents_approvals_partial_update
+      description: |-
+        ViewSet for ApprovalRequest.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/approvals/ - List approval requests
+        - GET /api/v1/ai-agents/approvals/{id}/ - Get approval detail
+        - POST /api/v1/ai-agents/approvals/ - Create approval request
+        - POST /api/v1/ai-agents/approvals/{id}/approve/ - Approve request
+        - POST /api/v1/ai-agents/approvals/{id}/reject/ - Reject request
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this approval request.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedApprovalRequestRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRequest'
+          description: ''
+    delete:
+      operationId: ai_agents_approvals_destroy
+      description: |-
+        ViewSet for ApprovalRequest.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/approvals/ - List approval requests
+        - GET /api/v1/ai-agents/approvals/{id}/ - Get approval detail
+        - POST /api/v1/ai-agents/approvals/ - Create approval request
+        - POST /api/v1/ai-agents/approvals/{id}/approve/ - Approve request
+        - POST /api/v1/ai-agents/approvals/{id}/reject/ - Reject request
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this approval request.
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/ai-agents/approvals/{id}/approve/:
+    post:
+      operationId: ai_agents_approvals_approve_create
+      description: Approve approval request.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this approval request.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequestRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRequest'
+          description: ''
+  /api/v1/ai-agents/approvals/{id}/reject/:
+    post:
+      operationId: ai_agents_approvals_reject_create
+      description: Reject approval request.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this approval request.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequestRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRequest'
+          description: ''
+  /api/v1/ai-agents/executions/:
+    get:
+      operationId: ai_agents_executions_list
+      description: |-
+        ViewSet for AgentExecution (read-only).
+
+        Endpoints:
+        - GET /api/v1/ai-agents/executions/ - List executions
+        - GET /api/v1/ai-agents/executions/{id}/ - Get execution detail
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentExecution'
+          description: ''
+  /api/v1/ai-agents/executions/{id}/:
+    get:
+      operationId: ai_agents_executions_retrieve
+      description: |-
+        ViewSet for AgentExecution (read-only).
+
+        Endpoints:
+        - GET /api/v1/ai-agents/executions/ - List executions
+        - GET /api/v1/ai-agents/executions/{id}/ - Get execution detail
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this agent execution.
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentExecution'
+          description: ''
+  /api/v1/ai-agents/health/:
+    get:
+      operationId: ai_agents_health_retrieve
+      description: |-
+        Health check endpoint.
+
+        Checks:
+        - Database connectivity
+        - Redis connectivity
+        - Module-specific health
+
+        Returns:
+        - 200 OK if healthy
+        - 503 Service Unavailable if unhealthy
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/ai-agents/quota-usage/:
+    get:
+      operationId: ai_agents_quota_usage_list
+      description: |-
+        ViewSet for QuotaUsage (read-only).
+
+        Endpoints:
+        - GET /api/v1/ai-agents/quota-usage/ - List quota usage records
+        - GET /api/v1/ai-agents/quota-usage/{id}/ - Get quota usage detail
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QuotaUsage'
+          description: ''
+  /api/v1/ai-agents/quota-usage/{id}/:
+    get:
+      operationId: ai_agents_quota_usage_retrieve
+      description: |-
+        ViewSet for QuotaUsage (read-only).
+
+        Endpoints:
+        - GET /api/v1/ai-agents/quota-usage/ - List quota usage records
+        - GET /api/v1/ai-agents/quota-usage/{id}/ - Get quota usage detail
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this quota usage.
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuotaUsage'
+          description: ''
+  /api/v1/ai-agents/quotas/:
+    get:
+      operationId: ai_agents_quotas_list
+      description: |-
+        ViewSet for TenantQuota (read-only).
+
+        Endpoints:
+        - GET /api/v1/ai-agents/quotas/ - List quotas
+        - GET /api/v1/ai-agents/quotas/{id}/ - Get quota detail
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TenantQuota'
+          description: ''
+  /api/v1/ai-agents/quotas/{id}/:
+    get:
+      operationId: ai_agents_quotas_retrieve
+      description: |-
+        ViewSet for TenantQuota (read-only).
+
+        Endpoints:
+        - GET /api/v1/ai-agents/quotas/ - List quotas
+        - GET /api/v1/ai-agents/quotas/{id}/ - Get quota detail
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this tenant quota.
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantQuota'
+          description: ''
+  /api/v1/ai-agents/scheduler-tasks/:
+    get:
+      operationId: ai_agents_scheduler_tasks_list
+      description: |-
+        ViewSet for AgentSchedulerTask (read-only).
+
+        Endpoints:
+        - GET /api/v1/ai-agents/scheduler-tasks/ - List scheduler tasks
+        - GET /api/v1/ai-agents/scheduler-tasks/{id}/ - Get scheduler task detail
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentSchedulerTask'
+          description: ''
+  /api/v1/ai-agents/scheduler-tasks/{id}/:
+    get:
+      operationId: ai_agents_scheduler_tasks_retrieve
+      description: |-
+        ViewSet for AgentSchedulerTask (read-only).
+
+        Endpoints:
+        - GET /api/v1/ai-agents/scheduler-tasks/ - List scheduler tasks
+        - GET /api/v1/ai-agents/scheduler-tasks/{id}/ - Get scheduler task detail
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this agent scheduler task.
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentSchedulerTask'
+          description: ''
+  /api/v1/ai-agents/sod-policies/:
+    get:
+      operationId: ai_agents_sod_policies_list
+      description: |-
+        ViewSet for SoDPolicy.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/sod-policies/ - List SoD policies
+        - POST /api/v1/ai-agents/sod-policies/ - Create SoD policy
+        - GET /api/v1/ai-agents/sod-policies/{id}/ - Get SoD policy detail
+        - PUT /api/v1/ai-agents/sod-policies/{id}/ - Update SoD policy
+        - DELETE /api/v1/ai-agents/sod-policies/{id}/ - Delete SoD policy
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SoDPolicy'
+          description: ''
+    post:
+      operationId: ai_agents_sod_policies_create
+      description: |-
+        ViewSet for SoDPolicy.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/sod-policies/ - List SoD policies
+        - POST /api/v1/ai-agents/sod-policies/ - Create SoD policy
+        - GET /api/v1/ai-agents/sod-policies/{id}/ - Get SoD policy detail
+        - PUT /api/v1/ai-agents/sod-policies/{id}/ - Update SoD policy
+        - DELETE /api/v1/ai-agents/sod-policies/{id}/ - Delete SoD policy
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SoDPolicyRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SoDPolicy'
+          description: ''
+  /api/v1/ai-agents/sod-policies/{id}/:
+    get:
+      operationId: ai_agents_sod_policies_retrieve
+      description: |-
+        ViewSet for SoDPolicy.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/sod-policies/ - List SoD policies
+        - POST /api/v1/ai-agents/sod-policies/ - Create SoD policy
+        - GET /api/v1/ai-agents/sod-policies/{id}/ - Get SoD policy detail
+        - PUT /api/v1/ai-agents/sod-policies/{id}/ - Update SoD policy
+        - DELETE /api/v1/ai-agents/sod-policies/{id}/ - Delete SoD policy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this so d policy.
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SoDPolicy'
+          description: ''
+    put:
+      operationId: ai_agents_sod_policies_update
+      description: |-
+        ViewSet for SoDPolicy.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/sod-policies/ - List SoD policies
+        - POST /api/v1/ai-agents/sod-policies/ - Create SoD policy
+        - GET /api/v1/ai-agents/sod-policies/{id}/ - Get SoD policy detail
+        - PUT /api/v1/ai-agents/sod-policies/{id}/ - Update SoD policy
+        - DELETE /api/v1/ai-agents/sod-policies/{id}/ - Delete SoD policy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this so d policy.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SoDPolicyRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SoDPolicy'
+          description: ''
+    patch:
+      operationId: ai_agents_sod_policies_partial_update
+      description: |-
+        ViewSet for SoDPolicy.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/sod-policies/ - List SoD policies
+        - POST /api/v1/ai-agents/sod-policies/ - Create SoD policy
+        - GET /api/v1/ai-agents/sod-policies/{id}/ - Get SoD policy detail
+        - PUT /api/v1/ai-agents/sod-policies/{id}/ - Update SoD policy
+        - DELETE /api/v1/ai-agents/sod-policies/{id}/ - Delete SoD policy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this so d policy.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSoDPolicyRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SoDPolicy'
+          description: ''
+    delete:
+      operationId: ai_agents_sod_policies_destroy
+      description: |-
+        ViewSet for SoDPolicy.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/sod-policies/ - List SoD policies
+        - POST /api/v1/ai-agents/sod-policies/ - Create SoD policy
+        - GET /api/v1/ai-agents/sod-policies/{id}/ - Get SoD policy detail
+        - PUT /api/v1/ai-agents/sod-policies/{id}/ - Update SoD policy
+        - DELETE /api/v1/ai-agents/sod-policies/{id}/ - Delete SoD policy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this so d policy.
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/ai-agents/sod-violations/:
+    get:
+      operationId: ai_agents_sod_violations_list
+      description: |-
+        ViewSet for SoDViolation (read-only).
+
+        Endpoints:
+        - GET /api/v1/ai-agents/sod-violations/ - List SoD violations
+        - GET /api/v1/ai-agents/sod-violations/{id}/ - Get SoD violation detail
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SoDViolation'
+          description: ''
+  /api/v1/ai-agents/sod-violations/{id}/:
+    get:
+      operationId: ai_agents_sod_violations_retrieve
+      description: |-
+        ViewSet for SoDViolation (read-only).
+
+        Endpoints:
+        - GET /api/v1/ai-agents/sod-violations/ - List SoD violations
+        - GET /api/v1/ai-agents/sod-violations/{id}/ - Get SoD violation detail
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this so d violation.
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SoDViolation'
+          description: ''
+  /api/v1/ai-agents/tool-invocations/:
+    get:
+      operationId: ai_agents_tool_invocations_list
+      description: |-
+        ViewSet for ToolInvocation (read-only).
+
+        Endpoints:
+        - GET /api/v1/ai-agents/tool-invocations/ - List tool invocations
+        - GET /api/v1/ai-agents/tool-invocations/{id}/ - Get tool invocation detail
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ToolInvocation'
+          description: ''
+  /api/v1/ai-agents/tool-invocations/{id}/:
+    get:
+      operationId: ai_agents_tool_invocations_retrieve
+      description: |-
+        ViewSet for ToolInvocation (read-only).
+
+        Endpoints:
+        - GET /api/v1/ai-agents/tool-invocations/ - List tool invocations
+        - GET /api/v1/ai-agents/tool-invocations/{id}/ - Get tool invocation detail
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolInvocation'
+          description: ''
+  /api/v1/ai-agents/tools/:
+    get:
+      operationId: ai_agents_tools_list
+      description: |-
+        ViewSet for Tool.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/tools/ - List tools
+        - POST /api/v1/ai-agents/tools/ - Create tool
+        - GET /api/v1/ai-agents/tools/{id}/ - Get tool detail
+        - PUT /api/v1/ai-agents/tools/{id}/ - Update tool
+        - DELETE /api/v1/ai-agents/tools/{id}/ - Delete tool
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tool'
+          description: ''
+    post:
+      operationId: ai_agents_tools_create
+      description: |-
+        ViewSet for Tool.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/tools/ - List tools
+        - POST /api/v1/ai-agents/tools/ - Create tool
+        - GET /api/v1/ai-agents/tools/{id}/ - Get tool detail
+        - PUT /api/v1/ai-agents/tools/{id}/ - Update tool
+        - DELETE /api/v1/ai-agents/tools/{id}/ - Delete tool
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tool'
+          description: ''
+  /api/v1/ai-agents/tools/{id}/:
+    get:
+      operationId: ai_agents_tools_retrieve
+      description: |-
+        ViewSet for Tool.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/tools/ - List tools
+        - POST /api/v1/ai-agents/tools/ - Create tool
+        - GET /api/v1/ai-agents/tools/{id}/ - Get tool detail
+        - PUT /api/v1/ai-agents/tools/{id}/ - Update tool
+        - DELETE /api/v1/ai-agents/tools/{id}/ - Delete tool
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this tool.
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tool'
+          description: ''
+    put:
+      operationId: ai_agents_tools_update
+      description: |-
+        ViewSet for Tool.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/tools/ - List tools
+        - POST /api/v1/ai-agents/tools/ - Create tool
+        - GET /api/v1/ai-agents/tools/{id}/ - Get tool detail
+        - PUT /api/v1/ai-agents/tools/{id}/ - Update tool
+        - DELETE /api/v1/ai-agents/tools/{id}/ - Delete tool
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this tool.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tool'
+          description: ''
+    patch:
+      operationId: ai_agents_tools_partial_update
+      description: |-
+        ViewSet for Tool.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/tools/ - List tools
+        - POST /api/v1/ai-agents/tools/ - Create tool
+        - GET /api/v1/ai-agents/tools/{id}/ - Get tool detail
+        - PUT /api/v1/ai-agents/tools/{id}/ - Update tool
+        - DELETE /api/v1/ai-agents/tools/{id}/ - Delete tool
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this tool.
+        required: true
+      tags:
+      - ai-agents
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedToolRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tool'
+          description: ''
+    delete:
+      operationId: ai_agents_tools_destroy
+      description: |-
+        ViewSet for Tool.
+
+        Endpoints:
+        - GET /api/v1/ai-agents/tools/ - List tools
+        - POST /api/v1/ai-agents/tools/ - Create tool
+        - GET /api/v1/ai-agents/tools/{id}/ - Get tool detail
+        - PUT /api/v1/ai-agents/tools/{id}/ - Update tool
+        - DELETE /api/v1/ai-agents/tools/{id}/ - Delete tool
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this tool.
+        required: true
+      tags:
+      - ai-agents
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/auth/login/:
+    post:
+      operationId: auth_login_create
+      description: |-
+        Login endpoint.
+
+        Creates a session for authenticated users.
+      tags:
+      - auth
+      security:
+      - {}
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/logout/:
+    post:
+      operationId: auth_logout_create
+      description: |-
+        Logout endpoint.
+
+        Invalidates the current session.
+      tags:
+      - auth
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/me/:
+    get:
+      operationId: auth_me_retrieve
+      description: Get current authenticated user.
+      tags:
+      - auth
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/auth/refresh/:
+    post:
+      operationId: auth_refresh_create
+      description: Refresh session validity.
+      tags:
+      - auth
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          description: No response body
+  /api/v1/platform/alerts/:
+    get:
+      operationId: platform_alerts_list
+      description: |-
+        ViewSet for Platform Alert CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/alerts/ - List alerts (with status/severity filters)
+        - POST /api/v1/platform/alerts/ - Create alert
+        - GET /api/v1/platform/alerts/{id}/ - Get alert detail
+        - PATCH /api/v1/platform/alerts/{id}/ - Update alert
+        - DELETE /api/v1/platform/alerts/{id}/ - Delete alert
+        - POST /api/v1/platform/alerts/{id}/resolve/ - Resolve alert
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlatformAlert'
+          description: ''
+    post:
+      operationId: platform_alerts_create
+      description: |-
+        ViewSet for Platform Alert CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/alerts/ - List alerts (with status/severity filters)
+        - POST /api/v1/platform/alerts/ - Create alert
+        - GET /api/v1/platform/alerts/{id}/ - Get alert detail
+        - PATCH /api/v1/platform/alerts/{id}/ - Update alert
+        - DELETE /api/v1/platform/alerts/{id}/ - Delete alert
+        - POST /api/v1/platform/alerts/{id}/resolve/ - Resolve alert
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformAlertRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAlert'
+          description: ''
+  /api/v1/platform/alerts/{id}/:
+    get:
+      operationId: platform_alerts_retrieve
+      description: |-
+        ViewSet for Platform Alert CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/alerts/ - List alerts (with status/severity filters)
+        - POST /api/v1/platform/alerts/ - Create alert
+        - GET /api/v1/platform/alerts/{id}/ - Get alert detail
+        - PATCH /api/v1/platform/alerts/{id}/ - Update alert
+        - DELETE /api/v1/platform/alerts/{id}/ - Delete alert
+        - POST /api/v1/platform/alerts/{id}/resolve/ - Resolve alert
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this Platform Alert.
+        required: true
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAlert'
+          description: ''
+    put:
+      operationId: platform_alerts_update
+      description: |-
+        ViewSet for Platform Alert CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/alerts/ - List alerts (with status/severity filters)
+        - POST /api/v1/platform/alerts/ - Create alert
+        - GET /api/v1/platform/alerts/{id}/ - Get alert detail
+        - PATCH /api/v1/platform/alerts/{id}/ - Update alert
+        - DELETE /api/v1/platform/alerts/{id}/ - Delete alert
+        - POST /api/v1/platform/alerts/{id}/resolve/ - Resolve alert
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this Platform Alert.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformAlertRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAlert'
+          description: ''
+    patch:
+      operationId: platform_alerts_partial_update
+      description: |-
+        ViewSet for Platform Alert CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/alerts/ - List alerts (with status/severity filters)
+        - POST /api/v1/platform/alerts/ - Create alert
+        - GET /api/v1/platform/alerts/{id}/ - Get alert detail
+        - PATCH /api/v1/platform/alerts/{id}/ - Update alert
+        - DELETE /api/v1/platform/alerts/{id}/ - Delete alert
+        - POST /api/v1/platform/alerts/{id}/resolve/ - Resolve alert
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this Platform Alert.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformAlertRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAlert'
+          description: ''
+    delete:
+      operationId: platform_alerts_destroy
+      description: |-
+        ViewSet for Platform Alert CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/alerts/ - List alerts (with status/severity filters)
+        - POST /api/v1/platform/alerts/ - Create alert
+        - GET /api/v1/platform/alerts/{id}/ - Get alert detail
+        - PATCH /api/v1/platform/alerts/{id}/ - Update alert
+        - DELETE /api/v1/platform/alerts/{id}/ - Delete alert
+        - POST /api/v1/platform/alerts/{id}/resolve/ - Resolve alert
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this Platform Alert.
+        required: true
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/platform/alerts/{id}/resolve/:
+    post:
+      operationId: platform_alerts_resolve_create
+      description: Resolve an alert.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this Platform Alert.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformAlertRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAlert'
+          description: ''
+  /api/v1/platform/alerts/active/:
+    get:
+      operationId: platform_alerts_active_retrieve
+      description: Get active alerts.
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformAlert'
+          description: ''
+  /api/v1/platform/health/:
+    get:
+      operationId: platform_health_list
+      description: |-
+        ViewSet for Platform Health read operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/health/ - Get current health status
+        - GET /api/v1/platform/health/{id}/ - Get health record detail
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlatformHealth'
+          description: ''
+  /api/v1/platform/health/{id}/:
+    get:
+      operationId: platform_health_retrieve
+      description: |-
+        ViewSet for Platform Health read operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/health/ - Get current health status
+        - GET /api/v1/platform/health/{id}/ - Get health record detail
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this Platform Health.
+        required: true
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformHealth'
+          description: ''
+  /api/v1/platform/health/current/:
+    get:
+      operationId: platform_health_current_retrieve
+      description: Get current platform health status.
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformHealth'
+          description: ''
+  /api/v1/platform/health/record_incident/:
+    post:
+      operationId: platform_health_record_incident_create
+      description: Record a platform incident.
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformHealthRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformHealth'
+          description: ''
+  /api/v1/platform/health/update_status/:
+    post:
+      operationId: platform_health_update_status_create
+      description: Update platform health status.
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformHealthRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformHealth'
+          description: ''
+  /api/v1/platform/maintenance/:
+    get:
+      operationId: platform_maintenance_list
+      description: |-
+        ViewSet for Maintenance Window CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/maintenance/ - List maintenance windows
+        - POST /api/v1/platform/maintenance/ - Schedule maintenance window
+        - GET /api/v1/platform/maintenance/{id}/ - Get maintenance window detail
+        - PUT /api/v1/platform/maintenance/{id}/ - Update maintenance window
+        - PATCH /api/v1/platform/maintenance/{id}/ - Partial update maintenance window
+        - DELETE /api/v1/platform/maintenance/{id}/ - Cancel maintenance window
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MaintenanceWindow'
+          description: ''
+    post:
+      operationId: platform_maintenance_create
+      description: |-
+        ViewSet for Maintenance Window CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/maintenance/ - List maintenance windows
+        - POST /api/v1/platform/maintenance/ - Schedule maintenance window
+        - GET /api/v1/platform/maintenance/{id}/ - Get maintenance window detail
+        - PUT /api/v1/platform/maintenance/{id}/ - Update maintenance window
+        - PATCH /api/v1/platform/maintenance/{id}/ - Partial update maintenance window
+        - DELETE /api/v1/platform/maintenance/{id}/ - Cancel maintenance window
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MaintenanceWindowRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceWindow'
+          description: ''
+  /api/v1/platform/maintenance/{id}/:
+    get:
+      operationId: platform_maintenance_retrieve
+      description: |-
+        ViewSet for Maintenance Window CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/maintenance/ - List maintenance windows
+        - POST /api/v1/platform/maintenance/ - Schedule maintenance window
+        - GET /api/v1/platform/maintenance/{id}/ - Get maintenance window detail
+        - PUT /api/v1/platform/maintenance/{id}/ - Update maintenance window
+        - PATCH /api/v1/platform/maintenance/{id}/ - Partial update maintenance window
+        - DELETE /api/v1/platform/maintenance/{id}/ - Cancel maintenance window
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this Maintenance Window.
+        required: true
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceWindow'
+          description: ''
+    put:
+      operationId: platform_maintenance_update
+      description: |-
+        ViewSet for Maintenance Window CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/maintenance/ - List maintenance windows
+        - POST /api/v1/platform/maintenance/ - Schedule maintenance window
+        - GET /api/v1/platform/maintenance/{id}/ - Get maintenance window detail
+        - PUT /api/v1/platform/maintenance/{id}/ - Update maintenance window
+        - PATCH /api/v1/platform/maintenance/{id}/ - Partial update maintenance window
+        - DELETE /api/v1/platform/maintenance/{id}/ - Cancel maintenance window
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this Maintenance Window.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MaintenanceWindowRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceWindow'
+          description: ''
+    patch:
+      operationId: platform_maintenance_partial_update
+      description: |-
+        ViewSet for Maintenance Window CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/maintenance/ - List maintenance windows
+        - POST /api/v1/platform/maintenance/ - Schedule maintenance window
+        - GET /api/v1/platform/maintenance/{id}/ - Get maintenance window detail
+        - PUT /api/v1/platform/maintenance/{id}/ - Update maintenance window
+        - PATCH /api/v1/platform/maintenance/{id}/ - Partial update maintenance window
+        - DELETE /api/v1/platform/maintenance/{id}/ - Cancel maintenance window
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this Maintenance Window.
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedMaintenanceWindowRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceWindow'
+          description: ''
+    delete:
+      operationId: platform_maintenance_destroy
+      description: |-
+        ViewSet for Maintenance Window CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/maintenance/ - List maintenance windows
+        - POST /api/v1/platform/maintenance/ - Schedule maintenance window
+        - GET /api/v1/platform/maintenance/{id}/ - Get maintenance window detail
+        - PUT /api/v1/platform/maintenance/{id}/ - Update maintenance window
+        - PATCH /api/v1/platform/maintenance/{id}/ - Partial update maintenance window
+        - DELETE /api/v1/platform/maintenance/{id}/ - Cancel maintenance window
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this Maintenance Window.
+        required: true
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/platform/maintenance/upcoming/:
+    get:
+      operationId: platform_maintenance_upcoming_retrieve
+      description: Get upcoming maintenance windows.
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceWindow'
+          description: ''
+  /api/v1/platform/metrics/:
+    get:
+      operationId: platform_metrics_list
+      description: |-
+        ViewSet for Platform Metrics read operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/metrics/ - Get metrics (with time_range query param)
+        - GET /api/v1/platform/metrics/{id}/ - Get metric record detail
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlatformMetrics'
+          description: ''
+  /api/v1/platform/metrics/{id}/:
+    get:
+      operationId: platform_metrics_retrieve
+      description: |-
+        ViewSet for Platform Metrics read operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/metrics/ - Get metrics (with time_range query param)
+        - GET /api/v1/platform/metrics/{id}/ - Get metric record detail
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+        description: A unique value identifying this Platform Metric.
+        required: true
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformMetrics'
+          description: ''
+  /api/v1/platform/metrics/current/:
+    get:
+      operationId: platform_metrics_current_retrieve
+      description: Get current platform metrics (computed on-the-fly).
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformMetrics'
+          description: ''
+  /api/v1/platform/metrics/save/:
+    post:
+      operationId: platform_metrics_save_create
+      description: Save current metrics to database.
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformMetricsRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformMetrics'
+          description: ''
+  /api/v1/platform/settings/:
+    get:
+      operationId: platform_settings_list
+      description: |-
+        ViewSet for Platform Settings CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/settings/ - List all settings
+        - POST /api/v1/platform/settings/ - Create setting
+        - GET /api/v1/platform/settings/{id}/ - Get setting detail
+        - PUT /api/v1/platform/settings/{id}/ - Update setting
+        - PATCH /api/v1/platform/settings/{id}/ - Partial update setting
+        - DELETE /api/v1/platform/settings/{id}/ - Delete setting
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlatformSettings'
+          description: ''
+    post:
+      operationId: platform_settings_create
+      description: |-
+        ViewSet for Platform Settings CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/settings/ - List all settings
+        - POST /api/v1/platform/settings/ - Create setting
+        - GET /api/v1/platform/settings/{id}/ - Get setting detail
+        - PUT /api/v1/platform/settings/{id}/ - Update setting
+        - PATCH /api/v1/platform/settings/{id}/ - Partial update setting
+        - DELETE /api/v1/platform/settings/{id}/ - Delete setting
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformSettingsRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformSettings'
+          description: ''
+  /api/v1/platform/settings/{key}/:
+    get:
+      operationId: platform_settings_retrieve
+      description: |-
+        ViewSet for Platform Settings CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/settings/ - List all settings
+        - POST /api/v1/platform/settings/ - Create setting
+        - GET /api/v1/platform/settings/{id}/ - Get setting detail
+        - PUT /api/v1/platform/settings/{id}/ - Update setting
+        - PATCH /api/v1/platform/settings/{id}/ - Partial update setting
+        - DELETE /api/v1/platform/settings/{id}/ - Delete setting
+      parameters:
+      - in: path
+        name: key
+        schema:
+          type: string
+          description: Setting key (e.g., 'max_tenants_per_shard')
+        required: true
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformSettings'
+          description: ''
+    put:
+      operationId: platform_settings_update
+      description: |-
+        ViewSet for Platform Settings CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/settings/ - List all settings
+        - POST /api/v1/platform/settings/ - Create setting
+        - GET /api/v1/platform/settings/{id}/ - Get setting detail
+        - PUT /api/v1/platform/settings/{id}/ - Update setting
+        - PATCH /api/v1/platform/settings/{id}/ - Partial update setting
+        - DELETE /api/v1/platform/settings/{id}/ - Delete setting
+      parameters:
+      - in: path
+        name: key
+        schema:
+          type: string
+          description: Setting key (e.g., 'max_tenants_per_shard')
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformSettingsRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformSettings'
+          description: ''
+    patch:
+      operationId: platform_settings_partial_update
+      description: |-
+        ViewSet for Platform Settings CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/settings/ - List all settings
+        - POST /api/v1/platform/settings/ - Create setting
+        - GET /api/v1/platform/settings/{id}/ - Get setting detail
+        - PUT /api/v1/platform/settings/{id}/ - Update setting
+        - PATCH /api/v1/platform/settings/{id}/ - Partial update setting
+        - DELETE /api/v1/platform/settings/{id}/ - Delete setting
+      parameters:
+      - in: path
+        name: key
+        schema:
+          type: string
+          description: Setting key (e.g., 'max_tenants_per_shard')
+        required: true
+      tags:
+      - platform
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformSettingsRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformSettings'
+          description: ''
+    delete:
+      operationId: platform_settings_destroy
+      description: |-
+        ViewSet for Platform Settings CRUD operations.
+
+        CRITICAL: Platform-level operations - only platform owners can access.
+
+        Endpoints:
+        - GET /api/v1/platform/settings/ - List all settings
+        - POST /api/v1/platform/settings/ - Create setting
+        - GET /api/v1/platform/settings/{id}/ - Get setting detail
+        - PUT /api/v1/platform/settings/{id}/ - Update setting
+        - PATCH /api/v1/platform/settings/{id}/ - Partial update setting
+        - DELETE /api/v1/platform/settings/{id}/ - Delete setting
+      parameters:
+      - in: path
+        name: key
+        schema:
+          type: string
+          description: Setting key (e.g., 'max_tenants_per_shard')
+        required: true
+      tags:
+      - platform
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+components:
+  schemas:
+    Agent:
+      type: object
+      description: Agent serializer for create/update/read operations.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        tenant_id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        identity_type:
+          allOf:
+          - $ref: '#/components/schemas/IdentityTypeEnum'
+          description: |-
+            User-bound or system-bound agent
+
+            * `user_bound` - User-Bound Agent
+            * `system_bound` - System-Bound Agent
+        subject_id:
+          type: string
+          description: User ID (for user-bound) or system role ID (for system-bound)
+          maxLength: 36
+        session_id:
+          type: string
+          nullable: true
+          description: Session ID for user-bound agents (null for system-bound)
+          maxLength: 36
+        framework:
+          type: string
+          description: Agent framework (langgraph, crewai, autogen, etc.)
+          maxLength: 50
+        config:
+          description: Agent configuration (framework-specific)
+        is_active:
+          type: boolean
+        created_by:
+          type: string
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - framework
+      - identity_type
+      - name
+      - subject_id
+    AgentExecution:
+      type: object
+      description: Agent execution serializer.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        agent:
+          type: string
+        agent_id:
+          type: string
+          readOnly: true
+        agent_name:
+          type: string
+          readOnly: true
+        state:
+          $ref: '#/components/schemas/StateEnum'
+        session_id:
+          type: string
+          nullable: true
+          description: Session ID for user-bound agents
+          maxLength: 36
+        task_definition:
+          description: Task/goal definition for this execution
+        started_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        error_message:
+          type: string
+        result:
+          nullable: true
+        metadata:
+          description: Execution metadata
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - agent
+      - task_definition
+    AgentRequest:
+      type: object
+      description: Agent serializer for create/update/read operations.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+        identity_type:
+          allOf:
+          - $ref: '#/components/schemas/IdentityTypeEnum'
+          description: |-
+            User-bound or system-bound agent
+
+            * `user_bound` - User-Bound Agent
+            * `system_bound` - System-Bound Agent
+        subject_id:
+          type: string
+          minLength: 1
+          description: User ID (for user-bound) or system role ID (for system-bound)
+          maxLength: 36
+        session_id:
+          type: string
+          nullable: true
+          description: Session ID for user-bound agents (null for system-bound)
+          maxLength: 36
+        framework:
+          type: string
+          minLength: 1
+          description: Agent framework (langgraph, crewai, autogen, etc.)
+          maxLength: 50
+        config:
+          description: Agent configuration (framework-specific)
+        is_active:
+          type: boolean
+      required:
+      - framework
+      - identity_type
+      - name
+      - subject_id
+    AgentSchedulerTask:
+      type: object
+      description: Agent scheduler task serializer.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        agent:
+          type: string
+        agent_name:
+          type: string
+          readOnly: true
+        execution:
+          type: string
+          nullable: true
+        priority:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+          description: Higher priority = execute first
+        scheduled_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        retry_count:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        max_retries:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+        status:
+          $ref: '#/components/schemas/AgentSchedulerTaskStatusEnum'
+        error_message:
+          type: string
+        task_data: {}
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - agent
+      - scheduled_at
+    AgentSchedulerTaskStatusEnum:
+      enum:
+      - pending
+      - running
+      - completed
+      - failed
+      - cancelled
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `running` - Running
+        * `completed` - Completed
+        * `failed` - Failed
+        * `cancelled` - Cancelled
+    ApprovalRequest:
+      type: object
+      description: Approval request serializer.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        tool:
+          type: string
+        tool_name:
+          type: string
+          readOnly: true
+        agent_execution:
+          type: string
+        agent_execution_id:
+          type: string
+          readOnly: true
+        tool_invocation:
+          type: string
+          nullable: true
+        requested_by:
+          type: string
+          description: User/agent who requested approval
+          maxLength: 36
+        requested_for:
+          type: string
+          description: User/agent who will execute if approved
+          maxLength: 36
+        approver_id:
+          type: string
+          readOnly: true
+          nullable: true
+          description: User ID who approved/rejected
+        status:
+          $ref: '#/components/schemas/Status2a4Enum'
+        tool_input:
+          description: Tool input data
+        justification:
+          type: string
+          description: Justification for the request
+        rejection_reason:
+          type: string
+          description: Reason for rejection
+        requested_at:
+          type: string
+          format: date-time
+          readOnly: true
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Approval expiration time
+        decided_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When approval decision was made
+        metadata:
+          description: Additional metadata
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - agent_execution
+      - requested_by
+      - requested_for
+      - tool
+      - tool_input
+    ApprovalRequestRequest:
+      type: object
+      description: Approval request serializer.
+      properties:
+        tool:
+          type: string
+          minLength: 1
+        agent_execution:
+          type: string
+          minLength: 1
+        tool_invocation:
+          type: string
+          minLength: 1
+          nullable: true
+        requested_by:
+          type: string
+          minLength: 1
+          description: User/agent who requested approval
+          maxLength: 36
+        requested_for:
+          type: string
+          minLength: 1
+          description: User/agent who will execute if approved
+          maxLength: 36
+        status:
+          $ref: '#/components/schemas/Status2a4Enum'
+        tool_input:
+          description: Tool input data
+        justification:
+          type: string
+          description: Justification for the request
+        rejection_reason:
+          type: string
+          description: Reason for rejection
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Approval expiration time
+        metadata:
+          description: Additional metadata
+      required:
+      - agent_execution
+      - requested_by
+      - requested_for
+      - tool
+      - tool_input
+    CategoryEnum:
+      enum:
+      - system_settings
+      - feature_flags
+      - limits
+      - security
+      - integrations
+      - api
+      - other
+      type: string
+      description: |-
+        * `system_settings` - System Settings
+        * `feature_flags` - Feature Flags
+        * `limits` - Limits
+        * `security` - Security
+        * `integrations` - Integrations
+        * `api` - API Configuration
+        * `other` - Other
+    IdentityTypeEnum:
+      enum:
+      - user_bound
+      - system_bound
+      type: string
+      description: |-
+        * `user_bound` - User-Bound Agent
+        * `system_bound` - System-Bound Agent
+    MaintenanceWindow:
+      type: object
+      description: Serializer for MaintenanceWindow.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        title:
+          type: string
+          description: Maintenance window title
+          maxLength: 255
+        description:
+          type: string
+          description: Description of maintenance work
+        scheduled_start:
+          type: string
+          format: date-time
+          description: Scheduled start time
+        scheduled_end:
+          type: string
+          format: date-time
+          description: Scheduled end time
+        actual_start:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: Actual start time
+        actual_end:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: Actual end time
+        status:
+          $ref: '#/components/schemas/MaintenanceWindowStatusEnum'
+        affected_services:
+          description: List of affected services
+        impact_level:
+          type: string
+          description: Expected impact level (low, medium, high)
+          maxLength: 20
+        notification_sent:
+          type: boolean
+          readOnly: true
+          description: Whether notifications were sent
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_by:
+          type: string
+          readOnly: true
+          nullable: true
+          description: User ID who created this record
+        updated_by:
+          type: string
+          readOnly: true
+          nullable: true
+          description: User ID who last updated this record
+      required:
+      - description
+      - scheduled_end
+      - scheduled_start
+      - title
+    MaintenanceWindowRequest:
+      type: object
+      description: Serializer for MaintenanceWindow.
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Maintenance window title
+          maxLength: 255
+        description:
+          type: string
+          minLength: 1
+          description: Description of maintenance work
+        scheduled_start:
+          type: string
+          format: date-time
+          description: Scheduled start time
+        scheduled_end:
+          type: string
+          format: date-time
+          description: Scheduled end time
+        status:
+          $ref: '#/components/schemas/MaintenanceWindowStatusEnum'
+        affected_services:
+          description: List of affected services
+        impact_level:
+          type: string
+          minLength: 1
+          description: Expected impact level (low, medium, high)
+          maxLength: 20
+      required:
+      - description
+      - scheduled_end
+      - scheduled_start
+      - title
+    MaintenanceWindowStatusEnum:
+      enum:
+      - scheduled
+      - in_progress
+      - completed
+      - cancelled
+      type: string
+      description: |-
+        * `scheduled` - Scheduled
+        * `in_progress` - In Progress
+        * `completed` - Completed
+        * `cancelled` - Cancelled
+    MetricTypeEnum:
+      enum:
+      - tenant_metrics
+      - user_metrics
+      - api_metrics
+      - revenue_metrics
+      - resource_utilization
+      - complete
+      type: string
+      description: |-
+        * `tenant_metrics` - Tenant Metrics
+        * `user_metrics` - User Metrics
+        * `api_metrics` - API Metrics
+        * `revenue_metrics` - Revenue Metrics
+        * `resource_utilization` - Resource Utilization
+        * `complete` - Complete Metrics
+    PatchedAgentRequest:
+      type: object
+      description: Agent serializer for create/update/read operations.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+        identity_type:
+          allOf:
+          - $ref: '#/components/schemas/IdentityTypeEnum'
+          description: |-
+            User-bound or system-bound agent
+
+            * `user_bound` - User-Bound Agent
+            * `system_bound` - System-Bound Agent
+        subject_id:
+          type: string
+          minLength: 1
+          description: User ID (for user-bound) or system role ID (for system-bound)
+          maxLength: 36
+        session_id:
+          type: string
+          nullable: true
+          description: Session ID for user-bound agents (null for system-bound)
+          maxLength: 36
+        framework:
+          type: string
+          minLength: 1
+          description: Agent framework (langgraph, crewai, autogen, etc.)
+          maxLength: 50
+        config:
+          description: Agent configuration (framework-specific)
+        is_active:
+          type: boolean
+    PatchedApprovalRequestRequest:
+      type: object
+      description: Approval request serializer.
+      properties:
+        tool:
+          type: string
+          minLength: 1
+        agent_execution:
+          type: string
+          minLength: 1
+        tool_invocation:
+          type: string
+          minLength: 1
+          nullable: true
+        requested_by:
+          type: string
+          minLength: 1
+          description: User/agent who requested approval
+          maxLength: 36
+        requested_for:
+          type: string
+          minLength: 1
+          description: User/agent who will execute if approved
+          maxLength: 36
+        status:
+          $ref: '#/components/schemas/Status2a4Enum'
+        tool_input:
+          description: Tool input data
+        justification:
+          type: string
+          description: Justification for the request
+        rejection_reason:
+          type: string
+          description: Reason for rejection
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Approval expiration time
+        metadata:
+          description: Additional metadata
+    PatchedMaintenanceWindowRequest:
+      type: object
+      description: Serializer for MaintenanceWindow.
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Maintenance window title
+          maxLength: 255
+        description:
+          type: string
+          minLength: 1
+          description: Description of maintenance work
+        scheduled_start:
+          type: string
+          format: date-time
+          description: Scheduled start time
+        scheduled_end:
+          type: string
+          format: date-time
+          description: Scheduled end time
+        status:
+          $ref: '#/components/schemas/MaintenanceWindowStatusEnum'
+        affected_services:
+          description: List of affected services
+        impact_level:
+          type: string
+          minLength: 1
+          description: Expected impact level (low, medium, high)
+          maxLength: 20
+    PatchedPlatformAlertRequest:
+      type: object
+      description: Serializer for PlatformAlert.
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Alert title
+          maxLength: 255
+        description:
+          type: string
+          minLength: 1
+          description: Alert description
+        severity:
+          $ref: '#/components/schemas/SeverityEnum'
+        status:
+          $ref: '#/components/schemas/PlatformAlertStatusEnum'
+        category:
+          type: string
+          description: Alert category (e.g., 'infrastructure', 'security', 'performance')
+          maxLength: 50
+        source:
+          type: string
+          description: Alert source (e.g., 'health_check', 'monitoring_system')
+          maxLength: 100
+        metadata:
+          description: Additional alert metadata
+    PatchedPlatformSettingsRequest:
+      type: object
+      description: Serializer for PlatformSettings.
+      properties:
+        key:
+          type: string
+          minLength: 1
+          description: Setting key (e.g., 'max_tenants_per_shard')
+          maxLength: 255
+        value:
+          type: string
+          minLength: 1
+          description: Setting value (JSON-encoded if complex)
+        category:
+          $ref: '#/components/schemas/CategoryEnum'
+        description:
+          type: string
+          description: Human-readable description of this setting
+        is_encrypted:
+          type: boolean
+          description: Whether the value is encrypted
+        is_readonly:
+          type: boolean
+          description: Whether this setting can be modified
+    PatchedSoDPolicyRequest:
+      type: object
+      description: SoD policy serializer.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+        action_1:
+          type: string
+          minLength: 1
+          description: First action in SoD constraint
+          maxLength: 255
+        action_2:
+          type: string
+          minLength: 1
+          description: Second action in SoD constraint
+          maxLength: 255
+        is_active:
+          type: boolean
+        created_by:
+          type: string
+          minLength: 1
+          maxLength: 36
+    PatchedToolRequest:
+      type: object
+      description: Tool serializer.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Tool name (globally unique)
+          maxLength: 255
+        owning_module:
+          type: string
+          minLength: 1
+          description: Module that owns this tool
+          maxLength: 100
+        version:
+          type: string
+          minLength: 1
+          default: 1.0.0
+          description: Tool version
+          maxLength: 20
+        description:
+          type: string
+        required_permissions:
+          description: List of required permissions
+        input_schema:
+          description: Input schema definition
+        output_schema:
+          description: Output schema definition
+        side_effect_class:
+          allOf:
+          - $ref: '#/components/schemas/SideEffectClassEnum'
+          description: |-
+            Side-effect classification
+
+            * `read_only` - READ_ONLY
+            * `workflow_transition` - WORKFLOW_TRANSITION
+            * `data_mutation` - DATA_MUTATION
+            * `external_integration` - EXTERNAL_INTEGRATION
+        is_active:
+          type: boolean
+        metadata:
+          description: Tool metadata
+        registered_by:
+          type: string
+          minLength: 1
+          description: User who registered the tool
+          maxLength: 36
+    PeriodEnum:
+      enum:
+      - hourly
+      - daily
+      - weekly
+      - monthly
+      type: string
+      description: |-
+        * `hourly` - Hourly
+        * `daily` - Daily
+        * `weekly` - Weekly
+        * `monthly` - Monthly
+    PlatformAlert:
+      type: object
+      description: Serializer for PlatformAlert.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        title:
+          type: string
+          description: Alert title
+          maxLength: 255
+        description:
+          type: string
+          description: Alert description
+        severity:
+          $ref: '#/components/schemas/SeverityEnum'
+        status:
+          $ref: '#/components/schemas/PlatformAlertStatusEnum'
+        category:
+          type: string
+          description: Alert category (e.g., 'infrastructure', 'security', 'performance')
+          maxLength: 50
+        source:
+          type: string
+          description: Alert source (e.g., 'health_check', 'monitoring_system')
+          maxLength: 100
+        metadata:
+          description: Additional alert metadata
+        resolved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When the alert was resolved
+        resolved_by:
+          type: string
+          readOnly: true
+          nullable: true
+          description: User ID who resolved this alert
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_by:
+          type: string
+          readOnly: true
+          nullable: true
+          description: User ID who created this record
+        updated_by:
+          type: string
+          readOnly: true
+          nullable: true
+          description: User ID who last updated this record
+      required:
+      - description
+      - title
+    PlatformAlertRequest:
+      type: object
+      description: Serializer for PlatformAlert.
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Alert title
+          maxLength: 255
+        description:
+          type: string
+          minLength: 1
+          description: Alert description
+        severity:
+          $ref: '#/components/schemas/SeverityEnum'
+        status:
+          $ref: '#/components/schemas/PlatformAlertStatusEnum'
+        category:
+          type: string
+          description: Alert category (e.g., 'infrastructure', 'security', 'performance')
+          maxLength: 50
+        source:
+          type: string
+          description: Alert source (e.g., 'health_check', 'monitoring_system')
+          maxLength: 100
+        metadata:
+          description: Additional alert metadata
+      required:
+      - description
+      - title
+    PlatformAlertStatusEnum:
+      enum:
+      - active
+      - acknowledged
+      - resolved
+      - suppressed
+      type: string
+      description: |-
+        * `active` - Active
+        * `acknowledged` - Acknowledged
+        * `resolved` - Resolved
+        * `suppressed` - Suppressed
+    PlatformHealth:
+      type: object
+      description: Serializer for PlatformHealth.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/PlatformHealthStatusEnum'
+        uptime_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+          description: Platform uptime percentage
+        incidents_count:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+          description: Number of active incidents
+        last_incident_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of last incident
+        checks:
+          description: Health check results (database, redis, api, etc.)
+        metrics:
+          description: System metrics (CPU, memory, disk, network)
+        notes:
+          type: string
+          description: Additional notes about platform health
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_by:
+          type: string
+          readOnly: true
+          nullable: true
+          description: User ID who created this record
+        updated_by:
+          type: string
+          readOnly: true
+          nullable: true
+          description: User ID who last updated this record
+    PlatformHealthRequest:
+      type: object
+      description: Serializer for PlatformHealth.
+      properties:
+        status:
+          $ref: '#/components/schemas/PlatformHealthStatusEnum'
+        uptime_percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+          description: Platform uptime percentage
+        incidents_count:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+          description: Number of active incidents
+        last_incident_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of last incident
+        checks:
+          description: Health check results (database, redis, api, etc.)
+        metrics:
+          description: System metrics (CPU, memory, disk, network)
+        notes:
+          type: string
+          description: Additional notes about platform health
+    PlatformHealthStatusEnum:
+      enum:
+      - healthy
+      - degraded
+      - unhealthy
+      - maintenance
+      type: string
+      description: |-
+        * `healthy` - Healthy
+        * `degraded` - Degraded
+        * `unhealthy` - Unhealthy
+        * `maintenance` - Maintenance
+    PlatformMetrics:
+      type: object
+      description: Serializer for PlatformMetrics.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        metric_type:
+          $ref: '#/components/schemas/MetricTypeEnum'
+        time_range:
+          type: string
+          description: Time range for metrics (e.g., '7d', '30d', '90d')
+          maxLength: 20
+        metrics_data:
+          description: Metrics data (structure depends on metric_type)
+        recorded_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: When these metrics were recorded
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_by:
+          type: string
+          readOnly: true
+          nullable: true
+          description: User ID who created this record
+        updated_by:
+          type: string
+          readOnly: true
+          nullable: true
+          description: User ID who last updated this record
+      required:
+      - metric_type
+    PlatformMetricsRequest:
+      type: object
+      description: Serializer for PlatformMetrics.
+      properties:
+        metric_type:
+          $ref: '#/components/schemas/MetricTypeEnum'
+        time_range:
+          type: string
+          minLength: 1
+          description: Time range for metrics (e.g., '7d', '30d', '90d')
+          maxLength: 20
+        metrics_data:
+          description: Metrics data (structure depends on metric_type)
+      required:
+      - metric_type
+    PlatformSettings:
+      type: object
+      description: Serializer for PlatformSettings.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        key:
+          type: string
+          description: Setting key (e.g., 'max_tenants_per_shard')
+          maxLength: 255
+        value:
+          type: string
+          description: Setting value (JSON-encoded if complex)
+        value_decoded:
+          type: string
+          readOnly: true
+        category:
+          $ref: '#/components/schemas/CategoryEnum'
+        description:
+          type: string
+          description: Human-readable description of this setting
+        is_encrypted:
+          type: boolean
+          description: Whether the value is encrypted
+        is_readonly:
+          type: boolean
+          description: Whether this setting can be modified
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_by:
+          type: string
+          readOnly: true
+          nullable: true
+          description: User ID who created this record
+        updated_by:
+          type: string
+          readOnly: true
+          nullable: true
+          description: User ID who last updated this record
+      required:
+      - key
+      - value
+    PlatformSettingsRequest:
+      type: object
+      description: Serializer for PlatformSettings.
+      properties:
+        key:
+          type: string
+          minLength: 1
+          description: Setting key (e.g., 'max_tenants_per_shard')
+          maxLength: 255
+        value:
+          type: string
+          minLength: 1
+          description: Setting value (JSON-encoded if complex)
+        category:
+          $ref: '#/components/schemas/CategoryEnum'
+        description:
+          type: string
+          description: Human-readable description of this setting
+        is_encrypted:
+          type: boolean
+          description: Whether the value is encrypted
+        is_readonly:
+          type: boolean
+          description: Whether this setting can be modified
+      required:
+      - key
+      - value
+    QuotaTypeEnum:
+      enum:
+      - token_count
+      - request_count
+      - execution_time
+      - tool_calls
+      - external_api_calls
+      - data_volume
+      type: string
+      description: |-
+        * `token_count` - Token Count
+        * `request_count` - Request Count
+        * `execution_time` - Execution Time (seconds)
+        * `tool_calls` - Tool Calls
+        * `external_api_calls` - External API Calls
+        * `data_volume` - Data Volume (bytes)
+    QuotaUsage:
+      type: object
+      description: Quota usage serializer.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        tenant_id:
+          type: string
+          readOnly: true
+        quota:
+          type: string
+        quota_type:
+          type: string
+          readOnly: true
+        agent_execution:
+          type: string
+          nullable: true
+        usage_value:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Amount of quota used
+        usage_timestamp:
+          type: string
+          format: date-time
+          readOnly: true
+        metadata:
+          description: Usage metadata
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - quota
+      - usage_value
+    SeverityEnum:
+      enum:
+      - low
+      - medium
+      - high
+      - critical
+      type: string
+      description: |-
+        * `low` - Low
+        * `medium` - Medium
+        * `high` - High
+        * `critical` - Critical
+    SideEffectClassEnum:
+      enum:
+      - read_only
+      - workflow_transition
+      - data_mutation
+      - external_integration
+      type: string
+      description: |-
+        * `read_only` - READ_ONLY
+        * `workflow_transition` - WORKFLOW_TRANSITION
+        * `data_mutation` - DATA_MUTATION
+        * `external_integration` - EXTERNAL_INTEGRATION
+    SoDPolicy:
+      type: object
+      description: SoD policy serializer.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        tenant_id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+        action_1:
+          type: string
+          description: First action in SoD constraint
+          maxLength: 255
+        action_2:
+          type: string
+          description: Second action in SoD constraint
+          maxLength: 255
+        is_active:
+          type: boolean
+        created_by:
+          type: string
+          maxLength: 36
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - action_1
+      - action_2
+      - created_by
+      - name
+    SoDPolicyRequest:
+      type: object
+      description: SoD policy serializer.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+        action_1:
+          type: string
+          minLength: 1
+          description: First action in SoD constraint
+          maxLength: 255
+        action_2:
+          type: string
+          minLength: 1
+          description: Second action in SoD constraint
+          maxLength: 255
+        is_active:
+          type: boolean
+        created_by:
+          type: string
+          minLength: 1
+          maxLength: 36
+      required:
+      - action_1
+      - action_2
+      - created_by
+      - name
+    SoDViolation:
+      type: object
+      description: SoD violation serializer.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        policy:
+          type: string
+        policy_name:
+          type: string
+          readOnly: true
+        agent_execution:
+          type: string
+          nullable: true
+        tool_invocation:
+          type: string
+          nullable: true
+        action_1_user:
+          type: string
+          description: User who performed first action
+          maxLength: 36
+        action_2_user:
+          type: string
+          description: User who attempted second action
+          maxLength: 36
+        action_1_timestamp:
+          type: string
+          format: date-time
+          description: When first action was performed
+        action_2_timestamp:
+          type: string
+          format: date-time
+          description: When second action was attempted
+        blocked:
+          type: boolean
+          description: Whether action was blocked
+        violation_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - action_1_timestamp
+      - action_1_user
+      - action_2_timestamp
+      - action_2_user
+      - policy
+    StateEnum:
+      enum:
+      - created
+      - validated
+      - running
+      - paused
+      - completed
+      - failed
+      - terminated
+      type: string
+      description: |-
+        * `created` - Created
+        * `validated` - Validated
+        * `running` - Running
+        * `paused` - Paused
+        * `completed` - Completed
+        * `failed` - Failed
+        * `terminated` - Terminated
+    Status2a4Enum:
+      enum:
+      - pending
+      - approved
+      - rejected
+      - expired
+      - cancelled
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `approved` - Approved
+        * `rejected` - Rejected
+        * `expired` - Expired
+        * `cancelled` - Cancelled
+    TenantQuota:
+      type: object
+      description: Tenant quota serializer.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        tenant_id:
+          type: string
+          readOnly: true
+        quota_type:
+          allOf:
+          - $ref: '#/components/schemas/QuotaTypeEnum'
+          description: |-
+            Type of quota
+
+            * `token_count` - Token Count
+            * `request_count` - Request Count
+            * `execution_time` - Execution Time (seconds)
+            * `tool_calls` - Tool Calls
+            * `external_api_calls` - External API Calls
+            * `data_volume` - Data Volume (bytes)
+        period:
+          allOf:
+          - $ref: '#/components/schemas/PeriodEnum'
+          description: |-
+            Quota period
+
+            * `hourly` - Hourly
+            * `daily` - Daily
+            * `weekly` - Weekly
+            * `monthly` - Monthly
+        limit_value:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
+          description: Quota limit value
+        current_usage:
+          type: integer
+          readOnly: true
+          description: Current usage in this period
+        reset_at:
+          type: string
+          format: date-time
+          description: When quota resets
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - limit_value
+      - period
+      - quota_type
+      - reset_at
+    Tool:
+      type: object
+      description: Tool serializer.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        tenant_id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          description: Tool name (globally unique)
+          maxLength: 255
+        owning_module:
+          type: string
+          description: Module that owns this tool
+          maxLength: 100
+        version:
+          type: string
+          default: 1.0.0
+          description: Tool version
+          maxLength: 20
+        description:
+          type: string
+        required_permissions:
+          description: List of required permissions
+        input_schema:
+          description: Input schema definition
+        output_schema:
+          description: Output schema definition
+        side_effect_class:
+          allOf:
+          - $ref: '#/components/schemas/SideEffectClassEnum'
+          description: |-
+            Side-effect classification
+
+            * `read_only` - READ_ONLY
+            * `workflow_transition` - WORKFLOW_TRANSITION
+            * `data_mutation` - DATA_MUTATION
+            * `external_integration` - EXTERNAL_INTEGRATION
+        is_active:
+          type: boolean
+        metadata:
+          description: Tool metadata
+        registered_by:
+          type: string
+          description: User who registered the tool
+          maxLength: 36
+        registered_at:
+          type: string
+          format: date-time
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - input_schema
+      - name
+      - output_schema
+      - owning_module
+      - registered_by
+      - required_permissions
+      - side_effect_class
+    ToolInvocation:
+      type: object
+      description: Tool invocation serializer.
+      properties:
+        id:
+          type: string
+          readOnly: true
+        tenant_id:
+          type: string
+          readOnly: true
+        tool:
+          type: string
+        tool_name:
+          type: string
+          readOnly: true
+        agent_execution:
+          type: string
+          nullable: true
+        agent_execution_id:
+          type: string
+          readOnly: true
+          nullable: true
+        input_data:
+          description: Tool input data
+        output_data:
+          nullable: true
+          description: Tool output data
+        success:
+          type: boolean
+        error_message:
+          type: string
+        invoked_at:
+          type: string
+          format: date-time
+          readOnly: true
+        completed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        duration_ms:
+          type: integer
+          maximum: 2147483647
+          minimum: -2147483648
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - input_data
+      - tool
+    ToolRequest:
+      type: object
+      description: Tool serializer.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: Tool name (globally unique)
+          maxLength: 255
+        owning_module:
+          type: string
+          minLength: 1
+          description: Module that owns this tool
+          maxLength: 100
+        version:
+          type: string
+          minLength: 1
+          default: 1.0.0
+          description: Tool version
+          maxLength: 20
+        description:
+          type: string
+        required_permissions:
+          description: List of required permissions
+        input_schema:
+          description: Input schema definition
+        output_schema:
+          description: Output schema definition
+        side_effect_class:
+          allOf:
+          - $ref: '#/components/schemas/SideEffectClassEnum'
+          description: |-
+            Side-effect classification
+
+            * `read_only` - READ_ONLY
+            * `workflow_transition` - WORKFLOW_TRANSITION
+            * `data_mutation` - DATA_MUTATION
+            * `external_integration` - EXTERNAL_INTEGRATION
+        is_active:
+          type: boolean
+        metadata:
+          description: Tool metadata
+        registered_by:
+          type: string
+          minLength: 1
+          description: User who registered the tool
+          maxLength: 36
+      required:
+      - input_schema
+      - name
+      - output_schema
+      - owning_module
+      - registered_by
+      - required_permissions
+      - side_effect_class
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: saraise_sessionid
+tags:
+- name: AI Agent Management
+  description: AI agent lifecycle and execution management

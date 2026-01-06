@@ -1,0 +1,31 @@
+name: ai-agent-management
+version: 1.0.0
+description: AI Agent Management - Runtime execution lifecycle and scheduler
+type: foundation
+lifecycle: core
+dependencies:
+  - core-identity >=1.0
+permissions:
+  - ai.agent:create
+  - ai.agent:execute
+  - ai.agent:view
+  - ai.agent:update
+  - ai.agent:delete
+  - ai.agent:pause
+  - ai.agent:resume
+  - ai.agent:terminate
+  - ai.tool:register
+  - ai.tool:view
+sod_actions:
+  - ai.agent:execute
+  - ai.agent:terminate
+search_indexes:
+  - ai_agents
+  - ai_agent_executions
+ai_tools:
+  - create_agent
+  - execute_agent
+  - pause_agent
+  - resume_agent
+  - terminate_agent
+
