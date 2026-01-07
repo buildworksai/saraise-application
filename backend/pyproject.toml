@@ -111,9 +111,10 @@ strict = false  # Gradually enable
 [tool.django-stubs]
 django_settings_module = "saraise_backend.settings"
 
-[tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "saraise_backend.settings"
-python_files = ["test_*.py"]
-testpaths = ["tests", "src"]
-addopts = "-v --cov=src --cov-report=term-missing --cov-fail-under=90"
+# Pytest configuration is in pytest.ini
+# [tool.pytest.ini_options]
+# DJANGO_SETTINGS_MODULE = "saraise_backend.settings"
+# python_files = ["test_*.py"]
+# testpaths = ["tests", "src"]
+# addopts = "-v --cov=src --cov-report=term-missing --cov-fail-under=90"
 

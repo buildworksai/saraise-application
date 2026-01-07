@@ -21,7 +21,7 @@ describe('securityService', () => {
     vi.clearAllMocks();
   });
 
-  describe('listRoles', () => {
+  describe('roles.list', () => {
     it('should fetch list of roles', async () => {
       const mockRoles = [
         { id: '1', name: 'Admin', description: 'Administrator role' },
@@ -30,27 +30,27 @@ describe('securityService', () => {
 
       vi.mocked(apiClient.get).mockResolvedValueOnce(mockRoles);
 
-      const result = await securityService.listRoles();
+      const result = await securityService.roles.list();
 
       expect(result).toEqual(mockRoles);
       expect(apiClient.get).toHaveBeenCalled();
     });
   });
 
-  describe('getRole', () => {
+  describe('roles.get', () => {
     it('should fetch single role', async () => {
       const mockRole = { id: '1', name: 'Admin', description: 'Administrator role' };
 
       vi.mocked(apiClient.get).mockResolvedValueOnce(mockRole);
 
-      const result = await securityService.getRole('1');
+      const result = await securityService.roles.get('1');
 
       expect(result).toEqual(mockRole);
       expect(apiClient.get).toHaveBeenCalled();
     });
   });
 
-  describe('listPermissions', () => {
+  describe('permissions.list', () => {
     it('should fetch list of permissions', async () => {
       const mockPermissions = [
         { id: '1', name: 'read:agents', description: 'Read agents' },
@@ -59,7 +59,7 @@ describe('securityService', () => {
 
       vi.mocked(apiClient.get).mockResolvedValueOnce(mockPermissions);
 
-      const result = await securityService.listPermissions();
+      const result = await securityService.permissions.list();
 
       expect(result).toEqual(mockPermissions);
       expect(apiClient.get).toHaveBeenCalled();

@@ -3,9 +3,9 @@ Authentication URL routing.
 """
 from django.urls import path
 from .auth_api import (
-    login_view, 
-    logout_view, 
-    current_user_view, 
+    login_view,
+    logout_view,
+    current_user_view,
     refresh_session_view,
     register_view,
 )

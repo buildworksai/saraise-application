@@ -107,8 +107,8 @@ describe('authService', () => {
 
       expect(fetchMock).toHaveBeenCalled();
       const callArgs = fetchMock.mock.calls[0];
-      expect(callArgs[0]).toContain('/api/v1/auth/logout/');
-      expect(callArgs[1]).toMatchObject({
+      expect(callArgs?.[0]).toContain('/api/v1/auth/logout/');
+      expect(callArgs?.[1]).toMatchObject({
         method: 'POST',
         credentials: 'include',
       });
@@ -136,8 +136,8 @@ describe('authService', () => {
       expect(result).toEqual(mockUser);
       expect(fetchMock).toHaveBeenCalled();
       const callArgs = fetchMock.mock.calls[0];
-      expect(callArgs[0]).toContain('/api/v1/auth/me/');
-      expect(callArgs[1]).toMatchObject({
+      expect(callArgs?.[0]).toContain('/api/v1/auth/me/');
+      expect(callArgs?.[1]).toMatchObject({
         method: 'GET',
         credentials: 'include',
       });
@@ -166,8 +166,8 @@ describe('authService', () => {
 
       expect(fetchMock).toHaveBeenCalled();
       const callArgs = fetchMock.mock.calls[0];
-      expect(callArgs[0]).toContain('/api/v1/auth/refresh/');
-      expect(callArgs[1]).toMatchObject({
+      expect(callArgs?.[0]).toContain('/api/v1/auth/refresh/');
+      expect(callArgs?.[1]).toMatchObject({
         method: 'POST',
         credentials: 'include',
       });

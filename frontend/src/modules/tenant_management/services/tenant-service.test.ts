@@ -21,7 +21,7 @@ describe('tenantService', () => {
     vi.clearAllMocks();
   });
 
-  describe('listTenants', () => {
+  describe('tenants.list', () => {
     it('should fetch list of tenants', async () => {
       const mockTenants = [
         { id: '1', name: 'Tenant 1', domain: 'tenant1.com', is_active: true },
@@ -30,20 +30,20 @@ describe('tenantService', () => {
 
       vi.mocked(apiClient.get).mockResolvedValueOnce(mockTenants);
 
-      const result = await tenantService.listTenants();
+      const result = await tenantService.tenants.list();
 
       expect(result).toEqual(mockTenants);
       expect(apiClient.get).toHaveBeenCalled();
     });
   });
 
-  describe('getTenant', () => {
+  describe('tenants.get', () => {
     it('should fetch single tenant', async () => {
       const mockTenant = { id: '1', name: 'Tenant 1', domain: 'tenant1.com', is_active: true };
 
       vi.mocked(apiClient.get).mockResolvedValueOnce(mockTenant);
 
-      const result = await tenantService.getTenant('1');
+      const result = await tenantService.tenants.get('1');
 
       expect(result).toEqual(mockTenant);
       expect(apiClient.get).toHaveBeenCalled();

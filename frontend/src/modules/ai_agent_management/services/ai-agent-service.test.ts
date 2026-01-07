@@ -24,8 +24,8 @@ describe('aiAgentService', () => {
   describe('listAgents', () => {
     it('should fetch list of agents', async () => {
       const mockAgents = [
-        { id: '1', name: 'Agent 1', identity_type: 'assistant', is_active: true },
-        { id: '2', name: 'Agent 2', identity_type: 'assistant', is_active: false },
+        { id: '1', name: 'Agent 1', identity_type: 'user_bound' as const, subject_id: 'user-1', framework: 'langgraph', is_active: true },
+        { id: '2', name: 'Agent 2', identity_type: 'system_bound' as const, subject_id: 'role-1', framework: 'crewai', is_active: false },
       ];
 
       vi.mocked(apiClient.get).mockResolvedValueOnce(mockAgents);
@@ -34,14 +34,14 @@ describe('aiAgentService', () => {
 
       expect(result).toEqual(mockAgents);
       expect(apiClient.get).toHaveBeenCalled();
-      const callArgs = apiClient.get.mock.calls[0];
-      expect(callArgs[0]).toContain('/api/v1/ai-agents/agents/');
+      const callArgs = vi.mocked(apiClient.get).mock.calls[0];
+      expect(callArgs?.[0]).toContain('/api/v1/ai-agents/agents/');
     });
   });
 
   describe('getAgent', () => {
     it('should fetch single agent', async () => {
-      const mockAgent = { id: '1', name: 'Agent 1', identity_type: 'assistant', is_active: true };
+      const mockAgent = { id: '1', name: 'Agent 1', identity_type: 'user_bound' as const, subject_id: 'user-1', framework: 'langgraph', is_active: true };
 
       vi.mocked(apiClient.get).mockResolvedValueOnce(mockAgent);
 
@@ -49,8 +49,8 @@ describe('aiAgentService', () => {
 
       expect(result).toEqual(mockAgent);
       expect(apiClient.get).toHaveBeenCalled();
-      const callArgs = apiClient.get.mock.calls[0];
-      expect(callArgs[0]).toContain('/api/v1/ai-agents/agents/1/');
+      const callArgs = vi.mocked(apiClient.get).mock.calls[0];
+      expect(callArgs?.[0]).toContain('/api/v1/ai-agents/agents/1/');
     });
   });
 
@@ -59,7 +59,9 @@ describe('aiAgentService', () => {
       const agentData = {
         name: 'New Agent',
         description: 'Test agent',
-        identity_type: 'assistant' as const,
+        identity_type: 'user_bound' as const,
+        subject_id: 'user-123',
+        framework: 'langgraph',
       };
       const mockAgent = { id: '1', ...agentData, is_active: true };
 
@@ -69,15 +71,15 @@ describe('aiAgentService', () => {
 
       expect(result).toEqual(mockAgent);
       expect(apiClient.post).toHaveBeenCalled();
-      const callArgs = apiClient.post.mock.calls[0];
-      expect(callArgs[0]).toContain('/api/v1/ai-agents/agents/');
+      const callArgs = vi.mocked(apiClient.post).mock.calls[0];
+      expect(callArgs?.[0]).toContain('/api/v1/ai-agents/agents/');
     });
   });
 
   describe('updateAgent', () => {
     it('should update agent', async () => {
       const updateData = { name: 'Updated Agent' };
-      const mockAgent = { id: '1', name: 'Updated Agent', identity_type: 'assistant', is_active: true };
+      const mockAgent = { id: '1', name: 'Updated Agent', identity_type: 'user_bound' as const, subject_id: 'user-1', framework: 'langgraph', is_active: true };
 
       vi.mocked(apiClient.put).mockResolvedValueOnce(mockAgent);
 
@@ -85,8 +87,8 @@ describe('aiAgentService', () => {
 
       expect(result).toEqual(mockAgent);
       expect(apiClient.put).toHaveBeenCalled();
-      const callArgs = apiClient.put.mock.calls[0];
-      expect(callArgs[0]).toContain('/api/v1/ai-agents/agents/1/');
+      const callArgs = vi.mocked(apiClient.put).mock.calls[0];
+      expect(callArgs?.[0]).toContain('/api/v1/ai-agents/agents/1/');
     });
   });
 
@@ -97,8 +99,8 @@ describe('aiAgentService', () => {
       await aiAgentService.deleteAgent('1');
 
       expect(apiClient.delete).toHaveBeenCalled();
-      const callArgs = apiClient.delete.mock.calls[0];
-      expect(callArgs[0]).toContain('/api/v1/ai-agents/agents/1/');
+      const callArgs = vi.mocked(apiClient.delete).mock.calls[0];
+      expect(callArgs?.[0]).toContain('/api/v1/ai-agents/agents/1/');
     });
   });
 });

@@ -14,7 +14,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.authentication import SessionAuthentication
 from django.core.exceptions import ValidationError
-from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth import login, logout
 from django.contrib.auth import get_user_model
 from django.views.decorators.csrf import ensure_csrf_cookie
 from src.core.authentication import CsrfExemptSessionAuthentication, RelaxedCsrfSessionAuthentication
@@ -31,13 +31,13 @@ User = get_user_model()
 def login_view(request):
     """
     Login endpoint.
-    
+
     Creates a session for authenticated users.
     """
     email = request.data.get('email')
     password = request.data.get('password')
     mfa_token = request.data.get('mfa_token')
-    
+
     if not email or not password:
         return Response(
             {'error': 'Email and password are required'},
@@ -52,19 +52,19 @@ def login_view(request):
             {'error': 'Invalid credentials'},
             status=status.HTTP_401_UNAUTHORIZED
         )
-    
+
     # Check password
     if not user.check_password(password):
         return Response(
             {'error': 'Invalid credentials'},
             status=status.HTTP_401_UNAUTHORIZED
         )
-    
+
     # TODO: MFA validation (for now, skip if mfa_token provided)
     if mfa_token:
         # Placeholder for MFA validation
         pass
-    
+
     # Login user (creates session)
     login(request, user)
     
@@ -85,7 +85,7 @@ def login_view(request):
             {'error': 'User profile is misconfigured', 'details': e.message_dict},
             status=status.HTTP_403_FORBIDDEN,
         )
-    
+
     # Build user response
     user_data = {
         'id': str(user.id),
@@ -110,7 +110,7 @@ def login_view(request):
 def logout_view(request):
     """
     Logout endpoint.
-    
+
     Invalidates the current session.
     """
     logout(request)
@@ -130,9 +130,9 @@ def current_user_view(request):
             {'error': 'Not authenticated', 'user_type': str(type(request.user))},
             status=status.HTTP_401_UNAUTHORIZED
         )
-    
+
     user = request.user
-    
+
     # Get user profile
     try:
         profile = user.profile
@@ -149,7 +149,7 @@ def current_user_view(request):
             {'error': 'User profile is misconfigured', 'details': e.message_dict},
             status=status.HTTP_403_FORBIDDEN,
         )
-    
+
     user_data = {
         'id': str(user.id),
         'email': user.email,
@@ -183,13 +183,13 @@ def refresh_session_view(request):
 def register_view(request):
     """
     User registration endpoint.
-    
+
     Phase 7.5: In self-hosted mode, initializes 14-day trial on first registration.
     """
     from django.conf import settings
     from src.core.licensing.models import Organization, License
     from src.core.licensing.services import LicenseService
-    
+
     email = request.data.get('email')
     password = request.data.get('password')
     organization_name = request.data.get('organization_name', 'My Organization')
@@ -235,7 +235,7 @@ def register_view(request):
                 name=organization_name,
                 domain=email.split('@')[1] if '@' in email else '',
             )
-            license = LicenseService.initialize_trial(organization)
+            LicenseService.initialize_trial(organization)
             
             # Set tenant_id for self-hosted mode (single tenant)
             # In self-hosted mode, all users belong to the same organization
@@ -248,7 +248,7 @@ def register_view(request):
             profile.tenant_id = str(organization.id)
             profile.tenant_role = 'tenant_user'
             profile.save()
-    
+
     # Auto-login after registration
     login(request, user)
     
