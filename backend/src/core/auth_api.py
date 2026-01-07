@@ -175,3 +175,97 @@ def refresh_session_view(request):
     # This endpoint just validates the session is still valid
     return Response({'message': 'Session refreshed'}, status=status.HTTP_200_OK)
 
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@authentication_classes([CsrfExemptSessionAuthentication])
+@ensure_csrf_cookie
+def register_view(request):
+    """
+    User registration endpoint.
+    
+    Phase 7.5: In self-hosted mode, initializes 14-day trial on first registration.
+    """
+    from django.conf import settings
+    from src.core.licensing.models import Organization, License
+    from src.core.licensing.services import LicenseService
+    
+    email = request.data.get('email')
+    password = request.data.get('password')
+    organization_name = request.data.get('organization_name', 'My Organization')
+    
+    if not email or not password:
+        return Response(
+            {'error': 'Email, password, and organization name are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Check if user already exists
+    if User.objects.filter(email=email).exists():
+        return Response(
+            {'error': 'User with this email already exists'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Only allow registration in self-hosted mode
+    mode = getattr(settings, 'SARAISE_MODE', 'development')
+    if mode == 'saas':
+        return Response(
+            {'error': 'Registration is handled by the platform in SaaS mode'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    # Create user
+    user = User.objects.create_user(
+        username=email,
+        email=email,
+        password=password,
+    )
+    
+    # Create user profile
+    profile = UserProfile.objects.create(user=user)
+    
+    # Phase 7.5: Initialize trial if this is the first registration (self-hosted mode)
+    if mode == 'self-hosted':
+        # Check if this is the first registration (no license exists)
+        existing_license = License.objects.first()
+        if not existing_license:
+            # First registration - create organization and start trial
+            organization = Organization.objects.create(
+                name=organization_name,
+                domain=email.split('@')[1] if '@' in email else '',
+            )
+            license = LicenseService.initialize_trial(organization)
+            
+            # Set tenant_id for self-hosted mode (single tenant)
+            # In self-hosted mode, all users belong to the same organization
+            profile.tenant_id = str(organization.id)
+            profile.tenant_role = 'tenant_admin'  # First user is admin
+            profile.save()
+        else:
+            # Subsequent registration - use existing organization
+            organization = existing_license.organization
+            profile.tenant_id = str(organization.id)
+            profile.tenant_role = 'tenant_user'
+            profile.save()
+    
+    # Auto-login after registration
+    login(request, user)
+    
+    user_data = {
+        'id': str(user.id),
+        'email': user.email,
+        'username': user.username,
+        'is_staff': user.is_staff,
+        'is_superuser': user.is_superuser,
+        'tenant_id': profile.tenant_id,
+        'platform_role': profile.platform_role,
+        'tenant_role': profile.tenant_role,
+    }
+    
+    return Response({
+        'user': user_data,
+        'session_id': request.session.session_key or str(uuid.uuid4()),
+        'message': 'Registration successful',
+    }, status=status.HTTP_201_CREATED)
+

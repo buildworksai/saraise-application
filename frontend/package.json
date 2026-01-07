@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src --ext .ts,.tsx --max-warnings 0",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "generate-types": "openapi-typescript http://localhost:18000/api/schema/ -o src/types/api.ts"
   },
   "dependencies": {
@@ -45,6 +46,7 @@
   "devDependencies": {
     "@testing-library/jest-dom": "6.4.2",
     "@testing-library/react": "14.2.0",
+    "@testing-library/user-event": "14.5.2",
     "@types/node": "18.19.3",
     "@types/react": "18.2.55",
     "@types/react-dom": "18.2.19",
