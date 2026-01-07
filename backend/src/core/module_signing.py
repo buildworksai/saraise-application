@@ -209,4 +209,3 @@ class ManifestSigner:
 
 # Global signer instance (should be configured with keys)
 manifest_signer = ManifestSigner()
-

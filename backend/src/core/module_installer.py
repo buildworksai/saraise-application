@@ -18,7 +18,6 @@ from django.utils import timezone
 
 from .module_registry_service import (
     module_registry_service,
-    RegistryError,
     DependencyResolutionError,
 )
 from .module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
@@ -27,7 +26,6 @@ from .module_installation_models import (
     InstallationStep,
     InstallationStatus,
 )
-from .module_versioning import Version
 
 logger = logging.getLogger(__name__)
 
@@ -473,4 +471,3 @@ class ModuleInstaller:
 
 # Global installer instance
 module_installer = ModuleInstaller()
-

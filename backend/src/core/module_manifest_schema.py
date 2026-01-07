@@ -9,7 +9,7 @@ from __future__ import annotations
 import yaml
 import hashlib
 import json
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 import re
@@ -289,4 +289,3 @@ class ManifestValidator:
 
 # Global validator instance
 manifest_validator = ManifestValidator()
-

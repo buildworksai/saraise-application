@@ -6,18 +6,12 @@ Task: 503.3 - Compliance Checks
 from __future__ import annotations
 
 import pytest
-from django.utils import timezone
 
-from ..compliance_service import (
-    ComplianceService,
-    ComplianceError,
-    compliance_service,
-)
+from ..compliance_service import ComplianceService
 from ..compliance_models import (
     ComplianceCheck,
     ComplianceCheckType,
     ResidencyRule,
-    PolicyBundleValidation,
 )
 
 
@@ -237,4 +231,3 @@ class TestComplianceService:
         assert rule.tenant_id is None
         assert rule.module_name is None
         assert rule.required_region == "us-east-1"
-

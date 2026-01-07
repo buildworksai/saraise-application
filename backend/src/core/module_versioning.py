@@ -278,4 +278,3 @@ class CompatibilityChecker:
 
 # Global compatibility checker instance
 compatibility_checker = CompatibilityChecker()
-

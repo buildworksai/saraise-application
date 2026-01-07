@@ -12,7 +12,6 @@ from typing import Dict, Any, List, Optional, Set, Tuple
 from collections import defaultdict, deque
 
 from django.db import transaction, models
-from django.core.exceptions import ValidationError
 
 from .module_registry_models import (
     ModuleRegistryEntry,
@@ -20,10 +19,9 @@ from .module_registry_models import (
 )
 from .module_manifest_schema import (
     ModuleManifest,
-    ManifestValidator,
     manifest_validator,
 )
-from .module_versioning import Version, CompatibilityChecker, compatibility_checker
+from .module_versioning import Version, compatibility_checker
 from .module_signing import ManifestSigner, VerificationError
 
 logger = logging.getLogger(__name__)
@@ -413,4 +411,3 @@ class ModuleRegistryService:
 
 # Global registry service instance
 module_registry_service = ModuleRegistryService()
-

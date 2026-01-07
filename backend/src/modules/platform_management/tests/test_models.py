@@ -3,7 +3,6 @@ Platform Management Model Tests
 """
 
 import pytest
-from django.core.exceptions import ValidationError
 import uuid
 
 from ..models import PlatformSetting, FeatureFlag, SystemHealth, PlatformAuditEvent
@@ -153,4 +152,3 @@ class TestPlatformAuditEventModel:
         # Try to delete
         with pytest.raises(ValueError, match="immutable"):
             event.delete()
-

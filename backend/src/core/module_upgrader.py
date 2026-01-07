@@ -17,7 +17,6 @@ from django.utils import timezone
 
 from .module_registry_service import (
     module_registry_service,
-    RegistryError,
     DependencyResolutionError,
 )
 from .module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
@@ -26,7 +25,7 @@ from .module_upgrade_models import (
     UpgradeStep,
     UpgradeStatus,
 )
-from .module_versioning import Version, CompatibilityChecker, compatibility_checker
+from .module_versioning import Version, compatibility_checker
 from .module_installer import ModuleInstaller
 
 logger = logging.getLogger(__name__)
@@ -549,4 +548,3 @@ class ModuleUpgrader:
 
 # Global upgrader instance
 module_upgrader = ModuleUpgrader()
-

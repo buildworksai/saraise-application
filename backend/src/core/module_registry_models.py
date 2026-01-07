@@ -7,7 +7,6 @@ Task: 501.2 - Module Registry & Compatibility Validation
 from __future__ import annotations
 
 from django.db import models
-from django.utils import timezone
 from typing import Optional, Dict, Any
 import uuid
 

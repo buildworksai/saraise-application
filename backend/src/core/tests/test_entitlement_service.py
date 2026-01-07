@@ -38,7 +38,7 @@ class TestEntitlementService:
 
         # Create subscription
         tenant_id = "tenant-1"
-        subscription = TenantSubscription.objects.create(
+        TenantSubscription.objects.create(
             tenant_id=tenant_id,
             plan=plan,
             status="active",
