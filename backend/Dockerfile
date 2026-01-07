@@ -18,10 +18,14 @@ RUN apt-get update && apt-get install -y \
 
 # Copy and install Python dependencies
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e .[dev]
 
 # Copy application code
 COPY . .
+
+# Copy and make startup script executable
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh && ls -la /app/start.sh
 
 # Create necessary directories
 RUN mkdir -p /app/static /app/media /app/logs

@@ -112,13 +112,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: >
-      sh -c "
-        pip install -e . &&
-        python manage.py migrate &&
-        python manage.py seed_default_users &&
-        python manage.py runserver 0.0.0.0:8000
-      "
+    command: ["/bin/bash", "/app/start.sh"]
     networks:
       - saraise-network
 

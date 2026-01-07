@@ -16,7 +16,7 @@ from urllib.parse import urljoin
 
 from django.conf import settings
 
-from .models import LicenseInfo, LicenseStatus, LicenseTier, ModuleLicense
+from .models import LicenseInfo, LicenseValidationStatus, LicenseTier, ModuleLicense
 
 logger = logging.getLogger('saraise.licensing')
 
@@ -136,7 +136,7 @@ class LicenseClient:
             organization_id=organization_id or "dev-org-001",
             organization_name="Development Organization",
             tier=LicenseTier.ENTERPRISE,
-            status=LicenseStatus.VALID,
+            status=LicenseValidationStatus.VALID,
             issued_at=now,
             expires_at=now + timedelta(days=365),
             licensed_modules=mock_modules,
@@ -163,7 +163,7 @@ class LicenseClient:
 class LicenseValidationError(Exception):
     """Raised when license validation fails."""
     
-    def __init__(self, message: str, status: LicenseStatus):
+    def __init__(self, message: str, status: LicenseValidationStatus):
         super().__init__(message)
         self.status = status
 

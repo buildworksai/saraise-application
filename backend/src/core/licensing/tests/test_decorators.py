@@ -5,6 +5,7 @@ Phase 7.5: Licensing Subsystem
 Tests for license decorators.
 """
 
+import json
 import pytest
 from django.test import RequestFactory
 from django.http import JsonResponse
@@ -15,6 +16,9 @@ from datetime import timedelta
 from ..models import License, LicenseStatus, Organization
 from ..decorators import requires_license, requires_module, requires_write_access
 from ..services import ModuleAccessService
+
+# Enable database access for all tests in this module
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
@@ -81,7 +85,8 @@ class TestRequiresLicenseDecorator:
         with patch('django.conf.settings.SARAISE_MODE', 'self-hosted'):
             response = decorated(request)
             assert response.status_code == 403
-            data = response.json()
+            assert isinstance(response, JsonResponse)
+            data = json.loads(response.content)
             assert data['error'] == 'license_required'
     
     def test_allows_with_valid_license(self, active_license):
@@ -125,7 +130,8 @@ class TestRequiresModuleDecorator:
         with patch('django.conf.settings.SARAISE_MODE', 'self-hosted'):
             response = decorated(request)
             assert response.status_code == 403
-            data = response.json()
+            assert isinstance(response, JsonResponse)
+            data = json.loads(response.content)
             assert data['error'] == 'no_license'
     
     def test_allows_licensed_module(self, active_license):
@@ -149,7 +155,8 @@ class TestRequiresModuleDecorator:
             with patch.object(ModuleAccessService, 'can_access_module', return_value=(False, 'Not licensed')):
                 response = decorated(request)
                 assert response.status_code == 403
-                data = response.json()
+                assert isinstance(response, JsonResponse)
+                data = json.loads(response.content)
                 assert data['error'] == 'module_not_licensed'
 
 
@@ -195,6 +202,7 @@ class TestRequiresWriteAccessDecorator:
             with patch.object(ModuleAccessService, 'can_write_module', return_value=False):
                 response = decorated(request)
                 assert response.status_code == 403
-                data = response.json()
+                assert isinstance(response, JsonResponse)
+                data = json.loads(response.content)
                 assert data['error'] == 'read_only_mode'
 
