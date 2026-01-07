@@ -182,4 +182,4 @@ jobs:
         if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           # Run only tests tagged with tenant isolation
-          pytest tests/ -v -k "isolation or tenant" --tb=short || echo "⚠️ No isolation tests found"
+          pytest tests/ -v -k "isolation or tenant" --tb=short

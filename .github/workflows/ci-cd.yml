@@ -86,7 +86,7 @@ jobs:
           if [ -f ./scripts/mypy-baseline.sh ]; then
             ./scripts/mypy-baseline.sh check
           else
-            mypy src --ignore-missing-imports || echo "⚠️ MyPy check skipped - baseline script not found"
+            mypy src --ignore-missing-imports
           fi
         continue-on-error: false
 
@@ -183,7 +183,7 @@ jobs:
         run: |
           cd backend
           # Run only tests tagged with tenant isolation
-          pytest tests/ -v -k "isolation or tenant" --tb=short || echo "⚠️ No isolation tests found"
+          pytest tests/ -v -k "isolation or tenant" --tb=short
         continue-on-error: false
 
   # Build and Test
