@@ -139,6 +139,121 @@ npx eslint src --max-warnings 0
 
 ---
 
+## Pre-Commit Hooks & Quality Gates
+
+**MANDATORY: All commits MUST pass pre-commit hooks before being pushed.**
+
+### Setup Pre-Commit Hooks
+
+```bash
+# Install pre-commit (Python tool)
+pip install pre-commit
+
+# Install hooks
+pre-commit install
+
+# Run manually on all files
+pre-commit run --all-files
+```
+
+### Pre-Commit Checks (SARAISE-04001, SARAISE-04002)
+
+The following checks are **MANDATORY** and **BLOCKING**:
+
+| Check | Rule | Enforcement |
+|-------|------|-------------|
+| TypeScript | `tsc --noEmit` — ZERO errors | Block commit |
+| ESLint | `npm run lint` — ZERO warnings | Block commit |
+| Python: Black | Formatting required | Block commit |
+| Python: Flake8 | Linting required | Block commit |
+| Python: MyPy | Type checking | Block commit |
+| File Quality | Trailing whitespace, EOF, YAML/JSON validation | Block commit |
+| Security | Secret detection — No hardcoded secrets | Block commit |
+
+**No exceptions. No bypasses. All checks must pass.**
+
+---
+
+## GitHub Workflows
+
+**MANDATORY: All workflows must pass before merge.**
+
+### Quality Guardrails Workflow
+
+- Runs on: Push to `main`, `develop`, `release/*`, `hotfix/*` and all PRs
+- Enforces: TypeScript (zero errors), ESLint (zero warnings), Python quality checks, Tests (≥90% coverage)
+- **Status**: Blocking — PR cannot be merged if this fails
+
+### CI/CD Workflow
+
+- Runs on: All pushes and PRs
+- Includes: Quality checks, Tests, Build, Security scan
+- **Status**: Blocking — PR cannot be merged if this fails
+
+---
+
+## Phase Completion & PR Process
+
+**CRITICAL: After successful completion of every phase, follow this process:**
+
+### 1. Testing (MANDATORY)
+
+Before creating a PR, **ALL tests must pass**:
+
+```bash
+# Backend tests
+cd backend
+pytest tests/ -v --cov=src --cov-fail-under=90
+
+# Frontend tests
+cd frontend
+npm run typecheck     # TypeScript (must pass with zero errors)
+npm run lint          # ESLint (must pass with zero warnings)
+npm run build         # Build must succeed
+```
+
+**If any check fails, fix the issues before proceeding.**
+
+### 2. Pre-Commit Validation
+
+Ensure pre-commit hooks pass:
+
+```bash
+pre-commit run --all-files
+```
+
+**All hooks must pass. No exceptions.**
+
+### 3. Create Pull Request
+
+Once **ALL tests pass** and **ALL pre-commit hooks pass**:
+
+1. **Commit changes** with descriptive commit messages
+2. **Push to feature branch**
+3. **Create Pull Request** in GitHub targeting `main` or `develop`
+4. **Wait for CI/CD workflows** to complete and pass
+5. **Request review** from team members
+6. **Merge only after** all checks pass and approval received
+
+**DO NOT create PRs with failing tests or pre-commit hooks.**
+
+**DO NOT merge PRs that fail CI/CD workflows.**
+
+---
+
+## Quality Standards
+
+| Standard | Requirement | Enforcement |
+|----------|-------------|-------------|
+| TypeScript Errors | ZERO | Pre-commit + CI |
+| ESLint Warnings | ZERO | Pre-commit + CI |
+| Python Formatting | Black compliant | Pre-commit + CI |
+| Test Coverage | ≥90% | CI |
+| Build Success | Must build without errors | CI |
+| Security | No secrets, no vulnerabilities | Pre-commit + CI |
+
+---
+
 ## Cross-References
 
 | Need | Location |
