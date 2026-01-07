@@ -5,6 +5,7 @@ Phase 7.5: Licensing Subsystem
 Tests for LicenseValidationMiddleware.
 """
 
+import json
 import pytest
 from django.test import RequestFactory
 from django.http import JsonResponse
@@ -15,6 +16,9 @@ from datetime import timedelta
 from ..models import License, LicenseStatus, Organization
 from ..middleware import LicenseValidationMiddleware
 from ..services import LicenseService
+
+# Enable database access for all tests in this module
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
@@ -111,7 +115,8 @@ class TestLicenseValidationMiddleware:
         with patch('django.conf.settings.SARAISE_MODE', 'self-hosted'):
             response = middleware(request)
             assert response.status_code == 403
-            data = response.json()
+            assert isinstance(response, JsonResponse)
+            data = json.loads(response.content)
             assert data['error'] == 'no_license'
     
     def test_allows_with_valid_license(self, get_response, active_license):
@@ -134,7 +139,8 @@ class TestLicenseValidationMiddleware:
             with patch.object(LicenseService, 'validate_license', return_value=(False, 'License locked')):
                 response = middleware(request)
                 assert response.status_code == 403
-                data = response.json()
+                assert isinstance(response, JsonResponse)
+                data = json.loads(response.content)
                 assert data['error'] == 'license_invalid'
     
     def test_validates_periodically(self, get_response, active_license):

@@ -13,9 +13,10 @@ from .validator import LicenseValidator
 from .models import (
     LicenseInfo, 
     ModuleLicense,
+    LicenseValidationStatus,  # Enum for dataclasses
     Organization,
     License,
-    LicenseStatus,
+    LicenseStatus,  # Django TextChoices for models
     LicenseValidationLog,
 )
 from .services import LicenseService, ModuleAccessService
@@ -35,10 +36,11 @@ __all__ = [
     # Dataclasses
     'LicenseInfo',
     'ModuleLicense',
+    'LicenseValidationStatus',  # Enum for dataclasses
     # Django models
     'Organization',
     'License',
-    'LicenseStatus',
+    'LicenseStatus',  # Django TextChoices for models
     'LicenseValidationLog',
     # Services
     'LicenseService',

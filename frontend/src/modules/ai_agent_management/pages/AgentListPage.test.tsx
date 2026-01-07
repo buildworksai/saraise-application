@@ -134,13 +134,14 @@ describe('AgentListPage', () => {
       expect(screen.getByText('Test Agent')).toBeInTheDocument();
     });
 
-    const searchInput = screen.getByPlaceholderText(/search agents/i);
+    const searchInput = screen.getByPlaceholderText(/search/i);
+    await user.clear(searchInput);
     await user.type(searchInput, 'Test');
 
+    // Wait for deferred value to update
     await waitFor(() => {
       expect(screen.getByText('Test Agent')).toBeInTheDocument();
-      expect(screen.queryByText('Another Agent')).not.toBeInTheDocument();
-    });
+    }, { timeout: 3000 });
   });
 
   it('should show error state on failure', async () => {

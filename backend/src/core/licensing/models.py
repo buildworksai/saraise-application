@@ -27,8 +27,8 @@ class LicenseTier(Enum):
     ENTERPRISE = "enterprise"
 
 
-class LicenseStatus(Enum):
-    """License validation status."""
+class LicenseValidationStatus(Enum):
+    """License validation status (for dataclasses)."""
     VALID = "valid"
     EXPIRED = "expired"
     GRACE_PERIOD = "grace_period"
@@ -67,7 +67,7 @@ class LicenseInfo:
     organization_id: str
     organization_name: str
     tier: LicenseTier
-    status: LicenseStatus
+    status: LicenseValidationStatus
     issued_at: datetime
     expires_at: datetime
     licensed_modules: list[ModuleLicense] = field(default_factory=list)
@@ -78,12 +78,12 @@ class LicenseInfo:
     @property
     def is_valid(self) -> bool:
         """Check if license is currently valid (includes grace period)."""
-        return self.status in (LicenseStatus.VALID, LicenseStatus.GRACE_PERIOD)
+        return self.status in (LicenseValidationStatus.VALID, LicenseValidationStatus.GRACE_PERIOD)
     
     @property
     def is_expired(self) -> bool:
         """Check if license is expired (past grace period)."""
-        return self.status == LicenseStatus.EXPIRED
+        return self.status == LicenseValidationStatus.EXPIRED
     
     @property
     def days_until_expiry(self) -> int:
@@ -232,9 +232,9 @@ class License(models.Model):
     def can_write(self) -> bool:
         """Check if write operations are allowed.
         
-        In soft lock, only reads are allowed.
+        In soft lock (expired/grace), only reads are allowed.
         """
-        return self.status not in [LicenseStatus.EXPIRED, LicenseStatus.LOCKED]
+        return self.status not in [LicenseStatus.EXPIRED, LicenseStatus.LOCKED, LicenseStatus.GRACE]
     
     def has_module(self, module_name: str) -> bool:
         """Check if license includes a specific industry module."""

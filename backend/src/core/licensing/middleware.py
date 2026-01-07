@@ -14,7 +14,7 @@ from django.http import JsonResponse
 from django.utils import timezone
 from datetime import timedelta
 
-from .models import License
+from .models import License, LicenseStatus
 from .services import LicenseService
 
 logger = logging.getLogger('saraise.licensing')
@@ -39,8 +39,14 @@ class LicenseValidationMiddleware:
         if self._should_skip(request.path):
             return self.get_response(request)
         
-        # Get license
-        license = self._get_license()
+        # Get license (with error handling for database not ready)
+        try:
+            license = self._get_license()
+        except Exception as e:
+            # Database might not be ready yet (during migrations)
+            logger.debug(f"License check failed (database may not be ready): {e}")
+            return self.get_response(request)
+        
         if not license:
             return JsonResponse({
                 'error': 'no_license',
@@ -51,17 +57,21 @@ class LicenseValidationMiddleware:
         request.license = license
         
         # Periodic validation (every 24 hours)
-        if self._should_validate(license):
-            is_valid, message = LicenseService.validate_license(license)
-            if not is_valid:
-                # Only block if license is locked (not grace period)
-                if license.status == License.LicenseStatus.LOCKED:
-                    return JsonResponse({
-                        'error': 'license_invalid',
-                        'message': message,
-                    }, status=403)
-                # For grace period, allow but log warning
-                logger.warning(f"License validation issue: {message}")
+        try:
+            if self._should_validate(license):
+                is_valid, message = LicenseService.validate_license(license)
+                if not is_valid:
+                    # Only block if license is locked (not grace period)
+                    if license.status == LicenseStatus.LOCKED:
+                        return JsonResponse({
+                            'error': 'license_invalid',
+                            'message': message,
+                        }, status=403)
+                    # For grace period, allow but log warning
+                    logger.warning(f"License validation issue: {message}")
+        except Exception as e:
+            # Don't block requests if validation fails
+            logger.warning(f"License validation error: {e}")
         
         return self.get_response(request)
     
@@ -79,7 +89,12 @@ class LicenseValidationMiddleware:
     def _get_license(self) -> Optional[License]:
         """Get the current license."""
         # In self-hosted mode, there's only one license
-        return License.objects.first()
+        try:
+            return License.objects.first()
+        except Exception as e:
+            # Database might not be ready yet (migrations not run)
+            logger.debug(f"Could not get license (database may not be ready): {e}")
+            return None
     
     def _should_validate(self, license: License) -> bool:
         """Check if we should re-validate license."""

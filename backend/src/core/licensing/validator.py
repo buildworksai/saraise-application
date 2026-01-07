@@ -17,7 +17,7 @@ from typing import Optional
 from django.conf import settings
 
 from .client import LicenseClient
-from .models import LicenseInfo, LicenseStatus, LicenseTier
+from .models import LicenseInfo, LicenseValidationStatus, LicenseTier
 
 logger = logging.getLogger('saraise.licensing')
 
@@ -101,13 +101,13 @@ class LicenseValidator:
         self._license_info = self._client.validate(license_key, organization_id)
         self._last_check = datetime.utcnow()
         
-        if self._license_info.status == LicenseStatus.GRACE_PERIOD:
+        if self._license_info.status == LicenseValidationStatus.GRACE_PERIOD:
             days_left = self._license_info.days_until_expiry
             logger.warning(
                 f"License in grace period! {days_left} days remaining. "
                 "Please renew to avoid service interruption."
             )
-        elif self._license_info.status == LicenseStatus.EXPIRED:
+        elif self._license_info.status == LicenseValidationStatus.EXPIRED:
             logger.error(
                 "License has expired! Application will operate in read-only mode. "
                 "Please renew your subscription."
@@ -184,7 +184,7 @@ class LicenseValidator:
         
         license_info = self.get_license()
         if license_info:
-            return license_info.status == LicenseStatus.EXPIRED
+            return license_info.status == LicenseValidationStatus.EXPIRED
         return True  # No license = soft-locked
     
     def needs_renewal_warning(self) -> tuple[bool, int]:

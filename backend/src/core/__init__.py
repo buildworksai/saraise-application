@@ -8,7 +8,8 @@ This app contains core infrastructure including:
 """
 
 # Import licensing models so Django can discover them
-from .licensing.models import Organization, License, LicenseValidationLog
+# Models imported lazily to avoid Django app registry issues
+# from .licensing.models import Organization, License, LicenseValidationLog
 
 __all__ = [
     'Organization',
