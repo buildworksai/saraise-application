@@ -17,7 +17,6 @@ from django.utils import timezone
 
 from .module_registry_service import (
     module_registry_service,
-    DependencyResolutionError,
 )
 from .module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
 from .module_upgrade_models import (

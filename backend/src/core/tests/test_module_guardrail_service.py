@@ -8,16 +8,13 @@ from __future__ import annotations
 import pytest
 import tempfile
 from pathlib import Path
-from django.utils import timezone
 
 from ..module_guardrail_service import (
     ModuleGuardrailService,
     GuardrailError,
-    module_guardrail_service,
 )
 from ..module_guardrail_models import (
     GuardrailViolation,
-    GuardrailRule,
     GuardrailViolationType,
 )
 

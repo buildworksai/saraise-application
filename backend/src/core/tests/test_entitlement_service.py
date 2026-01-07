@@ -11,7 +11,6 @@ from django.utils import timezone
 from ..entitlement_service import (
     EntitlementService,
     EntitlementError,
-    entitlement_service,
 )
 from ..entitlement_models import (
     SubscriptionPlan,
