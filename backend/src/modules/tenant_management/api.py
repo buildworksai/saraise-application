@@ -18,7 +18,6 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import PermissionDenied, MethodNotAllowed
 from django.db.models import Q
 
 from src.core.auth_utils import get_user_platform_role
@@ -43,18 +42,19 @@ from .serializers import (
 class TenantViewSet(viewsets.ReadOnlyModelViewSet):
     """
     READ-ONLY ViewSet for Tenant information.
-    
+
     ⚠️ ARCHITECTURAL VIOLATION PREVENTION:
     - CREATE operations: Use Control Plane API (saraise-platform/saraise-control-plane/)
     - UPDATE operations: Use Control Plane API
     - DELETE operations: Use Control Plane API
-    
+
     This ViewSet only provides:
     - LIST: Read tenant list (platform owners only)
     - RETRIEVE: Read tenant details (platform owners only)
-    
+
     Tenant lifecycle operations are FORBIDDEN in Application layer.
     """
+
     """
     ViewSet for Tenant CRUD operations.
 
@@ -93,9 +93,7 @@ class TenantViewSet(viewsets.ReadOnlyModelViewSet):
         search = self.request.query_params.get("search", None)
         if search:
             queryset = queryset.filter(
-                Q(name__icontains=search)
-                | Q(slug__icontains=search)
-                | Q(primary_contact_email__icontains=search)
+                Q(name__icontains=search) | Q(slug__icontains=search) | Q(primary_contact_email__icontains=search)
             )
 
         return queryset.order_by("-created_at")
@@ -132,9 +130,7 @@ class TenantViewSet(viewsets.ReadOnlyModelViewSet):
         if date_to:
             usage = usage.filter(date__lte=date_to)
 
-        serializer = TenantResourceUsageSerializer(
-            usage.order_by("-date")[:30], many=True
-        )
+        serializer = TenantResourceUsageSerializer(usage.order_by("-date")[:30], many=True)
         return Response(serializer.data)
 
     @action(detail=True, methods=["get"])
@@ -150,24 +146,22 @@ class TenantViewSet(viewsets.ReadOnlyModelViewSet):
         if date_to:
             scores = scores.filter(date__lte=date_to)
 
-        serializer = TenantHealthScoreSerializer(
-            scores.order_by("-date")[:30], many=True
-        )
+        serializer = TenantHealthScoreSerializer(scores.order_by("-date")[:30], many=True)
         return Response(serializer.data)
 
 
 class TenantModuleViewSet(viewsets.ReadOnlyModelViewSet):
     """
     READ-ONLY ViewSet for Tenant Module information.
-    
+
     ⚠️ ARCHITECTURAL VIOLATION PREVENTION:
     - Module enablement/disablement: Use Control Plane API (saraise-platform/saraise-control-plane/)
     - Module installation: Use Control Plane API
-    
+
     This ViewSet only provides:
     - LIST: Read tenant modules (platform owners only)
     - RETRIEVE: Read tenant module details (platform owners only)
-    
+
     Module lifecycle operations are FORBIDDEN in Application layer.
     """
 
@@ -240,14 +234,14 @@ class TenantResourceUsageViewSet(viewsets.ReadOnlyModelViewSet):
 class TenantSettingsViewSet(viewsets.ReadOnlyModelViewSet):
     """
     READ-ONLY ViewSet for Tenant Settings information.
-    
+
     ⚠️ ARCHITECTURAL VIOLATION PREVENTION:
     - Setting creation/update: Use Control Plane API (saraise-platform/saraise-control-plane/)
-    
+
     This ViewSet only provides:
     - LIST: Read tenant settings (platform owners only)
     - RETRIEVE: Read tenant setting details (platform owners only)
-    
+
     Setting management operations are FORBIDDEN in Application layer.
     """
 

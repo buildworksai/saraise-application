@@ -21,7 +21,6 @@ from datetime import date, timedelta
 
 from .models import (
     Tenant,
-    TenantModule,
     TenantResourceUsage,
     TenantSettings,
     TenantHealthScore,
@@ -31,7 +30,7 @@ from .models import (
 class TenantManagementService:
     """
     READ-ONLY business logic for tenant information.
-    
+
     ⚠️ ARCHITECTURAL ENFORCEMENT: All lifecycle operations removed.
     Tenant lifecycle MUST be performed via Control Plane services.
     """
@@ -50,7 +49,7 @@ class TenantManagementService:
     # ⚠️ ARCHITECTURAL NOTE: record_resource_usage() kept for metrics collection
     # This is data persistence (metrics), not tenant lifecycle management.
     # Metrics recording is acceptable in Runtime Plane.
-    
+
     @staticmethod
     def record_resource_usage(
         tenant_id: str,
@@ -67,7 +66,7 @@ class TenantManagementService:
     ) -> TenantResourceUsage:
         """
         Record daily resource usage for a tenant.
-        
+
         NOTE: This is metrics/data persistence, not tenant lifecycle management.
         Metrics recording is acceptable in Runtime Plane.
 
@@ -120,9 +119,7 @@ class TenantManagementService:
         tenant = Tenant.objects.get(id=tenant_id)
         date_from = date.today() - timedelta(days=days)
 
-        usage_records = TenantResourceUsage.objects.filter(
-            tenant=tenant, date__gte=date_from
-        )
+        usage_records = TenantResourceUsage.objects.filter(tenant=tenant, date__gte=date_from)
 
         return {
             "tenant_id": tenant_id,
@@ -130,29 +127,12 @@ class TenantManagementService:
             "period_days": days,
             "date_from": date_from.isoformat(),
             "date_to": date.today().isoformat(),
-            "total_api_calls": usage_records.aggregate(Sum("api_calls"))[
-                "api_calls__sum"
-            ]
-            or 0,
-            "avg_api_calls_per_day": usage_records.aggregate(Avg("api_calls"))[
-                "api_calls__avg"
-            ]
-            or 0,
-            "max_storage_gb": usage_records.aggregate(Sum("storage_used_gb"))[
-                "storage_used_gb__sum"
-            ]
-            or 0,
-            "avg_active_users": usage_records.aggregate(Avg("active_users"))[
-                "active_users__avg"
-            ]
-            or 0,
-            "total_errors": usage_records.aggregate(Sum("error_count"))[
-                "error_count__sum"
-            ]
-            or 0,
-            "avg_response_time_ms": usage_records.aggregate(
-                Avg("avg_response_time_ms")
-            )["avg_response_time_ms__avg"]
+            "total_api_calls": usage_records.aggregate(Sum("api_calls"))["api_calls__sum"] or 0,
+            "avg_api_calls_per_day": usage_records.aggregate(Avg("api_calls"))["api_calls__avg"] or 0,
+            "max_storage_gb": usage_records.aggregate(Sum("storage_used_gb"))["storage_used_gb__sum"] or 0,
+            "avg_active_users": usage_records.aggregate(Avg("active_users"))["active_users__avg"] or 0,
+            "total_errors": usage_records.aggregate(Sum("error_count"))["error_count__sum"] or 0,
+            "avg_response_time_ms": usage_records.aggregate(Avg("avg_response_time_ms"))["avg_response_time_ms__avg"]
             or None,
         }
 
@@ -160,9 +140,7 @@ class TenantManagementService:
     # - set_tenant_setting() → Use Control Plane
 
     @staticmethod
-    def get_tenant_setting(
-        tenant_id: str, category: str, key: str, default: Any = None
-    ) -> Any:
+    def get_tenant_setting(tenant_id: str, category: str, key: str, default: Any = None) -> Any:
         """
         Get a tenant setting value.
 
@@ -177,9 +155,7 @@ class TenantManagementService:
         """
         try:
             tenant = Tenant.objects.get(id=tenant_id)
-            setting = TenantSettings.objects.get(
-                tenant=tenant, category=category, key=key
-            )
+            setting = TenantSettings.objects.get(tenant=tenant, category=category, key=key)
             return setting.value
         except (Tenant.DoesNotExist, TenantSettings.DoesNotExist):
             return default
@@ -187,14 +163,12 @@ class TenantManagementService:
     # ⚠️ ARCHITECTURAL NOTE: calculate_health_score() kept for analytics
     # This is analytics/metrics calculation, not tenant lifecycle management.
     # Health score calculation is acceptable in Runtime Plane.
-    
+
     @staticmethod
-    def calculate_health_score(
-        tenant_id: str, target_date: Optional[date] = None
-    ) -> TenantHealthScore:
+    def calculate_health_score(tenant_id: str, target_date: Optional[date] = None) -> TenantHealthScore:
         """
         Calculate health score for a tenant.
-        
+
         NOTE: This is analytics/metrics calculation, not tenant lifecycle management.
         Health score calculation is acceptable in Runtime Plane.
 
@@ -261,10 +235,7 @@ class TenantManagementService:
 
         # Calculate overall score (weighted average)
         overall_score = int(
-            (usage_score * 0.3)
-            + (performance_score * 0.3)
-            + (error_score * 0.2)
-            + (engagement_score * 0.2)
+            (usage_score * 0.3) + (performance_score * 0.3) + (error_score * 0.2) + (engagement_score * 0.2)
         )
 
         # Calculate churn risk (inverse of health score)
@@ -337,24 +308,16 @@ class TenantManagementService:
                 {
                     "active_users": latest_usage.active_users if latest_usage else 0,
                     "api_calls_today": latest_usage.api_calls if latest_usage else 0,
-                    "storage_used_gb": (
-                        float(latest_usage.storage_used_gb) if latest_usage else 0.0
-                    ),
+                    "storage_used_gb": (float(latest_usage.storage_used_gb) if latest_usage else 0.0),
                 }
                 if latest_usage
                 else None
             ),
             "health": (
                 {
-                    "overall_score": (
-                        latest_health.overall_score if latest_health else None
-                    ),
-                    "churn_risk": (
-                        float(latest_health.churn_risk) if latest_health else None
-                    ),
-                    "at_risk_reasons": (
-                        latest_health.at_risk_reasons if latest_health else []
-                    ),
+                    "overall_score": (latest_health.overall_score if latest_health else None),
+                    "churn_risk": (float(latest_health.churn_risk) if latest_health else None),
+                    "at_risk_reasons": (latest_health.at_risk_reasons if latest_health else []),
                 }
                 if latest_health
                 else None

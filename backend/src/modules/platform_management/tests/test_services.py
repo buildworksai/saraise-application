@@ -1,6 +1,6 @@
 import pytest
 import uuid
-from ..models import PlatformSetting, FeatureFlag, PlatformAuditEvent, PlatformMetrics
+from ..models import PlatformSetting, FeatureFlag, PlatformMetrics
 from ..services import PlatformManagementService, AnalyticsService
 
 
