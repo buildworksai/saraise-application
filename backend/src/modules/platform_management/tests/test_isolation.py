@@ -134,9 +134,10 @@ class TestTenantIsolation:
         response = api_client.get(f"/api/v1/platform/settings/{other_setting.id}/")
 
         # MUST return 404 (not 403) to hide existence
+        response_data = response.data if hasattr(response, 'data') else 'No data'
         assert (
             response.status_code == status.HTTP_404_NOT_FOUND
-        ), f"Expected 404, got {response.status_code}. Response: {response.data if hasattr(response, 'data') else 'No data'}"
+        ), f"Expected 404, got {response.status_code}. Response: {response_data}"
 
     def test_user_cannot_update_other_tenant_setting(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot PUT to other tenant's setting."""
