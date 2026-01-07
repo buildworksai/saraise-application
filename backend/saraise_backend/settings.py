@@ -42,6 +42,12 @@ SARAISE_LICENSE_SERVER_URL: str = os.getenv(
     'SARAISE_LICENSE_SERVER_URL', 'https://license.saraise.com'
 )
 
+# License public key for offline validation (PEM format)
+# Set this in production for isolated mode license validation
+SARAISE_LICENSE_PUBLIC_KEY: str = os.getenv(
+    'SARAISE_LICENSE_PUBLIC_KEY', ''
+)
+
 # Module registry URL for downloading industry modules
 SARAISE_REGISTRY_URL: str = os.getenv(
     'SARAISE_REGISTRY_URL', 'https://registry.saraise.com'
@@ -98,6 +104,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',  # Authentication
     'django.contrib.messages.middleware.MessageMiddleware',
     'src.core.middleware.api_tracking.APITrackingMiddleware',  # API call tracking for metrics
+    # Phase 7.5: License validation middleware (only active in self-hosted mode)
+    'src.core.licensing.middleware.LicenseValidationMiddleware',
 ]
 
 ROOT_URLCONF = 'saraise_backend.urls'

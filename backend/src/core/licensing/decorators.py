@@ -6,18 +6,22 @@ Provides decorators for:
 - Module-level gating
 - Feature flag enforcement
 
-Reference: saraise-documentation/licensing/licensing-architecture.md
+Phase 7.5: Licensing Subsystem
+Reference: saraise-documentation/planning/phases/phase-7.5-licensing.md
 """
 
 import functools
 import logging
 from typing import Callable, Optional
 
+from django.conf import settings
 from django.http import JsonResponse
 from rest_framework import status
 from rest_framework.request import Request
 
 from .validator import get_license_validator
+from .models import License
+from .services import ModuleAccessService
 
 logger = logging.getLogger('saraise.licensing')
 
@@ -242,4 +246,125 @@ class LicenseException(Exception):
     def __init__(self, response: JsonResponse):
         self.response = response
         super().__init__("License validation failed")
+
+
+# ============================================================================
+# Phase 7.5: Additional decorators using services directly
+# ============================================================================
+
+def requires_license(func: Callable) -> Callable:
+    """
+    Decorator to require valid license for a view.
+    
+    Phase 7.5: Uses LicenseService directly.
+    
+    Usage:
+        @requires_license
+        def my_view(request):
+            ...
+    """
+    @functools.wraps(func)
+    def wrapper(request, *args, **kwargs):
+        # Skip in development mode
+        if getattr(settings, 'SARAISE_MODE', 'development') == 'development':
+            return func(request, *args, **kwargs)
+        
+        # Skip in SaaS mode
+        if getattr(settings, 'SARAISE_MODE', 'development') == 'saas':
+            return func(request, *args, **kwargs)
+        
+        license = getattr(request, 'license', None)
+        if not license or not license.is_license_valid():
+            return JsonResponse({
+                'error': 'license_required',
+                'message': 'Valid license required for this operation.',
+            }, status=403)
+        return func(request, *args, **kwargs)
+    return wrapper
+
+
+def requires_module(module_name: str):
+    """
+    Decorator to require specific module access.
+    
+    Phase 7.5: Uses ModuleAccessService directly.
+    
+    Usage:
+        @requires_module("manufacturing")
+        def manufacturing_api(request):
+            ...
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(request, *args, **kwargs):
+            # Skip in development mode
+            if getattr(settings, 'SARAISE_MODE', 'development') == 'development':
+                return func(request, *args, **kwargs)
+            
+            # Skip in SaaS mode
+            if getattr(settings, 'SARAISE_MODE', 'development') == 'saas':
+                return func(request, *args, **kwargs)
+            
+            license = getattr(request, 'license', None)
+            if not license:
+                return JsonResponse({
+                    'error': 'no_license',
+                    'message': 'License required.',
+                }, status=403)
+            
+            can_access, reason = ModuleAccessService.can_access_module(license, module_name)
+            if not can_access:
+                return JsonResponse({
+                    'error': 'module_not_licensed',
+                    'message': reason,
+                    'module': module_name,
+                }, status=403)
+            
+            return func(request, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
+def requires_write_access(module_name: str):
+    """
+    Decorator to require write access (not in soft lock).
+    
+    Phase 7.5: Uses ModuleAccessService to check write permissions.
+    
+    Usage:
+        @requires_write_access("crm")
+        def update_customer(request):
+            ...
+    """
+    def decorator(func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(request, *args, **kwargs):
+            # Skip in development mode
+            if getattr(settings, 'SARAISE_MODE', 'development') == 'development':
+                return func(request, *args, **kwargs)
+            
+            # Skip in SaaS mode
+            if getattr(settings, 'SARAISE_MODE', 'development') == 'saas':
+                return func(request, *args, **kwargs)
+            
+            license = getattr(request, 'license', None)
+            if not license:
+                return JsonResponse({
+                    'error': 'no_license',
+                    'message': 'License required.',
+                }, status=403)
+            
+            if not ModuleAccessService.can_write_module(license, module_name):
+                return JsonResponse({
+                    'error': 'read_only_mode',
+                    'message': (
+                        'License expired. Read-only mode active. '
+                        'Please renew to enable writes.'
+                    ),
+                    'module': module_name,
+                }, status=403)
+            
+            return func(request, *args, **kwargs)
+        return wrapper
+    return decorator
 
