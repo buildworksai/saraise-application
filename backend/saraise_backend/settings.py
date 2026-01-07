@@ -1,13 +1,65 @@
 """
-Django settings for SARAISE backend testing.
-Minimal configuration for running Phase 4 & 5 tests.
+Django settings for SARAISE backend.
+
+Supports three operating modes:
+- development: All modules enabled, no license checks
+- self-hosted: Single-tenant, built-in auth, license validation
+- saas: Multi-tenant, delegated auth to platform
+
+Reference: saraise-documentation/AGENTS.md
 """
 
 import os
 from pathlib import Path
+from typing import Literal
 
 # Build paths inside the project
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# =============================================================================
+# SARAISE MODE CONFIGURATION
+# =============================================================================
+# Mode determines authentication, tenant handling, and license behavior
+# Valid values: 'development', 'self-hosted', 'saas'
+SARAISE_MODE: Literal['development', 'self-hosted', 'saas'] = os.getenv(
+    'SARAISE_MODE', 'development'
+)
+
+# Self-hosted license mode (only applicable when SARAISE_MODE='self-hosted')
+# - 'connected': Validates against license.saraise.com
+# - 'isolated': Uses offline license keys
+SARAISE_LICENSE_MODE: Literal['connected', 'isolated'] = os.getenv(
+    'SARAISE_LICENSE_MODE', 'connected'
+)
+
+# Platform URL for SaaS mode (auth delegation and policy engine)
+SARAISE_PLATFORM_URL: str = os.getenv(
+    'SARAISE_PLATFORM_URL', 'http://localhost:18000'
+)
+
+# License server URL for self-hosted connected mode
+SARAISE_LICENSE_SERVER_URL: str = os.getenv(
+    'SARAISE_LICENSE_SERVER_URL', 'https://license.saraise.com'
+)
+
+# Module registry URL for downloading industry modules
+SARAISE_REGISTRY_URL: str = os.getenv(
+    'SARAISE_REGISTRY_URL', 'https://registry.saraise.com'
+)
+
+# =============================================================================
+# MODE-AWARE CONFIGURATION
+# =============================================================================
+# Determine tenant behavior based on mode
+SARAISE_MULTI_TENANT: bool = SARAISE_MODE == 'saas'
+SARAISE_SINGLE_TENANT: bool = SARAISE_MODE in ('development', 'self-hosted')
+
+# License validation settings
+SARAISE_LICENSE_VALIDATION_ENABLED: bool = SARAISE_MODE == 'self-hosted'
+SARAISE_LICENSE_GRACE_PERIOD_DAYS: int = 30
+
+# Trial period for new self-hosted installations
+SARAISE_TRIAL_PERIOD_DAYS: int = 14
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-test-key-only-for-testing-do-not-use-in-production'
@@ -190,16 +242,48 @@ SPECTACULAR_SETTINGS = {
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} [{name}] {message}',
+            'style': '{',
+        },
+    },
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
         },
     },
     'root': {
         'handlers': ['console'],
-        'level': 'INFO',
+        'level': 'DEBUG' if SARAISE_MODE == 'development' else 'INFO',
+    },
+    'loggers': {
+        'saraise': {
+            'handlers': ['console'],
+            'level': 'DEBUG' if SARAISE_MODE == 'development' else 'INFO',
+            'propagate': False,
+        },
+        'saraise.licensing': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
     },
 }
 
 # Test settings
 TEST_RUNNER = 'django.test.runner.DiscoverRunner'
+
+# =============================================================================
+# MODE-SPECIFIC STARTUP BANNER
+# =============================================================================
+if SARAISE_MODE == 'development':
+    import logging
+    _logger = logging.getLogger('saraise')
+    _logger.info("=" * 60)
+    _logger.info("SARAISE running in DEVELOPMENT mode")
+    _logger.info("  - All modules enabled")
+    _logger.info("  - License validation DISABLED")
+    _logger.info("  - Debug logging ENABLED")
+    _logger.info("=" * 60)

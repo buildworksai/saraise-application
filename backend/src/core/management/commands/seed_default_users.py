@@ -37,7 +37,9 @@ class Command(BaseCommand):
         force = options.get('force', False)
         
         self.stdout.write(self.style.SUCCESS('🌱 Seeding default users...'))
-        self.stdout.write(f'   Password for all users: {COMMON_PASSWORD}\n')
+        
+        # Clean up orphaned profiles (profiles referencing non-existent users)
+        self._cleanup_orphaned_profiles()
 
         # ===== Platform Users =====
         
@@ -224,7 +226,7 @@ class Command(BaseCommand):
 
         # Summary
         self.stdout.write(self.style.SUCCESS('\n✅ Default users seeded successfully!'))
-        self.stdout.write('\n📋 Login Credentials (Password for all: admin@134):')
+        self.stdout.write('\n📋 Created Users:')
         self.stdout.write('\n   Platform Users:')
         self.stdout.write(f'     - {platform_owner_email} (Platform Owner)')
         self.stdout.write(f'     - {platform_operator_email} (Platform Operator)')
@@ -254,7 +256,10 @@ class Command(BaseCommand):
     ):
         """Create or update a user with profile."""
         try:
+            # Get user and refresh from database to ensure it's not stale
             user = User.objects.get(email=email)
+            # Refresh user from database to ensure it exists
+            user.refresh_from_db()
             created = False
             
             if force:
@@ -266,24 +271,59 @@ class Command(BaseCommand):
                 user.save()
             
             # Get or create user profile (handle race conditions and duplicates gracefully)
-            profiles = UserProfile.objects.filter(user=user)
-            if profiles.count() > 1:
-                # Handle duplicates - keep first, delete rest
+            # Filter by primary key (user_id) directly to avoid issues with orphaned users
+            try:
+                # Since user is the primary key, filter by pk directly
+                profile = UserProfile.objects.get(pk=user.pk)
+            except UserProfile.DoesNotExist:
+                profile = None
+            except UserProfile.MultipleObjectsReturned:
+                # Handle duplicates - keep first, delete rest (shouldn't happen with pk, but be safe)
+                profiles = UserProfile.objects.filter(pk=user.pk)
                 profile = profiles.first()
                 for dup in profiles[1:]:
                     dup.delete()
-            elif profiles.count() == 1:
-                profile = profiles.first()
-            else:
-                # Profile doesn't exist, create it
-                profile = None
+            
+            # Verify profile's user exists (handle orphaned profiles)
+            if profile is not None:
+                try:
+                    # Verify the user referenced by the profile actually exists
+                    if not User.objects.filter(pk=profile.user_id).exists():
+                        # Orphaned profile - delete it
+                        profile.delete()
+                        profile = None
+                except Exception:
+                    # If we can't verify, delete to be safe
+                    profile.delete()
+                    profile = None
+            
             if profile is None:
-                profile = UserProfile.objects.create(
-                    user=user,
-                    tenant_id=tenant_id,
-                    platform_role=platform_role,
-                    tenant_role=tenant_role,
-                )
+                # Verify user still exists before creating profile
+                if not User.objects.filter(pk=user.pk).exists():
+                    # User was deleted - refresh from database
+                    user = User.objects.get(email=email)
+                # Check if profile exists by pk (might be orphaned)
+                # Delete any orphaned profile first
+                try:
+                    orphaned = UserProfile.objects.get(pk=user.pk)
+                    # If we got here, profile exists - verify user exists
+                    if not User.objects.filter(pk=user.pk).exists():
+                        # Orphaned profile - delete it
+                        orphaned.delete()
+                    else:
+                        # Profile exists and user exists - use it
+                        profile = orphaned
+                except UserProfile.DoesNotExist:
+                    pass  # Profile doesn't exist, we'll create it
+                
+                # Create profile if it doesn't exist
+                if profile is None:
+                    profile = UserProfile.objects.create(
+                        user=user,
+                        tenant_id=tenant_id,
+                        platform_role=platform_role,
+                        tenant_role=tenant_role,
+                    )
             
             # Always reconcile provided values (idempotent, and enforces guardrails)
             if tenant_id is not None or platform_role or tenant_role or force:
@@ -291,7 +331,22 @@ class Command(BaseCommand):
                 profile.tenant_id = tenant_id
                 profile.platform_role = platform_role
                 profile.tenant_role = tenant_role
-                profile.save()
+                # Try to save, but handle orphaned profile errors
+                try:
+                    profile.save()
+                except Exception as e:
+                    # If save fails due to orphaned user, delete and recreate
+                    if 'does not exist' in str(e).lower():
+                        profile.delete()
+                        profile = UserProfile.objects.create(
+                            user=user,
+                            tenant_id=tenant_id,
+                            platform_role=platform_role,
+                            tenant_role=tenant_role,
+                        )
+                    else:
+                        # Re-raise if it's a different error
+                        raise
             
             return user, created
                 
@@ -307,30 +362,116 @@ class Command(BaseCommand):
             
             # Create user profile
             # Get or create user profile (handle race conditions and duplicates gracefully)
-            profiles = UserProfile.objects.filter(user=user)
-            if profiles.count() > 1:
-                # Handle duplicates - keep first, delete rest
+            # Filter by primary key (user_id) directly to avoid issues with orphaned users
+            try:
+                # Since user is the primary key, filter by pk directly
+                profile = UserProfile.objects.get(pk=user.pk)
+            except UserProfile.DoesNotExist:
+                profile = None
+            except UserProfile.MultipleObjectsReturned:
+                # Handle duplicates - keep first, delete rest (shouldn't happen with pk, but be safe)
+                profiles = UserProfile.objects.filter(pk=user.pk)
                 profile = profiles.first()
                 for dup in profiles[1:]:
                     dup.delete()
-            elif profiles.count() == 1:
-                profile = profiles.first()
-            else:
-                # Profile doesn't exist, create it
-                profile = None
+            
+            # Verify profile's user exists (handle orphaned profiles)
+            if profile is not None:
+                try:
+                    # Verify the user referenced by the profile actually exists
+                    if not User.objects.filter(pk=profile.user_id).exists():
+                        # Orphaned profile - delete it
+                        profile.delete()
+                        profile = None
+                except Exception:
+                    # If we can't verify, delete to be safe
+                    profile.delete()
+                    profile = None
+            
             if profile is None:
-                profile = UserProfile.objects.create(
-                    user=user,
-                    tenant_id=tenant_id,
-                    platform_role=platform_role,
-                    tenant_role=tenant_role,
-                )
+                # Verify user still exists before creating profile
+                if not User.objects.filter(pk=user.pk).exists():
+                    # User was deleted - this shouldn't happen for new users, but handle it
+                    raise ValueError(f"User {user.email} (id={user.pk}) does not exist in database")
+                # Check if profile exists by pk (might be orphaned)
+                # Delete any orphaned profile first
+                try:
+                    orphaned = UserProfile.objects.get(pk=user.pk)
+                    # If we got here, profile exists - verify user exists
+                    if not User.objects.filter(pk=user.pk).exists():
+                        # Orphaned profile - delete it
+                        orphaned.delete()
+                    else:
+                        # Profile exists and user exists - use it
+                        profile = orphaned
+                except UserProfile.DoesNotExist:
+                    pass  # Profile doesn't exist, we'll create it
+                
+                # Create profile if it doesn't exist
+                if profile is None:
+                    profile = UserProfile.objects.create(
+                        user=user,
+                        tenant_id=tenant_id,
+                        platform_role=platform_role,
+                        tenant_role=tenant_role,
+                    )
             
             # Update profile deterministically (enforces guardrails)
             profile.tenant_id = tenant_id
             profile.platform_role = platform_role
             profile.tenant_role = tenant_role
-            profile.save()
+            # Try to save, but handle orphaned profile errors
+            try:
+                profile.save()
+            except Exception as e:
+                # If save fails due to orphaned user, delete and recreate
+                if 'does not exist' in str(e).lower():
+                    profile.delete()
+                    profile = UserProfile.objects.create(
+                        user=user,
+                        tenant_id=tenant_id,
+                        platform_role=platform_role,
+                        tenant_role=tenant_role,
+                    )
+                else:
+                    # Re-raise if it's a different error
+                    raise
             
             return user, True
+
+    def _cleanup_orphaned_profiles(self):
+        """Remove any UserProfile records that reference non-existent users."""
+        try:
+            # Get all user IDs that exist
+            existing_user_ids = set(User.objects.values_list('id', flat=True))
+            
+            # Find profiles that reference non-existent users
+            # Since user is the primary key, profile.pk is the user_id
+            orphaned_profiles = []
+            for profile in UserProfile.objects.all():
+                # profile.pk is the user_id (OneToOneField with primary_key=True)
+                if profile.pk not in existing_user_ids:
+                    orphaned_profiles.append(profile)
+            
+            # Delete orphaned profiles
+            orphaned_count = len(orphaned_profiles)
+            if orphaned_count > 0:
+                for profile in orphaned_profiles:
+                    try:
+                        profile.delete()
+                    except Exception:
+                        # If delete fails, try to delete by pk directly
+                        UserProfile.objects.filter(pk=profile.pk).delete()
+                self.stdout.write(
+                    self.style.WARNING(
+                        f'🧹 Cleaned up {orphaned_count} orphaned user profile(s)'
+                    )
+                )
+        except Exception as e:
+            # Don't fail the entire command if cleanup fails
+            self.stdout.write(
+                self.style.ERROR(
+                    f'⚠️  Warning: Could not clean up orphaned profiles: {e}'
+                )
+            )
 

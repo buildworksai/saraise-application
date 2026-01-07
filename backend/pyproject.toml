@@ -1,0 +1,118 @@
+[project]
+name = "saraise-backend"
+version = "4.0.0"
+description = "SARAISE ERP Backend - Runtime Plane"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+authors = [
+    { name = "SARAISE Team", email = "engineering@saraise.com" }
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Django :: 5.0",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    # Core Framework
+    "Django>=5.0.0,<6.0.0",
+    "djangorestframework>=3.15.0",
+    "drf-spectacular>=0.27.0",
+    "django-cors-headers>=4.3.1",
+    
+    # Database
+    "psycopg2-binary>=2.9.9",
+    "django-redis>=5.4.0",
+    
+    # Data Validation
+    "pydantic>=2.5.0",
+    "jsonschema>=4.20.0",
+    "pyyaml>=6.0.1",
+    
+    # Security & Cryptography
+    "cryptography>=42.0.0",
+    "PyJWT>=2.8.0",
+    
+    # Versioning
+    "semver>=3.0.2",
+    
+    # Async & Task Queue
+    "redis>=5.0.1",
+    "celery>=5.3.4",
+    
+    # HTTP Client
+    "httpx>=0.26.0",
+    
+    # Utilities
+    "python-dateutil>=2.8.2",
+    "pytz>=2023.3",
+    "prometheus-client>=0.19.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Testing
+    "pytest>=8.0.0",
+    "pytest-django>=4.8.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.2",
+    "factory-boy>=3.3.0",
+    "faker>=22.0.0",
+    
+    # Code Quality
+    "black>=24.0.0",
+    "isort>=5.13.2",
+    "flake8>=7.0.0",
+    "mypy>=1.8.0",
+    "django-stubs>=4.2.7",
+    "djangorestframework-stubs>=3.14.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "saraise_backend*"]
+
+[tool.black]
+line-length = 120
+target-version = ["py310", "py311", "py312"]
+exclude = '''
+/(
+    \.git
+    | \.mypy_cache
+    | \.pytest_cache
+    | __pycache__
+    | venv
+    | htmlcov
+    | migrations
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 120
+skip = ["venv", "migrations"]
+
+[tool.mypy]
+python_version = "3.10"
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+ignore_missing_imports = true
+strict = false  # Gradually enable
+
+[tool.django-stubs]
+django_settings_module = "saraise_backend.settings"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "saraise_backend.settings"
+python_files = ["test_*.py"]
+testpaths = ["tests", "src"]
+addopts = "-v --cov=src --cov-report=term-missing --cov-fail-under=90"
+
