@@ -6,6 +6,7 @@
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { authService } from './auth-service';
+import { ENDPOINTS } from './auth-contracts';
 
 // Mock fetch globally
 const fetchMock = vi.fn();
@@ -106,8 +107,8 @@ describe('authService', () => {
       await authService.logout();
 
       expect(fetchMock).toHaveBeenCalled();
-      const callArgs = fetchMock.mock.calls[0];
-      expect(callArgs?.[0]).toContain('/api/v1/auth/logout/');
+      const callArgs = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(callArgs[0]).toContain(ENDPOINTS.LOGOUT);
       expect(callArgs?.[1]).toMatchObject({
         method: 'POST',
         credentials: 'include',
@@ -135,8 +136,8 @@ describe('authService', () => {
 
       expect(result).toEqual(mockUser);
       expect(fetchMock).toHaveBeenCalled();
-      const callArgs = fetchMock.mock.calls[0];
-      expect(callArgs?.[0]).toContain('/api/v1/auth/me/');
+      const callArgs = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(callArgs[0]).toContain(ENDPOINTS.ME);
       expect(callArgs?.[1]).toMatchObject({
         method: 'GET',
         credentials: 'include',
@@ -165,8 +166,8 @@ describe('authService', () => {
       await authService.refreshSession();
 
       expect(fetchMock).toHaveBeenCalled();
-      const callArgs = fetchMock.mock.calls[0];
-      expect(callArgs?.[0]).toContain('/api/v1/auth/refresh/');
+      const callArgs = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(callArgs[0]).toContain(ENDPOINTS.REFRESH);
       expect(callArgs?.[1]).toMatchObject({
         method: 'POST',
         credentials: 'include',

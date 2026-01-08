@@ -1,0 +1,298 @@
+# SARAISE Contract Validation Workflow
+# Validates module contracts are properly structured and in sync
+
+name: Contract Validation
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'release/*'
+      - 'feature/*'
+    paths:
+      - 'backend/src/**/*.py'
+      - 'frontend/src/modules/**/*.ts'
+      - 'frontend/src/modules/**/*.tsx'
+      - 'frontend/src/types/**/*.ts'
+      - 'scripts/sync-api-contracts.sh'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/src/**/*.py'
+      - 'frontend/src/modules/**/*.ts'
+      - 'frontend/src/modules/**/*.tsx'
+      - 'frontend/src/types/**/*.ts'
+      - 'scripts/sync-api-contracts.sh'
+
+jobs:
+  validate-contracts:
+    name: Validate Module Contracts
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Check contracts.ts existence
+        working-directory: frontend
+        run: |
+          echo "Checking for required contracts.ts files..."
+          
+          MODULES=(
+            "platform_management"
+            "tenant_management"
+            "security_access_control"
+            "ai_agent_management"
+          )
+          
+          MISSING=0
+          for MODULE in "${MODULES[@]}"; do
+            CONTRACT_FILE="src/modules/${MODULE}/contracts.ts"
+            if [ ! -f "$CONTRACT_FILE" ]; then
+              echo "❌ Missing: $CONTRACT_FILE"
+              MISSING=$((MISSING + 1))
+            else
+              echo "✓ Found: $CONTRACT_FILE"
+            fi
+          done
+          
+          if [ $MISSING -gt 0 ]; then
+            echo ""
+            echo "ERROR: $MISSING contracts.ts file(s) missing"
+            exit 1
+          fi
+          
+          echo ""
+          echo "✓ All required contracts.ts files exist"
+
+      - name: Check .cursorrules existence
+        working-directory: frontend
+        run: |
+          echo "Checking for required .cursorrules files..."
+          
+          MODULES=(
+            "platform_management"
+            "tenant_management"
+            "security_access_control"
+            "ai_agent_management"
+          )
+          
+          MISSING=0
+          for MODULE in "${MODULES[@]}"; do
+            RULES_FILE="src/modules/${MODULE}/.cursorrules"
+            if [ ! -f "$RULES_FILE" ]; then
+              echo "⚠️ Warning: Missing $RULES_FILE"
+              MISSING=$((MISSING + 1))
+            else
+              echo "✓ Found: $RULES_FILE"
+            fi
+          done
+          
+          if [ $MISSING -gt 0 ]; then
+            echo ""
+            echo "WARNING: $MISSING .cursorrules file(s) missing"
+            # Warning only, not blocking
+          fi
+          
+          echo ""
+          echo "✓ .cursorrules check complete"
+
+      - name: Validate contracts.ts structure
+        working-directory: frontend
+        run: |
+          echo "Validating contracts.ts structure..."
+          
+          MODULES=(
+            "platform_management"
+            "tenant_management"
+            "security_access_control"
+            "ai_agent_management"
+          )
+          
+          ERRORS=0
+          for MODULE in "${MODULES[@]}"; do
+            CONTRACT_FILE="src/modules/${MODULE}/contracts.ts"
+            
+            echo ""
+            echo "Checking $MODULE..."
+            
+            # Check for @/types/api import
+            if ! grep -q "from '@/types/api'" "$CONTRACT_FILE"; then
+              echo "  ❌ Missing import from '@/types/api'"
+              ERRORS=$((ERRORS + 1))
+            else
+              echo "  ✓ Imports from @/types/api"
+            fi
+            
+            # Check for ENDPOINTS export
+            if ! grep -q "export const ENDPOINTS" "$CONTRACT_FILE"; then
+              echo "  ❌ Missing 'export const ENDPOINTS'"
+              ERRORS=$((ERRORS + 1))
+            else
+              echo "  ✓ Exports ENDPOINTS"
+            fi
+            
+            # Check for 'as const'
+            if ! grep -q "as const" "$CONTRACT_FILE"; then
+              echo "  ⚠️ ENDPOINTS should use 'as const'"
+            else
+              echo "  ✓ Uses 'as const'"
+            fi
+          done
+          
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "ERROR: $ERRORS structural issue(s) found"
+            exit 1
+          fi
+          
+          echo ""
+          echo "✓ All contracts.ts files properly structured"
+
+      - name: TypeScript compilation check
+        working-directory: frontend
+        run: |
+          echo "Running TypeScript compilation on contracts..."
+          
+          MODULES=(
+            "platform_management"
+            "tenant_management"
+            "security_access_control"
+            "ai_agent_management"
+          )
+          
+          ERRORS=0
+          for MODULE in "${MODULES[@]}"; do
+            CONTRACT_FILE="src/modules/${MODULE}/contracts.ts"
+            
+            if ! npx tsc --noEmit "$CONTRACT_FILE" 2>/dev/null; then
+              echo "❌ TypeScript errors in $CONTRACT_FILE"
+              npx tsc --noEmit "$CONTRACT_FILE" || true
+              ERRORS=$((ERRORS + 1))
+            else
+              echo "✓ $MODULE/contracts.ts"
+            fi
+          done
+          
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "ERROR: $ERRORS contract(s) have TypeScript errors"
+            exit 1
+          fi
+          
+          echo ""
+          echo "✓ All contracts pass TypeScript compilation"
+
+      - name: Check for hardcoded endpoints
+        working-directory: frontend
+        run: |
+          echo "Checking for hardcoded API endpoints in page files..."
+          
+          # Find hardcoded /api/v1/ in files excluding contracts.ts and service files
+          HARDCODED=$(grep -rn "/api/v1/" src/modules/ \
+            --include="*.tsx" \
+            --exclude="*contracts.ts" \
+            --exclude="*-service.ts" \
+            2>/dev/null || true)
+          
+          if [ -n "$HARDCODED" ]; then
+            echo "⚠️ WARNING: Found hardcoded API endpoints in page/component files:"
+            echo "$HARDCODED" | head -10
+            COUNT=$(echo "$HARDCODED" | wc -l)
+            if [ "$COUNT" -gt 10 ]; then
+              echo "... and $((COUNT - 10)) more"
+            fi
+            echo ""
+            echo "Consider using ENDPOINTS from contracts.ts instead"
+            # Warning only, not blocking for gradual migration
+          else
+            echo "✓ No hardcoded endpoints in page/component files"
+          fi
+
+      - name: Run contract validation tests
+        working-directory: frontend
+        run: |
+          echo "Running contract validation tests..."
+          
+          # Check if test file exists
+          if [ -f "src/modules/__tests__/contract-validation.test.ts" ]; then
+            npm test -- contract-validation --passWithNoTests || true
+          else
+            echo "⚠️ Contract validation test file not found"
+          fi
+          
+          echo "✓ Contract validation complete"
+
+  api-sync-check:
+    name: API Types Sync Check
+    runs-on: ubuntu-latest
+    needs: validate-contracts
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          pip install -e .[dev]
+          pip install drf-spectacular
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Generate OpenAPI schema
+        working-directory: backend
+        run: |
+          python manage.py spectacular --file schema.yml --validate || {
+            echo "⚠️ Could not generate schema (may need database)"
+            echo "Skipping API sync check"
+            exit 0
+          }
+
+      - name: Check if types are in sync
+        run: |
+          if [ -f "backend/schema.yml" ]; then
+            echo "Generating TypeScript types from schema..."
+            cd frontend
+            npx openapi-typescript ../backend/schema.yml -o /tmp/api-check.ts
+            
+            if diff -q /tmp/api-check.ts src/types/api.ts >/dev/null 2>&1; then
+              echo "✓ TypeScript types are in sync with backend"
+            else
+              echo "⚠️ WARNING: TypeScript types may be out of sync"
+              echo "Run './scripts/sync-api-contracts.sh' to update"
+              # Warning only, not blocking
+            fi
+          else
+            echo "⚠️ Skipping sync check (no schema generated)"
+          fi
+

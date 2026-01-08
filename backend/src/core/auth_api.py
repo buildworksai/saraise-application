@@ -68,6 +68,9 @@ def login_view(request):
     # Login user (creates session)
     login(request, user)
     
+    # Ensure session is saved (important for cookie to be set)
+    request.session.save()
+    
     # Get user profile
     try:
         profile = user.profile
@@ -123,13 +126,10 @@ def logout_view(request):
 def current_user_view(request):
     """
     Get current authenticated user.
+    
+    Note: DRF's IsAuthenticated will return 403 if user is not authenticated.
+    This happens before this function is called, so if we reach here, user is authenticated.
     """
-    # Debug: Check authentication state
-    if not request.user or not request.user.is_authenticated:
-        return Response(
-            {'error': 'Not authenticated', 'user_type': str(type(request.user))},
-            status=status.HTTP_401_UNAUTHORIZED
-        )
 
     user = request.user
 
@@ -186,6 +186,11 @@ def register_view(request):
 
     Phase 7.5: In self-hosted mode, initializes 14-day trial on first registration.
     """
+    """
+    User registration endpoint.
+
+    Phase 7.5: In self-hosted mode, initializes 14-day trial on first registration.
+    """
     from django.conf import settings
     from src.core.licensing.models import Organization, License
     from src.core.licensing.services import LicenseService
@@ -222,8 +227,8 @@ def register_view(request):
         password=password,
     )
     
-    # Create user profile
-    profile = UserProfile.objects.create(user=user)
+    # Create user profile (get_or_create to handle edge cases)
+    profile, _ = UserProfile.objects.get_or_create(user=user)
     
     # Phase 7.5: Initialize trial if this is the first registration (self-hosted mode)
     if mode == 'self-hosted':

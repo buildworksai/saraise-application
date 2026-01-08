@@ -102,6 +102,8 @@ services:
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
       - DEBUG=True
       - ALLOWED_HOSTS=localhost,backend,0.0.0.0
+      - SARAISE_MODE=${SARAISE_MODE:-self-hosted}
+      - SARAISE_LICENSE_MODE=${SARAISE_LICENSE_MODE:-connected}
     ports:
       - "28000:8000"  # Application: 2xxxx (fixed port)
     volumes:
@@ -131,7 +133,7 @@ services:
         reservations:
           memory: 128M
     environment:
-      - VITE_API_BASE_URL=http://localhost:28000
+      - VITE_API_BASE_URL=/api  # Use Vite proxy for same-origin requests (session cookies work)
       - NODE_ENV=development
     ports:
       - "25173:5173"  # Application: 2xxxx (fixed port)

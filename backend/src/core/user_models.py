@@ -97,13 +97,24 @@ class UserProfile(models.Model):
             errors["tenant_id"] = "tenant_id is required for tenant-scoped users."
 
         # If tenant_id is present, it must reference an existing Tenant row
+        # Exception: In self-hosted mode, tenant_id may reference Organization.id
         if self.tenant_id:
             try:
-                from src.modules.tenant_management.models import Tenant  # local import to avoid hard dependency at import time
-                if not Tenant.objects.filter(id=self.tenant_id).exists():
-                    errors["tenant_id"] = f"tenant_id '{self.tenant_id}' does not reference an existing tenant."
+                from django.conf import settings
+                mode = getattr(settings, 'SARAISE_MODE', 'development')
+                
+                # In self-hosted mode, tenant_id can reference Organization
+                if mode == 'self-hosted':
+                    from src.core.licensing.models import Organization
+                    if not Organization.objects.filter(id=self.tenant_id).exists():
+                        errors["tenant_id"] = f"tenant_id '{self.tenant_id}' does not reference an existing organization in self-hosted mode."
+                else:
+                    # In SaaS mode, tenant_id must reference Tenant
+                    from src.modules.tenant_management.models import Tenant
+                    if not Tenant.objects.filter(id=self.tenant_id).exists():
+                        errors["tenant_id"] = f"tenant_id '{self.tenant_id}' does not reference an existing tenant."
             except Exception as e:
-                errors["tenant_id"] = f"Unable to validate tenant_id against tenant registry: {e}"
+                errors["tenant_id"] = f"Unable to validate tenant_id: {e}"
 
         if errors:
             raise ValidationError(errors)

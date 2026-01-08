@@ -22,7 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Mode determines authentication, tenant handling, and license behavior
 # Valid values: 'development', 'self-hosted', 'saas'
 SARAISE_MODE: Literal['development', 'self-hosted', 'saas'] = os.getenv(
-    'SARAISE_MODE', 'development'
+    'SARAISE_MODE', 'self-hosted'  # Default to self-hosted for production readiness
 )
 
 # Self-hosted license mode (only applicable when SARAISE_MODE='self-hosted')
@@ -155,8 +155,15 @@ SESSION_ENGINE = 'django.contrib.sessions.backends.db'
 SESSION_COOKIE_NAME = 'saraise_sessionid'
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
-SESSION_COOKIE_SAMESITE = 'Lax'
+# CRITICAL: For cross-origin requests (different ports on localhost), we need None
+# Modern browsers allow SameSite=None with Secure=False for localhost in development
+# In production with HTTPS, this should be 'None' with Secure=True
+# CRITICAL: Use 'Lax' now that frontend uses Vite proxy (same-origin requests)
+# The Vite dev server proxies /api/* to backend, making requests same-origin
+SESSION_COOKIE_SAMESITE = 'Lax'  # Works with Vite proxy (same-origin)
 SESSION_COOKIE_AGE = 86400  # 24 hours
+# CRITICAL: Don't set SESSION_COOKIE_DOMAIN for localhost (allows cross-port cookies)
+SESSION_COOKIE_DOMAIN = None
 
 # CORS configuration
 # Application frontend: 25173 (2xxxx port convention)

@@ -1,0 +1,103 @@
+# Tenant Management Module - Cursor Rules
+# These rules are automatically applied when editing files in this directory
+
+# =============================================================================
+# CRITICAL: PLATFORM-LEVEL MODULE
+# =============================================================================
+#
+# This is a PLATFORM-LEVEL module. Only platform owners can access these endpoints.
+# All operations manage tenants across the entire platform.
+
+# =============================================================================
+# CRITICAL: Read contracts.ts FIRST
+# =============================================================================
+#
+# Before modifying any file in this module, you MUST read:
+#   frontend/src/modules/tenant_management/contracts.ts
+#
+# This file contains:
+# - All TypeScript types for this module
+# - All API endpoint URLs
+# - Type guards for runtime checking
+# - Usage examples
+
+# =============================================================================
+# TYPE IMPORTS
+# =============================================================================
+#
+# ✅ CORRECT: Import types from contracts.ts
+#   import { Tenant, TenantModule, TenantStatus, ENDPOINTS } from './contracts';
+#   import type { TenantCreate, TenantUpdate } from './contracts';
+#
+# ❌ FORBIDDEN: Import directly from @/types/api in pages/components
+#   import type { components } from '@/types/api';
+#
+# ❌ FORBIDDEN: Define ad-hoc types in page files
+#   interface Tenant { id: string; name: string; } // DON'T DO THIS
+
+# =============================================================================
+# ENDPOINT USAGE
+# =============================================================================
+#
+# ✅ CORRECT: Use ENDPOINTS constant
+#   apiClient.get<Tenant[]>(ENDPOINTS.TENANTS.LIST);
+#   apiClient.get<Tenant>(ENDPOINTS.TENANTS.DETAIL(id));
+#   apiClient.post<ActionResponse>(ENDPOINTS.TENANTS.SUSPEND(id));
+#
+# ❌ FORBIDDEN: Hardcode URL strings
+#   apiClient.get('/api/v1/tenant-management/tenants/');
+
+# =============================================================================
+# API CLIENT USAGE
+# =============================================================================
+#
+# ✅ CORRECT: Always specify generic type parameter
+#   apiClient.get<Tenant[]>(ENDPOINTS.TENANTS.LIST);
+#   apiClient.post<ActionResponse>(ENDPOINTS.TENANTS.SUSPEND(id));
+#
+# ❌ FORBIDDEN: Omit generic type or use any
+#   apiClient.get(ENDPOINTS.TENANTS.LIST);
+#   apiClient.post<any>(ENDPOINTS.TENANTS.SUSPEND(id));
+
+# =============================================================================
+# QUERY PARAMETER HANDLING
+# =============================================================================
+#
+# When building URLs with query parameters:
+#
+# ✅ CORRECT: Use URLSearchParams
+#   const params = new URLSearchParams();
+#   if (status) params.append('status', status);
+#   const url = `${ENDPOINTS.TENANTS.LIST}?${params.toString()}`;
+#
+# ❌ FORBIDDEN: Manual string concatenation
+#   const url = ENDPOINTS.TENANTS.LIST + '?status=' + status;
+
+# =============================================================================
+# VALIDATION CHECKPOINTS
+# =============================================================================
+#
+# After editing any TypeScript file in this module:
+# 1. Run: npx tsc --noEmit src/modules/tenant_management/{file}.tsx
+# 2. Run: npx eslint src/modules/tenant_management/{file}.tsx --max-warnings 0
+# 3. Fix ALL errors before proceeding
+
+# =============================================================================
+# SERVICE FILE RULES
+# =============================================================================
+#
+# The service file (services/tenant-service.ts) should:
+# 1. Import types from ../contracts, not define its own
+# 2. Use ENDPOINTS from ../contracts for all API calls
+# 3. Return typed responses (not undefined unless intentional)
+#
+# Example:
+#   import { Tenant, TenantCreate, ENDPOINTS, ActionResponse } from '../contracts';
+#   
+#   export const tenantService = {
+#     tenants: {
+#       list: () => apiClient.get<Tenant[]>(ENDPOINTS.TENANTS.LIST),
+#       suspend: (id: string) => apiClient.post<ActionResponse>(ENDPOINTS.TENANTS.SUSPEND(id)),
+#     },
+#   };
+

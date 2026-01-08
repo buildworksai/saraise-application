@@ -17,7 +17,11 @@ export class ApiClient {
   private readonly baseUrl: string;
 
   constructor(options: ApiClientOptions = {}) {
-    this.baseUrl = options.baseUrl ?? (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:28000'); // Application backend port: 2xxxx
+    // CRITICAL: Use relative path '/api' to leverage Vite proxy for same-origin requests
+    // This ensures session cookies work correctly (SameSite=Lax instead of SameSite=None)
+    // The Vite dev server proxies /api/* to http://localhost:28000/api/*
+    // In production, this should be configured via nginx or similar
+    this.baseUrl = options.baseUrl ?? (import.meta.env.VITE_API_BASE_URL ?? '/api');
   }
 
   /**

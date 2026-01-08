@@ -108,6 +108,50 @@ Full rules are in `saraise-documentation/rules/`.
 | Full-stack modules | Backend + Frontend + Tests required |
 | Test coverage | ≥90% with isolation tests |
 | Quality gates | Pre-commit hooks MUST pass |
+| Module contracts | ALL modules have `contracts.ts` |
+| Endpoint registry | Use ENDPOINTS constant, NO hardcoded URLs |
+
+---
+
+## Module Contracts Architecture (CRITICAL for AI Agents)
+
+**Every frontend module MUST have a `contracts.ts` file.**
+
+```
+frontend/src/modules/{module_name}/
+├── contracts.ts          # REQUIRED - Types & Endpoints
+├── .cursorrules          # REQUIRED - Module-specific rules
+├── pages/
+├── components/
+└── services/
+```
+
+### Before Writing Frontend Code
+
+1. **Read `contracts.ts` FIRST** — Contains all types and endpoints
+2. **Import types from `contracts.ts`** — NOT from `@/types/api`
+3. **Use `ENDPOINTS` constant** — NO hardcoded URL strings
+
+### Example Usage
+
+```typescript
+// ✅ CORRECT
+import { PlatformSetting, ENDPOINTS } from '../contracts';
+const settings = await apiClient.get<PlatformSetting[]>(ENDPOINTS.SETTINGS.LIST);
+
+// ❌ FORBIDDEN
+const settings = await apiClient.get('/api/v1/platform/settings/');
+```
+
+### Validation Checkpoints
+
+After editing TypeScript files:
+```bash
+cd frontend && npx tsc --noEmit src/modules/{path}.tsx
+npx eslint src/modules/{path}.tsx --max-warnings 0
+```
+
+See `saraise-documentation/rules/agent-rules/27-contracts-architecture.md` for full details
 
 ---
 

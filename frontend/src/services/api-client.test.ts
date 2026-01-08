@@ -30,9 +30,9 @@ describe('ApiClient', () => {
     expect(result.ok).toBe(true);
     // Check that fetch was called with correct base URL and credentials
     expect(fetchMock).toHaveBeenCalled();
-    const callArgs = fetchMock.mock.calls[0];
-    expect(callArgs?.[0]).toBe('https://example.test/ping');
-    expect(callArgs?.[1]).toMatchObject({
+    const callArgs = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(callArgs[0]).toBe('https://example.test/ping');
+    expect(callArgs[1]).toMatchObject({
       method: 'GET',
       credentials: 'include',
     });

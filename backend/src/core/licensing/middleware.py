@@ -48,6 +48,11 @@ class LicenseValidationMiddleware:
             return self.get_response(request)
         
         if not license:
+            # Allow auth endpoints even without license (for registration)
+            # CRITICAL: /api/v1/auth/me/ must always be allowed, as it's used
+            # by the frontend to verify authentication status
+            if request.path.startswith('/api/v1/auth/'):
+                return self.get_response(request)
             return JsonResponse({
                 'error': 'no_license',
                 'message': 'No license configured. Please register to start trial.',

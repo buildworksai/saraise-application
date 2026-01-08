@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { platformService } from './platform-service';
 import { apiClient } from '@/services/api-client';
+import { ENDPOINTS } from '../contracts';
 
 // Mock apiClient
 vi.mock('@/services/api-client', () => ({
@@ -32,7 +33,7 @@ describe('platformService', () => {
 
       const result = await platformService.settings.list();
 
-      expect(apiGet).toHaveBeenCalledWith('/api/v1/platform/settings/');
+      expect(apiGet).toHaveBeenCalledWith(ENDPOINTS.SETTINGS.LIST);
       expect(result).toEqual(mockSettings);
     });
 
@@ -43,7 +44,7 @@ describe('platformService', () => {
 
       const result = await platformService.settings.get('1');
 
-      expect(apiGet).toHaveBeenCalledWith('/api/v1/platform/settings/1/');
+      expect(apiGet).toHaveBeenCalledWith(ENDPOINTS.SETTINGS.DETAIL('1'));
       expect(result).toEqual(mockSetting);
     });
   });
@@ -69,8 +70,8 @@ describe('platformService', () => {
 
       const result = await platformService.health.getCurrent();
 
-      expect(apiGet).toHaveBeenCalledWith('/api/v1/platform/health/summary/');
-      expect(apiGet).toHaveBeenCalledWith('/api/v1/platform/health/');
+      expect(apiGet).toHaveBeenCalledWith(ENDPOINTS.HEALTH.SUMMARY);
+      expect(apiGet).toHaveBeenCalledWith(ENDPOINTS.HEALTH.LIST);
       expect(result.status).toEqual('healthy');
     });
   });
@@ -83,7 +84,8 @@ describe('platformService', () => {
 
       const result = await platformService.metrics.getCurrent('30d', 'complete');
 
-      expect(apiGet).toHaveBeenCalledWith('/api/v1/platform/metrics/current/?time_range=30d&metric_type=complete');
+      const expectedUrl = `${ENDPOINTS.METRICS.CURRENT}?time_range=30d&metric_type=complete`;
+      expect(apiGet).toHaveBeenCalledWith(expectedUrl);
       expect(result).toEqual(mockMetrics.metrics_data);
     });
   });

@@ -1,0 +1,127 @@
+# AI Agent Management Module - Cursor Rules
+# These rules are automatically applied when editing files in this directory
+
+# =============================================================================
+# MODULE OVERVIEW
+# =============================================================================
+#
+# This module manages AI agents, their executions, approvals, and tools.
+# Key entities: Agent, AgentExecution, ApprovalRequest, Tool, SoDPolicy
+
+# =============================================================================
+# CRITICAL: Read contracts.ts FIRST
+# =============================================================================
+#
+# Before modifying any file in this module, you MUST read:
+#   frontend/src/modules/ai_agent_management/contracts.ts
+#
+# This file contains:
+# - All TypeScript types for this module
+# - All API endpoint URLs
+# - Type guards for runtime checking
+# - Usage examples
+
+# =============================================================================
+# TYPE IMPORTS
+# =============================================================================
+#
+# ✅ CORRECT: Import types from contracts.ts
+#   import { Agent, AgentExecution, ApprovalRequest, ENDPOINTS } from './contracts';
+#   import type { AgentRequest, ExecutionState, ApprovalStatus } from './contracts';
+#
+# ❌ FORBIDDEN: Import directly from @/types/api in pages/components
+#   import type { components } from '@/types/api';
+#
+# ❌ FORBIDDEN: Define ad-hoc types in page files
+#   interface Agent { id: string; name: string; } // DON'T DO THIS
+
+# =============================================================================
+# ENDPOINT USAGE
+# =============================================================================
+#
+# ✅ CORRECT: Use ENDPOINTS constant
+#   apiClient.get<Agent[]>(ENDPOINTS.AGENTS.LIST);
+#   apiClient.post<AgentActionResponse>(ENDPOINTS.AGENTS.EXECUTE(id));
+#   apiClient.post<ApprovalActionResponse>(ENDPOINTS.APPROVALS.APPROVE(id));
+#
+# ❌ FORBIDDEN: Hardcode URL strings
+#   apiClient.get('/api/v1/ai-agents/agents/');
+#   apiClient.post('/api/v1/ai-agents/agents/' + id + '/execute/');
+
+# =============================================================================
+# API CLIENT USAGE
+# =============================================================================
+#
+# ✅ CORRECT: Always specify generic type parameter
+#   apiClient.get<Agent[]>(ENDPOINTS.AGENTS.LIST);
+#   apiClient.post<Agent>(ENDPOINTS.AGENTS.CREATE, agentData);
+#   apiClient.post<AgentActionResponse>(ENDPOINTS.AGENTS.EXECUTE(id), { task_definition });
+#
+# ❌ FORBIDDEN: Omit generic type or use any
+#   apiClient.get(ENDPOINTS.AGENTS.LIST);
+#   apiClient.post<any>(ENDPOINTS.AGENTS.EXECUTE(id));
+
+# =============================================================================
+# STATE MANAGEMENT
+# =============================================================================
+#
+# Agent executions have states that transition:
+#   created → validated → running → completed
+#                      ↓           ↓
+#                   paused      failed
+#                      ↓           ↓
+#                   running    terminated
+#
+# Use type guards to validate states:
+#   import { isExecutionState, isApprovalStatus } from './contracts';
+#   if (isExecutionState(state)) { /* safe to use */ }
+
+# =============================================================================
+# APPROVAL WORKFLOW
+# =============================================================================
+#
+# Approval requests require human-in-the-loop:
+# 1. Tool invocation requests approval
+# 2. User reviews and approves/rejects
+# 3. Agent continues or handles rejection
+#
+# Approval statuses: pending → approved | rejected | expired | cancelled
+#
+# Use ENDPOINTS.APPROVALS.APPROVE(id) and ENDPOINTS.APPROVALS.REJECT(id)
+
+# =============================================================================
+# VALIDATION CHECKPOINTS
+# =============================================================================
+#
+# After editing any TypeScript file in this module:
+# 1. Run: npx tsc --noEmit src/modules/ai_agent_management/{file}.tsx
+# 2. Run: npx eslint src/modules/ai_agent_management/{file}.tsx --max-warnings 0
+# 3. Fix ALL errors before proceeding
+
+# =============================================================================
+# SERVICE FILE RULES
+# =============================================================================
+#
+# The service file (services/ai-agent-service.ts) should:
+# 1. Import types from ../contracts, not define its own
+# 2. Use ENDPOINTS from ../contracts for all API calls
+# 3. Handle agent action responses appropriately
+#
+# Example:
+#   import { 
+#     Agent, AgentRequest, AgentExecution, 
+#     ApprovalRequest, ENDPOINTS, AgentActionResponse 
+#   } from '../contracts';
+#   
+#   export const aiAgentService = {
+#     agents: {
+#       list: () => apiClient.get<Agent[]>(ENDPOINTS.AGENTS.LIST),
+#       execute: (id: string, task: unknown) => 
+#         apiClient.post<AgentActionResponse>(ENDPOINTS.AGENTS.EXECUTE(id), { task_definition: task }),
+#     },
+#     approvals: {
+#       approve: (id: string) => 
+#         apiClient.post<ApprovalActionResponse>(ENDPOINTS.APPROVALS.APPROVE(id)),
+#     },
+#   };
+
