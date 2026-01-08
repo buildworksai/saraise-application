@@ -175,16 +175,21 @@ jobs:
             "ai_agent_management"
           )
           
+          # Run full project TypeScript check and filter for contract file errors
+          echo "Running full project TypeScript compilation..."
+          TSC_OUTPUT=$(npx tsc --noEmit -p tsconfig.json 2>&1 || true)
+          
           ERRORS=0
           for MODULE in "${MODULES[@]}"; do
             CONTRACT_FILE="src/modules/${MODULE}/contracts.ts"
             
-            if ! npx tsc --noEmit "$CONTRACT_FILE" 2>/dev/null; then
+            # Check if errors are in this contract file
+            if echo "$TSC_OUTPUT" | grep -q "$CONTRACT_FILE.*error TS"; then
               echo "❌ TypeScript errors in $CONTRACT_FILE"
-              npx tsc --noEmit "$CONTRACT_FILE" || true
+              echo "$TSC_OUTPUT" | grep "$CONTRACT_FILE" || true
               ERRORS=$((ERRORS + 1))
             else
-              echo "✓ $MODULE/contracts.ts"
+              echo "✓ $MODULE/contracts.ts (no errors in this file)"
             fi
           done
           
