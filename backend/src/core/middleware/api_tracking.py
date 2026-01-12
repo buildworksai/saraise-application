@@ -9,7 +9,6 @@ This middleware records request counts, response times, and error rates.
 
 import logging
 import time
-from typing import Callable
 
 from django.core.cache import cache
 from django.utils.deprecation import MiddlewareMixin

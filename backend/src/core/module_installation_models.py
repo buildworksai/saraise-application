@@ -7,10 +7,8 @@ Task: 502.1 - Module Installation
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, Optional
 
 from django.db import models
-from django.utils import timezone
 
 
 def generate_uuid():
