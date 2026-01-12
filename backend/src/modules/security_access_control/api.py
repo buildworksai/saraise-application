@@ -7,43 +7,44 @@ CRITICAL: This module manages RBAC data models.
 Policy Engine evaluates permissions at runtime.
 """
 
-from rest_framework import viewsets, status
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import NotFound, ValidationError
 import uuid
+
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 from src.core.auth_utils import get_user_tenant_id
 
 from .models import (
-    Role,
-    Permission,
-    RolePermission,
-    UserRole,
-    PermissionSet,
-    UserPermissionSet,
     FieldSecurity,
+    Permission,
+    PermissionSet,
+    Role,
+    RolePermission,
     RowSecurityRule,
-    SecurityProfile,
     SecurityAuditLog,
+    SecurityProfile,
+    UserPermissionSet,
+    UserRole,
 )
 from .serializers import (
-    RoleSerializer,
-    RoleCreateSerializer,
-    PermissionSerializer,
-    RolePermissionSerializer,
-    UserRoleSerializer,
-    PermissionSetSerializer,
-    PermissionSetCreateSerializer,
-    UserPermissionSetSerializer,
-    FieldSecuritySerializer,
     FieldSecurityCreateSerializer,
-    RowSecurityRuleSerializer,
+    FieldSecuritySerializer,
+    PermissionSerializer,
+    PermissionSetCreateSerializer,
+    PermissionSetSerializer,
+    RoleCreateSerializer,
+    RolePermissionSerializer,
+    RoleSerializer,
     RowSecurityRuleCreateSerializer,
-    SecurityProfileSerializer,
-    SecurityProfileCreateSerializer,
+    RowSecurityRuleSerializer,
     SecurityAuditLogSerializer,
+    SecurityProfileCreateSerializer,
+    SecurityProfileSerializer,
+    UserPermissionSetSerializer,
+    UserRoleSerializer,
 )
 from .services import SecurityAccessControlService
 
@@ -189,9 +190,7 @@ class RoleViewSet(viewsets.ModelViewSet):
         try:
             permission = Permission.objects.get(id=permission_id)
         except Permission.DoesNotExist:
-            return Response(
-                {"error": "Permission not found"}, status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Permission not found"}, status=status.HTTP_404_NOT_FOUND)
 
         role_permission, created = RolePermission.objects.get_or_create(
             role=role, permission=permission, defaults={"is_granted": is_granted}
@@ -380,9 +379,7 @@ class UserPermissionSetViewSet(viewsets.ModelViewSet):
 
         try:
             tenant_id = uuid.UUID(tenant_id_str)
-            queryset = UserPermissionSet.objects.filter(
-                permission_set__tenant_id=tenant_id
-            )
+            queryset = UserPermissionSet.objects.filter(permission_set__tenant_id=tenant_id)
         except (ValueError, TypeError):
             return UserPermissionSet.objects.none()
 

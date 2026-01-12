@@ -22,7 +22,7 @@ describe('Skeleton', () => {
   it('should render with different sizes', () => {
     const { container: container1 } = render(<Skeleton className="h-4 w-4" />);
     const { container: container2 } = render(<Skeleton className="h-8 w-8" />);
-    
+
     expect(container1.querySelector('.h-4')).toBeInTheDocument();
     expect(container2.querySelector('.h-8')).toBeInTheDocument();
   });
@@ -59,4 +59,3 @@ describe('ChartSkeleton', () => {
     expect(skeleton).toBeInTheDocument();
   });
 });
-

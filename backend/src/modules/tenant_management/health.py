@@ -4,10 +4,10 @@ Tenant Management Health Check.
 Health check endpoint for Tenant Management module.
 """
 
+from django.core.cache import cache
+from django.db import connection
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from django.db import connection
-from django.core.cache import cache
 
 from .models import Tenant
 
@@ -49,9 +49,7 @@ def health_check(request):
     # Check tenant statistics
     try:
         total_tenants = Tenant.objects.count()
-        active_tenants = Tenant.objects.filter(
-            status=Tenant.TenantStatus.ACTIVE
-        ).count()
+        active_tenants = Tenant.objects.filter(status=Tenant.TenantStatus.ACTIVE).count()
         trial_tenants = Tenant.objects.filter(status=Tenant.TenantStatus.TRIAL).count()
 
         health_status["checks"]["tenants"] = {

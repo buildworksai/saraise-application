@@ -7,12 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from ..tool_registry import (
-    ToolRegistry,
-    ToolDefinition,
-    ToolSchema,
-    ToolSideEffectClass,
-)
+from ..tool_registry import ToolDefinition, ToolRegistry, ToolSchema, ToolSideEffectClass
 
 
 class TestToolRegistry:
@@ -94,14 +89,10 @@ class TestToolRegistry:
         assert registry.validate_input("test_tool", {"input": "test"}) is True
 
         # Invalid input (missing required field)
-        assert (
-            registry.validate_input("test_tool", {}) is False
-        )
+        assert registry.validate_input("test_tool", {}) is False
 
         # Invalid input (wrong type)
-        assert (
-            registry.validate_input("test_tool", {"input": 123}) is False
-        )
+        assert registry.validate_input("test_tool", {"input": 123}) is False
 
     def test_validate_output(self) -> None:
         """Test output validation."""
@@ -125,14 +116,10 @@ class TestToolRegistry:
         registry.register_tool(tool)
 
         # Valid output
-        assert (
-            registry.validate_output("test_tool", {"output": "test"}) is True
-        )
+        assert registry.validate_output("test_tool", {"output": "test"}) is True
 
         # Invalid output (wrong type)
-        assert (
-            registry.validate_output("test_tool", {"output": 123}) is False
-        )
+        assert registry.validate_output("test_tool", {"output": 123}) is False
 
     def test_list_tools(self) -> None:
         """Test listing tools."""
@@ -142,8 +129,14 @@ class TestToolRegistry:
             name="tool1",
             owning_module="module1",
             required_permissions=["perm1"],
-            input_schema=ToolSchema(type="object"),
-            output_schema=ToolSchema(type="object"),
+            input_schema=ToolSchema(
+                type="object",
+                properties={"input": {"type": "string"}},
+            ),
+            output_schema=ToolSchema(
+                type="object",
+                properties={"output": {"type": "string"}},
+            ),
             side_effect_class=ToolSideEffectClass.READ_ONLY,
         )
 
@@ -151,8 +144,14 @@ class TestToolRegistry:
             name="tool2",
             owning_module="module2",
             required_permissions=["perm2"],
-            input_schema=ToolSchema(type="object"),
-            output_schema=ToolSchema(type="object"),
+            input_schema=ToolSchema(
+                type="object",
+                properties={"input": {"type": "string"}},
+            ),
+            output_schema=ToolSchema(
+                type="object",
+                properties={"output": {"type": "string"}},
+            ),
             side_effect_class=ToolSideEffectClass.DATA_MUTATION,
         )
 
@@ -169,9 +168,7 @@ class TestToolRegistry:
         assert module1_tools[0].name == "tool1"
 
         # Filter by side-effect class
-        read_only_tools = registry.list_tools(
-            side_effect_class=ToolSideEffectClass.READ_ONLY
-        )
+        read_only_tools = registry.list_tools(side_effect_class=ToolSideEffectClass.READ_ONLY)
         assert len(read_only_tools) == 1
         assert read_only_tools[0].name == "tool1"
 
@@ -183,8 +180,14 @@ class TestToolRegistry:
             name="tool1",
             owning_module="module1",
             required_permissions=["perm1"],
-            input_schema=ToolSchema(type="object"),
-            output_schema=ToolSchema(type="object"),
+            input_schema=ToolSchema(
+                type="object",
+                properties={"input": {"type": "string"}},
+            ),
+            output_schema=ToolSchema(
+                type="object",
+                properties={"output": {"type": "string"}},
+            ),
             side_effect_class=ToolSideEffectClass.READ_ONLY,
         )
 
@@ -192,8 +195,14 @@ class TestToolRegistry:
             name="tool2",
             owning_module="module1",
             required_permissions=["perm2"],
-            input_schema=ToolSchema(type="object"),
-            output_schema=ToolSchema(type="object"),
+            input_schema=ToolSchema(
+                type="object",
+                properties={"input": {"type": "string"}},
+            ),
+            output_schema=ToolSchema(
+                type="object",
+                properties={"output": {"type": "string"}},
+            ),
             side_effect_class=ToolSideEffectClass.READ_ONLY,
         )
 
@@ -212,8 +221,14 @@ class TestToolRegistry:
             name="test_tool",
             owning_module="test_module",
             required_permissions=["test.permission"],
-            input_schema=ToolSchema(type="object"),
-            output_schema=ToolSchema(type="object"),
+            input_schema=ToolSchema(
+                type="object",
+                properties={"input": {"type": "string"}},
+            ),
+            output_schema=ToolSchema(
+                type="object",
+                properties={"output": {"type": "string"}},
+            ),
             side_effect_class=ToolSideEffectClass.READ_ONLY,
         )
 
@@ -222,4 +237,3 @@ class TestToolRegistry:
 
         registry.unregister_tool("test_tool")
         assert registry.get_tool("test_tool") is None
-

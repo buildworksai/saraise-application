@@ -13,6 +13,27 @@ export default {
         ring: 'hsl(var(--ring))',
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
+        // SARAISE Brand Colors
+        deepBlue: {
+          DEFAULT: '#1565C0',
+          dark: '#0D47A1',
+          light: '#42A5F5',
+        },
+        teal: {
+          DEFAULT: '#00ACC1',
+          dark: '#0097A7',
+          light: '#4DD0E1',
+        },
+        gold: {
+          DEFAULT: '#FF8F00',
+          dark: '#F57C00',
+          light: '#FFB74D',
+        },
+        green: {
+          DEFAULT: '#388E3C',
+          dark: '#2E7D32',
+          light: '#66BB6A',
+        },
         primary: {
           main: '#1565C0',
           dark: '#0D47A1',
@@ -55,12 +76,16 @@ export default {
           '0%': { opacity: '0', transform: 'translateY(10px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
+        'pulse-slow': {
+          '0%, 100%': { opacity: '0.4', transform: 'scale(1)' },
+          '50%': { opacity: '0.6', transform: 'scale(1.05)' },
+        },
       },
       animation: {
         'fade-in': 'fade-in 0.3s ease-out',
+        'pulse-slow': 'pulse-slow 4s ease-in-out infinite',
       },
     },
   },
   plugins: [],
 }
-

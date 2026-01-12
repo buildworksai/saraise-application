@@ -8,26 +8,27 @@ Reference: saraise-documentation/rules/compliance-enforcement.md
 Rule: ALL tenant-scoped queries MUST filter by tenant_id
 """
 
-import pytest
-from rest_framework.test import APIClient
-from rest_framework import status
-from django.contrib.auth import get_user_model
-from django.utils import timezone
 import uuid
 from datetime import timedelta
 
-from ..models import (
-    Agent,
-    AgentExecution,
-    AgentSchedulerTask,
-    AgentLifecycleState,
-    AgentIdentityType,
-)
-from ..approval_models import ApprovalRequest, SoDPolicy, SoDViolation, ApprovalStatus
-from ..quota_models import TenantQuota, QuotaUsage, QuotaType, QuotaPeriod
+import pytest
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.test import APIClient
+
+from ..approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy, SoDViolation
+from ..models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState, AgentSchedulerTask
+from ..quota_models import QuotaPeriod, QuotaType, QuotaUsage, TenantQuota
 from ..tool_models import Tool, ToolInvocation
 
 User = get_user_model()
+
+
+@pytest.fixture(autouse=True)
+def override_saraise_mode(settings):
+    """Force development mode for tests to bypass licensing."""
+    settings.SARAISE_MODE = "development"
 
 
 @pytest.fixture
@@ -39,8 +40,9 @@ def api_client():
 @pytest.fixture
 def tenant_a_user(db):
     """Create user for tenant A."""
-    from src.core.user_models import UserProfile
     from unittest.mock import patch
+
+    from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
     user = User.objects.create_user(
@@ -66,8 +68,9 @@ def tenant_a_user(db):
 @pytest.fixture
 def tenant_b_user(db):
     """Create user for tenant B."""
-    from src.core.user_models import UserProfile
     from unittest.mock import patch
+
+    from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
     user = User.objects.create_user(
@@ -97,9 +100,7 @@ class TestAgentTenantIsolation:
     These tests verify that tenants cannot access each other's agents.
     """
 
-    def test_user_cannot_list_other_tenant_agents(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_list_other_tenant_agents(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User sees only their tenant's agents in list."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -136,20 +137,14 @@ class TestAgentTenantIsolation:
         response = api_client.get("/api/v1/ai-agents/agents/")
 
         assert response.status_code == status.HTTP_200_OK
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         agent_ids = [a["id"] for a in data]
 
         # User A should see tenant A's agent, but NOT tenant B's agent
         assert agent_a.id in agent_ids
         assert agent_b.id not in agent_ids
 
-    def test_user_cannot_access_other_tenant_agent(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_access_other_tenant_agent(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot GET other tenant's agent by ID."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -175,9 +170,7 @@ class TestAgentTenantIsolation:
         # MUST return 404 (not 403) to hide existence
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    def test_user_cannot_update_other_tenant_agent(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_update_other_tenant_agent(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot PUT/PATCH other tenant's agent."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -210,9 +203,7 @@ class TestAgentTenantIsolation:
         other_agent.refresh_from_db()
         assert other_agent.name == "Original Name"
 
-    def test_user_cannot_delete_other_tenant_agent(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_delete_other_tenant_agent(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot DELETE other tenant's agent."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -240,9 +231,7 @@ class TestAgentTenantIsolation:
         # Verify agent still exists
         assert Agent.objects.filter(id=other_agent.id).exists()
 
-    def test_user_cannot_execute_other_tenant_agent(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_execute_other_tenant_agent(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot execute other tenant's agent."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -278,9 +267,7 @@ class TestAgentExecutionTenantIsolation:
     CRITICAL: Tenant isolation tests for AgentExecution model.
     """
 
-    def test_user_cannot_list_other_tenant_executions(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_list_other_tenant_executions(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User sees only their tenant's executions."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -329,19 +316,13 @@ class TestAgentExecutionTenantIsolation:
         response = api_client.get("/api/v1/ai-agents/executions/")
 
         assert response.status_code == status.HTTP_200_OK
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         execution_ids = [e["id"] for e in data]
 
         assert execution_a.id in execution_ids
         assert execution_b.id not in execution_ids
 
-    def test_user_cannot_access_other_tenant_execution(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_access_other_tenant_execution(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot GET other tenant's execution."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -367,9 +348,7 @@ class TestAgentExecutionTenantIsolation:
         # Login as tenant A
         api_client.force_authenticate(user=tenant_a_user)
 
-        response = api_client.get(
-            f"/api/v1/ai-agents/executions/{other_execution.id}/"
-        )
+        response = api_client.get(f"/api/v1/ai-agents/executions/{other_execution.id}/")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -380,9 +359,7 @@ class TestToolTenantIsolation:
     CRITICAL: Tenant isolation tests for Tool model.
     """
 
-    def test_user_cannot_list_other_tenant_tools(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_list_other_tenant_tools(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User sees only their tenant's tools."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -418,19 +395,13 @@ class TestToolTenantIsolation:
         response = api_client.get("/api/v1/ai-agents/tools/")
 
         assert response.status_code == status.HTTP_200_OK
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         tool_ids = [t["id"] for t in data]
 
         assert tool_a.id in tool_ids
         assert tool_b.id not in tool_ids
 
-    def test_user_cannot_access_other_tenant_tool(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_access_other_tenant_tool(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot GET other tenant's tool."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -454,9 +425,7 @@ class TestToolTenantIsolation:
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    def test_user_cannot_update_other_tenant_tool(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_update_other_tenant_tool(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot UPDATE other tenant's tool."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -488,9 +457,7 @@ class TestToolTenantIsolation:
         other_tool.refresh_from_db()
         assert other_tool.name == "original_tool"
 
-    def test_user_cannot_delete_other_tenant_tool(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_delete_other_tenant_tool(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot DELETE other tenant's tool."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -524,9 +491,7 @@ class TestApprovalRequestTenantIsolation:
     CRITICAL: Tenant isolation tests for ApprovalRequest model.
     """
 
-    def test_user_cannot_list_other_tenant_approvals(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_list_other_tenant_approvals(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User sees only their tenant's approval requests."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -617,19 +582,13 @@ class TestApprovalRequestTenantIsolation:
         response = api_client.get("/api/v1/ai-agents/approvals/")
 
         assert response.status_code == status.HTTP_200_OK
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         approval_ids = [a["id"] for a in data]
 
         assert approval_a.id in approval_ids
         assert approval_b.id not in approval_ids
 
-    def test_user_cannot_approve_other_tenant_request(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_approve_other_tenant_request(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot approve other tenant's approval request."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -676,9 +635,7 @@ class TestApprovalRequestTenantIsolation:
         # Login as tenant A
         api_client.force_authenticate(user=tenant_a_user)
 
-        response = api_client.post(
-            f"/api/v1/ai-agents/approvals/{other_approval.id}/approve/"
-        )
+        response = api_client.post(f"/api/v1/ai-agents/approvals/{other_approval.id}/approve/")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -693,9 +650,7 @@ class TestSoDPolicyTenantIsolation:
     CRITICAL: Tenant isolation tests for SoDPolicy model.
     """
 
-    def test_user_cannot_list_other_tenant_sod_policies(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_list_other_tenant_sod_policies(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User sees only their tenant's SoD policies."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -727,19 +682,13 @@ class TestSoDPolicyTenantIsolation:
         response = api_client.get("/api/v1/ai-agents/sod-policies/")
 
         assert response.status_code == status.HTTP_200_OK
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         policy_ids = [p["id"] for p in data]
 
         assert policy_a.id in policy_ids
         assert policy_b.id not in policy_ids
 
-    def test_user_cannot_access_other_tenant_sod_policy(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_access_other_tenant_sod_policy(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot GET other tenant's SoD policy."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -757,15 +706,11 @@ class TestSoDPolicyTenantIsolation:
         # Login as tenant A
         api_client.force_authenticate(user=tenant_a_user)
 
-        response = api_client.get(
-            f"/api/v1/ai-agents/sod-policies/{other_policy.id}/"
-        )
+        response = api_client.get(f"/api/v1/ai-agents/sod-policies/{other_policy.id}/")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    def test_user_cannot_update_other_tenant_sod_policy(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_update_other_tenant_sod_policy(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot UPDATE other tenant's SoD policy."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -795,9 +740,7 @@ class TestSoDPolicyTenantIsolation:
         other_policy.refresh_from_db()
         assert other_policy.name == "Original Policy"
 
-    def test_user_cannot_delete_other_tenant_sod_policy(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_delete_other_tenant_sod_policy(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot DELETE other tenant's SoD policy."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -815,9 +758,7 @@ class TestSoDPolicyTenantIsolation:
         # Login as tenant A
         api_client.force_authenticate(user=tenant_a_user)
 
-        response = api_client.delete(
-            f"/api/v1/ai-agents/sod-policies/{other_policy.id}/"
-        )
+        response = api_client.delete(f"/api/v1/ai-agents/sod-policies/{other_policy.id}/")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -831,9 +772,7 @@ class TestQuotaTenantIsolation:
     CRITICAL: Tenant isolation tests for TenantQuota and QuotaUsage models.
     """
 
-    def test_user_cannot_list_other_tenant_quotas(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_list_other_tenant_quotas(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User sees only their tenant's quotas."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -865,19 +804,13 @@ class TestQuotaTenantIsolation:
         response = api_client.get("/api/v1/ai-agents/quotas/")
 
         assert response.status_code == status.HTTP_200_OK
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         quota_ids = [q["id"] for q in data]
 
         assert quota_a.id in quota_ids
         assert quota_b.id not in quota_ids
 
-    def test_user_cannot_access_other_tenant_quota(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_access_other_tenant_quota(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot GET other tenant's quota."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -898,4 +831,3 @@ class TestQuotaTenantIsolation:
         response = api_client.get(f"/api/v1/ai-agents/quotas/{other_quota.id}/")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
-

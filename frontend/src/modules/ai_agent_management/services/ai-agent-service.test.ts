@@ -5,6 +5,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { aiAgentService } from './ai-agent-service';
 import { apiClient } from '@/services/api-client';
+import { ENDPOINTS } from '../contracts';
 
 // Mock apiClient
 vi.mock('@/services/api-client', () => ({
@@ -33,9 +34,7 @@ describe('aiAgentService', () => {
       const result = await aiAgentService.listAgents();
 
       expect(result).toEqual(mockAgents);
-      expect(apiClient.get).toHaveBeenCalled();
-      const callArgs = vi.mocked(apiClient.get).mock.calls[0];
-      expect(callArgs?.[0]).toContain('/api/v1/ai-agents/agents/');
+      expect(apiClient.get).toHaveBeenCalledWith(ENDPOINTS.AGENTS.LIST);
     });
   });
 
@@ -48,9 +47,7 @@ describe('aiAgentService', () => {
       const result = await aiAgentService.getAgent('1');
 
       expect(result).toEqual(mockAgent);
-      expect(apiClient.get).toHaveBeenCalled();
-      const callArgs = vi.mocked(apiClient.get).mock.calls[0];
-      expect(callArgs?.[0]).toContain('/api/v1/ai-agents/agents/1/');
+      expect(apiClient.get).toHaveBeenCalledWith(ENDPOINTS.AGENTS.DETAIL('1'));
     });
   });
 
@@ -70,9 +67,7 @@ describe('aiAgentService', () => {
       const result = await aiAgentService.createAgent(agentData);
 
       expect(result).toEqual(mockAgent);
-      expect(apiClient.post).toHaveBeenCalled();
-      const callArgs = vi.mocked(apiClient.post).mock.calls[0];
-      expect(callArgs?.[0]).toContain('/api/v1/ai-agents/agents/');
+      expect(apiClient.post).toHaveBeenCalledWith(ENDPOINTS.AGENTS.CREATE, agentData);
     });
   });
 
@@ -86,9 +81,7 @@ describe('aiAgentService', () => {
       const result = await aiAgentService.updateAgent('1', updateData);
 
       expect(result).toEqual(mockAgent);
-      expect(apiClient.put).toHaveBeenCalled();
-      const callArgs = vi.mocked(apiClient.put).mock.calls[0];
-      expect(callArgs?.[0]).toContain('/api/v1/ai-agents/agents/1/');
+      expect(apiClient.put).toHaveBeenCalledWith(ENDPOINTS.AGENTS.UPDATE('1'), updateData);
     });
   });
 
@@ -98,10 +91,7 @@ describe('aiAgentService', () => {
 
       await aiAgentService.deleteAgent('1');
 
-      expect(apiClient.delete).toHaveBeenCalled();
-      const callArgs = vi.mocked(apiClient.delete).mock.calls[0];
-      expect(callArgs?.[0]).toContain('/api/v1/ai-agents/agents/1/');
+      expect(apiClient.delete).toHaveBeenCalledWith(ENDPOINTS.AGENTS.DELETE('1'));
     });
   });
 });
-

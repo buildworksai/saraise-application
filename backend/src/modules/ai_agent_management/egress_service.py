@@ -6,17 +6,17 @@ Task: 402.1 - Egress Allowlisting & Secret Isolation
 
 from __future__ import annotations
 
-import logging
 import ipaddress
-from typing import Optional, Dict, Any, List
-from urllib.parse import urlparse
+import logging
 import re
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
-from django.utils import timezone
 from django.db import transaction
+from django.utils import timezone
 
+from .egress_models import EgressRequest, EgressRule
 from .models import AgentExecution
-from .egress_models import EgressRule, EgressRequest
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +49,7 @@ class EgressService:
             Tuple of (allowed, matched_rule).
         """
         # Get active egress rules for tenant
-        rules = EgressRule.objects.filter(
-            tenant_id=tenant_id, is_active=True
-        )
+        rules = EgressRule.objects.filter(tenant_id=tenant_id, is_active=True)
 
         # Parse destination
         parsed_dest = self._parse_destination(destination)
@@ -71,9 +69,7 @@ class EgressService:
                     metadata={"parsed_dest": parsed_dest},
                 )
 
-                logger.info(
-                    f"Egress allowed: {destination} (matched rule {rule.id})"
-                )
+                logger.info(f"Egress allowed: {destination} (matched rule {rule.id})")
 
                 return True, rule
 
@@ -156,9 +152,7 @@ class EgressService:
 
         return rule
 
-    def list_egress_rules(
-        self, tenant_id: str, is_active: Optional[bool] = None
-    ) -> List[EgressRule]:
+    def list_egress_rules(self, tenant_id: str, is_active: Optional[bool] = None) -> List[EgressRule]:
         """List egress rules for tenant.
 
         Args:
@@ -174,6 +168,54 @@ class EgressService:
             query = query.filter(is_active=is_active)
 
         return list(query.order_by("name"))
+
+    def update_egress_rule(
+        self,
+        rule_id: str,
+        tenant_id: str,
+        updated_by: str,
+        **kwargs: Any,
+    ) -> EgressRule:
+        """Update egress rule.
+
+        Args:
+            rule_id: Rule ID.
+            tenant_id: Tenant ID.
+            updated_by: User updating the rule.
+            **kwargs: Fields to update.
+
+        Returns:
+            Updated EgressRule.
+
+        Raises:
+            ValueError: If validation fails.
+            EgressRule.DoesNotExist: If rule not found.
+        """
+        rule = EgressRule.objects.get(id=rule_id, tenant_id=tenant_id)
+
+        # Update fields
+        for key, value in kwargs.items():
+            if hasattr(rule, key):
+                setattr(rule, key, value)
+
+        rule.save()
+        logger.info(f"Updated egress rule {rule.id} by {updated_by}")
+        return rule
+
+    def delete_egress_rule(self, rule_id: str, tenant_id: str) -> None:
+        """Delete (soft delete) egress rule.
+
+        Args:
+            rule_id: Rule ID.
+            tenant_id: Tenant ID.
+        """
+        try:
+            rule = EgressRule.objects.get(id=rule_id, tenant_id=tenant_id)
+            rule.is_active = False
+            rule.save()
+            logger.info(f"Deleted (soft) egress rule {rule.id}")
+        except EgressRule.DoesNotExist:
+            pass
 
     def _parse_destination(self, destination: str) -> Dict[str, Any]:
         """Parse destination string.
@@ -311,4 +353,3 @@ class EgressService:
 
 # Global egress service instance
 egress_service = EgressService()
-

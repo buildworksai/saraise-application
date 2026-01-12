@@ -1,6 +1,6 @@
 /**
  * Agent List Page
- * 
+ *
  * Displays all AI agents with filtering, search, and CRUD operations.
  */
 import { useState, useDeferredValue } from 'react';
@@ -12,7 +12,7 @@ import { Plus, Search, Bot } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { TableSkeleton, EmptyState, ErrorState } from '@/components/ui';
 
@@ -41,10 +41,10 @@ export const AgentListPage = () => {
   });
 
   const filteredAgents = agents?.filter((agent) => {
-    const matchesSearch = deferredSearchTerm === '' || 
+    const matchesSearch = deferredSearchTerm === '' ||
       agent.name.toLowerCase().includes(deferredSearchTerm.toLowerCase()) ||
       agent.description?.toLowerCase().includes(deferredSearchTerm.toLowerCase());
-    
+
     const matchesType = filterType === 'all' || agent.identity_type === filterType;
     const matchesStatus = filterStatus === 'all'
       ? true
@@ -132,25 +132,27 @@ export const AgentListPage = () => {
           />
         </div>
 
-        <Select
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
-          options={[
-            { value: 'all', label: 'All Types' },
-            { value: 'user_bound', label: 'User-Bound' },
-            { value: 'system_bound', label: 'System-Bound' },
-          ]}
-        />
+        <Select value={filterType} onValueChange={setFilterType}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="All Types" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Types</SelectItem>
+            <SelectItem value="user_bound">User-Bound</SelectItem>
+            <SelectItem value="system_bound">System-Bound</SelectItem>
+          </SelectContent>
+        </Select>
 
-        <Select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          options={[
-            { value: 'all', label: 'All Status' },
-            { value: 'active', label: 'Active' },
-            { value: 'inactive', label: 'Inactive' },
-          ]}
-        />
+        <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="All Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="inactive">Inactive</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Agents Table */}

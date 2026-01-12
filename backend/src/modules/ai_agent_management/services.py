@@ -7,20 +7,14 @@ Task: 401.1 - Agent Runtime & Scheduler
 from __future__ import annotations
 
 import logging
-from typing import Optional, Dict, Any, List
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from django.utils import timezone
 from django.db import transaction
+from django.utils import timezone
 
-from .models import (
-    Agent,
-    AgentExecution,
-    AgentSchedulerTask,
-    AgentLifecycleState,
-    AgentIdentityType,
-)
-from .runtime import AgentRuntime, AgentExecutionContext
+from .models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState, AgentSchedulerTask
+from .runtime import AgentExecutionContext, AgentRuntime
 from .scheduler import AgentScheduler, ScheduledTask
 
 logger = logging.getLogger(__name__)
@@ -118,9 +112,7 @@ class AgentService:
             ValueError: If agent not found or validation fails.
         """
         # Get agent
-        agent = Agent.objects.filter(
-            id=agent_id, tenant_id=tenant_id
-        ).first()
+        agent = Agent.objects.filter(id=agent_id, tenant_id=tenant_id).first()
 
         if not agent:
             raise ValueError(f"Agent {agent_id} not found")
@@ -156,9 +148,7 @@ class AgentService:
             scheduler_task.execution = execution
             scheduler_task.save(update_fields=["execution", "updated_at"])
 
-            logger.info(
-                f"Scheduled execution {execution.id} for agent {agent_id}"
-            )
+            logger.info(f"Scheduled execution {execution.id} for agent {agent_id}")
 
             return execution
 
@@ -175,20 +165,14 @@ class AgentService:
             )
 
             execution = self.runtime.create_execution(context)
-            execution = self.runtime.validate_execution(
-                execution.id, tenant_id
-            )
+            execution = self.runtime.validate_execution(execution.id, tenant_id)
             execution = self.runtime.start_execution(execution.id, tenant_id)
 
-            logger.info(
-                f"Started immediate execution {execution.id} for agent {agent_id}"
-            )
+            logger.info(f"Started immediate execution {execution.id} for agent {agent_id}")
 
             return execution
 
-    def pause_execution(
-        self, execution_id: str, tenant_id: str
-    ) -> AgentExecution:
+    def pause_execution(self, execution_id: str, tenant_id: str) -> AgentExecution:
         """Pause an agent execution.
 
         Args:
@@ -200,9 +184,7 @@ class AgentService:
         """
         return self.runtime.pause_execution(execution_id, tenant_id)
 
-    def resume_execution(
-        self, execution_id: str, tenant_id: str
-    ) -> AgentExecution:
+    def resume_execution(self, execution_id: str, tenant_id: str) -> AgentExecution:
         """Resume a paused agent execution.
 
         Args:
@@ -214,9 +196,7 @@ class AgentService:
         """
         return self.runtime.resume_execution(execution_id, tenant_id)
 
-    def terminate_execution(
-        self, execution_id: str, tenant_id: str
-    ) -> AgentExecution:
+    def terminate_execution(self, execution_id: str, tenant_id: str) -> AgentExecution:
         """Terminate an agent execution (kill switch).
 
         Args:
@@ -228,9 +208,7 @@ class AgentService:
         """
         return self.runtime.terminate_execution(execution_id, tenant_id)
 
-    def get_execution(
-        self, execution_id: str, tenant_id: str
-    ) -> Optional[AgentExecution]:
+    def get_execution(self, execution_id: str, tenant_id: str) -> Optional[AgentExecution]:
         """Get an agent execution.
 
         Args:
@@ -240,9 +218,7 @@ class AgentService:
         Returns:
             AgentExecution instance or None if not found.
         """
-        return AgentExecution.objects.filter(
-            id=execution_id, tenant_id=tenant_id
-        ).first()
+        return AgentExecution.objects.filter(id=execution_id, tenant_id=tenant_id).first()
 
     def list_executions(
         self,
@@ -275,4 +251,3 @@ class AgentService:
 
 # Global service instance
 agent_service = AgentService()
-

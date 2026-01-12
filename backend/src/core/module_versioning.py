@@ -7,8 +7,8 @@ Task: 501.1 - Module Manifest Schema & Signing
 from __future__ import annotations
 
 import re
-from typing import Optional, Tuple
 from enum import Enum
+from typing import Optional, Tuple
 
 
 class VersionComparison(str, Enum):
@@ -33,9 +33,7 @@ class Version:
     Supports MAJOR.MINOR.PATCH[-PRERELEASE] format.
     """
 
-    VERSION_PATTERN = re.compile(
-        r"^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9]+))?$"
-    )
+    VERSION_PATTERN = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([a-zA-Z0-9]+))?$")
 
     def __init__(self, version_str: str) -> None:
         """Initialize version from string.
@@ -205,9 +203,7 @@ class CompatibilityChecker:
     Checks version compatibility between modules.
     """
 
-    def check_dependency(
-        self, module_version: Version, dependency_constraint: str
-    ) -> bool:
+    def check_dependency(self, module_version: Version, dependency_constraint: str) -> bool:
         """Check if module version satisfies dependency constraint.
 
         Args:
@@ -219,9 +215,7 @@ class CompatibilityChecker:
         """
         return module_version.satisfies(dependency_constraint)
 
-    def check_compatibility(
-        self, installed_version: Version, required_constraint: str
-    ) -> Tuple[bool, Optional[str]]:
+    def check_compatibility(self, installed_version: Version, required_constraint: str) -> Tuple[bool, Optional[str]]:
         """Check compatibility between installed and required versions.
 
         Args:
@@ -242,9 +236,7 @@ class CompatibilityChecker:
         except VersionError as e:
             return False, str(e)
 
-    def is_backward_compatible(
-        self, old_version: Version, new_version: Version
-    ) -> bool:
+    def is_backward_compatible(self, old_version: Version, new_version: Version) -> bool:
         """Check if new version is backward compatible with old version.
 
         Args:
@@ -256,9 +248,7 @@ class CompatibilityChecker:
         """
         return old_version.major == new_version.major
 
-    def is_upgrade_safe(
-        self, current_version: Version, target_version: Version
-    ) -> bool:
+    def is_upgrade_safe(self, current_version: Version, target_version: Version) -> bool:
         """Check if upgrade is safe.
 
         Args:

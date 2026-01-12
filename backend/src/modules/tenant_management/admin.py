@@ -3,13 +3,8 @@ Django Admin configuration for Tenant Management module.
 """
 
 from django.contrib import admin
-from .models import (
-    Tenant,
-    TenantModule,
-    TenantResourceUsage,
-    TenantSettings,
-    TenantHealthScore,
-)
+
+from .models import Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
 
 
 @admin.register(Tenant)

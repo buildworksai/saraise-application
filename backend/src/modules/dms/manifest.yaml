@@ -1,0 +1,25 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: dms
+version: 1.0.0
+description: Platform-level enterprise document storage, versioning, access control, file organization
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+permissions:
+  - dms.resource:create
+  - dms.resource:read
+  - dms.resource:update
+  - dms.resource:delete
+  - dms.resource:activate
+  - dms.resource:deactivate
+sod_actions:
+  - [dms.resource:create, dms.resource:delete]
+search_indexes:
+  - dms_resources
+ai_tools:
+  - create_dms_resource
+  - update_dms_resource
+  - delete_dms_resource

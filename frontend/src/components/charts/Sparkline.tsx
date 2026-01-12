@@ -35,4 +35,3 @@ export const Sparkline = ({ data, color = 'hsl(var(--primary))', height = 40 }: 
     </ResponsiveContainer>
   );
 };
-

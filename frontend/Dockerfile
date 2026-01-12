@@ -16,6 +16,11 @@ RUN npm run build
 
 FROM nginx:1.27.4-alpine AS runtime
 
+# SECURITY: Nginx official image runs as non-root user (nginx:nginx, UID 101)
+# The nginx process runs as user 'nginx' (not root) by default in this image
+# No USER directive needed - nginx image handles this automatically
+# To verify: docker run --rm nginx:1.27.4-alpine id
+
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 

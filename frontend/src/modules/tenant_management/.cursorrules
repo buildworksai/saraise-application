@@ -1,0 +1,46 @@
+# Tenant Management Module - Cursor Rules
+# These rules are automatically applied when editing files in this directory
+
+# =============================================================================
+# MODULE OVERVIEW
+# =============================================================================
+#
+# This module manages tenant lifecycle, modules, resource usage, and settings.
+# CRITICAL: This is a PLATFORM-LEVEL module. Only platform owners can access.
+# Key entities: Tenant, TenantModule, TenantResourceUsage, TenantSettings
+
+# =============================================================================
+# CRITICAL: Read contracts.ts FIRST
+# =============================================================================
+#
+# Before modifying any file in this module, you MUST read:
+#   frontend/src/modules/tenant_management/contracts.ts
+
+# =============================================================================
+# TYPE IMPORTS
+# =============================================================================
+#
+# ✅ CORRECT: Import types from contracts.ts
+#   import { Tenant, TenantModule, ENDPOINTS } from './contracts';
+#
+# ❌ FORBIDDEN: Import directly from @/types/api in pages/components
+# ❌ FORBIDDEN: Define ad-hoc types in page files
+
+# =============================================================================
+# ENDPOINT USAGE
+# =============================================================================
+#
+# ✅ CORRECT: Use ENDPOINTS constant
+#   apiClient.get<Tenant[]>(ENDPOINTS.TENANTS.LIST);
+#   apiClient.post<ActionResponse>(ENDPOINTS.TENANTS.SUSPEND(id));
+#
+# ❌ FORBIDDEN: Hardcode URL strings
+
+# =============================================================================
+# VALIDATION CHECKPOINTS
+# =============================================================================
+#
+# After editing any TypeScript file:
+# 1. Run: npx tsc --noEmit src/modules/tenant_management/{file}.tsx
+# 2. Run: npx eslint src/modules/tenant_management/{file}.tsx --max-warnings 0
+# 3. Fix ALL errors before proceeding

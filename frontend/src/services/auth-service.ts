@@ -1,62 +1,53 @@
 /**
  * Authentication Service
- * 
+ *
  * Handles authentication API calls.
+ *
+ * MIGRATED: Now uses auth-contracts.ts for types and endpoints.
+ * Reference: saraise-documentation/rules/agent-rules/27-contracts-architecture.md
  */
 import { apiClient } from './api-client';
-import type { User } from '../stores/auth-store';
+import type {
+  LoginRequest,
+  LoginResponse,
+  CurrentUserResponse,
+  RegisterRequest,
+  ForgotPasswordRequest,
+  ResetPasswordRequest,
+  User,
+} from './auth-contracts';
+import { ENDPOINTS } from './auth-contracts';
 
-export interface LoginRequest {
-  email: string;
-  password: string;
-  mfa_token?: string;
-}
-
-export interface LoginResponse {
-  user: User;
-  session_id: string;
-}
-
-export interface CurrentUserResponse {
-  user: User;
-}
-
-export interface RegisterRequest {
-  name: string;
-  email: string;
-  password: string;
-  company_name?: string;
-}
-
-export interface ForgotPasswordRequest {
-  email: string;
-}
-
-export interface ResetPasswordRequest {
-  token: string;
-  new_password: string;
-}
+// Re-export types for backward compatibility
+export type {
+  LoginRequest,
+  LoginResponse,
+  CurrentUserResponse,
+  RegisterRequest,
+  ForgotPasswordRequest,
+  ResetPasswordRequest,
+};
 
 export const authService = {
   /**
    * Login with email and password
    */
   login: async (credentials: LoginRequest): Promise<LoginResponse> => {
-    return apiClient.post<LoginResponse>('/api/v1/auth/login/', credentials);
+    return apiClient.post<LoginResponse>(ENDPOINTS.LOGIN, credentials);
   },
 
   /**
    * Logout current session
    */
   logout: async (): Promise<void> => {
-    return apiClient.post('/api/v1/auth/logout/');
+    return apiClient.post(ENDPOINTS.LOGOUT);
   },
 
   /**
    * Get current authenticated user
    */
   getCurrentUser: async (): Promise<User> => {
-    const res = await apiClient.get<CurrentUserResponse>('/api/v1/auth/me/');
+    const res = await apiClient.get<CurrentUserResponse>(ENDPOINTS.ME);
     return res.user;
   },
 
@@ -64,28 +55,27 @@ export const authService = {
    * Refresh session validity
    */
   refreshSession: async (): Promise<void> => {
-    return apiClient.post('/api/v1/auth/refresh/');
+    return apiClient.post(ENDPOINTS.REFRESH);
   },
 
   /**
    * Register new user account
    */
   register: async (data: RegisterRequest): Promise<LoginResponse> => {
-    return apiClient.post<LoginResponse>('/api/v1/auth/register/', data);
+    return apiClient.post<LoginResponse>(ENDPOINTS.REGISTER, data);
   },
 
   /**
    * Request password reset email
    */
   forgotPassword: async (data: ForgotPasswordRequest): Promise<void> => {
-    return apiClient.post('/api/v1/auth/forgot-password/', data);
+    return apiClient.post(ENDPOINTS.FORGOT_PASSWORD, data);
   },
 
   /**
    * Reset password with token
    */
   resetPassword: async (data: ResetPasswordRequest): Promise<void> => {
-    return apiClient.post('/api/v1/auth/reset-password/', data);
+    return apiClient.post(ENDPOINTS.RESET_PASSWORD, data);
   },
 };
-

@@ -6,21 +6,22 @@ Task: 501.1 - Module Manifest Schema & Signing
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
-import base64
 from typing import Optional, Tuple
+
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    PublicFormat,
     load_pem_private_key,
     load_pem_public_key,
-    Encoding,
-    PublicFormat,
-    PrivateFormat,
-    NoEncryption,
 )
-from cryptography.hazmat.backends import default_backend
 
 from .module_manifest_schema import ModuleManifest
 
@@ -62,9 +63,7 @@ class ManifestSigner:
         self.public_key = public_key
         self.hmac_secret = hmac_secret
 
-    def sign(
-        self, manifest: ModuleManifest, algorithm: str = "RS256"
-    ) -> Tuple[str, str]:
+    def sign(self, manifest: ModuleManifest, algorithm: str = "RS256") -> Tuple[str, str]:
         """Sign a manifest.
 
         Args:
@@ -84,9 +83,7 @@ class ManifestSigner:
                 raise SigningError("Private key required for RS256 signing")
 
             try:
-                key = load_pem_private_key(
-                    self.private_key, password=None, backend=default_backend()
-                )
+                key = load_pem_private_key(self.private_key, password=None, backend=default_backend())
                 signature_bytes = key.sign(
                     content_hash.encode(),
                     padding.PSS(
@@ -106,9 +103,7 @@ class ManifestSigner:
                 raise SigningError("HMAC secret required for HMAC-SHA256 signing")
 
             try:
-                signature_bytes = hmac.new(
-                    self.hmac_secret.encode(), content_hash.encode(), hashlib.sha256
-                ).digest()
+                signature_bytes = hmac.new(self.hmac_secret.encode(), content_hash.encode(), hashlib.sha256).digest()
                 signature = base64.b64encode(signature_bytes).decode()
                 return signature, algorithm
 
@@ -118,9 +113,7 @@ class ManifestSigner:
         else:
             raise SigningError(f"Unsupported algorithm: {algorithm}")
 
-    def verify(
-        self, manifest: ModuleManifest, signature: str, algorithm: str
-    ) -> bool:
+    def verify(self, manifest: ModuleManifest, signature: str, algorithm: str) -> bool:
         """Verify a manifest signature.
 
         Args:
@@ -141,9 +134,7 @@ class ManifestSigner:
                 raise VerificationError("Public key required for RS256 verification")
 
             try:
-                key = load_pem_public_key(
-                    self.public_key, backend=default_backend()
-                )
+                key = load_pem_public_key(self.public_key, backend=default_backend())
                 signature_bytes = base64.b64decode(signature)
                 key.verify(
                     signature_bytes,
@@ -161,9 +152,7 @@ class ManifestSigner:
 
         elif algorithm == "HMAC-SHA256":
             if not self.hmac_secret:
-                raise VerificationError(
-                    "HMAC secret required for HMAC-SHA256 verification"
-                )
+                raise VerificationError("HMAC secret required for HMAC-SHA256 verification")
 
             try:
                 expected_signature_bytes = hmac.new(
@@ -190,9 +179,7 @@ class ManifestSigner:
         Returns:
             Tuple of (private_key, public_key) in PEM format.
         """
-        private_key = rsa.generate_private_key(
-            public_exponent=65537, key_size=2048, backend=default_backend()
-        )
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048, backend=default_backend())
         public_key = private_key.public_key()
 
         private_pem = private_key.private_bytes(
@@ -200,9 +187,7 @@ class ManifestSigner:
             format=PrivateFormat.PKCS8,
             encryption_algorithm=NoEncryption(),
         )
-        public_pem = public_key.public_bytes(
-            encoding=Encoding.PEM, format=PublicFormat.SubjectPublicKeyInfo
-        )
+        public_pem = public_key.public_bytes(encoding=Encoding.PEM, format=PublicFormat.SubjectPublicKeyInfo)
 
         return private_pem, public_pem
 

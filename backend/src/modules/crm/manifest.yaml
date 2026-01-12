@@ -1,0 +1,201 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: crm
+version: 1.0.0
+category: core_business
+display_name: Customer Relationship Management
+description: |
+  Comprehensive CRM for managing leads, contacts, accounts, opportunities, and sales activities.
+  Includes AI-powered lead scoring, pipeline forecasting, and 360° customer view.
+
+# Dependencies
+dependencies:
+  - name: workflow_automation
+    version: ">=1.0.0"
+    required: false
+    purpose: Execute lead-to-opportunity and opportunity-to-customer workflows
+
+  - name: email_marketing
+    version: ">=1.0.0"
+    required: false
+    purpose: Lead nurturing sequences and activity sync
+
+  - name: sales_management
+    version: ">=1.0.0"
+    required: false
+    purpose: Create sales orders from won opportunities
+
+  - name: master_data_management
+    version: ">=1.0.0"
+    required: false
+    purpose: Account deduplication and data enrichment
+
+# Permissions
+permissions:
+  - crm.lead:create
+  - crm.lead:read
+  - crm.lead:update
+  - crm.lead:delete
+  - crm.account:create
+  - crm.account:read
+  - crm.account:update
+  - crm.account:delete
+  - crm.contact:create
+  - crm.contact:read
+  - crm.contact:update
+  - crm.contact:delete
+  - crm.opportunity:create
+  - crm.opportunity:read
+  - crm.opportunity:update
+  - crm.opportunity:delete
+  - crm.activity:create
+  - crm.activity:read
+  - crm.activity:update
+  - crm.activity:delete
+  - crm.forecasting:read
+
+# SoD (Segregation of Duties) actions
+sod_actions:
+  - [crm.opportunity:create, crm.opportunity:update]
+
+# Events Published
+events:
+  - event_type: crm.lead.created
+    description: Lead created
+    payload_schema:
+      lead_id: uuid
+      tenant_id: uuid
+      source: string
+      score: integer
+
+  - event_type: crm.lead.converted
+    description: Lead converted to opportunity
+    payload_schema:
+      lead_id: uuid
+      opportunity_id: uuid
+      account_id: uuid
+      contact_id: uuid
+
+  - event_type: crm.opportunity.closed_won
+    description: Opportunity closed as won
+    payload_schema:
+      opportunity_id: uuid
+      account_id: uuid
+      amount: decimal
+      currency: string
+
+# Events Subscribed
+subscriptions:
+  - event_type: email_marketing.email.sent
+    handler: crm.services.activity_service.sync_email_activity
+
+  - event_type: email_marketing.email.opened
+    handler: crm.services.activity_service.sync_email_activity
+
+  - event_type: email_marketing.email.clicked
+    handler: crm.services.activity_service.sync_email_activity
+
+# AI Agents
+ai_agents:
+  - name: lead_scoring_agent
+    agent_type: openai
+    model: gpt-4
+    temperature: 0.7
+    prompt_template: |
+      Analyze this lead and provide a score (0-100) and BANT qualification:
+
+      Lead Data:
+      - Name: {{first_name}} {{last_name}}
+      - Company: {{company}}
+      - Title: {{title}}
+      - Industry: {{industry}}
+      - Source: {{source}}
+
+      Respond with JSON:
+      {
+        "score": 0-100,
+        "bant_qualification": {
+          "budget": "yes/no/unknown",
+          "authority": "yes/no/unknown",
+          "need": "yes/no/unknown",
+          "timeline": "immediate/1-3 months/3-6 months/6+ months/unknown"
+        },
+        "reasoning": "Brief explanation"
+      }
+
+  - name: customer_sentiment_agent
+    agent_type: openai
+    model: gpt-4
+    temperature: 0.5
+    prompt_template: |
+      Analyze customer sentiment based on activity history:
+
+      Activities: {{activities}}
+
+      Respond with JSON:
+      {
+        "sentiment_score": 0-100,
+        "sentiment_label": "positive/neutral/negative",
+        "churn_risk": "low/medium/high",
+        "recommendations": ["action1", "action2"]
+      }
+
+# Workflows
+workflows:
+  - name: lead_to_opportunity
+    description: Convert qualified lead to opportunity
+    trigger: manual
+    steps:
+      - validate_lead_qualification
+      - collect_opportunity_data
+      - create_or_select_account
+      - create_contact_from_lead
+      - create_opportunity
+      - update_lead_status
+      - create_activity_log
+      - emit_event
+      - notify_sales_team
+
+  - name: opportunity_to_customer
+    description: Convert won opportunity to customer
+    trigger: manual
+    steps:
+      - validate_opportunity_won
+      - update_account_type
+      - create_sales_order
+      - create_activity_log
+      - emit_event
+      - notify_stakeholders
+
+# Health Checks
+health_checks:
+  - name: database_connectivity
+    endpoint: /health/db
+    interval: 60
+
+  - name: ai_service_availability
+    endpoint: /health/ai
+    interval: 300
+
+# Configuration
+default_configuration:
+  lead_score_threshold: 70
+  stale_deal_days: 14
+  ai_scoring_enabled: true
+  ai_model: gpt-4
+  pipeline_stages:
+    - name: prospecting
+      probability: 10
+    - name: qualification
+      probability: 20
+    - name: needs_analysis
+      probability: 40
+    - name: proposal
+      probability: 60
+    - name: negotiation
+      probability: 80
+    - name: closed_won
+      probability: 100
+    - name: closed_lost
+      probability: 0

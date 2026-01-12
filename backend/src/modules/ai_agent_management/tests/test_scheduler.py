@@ -5,11 +5,12 @@ Task: 401.1 - Agent Runtime & Scheduler
 
 from __future__ import annotations
 
-import pytest
-from django.utils import timezone
 from datetime import timedelta
 
-from ..models import Agent, AgentExecution, AgentSchedulerTask, AgentIdentityType
+import pytest
+from django.utils import timezone
+
+from ..models import Agent, AgentExecution, AgentIdentityType, AgentSchedulerTask
 from ..scheduler import AgentScheduler, ScheduledTask
 
 
@@ -319,4 +320,3 @@ class TestAgentScheduler:
         task.refresh_from_db()
         assert task.status == "cancelled"
         assert task.completed_at is not None
-

@@ -1,0 +1,5 @@
+name: workflow_automation
+version: 1.0.0
+type: foundation
+dependencies: ["security_access_control"]
+description: "Core engine for defining and executing state-machine workflows including approvals and tasks."

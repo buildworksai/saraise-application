@@ -7,21 +7,14 @@ Task: 402.2 - AI Quota Enforcement
 from __future__ import annotations
 
 import logging
-from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
-from django.utils import timezone
 from django.db import transaction
+from django.utils import timezone
 
 from .models import AgentExecution
-from .quota_models import (
-    TenantQuota,
-    QuotaUsage,
-    ShardSaturation,
-    KillSwitch,
-    QuotaType,
-    QuotaPeriod,
-)
+from .quota_models import KillSwitch, QuotaPeriod, QuotaType, QuotaUsage, ShardSaturation, TenantQuota
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +58,7 @@ class QuotaService:
 
         if not quota:
             # No quota defined - allow by default
-            logger.debug(
-                f"No quota defined for {quota_type} ({period}) - allowing"
-            )
+            logger.debug(f"No quota defined for {quota_type} ({period}) - allowing")
             return True, None, "No quota defined"
 
         # Check if quota has reset
@@ -117,18 +108,14 @@ class QuotaService:
             period = QuotaPeriod.DAILY
 
         # Check quota
-        allowed, quota, message = self.check_quota(
-            tenant_id, quota_type, amount, period
-        )
+        allowed, quota, message = self.check_quota(tenant_id, quota_type, amount, period)
 
         if not allowed:
             raise ValueError(f"Quota check failed: {message}")
 
         # If no quota exists, create default unlimited quota
         if not quota:
-            quota = self._create_default_quota(
-                tenant_id, quota_type, period
-            )
+            quota = self._create_default_quota(tenant_id, quota_type, period)
 
         # Consume quota
         with transaction.atomic():
@@ -168,9 +155,7 @@ class QuotaService:
             Tuple of (blocked, kill_switch).
         """
         # Check global kill switches
-        global_switches = KillSwitch.objects.filter(
-            scope="global", is_active=True
-        )
+        global_switches = KillSwitch.objects.filter(scope="global", is_active=True)
 
         if global_switches.exists():
             switch = global_switches.first()
@@ -178,15 +163,11 @@ class QuotaService:
             return True, switch
 
         # Check tenant kill switches
-        tenant_switches = KillSwitch.objects.filter(
-            tenant_id=tenant_id, scope="tenant", is_active=True
-        )
+        tenant_switches = KillSwitch.objects.filter(tenant_id=tenant_id, scope="tenant", is_active=True)
 
         if tenant_switches.exists():
             switch = tenant_switches.first()
-            logger.warning(
-                f"Tenant kill switch active for {tenant_id}: {switch.name}"
-            )
+            logger.warning(f"Tenant kill switch active for {tenant_id}: {switch.name}")
             return True, switch
 
         # Check shard kill switches
@@ -199,9 +180,7 @@ class QuotaService:
 
             if shard_switches.exists():
                 switch = shard_switches.first()
-                logger.warning(
-                    f"Shard kill switch active for {shard_id}: {switch.name}"
-                )
+                logger.warning(f"Shard kill switch active for {shard_id}: {switch.name}")
                 return True, switch
 
         # Check agent kill switches
@@ -214,9 +193,7 @@ class QuotaService:
 
             if agent_switches.exists():
                 switch = agent_switches.first()
-                logger.warning(
-                    f"Agent kill switch active for {agent_id}: {switch.name}"
-                )
+                logger.warning(f"Agent kill switch active for {agent_id}: {switch.name}")
                 return True, switch
 
         return False, None
@@ -258,16 +235,11 @@ class QuotaService:
             activated_by=activated_by,
         )
 
-        logger.warning(
-            f"Kill switch activated: {name} (scope={scope}, "
-            f"scope_id={scope_id})"
-        )
+        logger.warning(f"Kill switch activated: {name} (scope={scope}, " f"scope_id={scope_id})")
 
         return kill_switch
 
-    def deactivate_kill_switch(
-        self, kill_switch_id: str, tenant_id: Optional[str] = None
-    ) -> KillSwitch:
+    def deactivate_kill_switch(self, kill_switch_id: str, tenant_id: Optional[str] = None) -> KillSwitch:
         """Deactivate a kill switch.
 
         Args:
@@ -292,17 +264,13 @@ class QuotaService:
 
         kill_switch.is_active = False
         kill_switch.deactivated_at = timezone.now()
-        kill_switch.save(
-            update_fields=["is_active", "deactivated_at", "updated_at"]
-        )
+        kill_switch.save(update_fields=["is_active", "deactivated_at", "updated_at"])
 
         logger.info(f"Kill switch deactivated: {kill_switch.name}")
 
         return kill_switch
 
-    def check_shard_saturation(
-        self, shard_id: str, tenant_id: str
-    ) -> Tuple[bool, Optional[ShardSaturation]]:
+    def check_shard_saturation(self, shard_id: str, tenant_id: str) -> Tuple[bool, Optional[ShardSaturation]]:
         """Check shard saturation level.
 
         Args:
@@ -313,18 +281,16 @@ class QuotaService:
             Tuple of (saturated, saturation_record).
         """
         # Get latest saturation measurement
-        saturation = ShardSaturation.objects.filter(
-            tenant_id=tenant_id, shard_id=shard_id
-        ).order_by("-measured_at").first()
+        saturation = (
+            ShardSaturation.objects.filter(tenant_id=tenant_id, shard_id=shard_id).order_by("-measured_at").first()
+        )
 
         if not saturation:
             return False, None
 
         # Check if saturation exceeds threshold
         if saturation.saturation_level >= self._saturation_threshold:
-            logger.warning(
-                f"Shard {shard_id} saturated: {saturation.saturation_level:.2%}"
-            )
+            logger.warning(f"Shard {shard_id} saturated: {saturation.saturation_level:.2%}")
             return True, saturation
 
         return False, saturation
@@ -363,9 +329,7 @@ class QuotaService:
             memory_usage_percent=memory_usage_percent,
         )
 
-        logger.debug(
-            f"Recorded saturation for shard {shard_id}: {saturation_level:.2%}"
-        )
+        logger.debug(f"Recorded saturation for shard {shard_id}: {saturation_level:.2%}")
 
         return saturation
 
@@ -399,10 +363,7 @@ class QuotaService:
             reset_at=reset_at,
         )
 
-        logger.info(
-            f"Created quota {quota_type} ({period}) for tenant {tenant_id}: "
-            f"{limit_value}"
-        )
+        logger.info(f"Created quota {quota_type} ({period}) for tenant {tenant_id}: " f"{limit_value}")
 
         return quota
 
@@ -416,10 +377,7 @@ class QuotaService:
         quota.reset_at = self._calculate_reset_time(quota.period)
         quota.save(update_fields=["current_usage", "reset_at", "updated_at"])
 
-        logger.info(
-            f"Reset quota {quota.quota_type} ({quota.period}) for tenant "
-            f"{quota.tenant_id}"
-        )
+        logger.info(f"Reset quota {quota.quota_type} ({quota.period}) for tenant " f"{quota.tenant_id}")
 
     def _calculate_reset_time(self, period: str) -> datetime:
         """Calculate quota reset time.
@@ -433,32 +391,22 @@ class QuotaService:
         now = timezone.now()
 
         if period == QuotaPeriod.HOURLY:
-            return now.replace(minute=0, second=0, microsecond=0) + timedelta(
-                hours=1
-            )
+            return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
         elif period == QuotaPeriod.DAILY:
-            return now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
-                days=1
-            )
+            return now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
         elif period == QuotaPeriod.WEEKLY:
             days_until_monday = (7 - now.weekday()) % 7
             if days_until_monday == 0:
                 days_until_monday = 7
-            return now.replace(
-                hour=0, minute=0, second=0, microsecond=0
-            ) + timedelta(days=days_until_monday)
+            return now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=days_until_monday)
         elif period == QuotaPeriod.MONTHLY:
             next_month = now.replace(day=1) + timedelta(days=32)
             return next_month.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
         # Default to daily
-        return now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
-            days=1
-        )
+        return now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
 
-    def _create_default_quota(
-        self, tenant_id: str, quota_type: str, period: str
-    ) -> TenantQuota:
+    def _create_default_quota(self, tenant_id: str, quota_type: str, period: str) -> TenantQuota:
         """Create default unlimited quota.
 
         Args:
@@ -477,4 +425,3 @@ class QuotaService:
 
 # Global quota service instance
 quota_service = QuotaService()
-

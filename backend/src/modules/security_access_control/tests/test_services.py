@@ -3,21 +3,22 @@ Security & Access Control Service Tests
 """
 
 import pytest
+from django.contrib.auth import get_user_model
+
+from src.modules.tenant_management.models import Tenant
 
 from ..models import (
-    Role,
-    Permission,
-    RolePermission,
-    UserRole,
-    PermissionSet,
     FieldSecurity,
+    Permission,
+    PermissionSet,
+    Role,
+    RolePermission,
     RowSecurityRule,
-    SecurityProfile,
     SecurityAuditLog,
+    SecurityProfile,
+    UserRole,
 )
 from ..services import SecurityAccessControlService
-from django.contrib.auth import get_user_model
-from src.modules.tenant_management.models import Tenant
 
 User = get_user_model()
 
@@ -43,12 +44,8 @@ class TestSecurityAccessControlService:
     def test_assign_permission_to_role(self):
         """Test: Assign permission to role."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        role = Role.objects.create(
-            name="Test Role", code="test_role", tenant_id=tenant.id
-        )
-        permission = Permission.objects.create(
-            module="crm", object="customers", action="read"
-        )
+        role = Role.objects.create(name="Test Role", code="test_role", tenant_id=tenant.id)
+        permission = Permission.objects.create(module="crm", object="customers", action="read")
         role_permission = SecurityAccessControlService.assign_permission_to_role(
             role_id=role.id, permission_id=permission.id, is_granted=True
         )
@@ -59,12 +56,8 @@ class TestSecurityAccessControlService:
     def test_assign_role_to_user(self):
         """Test: Assign role to user."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        user = User.objects.create_user(
-            username="testuser", email="test@example.com", password="testpass123"
-        )
-        role = Role.objects.create(
-            name="Test Role", code="test_role", tenant_id=tenant.id
-        )
+        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass123")
+        role = Role.objects.create(name="Test Role", code="test_role", tenant_id=tenant.id)
         user_role = SecurityAccessControlService.assign_role_to_user(
             user_id=user.id,
             role_id=role.id,
@@ -78,12 +71,8 @@ class TestSecurityAccessControlService:
     def test_create_permission_set(self):
         """Test: Create permission set."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        perm1 = Permission.objects.create(
-            module="crm", object="customers", action="read"
-        )
-        perm2 = Permission.objects.create(
-            module="crm", object="customers", action="update"
-        )
+        perm1 = Permission.objects.create(module="crm", object="customers", action="read")
+        perm2 = Permission.objects.create(module="crm", object="customers", action="update")
         permission_set = SecurityAccessControlService.create_permission_set(
             name="CRM Access",
             tenant_id=tenant.id,
@@ -96,12 +85,8 @@ class TestSecurityAccessControlService:
     def test_grant_permission_set_to_user(self):
         """Test: Grant permission set to user."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        user = User.objects.create_user(
-            username="testuser", email="test@example.com", password="testpass123"
-        )
-        permission_set = PermissionSet.objects.create(
-            name="Test Set", tenant_id=tenant.id, permission_ids=[]
-        )
+        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass123")
+        permission_set = PermissionSet.objects.create(name="Test Set", tenant_id=tenant.id, permission_ids=[])
         user_permission_set = SecurityAccessControlService.grant_permission_set_to_user(
             user_id=user.id,
             permission_set_id=permission_set.id,
@@ -115,9 +100,7 @@ class TestSecurityAccessControlService:
     def test_create_field_security(self):
         """Test: Create field-level security rule."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        role = Role.objects.create(
-            name="Test Role", code="test_role", tenant_id=tenant.id
-        )
+        role = Role.objects.create(name="Test Role", code="test_role", tenant_id=tenant.id)
         field_security = SecurityAccessControlService.create_field_security(
             module="crm",
             object_name="customers",
@@ -136,9 +119,7 @@ class TestSecurityAccessControlService:
     def test_create_row_security_rule(self):
         """Test: Create row-level security rule."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        role = Role.objects.create(
-            name="Test Role", code="test_role", tenant_id=tenant.id
-        )
+        role = Role.objects.create(name="Test Role", code="test_role", tenant_id=tenant.id)
         row_rule = SecurityAccessControlService.create_row_security_rule(
             module="crm",
             object_name="opportunities",
@@ -168,9 +149,7 @@ class TestSecurityAccessControlService:
     def test_log_audit_event(self):
         """Test: Log audit event."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        user = User.objects.create_user(
-            username="testuser", email="test@example.com", password="testpass123"
-        )
+        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass123")
         audit_log = SecurityAccessControlService.log_audit_event(
             action="security.role.created",
             actor_id=user.id,
@@ -187,23 +166,13 @@ class TestSecurityAccessControlService:
     def test_get_user_effective_permissions(self):
         """Test: Get effective permissions for user."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        user = User.objects.create_user(
-            username="testuser", email="test@example.com", password="testpass123"
-        )
-        role = Role.objects.create(
-            name="Test Role", code="test_role", tenant_id=tenant.id
-        )
-        perm1 = Permission.objects.create(
-            module="crm", object="customers", action="read"
-        )
-        perm2 = Permission.objects.create(
-            module="crm", object="customers", action="update"
-        )
+        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass123")
+        role = Role.objects.create(name="Test Role", code="test_role", tenant_id=tenant.id)
+        perm1 = Permission.objects.create(module="crm", object="customers", action="read")
+        perm2 = Permission.objects.create(module="crm", object="customers", action="update")
         RolePermission.objects.create(role=role, permission=perm1, is_granted=True)
         RolePermission.objects.create(role=role, permission=perm2, is_granted=True)
         UserRole.objects.create(user=user, role=role)
-        permissions = SecurityAccessControlService.get_user_effective_permissions(
-            user_id=user.id, tenant_id=tenant.id
-        )
+        permissions = SecurityAccessControlService.get_user_effective_permissions(user_id=user.id, tenant_id=tenant.id)
         assert "crm:customers:read" in permissions
         assert "crm:customers:update" in permissions

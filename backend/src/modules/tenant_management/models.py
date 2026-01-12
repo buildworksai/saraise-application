@@ -8,11 +8,12 @@ All queries are platform-scoped, not tenant-scoped.
 
 from __future__ import annotations
 
+import uuid
+
+from django.contrib.auth import get_user_model
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
-from django.contrib.auth import get_user_model
-from django.core.validators import MinValueValidator, MaxValueValidator
-import uuid
 
 User = get_user_model()
 
@@ -72,12 +73,8 @@ class Tenant(PlatformBaseModel):
         SIZE_500_PLUS = "500+", "500+ employees"
 
     # Basic Information
-    name = models.CharField(
-        max_length=200, db_index=True, help_text="Tenant organization name"
-    )
-    slug = models.CharField(
-        max_length=100, unique=True, db_index=True, help_text="URL-safe identifier"
-    )
+    name = models.CharField(max_length=200, db_index=True, help_text="Tenant organization name")
+    slug = models.CharField(max_length=100, unique=True, db_index=True, help_text="URL-safe identifier")
     subdomain = models.CharField(
         max_length=100,
         unique=True,
@@ -108,9 +105,7 @@ class Tenant(PlatformBaseModel):
         null=True,
         help_text="Subscription plan ID (references billing module)",
     )
-    trial_ends_at = models.DateTimeField(
-        blank=True, null=True, help_text="Trial expiration date"
-    )
+    trial_ends_at = models.DateTimeField(blank=True, null=True, help_text="Trial expiration date")
     subscription_start_date = models.DateField(blank=True, null=True)
     subscription_end_date = models.DateField(blank=True, null=True)
 
@@ -125,39 +120,29 @@ class Tenant(PlatformBaseModel):
     logo_url = models.URLField(max_length=500, blank=True)
     website_url = models.URLField(max_length=500, blank=True)
     industry = models.CharField(max_length=100, blank=True)
-    company_size = models.CharField(
-        max_length=50, choices=CompanySize.choices, blank=True
-    )
+    company_size = models.CharField(max_length=50, choices=CompanySize.choices, blank=True)
     tax_id = models.CharField(max_length=100, blank=True)
 
     # Configuration
     timezone = models.CharField(max_length=100, default="UTC")
     default_language = models.CharField(max_length=10, default="en")
     default_currency = models.CharField(max_length=10, default="USD")
-    fiscal_year_start_month = models.IntegerField(
-        default=1, validators=[MinValueValidator(1), MaxValueValidator(12)]
-    )
+    fiscal_year_start_month = models.IntegerField(default=1, validators=[MinValueValidator(1), MaxValueValidator(12)])
     date_format = models.CharField(max_length=50, default="YYYY-MM-DD")
     time_format = models.CharField(max_length=50, default="HH:mm:ss")
 
     # Branding
-    primary_color = models.CharField(
-        max_length=7, blank=True, help_text="Hex color code"
-    )
+    primary_color = models.CharField(max_length=7, blank=True, help_text="Hex color code")
     secondary_color = models.CharField(max_length=7, blank=True)
     accent_color = models.CharField(max_length=7, blank=True)
 
     # Feature Flags
-    features_enabled = models.JSONField(
-        default=dict, help_text="Feature flags configuration"
-    )
+    features_enabled = models.JSONField(default=dict, help_text="Feature flags configuration")
 
     # Resource Limits
     max_users = models.IntegerField(default=10, validators=[MinValueValidator(1)])
     max_storage_gb = models.IntegerField(default=10, validators=[MinValueValidator(1)])
-    max_api_calls_per_day = models.IntegerField(
-        default=10000, validators=[MinValueValidator(0)]
-    )
+    max_api_calls_per_day = models.IntegerField(default=10000, validators=[MinValueValidator(0)])
 
     # Metadata
     onboarded_by = models.CharField(
@@ -203,9 +188,7 @@ class TenantModule(PlatformBaseModel):
     Tracks which modules are enabled for each tenant.
     """
 
-    tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, related_name="modules", db_index=True
-    )
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="modules", db_index=True)
     module_name = models.CharField(
         max_length=100,
         db_index=True,
@@ -219,18 +202,10 @@ class TenantModule(PlatformBaseModel):
         null=True,
         help_text="User ID who installed this module",
     )
-    version = models.CharField(
-        max_length=50, blank=True, help_text="Module version installed"
-    )
-    configuration = models.JSONField(
-        default=dict, help_text="Module-specific configuration"
-    )
-    last_used_at = models.DateTimeField(
-        blank=True, null=True, help_text="Last time module was accessed"
-    )
-    usage_count = models.IntegerField(
-        default=0, help_text="Number of times module was accessed"
-    )
+    version = models.CharField(max_length=50, blank=True, help_text="Module version installed")
+    configuration = models.JSONField(default=dict, help_text="Module-specific configuration")
+    last_used_at = models.DateTimeField(blank=True, null=True, help_text="Last time module was accessed")
+    usage_count = models.IntegerField(default=0, help_text="Number of times module was accessed")
 
     class Meta:
         db_table = "tenant_modules"
@@ -252,9 +227,7 @@ class TenantResourceUsage(PlatformBaseModel):
     Tracks daily resource consumption per tenant.
     """
 
-    tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, related_name="resource_usage", db_index=True
-    )
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="resource_usage", db_index=True)
     date = models.DateField(db_index=True, help_text="Date for this usage record")
 
     # Usage Metrics
@@ -266,9 +239,7 @@ class TenantResourceUsage(PlatformBaseModel):
     sms_sent = models.IntegerField(default=0)
 
     # Performance Metrics
-    avg_response_time_ms = models.DecimalField(
-        max_digits=10, decimal_places=2, blank=True, null=True
-    )
+    avg_response_time_ms = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
     error_count = models.IntegerField(default=0)
     slow_query_count = models.IntegerField(default=0)
 
@@ -291,9 +262,7 @@ class TenantSettings(PlatformBaseModel):
     Stores tenant configuration settings by category.
     """
 
-    tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, related_name="settings", db_index=True
-    )
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="settings", db_index=True)
     category = models.CharField(
         max_length=100,
         db_index=True,
@@ -328,9 +297,7 @@ class TenantHealthScore(PlatformBaseModel):
     Tracks overall tenant health based on usage, errors, and performance.
     """
 
-    tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, related_name="health_scores", db_index=True
-    )
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="health_scores", db_index=True)
     date = models.DateField(db_index=True)
     overall_score = models.IntegerField(
         validators=[MinValueValidator(0), MaxValueValidator(100)],
@@ -338,15 +305,11 @@ class TenantHealthScore(PlatformBaseModel):
     )
 
     # Component Scores
-    usage_score = models.IntegerField(
-        validators=[MinValueValidator(0), MaxValueValidator(100)], blank=True, null=True
-    )
+    usage_score = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(100)], blank=True, null=True)
     performance_score = models.IntegerField(
         validators=[MinValueValidator(0), MaxValueValidator(100)], blank=True, null=True
     )
-    error_score = models.IntegerField(
-        validators=[MinValueValidator(0), MaxValueValidator(100)], blank=True, null=True
-    )
+    error_score = models.IntegerField(validators=[MinValueValidator(0), MaxValueValidator(100)], blank=True, null=True)
     engagement_score = models.IntegerField(
         validators=[MinValueValidator(0), MaxValueValidator(100)], blank=True, null=True
     )

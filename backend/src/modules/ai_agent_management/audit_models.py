@@ -6,10 +6,11 @@ Task: 403.1 - AI Audit Trail
 
 from __future__ import annotations
 
+import uuid
+from typing import Any, Dict, Optional
+
 from django.db import models
 from django.utils import timezone
-from typing import Optional, Dict, Any
-import uuid
 
 from .models import TenantBaseModel
 
@@ -48,9 +49,7 @@ class AuditEvent(TenantBaseModel):
     Implements: request → agent → tool → outcome
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     event_type = models.CharField(
         max_length=50,
         choices=AuditEventType.choices,
@@ -105,9 +104,7 @@ class AuditEvent(TenantBaseModel):
         db_index=True,
         help_text="Request ID for tracking",
     )
-    event_timestamp = models.DateTimeField(
-        auto_now_add=True, db_index=True
-    )
+    event_timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
     outcome = models.CharField(
         max_length=20,
         choices=[
@@ -163,9 +160,7 @@ class AuditTrail(TenantBaseModel):
     request → agent → tool → outcome
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     request_id = models.CharField(
         max_length=36,
         unique=True,
@@ -183,9 +178,7 @@ class AuditTrail(TenantBaseModel):
         db_index=True,
         help_text="User/agent who initiated the request",
     )
-    request_timestamp = models.DateTimeField(
-        auto_now_add=True, db_index=True
-    )
+    request_timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
     completed_timestamp = models.DateTimeField(
         null=True,
         blank=True,
@@ -227,4 +220,3 @@ class AuditTrail(TenantBaseModel):
 
     def __str__(self) -> str:
         return f"Audit Trail {self.id}: {self.request_id} ({self.final_outcome or 'pending'})"
-

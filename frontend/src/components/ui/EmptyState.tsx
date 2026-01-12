@@ -19,12 +19,12 @@ interface EmptyStateProps {
   className?: string;
 }
 
-export const EmptyState = ({ 
-  icon: Icon, 
-  title, 
-  description, 
+export const EmptyState = ({
+  icon: Icon,
+  title,
+  description,
   action,
-  className 
+  className
 }: EmptyStateProps) => {
   return (
     <div className={`flex flex-col items-center justify-center min-h-[400px] text-center p-8 ${className ?? ''}`}>

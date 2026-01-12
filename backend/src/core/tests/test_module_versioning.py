@@ -7,13 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from ..module_versioning import (
-    Version,
-    VersionError,
-    VersionComparison,
-    CompatibilityChecker,
-    compatibility_checker,
-)
+from ..module_versioning import CompatibilityChecker, Version, VersionComparison, VersionError, compatibility_checker
 
 
 class TestVersion:
@@ -192,4 +186,3 @@ class TestCompatibilityChecker:
 
         assert checker.is_upgrade_safe(v1, v2) is True  # Same major
         assert checker.is_upgrade_safe(v1, v3) is False  # Major upgrade
-

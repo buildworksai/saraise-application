@@ -1,0 +1,44 @@
+# Security & Access Control Module - Cursor Rules
+# These rules are automatically applied when editing files in this directory
+
+# =============================================================================
+# MODULE OVERVIEW
+# =============================================================================
+#
+# This module manages roles, permissions, permission sets, security profiles, and audit logs.
+# Key entities: Role, Permission, PermissionSet, SecurityProfile, AuditLog
+
+# =============================================================================
+# CRITICAL: Read contracts.ts FIRST
+# =============================================================================
+#
+# Before modifying any file in this module, you MUST read:
+#   frontend/src/modules/security_access_control/contracts.ts
+
+# =============================================================================
+# TYPE IMPORTS
+# =============================================================================
+#
+# ✅ CORRECT: Import types from contracts.ts
+#   import { Role, Permission, PermissionSet, ENDPOINTS } from './contracts';
+#
+# ❌ FORBIDDEN: Import directly from @/types/api in pages/components
+# ❌ FORBIDDEN: Define ad-hoc types in page files
+
+# =============================================================================
+# ENDPOINT USAGE
+# =============================================================================
+#
+# ✅ CORRECT: Use ENDPOINTS constant
+#   apiClient.get<Role[]>(ENDPOINTS.ROLES.LIST);
+#
+# ❌ FORBIDDEN: Hardcode URL strings
+
+# =============================================================================
+# VALIDATION CHECKPOINTS
+# =============================================================================
+#
+# After editing any TypeScript file:
+# 1. Run: npx tsc --noEmit src/modules/security_access_control/{file}.tsx
+# 2. Run: npx eslint src/modules/security_access_control/{file}.tsx --max-warnings 0
+# 3. Fix ALL errors before proceeding

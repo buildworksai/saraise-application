@@ -1,0 +1,27 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: automation-orchestration
+version: 1.0.0
+description: Advanced orchestration for multi-agent workflows and workstreams
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+  - ai-agent-management >=1.0
+  - workflow-automation >=1.0
+permissions:
+  - automation_orchestration.resource:create
+  - automation_orchestration.resource:read
+  - automation_orchestration.resource:update
+  - automation_orchestration.resource:delete
+  - automation_orchestration.resource:activate
+  - automation_orchestration.resource:deactivate
+sod_actions:
+  - [automation_orchestration.resource:create, automation_orchestration.resource:delete]
+search_indexes:
+  - automation_orchestration_resources
+ai_tools:
+  - create_automation_orchestration_resource
+  - update_automation_orchestration_resource
+  - delete_automation_orchestration_resource

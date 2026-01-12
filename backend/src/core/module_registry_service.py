@@ -6,23 +6,17 @@ Task: 501.2 - Module Registry & Compatibility Validation
 
 from __future__ import annotations
 
-import logging
 import hashlib
-from typing import Dict, Any, List, Optional, Set, Tuple
+import logging
 from collections import defaultdict, deque
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-from django.db import transaction, models
+from django.db import models, transaction
 
-from .module_registry_models import (
-    ModuleRegistryEntry,
-    TenantModuleInstallation,
-)
-from .module_manifest_schema import (
-    ModuleManifest,
-    manifest_validator,
-)
-from .module_versioning import Version, compatibility_checker
+from .module_manifest_schema import ModuleManifest, manifest_validator
+from .module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
 from .module_signing import ManifestSigner, VerificationError
+from .module_versioning import Version, compatibility_checker
 
 logger = logging.getLogger(__name__)
 
@@ -96,21 +90,15 @@ class ModuleRegistryService:
                     ai_tools=manifest.ai_tools,
                     metadata=manifest.metadata,
                 )
-                if not self.signer.verify(
-                    manifest_without_sig, signature, signature_algorithm
-                ):
+                if not self.signer.verify(manifest_without_sig, signature, signature_algorithm):
                     raise RegistryError("Manifest signature verification failed")
             except VerificationError as e:
                 raise RegistryError(f"Signature verification failed: {e}") from e
 
         # Check if module already exists
-        existing = ModuleRegistryEntry.objects.filter(
-            name=manifest.name, version=manifest.version
-        ).first()
+        existing = ModuleRegistryEntry.objects.filter(name=manifest.name, version=manifest.version).first()
         if existing:
-            raise RegistryError(
-                f"Module {manifest.name} v{manifest.version} already registered"
-            )
+            raise RegistryError(f"Module {manifest.name} v{manifest.version} already registered")
 
         # Calculate manifest hash
         manifest_hash = hashlib.sha256(manifest_yaml.encode()).hexdigest()
@@ -138,9 +126,7 @@ class ModuleRegistryService:
         logger.info(f"Registered module {manifest.name} v{manifest.version}")
         return entry
 
-    def get_module(
-        self, name: str, version: Optional[str] = None
-    ) -> Optional[ModuleRegistryEntry]:
+    def get_module(self, name: str, version: Optional[str] = None) -> Optional[ModuleRegistryEntry]:
         """Get module from registry.
 
         Args:
@@ -203,9 +189,7 @@ class ModuleRegistryService:
         # Get module
         module = self.get_module(module_name, version)
         if not module:
-            raise DependencyResolutionError(
-                f"Module {module_name} v{version} not found"
-            )
+            raise DependencyResolutionError(f"Module {module_name} v{version} not found")
 
         # Build dependency graph
         resolved: Dict[str, ModuleRegistryEntry] = {}
@@ -230,9 +214,7 @@ class ModuleRegistryService:
                 constraint = f">={dep_version_constraint}"
 
             # Find matching version
-            candidates = ModuleRegistryEntry.objects.filter(
-                name=dep_name, is_active=True
-            ).order_by("-version")
+            candidates = ModuleRegistryEntry.objects.filter(name=dep_name, is_active=True).order_by("-version")
 
             matched = None
             for candidate in candidates:
@@ -245,9 +227,7 @@ class ModuleRegistryService:
                     continue
 
             if not matched:
-                raise DependencyResolutionError(
-                    f"Dependency {dep_name} {constraint} not found"
-                )
+                raise DependencyResolutionError(f"Dependency {dep_name} {constraint} not found")
 
             resolved[dep_name] = matched
 
@@ -320,9 +300,7 @@ class ModuleRegistryService:
             return False, [f"Module {module_name} v{version} not found"]
 
         # Get installed modules for tenant
-        installed = TenantModuleInstallation.objects.filter(
-            tenant_id=tenant_id, status="installed"
-        )
+        installed = TenantModuleInstallation.objects.filter(tenant_id=tenant_id, status="installed")
 
         # Check dependencies
         try:
@@ -386,10 +364,7 @@ class ModuleRegistryService:
             modules = modules.filter(lifecycle=lifecycle)
 
         if query:
-            modules = modules.filter(
-                models.Q(name__icontains=query)
-                | models.Q(description__icontains=query)
-            )
+            modules = modules.filter(models.Q(name__icontains=query) | models.Q(description__icontains=query))
 
         return list(modules.order_by("name", "-version"))
 
@@ -403,9 +378,7 @@ class ModuleRegistryService:
             List of TenantModuleInstallation instances.
         """
         return list(
-            TenantModuleInstallation.objects.filter(
-                tenant_id=tenant_id, status="installed"
-            ).order_by("module_name")
+            TenantModuleInstallation.objects.filter(tenant_id=tenant_id, status="installed").order_by("module_name")
         )
 
 

@@ -1,0 +1,25 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: performance-monitoring
+version: 1.0.0
+description: APM, distributed tracing, logging, metrics, alerting, SLA monitoring
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+permissions:
+  - performance_monitoring.resource:create
+  - performance_monitoring.resource:read
+  - performance_monitoring.resource:update
+  - performance_monitoring.resource:delete
+  - performance_monitoring.resource:activate
+  - performance_monitoring.resource:deactivate
+sod_actions:
+  - [performance_monitoring.resource:create, performance_monitoring.resource:delete]
+search_indexes:
+  - performance_monitoring_resources
+ai_tools:
+  - create_performance_monitoring_resource
+  - update_performance_monitoring_resource
+  - delete_performance_monitoring_resource

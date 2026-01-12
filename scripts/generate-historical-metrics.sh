@@ -20,7 +20,7 @@ cd "$PROJECT_ROOT"
 for i in {0..29}; do
     DAYS_AGO=$i
     echo "Creating metrics for $DAYS_AGO days ago..."
-    
+
     # Use Docker exec to run the command with a custom timestamp
     docker compose -f docker-compose.dev.yml exec -T backend python -c "
 import os
@@ -50,10 +50,9 @@ metric.save()
 
 print(f'Created metric {metric.id} for {target_date}')
 "
-    
+
     # Small delay to avoid overwhelming the database
     sleep 0.5
 done
 
 echo "Historical metrics generation complete!"
-

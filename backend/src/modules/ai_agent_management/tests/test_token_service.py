@@ -5,14 +5,15 @@ Task: 402.3 - Token Metering & Cost Attribution
 
 from __future__ import annotations
 
-import pytest
-from decimal import Decimal
-from django.utils import timezone
 from datetime import timedelta
+from decimal import Decimal
+
+import pytest
+from django.utils import timezone
 
 from ..models import Agent, AgentExecution, AgentIdentityType
+from ..token_models import CostRecord, CostSummary, TokenUsage
 from ..token_service import TokenService
-from ..token_models import TokenUsage, CostRecord, CostSummary
 
 
 @pytest.mark.django_db
@@ -226,4 +227,3 @@ class TestTokenService:
         assert usage is not None
         assert usage["total_tokens"] == 1500
         assert usage["provider"] == "openai"
-

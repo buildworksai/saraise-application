@@ -5,17 +5,13 @@ Task: 401.1 - Agent Runtime & Scheduler
 
 from __future__ import annotations
 
-import pytest
-from django.utils import timezone
 from datetime import datetime
 
-from ..models import (
-    Agent,
-    AgentExecution,
-    AgentLifecycleState,
-    AgentIdentityType,
-)
-from ..runtime import AgentRuntime, AgentExecutionContext
+import pytest
+from django.utils import timezone
+
+from ..models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState
+from ..runtime import AgentExecutionContext, AgentRuntime
 
 
 @pytest.mark.django_db
@@ -167,9 +163,7 @@ class TestAgentRuntime:
         assert execution.state == AgentLifecycleState.RUNNING
 
         # Complete
-        execution = runtime.complete_execution(
-            execution.id, tenant_id, result={"status": "success"}
-        )
+        execution = runtime.complete_execution(execution.id, tenant_id, result={"status": "success"})
         assert execution.state == AgentLifecycleState.COMPLETED
         assert execution.completed_at is not None
         assert execution.result == {"status": "success"}
@@ -208,4 +202,3 @@ class TestAgentRuntime:
         execution = runtime.terminate_execution(execution.id, tenant_id)
         assert execution.state == AgentLifecycleState.TERMINATED
         assert execution.completed_at is not None
-

@@ -2,29 +2,31 @@
 Security & Access Control API Tests
 """
 
-import pytest
+import uuid
 from datetime import timedelta
+from unittest.mock import patch
+
+import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from rest_framework.test import APIClient
 from rest_framework import status
-import uuid
+from rest_framework.test import APIClient
 
-from ..models import (
-    Role,
-    Permission,
-    UserRole,
-    PermissionSet,
-    UserPermissionSet,
-    RolePermission,
-    FieldSecurity,
-    RowSecurityRule,
-    SecurityProfile,
-    SecurityAuditLog,
-)
 from src.core.user_models import UserProfile
 from src.modules.tenant_management.models import Tenant
-from unittest.mock import patch
+
+from ..models import (
+    FieldSecurity,
+    Permission,
+    PermissionSet,
+    Role,
+    RolePermission,
+    RowSecurityRule,
+    SecurityAuditLog,
+    SecurityProfile,
+    UserPermissionSet,
+    UserRole,
+)
 
 User = get_user_model()
 
@@ -94,9 +96,7 @@ class TestRoleViewSet:
             "description": "Manages sales team",
             "role_type": "functional",
         }
-        response = authenticated_client.post(
-            "/api/v1/security-access-control/roles/", data, format="json"
-        )
+        response = authenticated_client.post("/api/v1/security-access-control/roles/", data, format="json")
         if response.status_code != status.HTTP_201_CREATED:
             print(f"Response status: {response.status_code}")
             print(f"Response data: {response.data}")
@@ -110,9 +110,7 @@ class TestRoleViewSet:
     def test_create_role_validation_error(self, authenticated_client):
         """Test: Validation error for short code."""
         data = {"name": "Test", "code": "a"}  # Code too short
-        response = authenticated_client.post(
-            "/api/v1/security-access-control/roles/", data, format="json"
-        )
+        response = authenticated_client.post("/api/v1/security-access-control/roles/", data, format="json")
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_list_roles_filtered_by_tenant(self, authenticated_client, tenant_user):
@@ -122,9 +120,7 @@ class TestRoleViewSet:
         Role.objects.create(name="Tenant Role", code="tenant_role", tenant_id=tenant_id)
         # Create role for other tenant (should not appear)
         other_tenant = Tenant.objects.create(name="Other Tenant", slug="other-tenant")
-        Role.objects.create(
-            name="Other Role", code="other_role", tenant_id=other_tenant.id
-        )
+        Role.objects.create(name="Other Role", code="other_role", tenant_id=other_tenant.id)
         response = authenticated_client.get("/api/v1/security-access-control/roles/")
         assert response.status_code == status.HTTP_200_OK
         names = [r["name"] for r in response.data]
@@ -146,9 +142,7 @@ class TestRoleViewSet:
             tenant_id=tenant_id,
             role_type=Role.RoleType.CUSTOM,
         )
-        response = authenticated_client.get(
-            "/api/v1/security-access-control/roles/?role_type=system"
-        )
+        response = authenticated_client.get("/api/v1/security-access-control/roles/?role_type=system")
         assert response.status_code == status.HTTP_200_OK
         names = [r["name"] for r in response.data]
         assert "System Role" in names
@@ -157,23 +151,15 @@ class TestRoleViewSet:
     def test_cannot_delete_system_role(self, authenticated_client, tenant_user):
         """Test: Cannot delete system role."""
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="System Role", code="system_role", tenant_id=tenant_id, is_system=True
-        )
-        response = authenticated_client.delete(
-            f"/api/v1/security-access-control/roles/{role.id}/"
-        )
+        role = Role.objects.create(name="System Role", code="system_role", tenant_id=tenant_id, is_system=True)
+        response = authenticated_client.delete(f"/api/v1/security-access-control/roles/{role.id}/")
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_assign_permission_to_role(self, authenticated_client, tenant_user):
         """Test: Assign permission to role."""
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="Test Role", code="test_role", tenant_id=tenant_id
-        )
-        permission = Permission.objects.create(
-            module="crm", object="customers", action="read"
-        )
+        role = Role.objects.create(name="Test Role", code="test_role", tenant_id=tenant_id)
+        permission = Permission.objects.create(module="crm", object="customers", action="read")
         response = authenticated_client.post(
             f"/api/v1/security-access-control/roles/{role.id}/assign_permission/",
             {"permission_id": str(permission.id)},
@@ -185,12 +171,8 @@ class TestRoleViewSet:
     def test_revoke_permission_from_role(self, authenticated_client, tenant_user):
         """Test: Revoke permission from role."""
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="Test Role", code="test_role_revoke", tenant_id=tenant_id
-        )
-        permission = Permission.objects.create(
-            module="crm", object="customers", action="read"
-        )
+        role = Role.objects.create(name="Test Role", code="test_role_revoke", tenant_id=tenant_id)
+        permission = Permission.objects.create(module="crm", object="customers", action="read")
         authenticated_client.post(
             f"/api/v1/security-access-control/roles/{role.id}/assign_permission/",
             {"permission_id": str(permission.id)},
@@ -207,9 +189,7 @@ class TestRoleViewSet:
     def test_assign_permission_missing_id(self, authenticated_client, tenant_user):
         """Test: Assign permission requires permission_id."""
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="Test Role", code="test_role_missing", tenant_id=tenant_id
-        )
+        role = Role.objects.create(name="Test Role", code="test_role_missing", tenant_id=tenant_id)
         response = authenticated_client.post(
             f"/api/v1/security-access-control/roles/{role.id}/assign_permission/",
             {},
@@ -220,9 +200,7 @@ class TestRoleViewSet:
     def test_assign_permission_not_found(self, authenticated_client, tenant_user):
         """Test: Assign permission returns 404 when permission not found."""
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="Test Role", code="test_role_notfound", tenant_id=tenant_id
-        )
+        role = Role.objects.create(name="Test Role", code="test_role_notfound", tenant_id=tenant_id)
         response = authenticated_client.post(
             f"/api/v1/security-access-control/roles/{role.id}/assign_permission/",
             {"permission_id": str(uuid.uuid4())},
@@ -233,9 +211,7 @@ class TestRoleViewSet:
     def test_update_role(self, authenticated_client, tenant_user):
         """Test: Update role."""
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="Role Update", code="role_update", tenant_id=tenant_id
-        )
+        role = Role.objects.create(name="Role Update", code="role_update", tenant_id=tenant_id)
         response = authenticated_client.patch(
             f"/api/v1/security-access-control/roles/{role.id}/",
             {"description": "Updated"},
@@ -247,20 +223,14 @@ class TestRoleViewSet:
     def test_delete_role(self, authenticated_client, tenant_user):
         """Test: Delete non-system role."""
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="Role Delete", code="role_delete", tenant_id=tenant_id
-        )
-        response = authenticated_client.delete(
-            f"/api/v1/security-access-control/roles/{role.id}/"
-        )
+        role = Role.objects.create(name="Role Delete", code="role_delete", tenant_id=tenant_id)
+        response = authenticated_client.delete(f"/api/v1/security-access-control/roles/{role.id}/")
         assert response.status_code == status.HTTP_204_NO_CONTENT
 
     def test_create_role_without_tenant(self, client_no_tenant):
         """Test: Create role without tenant fails."""
         data = {"name": "No Tenant", "code": "no_tenant"}
-        response = client_no_tenant.post(
-            "/api/v1/security-access-control/roles/", data, format="json"
-        )
+        response = client_no_tenant.post("/api/v1/security-access-control/roles/", data, format="json")
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     def test_list_roles_no_tenant(self, client_no_tenant):
@@ -282,18 +252,14 @@ class TestRoleViewSet:
     def test_filter_roles_by_is_active(self, authenticated_client, tenant_user):
         """Test: Filter roles by is_active query param."""
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        Role.objects.create(
-            name="Active Role", code="active_role", tenant_id=tenant_id, is_active=True
-        )
+        Role.objects.create(name="Active Role", code="active_role", tenant_id=tenant_id, is_active=True)
         Role.objects.create(
             name="Inactive Role",
             code="inactive_role",
             tenant_id=tenant_id,
             is_active=False,
         )
-        response = authenticated_client.get(
-            "/api/v1/security-access-control/roles/?is_active=true"
-        )
+        response = authenticated_client.get("/api/v1/security-access-control/roles/?is_active=true")
         assert response.status_code == status.HTTP_200_OK
         names = [r["name"] for r in response.data]
         assert "Active Role" in names
@@ -301,23 +267,15 @@ class TestRoleViewSet:
 
     def test_get_role_not_found(self, authenticated_client):
         """Test: Role detail not found returns 404."""
-        response = authenticated_client.get(
-            f"/api/v1/security-access-control/roles/{uuid.uuid4()}/"
-        )
+        response = authenticated_client.get(f"/api/v1/security-access-control/roles/{uuid.uuid4()}/")
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
     def test_assign_permission_updates_existing(self, authenticated_client, tenant_user):
         """Test: Assign permission updates existing RolePermission."""
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="Update RolePerm", code="update_roleperm", tenant_id=tenant_id
-        )
-        permission = Permission.objects.create(
-            module="crm", object="customers", action="read"
-        )
-        RolePermission.objects.create(
-            role=role, permission=permission, is_granted=True
-        )
+        role = Role.objects.create(name="Update RolePerm", code="update_roleperm", tenant_id=tenant_id)
+        permission = Permission.objects.create(module="crm", object="customers", action="read")
+        RolePermission.objects.create(role=role, permission=permission, is_granted=True)
         response = authenticated_client.post(
             f"/api/v1/security-access-control/roles/{role.id}/assign_permission/",
             {"permission_id": str(permission.id), "is_granted": False},
@@ -335,9 +293,7 @@ class TestPermissionViewSet:
         """Test: List permissions."""
         Permission.objects.create(module="crm", object="customers", action="read")
         Permission.objects.create(module="crm", object="customers", action="create")
-        response = authenticated_client.get(
-            "/api/v1/security-access-control/permissions/"
-        )
+        response = authenticated_client.get("/api/v1/security-access-control/permissions/")
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data) >= 2
 
@@ -345,9 +301,7 @@ class TestPermissionViewSet:
         """Test: Filter permissions by module."""
         Permission.objects.create(module="crm", object="customers", action="read")
         Permission.objects.create(module="accounting", object="invoices", action="read")
-        response = authenticated_client.get(
-            "/api/v1/security-access-control/permissions/?module=crm"
-        )
+        response = authenticated_client.get("/api/v1/security-access-control/permissions/?module=crm")
         assert response.status_code == status.HTTP_200_OK
         modules = [p["module"] for p in response.data]
         assert all(m == "crm" for m in modules)
@@ -360,22 +314,16 @@ class TestUserRoleViewSet:
     def test_assign_role_to_user(self, authenticated_client, tenant_user):
         """Test: Assign role to user."""
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="Test Role", code="test_role", tenant_id=tenant_id
-        )
+        role = Role.objects.create(name="Test Role", code="test_role", tenant_id=tenant_id)
         data = {"user": str(tenant_user.id), "role_id": str(role.id)}
-        response = authenticated_client.post(
-            "/api/v1/security-access-control/user-roles/", data, format="json"
-        )
+        response = authenticated_client.post("/api/v1/security-access-control/user-roles/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["role"]["id"] == str(role.id)
 
     def test_list_user_roles_filtered(self, authenticated_client, tenant_user):
         """Test: List user roles filtered by user and role."""
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="Filter Role", code="filter_role", tenant_id=tenant_id
-        )
+        role = Role.objects.create(name="Filter Role", code="filter_role", tenant_id=tenant_id)
         UserRole.objects.create(user=tenant_user, role=role)
         response = authenticated_client.get(
             f"/api/v1/security-access-control/user-roles/?user_id={tenant_user.id}&role_id={role.id}"
@@ -385,9 +333,7 @@ class TestUserRoleViewSet:
 
     def test_list_user_roles_no_tenant(self, client_no_tenant):
         """Test: List user roles returns empty without tenant."""
-        response = client_no_tenant.get(
-            "/api/v1/security-access-control/user-roles/"
-        )
+        response = client_no_tenant.get("/api/v1/security-access-control/user-roles/")
         assert response.status_code == status.HTTP_200_OK
         assert response.data == []
 
@@ -398,21 +344,15 @@ class TestPermissionSetViewSet:
 
     def test_create_permission_set(self, authenticated_client, tenant_user):
         """Test: Create permission set."""
-        perm1 = Permission.objects.create(
-            module="crm", object="customers", action="read"
-        )
-        perm2 = Permission.objects.create(
-            module="crm", object="customers", action="update"
-        )
+        perm1 = Permission.objects.create(module="crm", object="customers", action="read")
+        perm2 = Permission.objects.create(module="crm", object="customers", action="update")
         data = {
             "name": "CRM Access",
             "description": "CRM read and update access",
             "permission_ids": [str(perm1.id), str(perm2.id)],
             "default_duration_days": 30,
         }
-        response = authenticated_client.post(
-            "/api/v1/security-access-control/permission-sets/", data, format="json"
-        )
+        response = authenticated_client.post("/api/v1/security-access-control/permission-sets/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["name"] == "CRM Access"
         assert len(response.data["permission_ids"]) == 2
@@ -435,9 +375,7 @@ class TestPermissionSetViewSet:
 
     def test_list_permission_sets(self, authenticated_client):
         """Test: List permission sets."""
-        response = authenticated_client.get(
-            "/api/v1/security-access-control/permission-sets/"
-        )
+        response = authenticated_client.get("/api/v1/security-access-control/permission-sets/")
         assert response.status_code == status.HTTP_200_OK
 
     def test_create_permission_set_without_tenant(self, client_no_tenant):
@@ -493,9 +431,7 @@ class TestUserPermissionSetViewSet:
         assert response.status_code == status.HTTP_200_OK
 
     def test_list_user_permission_sets_no_tenant(self, client_no_tenant):
-        response = client_no_tenant.get(
-            "/api/v1/security-access-control/user-permission-sets/"
-        )
+        response = client_no_tenant.get("/api/v1/security-access-control/user-permission-sets/")
         assert response.status_code == status.HTTP_200_OK
         assert response.data == []
 
@@ -514,9 +450,7 @@ class TestSecurityProfileViewSet:
             "session_timeout_minutes": 5,
             "download_allowed": False,
         }
-        response = authenticated_client.post(
-            "/api/v1/security-access-control/security-profiles/", data, format="json"
-        )
+        response = authenticated_client.post("/api/v1/security-access-control/security-profiles/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["name"] == "High Security Profile"
         assert response.data["profile_type"] == "high_security"
@@ -543,9 +477,7 @@ class TestSecurityProfileViewSet:
         assert "Standard Profile" not in names
 
     def test_list_security_profiles_no_tenant(self, client_no_tenant):
-        response = client_no_tenant.get(
-            "/api/v1/security-access-control/security-profiles/"
-        )
+        response = client_no_tenant.get("/api/v1/security-access-control/security-profiles/")
         assert response.status_code == status.HTTP_200_OK
         assert response.data == []
 
@@ -556,9 +488,7 @@ class TestFieldSecurityViewSet:
 
     def test_create_field_security(self, authenticated_client, tenant_user):
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="Field Role", code="field_role", tenant_id=tenant_id
-        )
+        role = Role.objects.create(name="Field Role", code="field_role", tenant_id=tenant_id)
         data = {
             "module": "crm",
             "object": "customer",
@@ -567,16 +497,12 @@ class TestFieldSecurityViewSet:
             "visibility": "masked",
             "edit_control": "read_only",
         }
-        response = authenticated_client.post(
-            "/api/v1/security-access-control/field-security/", data, format="json"
-        )
+        response = authenticated_client.post("/api/v1/security-access-control/field-security/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
 
     def test_list_field_security_filtered(self, authenticated_client, tenant_user):
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="Field Filter Role", code="field_filter_role", tenant_id=tenant_id
-        )
+        role = Role.objects.create(name="Field Filter Role", code="field_filter_role", tenant_id=tenant_id)
         FieldSecurity.objects.create(
             tenant_id=tenant_id,
             module="crm",
@@ -591,9 +517,7 @@ class TestFieldSecurityViewSet:
         assert len(response.data) >= 1
 
     def test_list_field_security_no_tenant(self, client_no_tenant):
-        response = client_no_tenant.get(
-            "/api/v1/security-access-control/field-security/"
-        )
+        response = client_no_tenant.get("/api/v1/security-access-control/field-security/")
         assert response.status_code == status.HTTP_200_OK
         assert response.data == []
 
@@ -604,9 +528,7 @@ class TestRowSecurityRuleViewSet:
 
     def test_create_row_security_rule(self, authenticated_client, tenant_user):
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="Row Role", code="row_role", tenant_id=tenant_id
-        )
+        role = Role.objects.create(name="Row Role", code="row_role", tenant_id=tenant_id)
         data = {
             "module": "crm",
             "object": "customer",
@@ -615,16 +537,12 @@ class TestRowSecurityRuleViewSet:
             "filter_criteria": "owner_id = user_id",
             "priority": 10,
         }
-        response = authenticated_client.post(
-            "/api/v1/security-access-control/row-security-rules/", data, format="json"
-        )
+        response = authenticated_client.post("/api/v1/security-access-control/row-security-rules/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
 
     def test_list_row_security_rules_filtered(self, authenticated_client, tenant_user):
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        role = Role.objects.create(
-            name="Row Filter Role", code="row_filter_role", tenant_id=tenant_id
-        )
+        role = Role.objects.create(name="Row Filter Role", code="row_filter_role", tenant_id=tenant_id)
         RowSecurityRule.objects.create(
             tenant_id=tenant_id,
             module="crm",
@@ -641,9 +559,7 @@ class TestRowSecurityRuleViewSet:
         assert len(response.data) >= 1
 
     def test_list_row_security_rules_no_tenant(self, client_no_tenant):
-        response = client_no_tenant.get(
-            "/api/v1/security-access-control/row-security-rules/"
-        )
+        response = client_no_tenant.get("/api/v1/security-access-control/row-security-rules/")
         assert response.status_code == status.HTTP_200_OK
         assert response.data == []
 
@@ -663,16 +579,10 @@ class TestSecurityAuditLogViewSet:
             resource_type="Role",
             decision=SecurityAuditLog.Decision.ALLOW,
         )
-        response = authenticated_client.get(
-            "/api/v1/security-access-control/audit-logs/"
-        )
+        response = authenticated_client.get("/api/v1/security-access-control/audit-logs/")
         assert response.status_code == status.HTTP_200_OK
         # Response might be paginated
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) >= 1
         assert data[0]["action"] == "security.role.created"
 
@@ -686,20 +596,12 @@ class TestSecurityAuditLogViewSet:
             resource_type="Role",
             decision=SecurityAuditLog.Decision.DENY,
         )
-        response = authenticated_client.get(
-            "/api/v1/security-access-control/audit-logs/?action=deleted&decision=deny"
-        )
+        response = authenticated_client.get("/api/v1/security-access-control/audit-logs/?action=deleted&decision=deny")
         assert response.status_code == status.HTTP_200_OK
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) >= 1
 
     def test_list_audit_logs_no_tenant(self, client_no_tenant):
-        response = client_no_tenant.get(
-            "/api/v1/security-access-control/audit-logs/"
-        )
+        response = client_no_tenant.get("/api/v1/security-access-control/audit-logs/")
         assert response.status_code == status.HTTP_200_OK
         assert response.data == []

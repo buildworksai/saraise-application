@@ -41,7 +41,7 @@ describe('LoginForm', () => {
         <LoginForm />
       </BrowserRouter>
     );
-    
+
     expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
@@ -54,10 +54,10 @@ describe('LoginForm', () => {
         <LoginForm />
       </BrowserRouter>
     );
-    
+
     const submitButton = screen.getByRole('button', { name: /sign in/i });
     await user.click(submitButton);
-    
+
     await waitFor(() => {
       expect(screen.getByText(/email is required/i)).toBeInTheDocument();
     });
@@ -70,13 +70,13 @@ describe('LoginForm', () => {
         <LoginForm />
       </BrowserRouter>
     );
-    
+
     const emailInput = screen.getByLabelText(/email address/i);
     await user.type(emailInput, 'invalid-email');
-    
+
     const submitButton = screen.getByRole('button', { name: /sign in/i });
     await user.click(submitButton);
-    
+
     await waitFor(() => {
       expect(screen.getByText(/valid email address/i)).toBeInTheDocument();
     });
@@ -89,13 +89,13 @@ describe('LoginForm', () => {
         <LoginForm />
       </BrowserRouter>
     );
-    
+
     const emailInput = screen.getByLabelText(/email address/i);
     await user.type(emailInput, 'test@example.com');
-    
+
     const submitButton = screen.getByRole('button', { name: /sign in/i });
     await user.click(submitButton);
-    
+
     await waitFor(() => {
       expect(screen.getByText(/password is required/i)).toBeInTheDocument();
     });
@@ -124,15 +124,15 @@ describe('LoginForm', () => {
         <LoginForm />
       </BrowserRouter>
     );
-    
+
     const emailInput = screen.getByLabelText(/email address/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const submitButton = screen.getByRole('button', { name: /sign in/i });
-    
+
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, 'password123');
     await user.click(submitButton);
-    
+
     await waitFor(() => {
       expect(authService.login).toHaveBeenCalledWith({
         email: 'test@example.com',
@@ -150,15 +150,15 @@ describe('LoginForm', () => {
         <LoginForm />
       </BrowserRouter>
     );
-    
+
     const emailInput = screen.getByLabelText(/email address/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const submitButton = screen.getByRole('button', { name: /sign in/i });
-    
+
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, 'wrongpassword');
     await user.click(submitButton);
-    
+
     await waitFor(() => {
       expect(screen.getByText(/invalid credentials/i)).toBeInTheDocument();
     });
@@ -178,20 +178,20 @@ describe('LoginForm', () => {
         <LoginForm />
       </BrowserRouter>
     );
-    
+
     const emailInput = screen.getByLabelText(/email address/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const submitButton = screen.getByRole('button', { name: /sign in/i });
-    
+
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, 'password123');
     await user.click(submitButton);
-    
+
     // Button should be disabled during loading
     await waitFor(() => {
       expect(submitButton).toBeDisabled();
     });
-    
+
     // Resolve the promise
     resolveLogin!({
       user: { id: '1', email: 'test@example.com', username: 'test' },
@@ -199,4 +199,3 @@ describe('LoginForm', () => {
     });
   });
 });
-

@@ -1,6 +1,6 @@
 /**
  * Create Agent Page
- * 
+ *
  * Form for creating a new AI agent with validation.
  */
 import { useForm } from 'react-hook-form';

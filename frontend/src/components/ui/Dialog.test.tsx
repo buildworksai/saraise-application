@@ -52,7 +52,7 @@ describe('Dialog', () => {
         <div>Content</div>
       </Dialog>
     );
-    
+
     const closeButton = screen.getByRole('button');
     await user.click(closeButton);
     expect(onOpenChange).toHaveBeenCalledWith(false);
@@ -86,7 +86,7 @@ describe('ConfirmDialog', () => {
         onConfirm={onConfirm}
       />
     );
-    
+
     const confirmButton = screen.getByRole('button', { name: /confirm/i });
     await user.click(confirmButton);
     expect(onConfirm).toHaveBeenCalled();
@@ -104,7 +104,7 @@ describe('ConfirmDialog', () => {
         onConfirm={vi.fn()}
       />
     );
-    
+
     const cancelButton = screen.getByRole('button', { name: /cancel/i });
     await user.click(cancelButton);
     expect(onOpenChange).toHaveBeenCalledWith(false);
@@ -126,4 +126,3 @@ describe('ConfirmDialog', () => {
     expect(screen.getByRole('button', { name: 'No, keep' })).toBeInTheDocument();
   });
 });
-

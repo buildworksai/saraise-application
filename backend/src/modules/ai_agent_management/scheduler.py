@@ -8,20 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
-from django.utils import timezone
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 
-from .models import (
-    Agent,
-    AgentExecution,
-    AgentSchedulerTask,
-    AgentLifecycleState,
-)
+from .models import Agent, AgentExecution, AgentLifecycleState, AgentSchedulerTask
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +62,7 @@ class AgentScheduler:
             ValueError: If agent not found or validation fails.
         """
         # Validate agent exists
-        agent = Agent.objects.filter(
-            id=task.agent_id, tenant_id=task.tenant_id
-        ).first()
+        agent = Agent.objects.filter(id=task.agent_id, tenant_id=task.tenant_id).first()
 
         if not agent:
             raise ValueError(f"Agent {task.agent_id} not found")
@@ -91,16 +84,11 @@ class AgentScheduler:
             status="pending",
         )
 
-        logger.info(
-            f"Scheduled task {scheduler_task.id} for agent {agent.id} "
-            f"at {scheduled_at}"
-        )
+        logger.info(f"Scheduled task {scheduler_task.id} for agent {agent.id} " f"at {scheduled_at}")
 
         return scheduler_task
 
-    def get_next_tasks(
-        self, tenant_id: Optional[str] = None, limit: int = 10
-    ) -> List[AgentSchedulerTask]:
+    def get_next_tasks(self, tenant_id: Optional[str] = None, limit: int = 10) -> List[AgentSchedulerTask]:
         """Get next tasks to execute (priority-based).
 
         Args:
@@ -110,24 +98,18 @@ class AgentScheduler:
         Returns:
             List of scheduled tasks ordered by priority and scheduled_at.
         """
-        query = AgentSchedulerTask.objects.filter(
-            status="pending", scheduled_at__lte=timezone.now()
-        )
+        query = AgentSchedulerTask.objects.filter(status="pending", scheduled_at__lte=timezone.now())
 
         if tenant_id:
             query = query.filter(tenant_id=tenant_id)
 
         tasks = (
-            query.order_by("-priority", "scheduled_at")
-            .select_related("agent")
-            .prefetch_related("execution")[:limit]
+            query.order_by("-priority", "scheduled_at").select_related("agent").prefetch_related("execution")[:limit]
         )
 
         return list(tasks)
 
-    def execute_task(
-        self, task_id: str, tenant_id: str
-    ) -> AgentExecution:
+    def execute_task(self, task_id: str, tenant_id: str) -> AgentExecution:
         """Execute a scheduled task.
 
         Args:
@@ -140,9 +122,7 @@ class AgentScheduler:
         Raises:
             ValueError: If task not found or cannot be executed.
         """
-        task = AgentSchedulerTask.objects.filter(
-            id=task_id, tenant_id=tenant_id
-        ).first()
+        task = AgentSchedulerTask.objects.filter(id=task_id, tenant_id=tenant_id).first()
 
         if not task:
             raise ValueError(f"Task {task_id} not found")
@@ -157,7 +137,7 @@ class AgentScheduler:
 
         try:
             # Create execution from task
-            from .runtime import AgentRuntime, AgentExecutionContext
+            from .runtime import AgentExecutionContext, AgentRuntime
 
             runtime = AgentRuntime()
 
@@ -185,9 +165,7 @@ class AgentScheduler:
             task.execution = execution
             task.save(update_fields=["execution", "updated_at"])
 
-            logger.info(
-                f"Executed task {task.id}, created execution {execution.id}"
-            )
+            logger.info(f"Executed task {task.id}, created execution {execution.id}")
 
             return execution
 
@@ -199,9 +177,7 @@ class AgentScheduler:
             if task.retry_count < task.max_retries:
                 task.retry_count += 1
                 task.status = "pending"
-                task.scheduled_at = timezone.now() + timedelta(
-                    seconds=60 * task.retry_count
-                )  # Exponential backoff
+                task.scheduled_at = timezone.now() + timedelta(seconds=60 * task.retry_count)  # Exponential backoff
                 task.error_message = str(e)
                 task.save(
                     update_fields=[
@@ -212,10 +188,7 @@ class AgentScheduler:
                         "updated_at",
                     ]
                 )
-                logger.info(
-                    f"Scheduled retry {task.retry_count}/{task.max_retries} "
-                    f"for task {task.id}"
-                )
+                logger.info(f"Scheduled retry {task.retry_count}/{task.max_retries} " f"for task {task.id}")
             else:
                 # Max retries exceeded
                 task.status = "failed"
@@ -229,15 +202,11 @@ class AgentScheduler:
                         "updated_at",
                     ]
                 )
-                logger.error(
-                    f"Task {task.id} failed after {task.max_retries} retries"
-                )
+                logger.error(f"Task {task.id} failed after {task.max_retries} retries")
 
             raise
 
-    def complete_task(
-        self, task_id: str, tenant_id: str, success: bool = True
-    ) -> AgentSchedulerTask:
+    def complete_task(self, task_id: str, tenant_id: str, success: bool = True) -> AgentSchedulerTask:
         """Mark a task as completed.
 
         Args:
@@ -251,9 +220,7 @@ class AgentScheduler:
         Raises:
             ValueError: If task not found.
         """
-        task = AgentSchedulerTask.objects.filter(
-            id=task_id, tenant_id=tenant_id
-        ).first()
+        task = AgentSchedulerTask.objects.filter(id=task_id, tenant_id=tenant_id).first()
 
         if not task:
             raise ValueError(f"Task {task_id} not found")
@@ -279,9 +246,7 @@ class AgentScheduler:
         Raises:
             ValueError: If task not found or cannot be cancelled.
         """
-        task = AgentSchedulerTask.objects.filter(
-            id=task_id, tenant_id=tenant_id
-        ).first()
+        task = AgentSchedulerTask.objects.filter(id=task_id, tenant_id=tenant_id).first()
 
         if not task:
             raise ValueError(f"Task {task_id} not found")
@@ -299,13 +264,9 @@ class AgentScheduler:
 
             runtime = AgentRuntime()
             try:
-                runtime.terminate_execution(
-                    task.execution.id, task.tenant_id
-                )
+                runtime.terminate_execution(task.execution.id, task.tenant_id)
             except Exception as e:
-                logger.warning(
-                    f"Failed to terminate execution for task {task.id}: {e}"
-                )
+                logger.warning(f"Failed to terminate execution for task {task.id}: {e}")
 
         logger.info(f"Cancelled task {task.id}")
 
@@ -361,4 +322,3 @@ class AgentScheduler:
 
 # Global scheduler instance
 agent_scheduler = AgentScheduler()
-

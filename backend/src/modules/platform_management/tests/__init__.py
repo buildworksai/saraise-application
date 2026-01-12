@@ -1,2 +1,1 @@
 """Platform Management Tests."""
-

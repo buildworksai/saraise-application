@@ -6,26 +6,19 @@ Task: 502.1 - Module Installation
 
 from __future__ import annotations
 
-import logging
 import importlib
-from typing import Dict, Any, List, Optional
+import logging
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from django.db import transaction
-from django.core.management import call_command
 from django.apps import apps
+from django.core.management import call_command
+from django.db import transaction
 from django.utils import timezone
 
-from .module_registry_service import (
-    module_registry_service,
-    DependencyResolutionError,
-)
+from .module_installation_models import InstallationStatus, InstallationStep, ModuleInstallation
 from .module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
-from .module_installation_models import (
-    ModuleInstallation,
-    InstallationStep,
-    InstallationStatus,
-)
+from .module_registry_service import DependencyResolutionError, module_registry_service
 
 logger = logging.getLogger(__name__)
 
@@ -71,18 +64,14 @@ class ModuleInstaller:
         # Get module from registry
         registry_entry = self.registry_service.get_module(module_name, module_version)
         if not registry_entry:
-            raise InstallationError(
-                f"Module {module_name} v{module_version} not found in registry"
-            )
+            raise InstallationError(f"Module {module_name} v{module_version} not found in registry")
 
         # Check if already installed
         existing = TenantModuleInstallation.objects.filter(
             tenant_id=tenant_id, module_name=module_name, status="installed"
         ).first()
         if existing:
-            raise InstallationError(
-                f"Module {module_name} already installed for tenant {tenant_id}"
-            )
+            raise InstallationError(f"Module {module_name} already installed for tenant {tenant_id}")
 
         # Create installation record
         installation = ModuleInstallation.objects.create(
@@ -142,10 +131,7 @@ class ModuleInstaller:
             installation.completed_at = timezone.now()
             installation.save()
 
-            logger.info(
-                f"Successfully installed module {module_name} v{module_version} "
-                f"for tenant {tenant_id}"
-            )
+            logger.info(f"Successfully installed module {module_name} v{module_version} " f"for tenant {tenant_id}")
 
             return installation
 
@@ -158,16 +144,13 @@ class ModuleInstaller:
             installation.save()
 
             logger.error(
-                f"Failed to install module {module_name} v{module_version} "
-                f"for tenant {tenant_id}: {e}",
+                f"Failed to install module {module_name} v{module_version} " f"for tenant {tenant_id}: {e}",
                 exc_info=True,
             )
 
             raise InstallationError(f"Installation failed: {e}") from e
 
-    def _validate_dependencies(
-        self, tenant_id: str, registry_entry: ModuleRegistryEntry
-    ) -> None:
+    def _validate_dependencies(self, tenant_id: str, registry_entry: ModuleRegistryEntry) -> None:
         """Validate module dependencies.
 
         Args:
@@ -182,9 +165,7 @@ class ModuleInstaller:
                 registry_entry.name, registry_entry.version, tenant_id
             )
             if not is_compatible:
-                raise InstallationError(
-                    f"Dependency validation failed: {', '.join(errors)}"
-                )
+                raise InstallationError(f"Dependency validation failed: {', '.join(errors)}")
         except DependencyResolutionError as e:
             raise InstallationError(f"Dependency resolution failed: {e}") from e
 
@@ -223,13 +204,8 @@ class ModuleInstaller:
 
             if not existing:
                 # Recursively install dependency
-                logger.info(
-                    f"Installing dependency {dep_entry.name} v{dep_entry.version} "
-                    f"for tenant {tenant_id}"
-                )
-                self.install_module(
-                    tenant_id, dep_entry.name, dep_entry.version, installed_by
-                )
+                logger.info(f"Installing dependency {dep_entry.name} v{dep_entry.version} " f"for tenant {tenant_id}")
+                self.install_module(tenant_id, dep_entry.name, dep_entry.version, installed_by)
 
     def _run_migrations(self, module_name: str) -> None:
         """Run module migrations.
@@ -253,9 +229,7 @@ class ModuleInstaller:
                 try:
                     apps.get_app_config(app_name)
                 except LookupError:
-                    logger.warning(
-                        f"Module {module_name} app not found, skipping migrations"
-                    )
+                    logger.warning(f"Module {module_name} app not found, skipping migrations")
                     return
 
             # Run migrations
@@ -266,9 +240,7 @@ class ModuleInstaller:
         except Exception as e:
             raise InstallationError(f"Migration failed for {module_name}: {e}") from e
 
-    def _register_permissions(
-        self, tenant_id: str, registry_entry: ModuleRegistryEntry
-    ) -> None:
+    def _register_permissions(self, tenant_id: str, registry_entry: ModuleRegistryEntry) -> None:
         """Register module permissions.
 
         Args:
@@ -286,18 +258,13 @@ class ModuleInstaller:
             #     permission_registry.register(tenant_id, perm, registry_entry.name)
 
             logger.info(
-                f"Registered {len(registry_entry.permissions)} permissions "
-                f"for module {registry_entry.name}"
+                f"Registered {len(registry_entry.permissions)} permissions " f"for module {registry_entry.name}"
             )
 
         except Exception as e:
-            raise InstallationError(
-                f"Permission registration failed: {e}"
-            ) from e
+            raise InstallationError(f"Permission registration failed: {e}") from e
 
-    def _register_sod_actions(
-        self, tenant_id: str, registry_entry: ModuleRegistryEntry
-    ) -> None:
+    def _register_sod_actions(self, tenant_id: str, registry_entry: ModuleRegistryEntry) -> None:
         """Register SoD actions.
 
         Args:
@@ -315,16 +282,13 @@ class ModuleInstaller:
             #     sod_registry.register(tenant_id, action, registry_entry.name)
 
             logger.info(
-                f"Registered {len(registry_entry.sod_actions)} SoD actions "
-                f"for module {registry_entry.name}"
+                f"Registered {len(registry_entry.sod_actions)} SoD actions " f"for module {registry_entry.name}"
             )
 
         except Exception as e:
             raise InstallationError(f"SoD action registration failed: {e}") from e
 
-    def _register_search_indexes(
-        self, tenant_id: str, registry_entry: ModuleRegistryEntry
-    ) -> None:
+    def _register_search_indexes(self, tenant_id: str, registry_entry: ModuleRegistryEntry) -> None:
         """Register search indexes.
 
         Args:
@@ -342,18 +306,13 @@ class ModuleInstaller:
             #     search_registry.register(tenant_id, index, registry_entry.name)
 
             logger.info(
-                f"Registered {len(registry_entry.search_indexes)} search indexes "
-                f"for module {registry_entry.name}"
+                f"Registered {len(registry_entry.search_indexes)} search indexes " f"for module {registry_entry.name}"
             )
 
         except Exception as e:
-            raise InstallationError(
-                f"Search index registration failed: {e}"
-            ) from e
+            raise InstallationError(f"Search index registration failed: {e}") from e
 
-    def _register_ai_tools(
-        self, tenant_id: str, registry_entry: ModuleRegistryEntry
-    ) -> None:
+    def _register_ai_tools(self, tenant_id: str, registry_entry: ModuleRegistryEntry) -> None:
         """Register AI tools.
 
         Args:
@@ -370,17 +329,12 @@ class ModuleInstaller:
             # for tool_name in registry_entry.ai_tools:
             #     tool_registry.register_from_module(tenant_id, registry_entry.name, tool_name)
 
-            logger.info(
-                f"Registered {len(registry_entry.ai_tools)} AI tools "
-                f"for module {registry_entry.name}"
-            )
+            logger.info(f"Registered {len(registry_entry.ai_tools)} AI tools " f"for module {registry_entry.name}")
 
         except Exception as e:
             raise InstallationError(f"AI tool registration failed: {e}") from e
 
-    def _post_install_verification(
-        self, tenant_id: str, module_name: str
-    ) -> None:
+    def _post_install_verification(self, tenant_id: str, module_name: str) -> None:
         """Perform post-install verification.
 
         Args:
@@ -397,9 +351,7 @@ class ModuleInstaller:
             ).first()
 
             if not installation:
-                raise InstallationError(
-                    f"Module {module_name} installation verification failed"
-                )
+                raise InstallationError(f"Module {module_name} installation verification failed")
 
             # Additional verification checks can be added here
             logger.info(f"Post-install verification passed for {module_name}")
@@ -443,9 +395,7 @@ class ModuleInstaller:
 
         return step
 
-    def _complete_step(
-        self, step: InstallationStep, success: bool, output: Optional[Dict[str, Any]] = None
-    ) -> None:
+    def _complete_step(self, step: InstallationStep, success: bool, output: Optional[Dict[str, Any]] = None) -> None:
         """Complete installation step.
 
         Args:

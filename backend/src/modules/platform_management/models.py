@@ -8,8 +8,9 @@ Architecture Compliance:
 - ✅ Indexes on frequently queried fields
 """
 
-from django.db import models
 import uuid
+
+from django.db import models
 
 
 def generate_uuid():
@@ -25,18 +26,18 @@ class PlatformSetting(models.Model):
 
     key = models.CharField(max_length=255)
     value = models.TextField()
-    category = models.CharField(max_length=100, default='general')
+    category = models.CharField(max_length=100, default="general")
     description = models.TextField(blank=True)
     is_secret = models.BooleanField(default=False)
     data_type = models.CharField(
         max_length=20,
         choices=[
-            ('string', 'String'),
-            ('integer', 'Integer'),
-            ('boolean', 'Boolean'),
-            ('json', 'JSON'),
+            ("string", "String"),
+            ("integer", "Integer"),
+            ("boolean", "Boolean"),
+            ("json", "JSON"),
         ],
-        default='string'
+        default="string",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -45,11 +46,11 @@ class PlatformSetting(models.Model):
     updated_by = models.UUIDField(null=True, blank=True)
 
     class Meta:
-        db_table = 'platform_settings'
-        unique_together = [['tenant_id', 'key']]
+        db_table = "platform_settings"
+        unique_together = [["tenant_id", "key"]]
         indexes = [
-            models.Index(fields=['tenant_id', 'category']),
-            models.Index(fields=['key']),
+            models.Index(fields=["tenant_id", "category"]),
+            models.Index(fields=["key"]),
         ]
 
     def __str__(self):
@@ -71,11 +72,11 @@ class FeatureFlag(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'platform_feature_flags'
-        unique_together = [['tenant_id', 'name']]
+        db_table = "platform_feature_flags"
+        unique_together = [["tenant_id", "name"]]
         indexes = [
-            models.Index(fields=['tenant_id', 'enabled']),
-            models.Index(fields=['name']),
+            models.Index(fields=["tenant_id", "enabled"]),
+            models.Index(fields=["name"]),
         ]
 
     def __str__(self):
@@ -91,11 +92,11 @@ class SystemHealth(models.Model):
     status = models.CharField(
         max_length=20,
         choices=[
-            ('healthy', 'Healthy'),
-            ('degraded', 'Degraded'),
-            ('unhealthy', 'Unhealthy'),
+            ("healthy", "Healthy"),
+            ("degraded", "Degraded"),
+            ("unhealthy", "Unhealthy"),
         ],
-        default='healthy'
+        default="healthy",
     )
     last_check = models.DateTimeField(auto_now=True)
     response_time_ms = models.IntegerField(null=True, blank=True)
@@ -103,10 +104,10 @@ class SystemHealth(models.Model):
     error_message = models.TextField(blank=True)
 
     class Meta:
-        db_table = 'platform_system_health'
+        db_table = "platform_system_health"
         indexes = [
-            models.Index(fields=['service_name', 'status']),
-            models.Index(fields=['last_check']),
+            models.Index(fields=["service_name", "status"]),
+            models.Index(fields=["last_check"]),
         ]
 
     def __str__(self):
@@ -116,7 +117,7 @@ class SystemHealth(models.Model):
 class PlatformAuditEvent(models.Model):
     """
     Immutable audit log for platform operations.
-    
+
     CRITICAL: This model is APPEND-ONLY. Updates and deletes are forbidden.
     """
 
@@ -135,11 +136,11 @@ class PlatformAuditEvent(models.Model):
     user_agent = models.TextField(blank=True)
 
     class Meta:
-        db_table = 'platform_audit_events'
+        db_table = "platform_audit_events"
         indexes = [
-            models.Index(fields=['tenant_id', 'timestamp']),
-            models.Index(fields=['actor_id', 'timestamp']),
-            models.Index(fields=['resource_type', 'resource_id']),
+            models.Index(fields=["tenant_id", "timestamp"]),
+            models.Index(fields=["actor_id", "timestamp"]),
+            models.Index(fields=["resource_type", "resource_id"]),
         ]
         # CRITICAL: No update/delete allowed
         managed = True

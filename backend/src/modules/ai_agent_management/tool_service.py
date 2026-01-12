@@ -7,20 +7,15 @@ Task: 401.2 - Tool Registry & Schema Validation
 from __future__ import annotations
 
 import logging
-from typing import Optional, Dict, Any, List
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from django.utils import timezone
 from django.db import transaction
+from django.utils import timezone
 
 from .models import AgentExecution
-from .tool_registry import (
-    ToolRegistry,
-    ToolDefinition,
-    ToolSchema,
-    ToolSideEffectClass,
-)
 from .tool_models import Tool, ToolInvocation
+from .tool_registry import ToolDefinition, ToolRegistry, ToolSchema, ToolSideEffectClass
 
 logger = logging.getLogger(__name__)
 
@@ -79,15 +74,11 @@ class ToolService:
             registered_by=registered_by,
         )
 
-        logger.info(
-            f"Registered tool {tool.name} v{tool.version} for tenant {tenant_id}"
-        )
+        logger.info(f"Registered tool {tool.name} v{tool.version} for tenant {tenant_id}")
 
         return tool
 
-    def get_tool(
-        self, tool_name: str, tenant_id: Optional[str] = None
-    ) -> Optional[Tool]:
+    def get_tool(self, tool_name: str, tenant_id: Optional[str] = None) -> Optional[Tool]:
         """Get a tool by name.
 
         Args:
@@ -178,10 +169,7 @@ class ToolService:
             invoked_at=timezone.now(),
         )
 
-        logger.info(
-            f"Invoked tool {tool_name} for tenant {tenant_id} "
-            f"(invocation {invocation.id})"
-        )
+        logger.info(f"Invoked tool {tool_name} for tenant {tenant_id} " f"(invocation {invocation.id})")
 
         return invocation
 
@@ -208,9 +196,7 @@ class ToolService:
         Raises:
             ValueError: If invocation not found or output validation fails.
         """
-        invocation = ToolInvocation.objects.filter(
-            id=invocation_id, tenant_id=tenant_id
-        ).first()
+        invocation = ToolInvocation.objects.filter(id=invocation_id, tenant_id=tenant_id).first()
 
         if not invocation:
             raise ValueError(f"Invocation {invocation_id} not found")
@@ -219,9 +205,7 @@ class ToolService:
         if success:
             tool_def = self.registry.get_tool(invocation.tool.name)
             if tool_def:
-                if not self.registry.validate_output(
-                    invocation.tool.name, output_data
-                ):
+                if not self.registry.validate_output(invocation.tool.name, output_data):
                     success = False
                     error_message = "Tool output validation failed"
 
@@ -247,16 +231,11 @@ class ToolService:
             ]
         )
 
-        logger.info(
-            f"Completed tool invocation {invocation_id} "
-            f"(success={success})"
-        )
+        logger.info(f"Completed tool invocation {invocation_id} " f"(success={success})")
 
         return invocation
 
-    def unregister_tool(
-        self, tool_name: str, tenant_id: str, version: Optional[str] = None
-    ) -> None:
+    def unregister_tool(self, tool_name: str, tenant_id: str, version: Optional[str] = None) -> None:
         """Unregister a tool.
 
         Args:
@@ -289,4 +268,3 @@ class ToolService:
 
 # Global tool service instance
 tool_service = ToolService()
-

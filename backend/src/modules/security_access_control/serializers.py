@@ -5,17 +5,18 @@ DRF serializers for Security & Access Control models.
 """
 
 from rest_framework import serializers
+
 from .models import (
-    Role,
-    Permission,
-    RolePermission,
-    UserRole,
-    PermissionSet,
-    UserPermissionSet,
     FieldSecurity,
+    Permission,
+    PermissionSet,
+    Role,
+    RolePermission,
     RowSecurityRule,
-    SecurityProfile,
     SecurityAuditLog,
+    SecurityProfile,
+    UserPermissionSet,
+    UserRole,
 )
 
 
@@ -65,9 +66,7 @@ class RolePermissionSerializer(serializers.ModelSerializer):
 class RoleSerializer(serializers.ModelSerializer):
     """Serializer for roles."""
 
-    permissions = PermissionSerializer(
-        many=True, read_only=True, source="role_permissions.permission"
-    )
+    permissions = PermissionSerializer(many=True, read_only=True, source="role_permissions.permission")
     permission_count = serializers.SerializerMethodField()
 
     class Meta:

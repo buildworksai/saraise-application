@@ -150,6 +150,37 @@ jobs:
           cd frontend
           npm audit --audit-level moderate || (echo "❌ Security vulnerabilities found" && exit 1)
 
+      # SAST - Static Application Security Testing (SARAISE-01005)
+      - name: SAST Scan (Semgrep)
+        run: |
+          pip install semgrep
+          semgrep --config=auto --config=.semgrep/custom-rules.yaml \
+            --json --output=semgrep-results.json \
+            --error || true
+          
+          # Check for critical/high findings
+          if [ -f semgrep-results.json ]; then
+            CRITICAL=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' semgrep-results.json)
+            if [ "$CRITICAL" -gt 0 ]; then
+              echo "❌ SAST found $CRITICAL critical/high findings. Blocking merge."
+              cat semgrep-results.json | jq '.results[] | select(.extra.severity == "ERROR")'
+              exit 1
+            else
+              echo "✅ SAST scan passed (no critical/high findings)"
+            fi
+          fi
+          
+          # Upload SARIF for GitHub Security tab
+          semgrep --config=auto --config=.semgrep/custom-rules.yaml \
+            --sarif --output=semgrep-results.sarif || true
+
+      - name: Upload Semgrep SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep-results.sarif
+          wait-for-processing: false
+
   # Tenant Isolation Tests - Critical Security Gate
   tenant-isolation-tests:
     needs: quality-gates
@@ -215,6 +246,25 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Container Security Scanning - Trivy (SARAISE-01006)
+      - name: Scan backend container image (Trivy)
+        if: ${{ hashFiles('backend/Dockerfile') != '' }}
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}-api:test
+          format: 'sarif'
+          output: 'trivy-backend.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: false
+
+      - name: Upload Trivy backend SARIF
+        if: always() && hashFiles('backend/Dockerfile') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-backend.sarif
+          wait-for-processing: false
+
       # Build frontend image
       - name: Build frontend image
         uses: docker/build-push-action@v5
@@ -224,6 +274,24 @@ jobs:
           tags: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # Container Security Scanning - Trivy (SARAISE-01006)
+      - name: Scan frontend container image (Trivy)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:test
+          format: 'sarif'
+          output: 'trivy-frontend.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: false
+
+      - name: Upload Trivy frontend SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-frontend.sarif
+          wait-for-processing: false
 
   # Performance Baseline Check (New)
   performance-baseline:
@@ -239,11 +307,11 @@ jobs:
           cd frontend
           npm ci
           npm run build
-          
+
           # Check main bundle size (gzipped)
           BUNDLE_SIZE=$(find dist -name '*.js' -exec gzip -c {} \; | wc -c)
           MAX_SIZE=614400  # 600KB total gzipped
-          
+
           if [ "$BUNDLE_SIZE" -gt "$MAX_SIZE" ]; then
             echo "❌ Bundle size ($BUNDLE_SIZE bytes) exceeds limit ($MAX_SIZE bytes)"
             exit 1

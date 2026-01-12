@@ -28,4 +28,3 @@ ai_tools:
   - pause_agent
   - resume_agent
   - terminate_agent
-

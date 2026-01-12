@@ -9,11 +9,11 @@ import pytest
 import yaml
 
 from ..module_manifest_schema import (
+    ManifestValidationError,
+    ManifestValidator,
+    ModuleLifecycle,
     ModuleManifest,
     ModuleType,
-    ModuleLifecycle,
-    ManifestValidator,
-    ManifestValidationError,
     manifest_validator,
 )
 
@@ -252,4 +252,3 @@ lifecycle: managed
         validator = ManifestValidator()
         with pytest.raises(ManifestValidationError):
             validator.validate_from_yaml(yaml_content)
-

@@ -6,14 +6,14 @@ Task: 501.1 - Module Manifest Schema & Signing
 
 from __future__ import annotations
 
-import yaml
 import hashlib
 import json
-from typing import Dict, Any, List, Optional
+import re
 from dataclasses import dataclass, field
 from enum import Enum
-import re
+from typing import Any, Dict, List, Optional
 
+import yaml
 from django.core.exceptions import ValidationError
 
 
@@ -119,9 +119,7 @@ class ManifestValidator:
     PERMISSION_PATTERN = re.compile(r"^[a-z0-9_-]+\.[a-z0-9_-]+:[a-z0-9_-]+$")
 
     # Dependency pattern: module-name >=version or module-name ==version
-    DEPENDENCY_PATTERN = re.compile(
-        r"^[a-z0-9_-]+\s*(>=|<=|==|>|<)\s*\d+\.\d+\.\d+(-[a-zA-Z0-9]+)?$"
-    )
+    DEPENDENCY_PATTERN = re.compile(r"^[a-z0-9_-]+\s*(>=|<=|==|>|<)\s*\d+\.\d+\.\d+(-[a-zA-Z0-9]+)?$")
 
     REQUIRED_FIELDS = [
         "name",
@@ -156,34 +154,26 @@ class ManifestValidator:
         # Validate name
         name = manifest_data.get("name", "")
         if not self.NAME_PATTERN.match(name):
-            errors.append(
-                f"Invalid module name '{name}': must be lowercase alphanumeric with hyphens/underscores"
-            )
+            errors.append(f"Invalid module name '{name}': must be lowercase alphanumeric with hyphens/underscores")
 
         # Validate version
         version = manifest_data.get("version", "")
         if not self.VERSION_PATTERN.match(version):
-            errors.append(
-                f"Invalid version '{version}': must be semantic version (MAJOR.MINOR.PATCH)"
-            )
+            errors.append(f"Invalid version '{version}': must be semantic version (MAJOR.MINOR.PATCH)")
 
         # Validate type
         type_str = manifest_data.get("type", "")
         try:
             module_type = ModuleType(type_str)
         except ValueError:
-            errors.append(
-                f"Invalid type '{type_str}': must be one of {[t.value for t in ModuleType]}"
-            )
+            errors.append(f"Invalid type '{type_str}': must be one of {[t.value for t in ModuleType]}")
 
         # Validate lifecycle
         lifecycle_str = manifest_data.get("lifecycle", "")
         try:
             lifecycle = ModuleLifecycle(lifecycle_str)
         except ValueError:
-            errors.append(
-                f"Invalid lifecycle '{lifecycle_str}': must be one of {[l.value for l in ModuleLifecycle]}"
-            )
+            errors.append(f"Invalid lifecycle '{lifecycle_str}': must be one of {[l.value for l in ModuleLifecycle]}")
 
         # Validate dependencies
         dependencies = manifest_data.get("dependencies", [])
@@ -211,9 +201,7 @@ class ManifestValidator:
                 if not isinstance(perm, str):
                     errors.append(f"Permission must be a string: {perm}")
                 elif not self.PERMISSION_PATTERN.match(perm):
-                    errors.append(
-                        f"Invalid permission format '{perm}': must be 'module.resource:action'"
-                    )
+                    errors.append(f"Invalid permission format '{perm}': must be 'module.resource:action'")
 
         # Validate SoD actions
         sod_actions = manifest_data.get("sod_actions", [])
@@ -224,9 +212,7 @@ class ManifestValidator:
                 if not isinstance(action, str):
                     errors.append(f"SoD action must be a string: {action}")
                 elif not self.PERMISSION_PATTERN.match(action):
-                    errors.append(
-                        f"Invalid SoD action format '{action}': must be 'module.resource:action'"
-                    )
+                    errors.append(f"Invalid SoD action format '{action}': must be 'module.resource:action'")
 
         # Validate search indexes
         search_indexes = manifest_data.get("search_indexes", [])

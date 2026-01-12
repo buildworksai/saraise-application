@@ -41,13 +41,12 @@ python manage.py migrate --noinput || {
 }
 echo "✅ Migrations complete"
 
-# Seed default users (non-blocking)
-echo "🌱 Seeding default users..."
-python manage.py seed_default_users || {
-    echo "⚠️  Warning: seed_default_users failed, but continuing..."
-}
+# Seed default users (disabled temporarily for testing)
+# echo "🌱 Seeding default users..."
+# python manage.py seed_default_users || {
+#     echo "⚠️  Warning: seed_default_users failed, but continuing..."
+# }
 
 # Start server
 echo "🌐 Starting Django development server on 0.0.0.0:8000..."
 exec python manage.py runserver 0.0.0.0:8000
-

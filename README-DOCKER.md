@@ -279,7 +279,7 @@ For production deployment:
    ```bash
    # Backend
    docker exec -it saraise-backend pip install <package>
-   
+
    # Frontend
    docker exec -it saraise-frontend npm install <package>
    ```
@@ -353,4 +353,3 @@ docker exec -it saraise-frontend npm test
 ---
 
 **For issues or questions, see:** `docs/modules/01-foundation/ai-agent-management/USER-GUIDE.md`
-

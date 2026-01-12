@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: Apache-2.0
+# ===================================
+# SARAISE ACP Enforcement Gate
+# ===================================
+# Ensures frozen domain changes have approved ACP
+# ===================================
+
+name: ACP Enforcement Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  acp-check:
+    name: Verify ACP for Frozen Domain Changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect frozen domain changes
+        id: frozen
+        run: |
+          FROZEN_PATHS=(
+            "architecture/existing/"
+            "architecture/system-overview.md"
+            "architecture/governance-scope-definition.md"
+            "architecture/governance-reality-assessment.md"
+          )
+          
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          FROZEN_CHANGED=false
+          
+          for path in "${FROZEN_PATHS[@]}"; do
+            if echo "$CHANGED_FILES" | grep -q "^$path"; then
+              FROZEN_CHANGED=true
+              echo "⚠️  Frozen domain modified: $path"
+            fi
+          done
+          
+          echo "frozen_changed=$FROZEN_CHANGED" >> "$GITHUB_OUTPUT"
+
+      - name: Check for ACP reference
+        if: steps.frozen.outputs.frozen_changed == 'true'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # SECURITY: Use environment variables instead of direct substitution in shell
+          # This prevents shell injection from PR body/title content
+          # Check for ACP reference in PR body or title
+          if echo "$PR_BODY $PR_TITLE" | grep -qE "#ACP-[0-9]+|ACP-[0-9]+"; then
+            ACP_REF=$(echo "$PR_BODY $PR_TITLE" | grep -oE "#ACP-[0-9]+|ACP-[0-9]+" | head -1 | sed 's/#//')
+            # SECURITY: Validate ACP reference format (numbers only)
+            if ! echo "$ACP_REF" | grep -qE "^ACP-[0-9]+$"; then
+              echo "❌ Invalid ACP reference format: $ACP_REF"
+              exit 1
+            fi
+            echo "✅ ACP reference found: $ACP_REF"
+            
+            # Check if ACP file exists
+            ACP_FILE="architecture/acp-proposals/$ACP_REF.md"
+            if [ -f "$ACP_FILE" ]; then
+              echo "✅ ACP document exists: $ACP_FILE"
+              
+              # Check for approval status (look for "Status: APPROVED" in ACP)
+              if grep -q "Status:.*APPROVED" "$ACP_FILE"; then
+                echo "✅ ACP is approved"
+              else
+                echo "❌ ACP exists but is not approved. Status must be 'APPROVED'"
+                exit 1
+              fi
+            else
+              echo "❌ ACP document not found: $ACP_FILE"
+              exit 1
+            fi
+          else
+            echo "❌ Frozen domain changes require an ACP reference in PR description or title"
+            echo "   Format: #ACP-XXX or ACP-XXX"
+            exit 1
+          fi

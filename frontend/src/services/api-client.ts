@@ -17,7 +17,12 @@ export class ApiClient {
   private readonly baseUrl: string;
 
   constructor(options: ApiClientOptions = {}) {
-    this.baseUrl = options.baseUrl ?? (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:28000'); // Application backend port: 2xxxx
+    // CRITICAL: Endpoints already include /api prefix, so baseUrl should be empty
+    // Vite dev server proxies /api/* to http://localhost:28000/api/*
+    // This ensures session cookies work correctly (SameSite=Lax instead of SameSite=None)
+    // In production, this should be configured via nginx or similar
+    const envBaseUrl = import.meta.env.VITE_API_BASE_URL;
+    this.baseUrl = options.baseUrl ?? (envBaseUrl && envBaseUrl !== '' ? envBaseUrl : '');
   }
 
   /**
@@ -84,9 +89,10 @@ export class ApiClient {
       }
 
       // CRITICAL: backend session is the source of truth.
-      // If server says we're not authenticated/authorized, force-clear persisted auth state
-      // to avoid "logged in UI + 403 API" confusion.
-      if (response.status === 401 || response.status === 403) {
+      // Only auto-logout on 401 (Unauthorized) - this means not authenticated.
+      // 403 (Forbidden) can mean "not authorized" (permission issue), not "not authenticated".
+      // Exception: For /api/v1/auth/me/, 403 means not authenticated, so logout.
+      if (response.status === 401 || (response.status === 403 && path.includes('/auth/me/'))) {
         try {
           const { useAuthStore } = await import('@/stores/auth-store');
           useAuthStore.getState().logout();

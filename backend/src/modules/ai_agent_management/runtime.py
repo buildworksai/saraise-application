@@ -8,20 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
-from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from django.utils import timezone
 from django.db import transaction
+from django.utils import timezone
 
-from .models import (
-    Agent,
-    AgentExecution,
-    AgentLifecycleState,
-    AgentIdentityType,
-    AgentSchedulerTask,
-)
+from .models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState, AgentSchedulerTask
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +47,7 @@ class AgentRuntime:
         """Initialize agent runtime."""
         self._active_executions: Dict[str, AgentExecution] = {}
 
-    def create_execution(
-        self, context: AgentExecutionContext
-    ) -> AgentExecution:
+    def create_execution(self, context: AgentExecutionContext) -> AgentExecution:
         """Create a new agent execution.
 
         Args:
@@ -68,9 +60,7 @@ class AgentRuntime:
             ValueError: If agent not found or validation fails.
         """
         # Validate agent exists
-        agent = Agent.objects.filter(
-            id=context.agent_id, tenant_id=context.tenant_id
-        ).first()
+        agent = Agent.objects.filter(id=context.agent_id, tenant_id=context.tenant_id).first()
 
         if not agent:
             raise ValueError(f"Agent {context.agent_id} not found")
@@ -78,16 +68,13 @@ class AgentRuntime:
         # Validate identity type matches
         if agent.identity_type != context.identity_type:
             raise ValueError(
-                f"Identity type mismatch: agent={agent.identity_type}, "
-                f"context={context.identity_type}"
+                f"Identity type mismatch: agent={agent.identity_type}, " f"context={context.identity_type}"
             )
 
         # Validate session binding for user-bound agents
         if context.identity_type == AgentIdentityType.USER_BOUND:
             if not context.session_id:
-                raise ValueError(
-                    "User-bound agents require session_id"
-                )
+                raise ValueError("User-bound agents require session_id")
             # TODO: Validate session is active (Task 401.3)
 
         # Create execution
@@ -100,15 +87,11 @@ class AgentRuntime:
             metadata=context.metadata,
         )
 
-        logger.info(
-            f"Created agent execution {execution.id} for agent {agent.id}"
-        )
+        logger.info(f"Created agent execution {execution.id} for agent {agent.id}")
 
         return execution
 
-    def validate_execution(
-        self, execution_id: str, tenant_id: str
-    ) -> AgentExecution:
+    def validate_execution(self, execution_id: str, tenant_id: str) -> AgentExecution:
         """Validate agent execution before starting.
 
         Args:
@@ -121,24 +104,18 @@ class AgentRuntime:
         Raises:
             ValueError: If validation fails.
         """
-        execution = AgentExecution.objects.filter(
-            id=execution_id, tenant_id=tenant_id
-        ).first()
+        execution = AgentExecution.objects.filter(id=execution_id, tenant_id=tenant_id).first()
 
         if not execution:
             raise ValueError(f"Execution {execution_id} not found")
 
         if execution.state != AgentLifecycleState.CREATED:
-            raise ValueError(
-                f"Execution {execution_id} is not in CREATED state"
-            )
+            raise ValueError(f"Execution {execution_id} is not in CREATED state")
 
         # Validate session binding for user-bound agents
         if execution.agent.identity_type == AgentIdentityType.USER_BOUND:
             if not execution.session_id:
-                raise ValueError(
-                    "User-bound agent execution missing session_id"
-                )
+                raise ValueError("User-bound agent execution missing session_id")
             # TODO: Validate session is still active (Task 401.3)
 
         # Update state to validated
@@ -149,9 +126,7 @@ class AgentRuntime:
 
         return execution
 
-    def start_execution(
-        self, execution_id: str, tenant_id: str
-    ) -> AgentExecution:
+    def start_execution(self, execution_id: str, tenant_id: str) -> AgentExecution:
         """Start agent execution.
 
         Args:
@@ -164,9 +139,7 @@ class AgentRuntime:
         Raises:
             ValueError: If execution cannot be started.
         """
-        execution = AgentExecution.objects.filter(
-            id=execution_id, tenant_id=tenant_id
-        ).first()
+        execution = AgentExecution.objects.filter(id=execution_id, tenant_id=tenant_id).first()
 
         if not execution:
             raise ValueError(f"Execution {execution_id} not found")
@@ -176,17 +149,12 @@ class AgentRuntime:
             AgentLifecycleState.VALIDATED,
             AgentLifecycleState.PAUSED,
         ]:
-            raise ValueError(
-                f"Execution {execution_id} cannot be started from state "
-                f"{execution.state}"
-            )
+            raise ValueError(f"Execution {execution_id} cannot be started from state " f"{execution.state}")
 
         # Validate session binding for user-bound agents
         if execution.agent.identity_type == AgentIdentityType.USER_BOUND:
             if not execution.session_id:
-                raise ValueError(
-                    "User-bound agent execution missing session_id"
-                )
+                raise ValueError("User-bound agent execution missing session_id")
             # TODO: Validate session is still active (Task 401.3)
 
         # Update state to running
@@ -201,9 +169,7 @@ class AgentRuntime:
 
         return execution
 
-    def pause_execution(
-        self, execution_id: str, tenant_id: str
-    ) -> AgentExecution:
+    def pause_execution(self, execution_id: str, tenant_id: str) -> AgentExecution:
         """Pause agent execution.
 
         Args:
@@ -216,18 +182,13 @@ class AgentRuntime:
         Raises:
             ValueError: If execution cannot be paused.
         """
-        execution = AgentExecution.objects.filter(
-            id=execution_id, tenant_id=tenant_id
-        ).first()
+        execution = AgentExecution.objects.filter(id=execution_id, tenant_id=tenant_id).first()
 
         if not execution:
             raise ValueError(f"Execution {execution_id} not found")
 
         if execution.state != AgentLifecycleState.RUNNING:
-            raise ValueError(
-                f"Execution {execution_id} cannot be paused from state "
-                f"{execution.state}"
-            )
+            raise ValueError(f"Execution {execution_id} cannot be paused from state " f"{execution.state}")
 
         # Update state to paused
         execution.state = AgentLifecycleState.PAUSED
@@ -241,9 +202,7 @@ class AgentRuntime:
 
         return execution
 
-    def resume_execution(
-        self, execution_id: str, tenant_id: str
-    ) -> AgentExecution:
+    def resume_execution(self, execution_id: str, tenant_id: str) -> AgentExecution:
         """Resume paused agent execution.
 
         Args:
@@ -256,25 +215,18 @@ class AgentRuntime:
         Raises:
             ValueError: If execution cannot be resumed.
         """
-        execution = AgentExecution.objects.filter(
-            id=execution_id, tenant_id=tenant_id
-        ).first()
+        execution = AgentExecution.objects.filter(id=execution_id, tenant_id=tenant_id).first()
 
         if not execution:
             raise ValueError(f"Execution {execution_id} not found")
 
         if execution.state != AgentLifecycleState.PAUSED:
-            raise ValueError(
-                f"Execution {execution_id} cannot be resumed from state "
-                f"{execution.state}"
-            )
+            raise ValueError(f"Execution {execution_id} cannot be resumed from state " f"{execution.state}")
 
         # Validate session binding for user-bound agents
         if execution.agent.identity_type == AgentIdentityType.USER_BOUND:
             if not execution.session_id:
-                raise ValueError(
-                    "User-bound agent execution missing session_id"
-                )
+                raise ValueError("User-bound agent execution missing session_id")
             # TODO: Validate session is still active (Task 401.3)
 
         # Update state to running
@@ -307,27 +259,20 @@ class AgentRuntime:
         Raises:
             ValueError: If execution cannot be completed.
         """
-        execution = AgentExecution.objects.filter(
-            id=execution_id, tenant_id=tenant_id
-        ).first()
+        execution = AgentExecution.objects.filter(id=execution_id, tenant_id=tenant_id).first()
 
         if not execution:
             raise ValueError(f"Execution {execution_id} not found")
 
         if execution.state != AgentLifecycleState.RUNNING:
-            raise ValueError(
-                f"Execution {execution_id} cannot be completed from state "
-                f"{execution.state}"
-            )
+            raise ValueError(f"Execution {execution_id} cannot be completed from state " f"{execution.state}")
 
         # Update state to completed
         execution.state = AgentLifecycleState.COMPLETED
         execution.completed_at = timezone.now()
         if result:
             execution.result = result
-        execution.save(
-            update_fields=["state", "completed_at", "result", "updated_at"]
-        )
+        execution.save(update_fields=["state", "completed_at", "result", "updated_at"])
 
         # Remove from active executions
         if execution.id in self._active_executions:
@@ -356,9 +301,7 @@ class AgentRuntime:
         Raises:
             ValueError: If execution cannot be failed.
         """
-        execution = AgentExecution.objects.filter(
-            id=execution_id, tenant_id=tenant_id
-        ).first()
+        execution = AgentExecution.objects.filter(id=execution_id, tenant_id=tenant_id).first()
 
         if not execution:
             raise ValueError(f"Execution {execution_id} not found")
@@ -384,9 +327,7 @@ class AgentRuntime:
 
         return execution
 
-    def terminate_execution(
-        self, execution_id: str, tenant_id: str
-    ) -> AgentExecution:
+    def terminate_execution(self, execution_id: str, tenant_id: str) -> AgentExecution:
         """Terminate agent execution (kill switch).
 
         Args:
@@ -399,9 +340,7 @@ class AgentRuntime:
         Raises:
             ValueError: If execution cannot be terminated.
         """
-        execution = AgentExecution.objects.filter(
-            id=execution_id, tenant_id=tenant_id
-        ).first()
+        execution = AgentExecution.objects.filter(id=execution_id, tenant_id=tenant_id).first()
 
         if not execution:
             raise ValueError(f"Execution {execution_id} not found")
@@ -411,16 +350,12 @@ class AgentRuntime:
             AgentLifecycleState.TERMINATED,
             AgentLifecycleState.COMPLETED,
         ]:
-            raise ValueError(
-                f"Execution {execution_id} already in terminal state"
-            )
+            raise ValueError(f"Execution {execution_id} already in terminal state")
 
         # Update state to terminated
         execution.state = AgentLifecycleState.TERMINATED
         execution.completed_at = timezone.now()
-        execution.save(
-            update_fields=["state", "completed_at", "updated_at"]
-        )
+        execution.save(update_fields=["state", "completed_at", "updated_at"])
 
         # Remove from active executions
         if execution.id in self._active_executions:
@@ -430,9 +365,7 @@ class AgentRuntime:
 
         return execution
 
-    def check_session_validity(
-        self, execution_id: str, tenant_id: str
-    ) -> bool:
+    def check_session_validity(self, execution_id: str, tenant_id: str) -> bool:
         """Check if session is still valid for user-bound agent execution.
 
         Args:
@@ -442,9 +375,7 @@ class AgentRuntime:
         Returns:
             True if session is valid, False otherwise.
         """
-        execution = AgentExecution.objects.filter(
-            id=execution_id, tenant_id=tenant_id
-        ).first()
+        execution = AgentExecution.objects.filter(id=execution_id, tenant_id=tenant_id).first()
 
         if not execution:
             return False
@@ -483,13 +414,10 @@ class AgentRuntime:
                 self.terminate_execution(execution.id, tenant_id)
                 terminated_count += 1
 
-        logger.info(
-            f"Terminated {terminated_count} executions with expired sessions"
-        )
+        logger.info(f"Terminated {terminated_count} executions with expired sessions")
 
         return terminated_count
 
 
 # Global runtime instance
 agent_runtime = AgentRuntime()
-

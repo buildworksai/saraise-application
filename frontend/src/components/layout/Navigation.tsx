@@ -1,15 +1,12 @@
 /**
  * Navigation Wrapper
  *
- * IMPORTANT: We maintain exactly two sidebars:
- * - PlatformSidebar: for platform-scoped users
- * - TenantSidebar: for tenant-scoped users
+ * ⚠️ ARCHITECTURAL ENFORCEMENT: Application repo is tenant-only.
+ * Platform management UI MUST be in saraise-platform/frontend/.
  *
- * This wrapper selects the correct sidebar based on the verified backend identity
- * stored in `useAuthStore().user`.
+ * This application frontend serves tenant-scoped users only.
  */
 import { useAuthStore } from '../../stores/auth-store';
-import { PlatformSidebar } from './PlatformSidebar';
 import { TenantSidebar } from './TenantSidebar';
 
 export const Navigation = () => {
@@ -27,10 +24,6 @@ export const Navigation = () => {
     );
   }
 
-  if (user.platform_role) {
-    return <PlatformSidebar user={user} />;
-  }
-
+  // Application repo is tenant-only - always use TenantSidebar
   return <TenantSidebar user={user} />;
 };
-

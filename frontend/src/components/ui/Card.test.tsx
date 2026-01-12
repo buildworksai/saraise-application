@@ -68,11 +68,10 @@ describe('Card Composition', () => {
         <CardFooter>Footer</CardFooter>
       </Card>
     );
-    
+
     expect(screen.getByText('Test Card')).toBeInTheDocument();
     expect(screen.getByText('Test description')).toBeInTheDocument();
     expect(screen.getByText('Card body')).toBeInTheDocument();
     expect(screen.getByText('Footer')).toBeInTheDocument();
   });
 });
-

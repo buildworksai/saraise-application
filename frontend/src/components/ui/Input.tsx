@@ -1,6 +1,6 @@
 /**
  * Input Component
- * 
+ *
  * Reusable input component with error handling.
  */
 import type { InputHTMLAttributes} from 'react';
@@ -42,4 +42,3 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
 );
 
 Input.displayName = 'Input';
-

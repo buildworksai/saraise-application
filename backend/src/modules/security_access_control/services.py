@@ -4,23 +4,24 @@ Security & Access Control Services.
 Business logic for Security & Access Control operations.
 """
 
-from typing import Optional, Union, List, Dict, Any
-from django.utils import timezone
-from django.db import models
-from datetime import timedelta
 import uuid
+from datetime import timedelta
+from typing import Any, Dict, List, Optional, Union
+
+from django.db import models
+from django.utils import timezone
 
 from .models import (
-    Role,
-    Permission,
-    RolePermission,
-    UserRole,
-    PermissionSet,
-    UserPermissionSet,
     FieldSecurity,
+    Permission,
+    PermissionSet,
+    Role,
+    RolePermission,
     RowSecurityRule,
-    SecurityProfile,
     SecurityAuditLog,
+    SecurityProfile,
+    UserPermissionSet,
+    UserRole,
 )
 
 
@@ -148,9 +149,7 @@ class SecurityAccessControlService:
             created_by = uuid.UUID(created_by)
 
         # Convert permission IDs to strings for JSON storage
-        permission_ids_str = [
-            str(pid) if isinstance(pid, uuid.UUID) else pid for pid in permission_ids
-        ]
+        permission_ids_str = [str(pid) if isinstance(pid, uuid.UUID) else pid for pid in permission_ids]
 
         permission_set = PermissionSet.objects.create(
             name=name,
@@ -194,9 +193,7 @@ class SecurityAccessControlService:
         elif expires_at is None:
             # Use permission set's default duration
             if permission_set.default_duration_days:
-                expires_at = timezone.now() + timedelta(
-                    days=permission_set.default_duration_days
-                )
+                expires_at = timezone.now() + timedelta(days=permission_set.default_duration_days)
             else:
                 # Default to 30 days if no duration specified
                 expires_at = timezone.now() + timedelta(days=30)
@@ -346,9 +343,7 @@ class SecurityAccessControlService:
         )
 
     @staticmethod
-    def get_user_effective_permissions(
-        user_id: Union[str, uuid.UUID], tenant_id: Union[str, uuid.UUID]
-    ) -> List[str]:
+    def get_user_effective_permissions(user_id: Union[str, uuid.UUID], tenant_id: Union[str, uuid.UUID]) -> List[str]:
         """
         Get effective permissions for a user (from all assigned roles and permission sets).
 
@@ -366,18 +361,13 @@ class SecurityAccessControlService:
         user = User.objects.get(id=user_id)
 
         # Get permissions from roles
-        active_user_roles = UserRole.objects.filter(
-            user=user, role__tenant_id=tenant_id, role__is_active=True
-        ).filter(
-            models.Q(valid_until__isnull=True)
-            | models.Q(valid_until__gt=timezone.now())
+        active_user_roles = UserRole.objects.filter(user=user, role__tenant_id=tenant_id, role__is_active=True).filter(
+            models.Q(valid_until__isnull=True) | models.Q(valid_until__gt=timezone.now())
         )
 
         permission_ids = set()
         for user_role in active_user_roles:
-            role_permissions = RolePermission.objects.filter(
-                role=user_role.role, is_granted=True
-            )
+            role_permissions = RolePermission.objects.filter(role=user_role.role, is_granted=True)
             for rp in role_permissions:
                 permission_ids.add(rp.permission.id)
 

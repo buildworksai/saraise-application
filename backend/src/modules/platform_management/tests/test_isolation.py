@@ -4,13 +4,14 @@ Tenant Isolation Tests for Platform Management
 CRITICAL: These tests verify that tenants cannot access each other's data.
 """
 
-import pytest
-from rest_framework.test import APIClient
-from rest_framework import status
-from django.contrib.auth import get_user_model
 import uuid
 
-from ..models import PlatformSetting, FeatureFlag
+import pytest
+from django.contrib.auth import get_user_model
+from rest_framework import status
+from rest_framework.test import APIClient
+
+from ..models import FeatureFlag, PlatformSetting
 
 User = get_user_model()
 
@@ -24,8 +25,9 @@ def api_client():
 @pytest.fixture
 def tenant_a_user(db):
     """Create user for tenant A."""
-    from src.core.user_models import UserProfile
     from unittest.mock import patch
+
+    from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
     user = User.objects.create_user(
@@ -51,8 +53,9 @@ def tenant_a_user(db):
 @pytest.fixture
 def tenant_b_user(db):
     """Create user for tenant B."""
-    from src.core.user_models import UserProfile
     from unittest.mock import patch
+
+    from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
     user = User.objects.create_user(
@@ -134,7 +137,7 @@ class TestTenantIsolation:
         response = api_client.get(f"/api/v1/platform/settings/{other_setting.id}/")
 
         # MUST return 404 (not 403) to hide existence
-        response_data = response.data if hasattr(response, 'data') else 'No data'
+        response_data = response.data if hasattr(response, "data") else "No data"
         assert (
             response.status_code == status.HTTP_404_NOT_FOUND
         ), f"Expected 404, got {response.status_code}. Response: {response_data}"

@@ -1,0 +1,25 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: backup-disaster-recovery
+version: 1.0.0
+description: Automated backups, point-in-time recovery, disaster recovery orchestration
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+permissions:
+  - backup_disaster_recovery.resource:create
+  - backup_disaster_recovery.resource:read
+  - backup_disaster_recovery.resource:update
+  - backup_disaster_recovery.resource:delete
+  - backup_disaster_recovery.resource:activate
+  - backup_disaster_recovery.resource:deactivate
+sod_actions:
+  - [backup_disaster_recovery.resource:create, backup_disaster_recovery.resource:delete]
+search_indexes:
+  - backup_disaster_recovery_resources
+ai_tools:
+  - create_backup_disaster_recovery_resource
+  - update_backup_disaster_recovery_resource
+  - delete_backup_disaster_recovery_resource

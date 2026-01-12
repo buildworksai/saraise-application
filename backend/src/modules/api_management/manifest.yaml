@@ -1,0 +1,25 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: api-management
+version: 1.0.0
+description: GraphQL & REST API gateway, rate limiting, API versioning, developer portal
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+permissions:
+  - api_management.resource:create
+  - api_management.resource:read
+  - api_management.resource:update
+  - api_management.resource:delete
+  - api_management.resource:activate
+  - api_management.resource:deactivate
+sod_actions:
+  - [api_management.resource:create, api_management.resource:delete]
+search_indexes:
+  - api_management_resources
+ai_tools:
+  - create_api_management_resource
+  - update_api_management_resource
+  - delete_api_management_resource

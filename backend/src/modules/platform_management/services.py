@@ -2,11 +2,13 @@
 Platform Management Business Logic
 """
 
-from typing import Optional, Union
 import uuid
+from typing import Optional, Union
+
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from .models import PlatformSetting, FeatureFlag, PlatformAuditEvent, PlatformMetrics
+
+from .models import FeatureFlag, PlatformAuditEvent, PlatformMetrics, PlatformSetting
 
 
 class PlatformManagementService:
@@ -20,27 +22,21 @@ class PlatformManagementService:
                 # Convert string to UUID if needed
                 if isinstance(tenant_id, str):
                     tenant_id = uuid.UUID(tenant_id)
-                
+
                 # Try tenant-specific first
-                setting = PlatformSetting.objects.filter(
-                    tenant_id=tenant_id, key=key
-                ).first()
+                setting = PlatformSetting.objects.filter(tenant_id=tenant_id, key=key).first()
                 if setting:
                     return setting.value
 
             # Fall back to platform-wide
-            setting = PlatformSetting.objects.filter(
-                tenant_id__isnull=True, key=key
-            ).first()
+            setting = PlatformSetting.objects.filter(tenant_id__isnull=True, key=key).first()
             return setting.value if setting else default
         except Exception:
             return default
 
     @staticmethod
     def is_feature_enabled(
-        name: str,
-        tenant_id: Optional[Union[str, uuid.UUID]] = None,
-        user_id: Optional[Union[str, uuid.UUID]] = None
+        name: str, tenant_id: Optional[Union[str, uuid.UUID]] = None, user_id: Optional[Union[str, uuid.UUID]] = None
     ) -> bool:
         """Check if a feature flag is enabled."""
         try:
@@ -50,15 +46,11 @@ class PlatformManagementService:
             if tenant_id:
                 if isinstance(tenant_id, str):
                     tenant_id = uuid.UUID(tenant_id)
-                flag = FeatureFlag.objects.filter(
-                    tenant_id=tenant_id, name=name
-                ).first()
+                flag = FeatureFlag.objects.filter(tenant_id=tenant_id, name=name).first()
 
             # Fall back to platform-wide
             if not flag:
-                flag = FeatureFlag.objects.filter(
-                    tenant_id__isnull=True, name=name
-                ).first()
+                flag = FeatureFlag.objects.filter(tenant_id__isnull=True, name=name).first()
 
             if not flag:
                 return False
@@ -85,7 +77,7 @@ class PlatformManagementService:
         resource_id: Optional[Union[str, uuid.UUID]] = None,
         tenant_id: Optional[Union[str, uuid.UUID]] = None,
         details: Optional[dict] = None,
-        ip_address: Optional[str] = None
+        ip_address: Optional[str] = None,
     ) -> PlatformAuditEvent:
         """Log an immutable audit event."""
         # Convert string IDs to UUID if needed
@@ -95,16 +87,16 @@ class PlatformManagementService:
             resource_id = uuid.UUID(resource_id)
         if tenant_id and isinstance(tenant_id, str):
             tenant_id = uuid.UUID(tenant_id)
-        
+
         return PlatformAuditEvent.objects.create(
             action=action,
-            actor_type='user',
+            actor_type="user",
             actor_id=actor_id,
             resource_type=resource_type,
             resource_id=resource_id,
             tenant_id=tenant_id,
             details=details or {},
-            ip_address=ip_address
+            ip_address=ip_address,
         )
 
 
@@ -115,12 +107,12 @@ class AnalyticsService:
         """Collect API metrics from cache."""
         from django.utils import timezone
 
-        date_key = timezone.now().strftime('%Y-%m-%d')
-        cache_key_prefix = f'api_metrics:{date_key}'
+        date_key = timezone.now().strftime("%Y-%m-%d")
+        cache_key_prefix = f"api_metrics:{date_key}"
 
-        total = cache.get(f'{cache_key_prefix}:total', 0) or 0
-        errors = cache.get(f'{cache_key_prefix}:errors', 0) or 0
-        response_times = cache.get(f'{cache_key_prefix}:response_times', []) or []
+        total = cache.get(f"{cache_key_prefix}:total", 0) or 0
+        errors = cache.get(f"{cache_key_prefix}:errors", 0) or 0
+        response_times = cache.get(f"{cache_key_prefix}:response_times", []) or []
 
         if response_times:
             sorted_times = sorted(response_times)
@@ -142,16 +134,11 @@ class AnalyticsService:
         try:
             from src.modules.tenant_management.models import Tenant
         except Exception:
-            return {
-                "total": 0, 
-                "active_30d": 0, 
-                "new_this_month": 0, 
-                "churned_this_month": 0
-            }
+            return {"total": 0, "active_30d": 0, "new_this_month": 0, "churned_this_month": 0}
 
         total = Tenant.objects.count()
         active = Tenant.objects.filter(status=Tenant.TenantStatus.ACTIVE).count()
-        
+
         # Placeholder for time-based metrics until history tracking implemented
         return {
             "total": total,
@@ -164,7 +151,7 @@ class AnalyticsService:
         """Collect user metrics from auth user model."""
         user_model = get_user_model()
         total = user_model.objects.count()
-        
+
         # Placeholder for activity metrics
         return {
             "total": total,

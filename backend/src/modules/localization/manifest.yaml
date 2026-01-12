@@ -1,0 +1,25 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: localization
+version: 1.0.0
+description: Multi-language support, regional compliance, currency, date/time formats, RTL support
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+permissions:
+  - localization.resource:create
+  - localization.resource:read
+  - localization.resource:update
+  - localization.resource:delete
+  - localization.resource:activate
+  - localization.resource:deactivate
+sod_actions:
+  - [localization.resource:create, localization.resource:delete]
+search_indexes:
+  - localization_resources
+ai_tools:
+  - create_localization_resource
+  - update_localization_resource
+  - delete_localization_resource

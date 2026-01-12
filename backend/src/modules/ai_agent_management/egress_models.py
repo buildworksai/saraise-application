@@ -6,10 +6,11 @@ Task: 402.1 - Egress Allowlisting & Secret Isolation
 
 from __future__ import annotations
 
+import uuid
+from typing import Any, Dict, Optional
+
 from django.db import models
 from django.utils import timezone
-from typing import Optional, Dict, Any
-import uuid
 
 from .models import TenantBaseModel
 
@@ -25,9 +26,7 @@ class EgressRule(TenantBaseModel):
     Defines allowed egress destinations for AI agents.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     name = models.CharField(max_length=255, db_index=True)
     description = models.TextField(blank=True)
     destination_type = models.CharField(
@@ -85,18 +84,14 @@ class EgressRequest(TenantBaseModel):
     Tracks egress requests for audit and monitoring.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     agent_execution = models.ForeignKey(
         "AgentExecution",
         on_delete=models.CASCADE,
         related_name="egress_requests",
         db_index=True,
     )
-    destination = models.CharField(
-        max_length=500, db_index=True, help_text="Requested destination"
-    )
+    destination = models.CharField(max_length=500, db_index=True, help_text="Requested destination")
     port = models.IntegerField(null=True, blank=True)
     protocol = models.CharField(max_length=10, db_index=True)
     allowed = models.BooleanField(db_index=True, help_text="Whether request was allowed")
@@ -129,9 +124,7 @@ class Secret(TenantBaseModel):
     Stores secrets for AI agents with per-tenant isolation.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     name = models.CharField(max_length=255, db_index=True)
     description = models.TextField(blank=True)
     secret_type = models.CharField(
@@ -145,20 +138,14 @@ class Secret(TenantBaseModel):
         ],
         db_index=True,
     )
-    encrypted_value = models.TextField(
-        help_text="Encrypted secret value (base64 encoded)"
-    )
+    encrypted_value = models.TextField(help_text="Encrypted secret value (base64 encoded)")
     encryption_key_id = models.CharField(
         max_length=100,
         help_text="Key ID used for encryption",
     )
     is_active = models.BooleanField(default=True, db_index=True)
-    expires_at = models.DateTimeField(
-        null=True, blank=True, db_index=True, help_text="Secret expiration time"
-    )
-    last_rotated_at = models.DateTimeField(
-        null=True, blank=True, help_text="When secret was last rotated"
-    )
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True, help_text="Secret expiration time")
+    last_rotated_at = models.DateTimeField(null=True, blank=True, help_text="When secret was last rotated")
     rotation_interval_days = models.IntegerField(
         null=True,
         blank=True,
@@ -187,9 +174,7 @@ class SecretAccess(TenantBaseModel):
     Tracks secret access for audit and monitoring.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     secret = models.ForeignKey(
         Secret,
         on_delete=models.CASCADE,
@@ -204,9 +189,7 @@ class SecretAccess(TenantBaseModel):
         blank=True,
         db_index=True,
     )
-    accessed_by = models.CharField(
-        max_length=36, db_index=True, help_text="User/agent who accessed secret"
-    )
+    accessed_by = models.CharField(max_length=36, db_index=True, help_text="User/agent who accessed secret")
     accessed_at = models.DateTimeField(auto_now_add=True, db_index=True)
     metadata = models.JSONField(default=dict, help_text="Access metadata")
 
@@ -221,4 +204,3 @@ class SecretAccess(TenantBaseModel):
 
     def __str__(self) -> str:
         return f"Secret Access {self.id} for {self.secret.name}"
-

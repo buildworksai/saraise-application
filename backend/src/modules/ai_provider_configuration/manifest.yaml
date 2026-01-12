@@ -1,0 +1,25 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Scaffold - requires implementation
+
+name: ai-provider-configuration
+version: 1.0.0
+description: Unified interface for all LLM providers (OpenAI, Anthropic, Google, Groq, Mistral, etc.)
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+permissions:
+  - ai_provider_configuration.resource:create
+  - ai_provider_configuration.resource:read
+  - ai_provider_configuration.resource:update
+  - ai_provider_configuration.resource:delete
+  - ai_provider_configuration.resource:activate
+  - ai_provider_configuration.resource:deactivate
+sod_actions:
+  - [ai_provider_configuration.resource:create, ai_provider_configuration.resource:delete]
+search_indexes:
+  - ai_provider_configuration_resources
+ai_tools:
+  - create_ai_provider_configuration_resource
+  - update_ai_provider_configuration_resource
+  - delete_ai_provider_configuration_resource

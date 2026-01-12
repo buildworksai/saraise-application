@@ -6,14 +6,16 @@ Tenant Management is a platform-level module - only platform owners can access.
 Tenant-scoped users should NOT have access to tenant management endpoints.
 """
 
-import pytest
-from django.contrib.auth import get_user_model
-from rest_framework.test import APIClient
-from rest_framework import status
 from unittest.mock import patch
 
-from ..models import Tenant
+import pytest
+from django.contrib.auth import get_user_model
+from rest_framework import status
+from rest_framework.test import APIClient
+
 from src.core.user_models import UserProfile
+
+from ..models import Tenant
 
 User = get_user_model()
 
@@ -74,9 +76,7 @@ def tenant_a_user(db):
 @pytest.fixture
 def tenant_b_user(db):
     """Create a user for Tenant B."""
-    tenant_b = Tenant.objects.create(
-        name="Tenant B", slug="tenant-b", subdomain="tenant-b"
-    )
+    tenant_b = Tenant.objects.create(name="Tenant B", slug="tenant-b", subdomain="tenant-b")
     user = User.objects.create_user(
         username="user_b",
         email="user_b@example.com",
@@ -121,11 +121,7 @@ class TestPlatformLevelAccessControl:
         # Returns empty queryset (not 403) because get_queryset filters by platform_role
         assert response.status_code == status.HTTP_200_OK
         # DRF may return paginated or direct list
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) == 0
 
     def test_tenant_user_cannot_create_tenant(self, api_client, tenant_a_user):
@@ -138,9 +134,7 @@ class TestPlatformLevelAccessControl:
         }
 
         api_client.force_authenticate(user=tenant_a_user)
-        response = api_client.post(
-            "/api/v1/tenant-management/tenants/", data, format="json"
-        )
+        response = api_client.post("/api/v1/tenant-management/tenants/", data, format="json")
 
         # perform_create checks platform_role and raises PermissionDenied
         assert response.status_code == status.HTTP_403_FORBIDDEN
@@ -215,23 +209,15 @@ class TestPlatformLevelAccessControl:
 
     def test_platform_owner_can_access_all_tenants(self, api_client, platform_owner):
         """Test: Platform owner can access all tenants."""
-        tenant_a = Tenant.objects.create(
-            name="Tenant A", slug="tenant-a", subdomain="tenant-a"
-        )
-        tenant_b = Tenant.objects.create(
-            name="Tenant B", slug="tenant-b", subdomain="tenant-b"
-        )
+        tenant_a = Tenant.objects.create(name="Tenant A", slug="tenant-a", subdomain="tenant-a")
+        tenant_b = Tenant.objects.create(name="Tenant B", slug="tenant-b", subdomain="tenant-b")
 
         api_client.force_authenticate(user=platform_owner)
         response = api_client.get("/api/v1/tenant-management/tenants/")
 
         assert response.status_code == status.HTTP_200_OK
         # DRF may return paginated or direct list
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         tenant_ids = [t["id"] for t in data]
         assert tenant_a.id in tenant_ids
         assert tenant_b.id in tenant_ids

@@ -1,61 +1,67 @@
 /**
  * AI Agent Management Service
- * 
+ *
  * Service client for AI Agent Management module API calls.
- * Uses generated TypeScript types from OpenAPI schema.
+ *
+ * MIGRATED: Now uses contracts.ts for types and endpoints.
+ * Reference: saraise-documentation/rules/agent-rules/27-contracts-architecture.md
  */
 
 import { apiClient } from '@/services/api-client';
-import type { components } from '@/types/api';
-
-// Type aliases for cleaner code
-type Agent = components['schemas']['Agent'];
-type AgentRequest = components['schemas']['AgentRequest'];
-type PatchedAgentRequest = components['schemas']['PatchedAgentRequest'];
-type AgentExecution = components['schemas']['AgentExecution'];
-type ApprovalRequest = components['schemas']['ApprovalRequest'];
+import type {
+  Agent,
+  AgentRequest,
+  AgentUpdate,
+  AgentExecution,
+  ApprovalRequest,
+  AgentCreate,
+} from '../contracts';
+import { ENDPOINTS } from '../contracts';
 
 // Re-export types for use in components
-export type { Agent, AgentRequest, PatchedAgentRequest, AgentExecution, ApprovalRequest };
-
-// Alias for backward compatibility
-export type AgentCreate = AgentRequest;
-export type AgentUpdate = PatchedAgentRequest;
+export type {
+  Agent,
+  AgentRequest,
+  AgentUpdate,
+  AgentExecution,
+  ApprovalRequest,
+  AgentCreate,
+};
 
 export const aiAgentService = {
   /**
    * List all agents
    */
   listAgents: async (): Promise<Agent[]> => {
-    return apiClient.get<Agent[]>('/api/v1/ai-agents/agents/');
+    return apiClient.get<Agent[]>(ENDPOINTS.AGENTS.LIST);
   },
 
   /**
    * Get agent by ID
    */
   getAgent: async (id: string): Promise<Agent> => {
-    return apiClient.get<Agent>(`/api/v1/ai-agents/agents/${id}/`);
+    return apiClient.get<Agent>(ENDPOINTS.AGENTS.DETAIL(id));
   },
 
   /**
    * Create new agent
    */
   createAgent: async (data: AgentRequest): Promise<Agent> => {
-    return apiClient.post<Agent>('/api/v1/ai-agents/agents/', data);
+    return apiClient.post<Agent>(ENDPOINTS.AGENTS.CREATE, data);
   },
 
   /**
    * Update agent
    */
-  updateAgent: async (id: string, data: PatchedAgentRequest): Promise<Agent> => {
-    return apiClient.put<Agent>(`/api/v1/ai-agents/agents/${id}/`, data);
+  updateAgent: async (id: string, data: AgentUpdate): Promise<Agent> => {
+    return apiClient.put<Agent>(ENDPOINTS.AGENTS.UPDATE(id), data);
   },
 
   /**
    * Delete agent
    */
   deleteAgent: async (id: string): Promise<void> => {
-    return apiClient.delete(`/api/v1/ai-agents/agents/${id}/`);
+    return apiClient.delete(ENDPOINTS.AGENTS.DELETE(id));
   },
 
   /**
@@ -66,7 +72,7 @@ export const aiAgentService = {
     taskDefinition: Record<string, unknown>,
     metadata?: Record<string, unknown>
   ): Promise<AgentExecution> => {
-    return apiClient.post<AgentExecution>(`/api/v1/ai-agents/agents/${id}/execute/`, {
+    return apiClient.post<AgentExecution>(ENDPOINTS.AGENTS.EXECUTE(id), {
       task_definition: taskDefinition,
       metadata: metadata ?? {},
     });
@@ -76,7 +82,7 @@ export const aiAgentService = {
    * Pause agent execution
    */
   pauseAgent: async (id: string, executionId: string): Promise<AgentExecution> => {
-    return apiClient.post<AgentExecution>(`/api/v1/ai-agents/agents/${id}/pause/`, {
+    return apiClient.post<AgentExecution>(ENDPOINTS.AGENTS.PAUSE(id), {
       execution_id: executionId,
     });
   },
@@ -85,7 +91,7 @@ export const aiAgentService = {
    * Resume agent execution
    */
   resumeAgent: async (id: string, executionId: string): Promise<AgentExecution> => {
-    return apiClient.post<AgentExecution>(`/api/v1/ai-agents/agents/${id}/resume/`, {
+    return apiClient.post<AgentExecution>(ENDPOINTS.AGENTS.RESUME(id), {
       execution_id: executionId,
     });
   },
@@ -94,7 +100,7 @@ export const aiAgentService = {
    * Terminate agent execution
    */
   terminateAgent: async (id: string, executionId: string): Promise<AgentExecution> => {
-    return apiClient.post<AgentExecution>(`/api/v1/ai-agents/agents/${id}/terminate/`, {
+    return apiClient.post<AgentExecution>(ENDPOINTS.AGENTS.TERMINATE(id), {
       execution_id: executionId,
     });
   },
@@ -103,37 +109,43 @@ export const aiAgentService = {
    * List agent executions
    */
   listExecutions: async (agentId?: string): Promise<AgentExecution[]> => {
-    const params = agentId ? `?agent_id=${agentId}` : '';
-    return apiClient.get<AgentExecution[]>(`/api/v1/ai-agents/executions/${params}`);
+    const queryParams = new URLSearchParams();
+    if (agentId) queryParams.append('agent_id', agentId);
+    const queryString = queryParams.toString();
+    const url = queryString ? `${ENDPOINTS.EXECUTIONS.LIST}?${queryString}` : ENDPOINTS.EXECUTIONS.LIST;
+    return apiClient.get<AgentExecution[]>(url);
   },
 
   /**
    * Get execution by ID
    */
   getExecution: async (id: string): Promise<AgentExecution> => {
-    return apiClient.get<AgentExecution>(`/api/v1/ai-agents/executions/${id}/`);
+    return apiClient.get<AgentExecution>(ENDPOINTS.EXECUTIONS.DETAIL(id));
   },
 
   /**
    * List approval requests
    */
   listApprovals: async (status?: string): Promise<ApprovalRequest[]> => {
-    const params = status ? `?status=${status}` : '';
-    return apiClient.get<ApprovalRequest[]>(`/api/v1/ai-agents/approvals/${params}`);
+    const queryParams = new URLSearchParams();
+    if (status) queryParams.append('status', status);
+    const queryString = queryParams.toString();
+    const url = queryString ? `${ENDPOINTS.APPROVALS.LIST}?${queryString}` : ENDPOINTS.APPROVALS.LIST;
+    return apiClient.get<ApprovalRequest[]>(url);
   },
 
   /**
    * Approve request
    */
   approveRequest: async (id: string): Promise<ApprovalRequest> => {
-    return apiClient.post<ApprovalRequest>(`/api/v1/ai-agents/approvals/${id}/approve/`);
+    return apiClient.post<ApprovalRequest>(ENDPOINTS.APPROVALS.APPROVE(id));
   },
 
   /**
    * Reject request
    */
   rejectRequest: async (id: string, reason: string): Promise<ApprovalRequest> => {
-    return apiClient.post<ApprovalRequest>(`/api/v1/ai-agents/approvals/${id}/reject/`, {
+    return apiClient.post<ApprovalRequest>(ENDPOINTS.APPROVALS.REJECT(id), {
       reason,
     });
   },

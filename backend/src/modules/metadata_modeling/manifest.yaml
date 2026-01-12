@@ -1,0 +1,12 @@
+name: metadata_modeling
+version: 1.0.0
+type: foundation
+category: core
+description: Define custom entities and extend data models dynamically.
+dependencies:
+  - core
+  - tenant_management
+permissions:
+  - metadata_modeling.manage_schema
+  - metadata_modeling.manage_data
+settings: {}

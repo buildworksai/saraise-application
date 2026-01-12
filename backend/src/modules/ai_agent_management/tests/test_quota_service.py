@@ -5,13 +5,14 @@ Task: 402.2 - AI Quota Enforcement
 
 from __future__ import annotations
 
-import pytest
-from django.utils import timezone
 from datetime import timedelta
 
+import pytest
+from django.utils import timezone
+
 from ..models import Agent, AgentExecution, AgentIdentityType
+from ..quota_models import QuotaPeriod, QuotaType, QuotaUsage, TenantQuota
 from ..quota_service import QuotaService
-from ..quota_models import TenantQuota, QuotaUsage, QuotaType, QuotaPeriod
 
 
 @pytest.mark.django_db
@@ -219,4 +220,3 @@ class TestQuotaService:
 
         quota.refresh_from_db()
         assert quota.is_active is False
-

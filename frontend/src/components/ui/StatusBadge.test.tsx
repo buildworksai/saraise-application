@@ -53,4 +53,3 @@ describe('StatusBadge', () => {
     expect(badge?.className).toContain('custom-class');
   });
 });
-

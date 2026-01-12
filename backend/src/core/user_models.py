@@ -5,23 +5,22 @@ Since Django's default User model doesn't include tenant_id,
 we use a UserProfile model to extend user information.
 """
 
-from django.db import models
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from django.db import models
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from django.core.exceptions import ValidationError
-
 
 User = get_user_model()
 
 
 class UserProfile(models.Model):
     """User profile extending Django User with tenant_id and roles."""
-    
+
     user = models.OneToOneField(
         User,
         on_delete=models.CASCADE,
-        related_name='profile',
+        related_name="profile",
         primary_key=True,
     )
     tenant_id = models.CharField(
@@ -29,7 +28,7 @@ class UserProfile(models.Model):
         null=True,
         blank=True,
         db_index=True,
-        help_text='Tenant ID for tenant-scoped users (null for platform users)',
+        help_text="Tenant ID for tenant-scoped users (null for platform users)",
     )
     platform_role = models.CharField(
         max_length=50,
@@ -37,10 +36,10 @@ class UserProfile(models.Model):
         blank=True,
         db_index=True,
         choices=[
-            ('platform_owner', 'Platform Owner'),
-            ('platform_operator', 'Platform Operator'),
+            ("platform_owner", "Platform Owner"),
+            ("platform_operator", "Platform Operator"),
         ],
-        help_text='Platform-level role',
+        help_text="Platform-level role",
     )
     tenant_role = models.CharField(
         max_length=50,
@@ -48,31 +47,31 @@ class UserProfile(models.Model):
         blank=True,
         db_index=True,
         choices=[
-            ('tenant_admin', 'Tenant Admin'),
-            ('tenant_user', 'Tenant User'),
+            ("tenant_admin", "Tenant Admin"),
+            ("tenant_user", "Tenant User"),
         ],
-        help_text='Tenant-level role',
+        help_text="Tenant-level role",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'user_profiles'
+        db_table = "user_profiles"
         indexes = [
-            models.Index(fields=['tenant_id']),
-            models.Index(fields=['platform_role']),
-            models.Index(fields=['tenant_role']),
-            models.Index(fields=['tenant_id', 'tenant_role']),
+            models.Index(fields=["tenant_id"]),
+            models.Index(fields=["platform_role"]),
+            models.Index(fields=["tenant_role"]),
+            models.Index(fields=["tenant_id", "tenant_role"]),
         ]
 
     def __str__(self):
         role_info = []
         if self.platform_role:
-            role_info.append(f'Platform: {self.platform_role}')
+            role_info.append(f"Platform: {self.platform_role}")
         if self.tenant_role:
-            role_info.append(f'Tenant: {self.tenant_role}')
-        roles = ', '.join(role_info) if role_info else 'No roles'
-        return f'{self.user.email} ({roles})'
+            role_info.append(f"Tenant: {self.tenant_role}")
+        roles = ", ".join(role_info) if role_info else "No roles"
+        return f"{self.user.email} ({roles})"
 
     def clean(self):
         """
@@ -97,13 +96,29 @@ class UserProfile(models.Model):
             errors["tenant_id"] = "tenant_id is required for tenant-scoped users."
 
         # If tenant_id is present, it must reference an existing Tenant row
+        # Exception: In self-hosted/development mode, tenant_id may reference Organization.id
         if self.tenant_id:
             try:
-                from src.modules.tenant_management.models import Tenant  # local import to avoid hard dependency at import time
-                if not Tenant.objects.filter(id=self.tenant_id).exists():
-                    errors["tenant_id"] = f"tenant_id '{self.tenant_id}' does not reference an existing tenant."
+                from django.conf import settings
+
+                mode = getattr(settings, "SARAISE_MODE", "development")
+
+                # In self-hosted/development mode, tenant_id can reference Organization
+                if mode in ["self-hosted", "development"]:
+                    from src.core.licensing.models import Organization
+
+                    if not Organization.objects.filter(id=self.tenant_id).exists():
+                        errors["tenant_id"] = (
+                            f"tenant_id '{self.tenant_id}' does not reference an existing organization in {mode} mode."
+                        )
+                else:
+                    # In SaaS mode, tenant_id must reference Tenant
+                    from src.modules.tenant_management.models import Tenant
+
+                    if not Tenant.objects.filter(id=self.tenant_id).exists():
+                        errors["tenant_id"] = f"tenant_id '{self.tenant_id}' does not reference an existing tenant."
             except Exception as e:
-                errors["tenant_id"] = f"Unable to validate tenant_id against tenant registry: {e}"
+                errors["tenant_id"] = f"Unable to validate tenant_id: {e}"
 
         if errors:
             raise ValidationError(errors)
@@ -119,4 +134,3 @@ def create_user_profile(sender, instance, created, **kwargs):
     """Create UserProfile when User is created."""
     if created:
         UserProfile.objects.get_or_create(user=instance)
-

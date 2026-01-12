@@ -41,7 +41,7 @@ describe('RegisterForm', () => {
         <RegisterForm />
       </BrowserRouter>
     );
-    
+
     expect(screen.getByLabelText(/^name$/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
@@ -55,10 +55,10 @@ describe('RegisterForm', () => {
         <RegisterForm />
       </BrowserRouter>
     );
-    
+
     const submitButton = screen.getByRole('button', { name: /create account/i });
     await user.click(submitButton);
-    
+
     await waitFor(() => {
       expect(screen.getByText(/name is required/i)).toBeInTheDocument();
     });
@@ -71,13 +71,13 @@ describe('RegisterForm', () => {
         <RegisterForm />
       </BrowserRouter>
     );
-    
+
     const emailInput = screen.getByLabelText(/email address/i);
     await user.type(emailInput, 'invalid-email');
-    
+
     const submitButton = screen.getByRole('button', { name: /create account/i });
     await user.click(submitButton);
-    
+
     await waitFor(() => {
       expect(screen.getByText(/valid email address/i)).toBeInTheDocument();
     });
@@ -90,13 +90,13 @@ describe('RegisterForm', () => {
         <RegisterForm />
       </BrowserRouter>
     );
-    
+
     const passwordInput = screen.getByLabelText(/^password$/i);
     await user.type(passwordInput, 'short');
-    
+
     const submitButton = screen.getByRole('button', { name: /create account/i });
     await user.click(submitButton);
-    
+
     await waitFor(() => {
       expect(screen.getByText(/at least 8 characters/i)).toBeInTheDocument();
     });
@@ -109,16 +109,16 @@ describe('RegisterForm', () => {
         <RegisterForm />
       </BrowserRouter>
     );
-    
+
     const passwordInput = screen.getByLabelText(/^password$/i);
     const confirmPasswordInput = screen.getByLabelText(/confirm password/i);
-    
+
     await user.type(passwordInput, 'password123');
     await user.type(confirmPasswordInput, 'password456');
-    
+
     const submitButton = screen.getByRole('button', { name: /create account/i });
     await user.click(submitButton);
-    
+
     await waitFor(() => {
       expect(screen.getByText(/passwords do not match/i)).toBeInTheDocument();
     });
@@ -147,22 +147,21 @@ describe('RegisterForm', () => {
         <RegisterForm />
       </BrowserRouter>
     );
-    
+
     const nameInput = screen.getByLabelText(/^name$/i);
     const emailInput = screen.getByLabelText(/email address/i);
     const passwordInput = screen.getByLabelText(/^password$/i);
     const confirmPasswordInput = screen.getByLabelText(/confirm password/i);
     const submitButton = screen.getByRole('button', { name: /create account/i });
-    
+
     await user.type(nameInput, 'Test User');
     await user.type(emailInput, 'test@example.com');
     await user.type(passwordInput, 'password123');
     await user.type(confirmPasswordInput, 'password123');
     await user.click(submitButton);
-    
+
     await waitFor(() => {
       expect(authService.register).toHaveBeenCalled();
     });
   });
 });
-

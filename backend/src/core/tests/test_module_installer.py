@@ -5,13 +5,14 @@ Task: 502.1 - Module Installation
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
 from django.utils import timezone
 
-from ..module_installer import ModuleInstaller, InstallationError, module_installer
+from ..module_installation_models import InstallationStatus, ModuleInstallation
+from ..module_installer import InstallationError, ModuleInstaller, module_installer
 from ..module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
-from ..module_installation_models import ModuleInstallation, InstallationStatus
 
 
 @pytest.mark.django_db
@@ -40,20 +41,14 @@ class TestModuleInstaller:
         tenant_id = "tenant-1"
 
         with patch.object(installer.registry_service, "get_module", return_value=entry):
-            with patch.object(
-                installer.registry_service, "check_compatibility", return_value=(True, [])
-            ):
-                with patch.object(
-                    installer.registry_service, "resolve_dependencies", return_value=[entry]
-                ):
+            with patch.object(installer.registry_service, "check_compatibility", return_value=(True, [])):
+                with patch.object(installer.registry_service, "resolve_dependencies", return_value=[entry]):
                     with patch.object(installer, "_run_migrations"):
                         with patch.object(installer, "_register_permissions"):
                             with patch.object(installer, "_register_sod_actions"):
                                 with patch.object(installer, "_register_search_indexes"):
                                     with patch.object(installer, "_register_ai_tools"):
-                                        with patch.object(
-                                            installer, "_post_install_verification"
-                                        ):
+                                        with patch.object(installer, "_post_install_verification"):
                                             installation = installer.install_module(
                                                 tenant_id=tenant_id,
                                                 module_name="test-module",
@@ -156,15 +151,9 @@ class TestModuleInstaller:
         )
 
         with patch.object(installer.registry_service, "get_module", return_value=entry):
-            with patch.object(
-                installer.registry_service, "check_compatibility", return_value=(True, [])
-            ):
-                with patch.object(
-                    installer.registry_service, "resolve_dependencies", return_value=[entry]
-                ):
-                    with patch.object(
-                        installer, "_run_migrations", side_effect=Exception("Migration failed")
-                    ):
+            with patch.object(installer.registry_service, "check_compatibility", return_value=(True, [])):
+                with patch.object(installer.registry_service, "resolve_dependencies", return_value=[entry]):
+                    with patch.object(installer, "_run_migrations", side_effect=Exception("Migration failed")):
                         with pytest.raises(InstallationError):
                             installer.install_module(
                                 tenant_id="tenant-1",
@@ -174,9 +163,7 @@ class TestModuleInstaller:
                             )
 
         # Verify installation marked as failed
-        installation = ModuleInstallation.objects.filter(
-            tenant_id="tenant-1", module_name="test-module"
-        ).first()
+        installation = ModuleInstallation.objects.filter(tenant_id="tenant-1", module_name="test-module").first()
         assert installation is not None
         assert installation.status == InstallationStatus.FAILED
 
@@ -221,4 +208,3 @@ class TestModuleInstaller:
         ):
             with pytest.raises(InstallationError, match="Dependency validation failed"):
                 installer._validate_dependencies("tenant-1", entry)
-

@@ -6,11 +6,12 @@ All models include tenant_id for Row-Level Multitenancy.
 
 from __future__ import annotations
 
+import uuid
+from datetime import datetime
+from typing import Any, Dict, Optional
+
 from django.db import models
 from django.utils import timezone
-from typing import Optional, Dict, Any
-from datetime import datetime
-import uuid
 
 
 def generate_uuid():
@@ -64,9 +65,7 @@ class Agent(TenantBaseModel):
     system identities).
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     name = models.CharField(max_length=255, db_index=True)
     description = models.TextField(blank=True)
     identity_type = models.CharField(
@@ -120,9 +119,7 @@ class AgentExecution(TenantBaseModel):
     state and is bound to a session (for user-bound agents).
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     agent = models.ForeignKey(
         Agent,
         on_delete=models.CASCADE,
@@ -142,9 +139,7 @@ class AgentExecution(TenantBaseModel):
         db_index=True,
         help_text="Session ID for user-bound agents",
     )
-    task_definition = models.JSONField(
-        help_text="Task/goal definition for this execution"
-    )
+    task_definition = models.JSONField(help_text="Task/goal definition for this execution")
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     error_message = models.TextField(blank=True)
@@ -171,9 +166,7 @@ class AgentSchedulerTask(TenantBaseModel):
     to manage task queue, priority, and retry logic.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     agent = models.ForeignKey(
         Agent,
         on_delete=models.CASCADE,
@@ -188,9 +181,7 @@ class AgentSchedulerTask(TenantBaseModel):
         blank=True,
         db_index=True,
     )
-    priority = models.IntegerField(
-        default=0, db_index=True, help_text="Higher priority = execute first"
-    )
+    priority = models.IntegerField(default=0, db_index=True, help_text="Higher priority = execute first")
     scheduled_at = models.DateTimeField(db_index=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -221,4 +212,3 @@ class AgentSchedulerTask(TenantBaseModel):
 
     def __str__(self) -> str:
         return f"Task {self.id} ({self.status})"
-

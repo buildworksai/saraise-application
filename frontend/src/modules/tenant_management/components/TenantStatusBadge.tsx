@@ -1,6 +1,6 @@
 /**
  * TenantStatusBadge Component
- * 
+ *
  * Displays tenant status with appropriate styling.
  */
 import { CheckCircle2, Clock, AlertTriangle, XCircle, Archive } from 'lucide-react';
@@ -66,4 +66,3 @@ export const TenantStatusBadge = ({ status, className = '' }: TenantStatusBadgeP
     </span>
   );
 };
-

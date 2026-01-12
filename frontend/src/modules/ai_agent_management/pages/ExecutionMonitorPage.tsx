@@ -1,6 +1,6 @@
 /**
  * Execution Monitor Page
- * 
+ *
  * Real-time monitoring of agent executions with logs and tool invocations.
  */
 import { useQuery } from '@tanstack/react-query';

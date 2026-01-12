@@ -1,0 +1,27 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: document-intelligence
+version: 1.0.0
+description: AI-powered document processing, OCR, data extraction, classification
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+  - ai-agent-management >=1.0
+  - dms >=1.0
+permissions:
+  - document_intelligence.resource:create
+  - document_intelligence.resource:read
+  - document_intelligence.resource:update
+  - document_intelligence.resource:delete
+  - document_intelligence.resource:activate
+  - document_intelligence.resource:deactivate
+sod_actions:
+  - [document_intelligence.resource:create, document_intelligence.resource:delete]
+search_indexes:
+  - document_intelligence_resources
+ai_tools:
+  - create_document_intelligence_resource
+  - update_document_intelligence_resource
+  - delete_document_intelligence_resource

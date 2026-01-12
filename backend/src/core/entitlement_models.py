@@ -6,10 +6,16 @@ Task: 503.1 - Subscription Entitlements & Runtime Gating
 
 from __future__ import annotations
 
+import uuid
+from typing import Any, Dict, Optional
+
 from django.db import models
 from django.utils import timezone
-from typing import Optional, Dict, Any
-import uuid
+
+
+def generate_uuid():
+    """Generate UUID for model primary keys."""
+    return str(uuid.uuid4())
 
 
 class SubscriptionPlan(models.Model):
@@ -18,9 +24,7 @@ class SubscriptionPlan(models.Model):
     Defines subscription plans and their entitlements.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     name = models.CharField(max_length=255, unique=True, db_index=True)
     description = models.TextField(blank=True, null=True)
     plan_type = models.CharField(
@@ -35,9 +39,7 @@ class SubscriptionPlan(models.Model):
         db_index=True,
     )
     is_active = models.BooleanField(default=True, db_index=True)
-    metadata = models.JSONField(
-        default=dict, help_text="Plan metadata"
-    )
+    metadata = models.JSONField(default=dict, help_text="Plan metadata")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -58,9 +60,7 @@ class PlanEntitlement(models.Model):
     Defines entitlements for a subscription plan.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     plan = models.ForeignKey(
         SubscriptionPlan,
         on_delete=models.CASCADE,
@@ -79,21 +79,15 @@ class PlanEntitlement(models.Model):
         ],
         db_index=True,
     )
-    resource_name = models.CharField(
-        max_length=255, db_index=True, help_text="Module name, feature name, etc."
-    )
-    limit_value = models.IntegerField(
-        null=True, blank=True, help_text="Limit value (null = unlimited)"
-    )
+    resource_name = models.CharField(max_length=255, db_index=True, help_text="Module name, feature name, etc.")
+    limit_value = models.IntegerField(null=True, blank=True, help_text="Limit value (null = unlimited)")
     limit_unit = models.CharField(
         max_length=50,
         null=True,
         blank=True,
         help_text="Limit unit (per_month, per_user, etc.)",
     )
-    metadata = models.JSONField(
-        default=dict, help_text="Entitlement metadata"
-    )
+    metadata = models.JSONField(default=dict, help_text="Entitlement metadata")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -115,9 +109,7 @@ class TenantSubscription(models.Model):
     Tracks tenant subscriptions to plans.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     tenant_id = models.CharField(max_length=36, unique=True, db_index=True)
     plan = models.ForeignKey(
         SubscriptionPlan,
@@ -138,9 +130,7 @@ class TenantSubscription(models.Model):
     )
     started_at = models.DateTimeField(auto_now_add=True, db_index=True)
     expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
-    metadata = models.JSONField(
-        default=dict, help_text="Subscription metadata"
-    )
+    metadata = models.JSONField(default=dict, help_text="Subscription metadata")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -162,18 +152,14 @@ class EntitlementCheck(models.Model):
     Tracks entitlement checks for auditing.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     tenant_id = models.CharField(max_length=36, db_index=True)
     entitlement_type = models.CharField(max_length=50, db_index=True)
     resource_name = models.CharField(max_length=255, db_index=True)
     allowed = models.BooleanField(db_index=True)
     reason = models.TextField(null=True, blank=True)
     checked_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    metadata = models.JSONField(
-        default=dict, help_text="Check metadata"
-    )
+    metadata = models.JSONField(default=dict, help_text="Check metadata")
 
     class Meta:
         db_table = "entitlement_checks"
@@ -188,4 +174,3 @@ class EntitlementCheck(models.Model):
             f"Entitlement check: {self.entitlement_type}/{self.resource_name} "
             f"(Tenant: {self.tenant_id}) - {'ALLOWED' if self.allowed else 'DENIED'}"
         )
-

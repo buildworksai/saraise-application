@@ -8,16 +8,8 @@ from __future__ import annotations
 import pytest
 from django.utils import timezone
 
-from ..entitlement_service import (
-    EntitlementService,
-    EntitlementError,
-)
-from ..entitlement_models import (
-    SubscriptionPlan,
-    PlanEntitlement,
-    TenantSubscription,
-    EntitlementCheck,
-)
+from ..entitlement_models import EntitlementCheck, PlanEntitlement, SubscriptionPlan, TenantSubscription
+from ..entitlement_service import EntitlementError, EntitlementService
 
 
 @pytest.mark.django_db
@@ -30,8 +22,9 @@ class TestEntitlementService:
 
         # Create plan
         plan = SubscriptionPlan.objects.create(
-            plan_name="basic",
-            display_name="Basic Plan",
+            name="basic",
+            description="Basic Plan",
+            plan_type="basic",
             is_active=True,
         )
 
@@ -63,14 +56,15 @@ class TestEntitlementService:
 
         # Create plan with module entitlement
         plan = SubscriptionPlan.objects.create(
-            plan_name="basic",
-            display_name="Basic Plan",
+            name="basic",
+            description="Basic Plan",
+            plan_type="basic",
             is_active=True,
         )
 
         PlanEntitlement.objects.create(
             plan=plan,
-            entitlement_type="module",
+            entitlement_type="module_access",
             resource_name="test-module",
             limit_value=1,
         )
@@ -91,8 +85,9 @@ class TestEntitlementService:
         service = EntitlementService()
 
         plan = SubscriptionPlan.objects.create(
-            plan_name="basic",
-            display_name="Basic Plan",
+            name="basic",
+            description="Basic Plan",
+            plan_type="basic",
             is_active=True,
         )
 
@@ -112,14 +107,15 @@ class TestEntitlementService:
         service = EntitlementService()
 
         plan = SubscriptionPlan.objects.create(
-            plan_name="basic",
-            display_name="Basic Plan",
+            name="basic",
+            description="Basic Plan",
+            plan_type="basic",
             is_active=True,
         )
 
         PlanEntitlement.objects.create(
             plan=plan,
-            entitlement_type="feature",
+            entitlement_type="feature_access",
             resource_name="advanced-reports",
             limit_value=1,
         )
@@ -140,14 +136,15 @@ class TestEntitlementService:
         service = EntitlementService()
 
         plan = SubscriptionPlan.objects.create(
-            plan_name="basic",
-            display_name="Basic Plan",
+            name="basic",
+            description="Basic Plan",
+            plan_type="basic",
             is_active=True,
         )
 
         PlanEntitlement.objects.create(
             plan=plan,
-            entitlement_type="resource",
+            entitlement_type="resource_limit",
             resource_name="api_calls_per_month",
             limit_value=10000,
         )
@@ -160,14 +157,10 @@ class TestEntitlementService:
             started_at=timezone.now(),
         )
 
-        within_limit = service.check_resource_limit(
-            tenant_id, "api_calls_per_month", 5000
-        )
+        within_limit = service.check_resource_limit(tenant_id, "api_calls_per_month", 5000)
         assert within_limit is True
 
-        exceeds_limit = service.check_resource_limit(
-            tenant_id, "api_calls_per_month", 15000
-        )
+        exceeds_limit = service.check_resource_limit(tenant_id, "api_calls_per_month", 15000)
         assert exceeds_limit is False
 
     def test_create_subscription(self) -> None:
@@ -175,16 +168,16 @@ class TestEntitlementService:
         service = EntitlementService()
 
         plan = SubscriptionPlan.objects.create(
-            plan_name="basic",
-            display_name="Basic Plan",
+            name="basic",
+            description="Basic Plan",
+            plan_type="basic",
             is_active=True,
         )
 
         tenant_id = "tenant-1"
         subscription = service.create_subscription(
             tenant_id=tenant_id,
-            plan_name="basic",
-            started_by="user-1",
+            plan_id=plan.id,
         )
 
         assert subscription is not None
@@ -199,8 +192,7 @@ class TestEntitlementService:
         with pytest.raises(EntitlementError, match="not found"):
             service.create_subscription(
                 tenant_id="tenant-1",
-                plan_name="non-existent",
-                started_by="user-1",
+                plan_id="non-existent-plan-id",
             )
 
     def test_log_entitlement_check(self) -> None:
@@ -216,11 +208,8 @@ class TestEntitlementService:
             reason="Plan includes module",
         )
 
-        check = EntitlementCheck.objects.filter(
-            tenant_id=tenant_id, entitlement_type="module"
-        ).first()
+        check = EntitlementCheck.objects.filter(tenant_id=tenant_id, entitlement_type="module").first()
 
         assert check is not None
         assert check.resource_name == "test-module"
         assert check.granted is True
-

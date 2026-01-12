@@ -1,8 +1,8 @@
 import pytest
 from django.contrib.auth import get_user_model
-from rest_framework.test import APIRequestFactory, force_authenticate
 from django.core.cache import cache
 from django.db import connection
+from rest_framework.test import APIRequestFactory, force_authenticate
 
 from ..health import health_check
 from ..models import Tenant

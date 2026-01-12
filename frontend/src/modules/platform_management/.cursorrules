@@ -1,0 +1,94 @@
+# Platform Management Module - Cursor Rules
+# These rules are automatically applied when editing files in this directory
+
+# =============================================================================
+# MODULE OVERVIEW
+# =============================================================================
+#
+# This module manages platform settings, feature flags, health monitoring, and audit events.
+# Key entities: PlatformSetting, FeatureFlag, SystemHealth, PlatformAuditEvent
+
+# =============================================================================
+# CRITICAL: Read contracts.ts FIRST
+# =============================================================================
+#
+# Before modifying any file in this module, you MUST read:
+#   frontend/src/modules/platform_management/contracts.ts
+#
+# This file contains:
+# - All TypeScript types for this module
+# - All API endpoint URLs
+# - Type guards for runtime checking
+# - Usage examples
+
+# =============================================================================
+# TYPE IMPORTS
+# =============================================================================
+#
+# ✅ CORRECT: Import types from contracts.ts
+#   import { PlatformSetting, FeatureFlag, ENDPOINTS } from './contracts';
+#   import type { PlatformSettingCreate, FeatureFlagUpdate } from './contracts';
+#
+# ❌ FORBIDDEN: Import directly from @/types/api in pages/components
+#   import type { components } from '@/types/api';
+#
+# ❌ FORBIDDEN: Define ad-hoc types in page files
+#   interface PlatformSetting { id: string; key: string; } // DON'T DO THIS
+
+# =============================================================================
+# ENDPOINT USAGE
+# =============================================================================
+#
+# ✅ CORRECT: Use ENDPOINTS constant
+#   apiClient.get<PlatformSetting[]>(ENDPOINTS.SETTINGS.LIST);
+#   apiClient.post<PlatformSetting>(ENDPOINTS.SETTINGS.CREATE, settingData);
+#   apiClient.patch<PlatformSetting>(ENDPOINTS.SETTINGS.UPDATE(id), updates);
+#
+# ❌ FORBIDDEN: Hardcode URL strings
+#   apiClient.get('/api/v1/platform/settings/');
+#   apiClient.post('/api/v1/platform/settings/' + id + '/');
+
+# =============================================================================
+# API CLIENT USAGE
+# =============================================================================
+#
+# ✅ CORRECT: Always specify generic type parameter
+#   apiClient.get<PlatformSetting[]>(ENDPOINTS.SETTINGS.LIST);
+#   apiClient.post<PlatformSetting>(ENDPOINTS.SETTINGS.CREATE, settingData);
+#
+# ❌ FORBIDDEN: Omit generic type or use any
+#   apiClient.get(ENDPOINTS.SETTINGS.LIST);
+#   apiClient.post<any>(ENDPOINTS.SETTINGS.CREATE, settingData);
+
+# =============================================================================
+# VALIDATION CHECKPOINTS
+# =============================================================================
+#
+# After editing any TypeScript file in this module:
+# 1. Run: npx tsc --noEmit src/modules/platform_management/{file}.tsx
+# 2. Run: npx eslint src/modules/platform_management/{file}.tsx --max-warnings 0
+# 3. Fix ALL errors before proceeding
+
+# =============================================================================
+# SERVICE FILE RULES
+# =============================================================================
+#
+# The service file (services/platform-service.ts) should:
+# 1. Import types from ../contracts, not define its own
+# 2. Use ENDPOINTS from ../contracts for all API calls
+# 3. Handle errors appropriately
+#
+# Example:
+#   import {
+#     PlatformSetting, PlatformSettingCreate,
+#     FeatureFlag, FeatureFlagUpdate,
+#     ENDPOINTS
+#   } from '../contracts';
+#
+#   export const platformService = {
+#     settings: {
+#       list: () => apiClient.get<PlatformSetting[]>(ENDPOINTS.SETTINGS.LIST),
+#       create: (data: PlatformSettingCreate) =>
+#         apiClient.post<PlatformSetting>(ENDPOINTS.SETTINGS.CREATE, data),
+#     },
+#   };

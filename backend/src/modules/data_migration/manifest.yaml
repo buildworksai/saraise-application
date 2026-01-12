@@ -1,0 +1,26 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Scaffold - requires implementation
+
+name: data-migration
+version: 1.0.0
+description: Intelligent data import/migration from external systems with AI-powered field mapping, validation, rollback
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+  - ai-agent-management >=1.0
+permissions:
+  - data_migration.resource:create
+  - data_migration.resource:read
+  - data_migration.resource:update
+  - data_migration.resource:delete
+  - data_migration.resource:activate
+  - data_migration.resource:deactivate
+sod_actions:
+  - [data_migration.resource:create, data_migration.resource:delete]
+search_indexes:
+  - data_migration_resources
+ai_tools:
+  - create_data_migration_resource
+  - update_data_migration_resource
+  - delete_data_migration_resource

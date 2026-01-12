@@ -6,9 +6,15 @@ Task: 502.2 - Module Upgrade & Rollback
 
 from __future__ import annotations
 
-from django.db import models
-from typing import Optional, Dict, Any
 import uuid
+from typing import Any, Dict, Optional
+
+from django.db import models
+
+
+def generate_uuid():
+    """Generate UUID for model primary keys."""
+    return str(uuid.uuid4())
 
 
 class UpgradeStatus(models.TextChoices):
@@ -32,9 +38,7 @@ class ModuleUpgrade(models.Model):
     Tracks the upgrade lifecycle of a module for a tenant.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     tenant_id = models.CharField(max_length=36, db_index=True)
     module_name = models.CharField(max_length=255, db_index=True)
     from_version = models.CharField(max_length=50, db_index=True)
@@ -53,25 +57,13 @@ class ModuleUpgrade(models.Model):
     )
     started_at = models.DateTimeField(auto_now_add=True, db_index=True)
     completed_at = models.DateTimeField(null=True, blank=True)
-    upgraded_by = models.CharField(
-        max_length=36, help_text="User/system who initiated upgrade"
-    )
+    upgraded_by = models.CharField(max_length=36, help_text="User/system who initiated upgrade")
     error_message = models.TextField(null=True, blank=True)
-    error_details = models.JSONField(
-        default=dict, help_text="Detailed error information"
-    )
-    upgrade_log = models.JSONField(
-        default=list, help_text="Upgrade step log"
-    )
-    backup_snapshot = models.JSONField(
-        null=True, blank=True, help_text="Backup snapshot data"
-    )
-    rollback_data = models.JSONField(
-        null=True, blank=True, help_text="Rollback data preservation"
-    )
-    metadata = models.JSONField(
-        default=dict, help_text="Upgrade metadata"
-    )
+    error_details = models.JSONField(default=dict, help_text="Detailed error information")
+    upgrade_log = models.JSONField(default=list, help_text="Upgrade step log")
+    backup_snapshot = models.JSONField(null=True, blank=True, help_text="Backup snapshot data")
+    rollback_data = models.JSONField(null=True, blank=True, help_text="Rollback data preservation")
+    metadata = models.JSONField(default=dict, help_text="Upgrade metadata")
 
     class Meta:
         db_table = "module_upgrades"
@@ -94,9 +86,7 @@ class UpgradeStep(models.Model):
     Tracks individual steps within an upgrade.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     upgrade = models.ForeignKey(
         ModuleUpgrade,
         on_delete=models.CASCADE,
@@ -122,12 +112,8 @@ class UpgradeStep(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     duration_ms = models.IntegerField(null=True, blank=True)
     error_message = models.TextField(null=True, blank=True)
-    output = models.JSONField(
-        default=dict, help_text="Step output/result"
-    )
-    rollback_data = models.JSONField(
-        null=True, blank=True, help_text="Step-specific rollback data"
-    )
+    output = models.JSONField(default=dict, help_text="Step output/result")
+    rollback_data = models.JSONField(null=True, blank=True, help_text="Step-specific rollback data")
 
     class Meta:
         db_table = "module_upgrade_steps"
@@ -139,4 +125,3 @@ class UpgradeStep(models.Model):
 
     def __str__(self) -> str:
         return f"{self.step_name} ({self.status}) - Upgrade {self.upgrade.id}"
-

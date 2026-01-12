@@ -1,0 +1,74 @@
+# SARAISE Tenant Isolation Check Workflow
+#
+# This workflow verifies that all tenant-scoped modules have
+# mandatory tenant isolation tests (test_isolation.py).
+#
+# Rule: SARAISE-33004
+# Authority: saraise-documentation/rules/agent-rules/33-tenant-isolation-enforcement.md
+
+name: Tenant Isolation Check
+
+on:
+  pull_request:
+    paths:
+      - 'backend/src/modules/**/*.py'
+      - 'backend/src/modules/**/tests/**'
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'backend/src/modules/**/*.py'
+      - 'backend/src/modules/**/tests/**'
+
+jobs:
+  check-isolation-tests:
+    name: Check Tenant Isolation Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Make script executable
+        run: chmod +x ./scripts/check-tenant-isolation-tests.sh
+
+      - name: Run tenant isolation check
+        run: ./scripts/check-tenant-isolation-tests.sh
+
+      - name: Post failure comment on PR
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `❌ **Tenant Isolation Test Check Failed**
+
+            One or more modules with \`tenant_id\` in their models are missing \`tests/test_isolation.py\`.
+
+            **Required Action:**
+            Every tenant-scoped module MUST have tenant isolation tests to prevent cross-tenant data leakage.
+
+            See: [Tenant Isolation Enforcement](https://github.com/${context.repo.owner}/saraise-documentation/blob/main/rules/agent-rules/33-tenant-isolation-enforcement.md)
+
+            **Rule:** SARAISE-33004`
+            })
+
+  lint-raw-sql-tenant-filter:
+    name: Lint Raw SQL Tenant Filter
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Run raw SQL tenant filter check
+        run: python scripts/lint-tenant-filter.py

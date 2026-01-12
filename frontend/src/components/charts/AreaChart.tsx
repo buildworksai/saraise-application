@@ -69,9 +69,12 @@ export const AreaChart = ({
           contentStyle={{
             backgroundColor: tooltipBg,
             border: `1px solid ${tooltipBorder}`,
-            borderRadius: '6px',
+            borderRadius: '8px',
             color: textColor,
+            padding: '8px 12px',
+            boxShadow: isDark ? '0 4px 6px rgba(0, 0, 0, 0.3)' : '0 4px 6px rgba(0, 0, 0, 0.1)',
           }}
+          itemStyle={{ color: textColor }}
         />
         {showLegend && (
           <Legend

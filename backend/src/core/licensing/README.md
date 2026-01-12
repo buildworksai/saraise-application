@@ -141,4 +141,3 @@ python manage.py migrate core
 
 - Phase Document: `saraise-documentation/planning/phases/phase-7.5-licensing.md`
 - Architecture: `saraise-documentation/licensing/licensing-architecture.md`
-

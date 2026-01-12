@@ -96,4 +96,3 @@ echo "   docker-compose -f docker-compose.dev.yml logs -f [service_name]"
 echo ""
 echo "🛑 Stop:"
 echo "   docker-compose -f docker-compose.dev.yml down"
-

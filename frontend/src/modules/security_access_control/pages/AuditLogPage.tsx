@@ -1,26 +1,34 @@
 /**
  * SPDX-License-Identifier: Apache-2.0
- * 
+ *
  * Security Audit Log Page
- * 
+ *
  * Displays security audit logs for the current tenant.
  */
-import { useQuery } from '@tanstack/react-query';
-import { FileText, Search } from 'lucide-react';
-import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
-import { TableSkeleton, EmptyState, ErrorState } from '@/components/ui';
-import { securityService, type SecurityAuditLog } from '../services/security-service';
-import { useState, useDeferredValue } from 'react';
+import { useQuery } from "@tanstack/react-query";
+import { FileText, Search } from "lucide-react";
+import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
+import { TableSkeleton, EmptyState, ErrorState } from "@/components/ui";
+import {
+  securityService,
+  type SecurityAuditLog,
+} from "../services/security-service";
+import { useState, useDeferredValue } from "react";
 
 export const AuditLogPage = () => {
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const deferredSearchQuery = useDeferredValue(searchQuery);
-  const [actionFilter, setActionFilter] = useState<string>('');
+  const [actionFilter, setActionFilter] = useState<string>("");
 
-  const { data: auditLogs, isLoading, error, refetch } = useQuery<SecurityAuditLog[]>({
-    queryKey: ['security-audit-logs', actionFilter],
+  const {
+    data: auditLogs,
+    isLoading,
+    error,
+    refetch,
+  } = useQuery<SecurityAuditLog[]>({
+    queryKey: ["security-audit-logs", actionFilter],
     queryFn: async (): Promise<SecurityAuditLog[]> => {
       const result = await securityService.auditLogs.list({
         action: actionFilter || undefined,
@@ -31,43 +39,51 @@ export const AuditLogPage = () => {
   });
 
   // Type guard to ensure auditLogs is an array
-  const safeAuditLogs: SecurityAuditLog[] = Array.isArray(auditLogs) ? auditLogs : [];
+  const safeAuditLogs: SecurityAuditLog[] = Array.isArray(auditLogs)
+    ? auditLogs
+    : [];
 
-  const filteredLogs: SecurityAuditLog[] = safeAuditLogs.filter((log: SecurityAuditLog) => {
-    if (deferredSearchQuery) {
-      const query = deferredSearchQuery.toLowerCase();
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      const action = String(log.action ?? '').toLowerCase();
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      const resourceType = String(log.resource_type ?? '').toLowerCase();
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-      const actorIdStr = typeof log.actor_id === 'string' ? log.actor_id : String(log.actor_id ?? '');
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-      const actorId = String(actorIdStr).toLowerCase();
-      return (
-        action.includes(query) ||
-        resourceType.includes(query) ||
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
-        actorId.includes(query)
-      );
+  const filteredLogs: SecurityAuditLog[] = safeAuditLogs.filter(
+    (log: SecurityAuditLog) => {
+      if (deferredSearchQuery) {
+        const query = deferredSearchQuery.toLowerCase();
+
+        // Safe type conversions without ESLint suppressions
+        const action =
+          typeof log.action === "string" ? log.action.toLowerCase() : "";
+        const resourceType =
+          typeof log.resource_type === "string"
+            ? log.resource_type.toLowerCase()
+            : "";
+        const actorIdStr =
+          log.actor_id !== undefined && log.actor_id !== null
+            ? String(log.actor_id)
+            : "";
+        const actorId = actorIdStr.toLowerCase();
+
+        return (
+          action.includes(query) ||
+          resourceType.includes(query) ||
+          actorId.includes(query)
+        );
+      }
+      return true;
     }
-    return true;
-  });
+  );
 
   // Get unique actions for filter
   const actions: string[] = Array.from(
     new Set(
       safeAuditLogs
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
-        .map((log) => String(log.action ?? ''))
+        .map((log) => (typeof log.action === "string" ? log.action : ""))
         .filter((action): action is string => action.length > 0)
     )
   );
 
   const getSeverityColor = (decision?: string) => {
-    if (decision === 'allow') return 'text-green-600';
-    if (decision === 'deny') return 'text-red-600';
-    return 'text-muted-foreground';
+    if (decision === "allow") return "text-green-600";
+    if (decision === "deny") return "text-red-600";
+    return "text-muted-foreground";
   };
 
   if (isLoading) {
@@ -95,8 +111,12 @@ export const AuditLogPage = () => {
     <div className="p-8 max-w-7xl mx-auto">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-4xl font-bold text-foreground mb-2">Security Audit Log</h1>
-        <p className="text-muted-foreground">View security events and access decisions</p>
+        <h1 className="text-4xl font-bold text-foreground mb-2">
+          Security Audit Log
+        </h1>
+        <p className="text-muted-foreground">
+          View security events and access decisions
+        </p>
       </div>
 
       {/* Filters */}
@@ -117,8 +137,11 @@ export const AuditLogPage = () => {
               value={actionFilter}
               onChange={(e) => setActionFilter(e.target.value)}
               options={[
-                { value: '', label: 'All Actions' },
-                ...actions.map((action: string) => ({ value: action, label: action })),
+                { value: "", label: "All Actions" },
+                ...actions.map((action: string) => ({
+                  value: action,
+                  label: action,
+                })),
               ]}
             />
           </div>
@@ -129,25 +152,16 @@ export const AuditLogPage = () => {
       {filteredLogs && filteredLogs.length > 0 ? (
         <div className="space-y-4">
           {filteredLogs.map((log) => {
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-            const logId = String(log.id ?? `log-${Math.random()}`);
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
-            const logAction = log.action ?? 'Unknown';
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
+            const logId = log.id ? String(log.id) : `log-${Math.random()}`;
+            const logAction =
+              typeof log.action === "string" ? log.action : "Unknown";
             const logDecision = log.decision;
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
             const logActorId = log.actor_id;
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
             const logActorType = log.actor_type;
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
             const logResourceType = log.resource_type;
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
             const logResourceId = log.resource_id;
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
             const logTimestamp = log.timestamp;
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
             const logIpAddress = log.ip_address;
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
             const logReasonCodes = log.reason_codes;
 
             return (
@@ -159,40 +173,58 @@ export const AuditLogPage = () => {
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-semibold text-foreground">{String(logAction)}</span>
-                        {logDecision && typeof logDecision === 'string' && (
-                          <span className={`text-sm font-medium ${getSeverityColor(logDecision)}`}>
+                        <span className="font-semibold text-foreground">
+                          {String(logAction)}
+                        </span>
+                        {logDecision && typeof logDecision === "string" && (
+                          <span
+                            className={`text-sm font-medium ${getSeverityColor(
+                              logDecision
+                            )}`}
+                          >
                             ({logDecision.toUpperCase()})
                           </span>
                         )}
                       </div>
                       <div className="text-sm text-muted-foreground space-y-1">
                         <div>
-                          <span className="font-medium">Actor:</span> {String(logActorId ?? '')} ({String(logActorType ?? 'unknown')})
+                          <span className="font-medium">Actor:</span>{" "}
+                          {String(logActorId ?? "")} (
+                          {String(logActorType ?? "unknown")})
                         </div>
                         {logResourceType && (
                           <div>
-                            <span className="font-medium">Resource:</span> {String(logResourceType)}
+                            <span className="font-medium">Resource:</span>{" "}
+                            {String(logResourceType)}
                             {logResourceId && ` (${String(logResourceId)})`}
                           </div>
                         )}
                         {logTimestamp && (
                           <div>
-                            <span className="font-medium">Time:</span>{' '}
+                            <span className="font-medium">Time:</span>{" "}
                             {new Date(String(logTimestamp)).toLocaleString()}
                           </div>
                         )}
                         {logIpAddress && (
                           <div>
-                            <span className="font-medium">IP:</span> {String(logIpAddress)}
+                            <span className="font-medium">IP:</span>{" "}
+                            {String(logIpAddress)}
                           </div>
                         )}
                         {(() => {
-                          if (logReasonCodes && Array.isArray(logReasonCodes) && logReasonCodes.length > 0) {
+                          if (
+                            logReasonCodes &&
+                            Array.isArray(logReasonCodes) &&
+                            logReasonCodes.length > 0
+                          ) {
                             return (
                               <div>
-                                <span className="font-medium">Reason Codes:</span>{' '}
-                                <span>{(logReasonCodes as string[]).join(', ')}</span>
+                                <span className="font-medium">
+                                  Reason Codes:
+                                </span>{" "}
+                                <span>
+                                  {(logReasonCodes as string[]).join(", ")}
+                                </span>
                               </div>
                             );
                           }
@@ -216,4 +248,3 @@ export const AuditLogPage = () => {
     </div>
   );
 };
-

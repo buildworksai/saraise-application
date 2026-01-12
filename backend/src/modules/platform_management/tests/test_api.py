@@ -1,12 +1,12 @@
-import pytest
-from django.contrib.auth import get_user_model
-from rest_framework.test import APIClient
-from rest_framework import status
 import uuid
 
-from ..models import PlatformSetting, FeatureFlag, SystemHealth, PlatformAuditEvent
-from src.core.user_models import UserProfile
+import pytest
+from django.contrib.auth import get_user_model
 from django.utils import timezone
+from rest_framework import status
+from rest_framework.test import APIClient
+
+from ..models import FeatureFlag, PlatformAuditEvent, PlatformSetting, SystemHealth
 
 User = get_user_model()
 
@@ -20,8 +20,9 @@ def api_client():
 @pytest.fixture
 def tenant_user(db):
     """Create a test user with tenant."""
-    from src.core.user_models import UserProfile
     from unittest.mock import patch
+
+    from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
     user = User.objects.create_user(
@@ -63,9 +64,7 @@ class TestPlatformSettingViewSet:
             "category": "general",
             "is_secret": False,
         }
-        response = authenticated_client.post(
-            "/api/v1/platform/settings/", data, format="json"
-        )
+        response = authenticated_client.post("/api/v1/platform/settings/", data, format="json")
 
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["key"] == "test_setting"
@@ -80,9 +79,7 @@ class TestPlatformSettingViewSet:
     def test_create_setting_validation_error(self, authenticated_client):
         """Test: Validation error for short key."""
         data = {"key": "a", "value": "test"}  # Key too short
-        response = authenticated_client.post(
-            "/api/v1/platform/settings/", data, format="json"
-        )
+        response = authenticated_client.post("/api/v1/platform/settings/", data, format="json")
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "key" in response.data
@@ -95,14 +92,10 @@ class TestPlatformSettingViewSet:
         tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
 
         # Create platform-wide setting
-        PlatformSetting.objects.create(
-            tenant_id=None, key="platform_setting", value="platform_value"
-        )
+        PlatformSetting.objects.create(tenant_id=None, key="platform_setting", value="platform_value")
 
         # Create tenant-specific setting
-        PlatformSetting.objects.create(
-            tenant_id=tenant_id, key="tenant_setting", value="tenant_value"
-        )
+        PlatformSetting.objects.create(tenant_id=tenant_id, key="tenant_setting", value="tenant_value")
 
         response = authenticated_client.get("/api/v1/platform/settings/")
         assert response.status_code == status.HTTP_200_OK
@@ -116,12 +109,8 @@ class TestPlatformSettingViewSet:
             "src.modules.platform_management.api.get_user_tenant_id",
             lambda _user: "not-a-uuid",
         )
-        PlatformSetting.objects.create(
-            tenant_id=None, key="platform_only", value="platform_value"
-        )
-        PlatformSetting.objects.create(
-            tenant_id=uuid.uuid4(), key="tenant_only", value="tenant_value"
-        )
+        PlatformSetting.objects.create(tenant_id=None, key="platform_only", value="platform_value")
+        PlatformSetting.objects.create(tenant_id=uuid.uuid4(), key="tenant_only", value="tenant_value")
         response = authenticated_client.get("/api/v1/platform/settings/")
         assert response.status_code == status.HTTP_200_OK
         keys = [s["key"] for s in response.data]
@@ -151,13 +140,9 @@ class TestPlatformSettingViewSet:
 
         tenant_id_str = get_user_tenant_id(tenant_user)
         tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
-        setting = PlatformSetting.objects.create(
-            tenant_id=tenant_id, key="update_me", value="old_value"
-        )
+        setting = PlatformSetting.objects.create(tenant_id=tenant_id, key="update_me", value="old_value")
         data = {"value": "new_value"}
-        response = authenticated_client.patch(
-            f"/api/v1/platform/settings/{setting.id}/", data, format="json"
-        )
+        response = authenticated_client.patch(f"/api/v1/platform/settings/{setting.id}/", data, format="json")
         assert response.status_code == status.HTTP_200_OK
         assert response.data["value"] == "new_value"
 
@@ -167,12 +152,8 @@ class TestPlatformSettingViewSet:
 
         tenant_id_str = get_user_tenant_id(tenant_user)
         tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
-        setting = PlatformSetting.objects.create(
-            tenant_id=tenant_id, key="delete_me", value="value"
-        )
-        response = authenticated_client.delete(
-            f"/api/v1/platform/settings/{setting.id}/"
-        )
+        setting = PlatformSetting.objects.create(tenant_id=tenant_id, key="delete_me", value="value")
+        response = authenticated_client.delete(f"/api/v1/platform/settings/{setting.id}/")
         assert response.status_code == status.HTTP_204_NO_CONTENT
         assert not PlatformSetting.objects.filter(id=setting.id).exists()
 
@@ -188,9 +169,7 @@ class TestFeatureFlagViewSet:
         tenant_id_str = get_user_tenant_id(tenant_user)
 
         data = {"name": "new_feature", "enabled": True, "rollout_percentage": 50}
-        response = authenticated_client.post(
-            "/api/v1/platform/feature-flags/", data, format="json"
-        )
+        response = authenticated_client.post("/api/v1/platform/feature-flags/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["name"] == "new_feature"
         # tenant_id may or may not be in response depending on serializer
@@ -200,19 +179,13 @@ class TestFeatureFlagViewSet:
     def test_toggle_feature_flag(self, authenticated_client, tenant_user):
         """Test: Toggle feature flag status."""
         tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        flag = FeatureFlag.objects.create(
-            tenant_id=tenant_id, name="toggle_me", enabled=True
-        )
-        response = authenticated_client.post(
-            f"/api/v1/platform/feature-flags/{flag.id}/toggle/"
-        )
+        flag = FeatureFlag.objects.create(tenant_id=tenant_id, name="toggle_me", enabled=True)
+        response = authenticated_client.post(f"/api/v1/platform/feature-flags/{flag.id}/toggle/")
         assert response.status_code == status.HTTP_200_OK
         assert not response.data["enabled"]
 
         # Toggle again
-        response = authenticated_client.post(
-            f"/api/v1/platform/feature-flags/{flag.id}/toggle/"
-        )
+        response = authenticated_client.post(f"/api/v1/platform/feature-flags/{flag.id}/toggle/")
         assert response.status_code == status.HTTP_200_OK
         assert response.data["enabled"]
 
@@ -220,26 +193,20 @@ class TestFeatureFlagViewSet:
         """Test: Feature flag validation."""
         # Invalid rollout percentage (> 100) - should fail validation
         data = {"name": "test_feature_150", "enabled": True, "rollout_percentage": 150}
-        response = authenticated_client.post(
-            "/api/v1/platform/feature-flags/", data, format="json"
-        )
+        response = authenticated_client.post("/api/v1/platform/feature-flags/", data, format="json")
         # Note: DRF may accept > 100 but we test the validation exists
         if response.status_code == status.HTTP_400_BAD_REQUEST:
             assert "rollout_percentage" in response.data
 
         # Invalid rollout percentage (< 0) - should fail validation
         data = {"name": "test_feature_neg", "enabled": True, "rollout_percentage": -10}
-        response = authenticated_client.post(
-            "/api/v1/platform/feature-flags/", data, format="json"
-        )
+        response = authenticated_client.post("/api/v1/platform/feature-flags/", data, format="json")
         if response.status_code == status.HTTP_400_BAD_REQUEST:
             assert "rollout_percentage" in response.data
 
         # Short name - should fail validation
         data = {"name": "a", "enabled": True, "rollout_percentage": 50}
-        response = authenticated_client.post(
-            "/api/v1/platform/feature-flags/", data, format="json"
-        )
+        response = authenticated_client.post("/api/v1/platform/feature-flags/", data, format="json")
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert "name" in response.data
 
@@ -249,12 +216,8 @@ class TestFeatureFlagViewSet:
             "src.modules.platform_management.api.get_user_tenant_id",
             lambda _user: "invalid-tenant",
         )
-        FeatureFlag.objects.create(
-            tenant_id=None, name="platform_flag", enabled=True
-        )
-        FeatureFlag.objects.create(
-            tenant_id=uuid.uuid4(), name="tenant_flag", enabled=True
-        )
+        FeatureFlag.objects.create(tenant_id=None, name="platform_flag", enabled=True)
+        FeatureFlag.objects.create(tenant_id=uuid.uuid4(), name="tenant_flag", enabled=True)
         response = authenticated_client.get("/api/v1/platform/feature-flags/")
         assert response.status_code == status.HTTP_200_OK
         names = [f["name"] for f in response.data]
@@ -275,12 +238,8 @@ class TestSystemHealthViewSet:
 
     def test_health_summary(self, authenticated_client):
         """Test: Get health summary."""
-        SystemHealth.objects.create(
-            service_name="database", status="healthy", last_check=timezone.now()
-        )
-        SystemHealth.objects.create(
-            service_name="cache", status="degraded", last_check=timezone.now()
-        )
+        SystemHealth.objects.create(service_name="database", status="healthy", last_check=timezone.now())
+        SystemHealth.objects.create(service_name="cache", status="degraded", last_check=timezone.now())
         response = authenticated_client.get("/api/v1/platform/health/summary/")
         assert response.status_code == status.HTTP_200_OK
         assert "status" in response.data
@@ -328,15 +287,11 @@ class TestPlatformAuditEventViewSet:
         )
         # Try to update (should fail)
         data = {"action": "modified.action"}
-        response = authenticated_client.patch(
-            f"/api/v1/platform/audit-events/{event.id}/", data, format="json"
-        )
+        response = authenticated_client.patch(f"/api/v1/platform/audit-events/{event.id}/", data, format="json")
         assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
         # Try to delete (should fail)
-        response = authenticated_client.delete(
-            f"/api/v1/platform/audit-events/{event.id}/"
-        )
+        response = authenticated_client.delete(f"/api/v1/platform/audit-events/{event.id}/")
         assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
 
@@ -345,9 +300,7 @@ class TestPlatformMetricsViewSet:
     """Test cases for Platform Metrics API."""
 
     def test_get_current_metrics(self, authenticated_client):
-        response = authenticated_client.get(
-            "/api/v1/platform/metrics/current/?metric_type=api_metrics&time_range=7d"
-        )
+        response = authenticated_client.get("/api/v1/platform/metrics/current/?metric_type=api_metrics&time_range=7d")
         assert response.status_code == status.HTTP_200_OK
         assert response.data["metric_type"] == "api_metrics"
         assert response.data["time_range"] == "7d"

@@ -6,10 +6,16 @@ Task: 502.1 - Module Installation
 
 from __future__ import annotations
 
+import uuid
+from typing import Any, Dict, Optional
+
 from django.db import models
 from django.utils import timezone
-from typing import Optional, Dict, Any
-import uuid
+
+
+def generate_uuid():
+    """Generate UUID for model primary keys."""
+    return str(uuid.uuid4())
 
 
 class InstallationStatus(models.TextChoices):
@@ -31,16 +37,14 @@ class ModuleInstallation(models.Model):
     Tracks the installation lifecycle of a module for a tenant.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     tenant_id = models.CharField(max_length=36, db_index=True)
     module_name = models.CharField(max_length=255, db_index=True)
     module_version = models.CharField(max_length=50, db_index=True)
     registry_entry = models.ForeignKey(
         "ModuleRegistryEntry",
         on_delete=models.PROTECT,
-        related_name="installations",
+        related_name="module_installations",
         db_index=True,
     )
     status = models.CharField(
@@ -51,19 +55,11 @@ class ModuleInstallation(models.Model):
     )
     started_at = models.DateTimeField(auto_now_add=True, db_index=True)
     completed_at = models.DateTimeField(null=True, blank=True)
-    installed_by = models.CharField(
-        max_length=36, help_text="User/system who initiated installation"
-    )
+    installed_by = models.CharField(max_length=36, help_text="User/system who initiated installation")
     error_message = models.TextField(null=True, blank=True)
-    error_details = models.JSONField(
-        default=dict, help_text="Detailed error information"
-    )
-    installation_log = models.JSONField(
-        default=list, help_text="Installation step log"
-    )
-    metadata = models.JSONField(
-        default=dict, help_text="Installation metadata"
-    )
+    error_details = models.JSONField(default=dict, help_text="Detailed error information")
+    installation_log = models.JSONField(default=list, help_text="Installation step log")
+    metadata = models.JSONField(default=dict, help_text="Installation metadata")
 
     class Meta:
         db_table = "module_installations"
@@ -83,9 +79,7 @@ class InstallationStep(models.Model):
     Tracks individual steps within an installation.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     installation = models.ForeignKey(
         ModuleInstallation,
         on_delete=models.CASCADE,
@@ -110,9 +104,7 @@ class InstallationStep(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     duration_ms = models.IntegerField(null=True, blank=True)
     error_message = models.TextField(null=True, blank=True)
-    output = models.JSONField(
-        default=dict, help_text="Step output/result"
-    )
+    output = models.JSONField(default=dict, help_text="Step output/result")
 
     class Meta:
         db_table = "module_installation_steps"
@@ -124,4 +116,3 @@ class InstallationStep(models.Model):
 
     def __str__(self) -> str:
         return f"{self.step_name} ({self.status}) - Installation {self.installation.id}"
-

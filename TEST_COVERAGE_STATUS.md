@@ -169,4 +169,3 @@ open coverage/index.html
 - Frontend: `npm test -- --coverage` (≥90%)
 
 **No exceptions. No bypasses.**
-

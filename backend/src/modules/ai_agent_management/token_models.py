@@ -6,10 +6,11 @@ Task: 402.3 - Token Metering & Cost Attribution
 
 from __future__ import annotations
 
+import uuid
+from typing import Any, Dict, Optional
+
 from django.db import models
 from django.utils import timezone
-from typing import Optional, Dict, Any
-import uuid
 
 from .models import TenantBaseModel
 
@@ -25,9 +26,7 @@ class TokenUsage(TenantBaseModel):
     Tracks token consumption for agent executions.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     agent_execution = models.ForeignKey(
         "AgentExecution",
         on_delete=models.CASCADE,
@@ -44,21 +43,11 @@ class TokenUsage(TenantBaseModel):
         db_index=True,
         help_text="Model name (gpt-4, claude-3, etc.)",
     )
-    input_tokens = models.IntegerField(
-        default=0, help_text="Input tokens consumed"
-    )
-    output_tokens = models.IntegerField(
-        default=0, help_text="Output tokens generated"
-    )
-    total_tokens = models.IntegerField(
-        default=0, help_text="Total tokens (input + output)"
-    )
-    usage_timestamp = models.DateTimeField(
-        auto_now_add=True, db_index=True
-    )
-    metadata = models.JSONField(
-        default=dict, help_text="Usage metadata"
-    )
+    input_tokens = models.IntegerField(default=0, help_text="Input tokens consumed")
+    output_tokens = models.IntegerField(default=0, help_text="Output tokens generated")
+    total_tokens = models.IntegerField(default=0, help_text="Total tokens (input + output)")
+    usage_timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    metadata = models.JSONField(default=dict, help_text="Usage metadata")
 
     class Meta:
         db_table = "ai_token_usage"
@@ -79,9 +68,7 @@ class CostRecord(TenantBaseModel):
     Tracks cost attribution for AI operations.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     agent_execution = models.ForeignKey(
         "AgentExecution",
         on_delete=models.CASCADE,
@@ -134,12 +121,8 @@ class CostRecord(TenantBaseModel):
         default="USD",
         help_text="Currency code",
     )
-    cost_timestamp = models.DateTimeField(
-        auto_now_add=True, db_index=True
-    )
-    metadata = models.JSONField(
-        default=dict, help_text="Cost metadata"
-    )
+    cost_timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    metadata = models.JSONField(default=dict, help_text="Cost metadata")
 
     class Meta:
         db_table = "ai_cost_records"
@@ -161,15 +144,9 @@ class CostSummary(TenantBaseModel):
     Aggregated cost summaries for reporting.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
-    period_start = models.DateTimeField(
-        db_index=True, help_text="Period start time"
-    )
-    period_end = models.DateTimeField(
-        db_index=True, help_text="Period end time"
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
+    period_start = models.DateTimeField(db_index=True, help_text="Period start time")
+    period_end = models.DateTimeField(db_index=True, help_text="Period end time")
     period_type = models.CharField(
         max_length=20,
         choices=[
@@ -203,12 +180,8 @@ class CostSummary(TenantBaseModel):
         default=dict,
         help_text="Cost breakdown by provider",
     )
-    total_tokens = models.BigIntegerField(
-        default=0, help_text="Total tokens consumed"
-    )
-    total_executions = models.IntegerField(
-        default=0, help_text="Total agent executions"
-    )
+    total_tokens = models.BigIntegerField(default=0, help_text="Total tokens consumed")
+    total_executions = models.IntegerField(default=0, help_text="Total agent executions")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -222,4 +195,3 @@ class CostSummary(TenantBaseModel):
 
     def __str__(self) -> str:
         return f"Cost Summary {self.id}: {self.total_cost} {self.currency} ({self.period_type})"
-

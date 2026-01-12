@@ -2,24 +2,26 @@
 Security & Access Control Model Tests
 """
 
-import pytest
-from django.utils import timezone
 from datetime import timedelta
 
-from ..models import (
-    Role,
-    Permission,
-    RolePermission,
-    UserRole,
-    PermissionSet,
-    UserPermissionSet,
-    FieldSecurity,
-    RowSecurityRule,
-    SecurityProfile,
-    SecurityAuditLog,
-)
+import pytest
 from django.contrib.auth import get_user_model
+from django.utils import timezone
+
 from src.modules.tenant_management.models import Tenant
+
+from ..models import (
+    FieldSecurity,
+    Permission,
+    PermissionSet,
+    Role,
+    RolePermission,
+    RowSecurityRule,
+    SecurityAuditLog,
+    SecurityProfile,
+    UserPermissionSet,
+    UserRole,
+)
 
 User = get_user_model()
 
@@ -58,17 +60,13 @@ class TestRole:
         tenant_b = Tenant.objects.create(name="Tenant B", slug="tenant-b")
         Role.objects.create(name="Role A", code="same_code", tenant_id=tenant_a.id)
         # Same code, different tenant - should succeed
-        role_b = Role.objects.create(
-            name="Role B", code="same_code", tenant_id=tenant_b.id
-        )
+        role_b = Role.objects.create(name="Role B", code="same_code", tenant_id=tenant_b.id)
         assert role_b.code == "same_code"
 
     def test_role_hierarchy(self):
         """Test: Role hierarchy with parent_role_id."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        parent_role = Role.objects.create(
-            name="Parent Role", code="parent", tenant_id=tenant.id
-        )
+        parent_role = Role.objects.create(name="Parent Role", code="parent", tenant_id=tenant.id)
         child_role = Role.objects.create(
             name="Child Role",
             code="child",
@@ -80,9 +78,7 @@ class TestRole:
     def test_system_role_cannot_be_deleted(self):
         """Test: System roles have is_system=True."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        role = Role.objects.create(
-            name="System Role", code="system_role", tenant_id=tenant.id, is_system=True
-        )
+        role = Role.objects.create(name="System Role", code="system_role", tenant_id=tenant.id, is_system=True)
         assert role.is_system is True
 
 
@@ -113,9 +109,7 @@ class TestPermission:
 
     def test_permission_string_format(self):
         """Test: Permission string format is module:object:action."""
-        permission = Permission.objects.create(
-            module="accounting", object="invoices", action="create"
-        )
+        permission = Permission.objects.create(module="accounting", object="invoices", action="create")
         assert str(permission) == "accounting:invoices:create"
 
 
@@ -126,15 +120,9 @@ class TestRolePermission:
     def test_assign_permission_to_role(self):
         """Test: Assign permission to role."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        role = Role.objects.create(
-            name="Test Role", code="test_role", tenant_id=tenant.id
-        )
-        permission = Permission.objects.create(
-            module="crm", object="customers", action="read"
-        )
-        role_permission = RolePermission.objects.create(
-            role=role, permission=permission, is_granted=True
-        )
+        role = Role.objects.create(name="Test Role", code="test_role", tenant_id=tenant.id)
+        permission = Permission.objects.create(module="crm", object="customers", action="read")
+        role_permission = RolePermission.objects.create(role=role, permission=permission, is_granted=True)
         assert role_permission.role == role
         assert role_permission.permission == permission
         assert role_permission.is_granted is True
@@ -142,12 +130,8 @@ class TestRolePermission:
     def test_explicit_deny(self):
         """Test: Explicit deny (is_granted=False)."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        role = Role.objects.create(
-            name="Test Role", code="test_role", tenant_id=tenant.id
-        )
-        permission = Permission.objects.create(
-            module="crm", object="customers", action="delete"
-        )
+        role = Role.objects.create(name="Test Role", code="test_role", tenant_id=tenant.id)
+        permission = Permission.objects.create(module="crm", object="customers", action="delete")
         role_permission = RolePermission.objects.create(
             role=role, permission=permission, is_granted=False  # Explicit deny
         )
@@ -161,12 +145,8 @@ class TestUserRole:
     def test_assign_role_to_user(self):
         """Test: Assign role to user."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        user = User.objects.create_user(
-            username="testuser", email="test@example.com", password="testpass123"
-        )
-        role = Role.objects.create(
-            name="Test Role", code="test_role", tenant_id=tenant.id
-        )
+        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass123")
+        role = Role.objects.create(name="Test Role", code="test_role", tenant_id=tenant.id)
         user_role = UserRole.objects.create(user=user, role=role, assigned_by=user.id)
         assert user_role.user == user
         assert user_role.role == role
@@ -175,32 +155,20 @@ class TestUserRole:
     def test_temporal_role_assignment(self):
         """Test: Temporal role assignment with expiration."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        user = User.objects.create_user(
-            username="testuser", email="test@example.com", password="testpass123"
-        )
-        role = Role.objects.create(
-            name="Temporary Role", code="temp_role", tenant_id=tenant.id
-        )
+        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass123")
+        role = Role.objects.create(name="Temporary Role", code="temp_role", tenant_id=tenant.id)
         valid_until = timezone.now() + timedelta(days=30)
-        user_role = UserRole.objects.create(
-            user=user, role=role, valid_until=valid_until
-        )
+        user_role = UserRole.objects.create(user=user, role=role, valid_until=valid_until)
         assert user_role.valid_until == valid_until
         assert user_role.is_active is True
 
     def test_expired_role_assignment(self):
         """Test: Expired role assignment is inactive."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        user = User.objects.create_user(
-            username="testuser", email="test@example.com", password="testpass123"
-        )
-        role = Role.objects.create(
-            name="Expired Role", code="expired_role", tenant_id=tenant.id
-        )
+        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass123")
+        role = Role.objects.create(name="Expired Role", code="expired_role", tenant_id=tenant.id)
         valid_until = timezone.now() - timedelta(days=1)  # Expired
-        user_role = UserRole.objects.create(
-            user=user, role=role, valid_until=valid_until
-        )
+        user_role = UserRole.objects.create(user=user, role=role, valid_until=valid_until)
         assert user_role.is_active is False
 
 
@@ -211,12 +179,8 @@ class TestPermissionSet:
     def test_create_permission_set(self):
         """Test: Create permission set."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        perm1 = Permission.objects.create(
-            module="crm", object="customers", action="read"
-        )
-        perm2 = Permission.objects.create(
-            module="crm", object="customers", action="update"
-        )
+        perm1 = Permission.objects.create(module="crm", object="customers", action="read")
+        perm2 = Permission.objects.create(module="crm", object="customers", action="update")
         permission_set = PermissionSet.objects.create(
             name="CRM Access",
             tenant_id=tenant.id,
@@ -235,12 +199,8 @@ class TestUserPermissionSet:
     def test_grant_permission_set_to_user(self):
         """Test: Grant permission set to user."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        user = User.objects.create_user(
-            username="testuser", email="test@example.com", password="testpass123"
-        )
-        permission_set = PermissionSet.objects.create(
-            name="Test Set", tenant_id=tenant.id, permission_ids=[]
-        )
+        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass123")
+        permission_set = PermissionSet.objects.create(name="Test Set", tenant_id=tenant.id, permission_ids=[])
         expires_at = timezone.now() + timedelta(days=7)
         user_permission_set = UserPermissionSet.objects.create(
             user=user, permission_set=permission_set, expires_at=expires_at
@@ -252,12 +212,8 @@ class TestUserPermissionSet:
     def test_expired_permission_set_grant(self):
         """Test: Expired permission set grant is inactive."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        user = User.objects.create_user(
-            username="testuser", email="test@example.com", password="testpass123"
-        )
-        permission_set = PermissionSet.objects.create(
-            name="Expired Set", tenant_id=tenant.id, permission_ids=[]
-        )
+        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass123")
+        permission_set = PermissionSet.objects.create(name="Expired Set", tenant_id=tenant.id, permission_ids=[])
         expires_at = timezone.now() - timedelta(days=1)  # Expired
         user_permission_set = UserPermissionSet.objects.create(
             user=user, permission_set=permission_set, expires_at=expires_at
@@ -272,9 +228,7 @@ class TestFieldSecurity:
     def test_create_field_security_rule(self):
         """Test: Create field-level security rule."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        role = Role.objects.create(
-            name="Test Role", code="test_role", tenant_id=tenant.id
-        )
+        role = Role.objects.create(name="Test Role", code="test_role", tenant_id=tenant.id)
         field_security = FieldSecurity.objects.create(
             tenant_id=tenant.id,
             module="crm",
@@ -299,9 +253,7 @@ class TestRowSecurityRule:
     def test_create_row_security_rule(self):
         """Test: Create row-level security rule."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        role = Role.objects.create(
-            name="Test Role", code="test_role", tenant_id=tenant.id
-        )
+        role = Role.objects.create(name="Test Role", code="test_role", tenant_id=tenant.id)
         row_rule = RowSecurityRule.objects.create(
             tenant_id=tenant.id,
             module="crm",
@@ -345,9 +297,7 @@ class TestSecurityAuditLog:
     def test_create_audit_log(self):
         """Test: Create audit log entry."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        user = User.objects.create_user(
-            username="testuser", email="test@example.com", password="testpass123"
-        )
+        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass123")
         audit_log = SecurityAuditLog.objects.create(
             tenant_id=tenant.id,
             action="security.role.created",
@@ -365,9 +315,7 @@ class TestSecurityAuditLog:
     def test_audit_log_immutable(self):
         """Test: Audit logs cannot be updated."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        user = User.objects.create_user(
-            username="testuser", email="test@example.com", password="testpass123"
-        )
+        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass123")
         audit_log = SecurityAuditLog.objects.create(
             tenant_id=tenant.id,
             action="test.action",
@@ -383,9 +331,7 @@ class TestSecurityAuditLog:
     def test_audit_log_cannot_be_deleted(self):
         """Test: Audit logs cannot be deleted."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        user = User.objects.create_user(
-            username="testuser", email="test@example.com", password="testpass123"
-        )
+        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass123")
         audit_log = SecurityAuditLog.objects.create(
             tenant_id=tenant.id,
             action="test.action",

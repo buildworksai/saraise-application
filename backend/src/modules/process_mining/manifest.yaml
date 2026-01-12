@@ -1,0 +1,26 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: process-mining
+version: 1.0.0
+description: Discover and optimize business processes using AI, process analytics, bottleneck detection
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+  - ai-agent-management >=1.0
+permissions:
+  - process_mining.resource:create
+  - process_mining.resource:read
+  - process_mining.resource:update
+  - process_mining.resource:delete
+  - process_mining.resource:activate
+  - process_mining.resource:deactivate
+sod_actions:
+  - [process_mining.resource:create, process_mining.resource:delete]
+search_indexes:
+  - process_mining_resources
+ai_tools:
+  - create_process_mining_resource
+  - update_process_mining_resource
+  - delete_process_mining_resource

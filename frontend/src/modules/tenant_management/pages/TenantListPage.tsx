@@ -1,34 +1,40 @@
 /**
  * SPDX-License-Identifier: Apache-2.0
- * 
+ *
  * Tenant List Page
- * 
+ *
  * Lists all tenants with filtering, search, and management actions.
  */
-import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Building2 } from 'lucide-react';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
-import { TableSkeleton, EmptyState, ErrorState } from '@/components/ui';
-import { tenantService, type Tenant } from '../services/tenant-service';
-import { TenantStatusBadge, type TenantStatus } from '../components';
-import { useState, useDeferredValue } from 'react';
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { Plus, Search, Building2 } from "lucide-react";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
+import { TableSkeleton, EmptyState, ErrorState } from "@/components/ui";
+import { tenantService, type Tenant } from "../services/tenant-service";
+import { TenantStatusBadge, type TenantStatus } from "../components";
+import { useState, useDeferredValue } from "react";
 
 export const TenantListPage = () => {
   const navigate = useNavigate();
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const deferredSearchQuery = useDeferredValue(searchQuery);
-  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>("");
 
-  const { data: tenants, isLoading, error, refetch } = useQuery<Tenant[]>({
-    queryKey: ['tenants', statusFilter, deferredSearchQuery],
-    queryFn: () => tenantService.tenants.list({
-      status: statusFilter || undefined,
-      search: deferredSearchQuery || undefined,
-    }),
+  const {
+    data: tenants,
+    isLoading,
+    error,
+    refetch,
+  } = useQuery<Tenant[]>({
+    queryKey: ["tenants", statusFilter, deferredSearchQuery],
+    queryFn: () =>
+      tenantService.tenants.list({
+        status: statusFilter || undefined,
+        search: deferredSearchQuery || undefined,
+      }),
     refetchInterval: 60000, // Refetch every minute
   });
 
@@ -58,13 +64,14 @@ export const TenantListPage = () => {
       {/* Header */}
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-bold text-foreground mb-2">Tenant Management</h1>
-          <p className="text-muted-foreground">Manage tenant organizations, subscriptions, and modules</p>
+          <h1 className="text-4xl font-bold text-foreground mb-2">
+            Tenant Management
+          </h1>
+          <p className="text-muted-foreground">
+            Manage tenant organizations, subscriptions, and modules
+          </p>
         </div>
-        <Button onClick={() => navigate('/tenant-management/create')}>
-          <Plus className="w-4 h-4 mr-2" />
-          Create Tenant
-        </Button>
+        {/* Create action removed: Tenant creation must happen via Control Plane */}
       </div>
 
       {/* Filters */}
@@ -85,12 +92,12 @@ export const TenantListPage = () => {
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               options={[
-                { value: '', label: 'All Statuses' },
-                { value: 'trial', label: 'Trial' },
-                { value: 'active', label: 'Active' },
-                { value: 'suspended', label: 'Suspended' },
-                { value: 'cancelled', label: 'Cancelled' },
-                { value: 'archived', label: 'Archived' },
+                { value: "", label: "All Statuses" },
+                { value: "trial", label: "Trial" },
+                { value: "active", label: "Active" },
+                { value: "suspended", label: "Suspended" },
+                { value: "cancelled", label: "Cancelled" },
+                { value: "archived", label: "Archived" },
               ]}
             />
           </div>
@@ -112,8 +119,12 @@ export const TenantListPage = () => {
                     <Building2 className="w-5 h-5 text-primary-main" />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-lg text-foreground">{tenant.name}</h3>
-                    <p className="text-sm text-muted-foreground">{tenant.slug}</p>
+                    <h3 className="font-semibold text-lg text-foreground">
+                      {tenant.name}
+                    </h3>
+                    <p className="text-sm text-muted-foreground">
+                      {tenant.slug}
+                    </p>
                   </div>
                 </div>
                 <TenantStatusBadge status={tenant.status! as TenantStatus} />
@@ -141,7 +152,9 @@ export const TenantListPage = () => {
                 {tenant.created_at && (
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <span className="font-medium">Created:</span>
-                    <span>{new Date(tenant.created_at).toLocaleDateString()}</span>
+                    <span>
+                      {new Date(tenant.created_at).toLocaleDateString()}
+                    </span>
                   </div>
                 )}
               </div>
@@ -151,23 +164,16 @@ export const TenantListPage = () => {
       ) : (
         <EmptyState
           icon={Building2}
-          title={searchQuery || statusFilter ? "No tenants found" : "No tenants yet"}
+          title={
+            searchQuery || statusFilter ? "No tenants found" : "No tenants yet"
+          }
           description={
             searchQuery || statusFilter
               ? "Try adjusting your filters to find tenants."
-              : "Get started by creating your first tenant organization."
-          }
-          action={
-            !searchQuery && !statusFilter
-              ? {
-                  label: "Create Tenant",
-                  onClick: () => navigate('/tenant-management/create')
-                }
-              : undefined
+              : "No tenants found. Tenants must be created via the Control Plane."
           }
         />
       )}
     </div>
   );
 };
-

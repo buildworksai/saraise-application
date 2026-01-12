@@ -1,6 +1,6 @@
 /**
  * SPDX-License-Identifier: Apache-2.0
- * 
+ *
  * Beautiful forgot password form with video background
  * Adapted from MVP with Phase 6 backend integration
  */

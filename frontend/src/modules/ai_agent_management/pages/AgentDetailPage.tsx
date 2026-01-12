@@ -1,6 +1,6 @@
 /**
  * Agent Detail Page
- * 
+ *
  * Displays agent details, execution history, quota usage, and controls.
  */
 import { useParams, useNavigate } from 'react-router-dom';

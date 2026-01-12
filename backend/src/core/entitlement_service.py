@@ -7,18 +7,13 @@ Task: 503.1 - Subscription Entitlements & Runtime Gating
 from __future__ import annotations
 
 import logging
-from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
 from django.db import transaction
 from django.utils import timezone
 
-from .entitlement_models import (
-    SubscriptionPlan,
-    PlanEntitlement,
-    TenantSubscription,
-    EntitlementCheck,
-)
+from .entitlement_models import EntitlementCheck, PlanEntitlement, SubscriptionPlan, TenantSubscription
 from .module_registry_models import TenantModuleInstallation
 
 logger = logging.getLogger(__name__)
@@ -49,13 +44,9 @@ class EntitlementService:
         Returns:
             TenantSubscription instance or None if not found.
         """
-        return TenantSubscription.objects.filter(
-            tenant_id=tenant_id, status="active"
-        ).first()
+        return TenantSubscription.objects.filter(tenant_id=tenant_id, status="active").first()
 
-    def check_module_access(
-        self, tenant_id: str, module_name: str
-    ) -> Tuple[bool, Optional[str]]:
+    def check_module_access(self, tenant_id: str, module_name: str) -> Tuple[bool, Optional[str]]:
         """Check if tenant has access to a module.
 
         Args:
@@ -99,9 +90,7 @@ class EntitlementService:
         self._log_check(tenant_id, "module_access", module_name, True, "Entitlement granted")
         return True, None
 
-    def check_feature_access(
-        self, tenant_id: str, feature_name: str
-    ) -> Tuple[bool, Optional[str]]:
+    def check_feature_access(self, tenant_id: str, feature_name: str) -> Tuple[bool, Optional[str]]:
         """Check if tenant has access to a feature.
 
         Args:
@@ -189,9 +178,7 @@ class EntitlementService:
         )
         return True, None, limit_value
 
-    def check_api_rate_limit(
-        self, tenant_id: str, current_rate: float
-    ) -> Tuple[bool, Optional[str], Optional[int]]:
+    def check_api_rate_limit(self, tenant_id: str, current_rate: float) -> Tuple[bool, Optional[str], Optional[int]]:
         """Check if tenant is within API rate limits.
 
         Args:
@@ -388,4 +375,3 @@ class EntitlementService:
 
 # Global entitlement service instance
 entitlement_service = EntitlementService()
-

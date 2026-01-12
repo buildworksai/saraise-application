@@ -1,6 +1,6 @@
 /**
  * Auth Store Tests
- * 
+ *
  * Tests for authentication store (Zustand).
  */
 
@@ -115,4 +115,3 @@ describe('useAuthStore', () => {
     expect(useAuthStore.getState().isAuthenticated).toBe(false);
   });
 });
-

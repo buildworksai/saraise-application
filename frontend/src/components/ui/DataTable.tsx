@@ -1,6 +1,6 @@
 /**
  * DataTable Component
- * 
+ *
  * Reusable data table with sorting, filtering, and pagination.
  * Uses TanStack Table for advanced features.
  */
@@ -56,7 +56,7 @@ export function DataTable<T>({
   // Add checkbox column if row selection is enabled
   const enhancedColumns = useMemo(() => {
     if (!enableRowSelection) return columns;
-    
+
     const checkboxColumn: ColumnDef<T> = {
       id: 'select',
       header: ({ table }) => (
@@ -80,7 +80,7 @@ export function DataTable<T>({
       enableSorting: false,
       enableHiding: false,
     };
-    
+
     return [checkboxColumn, ...columns];
   }, [columns, enableRowSelection]);
 
@@ -225,8 +225,8 @@ export function DataTable<T>({
               </tr>
             ) : (
               table.getRowModel().rows.map((row) => (
-                <tr 
-                  key={row.id} 
+                <tr
+                  key={row.id}
                   className={`hover:bg-muted/50 ${row.getIsSelected() ? 'bg-primary/5' : ''}`}
                 >
                   {row.getVisibleCells().map((cell) => (

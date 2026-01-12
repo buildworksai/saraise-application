@@ -1,7 +1,44 @@
 # SARAISE — AI Coding Agent Instructions
 
-**Version**: 3.0.0  
-**Last Updated**: January 5, 2026
+**Version**: 4.0.0  
+**Last Updated**: January 8, 2026
+
+---
+
+## 🚨 CRITICAL: Module Contracts Architecture
+
+**Before writing ANY frontend code, read the module's `contracts.ts` file.**
+
+```
+frontend/src/modules/{module_name}/
+├── contracts.ts          # READ THIS FIRST - Types & Endpoints
+├── .cursorrules          # Module-specific rules
+├── pages/
+├── components/
+└── services/
+```
+
+### Mandatory Workflow
+
+1. **Read `contracts.ts`** — Contains all types and endpoints
+2. **Import from `contracts.ts`** — NOT from `@/types/api`
+3. **Use `ENDPOINTS` constant** — NO hardcoded URL strings
+4. **Run `tsc --noEmit`** — AFTER editing each file
+5. **Fix errors immediately** — Before proceeding
+
+### Example (Correct vs Forbidden)
+
+```typescript
+// ✅ CORRECT
+import { PlatformSetting, ENDPOINTS } from '../contracts';
+const data = await apiClient.get<PlatformSetting[]>(ENDPOINTS.SETTINGS.LIST);
+
+// ❌ FORBIDDEN - Hardcoded URL
+const data = await apiClient.get('/api/v1/platform/settings/');
+
+// ❌ FORBIDDEN - Import from api.ts in pages
+import type { components } from '@/types/api';
+```
 
 ---
 
@@ -176,9 +213,11 @@ Use `backend/src/modules/ai_agent_management/` as template:
 - `tests/` — ≥90% coverage, tenant isolation tests
 
 **Frontend:**
+- `contracts.ts` — **REQUIRED** Types & Endpoints registry
+- `.cursorrules` — **REQUIRED** Module-specific agent rules
 - `pages/` — List, Detail, Create pages
 - `components/` — Reusable components
-- `services/` — API client
+- `services/` — API client (imports from contracts.ts)
 - `tests/` — Component and service tests
 
 ### Tenant Isolation (CRITICAL)
@@ -199,9 +238,11 @@ def get_queryset(self):
 ❌ Missing tenant filtering in queries  
 ❌ JWT for interactive users  
 ❌ Modules without `manifest.yaml`  
+❌ Modules without `contracts.ts`  
 ❌ Dynamic route registration  
 ❌ Skipping tests (90% coverage mandatory)  
-❌ Hardcoded API URLs  
+❌ Hardcoded API URLs (use ENDPOINTS from contracts.ts)  
+❌ Importing from @/types/api in page files  
 ❌ Circular module dependencies  
 ❌ Modifying audit logs  
 ❌ Bypassing pre-commit hooks  
@@ -209,6 +250,7 @@ def get_queryset(self):
 ❌ Database transactions in route handlers  
 ❌ Backend-only module stubs  
 ❌ Auth implementation in modules  
+❌ Proceeding with TypeScript errors (fix immediately)  
 
 ---
 

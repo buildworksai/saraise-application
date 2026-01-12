@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: Apache-2.0
+# ===================================
+# SARAISE Custom Semgrep Rules
+# ===================================
+# Custom security rules specific to SARAISE architecture
+# ===================================
+
+rules:
+  - id: no-jwt-for-interactive-users
+    pattern: |
+      import jwt
+      ...
+      jwt.encode(...)
+    message: "JWT usage detected. SARAISE uses session-based auth only for interactive users (SARAISE-07001)"
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-287: Improper Authentication"
+      rule_id: "SARAISE-07001"
+
+  - id: tenant-id-required-in-queries
+    pattern-either:
+      - pattern: |
+          $MODEL.objects.filter(...)
+          ...
+          .filter($FIELD=...)
+      - pattern: |
+          $MODEL.objects.get(...)
+    message: "Query may be missing tenant_id filter. All tenant-scoped queries MUST filter by tenant_id (SARAISE-08001)"
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-284: Improper Access Control"
+      rule_id: "SARAISE-08001"
+    exclude:
+      - "**/tests/**"
+      - "**/migrations/**"
+
+  - id: no-hardcoded-secrets
+    pattern-either:
+      - pattern: |
+          $VAR = "sk_live_..."
+      - pattern: |
+          $VAR = "AKIA..."
+      - pattern: |
+          $VAR = "password" = "..."
+    message: "Potential hardcoded secret detected. Use environment variables or secret management (SARAISE-10001)"
+    languages: [python, typescript]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      rule_id: "SARAISE-10001"
+
+  # Exclusions for validated SQL queries
+  - id: ignore-validated-sql-queries
+    pattern-not-inside: |
+      # SECURITY: Validate table_name to prevent SQL injection
+      ...
+      if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', $TABLE):
+        raise ValueError(...)
+      ...
+      cursor.execute(f"... $TABLE ...")
+    paths:
+      exclude:
+        - "**/integration_platform/services.py"
+    message: "SQL queries with validated table/column names are acceptable"
+    languages: [python]
+    severity: INFO
+    metadata:
+      category: security
+      rule_id: "SARAISE-10002"

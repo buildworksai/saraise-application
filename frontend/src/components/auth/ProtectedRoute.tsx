@@ -1,6 +1,6 @@
 /**
  * Protected Route Component
- * 
+ *
  * Wraps routes that require authentication.
  * Redirects to login if user is not authenticated.
  */
@@ -26,6 +26,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     const verifySession = async () => {
       // Skip verification if we already have a user AND are authenticated
       // This prevents race conditions where getCurrentUser() might fail temporarily after login
+      // CRITICAL: Only verify once per route, not on every render
       if (user && isAuthenticated) {
         return;
       }
@@ -35,7 +36,9 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
         const currentUser = await authService.getCurrentUser();
         setUser(currentUser);
       } catch {
-        // Session invalid, will redirect to login
+        // api-client.ts already handles 401 and 403 on /auth/me/ by logging out
+        // If we get here, it means getCurrentUser() failed, so session is invalid
+        // Clear user to trigger redirect to login
         setUser(null);
       } finally {
         setLoading(false);
@@ -43,7 +46,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     };
 
     void verifySession();
-  }, [setUser, setLoading, user, isAuthenticated]);
+  }, [setUser, setLoading, user, isAuthenticated, location.pathname]); // Add location.pathname to deps
 
   const { isLoading } = useAuthStore();
 

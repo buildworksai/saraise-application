@@ -5,18 +5,14 @@ Task: 502.2 - Module Upgrade & Rollback
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 from django.utils import timezone
 
-from ..module_upgrader import (
-    ModuleUpgrader,
-    UpgradeError,
-    RollbackError,
-    module_upgrader,
-)
 from ..module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
 from ..module_upgrade_models import ModuleUpgrade, UpgradeStatus
+from ..module_upgrader import ModuleUpgrader, RollbackError, UpgradeError, module_upgrader
 from ..module_versioning import Version
 
 
@@ -47,14 +43,16 @@ class TestModuleUpgrader:
             status="installed",
         )
 
-        # Create target entry
-        target_entry = ModuleRegistryEntry.objects.create(
+        # Create target entry (use get_or_create to avoid unique constraint violation)
+        target_entry, _ = ModuleRegistryEntry.objects.get_or_create(
             name="test-module",
             version="1.1.0",
-            description="Test module",
-            module_type="domain",
-            lifecycle="managed",
-            is_active=True,
+            defaults={
+                "description": "Test module",
+                "module_type": "domain",
+                "lifecycle": "managed",
+                "is_active": True,
+            },
         )
 
         with patch.object(upgrader.registry_service, "get_module", return_value=target_entry):
@@ -235,11 +233,24 @@ class TestModuleUpgrader:
         """Test rolling back already rolled back upgrade fails."""
         upgrader = ModuleUpgrader()
 
+        # Create registry entry first
+        registry_entry, _ = ModuleRegistryEntry.objects.get_or_create(
+            name="test-module",
+            version="1.1.0",
+            defaults={
+                "description": "Test module",
+                "module_type": "domain",
+                "lifecycle": "managed",
+                "is_active": True,
+            },
+        )
+
         upgrade = ModuleUpgrade.objects.create(
             tenant_id="tenant-1",
             module_name="test-module",
             from_version="1.0.0",
             to_version="1.1.0",
+            registry_entry=registry_entry,
             status=UpgradeStatus.ROLLED_BACK,
         )
 
@@ -253,9 +264,7 @@ class TestModuleUpgrader:
         current = Version("1.0.0")
         target = Version("1.1.0")
 
-        with patch.object(
-            upgrader.compatibility_checker, "is_upgrade_safe", return_value=True
-        ):
+        with patch.object(upgrader.compatibility_checker, "is_upgrade_safe", return_value=True):
             upgrader._validate_upgrade_compatibility(current, target, "test-module")
             # Should not raise
 
@@ -266,9 +275,6 @@ class TestModuleUpgrader:
         current = Version("1.0.0")
         target = Version("2.0.0")
 
-        with patch.object(
-            upgrader.compatibility_checker, "is_upgrade_safe", return_value=False
-        ):
+        with patch.object(upgrader.compatibility_checker, "is_upgrade_safe", return_value=False):
             with pytest.raises(UpgradeError, match="requires explicit approval"):
                 upgrader._validate_upgrade_compatibility(current, target, "test-module")
-
