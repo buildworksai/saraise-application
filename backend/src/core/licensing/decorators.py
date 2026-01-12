@@ -19,7 +19,6 @@ from django.http import JsonResponse
 from rest_framework import status
 from rest_framework.request import Request
 
-from .models import License
 from .services import ModuleAccessService
 from .validator import get_license_validator
 

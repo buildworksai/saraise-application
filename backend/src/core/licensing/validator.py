@@ -10,8 +10,7 @@ Reference: saraise-documentation/licensing/licensing-architecture.md
 """
 
 import logging
-from datetime import datetime, timedelta
-from functools import lru_cache
+from datetime import datetime
 from typing import Optional
 
 from django.conf import settings

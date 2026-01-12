@@ -12,7 +12,6 @@ Reference: saraise-documentation/licensing/licensing-architecture.md
 import logging
 from datetime import datetime
 from typing import Optional
-from urllib.parse import urljoin
 
 from django.conf import settings
 

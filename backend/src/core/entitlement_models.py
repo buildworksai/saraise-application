@@ -7,10 +7,8 @@ Task: 503.1 - Subscription Entitlements & Runtime Gating
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, Optional
 
 from django.db import models
-from django.utils import timezone
 
 
 def generate_uuid():
