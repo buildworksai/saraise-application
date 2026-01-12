@@ -6,9 +6,7 @@ Task: 503.2 - Module Guardrails
 
 from __future__ import annotations
 
-import ast
 import logging
-import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -16,8 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from django.db import transaction
 from django.utils import timezone
 
-from .module_guardrail_models import GuardrailRule, GuardrailViolation, GuardrailViolationType
-from .module_registry_models import ModuleRegistryEntry
+from .module_guardrail_models import GuardrailViolation, GuardrailViolationType
 
 logger = logging.getLogger(__name__)
 
