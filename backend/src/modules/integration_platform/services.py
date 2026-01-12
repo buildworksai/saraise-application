@@ -260,6 +260,7 @@ class IntegrationService:
                 )
 
                 # Execute a simple read-only query
+                # SARAISE-33006: System query, not tenant-scoped
                 cursor = conn.cursor()
                 cursor.execute("SELECT version();")
                 version = cursor.fetchone()[0]
@@ -310,6 +311,7 @@ class IntegrationService:
                 )
 
                 # Execute a simple read-only query
+                # SARAISE-33006: System query, not tenant-scoped
                 cursor = conn.cursor()
                 cursor.execute("SELECT VERSION();")
                 version = cursor.fetchone()[0]

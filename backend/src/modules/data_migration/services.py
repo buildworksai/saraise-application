@@ -315,6 +315,7 @@ class MigrationEngine:
             # Create a temporary database connection
             # Note: This is a simplified implementation
             # In production, you'd want to use proper connection pooling
+            # SARAISE-33006: Data migration queries external databases, not tenant-scoped
             conn = connections["default"]
             with conn.cursor() as cursor:
                 cursor.execute(query)
