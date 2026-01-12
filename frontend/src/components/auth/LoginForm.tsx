@@ -1,110 +1,123 @@
 /**
  * SPDX-License-Identifier: Apache-2.0
- * 
+ *
  * Beautiful split-screen login form with video background
  * Adapted from MVP with Phase 6 backend integration
  */
-import { AuthLegalFooter } from '@/components/auth/AuthLegalFooter'
-import { PasswordField } from '@/components/auth/PasswordField'
-import { Button } from '@/components/ui/Button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
-import { Input } from '@/components/ui/Input'
-import { Label } from '@/components/ui/Label'
-import { LogoVideo } from '@/components/ui/logo-video'
-import { authService } from '@/services/auth-service'
-import { useAuthStore } from '@/stores/auth-store'
-import { Loader2, LogIn, Shield, Sparkles, Users } from 'lucide-react'
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { AuthLegalFooter } from "@/components/auth/AuthLegalFooter";
+import { PasswordField } from "@/components/auth/PasswordField";
+import { Button } from "@/components/ui/Button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
+import { Label } from "@/components/ui/Label";
+import { LogoVideo } from "@/components/ui/logo-video";
+import { authService } from "@/services/auth-service";
+import { useAuthStore } from "@/stores/auth-store";
+import { Loader2, LogIn, Shield, Sparkles, Users } from "lucide-react";
+import { useId, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 export function LoginForm() {
-  const navigate = useNavigate()
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [emailError, setEmailError] = useState<string | null>(null)
-  const [passwordError, setPasswordError] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [emailTouched, setEmailTouched] = useState(false)
-  const [passwordTouched, setPasswordTouched] = useState(false)
-  
+  const navigate = useNavigate();
+  const emailId = useId();
+  const passwordId = useId();
+  const emailHelperId = useId();
+  const emailErrorId = useId();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [emailTouched, setEmailTouched] = useState(false);
+  const [passwordTouched, setPasswordTouched] = useState(false);
+
   const loginHighlights = [
-    { icon: Sparkles, text: 'AI-native orchestration across ERP workflows' },
-    { icon: Shield, text: 'SOC 2-ready controls and tenant isolation' },
-    { icon: Users, text: 'Trusted by global operators & disruptive MSMEs' },
-  ]
+    { icon: Sparkles, text: "AI-native orchestration across ERP workflows" },
+    { icon: Shield, text: "SOC 2-ready controls and tenant isolation" },
+    { icon: Users, text: "Trusted by global operators & disruptive MSMEs" },
+  ] as const;
 
   const computeEmailError = (emailValue?: string) => {
-    const value = emailValue ?? email
-    if (!value.trim()) return 'Email is required'
-    const isValidEmail = /\S+@\S+\.\S+/.test(value.trim())
-    if (!isValidEmail) return 'Please enter a valid email address'
-    return null
-  }
+    const value = emailValue ?? email;
+    if (!value.trim()) return "Email is required";
+    const isValidEmail = /\S+@\S+\.\S+/.test(value.trim());
+    if (!isValidEmail) return "Please enter a valid email address";
+    return null;
+  };
 
   const computePasswordError = (passwordValue?: string) => {
-    const value = passwordValue ?? password
-    if (!value) return 'Password is required'
-    return null
-  }
+    const value = passwordValue ?? password;
+    if (!value) return "Password is required";
+    return null;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
+    e.preventDefault();
+    e.stopPropagation();
 
     // Mark fields as touched
-    setEmailTouched(true)
-    setPasswordTouched(true)
+    setEmailTouched(true);
+    setPasswordTouched(true);
 
-    const currentEmailError = computeEmailError()
-    const currentPasswordError = computePasswordError()
-    setEmailError(currentEmailError)
-    setPasswordError(currentPasswordError)
+    const currentEmailError = computeEmailError();
+    const currentPasswordError = computePasswordError();
+    setEmailError(currentEmailError);
+    setPasswordError(currentPasswordError);
 
     if (currentEmailError || currentPasswordError) {
       // Focus first field with error
       if (currentEmailError) {
-        document.getElementById('email')?.focus()
+        document.getElementById(emailId)?.focus();
       } else if (currentPasswordError) {
-        document.getElementById('password')?.focus()
+        document.getElementById(passwordId)?.focus();
       }
-      return
+      return;
     }
 
-    setError(null)
-    setIsLoading(true)
+    setError(null);
+    setIsLoading(true);
 
     try {
       // Phase 6 backend integration
-      const response = await authService.login({ email: email.trim(), password })
-      
+      const response = await authService.login({
+        email: email.trim(),
+        password,
+      });
+
       // Update auth store
-      const { setUser, setAuthenticated } = useAuthStore.getState()
-      setUser(response.user)
-      setAuthenticated(true)
+      const { setUser, setAuthenticated } = useAuthStore.getState();
+      setUser(response.user);
+      setAuthenticated(true);
 
       // Navigate based on roles
-      if (response.user.platform_role === 'platform_owner') {
+      if (response.user.platform_role === "platform_owner") {
         // Platform owners should use platform frontend, not application frontend
         // But if they login here, redirect to root which will use RoleBasedRedirect
-        navigate('/', { replace: true })
+        navigate("/", { replace: true });
       } else if (response.user.tenant_role) {
         // Tenant users should go to tenant dashboard
-        navigate('/tenant/dashboard', { replace: true })
+        navigate("/tenant/dashboard", { replace: true });
       } else {
         // Default: use RoleBasedRedirect to determine appropriate route
-        navigate('/', { replace: true })
+        navigate("/", { replace: true });
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Invalid email or password'
-      setError(errorMessage)
-      console.error('Login error:', err)
+      const errorMessage =
+        err instanceof Error ? err.message : "Invalid email or password";
+      setError(errorMessage);
       // Focus password field on error for better UX
-      document.getElementById('password')?.focus()
+      document.getElementById(passwordId)?.focus();
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   return (
     <div className="h-screen flex overflow-hidden">
@@ -123,7 +136,7 @@ export function LoginForm() {
             className="absolute inset-0"
             style={{
               backgroundImage: `radial-gradient(circle at 2px 2px, rgba(255,255,255,0.3) 1px, transparent 0)`,
-              backgroundSize: '60px 60px',
+              backgroundSize: "60px 60px",
             }}
           />
         </div>
@@ -150,18 +163,26 @@ export function LoginForm() {
             <ul className="space-y-1 text-xs text-muted-foreground">
               {loginHighlights.map((item) => (
                 <li key={item.text} className="flex items-center gap-2">
-                  <item.icon className="h-3.5 w-3.5 text-primary-main" aria-hidden="true" />
+                  <item.icon
+                    className="h-3.5 w-3.5 text-primary-main"
+                    aria-hidden="true"
+                  />
                   {item.text}
                 </li>
               ))}
             </ul>
           </div>
-
           <Card className="shadow-xl border-0">
             <CardHeader className="space-y-4 pb-6">
               {/* Mobile Logo */}
               <div className="lg:hidden flex justify-center mb-4">
-                <LogoVideo width={180} showText={true} className="text-white" autoplay loop />
+                <LogoVideo
+                  width={180}
+                  showText={true}
+                  className="text-white"
+                  autoplay
+                  loop
+                />
               </div>
 
               <div className="space-y-2 text-center lg:text-left">
@@ -176,53 +197,56 @@ export function LoginForm() {
             <CardContent>
               <form
                 onSubmit={(event) => {
-                  void handleSubmit(event)
+                  void handleSubmit(event);
                 }}
                 className="space-y-5"
                 aria-busy={isLoading}
                 noValidate
               >
                 <div className="space-y-2">
-                  <Label htmlFor="email" className="text-sm font-semibold">
+                  <Label htmlFor={emailId} className="text-sm font-semibold">
                     Email Address
                   </Label>
                   <Input
-                    id="email"
+                    id={emailId}
                     type="email"
                     placeholder="you@example.com"
                     value={email}
                     onChange={(e) => {
-                      const newValue = e.target.value
-                      setEmail(newValue)
+                      const newValue = e.target.value;
+                      setEmail(newValue);
                       if (emailTouched) {
-                        setEmailError(computeEmailError(newValue))
+                        setEmailError(computeEmailError(newValue));
                       }
                     }}
                     autoComplete="email"
                     className="h-11"
                     disabled={isLoading}
-                    aria-invalid={emailError ? 'true' : 'false'}
-                    aria-describedby={emailError ? 'login-email-error' : 'login-email-helper'}
+                    aria-invalid={emailError ? "true" : "false"}
+                    aria-describedby={emailError ? emailErrorId : emailHelperId}
                     onBlur={() => {
-                      setEmailTouched(true)
-                      setEmailError(computeEmailError())
+                      setEmailTouched(true);
+                      setEmailError(computeEmailError());
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !emailError && email.trim()) {
-                        document.getElementById('password')?.focus()
+                      if (e.key === "Enter" && !emailError && email.trim()) {
+                        document.getElementById(passwordId)?.focus();
                       }
                     }}
                     autoFocus
                   />
                   {!emailError && (
-                    <p id="login-email-helper" className="text-xs text-muted-foreground">
+                    <p
+                      id={emailHelperId}
+                      className="text-xs text-muted-foreground"
+                    >
                       Use your work email to sign in.
                     </p>
                   )}
                   {emailError && emailTouched && (
                     <p
-                      id="login-email-error"
-                      className="text-xs text-red-600 dark:text-red-400 font-medium"
+                      id={emailErrorId}
+                      className="text-xs text-destructive font-medium"
                       role="alert"
                       aria-live="polite"
                     >
@@ -231,28 +255,35 @@ export function LoginForm() {
                   )}
                 </div>
                 <PasswordField
-                  id="password"
+                  id={passwordId}
                   label="Password"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => {
-                    const newValue = e.target.value
-                    setPassword(newValue)
+                    const newValue = e.target.value;
+                    setPassword(newValue);
                     if (passwordTouched) {
-                      setPasswordError(computePasswordError(newValue))
+                      setPasswordError(computePasswordError(newValue));
                     }
                   }}
                   onBlur={() => {
-                    setPasswordTouched(true)
-                    setPasswordError(computePasswordError())
+                    setPasswordTouched(true);
+                    setPasswordError(computePasswordError());
                   }}
                   error={passwordTouched ? passwordError : null}
-                  helperText={!passwordError ? "Enter your password" : undefined}
+                  helperText={
+                    !passwordError ? "Enter your password" : undefined
+                  }
                   autoComplete="current-password"
                   disabled={isLoading}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !passwordError && password && !isLoading) {
-                      void handleSubmit(e as unknown as React.FormEvent)
+                    if (
+                      e.key === "Enter" &&
+                      !passwordError &&
+                      password &&
+                      !isLoading
+                    ) {
+                      void handleSubmit(e as unknown as React.FormEvent);
                     }
                   }}
                 />
@@ -266,7 +297,7 @@ export function LoginForm() {
                 </div>
                 {error && (
                   <div
-                    className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 px-4 py-3 rounded-md text-sm animate-fade-in"
+                    className="bg-destructive/10 border border-destructive/20 text-destructive px-4 py-3 rounded-md text-sm animate-fade-in"
                     role="alert"
                     aria-live="assertive"
                   >
@@ -296,12 +327,12 @@ export function LoginForm() {
               {/* Register link */}
               <div className="mt-6 text-center">
                 <p className="text-sm text-muted-foreground">
-                  Don't have an account?{' '}
+                  New to SARAISE? Don't have an access?{" "}
                   <Link
                     to="/register"
                     className="font-semibold text-primary-main hover:text-primary-dark transition-colors"
                   >
-                    Create an account
+                    Create an Organization
                   </Link>
                 </p>
               </div>
@@ -312,5 +343,5 @@ export function LoginForm() {
         </div>
       </div>
     </div>
-  )
+  );
 }

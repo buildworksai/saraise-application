@@ -1,9 +1,9 @@
 /**
  * Security & Access Control Service
- * 
+ *
  * Service client for Security & Access Control API endpoints.
  * CRITICAL: Tenant-scoped operations - users can only manage their tenant's security.
- * 
+ *
  * MIGRATED: Now uses contracts.ts for types and endpoints.
  * Reference: saraise-documentation/rules/agent-rules/27-contracts-architecture.md
  */
@@ -303,4 +303,3 @@ export const securityService = {
     },
   },
 };
-

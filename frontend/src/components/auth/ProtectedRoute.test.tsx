@@ -1,6 +1,6 @@
 /**
  * ProtectedRoute Component Tests
- * 
+ *
  * Tests for authentication-protected route component.
  */
 
@@ -121,4 +121,3 @@ describe('ProtectedRoute', () => {
     });
   });
 });
-

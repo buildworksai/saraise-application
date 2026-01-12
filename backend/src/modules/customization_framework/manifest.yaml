@@ -1,0 +1,26 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: customization-framework
+version: 1.0.0
+description: No-code/low-code customization engine, custom scripts, client scripts, server scripts
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+  - metadata-modeling >=1.0
+permissions:
+  - customization_framework.resource:create
+  - customization_framework.resource:read
+  - customization_framework.resource:update
+  - customization_framework.resource:delete
+  - customization_framework.resource:activate
+  - customization_framework.resource:deactivate
+sod_actions:
+  - [customization_framework.resource:create, customization_framework.resource:delete]
+search_indexes:
+  - customization_framework_resources
+ai_tools:
+  - create_customization_framework_resource
+  - update_customization_framework_resource
+  - delete_customization_framework_resource

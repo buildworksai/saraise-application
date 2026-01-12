@@ -100,7 +100,7 @@ function getResponseType(operation: OpenAPIOperation): string {
     if (content?.schema) {
       const ref = content.schema.$ref;
       const itemsRef = content.schema.items?.$ref;
-      
+
       if (ref) {
         const typeName = extractTypeName(ref);
         return typeName ? `components['schemas']['${typeName}']` : 'unknown';
@@ -131,10 +131,10 @@ function getRequestType(operation: OpenAPIOperation): string | null {
 function pathToFunctionName(path: string, method: string): string {
   // Remove /api/v1/ prefix and trailing slash
   let cleanPath = path.replace(/^\/api\/v1\//, '').replace(/\/$/, '');
-  
+
   // Handle path parameters
   cleanPath = cleanPath.replace(/\{(\w+)\}/g, 'By$1');
-  
+
   // Convert to camelCase
   const parts = cleanPath.split('/').filter(Boolean);
   const name = parts
@@ -144,7 +144,7 @@ function pathToFunctionName(path: string, method: string): string {
       return part.charAt(0).toUpperCase() + part.slice(1);
     })
     .join('');
-  
+
   // Add method prefix
   const methodPrefix = {
     get: 'get',
@@ -153,13 +153,13 @@ function pathToFunctionName(path: string, method: string): string {
     patch: 'patch',
     delete: 'delete',
   }[method] || method;
-  
+
   return methodPrefix + name.charAt(0).toUpperCase() + name.slice(1);
 }
 
 function generateClient(spec: OpenAPISpec): string {
   const lines: string[] = [];
-  
+
   // Header
   lines.push(`/**
  * SARAISE Typed API Client
@@ -184,28 +184,28 @@ import type { components } from '@/types/api';
   // Generate module-specific clients
   for (const module of MODULES) {
     const modulePaths: { [key: string]: string[] } = {};
-    
+
     // Group paths by resource
     for (const [pathUrl, pathDef] of Object.entries(spec.paths)) {
       if (!pathUrl.startsWith(module.prefix)) continue;
-      
+
       const relativePath = pathUrl.slice(module.prefix.length);
       const resourceName = relativePath.split('/')[0];
-      
+
       if (!modulePaths[resourceName]) {
         modulePaths[resourceName] = [];
       }
-      
+
       for (const method of ['get', 'post', 'put', 'patch', 'delete'] as const) {
         const operation = pathDef[method];
         if (!operation) continue;
-        
+
         const responseType = getResponseType(operation);
         const requestType = getRequestType(operation);
         const hasPathParam = pathUrl.includes('{');
-        
+
         let functionDef: string;
-        
+
         if (hasPathParam && method === 'get') {
           // Detail endpoint
           functionDef = `    get: (id: string) => apiClient.get<${responseType}>(\`${pathUrl.replace('{id}', '${id}')}\`),`;
@@ -223,26 +223,26 @@ import type { components } from '@/types/api';
         } else {
           continue;
         }
-        
+
         modulePaths[resourceName].push(functionDef);
       }
     }
-    
+
     if (Object.keys(modulePaths).length === 0) continue;
-    
+
     lines.push(`
 /**
  * ${module.displayName} API
  */
 export const ${module.name}Api = {`);
-    
+
     for (const [resource, methods] of Object.entries(modulePaths)) {
       if (methods.length === 0) continue;
       lines.push(`  ${resource}: {`);
       lines.push(...methods);
       lines.push('  },');
     }
-    
+
     lines.push('} as const;');
   }
 
@@ -262,34 +262,34 @@ ${MODULES.filter(m => Object.keys(spec.paths).some(p => p.startsWith(m.prefix)))
 async function main() {
   const schemaPath = path.resolve(__dirname, '../backend/schema.yml');
   const outputPath = path.resolve(__dirname, '../frontend/src/lib/api-client-generated.ts');
-  
+
   console.log('SARAISE Typed API Client Generator');
   console.log('===================================');
   console.log('');
-  
+
   // Check if schema exists
   if (!fs.existsSync(schemaPath)) {
     console.error(`ERROR: Schema file not found at ${schemaPath}`);
     console.error('Run "./scripts/sync-api-contracts.sh" first to generate the schema.');
     process.exit(1);
   }
-  
+
   console.log(`Reading schema from: ${schemaPath}`);
   const schemaContent = fs.readFileSync(schemaPath, 'utf-8');
   const spec = yaml.load(schemaContent) as OpenAPISpec;
-  
+
   console.log(`Found ${Object.keys(spec.paths).length} API paths`);
   console.log('');
-  
+
   console.log('Generating typed client...');
   const client = generateClient(spec);
-  
+
   // Ensure output directory exists
   const outputDir = path.dirname(outputPath);
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
-  
+
   fs.writeFileSync(outputPath, client);
   console.log(`Generated: ${outputPath}`);
   console.log('');
@@ -297,4 +297,3 @@ async function main() {
 }
 
 main().catch(console.error);
-

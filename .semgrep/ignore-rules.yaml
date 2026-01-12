@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# ===================================
+# SARAISE Semgrep Ignore Rules
+# ===================================
+# Rules for ignoring false positives with justification
+# ===================================
+
+rules:
+  # Frontend Dockerfile - nginx runs as non-root by default
+  - id: ignore-frontend-dockerfile-user
+    paths:
+      include:
+        - "frontend/Dockerfile"
+    message: "Nginx official image runs as non-root user (nginx:nginx, UID 101) by default. No USER directive needed."

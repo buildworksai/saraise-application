@@ -7,18 +7,13 @@ Task: 503.3 - Compliance Checks
 from __future__ import annotations
 
 import logging
-from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
-from django.db import transaction, models
+from django.db import models, transaction
 from django.utils import timezone
 
-from .compliance_models import (
-    ComplianceCheck,
-    ComplianceCheckType,
-    ResidencyRule,
-    PolicyBundleValidation,
-)
+from .compliance_models import ComplianceCheck, ComplianceCheckType, PolicyBundleValidation, ResidencyRule
 from .module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
 
 logger = logging.getLogger(__name__)
@@ -59,17 +54,16 @@ class ComplianceService:
         violations: List[str] = []
 
         # Get residency rules (tenant-specific, module-specific, or global)
-        rules = ResidencyRule.objects.filter(is_active=True).filter(
-            models.Q(tenant_id=tenant_id) | models.Q(tenant_id__isnull=True)
-        ).filter(
-            models.Q(module_name=module_name) | models.Q(module_name__isnull=True)
-        ).order_by("tenant_id", "module_name")  # More specific rules first
+        rules = (
+            ResidencyRule.objects.filter(is_active=True)
+            .filter(models.Q(tenant_id=tenant_id) | models.Q(tenant_id__isnull=True))
+            .filter(models.Q(module_name=module_name) | models.Q(module_name__isnull=True))
+            .order_by("tenant_id", "module_name")
+        )  # More specific rules first
 
         if not rules.exists():
             # No residency rules = compliant
-            self._record_check(
-                tenant_id, module_name, ComplianceCheckType.RESIDENCY, True, []
-            )
+            self._record_check(tenant_id, module_name, ComplianceCheckType.RESIDENCY, True, [])
             return True, []
 
         # Check if data region matches required region
@@ -83,9 +77,7 @@ class ComplianceService:
 
         is_compliant = len(violations) == 0
 
-        self._record_check(
-            tenant_id, module_name, ComplianceCheckType.RESIDENCY, is_compliant, violations
-        )
+        self._record_check(tenant_id, module_name, ComplianceCheckType.RESIDENCY, is_compliant, violations)
 
         return is_compliant, violations
 
@@ -113,9 +105,7 @@ class ComplianceService:
         # Basic validation
         if not isinstance(policy_bundle, dict):
             errors.append("Policy bundle must be a dictionary")
-            self._record_policy_validation(
-                tenant_id, module_name, policy_bundle_version, False, errors, warnings
-            )
+            self._record_policy_validation(tenant_id, module_name, policy_bundle_version, False, errors, warnings)
             return False, errors, warnings
 
         # Check required fields
@@ -140,9 +130,7 @@ class ComplianceService:
                         if "effect" not in policy:
                             errors.append(f"Policy at index {i} missing 'effect' field")
                         elif policy["effect"] not in ["allow", "deny"]:
-                            errors.append(
-                                f"Policy at index {i} has invalid effect: {policy['effect']}"
-                            )
+                            errors.append(f"Policy at index {i} has invalid effect: {policy['effect']}")
 
         # Version validation
         if "version" in policy_bundle:
@@ -154,9 +142,7 @@ class ComplianceService:
 
         is_valid = len(errors) == 0
 
-        self._record_policy_validation(
-            tenant_id, module_name, policy_bundle_version, is_valid, errors, warnings
-        )
+        self._record_policy_validation(tenant_id, module_name, policy_bundle_version, is_valid, errors, warnings)
 
         return is_valid, errors, warnings
 
@@ -176,9 +162,7 @@ class ComplianceService:
         violations: List[str] = []
 
         # Check residency (if tenant has residency rules)
-        residency_rules = ResidencyRule.objects.filter(
-            tenant_id=tenant_id, is_active=True
-        ).first()
+        residency_rules = ResidencyRule.objects.filter(tenant_id=tenant_id, is_active=True).first()
         if residency_rules:
             # This is a placeholder - actual implementation would check data region
             # For now, we'll assume compliance if no explicit violation
@@ -220,9 +204,7 @@ class ComplianceService:
         violations: List[str] = []
 
         # Check residency (if tenant has residency rules)
-        residency_rules = ResidencyRule.objects.filter(
-            tenant_id=tenant_id, is_active=True
-        ).first()
+        residency_rules = ResidencyRule.objects.filter(tenant_id=tenant_id, is_active=True).first()
         if residency_rules:
             # This is a placeholder - actual implementation would check data region
             pass
@@ -328,10 +310,7 @@ class ComplianceService:
             is_active=True,
         )
 
-        logger.info(
-            f"Created residency rule: {required_region} "
-            f"(Tenant: {tenant_id}, Module: {module_name})"
-        )
+        logger.info(f"Created residency rule: {required_region} " f"(Tenant: {tenant_id}, Module: {module_name})")
 
         return rule
 
@@ -410,4 +389,3 @@ class ComplianceService:
 
 # Global compliance service instance
 compliance_service = ComplianceService()
-

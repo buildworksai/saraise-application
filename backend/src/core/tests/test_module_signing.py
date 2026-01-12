@@ -7,12 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-from ..module_manifest_schema import ModuleManifest, ModuleType, ModuleLifecycle
-from ..module_signing import (
-    ManifestSigner,
-    SigningError,
-    VerificationError,
-)
+from ..module_manifest_schema import ModuleLifecycle, ModuleManifest, ModuleType
+from ..module_signing import ManifestSigner, SigningError, VerificationError
 
 
 class TestManifestSigner:
@@ -232,4 +228,3 @@ class TestManifestSigner:
         # Verification should fail
         with pytest.raises(VerificationError):
             signer.verify(manifest2, signature, algorithm)
-

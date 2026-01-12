@@ -69,7 +69,7 @@
    ```bash
    # Frontend
    docker-compose -f docker-compose.dev.yml exec frontend npm test -- --coverage --run
-   
+
    # Backend
    docker-compose -f docker-compose.dev.yml exec backend pytest src/core/licensing/tests/ -v --cov=src/core/licensing --cov-report=term --cov-fail-under=90
    ```
@@ -77,4 +77,3 @@
 ---
 
 **Status:** All fixes applied, ready for container rebuild and testing
-

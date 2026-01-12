@@ -2,8 +2,10 @@
 Tenant Management Service Tests
 """
 
-import pytest
 from datetime import date, timedelta
+
+import pytest
+
 from ..models import Tenant, TenantModule
 from ..services import TenantManagementService
 
@@ -25,41 +27,31 @@ class TestTenantManagementService:
 
     def test_activate_tenant(self):
         """Test: Activate tenant."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.TRIAL
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.TRIAL)
         activated = TenantManagementService.activate_tenant(tenant.id)
         assert activated.status == Tenant.TenantStatus.ACTIVE
 
     def test_suspend_tenant(self):
         """Test: Suspend tenant."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.ACTIVE
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.ACTIVE)
         suspended = TenantManagementService.suspend_tenant(tenant.id)
         assert suspended.status == Tenant.TenantStatus.SUSPENDED
 
     def test_cancel_tenant(self):
         """Test: Cancel tenant."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.ACTIVE
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.ACTIVE)
         cancelled = TenantManagementService.cancel_tenant(tenant.id)
         assert cancelled.status == Tenant.TenantStatus.CANCELLED
 
     def test_archive_tenant(self):
         """Test: Archive tenant."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.ACTIVE
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.ACTIVE)
         archived = TenantManagementService.archive_tenant(tenant.id)
         assert archived.status == Tenant.TenantStatus.ARCHIVED
 
     def test_install_module(self):
         """Test: Install module for tenant."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
         module = TenantManagementService.install_module(
             tenant_id=tenant.id,
             module_name="crm",
@@ -72,14 +64,8 @@ class TestTenantManagementService:
 
     def test_enable_disable_module(self):
         """Test: Enable and disable module."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant",
-            slug="test-tenant",
-            subdomain="test-tenant"
-        )
-        TenantModule.objects.create(
-            tenant=tenant, module_name="crm", is_enabled=False
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
+        TenantModule.objects.create(tenant=tenant, module_name="crm", is_enabled=False)
 
         enabled = TenantManagementService.enable_module(tenant.id, "crm")
         assert enabled.is_enabled is True
@@ -89,18 +75,14 @@ class TestTenantManagementService:
 
     def test_uninstall_module(self):
         """Test: Uninstall module."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
         TenantModule.objects.create(tenant=tenant, module_name="crm", is_enabled=True)
         TenantManagementService.uninstall_module(tenant.id, "crm")
         assert not TenantModule.objects.filter(tenant=tenant, module_name="crm").exists()
 
     def test_record_resource_usage(self):
         """Test: Record resource usage."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
         usage = TenantManagementService.record_resource_usage(
             tenant_id=tenant.id,
             date=date.today(),
@@ -114,9 +96,7 @@ class TestTenantManagementService:
 
     def test_get_resource_usage_summary(self):
         """Test: Get resource usage summary."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
         TenantManagementService.record_resource_usage(
             tenant_id=tenant.id, date=date.today(), active_users=10, api_calls=1000
         )
@@ -134,27 +114,24 @@ class TestTenantManagementService:
 
     def test_set_get_tenant_setting(self):
         """Test: Set and get tenant setting."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
-        TenantManagementService.set_tenant_setting(
-            tenant_id=tenant.id,
+        from ..models import TenantSettings
+
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
+        # Create setting directly (set_tenant_setting was removed for architectural reasons)
+        TenantSettings.objects.create(
+            tenant=tenant,
             category="email",
             key="smtp_host",
             value={"host": "smtp.example.com"},
             updated_by="test-user-id",
         )
 
-        value = TenantManagementService.get_tenant_setting(
-            tenant_id=tenant.id, category="email", key="smtp_host"
-        )
+        value = TenantManagementService.get_tenant_setting(tenant_id=tenant.id, category="email", key="smtp_host")
         assert value == {"host": "smtp.example.com"}
 
     def test_calculate_health_score(self):
         """Test: Calculate health score."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", max_users=20
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", max_users=20)
         TenantManagementService.record_resource_usage(
             tenant_id=tenant.id,
             date=date.today(),
@@ -172,9 +149,7 @@ class TestTenantManagementService:
 
     def test_get_tenant_summary(self):
         """Test: Get tenant summary."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
         TenantModule.objects.create(tenant=tenant, module_name="crm", is_enabled=True)
         TenantManagementService.record_resource_usage(
             tenant_id=tenant.id, date=date.today(), active_users=10, api_calls=1000

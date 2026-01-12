@@ -15,4 +15,3 @@ else
     echo ""
     docker-compose -f docker-compose.dev.yml logs -f "$SERVICE"
 fi
-

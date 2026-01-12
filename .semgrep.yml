@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+# ===================================
+# SARAISE Semgrep Configuration
+# ===================================
+# SAST (Static Application Security Testing)
+# BLOCKING: CRITICAL/HIGH findings block merge
+# ===================================
+
+rules:
+  - id: semgrep-rules
+    paths:
+      include:
+        - "backend/**/*.py"
+        - "frontend/**/*.ts"
+        - "frontend/**/*.tsx"
+        - "scripts/**/*.py"
+    languages:
+      - python
+      - typescript
+    severity: ERROR
+
+# Use Semgrep's auto-config for common security rules
+# Custom rules can be added in .semgrep/custom-rules/

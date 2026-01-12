@@ -15,16 +15,12 @@ This service provides read-only operations for:
 CRITICAL: Tenant lifecycle operations are FORBIDDEN here - use Control Plane APIs.
 """
 
-from typing import Optional, Dict, Any
-from django.db.models import Sum, Avg
 from datetime import date, timedelta
+from typing import Any, Dict, Optional
 
-from .models import (
-    Tenant,
-    TenantResourceUsage,
-    TenantSettings,
-    TenantHealthScore,
-)
+from django.db.models import Avg, Sum
+
+from .models import Tenant, TenantHealthScore, TenantResourceUsage, TenantSettings
 
 
 class TenantManagementService:

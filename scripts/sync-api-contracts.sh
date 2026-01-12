@@ -92,7 +92,7 @@ if [ "$CHECK_ONLY" = true ]; then
     # Generate to temp file for comparison
     TEMP_TYPES=$(mktemp)
     npx openapi-typescript "$SCHEMA_FILE" -o "$TEMP_TYPES" 2>/dev/null
-    
+
     if ! diff -q "$TEMP_TYPES" "$TYPES_FILE" >/dev/null 2>&1; then
         echo -e "${RED}ERROR: TypeScript types are out of sync!${NC}"
         echo -e "${YELLOW}Run './scripts/sync-api-contracts.sh' to regenerate${NC}"
@@ -117,7 +117,7 @@ CONTRACTS_ERRORS=0
 for MODULE_DIR in "$MODULES_DIR"/*/; do
     MODULE_NAME=$(basename "$MODULE_DIR")
     CONTRACT_FILE="$MODULE_DIR/contracts.ts"
-    
+
     if [ -f "$CONTRACT_FILE" ]; then
         # Check if contract file imports from @/types/api
         if grep -q "from '@/types/api'" "$CONTRACT_FILE"; then
@@ -125,7 +125,7 @@ for MODULE_DIR in "$MODULES_DIR"/*/; do
         else
             echo -e "${YELLOW}  ⚠ $MODULE_NAME/contracts.ts - missing @/types/api import${NC}"
         fi
-        
+
         # Verify TypeScript compilation
         if npx tsc --noEmit "$CONTRACT_FILE" 2>/dev/null; then
             : # Silent success
@@ -177,4 +177,3 @@ else
     echo -e "${GREEN}✓ API contracts synchronized successfully${NC}"
 fi
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-

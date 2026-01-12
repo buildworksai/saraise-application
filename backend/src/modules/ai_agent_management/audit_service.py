@@ -7,14 +7,14 @@ Task: 403.1 - AI Audit Trail
 from __future__ import annotations
 
 import logging
-from typing import Optional, Dict, Any, List
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from django.utils import timezone
 from django.db import transaction
+from django.utils import timezone
 
+from .audit_models import AuditEvent, AuditEventType, AuditTrail
 from .models import AgentExecution
-from .audit_models import AuditEvent, AuditTrail, AuditEventType
 
 logger = logging.getLogger(__name__)
 
@@ -120,18 +120,14 @@ class AuditService:
 
         # Add to audit trail if request_id provided
         if request_id:
-            trail = AuditTrail.objects.filter(
-                tenant_id=tenant_id, request_id=request_id
-            ).first()
+            trail = AuditTrail.objects.filter(tenant_id=tenant_id, request_id=request_id).first()
             if trail:
                 trail.events.add(event)
 
                 # Update trail summary
                 self._update_trail_summary(trail, event)
 
-        logger.debug(
-            f"Recorded audit event {event.id}: {event_type} ({outcome})"
-        )
+        logger.debug(f"Recorded audit event {event.id}: {event_type} ({outcome})")
 
         return event
 
@@ -275,9 +271,7 @@ class AuditService:
         Raises:
             ValueError: If trail not found.
         """
-        trail = AuditTrail.objects.filter(
-            tenant_id=tenant_id, request_id=request_id
-        ).first()
+        trail = AuditTrail.objects.filter(tenant_id=tenant_id, request_id=request_id).first()
 
         if not trail:
             raise ValueError(f"Audit trail {request_id} not found")
@@ -297,15 +291,11 @@ class AuditService:
             ]
         )
 
-        logger.info(
-            f"Completed audit trail {trail.id} with outcome {final_outcome}"
-        )
+        logger.info(f"Completed audit trail {trail.id} with outcome {final_outcome}")
 
         return trail
 
-    def get_audit_trail(
-        self, request_id: str, tenant_id: str
-    ) -> Optional[AuditTrail]:
+    def get_audit_trail(self, request_id: str, tenant_id: str) -> Optional[AuditTrail]:
         """Get audit trail by request ID.
 
         Args:
@@ -315,9 +305,7 @@ class AuditService:
         Returns:
             AuditTrail instance or None if not found.
         """
-        return AuditTrail.objects.filter(
-            tenant_id=tenant_id, request_id=request_id
-        ).prefetch_related("events").first()
+        return AuditTrail.objects.filter(tenant_id=tenant_id, request_id=request_id).prefetch_related("events").first()
 
     def query_audit_events(
         self,
@@ -416,4 +404,3 @@ class AuditService:
 
 # Global audit service instance
 audit_service = AuditService()
-

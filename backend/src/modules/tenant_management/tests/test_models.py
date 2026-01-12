@@ -2,16 +2,12 @@
 Tenant Management Model Tests
 """
 
+from datetime import date, timedelta
+
 import pytest
 from django.utils import timezone
-from datetime import date, timedelta
-from ..models import (
-    Tenant,
-    TenantModule,
-    TenantResourceUsage,
-    TenantSettings,
-    TenantHealthScore,
-)
+
+from ..models import Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
 
 
 @pytest.mark.django_db
@@ -43,9 +39,7 @@ class TestTenantModel:
 
     def test_tenant_is_active(self):
         """Test: Tenant active status check."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.ACTIVE
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.ACTIVE)
         assert tenant.is_active is True
 
     def test_tenant_slug_validation(self):
@@ -63,9 +57,7 @@ class TestTenantModuleModel:
     def test_create_tenant_module(self):
         """Test: Create tenant module."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        module = TenantModule.objects.create(
-            tenant=tenant, module_name="crm", is_enabled=True
-        )
+        module = TenantModule.objects.create(tenant=tenant, module_name="crm", is_enabled=True)
         assert module.id is not None
         assert module.tenant == tenant
         assert module.module_name == "crm"
@@ -102,14 +94,10 @@ class TestTenantResourceUsageModel:
     def test_resource_usage_unique_together(self):
         """Test: Tenant and date must be unique together."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        TenantResourceUsage.objects.create(
-            tenant=tenant, date=date.today(), active_users=10
-        )
+        TenantResourceUsage.objects.create(tenant=tenant, date=date.today(), active_users=10)
         # Try to create duplicate
         with pytest.raises(Exception):  # IntegrityError
-            TenantResourceUsage.objects.create(
-                tenant=tenant, date=date.today(), active_users=20
-            )
+            TenantResourceUsage.objects.create(tenant=tenant, date=date.today(), active_users=20)
 
 
 @pytest.mark.django_db
@@ -171,11 +159,7 @@ class TestTenantHealthScoreModel:
     def test_health_score_unique_together(self):
         """Test: Tenant and date must be unique together."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant")
-        TenantHealthScore.objects.create(
-            tenant=tenant, date=date.today(), overall_score=85
-        )
+        TenantHealthScore.objects.create(tenant=tenant, date=date.today(), overall_score=85)
         # Try to create duplicate
         with pytest.raises(Exception):  # IntegrityError
-            TenantHealthScore.objects.create(
-                tenant=tenant, date=date.today(), overall_score=90
-            )
+            TenantHealthScore.objects.create(tenant=tenant, date=date.today(), overall_score=90)

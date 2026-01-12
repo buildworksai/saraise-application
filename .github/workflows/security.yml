@@ -1,0 +1,73 @@
+# SPDX-License-Identifier: Apache-2.0
+# ===================================
+# SARAISE Security Scanning (DAST)
+# ===================================
+# Dynamic Application Security Testing using OWASP ZAP
+# BLOCKING: CRITICAL findings block merge
+# ===================================
+
+name: Security Scan (DAST)
+
+on:
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dast:
+    name: DAST Scan (OWASP ZAP)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18.19.1'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Start application services
+        run: |
+          docker-compose -f docker-compose.dev.yml up -d
+          # Wait for services to be ready
+          timeout 120 bash -c 'until curl -f http://localhost:8000/health/; do sleep 2; done' || true
+
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.10.0
+        with:
+          target: 'http://localhost:8000'
+          rules_file_name: '.zap/rules.tsv'
+          fail_action: true
+          cmd_options: '-a'
+
+      - name: Upload ZAP Report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: zap-report
+          path: report_html.html
+          retention-days: 30
+
+      - name: Check for critical findings
+        if: always()
+        run: |
+          if [ -f zap-report.json ]; then
+            CRITICAL=$(jq '[.site[] | .alerts[] | select(.riskcode == "4")] | length' zap-report.json || echo "0")
+            if [ "$CRITICAL" -gt 0 ]; then
+              echo "❌ DAST found $CRITICAL critical findings. Blocking merge."
+              exit 1
+            else
+              echo "✅ DAST scan passed (no critical findings)"
+            fi
+          fi

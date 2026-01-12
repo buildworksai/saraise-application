@@ -44,7 +44,7 @@ repos:
         name: "Python: Type Checking (MyPy)"
         args: ["--ignore-missing-imports", "--exclude=tests/"]
         files: ^backend/src/
-        additional_dependencies: 
+        additional_dependencies:
           - types-redis
           - types-requests
           - django-stubs>=5.0.2
@@ -52,6 +52,17 @@ repos:
   # ===================================
   # TypeScript / Frontend Quality
   # ===================================
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        name: "TypeScript: Prettier Formatting"
+        types: [file]
+        files: ^frontend/src/.*\.(ts|tsx|json|css|md)$
+        exclude: ^frontend/src/types/api\.ts$
+        additional_dependencies:
+          - prettier@3.2.5
+
   - repo: local
     hooks:
       - id: typescript-check
@@ -115,6 +126,34 @@ repos:
         name: "Security: Secret Detection"
         args: ["--baseline", ".secrets.baseline"]
         exclude: package-lock.json
+
+  - repo: https://github.com/returntocorp/semgrep
+    rev: v1.50.0
+    hooks:
+      - id: semgrep
+        name: "Security: SAST (Semgrep)"
+        args: ['--config', 'auto', '--config', '.semgrep/custom-rules.yaml', '--error', '--no-git-ignore']
+        additional_dependencies: []
+        exclude: |
+          (?x)^(
+            node_modules/|
+            \.venv/|
+            venv/|
+            __pycache__/|
+            \.git/
+          )
+
+  # ===================================
+  # Code Complexity Analysis
+  # ===================================
+  - repo: local
+    hooks:
+      - id: radon-cc
+        name: "Python: Cyclomatic Complexity (Radon)"
+        entry: bash -c 'pip install radon && radon cc --min B --show-complexity backend/src 2>/dev/null || true'
+        language: system
+        files: ^backend/src/.*\.py$
+        pass_filenames: false
 
 # ===================================
 # Configuration

@@ -1,0 +1,26 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: integration-platform
+version: 1.0.0
+description: iPaaS for third-party integrations, connectors, webhooks, event streaming
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+  - api-management >=1.0
+permissions:
+  - integration_platform.resource:create
+  - integration_platform.resource:read
+  - integration_platform.resource:update
+  - integration_platform.resource:delete
+  - integration_platform.resource:activate
+  - integration_platform.resource:deactivate
+sod_actions:
+  - [integration_platform.resource:create, integration_platform.resource:delete]
+search_indexes:
+  - integration_platform_resources
+ai_tools:
+  - create_integration_platform_resource
+  - update_integration_platform_resource
+  - delete_integration_platform_resource

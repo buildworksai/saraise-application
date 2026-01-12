@@ -16,10 +16,15 @@ AUTHORITATIVE SOURCE: saraise-documentation/
 ├── architecture/              ← System architecture (FROZEN)
 ├── rules/                     ← Compliance rules (MANDATORY)
 ├── standards/                 ← Coding standards (REQUIRED)
-└── modules/                   ← Module specifications
+├── modules/                   ← Module specifications
+└── .agents/data/              ← Machine-readable rules (FAST ACCESS)
+    ├── rules-index.json       ← Query rules by scope/type/severity
+    └── checklists.json        ← Task-level checklists
 ```
 
 **Before ANY operation, agents MUST read `saraise-documentation/AGENTS.md`.**
+
+**For rule queries, use `saraise-documentation/.agents/data/rules-index.json` for fast access.**
 
 ---
 
@@ -99,6 +104,8 @@ SARAISE_PLATFORM_URL: https://platform.saraise.com
 ## Quick Rules (Summary)
 
 Full rules are in `saraise-documentation/rules/`.
+
+**For machine-readable access:** Use `saraise-documentation/.agents/data/rules-index.json`
 
 | Rule | Enforcement |
 |------|-------------|
@@ -303,6 +310,7 @@ Once **ALL tests pass** and **ALL pre-commit hooks pass**:
 | Need | Location |
 |------|----------|
 | Full agent instructions | `saraise-documentation/AGENTS.md` |
+| Machine-readable rules | `saraise-documentation/.agents/data/rules-index.json` |
 | System architecture | `saraise-documentation/architecture/` |
 | Compliance rules | `saraise-documentation/rules/` |
 | Coding standards | `saraise-documentation/standards/` |

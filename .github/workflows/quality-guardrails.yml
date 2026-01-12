@@ -41,7 +41,7 @@ jobs:
             echo "❌ Jest flag '--watchAll' found in workflow commands"
             exit 1
           fi
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -62,7 +62,7 @@ jobs:
 
       - name: "🔒 Unit Tests & Coverage (SARAISE-01002)"
         run: npm test -- --coverage
-      
+
       - name: Verify Coverage Threshold
         run: |
           if [ -f "coverage/coverage-summary.json" ]; then
@@ -71,6 +71,10 @@ jobs:
             echo "❌ Coverage report missing - Test run failed to generate artifacts"
             exit 1
           fi
+
+      - name: "🔒 Per-Module Coverage Check"
+        run: |
+          python3 ../scripts/coverage-per-module.py || (echo "❌ One or more modules below 90% coverage" && exit 1)
 
       - name: Security Audit
         run: npm audit --audit-level moderate
@@ -140,9 +144,20 @@ jobs:
         run: |
           coverage report --fail-under=90 || (echo "❌ Coverage below 90% threshold" && exit 1)
 
+      - name: "🔒 Per-Module Coverage Check"
+        if: ${{ steps.backend.outputs.present == 'true' }}
+        run: |
+          pip install radon
+          python3 ../scripts/coverage-per-module.py || (echo "❌ One or more modules below 90% coverage" && exit 1)
+
       - name: Security Audit
         if: ${{ steps.backend.outputs.present == 'true' }}
         run: safety check
+
+      - name: Collect GCR Data
+        if: always() && steps.backend.outputs.present == 'true'
+        run: |
+          python3 ../scripts/gcr-collector.py || echo "⚠️  GCR collection failed (non-blocking)"
 
   # ------------------------------------------------------------------
   # Tenant Isolation Tests (Critical Security Gate)

@@ -1,8 +1,8 @@
 /**
  * SPDX-License-Identifier: Apache-2.0
- * 
+ *
  * Roles Page
- * 
+ *
  * Lists and manages roles for the current tenant.
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -228,4 +228,3 @@ export const RolesPage = () => {
     </div>
   );
 };
-

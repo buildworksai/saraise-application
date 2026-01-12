@@ -6,21 +6,17 @@ Task: 503.2 - Module Guardrails
 
 from __future__ import annotations
 
-import logging
-import re
 import ast
+import logging
 import os
-from typing import Dict, Any, List, Optional, Tuple
+import re
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from django.db import transaction
 from django.utils import timezone
 
-from .module_guardrail_models import (
-    GuardrailViolation,
-    GuardrailRule,
-    GuardrailViolationType,
-)
+from .module_guardrail_models import GuardrailRule, GuardrailViolation, GuardrailViolationType
 from .module_registry_models import ModuleRegistryEntry
 
 logger = logging.getLogger(__name__)
@@ -61,17 +57,13 @@ class ModuleGuardrailService:
     def __init__(self) -> None:
         """Initialize guardrail service."""
         self.auth_patterns = [
-            (re.compile(pattern, re.IGNORECASE), description)
-            for pattern, description in self.AUTH_FORBIDDEN_PATTERNS
+            (re.compile(pattern, re.IGNORECASE), description) for pattern, description in self.AUTH_FORBIDDEN_PATTERNS
         ]
         self.policy_patterns = [
-            (re.compile(pattern, re.IGNORECASE), description)
-            for pattern, description in self.POLICY_FORBIDDEN_PATTERNS
+            (re.compile(pattern, re.IGNORECASE), description) for pattern, description in self.POLICY_FORBIDDEN_PATTERNS
         ]
 
-    def scan_module(
-        self, module_name: str, module_path: Optional[str] = None
-    ) -> List[GuardrailViolation]:
+    def scan_module(self, module_name: str, module_path: Optional[str] = None) -> List[GuardrailViolation]:
         """Scan module for guardrail violations.
 
         Args:
@@ -107,9 +99,7 @@ class ModuleGuardrailService:
 
         return violations
 
-    def _scan_file(
-        self, file_path: Path, module_name: str
-    ) -> List[GuardrailViolation]:
+    def _scan_file(self, file_path: Path, module_name: str) -> List[GuardrailViolation]:
         """Scan a single file for violations.
 
         Args:
@@ -130,15 +120,11 @@ class ModuleGuardrailService:
             return violations
 
         # Check for auth drift
-        auth_violations = self._detect_auth_drift(
-            content, lines, file_path, module_name
-        )
+        auth_violations = self._detect_auth_drift(content, lines, file_path, module_name)
         violations.extend(auth_violations)
 
         # Check for policy drift
-        policy_violations = self._detect_policy_drift(
-            content, lines, file_path, module_name
-        )
+        policy_violations = self._detect_policy_drift(content, lines, file_path, module_name)
         violations.extend(policy_violations)
 
         return violations
@@ -260,10 +246,7 @@ class ModuleGuardrailService:
             status="detected",
         )
 
-        logger.warning(
-            f"Guardrail violation detected: {violation_type} in {module_name} "
-            f"(Tenant: {tenant_id})"
-        )
+        logger.warning(f"Guardrail violation detected: {violation_type} in {module_name} " f"(Tenant: {tenant_id})")
 
         return violation
 
@@ -359,9 +342,7 @@ class ModuleGuardrailService:
 
         return violation
 
-    def block_module_on_violation(
-        self, module_name: str, tenant_id: Optional[str] = None
-    ) -> bool:
+    def block_module_on_violation(self, module_name: str, tenant_id: Optional[str] = None) -> bool:
         """Block module access due to violations.
 
         Args:
@@ -396,4 +377,3 @@ class ModuleGuardrailService:
 
 # Global guardrail service instance
 module_guardrail_service = ModuleGuardrailService()
-

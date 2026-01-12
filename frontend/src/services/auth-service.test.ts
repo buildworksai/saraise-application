@@ -1,6 +1,6 @@
 /**
  * Auth Service Tests
- * 
+ *
  * Tests for authentication service including login, logout, registration, and session management.
  */
 
@@ -175,4 +175,3 @@ describe('authService', () => {
     });
   });
 });
-

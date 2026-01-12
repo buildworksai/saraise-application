@@ -1,0 +1,35 @@
+# Backup & Recovery (Extended) Module Rules
+
+**Module ID:** `backup-recovery`
+**Type:** Foundation
+**Status:** Active
+
+## Module Overview
+
+Extended backup capabilities: incremental backups, retention policies, archive management.
+
+## Frontend Architecture
+
+- **Contracts**: `contracts.ts` - All types and endpoints defined here
+- **Service**: `services/backup-recovery-service.ts` - API client using ENDPOINTS
+- **Pages**: 6 pages for complete CRUD operations
+
+## Rules
+
+1. **ALWAYS import types from `contracts.ts`** - Never define ad-hoc types
+2. **ALWAYS use `ENDPOINTS` constant** - Never hardcode URL strings
+3. **Use TanStack Query** for server state management
+4. **Follow React component standards** from `saraise-documentation/standards/`
+
+## API Endpoints
+
+All endpoints are defined in `contracts.ts` under `ENDPOINTS`:
+- Jobs: `/api/v1/backup-recovery/jobs/`
+- Schedules: `/api/v1/backup-recovery/schedules/`
+- Retention Policies: `/api/v1/backup-recovery/retention-policies/`
+- Archives: `/api/v1/backup-recovery/archives/`
+
+## Reference
+
+- **Architecture**: `saraise-documentation/rules/agent-rules/27-contracts-architecture.md`
+- **Backend**: `backend/src/modules/backup_recovery/`

@@ -220,4 +220,3 @@ curl http://localhost:18001/health
 ---
 
 **Last Updated:** January 5, 2026
-

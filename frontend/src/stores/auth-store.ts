@@ -1,6 +1,6 @@
 /**
  * Authentication Store (Zustand)
- * 
+ *
  * Manages authentication state and session management.
  * Sessions establish identity only - no authorization state cached.
  */
@@ -48,4 +48,3 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
-

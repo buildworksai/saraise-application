@@ -6,9 +6,15 @@ Task: 501.2 - Module Registry & Compatibility Validation
 
 from __future__ import annotations
 
-from django.db import models
-from typing import Optional, Dict, Any
 import uuid
+from typing import Any, Dict, Optional
+
+from django.db import models
+
+
+def generate_uuid():
+    """Generate UUID for model primary keys."""
+    return str(uuid.uuid4())
 
 
 class ModuleRegistryEntry(models.Model):
@@ -17,10 +23,8 @@ class ModuleRegistryEntry(models.Model):
     Tracks registered modules in the registry.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    name = models.CharField(max_length=255, unique=True, db_index=True)
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
+    name = models.CharField(max_length=255, db_index=True)
     version = models.CharField(max_length=50, db_index=True)
     description = models.TextField(blank=True, null=True)
     module_type = models.CharField(
@@ -44,9 +48,7 @@ class ModuleRegistryEntry(models.Model):
         db_index=True,
     )
     manifest_content = models.TextField(help_text="Full manifest YAML content")
-    manifest_hash = models.CharField(
-        max_length=64, db_index=True, help_text="SHA-256 hash of manifest"
-    )
+    manifest_hash = models.CharField(max_length=64, db_index=True, help_text="SHA-256 hash of manifest")
     signature = models.TextField(null=True, blank=True, help_text="Manifest signature")
     signature_algorithm = models.CharField(
         max_length=20,
@@ -54,27 +56,13 @@ class ModuleRegistryEntry(models.Model):
         blank=True,
         help_text="Signature algorithm (RS256, HMAC-SHA256)",
     )
-    dependencies = models.JSONField(
-        default=list, help_text="Module dependencies"
-    )
-    permissions = models.JSONField(
-        default=list, help_text="Declared permissions"
-    )
-    sod_actions = models.JSONField(
-        default=list, help_text="SoD actions"
-    )
-    search_indexes = models.JSONField(
-        default=list, help_text="Search indexes"
-    )
-    ai_tools = models.JSONField(
-        default=list, help_text="AI tools"
-    )
-    metadata = models.JSONField(
-        default=dict, help_text="Additional metadata"
-    )
-    is_active = models.BooleanField(
-        default=True, db_index=True, help_text="Module active in registry"
-    )
+    dependencies = models.JSONField(default=list, help_text="Module dependencies")
+    permissions = models.JSONField(default=list, help_text="Declared permissions")
+    sod_actions = models.JSONField(default=list, help_text="SoD actions")
+    search_indexes = models.JSONField(default=list, help_text="Search indexes")
+    ai_tools = models.JSONField(default=list, help_text="AI tools")
+    metadata = models.JSONField(default=dict, help_text="Additional metadata")
+    is_active = models.BooleanField(default=True, db_index=True, help_text="Module active in registry")
     registered_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -98,9 +86,7 @@ class TenantModuleInstallation(models.Model):
     Tracks which modules are installed for each tenant.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     tenant_id = models.CharField(max_length=36, db_index=True)
     module_name = models.CharField(max_length=255, db_index=True)
     module_version = models.CharField(max_length=50, db_index=True)
@@ -111,9 +97,7 @@ class TenantModuleInstallation(models.Model):
         db_index=True,
     )
     installed_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    installed_by = models.CharField(
-        max_length=36, help_text="User/system who installed"
-    )
+    installed_by = models.CharField(max_length=36, help_text="User/system who installed")
     status = models.CharField(
         max_length=50,
         choices=[
@@ -125,9 +109,7 @@ class TenantModuleInstallation(models.Model):
         default="installed",
         db_index=True,
     )
-    metadata = models.JSONField(
-        default=dict, help_text="Installation metadata"
-    )
+    metadata = models.JSONField(default=dict, help_text="Installation metadata")
 
     class Meta:
         db_table = "tenant_module_installations"
@@ -140,4 +122,3 @@ class TenantModuleInstallation(models.Model):
 
     def __str__(self) -> str:
         return f"{self.module_name} v{self.module_version} (Tenant: {self.tenant_id})"
-

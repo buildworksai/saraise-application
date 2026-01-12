@@ -22,9 +22,8 @@ describe('Separator', () => {
   it('should render with orientation prop', () => {
     const { container: horizontal } = render(<Separator orientation="horizontal" />);
     const { container: vertical } = render(<Separator orientation="vertical" />);
-    
+
     expect(horizontal.querySelector('[role="separator"]')).toBeInTheDocument();
     expect(vertical.querySelector('[role="separator"]')).toBeInTheDocument();
   });
 });
-

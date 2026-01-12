@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+# ===================================
+# SARAISE Semgrep Ignore Patterns
+# ===================================
+# Files and patterns to exclude from Semgrep scanning
+# ===================================
+
+# Frontend Dockerfile - nginx runs as non-root by default
+frontend/Dockerfile
+
+# SQL queries with validated identifiers (see services.py for validation)
+# These queries have table/column name validation via regex
+backend/src/modules/integration_platform/services.py

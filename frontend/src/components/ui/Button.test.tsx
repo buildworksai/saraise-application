@@ -1,6 +1,6 @@
 /**
  * Button Component Tests
- * 
+ *
  * Tests for Button UI component.
  */
 
@@ -16,9 +16,9 @@ describe('Button', () => {
 
   it('should call onClick when clicked', () => {
     const handleClick = vi.fn();
-    
+
     render(<Button onClick={handleClick}>Click me</Button>);
-    
+
     const button = screen.getByRole('button');
     button.click();
     expect(handleClick).toHaveBeenCalledTimes(1);
@@ -31,9 +31,9 @@ describe('Button', () => {
 
   it('should not call onClick when disabled', () => {
     const handleClick = vi.fn();
-    
+
     render(<Button disabled onClick={handleClick}>Disabled</Button>);
-    
+
     const button = screen.getByRole('button');
     button.click();
     expect(handleClick).not.toHaveBeenCalled();
@@ -51,4 +51,3 @@ describe('Button', () => {
     expect(button).toBeInTheDocument();
   });
 });
-

@@ -28,4 +28,3 @@ else
 fi
 
 echo "Platform metrics saved successfully at $(date)"
-

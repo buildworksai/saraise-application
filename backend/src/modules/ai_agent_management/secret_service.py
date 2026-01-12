@@ -6,17 +6,17 @@ Task: 402.1 - Egress Allowlisting & Secret Isolation
 
 from __future__ import annotations
 
-import logging
 import base64
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
 import hashlib
+import logging
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
-from django.utils import timezone
 from django.db import transaction
+from django.utils import timezone
 
-from .models import AgentExecution
 from .egress_models import Secret, SecretAccess
+from .models import AgentExecution
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +58,7 @@ class SecretService:
             ValueError: If validation fails or secret already exists.
         """
         # Check if secret already exists
-        existing = Secret.objects.filter(
-            tenant_id=tenant_id, name=name, is_active=True
-        ).first()
+        existing = Secret.objects.filter(tenant_id=tenant_id, name=name, is_active=True).first()
 
         if existing:
             raise ValueError(f"Secret {name} already exists for tenant {tenant_id}")
@@ -106,9 +104,7 @@ class SecretService:
         Raises:
             ValueError: If secret not found or expired.
         """
-        secret = Secret.objects.filter(
-            tenant_id=tenant_id, name=secret_name, is_active=True
-        ).first()
+        secret = Secret.objects.filter(tenant_id=tenant_id, name=secret_name, is_active=True).first()
 
         if not secret:
             return None
@@ -155,9 +151,7 @@ class SecretService:
         Raises:
             ValueError: If secret not found.
         """
-        secret = Secret.objects.filter(
-            tenant_id=tenant_id, name=secret_name, is_active=True
-        ).first()
+        secret = Secret.objects.filter(tenant_id=tenant_id, name=secret_name, is_active=True).first()
 
         if not secret:
             raise ValueError(f"Secret {secret_name} not found")
@@ -171,9 +165,7 @@ class SecretService:
 
         # Update expiration if rotation interval is set
         if secret.rotation_interval_days:
-            secret.expires_at = timezone.now() + timedelta(
-                days=secret.rotation_interval_days
-            )
+            secret.expires_at = timezone.now() + timedelta(days=secret.rotation_interval_days)
 
         secret.save(update_fields=["encrypted_value", "last_rotated_at", "expires_at", "updated_at"])
 
@@ -220,9 +212,7 @@ class SecretService:
         Raises:
             ValueError: If secret not found.
         """
-        secret = Secret.objects.filter(
-            tenant_id=tenant_id, name=secret_name, is_active=True
-        ).first()
+        secret = Secret.objects.filter(tenant_id=tenant_id, name=secret_name, is_active=True).first()
 
         if not secret:
             raise ValueError(f"Secret {secret_name} not found")
@@ -261,13 +251,11 @@ class SecretService:
             Encrypted value (base64 encoded).
 
         Note:
-            This is a placeholder implementation. In production, use proper
-            encryption (e.g., AES-256-GCM) with key management.
+            Uses Fernet symmetric encryption from EncryptionService.
         """
-        # TODO: Implement proper encryption with key management
-        # For now, base64 encode (NOT SECURE - placeholder only)
-        encoded = base64.b64encode(secret_value.encode()).decode()
-        return encoded
+        from src.core.encryption import EncryptionService
+
+        return EncryptionService.encrypt(secret_value)
 
     def _decrypt_secret(self, encrypted_value: str) -> str:
         """Decrypt secret value.
@@ -279,15 +267,12 @@ class SecretService:
             Decrypted secret value.
 
         Note:
-            This is a placeholder implementation. In production, use proper
-            decryption with key management.
+            Uses Fernet symmetric decryption from EncryptionService.
         """
-        # TODO: Implement proper decryption with key management
-        # For now, base64 decode (NOT SECURE - placeholder only)
-        decoded = base64.b64decode(encrypted_value.encode()).decode()
-        return decoded
+        from src.core.encryption import EncryptionService
+
+        return EncryptionService.decrypt(encrypted_value)
 
 
 # Global secret service instance
 secret_service = SecretService()
-

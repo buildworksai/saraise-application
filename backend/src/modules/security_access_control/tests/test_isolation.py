@@ -6,16 +6,18 @@ Users can only access roles, permission sets, and security profiles
 belonging to their tenant.
 """
 
+import uuid
+from unittest.mock import patch
+
 import pytest
 from django.contrib.auth import get_user_model
-from rest_framework.test import APIClient
 from rest_framework import status
-import uuid
+from rest_framework.test import APIClient
 
-from ..models import Role, PermissionSet, SecurityProfile
 from src.core.user_models import UserProfile
 from src.modules.tenant_management.models import Tenant
-from unittest.mock import patch
+
+from ..models import PermissionSet, Role, SecurityProfile
 
 User = get_user_model()
 
@@ -93,9 +95,7 @@ class TestTenantIsolation:
     These tests verify that tenants cannot access each other's data.
     """
 
-    def test_user_cannot_list_other_tenant_roles(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_list_other_tenant_roles(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User sees only their tenant's roles in list."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -105,14 +105,10 @@ class TestTenantIsolation:
         tenant_b_id = uuid.UUID(tenant_b_id_str) if tenant_b_id_str else None
 
         # Create role for tenant A
-        Role.objects.create(
-            tenant_id=tenant_a_id, name="Tenant A Role", code="tenant_a_role"
-        )
+        Role.objects.create(tenant_id=tenant_a_id, name="Tenant A Role", code="tenant_a_role")
 
         # Create role for tenant B
-        other_role = Role.objects.create(
-            tenant_id=tenant_b_id, name="Tenant B Role", code="tenant_b_role"
-        )
+        other_role = Role.objects.create(tenant_id=tenant_b_id, name="Tenant B Role", code="tenant_b_role")
 
         # Login as tenant A
         api_client.force_authenticate(user=tenant_a_user)
@@ -120,20 +116,14 @@ class TestTenantIsolation:
         response = api_client.get("/api/v1/security-access-control/roles/")
 
         assert response.status_code == status.HTTP_200_OK
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         names = [r["name"] for r in data]
         assert "Tenant A Role" in names
         assert "Tenant B Role" not in names
         role_ids = [r["id"] for r in data]
         assert str(other_role.id) not in role_ids
 
-    def test_user_cannot_access_other_tenant_role(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_access_other_tenant_role(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot GET other tenant's role by ID."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -145,23 +135,17 @@ class TestTenantIsolation:
         tenant_b_id = uuid.UUID(tenant_b_id_str)
 
         # Create role for tenant B
-        other_role = Role.objects.create(
-            tenant_id=tenant_b_id, name="Other Role", code="other_role"
-        )
+        other_role = Role.objects.create(tenant_id=tenant_b_id, name="Other Role", code="other_role")
 
         # Login as tenant A
         api_client.force_authenticate(user=tenant_a_user)
 
-        response = api_client.get(
-            f"/api/v1/security-access-control/roles/{other_role.id}/"
-        )
+        response = api_client.get(f"/api/v1/security-access-control/roles/{other_role.id}/")
 
         # MUST return 404 (not 403) to hide existence
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
-    def test_user_cannot_update_other_tenant_role(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_update_other_tenant_role(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot PATCH other tenant's role."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -173,9 +157,7 @@ class TestTenantIsolation:
         tenant_b_id = uuid.UUID(tenant_b_id_str)
 
         # Create role for tenant B
-        other_role = Role.objects.create(
-            tenant_id=tenant_b_id, name="Other Role", code="other_role"
-        )
+        other_role = Role.objects.create(tenant_id=tenant_b_id, name="Other Role", code="other_role")
         original_name = other_role.name
 
         # Login as tenant A
@@ -193,9 +175,7 @@ class TestTenantIsolation:
         other_role.refresh_from_db()
         assert other_role.name == original_name
 
-    def test_user_cannot_delete_other_tenant_role(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_user_cannot_delete_other_tenant_role(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot DELETE other tenant's role."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -207,25 +187,19 @@ class TestTenantIsolation:
         tenant_b_id = uuid.UUID(tenant_b_id_str)
 
         # Create role for tenant B
-        other_role = Role.objects.create(
-            tenant_id=tenant_b_id, name="Other Role", code="other_role"
-        )
+        other_role = Role.objects.create(tenant_id=tenant_b_id, name="Other Role", code="other_role")
         initial_count = Role.objects.count()
 
         # Login as tenant A
         api_client.force_authenticate(user=tenant_a_user)
 
-        response = api_client.delete(
-            f"/api/v1/security-access-control/roles/{other_role.id}/"
-        )
+        response = api_client.delete(f"/api/v1/security-access-control/roles/{other_role.id}/")
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
         # Ensure role was not deleted
         assert Role.objects.count() == initial_count
 
-    def test_permission_set_tenant_isolation(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_permission_set_tenant_isolation(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User A should not see permission sets belonging to Tenant B."""
         from src.core.auth_utils import get_user_tenant_id
 
@@ -238,12 +212,8 @@ class TestTenantIsolation:
         tenant_a_id = uuid.UUID(tenant_a_id_str)
         tenant_b_id = uuid.UUID(tenant_b_id_str)
 
-        PermissionSet.objects.create(
-            tenant_id=tenant_a_id, name="Tenant A Set", permission_ids=[]
-        )
-        other_set = PermissionSet.objects.create(
-            tenant_id=tenant_b_id, name="Tenant B Set", permission_ids=[]
-        )
+        PermissionSet.objects.create(tenant_id=tenant_a_id, name="Tenant A Set", permission_ids=[])
+        other_set = PermissionSet.objects.create(tenant_id=tenant_b_id, name="Tenant B Set", permission_ids=[])
 
         api_client.force_authenticate(user=tenant_a_user)
 
@@ -255,9 +225,7 @@ class TestTenantIsolation:
         set_ids = [s["id"] for s in response.data]
         assert str(other_set.id) not in set_ids
 
-    def test_security_profile_tenant_isolation(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_security_profile_tenant_isolation(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User A should not see security profiles belonging to Tenant B."""
         from src.core.auth_utils import get_user_tenant_id
 

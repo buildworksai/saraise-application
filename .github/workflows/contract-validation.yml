@@ -31,7 +31,7 @@ jobs:
   validate-contracts:
     name: Validate Module Contracts
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -51,14 +51,14 @@ jobs:
         working-directory: frontend
         run: |
           echo "Checking for required contracts.ts files..."
-          
+
           MODULES=(
             "platform_management"
             "tenant_management"
             "security_access_control"
             "ai_agent_management"
           )
-          
+
           MISSING=0
           for MODULE in "${MODULES[@]}"; do
             CONTRACT_FILE="src/modules/${MODULE}/contracts.ts"
@@ -69,13 +69,13 @@ jobs:
               echo "✓ Found: $CONTRACT_FILE"
             fi
           done
-          
+
           if [ $MISSING -gt 0 ]; then
             echo ""
             echo "ERROR: $MISSING contracts.ts file(s) missing"
             exit 1
           fi
-          
+
           echo ""
           echo "✓ All required contracts.ts files exist"
 
@@ -83,14 +83,14 @@ jobs:
         working-directory: frontend
         run: |
           echo "Checking for required .cursorrules files..."
-          
+
           MODULES=(
             "platform_management"
             "tenant_management"
             "security_access_control"
             "ai_agent_management"
           )
-          
+
           MISSING=0
           for MODULE in "${MODULES[@]}"; do
             RULES_FILE="src/modules/${MODULE}/.cursorrules"
@@ -101,13 +101,13 @@ jobs:
               echo "✓ Found: $RULES_FILE"
             fi
           done
-          
+
           if [ $MISSING -gt 0 ]; then
             echo ""
             echo "WARNING: $MISSING .cursorrules file(s) missing"
             # Warning only, not blocking
           fi
-          
+
           echo ""
           echo "✓ .cursorrules check complete"
 
@@ -115,21 +115,21 @@ jobs:
         working-directory: frontend
         run: |
           echo "Validating contracts.ts structure..."
-          
+
           MODULES=(
             "platform_management"
             "tenant_management"
             "security_access_control"
             "ai_agent_management"
           )
-          
+
           ERRORS=0
           for MODULE in "${MODULES[@]}"; do
             CONTRACT_FILE="src/modules/${MODULE}/contracts.ts"
-            
+
             echo ""
             echo "Checking $MODULE..."
-            
+
             # Check for @/types/api import
             if ! grep -q "from '@/types/api'" "$CONTRACT_FILE"; then
               echo "  ❌ Missing import from '@/types/api'"
@@ -137,7 +137,7 @@ jobs:
             else
               echo "  ✓ Imports from @/types/api"
             fi
-            
+
             # Check for ENDPOINTS export
             if ! grep -q "export const ENDPOINTS" "$CONTRACT_FILE"; then
               echo "  ❌ Missing 'export const ENDPOINTS'"
@@ -145,7 +145,7 @@ jobs:
             else
               echo "  ✓ Exports ENDPOINTS"
             fi
-            
+
             # Check for 'as const'
             if ! grep -q "as const" "$CONTRACT_FILE"; then
               echo "  ⚠️ ENDPOINTS should use 'as const'"
@@ -153,13 +153,13 @@ jobs:
               echo "  ✓ Uses 'as const'"
             fi
           done
-          
+
           if [ $ERRORS -gt 0 ]; then
             echo ""
             echo "ERROR: $ERRORS structural issue(s) found"
             exit 1
           fi
-          
+
           echo ""
           echo "✓ All contracts.ts files properly structured"
 
@@ -167,22 +167,22 @@ jobs:
         working-directory: frontend
         run: |
           echo "Running TypeScript compilation on contracts..."
-          
+
           MODULES=(
             "platform_management"
             "tenant_management"
             "security_access_control"
             "ai_agent_management"
           )
-          
+
           # Run full project TypeScript check and filter for contract file errors
           echo "Running full project TypeScript compilation..."
           TSC_OUTPUT=$(npx tsc --noEmit -p tsconfig.json 2>&1 || true)
-          
+
           ERRORS=0
           for MODULE in "${MODULES[@]}"; do
             CONTRACT_FILE="src/modules/${MODULE}/contracts.ts"
-            
+
             # Check if errors are in this contract file
             if echo "$TSC_OUTPUT" | grep -q "$CONTRACT_FILE.*error TS"; then
               echo "❌ TypeScript errors in $CONTRACT_FILE"
@@ -192,13 +192,13 @@ jobs:
               echo "✓ $MODULE/contracts.ts (no errors in this file)"
             fi
           done
-          
+
           if [ $ERRORS -gt 0 ]; then
             echo ""
             echo "ERROR: $ERRORS contract(s) have TypeScript errors"
             exit 1
           fi
-          
+
           echo ""
           echo "✓ All contracts pass TypeScript compilation"
 
@@ -206,14 +206,14 @@ jobs:
         working-directory: frontend
         run: |
           echo "Checking for hardcoded API endpoints in page files..."
-          
+
           # Find hardcoded /api/v1/ in files excluding contracts.ts and service files
           HARDCODED=$(grep -rn "/api/v1/" src/modules/ \
             --include="*.tsx" \
             --exclude="*contracts.ts" \
             --exclude="*-service.ts" \
             2>/dev/null || true)
-          
+
           if [ -n "$HARDCODED" ]; then
             echo "⚠️ WARNING: Found hardcoded API endpoints in page/component files:"
             echo "$HARDCODED" | head -10
@@ -232,21 +232,21 @@ jobs:
         working-directory: frontend
         run: |
           echo "Running contract validation tests..."
-          
+
           # Check if test file exists
           if [ -f "src/modules/__tests__/contract-validation.test.ts" ]; then
             npm test -- contract-validation --passWithNoTests || true
           else
             echo "⚠️ Contract validation test file not found"
           fi
-          
+
           echo "✓ Contract validation complete"
 
   api-sync-check:
     name: API Types Sync Check
     runs-on: ubuntu-latest
     needs: validate-contracts
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -289,7 +289,7 @@ jobs:
             echo "Generating TypeScript types from schema..."
             cd frontend
             npx openapi-typescript ../backend/schema.yml -o /tmp/api-check.ts
-            
+
             if diff -q /tmp/api-check.ts src/types/api.ts >/dev/null 2>&1; then
               echo "✓ TypeScript types are in sync with backend"
             else
@@ -300,4 +300,3 @@ jobs:
           else
             echo "⚠️ Skipping sync check (no schema generated)"
           fi
-

@@ -22,7 +22,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <ThemeProvider defaultTheme="system" storageKey="saraise-theme">
         <QueryClientProvider client={queryClient}>
           <App />
-          <Toaster 
+          <Toaster
             position="top-right"
             richColors
             closeButton

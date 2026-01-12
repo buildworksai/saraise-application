@@ -6,14 +6,15 @@ Task: 401.2 - Tool Registry & Schema Validation
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from enum import Enum
-import json
+from typing import Any, Dict, List, Optional
 
 try:
     import jsonschema
+
     JSONSCHEMA_AVAILABLE = True
 except ImportError:
     JSONSCHEMA_AVAILABLE = False
@@ -93,12 +94,8 @@ class ToolRegistry:
             raise ValueError("Tool owning_module must be a non-empty string")
 
         # Validate permissions
-        if not tool.required_permissions or not isinstance(
-            tool.required_permissions, list
-        ):
-            raise ValueError(
-                "Tool required_permissions must be a non-empty list"
-            )
+        if not tool.required_permissions or not isinstance(tool.required_permissions, list):
+            raise ValueError("Tool required_permissions must be a non-empty list")
 
         # Validate side-effect class
         if not isinstance(tool.side_effect_class, ToolSideEffectClass):
@@ -112,9 +109,7 @@ class ToolRegistry:
         if tool.name in self._tools:
             existing_tool = self._tools[tool.name]
             if existing_tool.version == tool.version:
-                raise ValueError(
-                    f"Tool {tool.name} version {tool.version} already registered"
-                )
+                raise ValueError(f"Tool {tool.name} version {tool.version} already registered")
 
         # Register tool
         self._tools[tool.name] = tool
@@ -124,10 +119,7 @@ class ToolRegistry:
             self._tools_by_module[tool.owning_module] = []
         self._tools_by_module[tool.owning_module].append(tool.name)
 
-        logger.info(
-            f"Registered tool {tool.name} v{tool.version} from module "
-            f"{tool.owning_module}"
-        )
+        logger.info(f"Registered tool {tool.name} v{tool.version} from module " f"{tool.owning_module}")
 
     def get_tool(self, tool_name: str) -> Optional[ToolDefinition]:
         """Get a tool definition by name.
@@ -160,9 +152,7 @@ class ToolRegistry:
             tools = [t for t in tools if t.owning_module == owning_module]
 
         if side_effect_class:
-            tools = [
-                t for t in tools if t.side_effect_class == side_effect_class
-            ]
+            tools = [t for t in tools if t.side_effect_class == side_effect_class]
 
         return tools
 
@@ -178,9 +168,7 @@ class ToolRegistry:
         tool_names = self._tools_by_module.get(module_name, [])
         return [self._tools[name] for name in tool_names]
 
-    def validate_input(
-        self, tool_name: str, input_data: Dict[str, Any]
-    ) -> bool:
+    def validate_input(self, tool_name: str, input_data: Dict[str, Any]) -> bool:
         """Validate tool input against schema.
 
         Args:
@@ -197,13 +185,9 @@ class ToolRegistry:
         if not tool:
             raise ValueError(f"Tool {tool_name} not found")
 
-        return self._validate_against_schema(
-            input_data, tool.input_schema
-        )
+        return self._validate_against_schema(input_data, tool.input_schema)
 
-    def validate_output(
-        self, tool_name: str, output_data: Any
-    ) -> bool:
+    def validate_output(self, tool_name: str, output_data: Any) -> bool:
         """Validate tool output against schema.
 
         Args:
@@ -220,9 +204,7 @@ class ToolRegistry:
         if not tool:
             raise ValueError(f"Tool {tool_name} not found")
 
-        return self._validate_against_schema(
-            output_data, tool.output_schema
-        )
+        return self._validate_against_schema(output_data, tool.output_schema)
 
     def unregister_tool(self, tool_name: str) -> None:
         """Unregister a tool.
@@ -260,13 +242,9 @@ class ToolRegistry:
             raise ValueError(f"{schema_name}.type is required")
 
         if schema.type == "object" and not schema.properties:
-            raise ValueError(
-                f"{schema_name}.properties is required for object type"
-            )
+            raise ValueError(f"{schema_name}.properties is required for object type")
 
-    def _validate_against_schema(
-        self, data: Any, schema: ToolSchema
-    ) -> bool:
+    def _validate_against_schema(self, data: Any, schema: ToolSchema) -> bool:
         """Validate data against schema using JSON Schema.
 
         Args:
@@ -306,9 +284,7 @@ class ToolRegistry:
             logger.error(f"Schema validation error: {e}")
             return False
 
-    def _basic_type_validation(
-        self, data: Any, schema: ToolSchema
-    ) -> bool:
+    def _basic_type_validation(self, data: Any, schema: ToolSchema) -> bool:
         """Basic type validation fallback when jsonschema not available.
 
         Args:
@@ -345,4 +321,3 @@ class ToolRegistry:
 
 # Global tool registry instance
 tool_registry = ToolRegistry()
-

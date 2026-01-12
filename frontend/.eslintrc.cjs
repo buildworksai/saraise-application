@@ -30,6 +30,12 @@ module.exports = {
     'react-hooks/exhaustive-deps': 'error',
 
     'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+
+    // Complexity rules (SARAISE-01007)
+    'complexity': ['error', { max: 15 }],
+    'max-depth': ['error', { max: 4 }],
+    'max-nested-callbacks': ['error', { max: 3 }],
+    'max-lines-per-function': ['warn', { max: 100, skipBlankLines: true, skipComments: true }],
   },
   ignorePatterns: ['dist', 'node_modules'],
 };

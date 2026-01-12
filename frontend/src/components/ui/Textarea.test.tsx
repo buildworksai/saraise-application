@@ -44,4 +44,3 @@ describe('Textarea', () => {
     expect(textarea.readOnly).toBe(true);
   });
 });
-

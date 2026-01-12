@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+# ===================================
+# SARAISE OWASP ZAP Rules Configuration
+# ===================================
+# Custom rules for DAST scanning
+# Format: Rule ID, Action (IGNORE|WARN|FAIL), Reason
+# ===================================
+
+# Ignore false positives for API endpoints that require authentication
+# These are expected to return 401/403, not vulnerabilities
+10021	IGNORE	Expected authentication required for protected endpoints
+10020	IGNORE	Expected authentication required for protected endpoints
+
+# Ignore informational findings for API versioning headers
+# SARAISE uses /api/v1/ prefix, which is intentional
+10054	IGNORE	API versioning is intentional design
+
+# Ignore cookie security warnings for session cookies
+# SARAISE uses HttpOnly session cookies, which is correct
+10010	WARN	Session cookies are HttpOnly (expected behavior)
+
+# Fail on critical security issues
+# These should always block merge
+10000	FAIL	SQL Injection (critical)
+10001	FAIL	Command Injection (critical)
+10002	FAIL	Path Traversal (critical)
+10003	FAIL	Remote Code Execution (critical)
+10004	FAIL	Cross-Site Scripting (XSS) - Stored (critical)
+10005	FAIL	Cross-Site Scripting (XSS) - Reflected (critical)
+10007	FAIL	Cross-Site Request Forgery (CSRF) (critical)
+10008	FAIL	Server-Side Request Forgery (SSRF) (critical)
+10009	FAIL	Insecure Direct Object Reference (IDOR) (critical)
+
+# Warn on high-severity issues (review required)
+10011	WARN	Weak Authentication (high)
+10012	WARN	Session Fixation (high)
+10013	WARN	Insecure Random Number Generation (high)
+10014	WARN	Weak Cryptography (high)
+10015	WARN	Information Disclosure (high)

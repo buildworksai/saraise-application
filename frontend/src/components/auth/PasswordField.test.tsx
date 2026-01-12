@@ -17,15 +17,15 @@ describe('PasswordField', () => {
   it('should toggle password visibility', async () => {
     const user = userEvent.setup();
     render(<PasswordField id="password" label="Password" />);
-    
+
     const input = screen.getByLabelText(/^password$/i) as HTMLInputElement;
     const toggleButton = screen.getByRole('button');
-    
+
     expect(input.type).toBe('password');
-    
+
     await user.click(toggleButton);
     expect(input.type).toBe('text');
-    
+
     await user.click(toggleButton);
     expect(input.type).toBe('password');
   });
@@ -44,11 +44,10 @@ describe('PasswordField', () => {
     const user = userEvent.setup();
     const handleChange = vi.fn();
     render(<PasswordField id="password" label="Password" onChange={handleChange} />);
-    
+
     const input = screen.getByLabelText(/^password$/i);
     await user.type(input, 'test123');
-    
+
     expect(handleChange).toHaveBeenCalled();
   });
 });
-

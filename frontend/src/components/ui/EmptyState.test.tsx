@@ -17,7 +17,7 @@ describe('EmptyState', () => {
         description="There are no items to display"
       />
     );
-    
+
     expect(screen.getByText('No items')).toBeInTheDocument();
     expect(screen.getByText('There are no items to display')).toBeInTheDocument();
   });
@@ -25,7 +25,7 @@ describe('EmptyState', () => {
   it('should render action button when provided', async () => {
     const user = userEvent.setup();
     const handleAction = vi.fn();
-    
+
     render(
       <EmptyState
         icon={Bot}
@@ -37,10 +37,10 @@ describe('EmptyState', () => {
         }}
       />
     );
-    
+
     const button = screen.getByRole('button', { name: 'Create Item' });
     expect(button).toBeInTheDocument();
-    
+
     await user.click(button);
     expect(handleAction).toHaveBeenCalled();
   });
@@ -53,8 +53,7 @@ describe('EmptyState', () => {
         description="There are no items"
       />
     );
-    
+
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 });
-

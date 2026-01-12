@@ -13,10 +13,11 @@ Architecture Compliance:
 
 from __future__ import annotations
 
+import uuid
+
+from django.contrib.auth import get_user_model
 from django.db import models
 from django.utils import timezone
-from django.contrib.auth import get_user_model
-import uuid
 
 User = get_user_model()
 
@@ -45,13 +46,9 @@ class Role(models.Model):
 
     # Role definition
     name = models.CharField(max_length=255, db_index=True)
-    code = models.CharField(
-        max_length=100, db_index=True
-    )  # snake_case unique identifier
+    code = models.CharField(max_length=100, db_index=True)  # snake_case unique identifier
     description = models.TextField(blank=True)
-    role_type = models.CharField(
-        max_length=50, choices=RoleType.choices, default=RoleType.CUSTOM
-    )
+    role_type = models.CharField(max_length=50, choices=RoleType.choices, default=RoleType.CUSTOM)
 
     # Hierarchy
     parent_role_id = models.UUIDField(null=True, blank=True, db_index=True)
@@ -122,12 +119,8 @@ class RolePermission(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    role = models.ForeignKey(
-        Role, on_delete=models.CASCADE, related_name="role_permissions"
-    )
-    permission = models.ForeignKey(
-        Permission, on_delete=models.CASCADE, related_name="role_permissions"
-    )
+    role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name="role_permissions")
+    permission = models.ForeignKey(Permission, on_delete=models.CASCADE, related_name="role_permissions")
 
     # Override
     is_granted = models.BooleanField(default=True)  # false for explicit deny
@@ -238,12 +231,8 @@ class UserPermissionSet(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name="user_permission_sets"
-    )
-    permission_set = models.ForeignKey(
-        PermissionSet, on_delete=models.CASCADE, related_name="user_permission_sets"
-    )
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="user_permission_sets")
+    permission_set = models.ForeignKey(PermissionSet, on_delete=models.CASCADE, related_name="user_permission_sets")
 
     # Temporal
     granted_at = models.DateTimeField(default=timezone.now)
@@ -298,24 +287,16 @@ class FieldSecurity(models.Model):
     field = models.CharField(max_length=100, db_index=True)
 
     # Security per Role
-    role = models.ForeignKey(
-        Role, on_delete=models.CASCADE, related_name="field_security"
-    )
+    role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name="field_security")
 
     # Visibility
-    visibility = models.CharField(
-        max_length=50, choices=Visibility.choices, default=Visibility.VISIBLE
-    )
+    visibility = models.CharField(max_length=50, choices=Visibility.choices, default=Visibility.VISIBLE)
 
     # Edit Control
-    edit_control = models.CharField(
-        max_length=50, choices=EditControl.choices, default=EditControl.EDITABLE
-    )
+    edit_control = models.CharField(max_length=50, choices=EditControl.choices, default=EditControl.EDITABLE)
 
     # Masking
-    mask_pattern = models.CharField(
-        max_length=100, blank=True
-    )  # e.g., '***-**-XXXX' for SSN
+    mask_pattern = models.CharField(max_length=100, blank=True)  # e.g., '***-**-XXXX' for SSN
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -353,12 +334,8 @@ class RowSecurityRule(models.Model):
     object = models.CharField(max_length=100, db_index=True)
 
     # Rule
-    role = models.ForeignKey(
-        Role, on_delete=models.CASCADE, related_name="row_security_rules"
-    )
-    rule_type = models.CharField(
-        max_length=50, choices=RuleType.choices, default=RuleType.OWNERSHIP
-    )
+    role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name="row_security_rules")
+    rule_type = models.CharField(max_length=50, choices=RuleType.choices, default=RuleType.OWNERSHIP)
 
     # Filter (SQL WHERE clause or equivalent)
     filter_criteria = models.TextField()
@@ -406,23 +383,17 @@ class SecurityProfile(models.Model):
     # Profile definition
     name = models.CharField(max_length=255, db_index=True)
     description = models.TextField(blank=True)
-    profile_type = models.CharField(
-        max_length=50, choices=ProfileType.choices, default=ProfileType.STANDARD
-    )
+    profile_type = models.CharField(max_length=50, choices=ProfileType.choices, default=ProfileType.STANDARD)
 
     # Access Policies (stored as JSON)
     ip_whitelist = models.JSONField(default=list, blank=True)
     ip_blacklist = models.JSONField(default=list, blank=True)
     allowed_countries = models.JSONField(default=list, blank=True)  # ISO country codes
     blocked_countries = models.JSONField(default=list, blank=True)
-    time_restrictions = models.JSONField(
-        default=dict, blank=True
-    )  # {days: [1-5], hours: [9-17]}
+    time_restrictions = models.JSONField(default=dict, blank=True)  # {days: [1-5], hours: [9-17]}
 
     # Authentication Policies
-    mfa_required = models.CharField(
-        max_length=50, choices=MFARequired.choices, default=MFARequired.CONDITIONAL
-    )
+    mfa_required = models.CharField(max_length=50, choices=MFARequired.choices, default=MFARequired.CONDITIONAL)
     allowed_mfa_methods = models.JSONField(default=list, blank=True)
     password_policy = models.JSONField(default=dict, blank=True)
     session_timeout_minutes = models.IntegerField(default=60)
@@ -478,17 +449,13 @@ class SecurityAuditLog(models.Model):
 
     # Event
     action = models.CharField(max_length=100, db_index=True)
-    actor_type = models.CharField(
-        max_length=20, choices=ActorType.choices, default=ActorType.USER
-    )
+    actor_type = models.CharField(max_length=20, choices=ActorType.choices, default=ActorType.USER)
     actor_id = models.UUIDField(db_index=True)
     resource_type = models.CharField(max_length=100, db_index=True)
     resource_id = models.UUIDField(null=True, blank=True)
 
     # Authorization decision
-    decision = models.CharField(
-        max_length=10, choices=Decision.choices, null=True, blank=True
-    )
+    decision = models.CharField(max_length=10, choices=Decision.choices, null=True, blank=True)
     reason_codes = models.JSONField(default=list, blank=True)
 
     # Context

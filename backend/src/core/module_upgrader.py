@@ -7,25 +7,19 @@ Task: 502.2 - Module Upgrade & Rollback
 from __future__ import annotations
 
 import logging
-from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
-from django.db import transaction
-from django.core.management import call_command
 from django.apps import apps
+from django.core.management import call_command
+from django.db import transaction
 from django.utils import timezone
 
-from .module_registry_service import (
-    module_registry_service,
-)
-from .module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
-from .module_upgrade_models import (
-    ModuleUpgrade,
-    UpgradeStep,
-    UpgradeStatus,
-)
-from .module_versioning import Version, compatibility_checker
 from .module_installer import ModuleInstaller
+from .module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
+from .module_registry_service import module_registry_service
+from .module_upgrade_models import ModuleUpgrade, UpgradeStatus, UpgradeStep
+from .module_versioning import Version, compatibility_checker
 
 logger = logging.getLogger(__name__)
 
@@ -82,18 +76,14 @@ class ModuleUpgrader:
         ).first()
 
         if not current_installation:
-            raise UpgradeError(
-                f"Module {module_name} not installed for tenant {tenant_id}"
-            )
+            raise UpgradeError(f"Module {module_name} not installed for tenant {tenant_id}")
 
         from_version = current_installation.module_version
 
         # Get target module from registry
         target_entry = self.registry_service.get_module(module_name, to_version)
         if not target_entry:
-            raise UpgradeError(
-                f"Module {module_name} v{to_version} not found in registry"
-            )
+            raise UpgradeError(f"Module {module_name} v{to_version} not found in registry")
 
         # Check version compatibility
         try:
@@ -116,9 +106,7 @@ class ModuleUpgrader:
         try:
             # Step 1: Validate upgrade compatibility
             self._log_step(upgrade, "validate_compatibility", 1)
-            self._validate_upgrade_compatibility(
-                current_version, target_version, module_name
-            )
+            self._validate_upgrade_compatibility(current_version, target_version, module_name)
 
             # Step 2: Validate schema changes (expand/contract)
             self._log_step(upgrade, "validate_schema_changes", 2)
@@ -157,8 +145,7 @@ class ModuleUpgrader:
             upgrade.save()
 
             logger.info(
-                f"Successfully upgraded module {module_name} "
-                f"{from_version} -> {to_version} for tenant {tenant_id}"
+                f"Successfully upgraded module {module_name} " f"{from_version} -> {to_version} for tenant {tenant_id}"
             )
 
             return upgrade
@@ -214,15 +201,11 @@ class ModuleUpgrader:
             # Step 1: Restore backup snapshot
             self._log_step(upgrade, "restore_backup", 1)
             if upgrade.backup_snapshot:
-                self._restore_backup_snapshot(
-                    upgrade.tenant_id, upgrade.module_name, upgrade.backup_snapshot
-                )
+                self._restore_backup_snapshot(upgrade.tenant_id, upgrade.module_name, upgrade.backup_snapshot)
 
             # Step 2: Rollback migrations
             self._log_step(upgrade, "rollback_migrations", 2)
-            self._rollback_migrations(
-                upgrade.module_name, upgrade.from_version, upgrade.to_version
-            )
+            self._rollback_migrations(upgrade.module_name, upgrade.from_version, upgrade.to_version)
 
             # Step 3: Restore module version
             installation = TenantModuleInstallation.objects.filter(
@@ -233,9 +216,7 @@ class ModuleUpgrader:
 
             if installation:
                 # Get original registry entry
-                original_entry = self.registry_service.get_module(
-                    upgrade.module_name, upgrade.from_version
-                )
+                original_entry = self.registry_service.get_module(upgrade.module_name, upgrade.from_version)
                 if original_entry:
                     installation.registry_entry = original_entry
                     installation.module_version = upgrade.from_version
@@ -244,9 +225,7 @@ class ModuleUpgrader:
             # Step 4: Restore registrations
             self._log_step(upgrade, "restore_registrations", 3)
             if original_entry:
-                self._restore_module_registrations(
-                    upgrade.tenant_id, original_entry, installation
-                )
+                self._restore_module_registrations(upgrade.tenant_id, original_entry, installation)
 
             # Mark as rolled back
             upgrade.status = UpgradeStatus.ROLLED_BACK
@@ -280,26 +259,16 @@ class ModuleUpgrader:
             UpgradeError: If upgrade is not compatible.
         """
         # Check if upgrade is safe (same major version or explicit approval)
-        if not self.compatibility_checker.is_upgrade_safe(
-            current_version, target_version
-        ):
+        if not self.compatibility_checker.is_upgrade_safe(current_version, target_version):
             raise UpgradeError(
-                f"Major version upgrade from {current_version} to {target_version} "
-                f"requires explicit approval"
+                f"Major version upgrade from {current_version} to {target_version} " f"requires explicit approval"
             )
 
         # Check backward compatibility
-        if not self.compatibility_checker.is_backward_compatible(
-            current_version, target_version
-        ):
-            logger.warning(
-                f"Upgrade from {current_version} to {target_version} "
-                f"may not be backward compatible"
-            )
+        if not self.compatibility_checker.is_backward_compatible(current_version, target_version):
+            logger.warning(f"Upgrade from {current_version} to {target_version} " f"may not be backward compatible")
 
-    def _validate_schema_changes(
-        self, module_name: str, from_version: str, to_version: str
-    ) -> None:
+    def _validate_schema_changes(self, module_name: str, from_version: str, to_version: str) -> None:
         """Validate schema changes follow expand/contract discipline.
 
         Args:
@@ -321,9 +290,7 @@ class ModuleUpgrader:
             f"{from_version} -> {to_version} (expand/contract discipline)"
         )
 
-    def _create_backup_snapshot(
-        self, tenant_id: str, module_name: str
-    ) -> Dict[str, Any]:
+    def _create_backup_snapshot(self, tenant_id: str, module_name: str) -> Dict[str, Any]:
         """Create backup snapshot before upgrade.
 
         Args:
@@ -349,9 +316,7 @@ class ModuleUpgrader:
 
         return snapshot
 
-    def _restore_backup_snapshot(
-        self, tenant_id: str, module_name: str, backup_data: Dict[str, Any]
-    ) -> None:
+    def _restore_backup_snapshot(self, tenant_id: str, module_name: str, backup_data: Dict[str, Any]) -> None:
         """Restore backup snapshot.
 
         Args:
@@ -361,13 +326,9 @@ class ModuleUpgrader:
         """
         # This is a placeholder - actual implementation would restore data
 
-        logger.info(
-            f"Restored backup snapshot for {module_name} (tenant: {tenant_id})"
-        )
+        logger.info(f"Restored backup snapshot for {module_name} (tenant: {tenant_id})")
 
-    def _run_migrations(
-        self, module_name: str, from_version: str, to_version: str
-    ) -> None:
+    def _run_migrations(self, module_name: str, from_version: str, to_version: str) -> None:
         """Run migrations for upgrade.
 
         Args:
@@ -390,24 +351,18 @@ class ModuleUpgrader:
                 try:
                     apps.get_app_config(app_name)
                 except LookupError:
-                    logger.warning(
-                        f"Module {module_name} app not found, skipping migrations"
-                    )
+                    logger.warning(f"Module {module_name} app not found, skipping migrations")
                     return
 
             # Run migrations
             call_command("migrate", app_name, verbosity=0, interactive=False)
 
-            logger.info(
-                f"Ran migrations for {module_name} upgrade {from_version} -> {to_version}"
-            )
+            logger.info(f"Ran migrations for {module_name} upgrade {from_version} -> {to_version}")
 
         except Exception as e:
             raise UpgradeError(f"Migration failed for {module_name}: {e}") from e
 
-    def _rollback_migrations(
-        self, module_name: str, from_version: str, to_version: str
-    ) -> None:
+    def _rollback_migrations(self, module_name: str, from_version: str, to_version: str) -> None:
         """Rollback migrations.
 
         Args:
@@ -419,14 +374,9 @@ class ModuleUpgrader:
         # This would require custom migration reversal logic
         # For now, this is a placeholder
 
-        logger.info(
-            f"Rolled back migrations for {module_name} "
-            f"{to_version} -> {from_version}"
-        )
+        logger.info(f"Rolled back migrations for {module_name} " f"{to_version} -> {from_version}")
 
-    def _run_data_migrations(
-        self, tenant_id: str, module_name: str, from_version: str, to_version: str
-    ) -> None:
+    def _run_data_migrations(self, tenant_id: str, module_name: str, from_version: str, to_version: str) -> None:
         """Run data migrations during upgrade.
 
         Args:
@@ -440,10 +390,7 @@ class ModuleUpgrader:
         # 2. Transform data between versions
         # 3. Handle data type conversions
 
-        logger.info(
-            f"Ran data migrations for {module_name} "
-            f"{from_version} -> {to_version} (tenant: {tenant_id})"
-        )
+        logger.info(f"Ran data migrations for {module_name} " f"{from_version} -> {to_version} (tenant: {tenant_id})")
 
     def _update_module_registrations(
         self,
@@ -461,10 +408,7 @@ class ModuleUpgrader:
         # Update permissions, SoD actions, search indexes, AI tools
         # This is similar to installation but updates existing registrations
 
-        logger.info(
-            f"Updated registrations for module {registry_entry.name} "
-            f"(tenant: {tenant_id})"
-        )
+        logger.info(f"Updated registrations for module {registry_entry.name} " f"(tenant: {tenant_id})")
 
     def _restore_module_registrations(
         self,
@@ -481,14 +425,9 @@ class ModuleUpgrader:
         """
         # Restore permissions, SoD actions, search indexes, AI tools to previous version
 
-        logger.info(
-            f"Restored registrations for module {registry_entry.name} "
-            f"(tenant: {tenant_id})"
-        )
+        logger.info(f"Restored registrations for module {registry_entry.name} " f"(tenant: {tenant_id})")
 
-    def _post_upgrade_verification(
-        self, tenant_id: str, module_name: str, version: str
-    ) -> None:
+    def _post_upgrade_verification(self, tenant_id: str, module_name: str, version: str) -> None:
         """Perform post-upgrade verification.
 
         Args:
@@ -505,15 +444,11 @@ class ModuleUpgrader:
         ).first()
 
         if not installation or installation.module_version != version:
-            raise UpgradeError(
-                f"Module {module_name} upgrade verification failed"
-            )
+            raise UpgradeError(f"Module {module_name} upgrade verification failed")
 
         logger.info(f"Post-upgrade verification passed for {module_name} v{version}")
 
-    def _log_step(
-        self, upgrade: ModuleUpgrade, step_name: str, step_order: int
-    ) -> UpgradeStep:
+    def _log_step(self, upgrade: ModuleUpgrade, step_name: str, step_order: int) -> UpgradeStep:
         """Log upgrade step.
 
         Args:

@@ -8,14 +8,14 @@ from __future__ import annotations
 import pytest
 from django.utils import timezone
 
+from ..module_manifest_schema import ModuleLifecycle, ModuleType
+from ..module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
 from ..module_registry_service import (
+    DependencyResolutionError,
     ModuleRegistryService,
     RegistryError,
-    DependencyResolutionError,
     module_registry_service,
 )
-from ..module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
-from ..module_manifest_schema import ModuleType, ModuleLifecycle
 
 
 @pytest.mark.django_db
@@ -191,9 +191,7 @@ lifecycle: managed
 
         service.register_module(manifest_yaml, verify_signature=False)
 
-        is_compatible, errors = service.check_compatibility(
-            "test-module", "1.0.0", "tenant-1"
-        )
+        is_compatible, errors = service.check_compatibility("test-module", "1.0.0", "tenant-1")
 
         assert is_compatible is True
         assert len(errors) == 0
@@ -202,9 +200,7 @@ lifecycle: managed
         """Test checking compatibility fails when module not found."""
         service = ModuleRegistryService()
 
-        is_compatible, errors = service.check_compatibility(
-            "non-existent", "1.0.0", "tenant-1"
-        )
+        is_compatible, errors = service.check_compatibility("non-existent", "1.0.0", "tenant-1")
 
         assert is_compatible is False
         assert len(errors) > 0
@@ -260,4 +256,3 @@ lifecycle: managed
 
         assert len(installed) >= 1
         assert any(m.module_name == "test-module" for m in installed)
-

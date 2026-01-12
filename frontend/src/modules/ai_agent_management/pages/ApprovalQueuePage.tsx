@@ -1,6 +1,6 @@
 /**
  * Approval Queue Page
- * 
+ *
  * Displays pending approval requests with approve/reject actions.
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';

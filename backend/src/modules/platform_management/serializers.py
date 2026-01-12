@@ -4,13 +4,8 @@ DRF serializers for API validation and transformation
 """
 
 from rest_framework import serializers
-from .models import (
-    PlatformSetting,
-    FeatureFlag,
-    SystemHealth,
-    PlatformAuditEvent,
-    PlatformMetrics,
-)
+
+from .models import FeatureFlag, PlatformAuditEvent, PlatformMetrics, PlatformSetting, SystemHealth
 
 
 class PlatformSettingSerializer(serializers.ModelSerializer):
@@ -19,22 +14,29 @@ class PlatformSettingSerializer(serializers.ModelSerializer):
     class Meta:
         model = PlatformSetting
         fields = [
-            'id', 'tenant_id', 'key', 'value', 'category',
-            'description', 'is_secret', 'data_type',
-            'created_at', 'updated_at'
+            "id",
+            "tenant_id",
+            "key",
+            "value",
+            "category",
+            "description",
+            "is_secret",
+            "data_type",
+            "created_at",
+            "updated_at",
         ]
-        read_only_fields = ['id', 'tenant_id', 'created_at', 'updated_at']
+        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
 
     def validate_key(self, value):
         if not value or len(value) < 2:
             raise serializers.ValidationError("Key must be at least 2 characters")
-        return value.lower().replace(' ', '_')
+        return value.lower().replace(" ", "_")
 
     def to_representation(self, instance):
         """Mask secret values in output."""
         data = super().to_representation(instance)
         if instance.is_secret:
-            data['value'] = '********'
+            data["value"] = "********"
         return data
 
 
@@ -43,12 +45,12 @@ class PlatformSettingCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PlatformSetting
-        fields = ['key', 'value', 'category', 'description', 'is_secret', 'data_type']
+        fields = ["key", "value", "category", "description", "is_secret", "data_type"]
 
     def validate_key(self, value):
         if not value or len(value) < 2:
             raise serializers.ValidationError("Key must be at least 2 characters")
-        return value.lower().replace(' ', '_')
+        return value.lower().replace(" ", "_")
 
 
 class FeatureFlagSerializer(serializers.ModelSerializer):
@@ -56,17 +58,13 @@ class FeatureFlagSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FeatureFlag
-        fields = [
-            'id', 'tenant_id', 'name', 'enabled',
-            'description', 'rollout_percentage',
-            'created_at', 'updated_at'
-        ]
-        read_only_fields = ['id', 'tenant_id', 'created_at', 'updated_at']
+        fields = ["id", "tenant_id", "name", "enabled", "description", "rollout_percentage", "created_at", "updated_at"]
+        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
 
     def validate_name(self, value):
         if not value or len(value) < 2:
             raise serializers.ValidationError("Name must be at least 2 characters")
-        return value.lower().replace(' ', '_')
+        return value.lower().replace(" ", "_")
 
     def validate_rollout_percentage(self, value):
         if value < 0 or value > 100:
@@ -79,12 +77,12 @@ class FeatureFlagCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FeatureFlag
-        fields = ['name', 'enabled', 'description', 'rollout_percentage']
+        fields = ["name", "enabled", "description", "rollout_percentage"]
 
     def validate_name(self, value):
         if not value or len(value) < 2:
             raise serializers.ValidationError("Name must be at least 2 characters")
-        return value.lower().replace(' ', '_')
+        return value.lower().replace(" ", "_")
 
     def validate_rollout_percentage(self, value):
         if value < 0 or value > 100:
@@ -97,11 +95,8 @@ class SystemHealthSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SystemHealth
-        fields = [
-            'id', 'service_name', 'status', 'last_check',
-            'response_time_ms', 'details', 'error_message'
-        ]
-        read_only_fields = ['id', 'last_check']
+        fields = ["id", "service_name", "status", "last_check", "response_time_ms", "details", "error_message"]
+        read_only_fields = ["id", "last_check"]
 
 
 class PlatformAuditEventSerializer(serializers.ModelSerializer):
@@ -110,9 +105,16 @@ class PlatformAuditEventSerializer(serializers.ModelSerializer):
     class Meta:
         model = PlatformAuditEvent
         fields = [
-            'id', 'tenant_id', 'action', 'actor_type', 'actor_id',
-            'resource_type', 'resource_id', 'timestamp',
-            'details', 'ip_address'
+            "id",
+            "tenant_id",
+            "action",
+            "actor_type",
+            "actor_id",
+            "resource_type",
+            "resource_id",
+            "timestamp",
+            "details",
+            "ip_address",
         ]
         read_only_fields = fields  # All fields are read-only
 
@@ -123,13 +125,17 @@ class PlatformMetricsSerializer(serializers.ModelSerializer):
     class Meta:
         model = PlatformMetrics
         fields = [
-            'id', 'metric_type', 'time_range', 'metrics_data',
-            'recorded_at', 'created_at', 'updated_at',
-            'created_by', 'updated_by'
+            "id",
+            "metric_type",
+            "time_range",
+            "metrics_data",
+            "recorded_at",
+            "created_at",
+            "updated_at",
+            "created_by",
+            "updated_by",
         ]
-        read_only_fields = [
-            'id', 'recorded_at', 'created_at', 'updated_at', 'created_by', 'updated_by'
-        ]
+        read_only_fields = ["id", "recorded_at", "created_at", "updated_at", "created_by", "updated_by"]
 
 
 class PlatformMetricsRequestSerializer(serializers.Serializer):

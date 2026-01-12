@@ -1,8 +1,8 @@
 /**
  * Authentication Service
- * 
+ *
  * Handles authentication API calls.
- * 
+ *
  * MIGRATED: Now uses auth-contracts.ts for types and endpoints.
  * Reference: saraise-documentation/rules/agent-rules/27-contracts-architecture.md
  */
@@ -14,6 +14,7 @@ import type {
   RegisterRequest,
   ForgotPasswordRequest,
   ResetPasswordRequest,
+  User,
 } from './auth-contracts';
 import { ENDPOINTS } from './auth-contracts';
 
@@ -45,7 +46,7 @@ export const authService = {
   /**
    * Get current authenticated user
    */
-  getCurrentUser: async (): Promise<import('../stores/auth-store').User> => {
+  getCurrentUser: async (): Promise<User> => {
     const res = await apiClient.get<CurrentUserResponse>(ENDPOINTS.ME);
     return res.user;
   },
@@ -78,4 +79,3 @@ export const authService = {
     return apiClient.post(ENDPOINTS.RESET_PASSWORD, data);
   },
 };
-

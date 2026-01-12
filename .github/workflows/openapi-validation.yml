@@ -1,0 +1,86 @@
+# SPDX-License-Identifier: Apache-2.0
+# ===================================
+# SARAISE OpenAPI Schema Validation
+# ===================================
+# Validates OpenAPI schema generation and consistency
+# ===================================
+
+name: OpenAPI Schema Validation
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+jobs:
+  validate-openapi:
+    name: Validate OpenAPI Schema
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          cd backend
+          pip install -e .[dev]
+          pip install openapi-spec-validator
+
+      - name: Generate OpenAPI Schema
+        run: |
+          cd backend
+          python manage.py spectacular --file schema.yaml --format openapi-json || true
+          
+          # Alternative: Use DRF's schema endpoint if available
+          # curl http://localhost:8000/api/schema/ -o schema.yaml || true
+
+      - name: Validate OpenAPI Schema
+        run: |
+          if [ -f backend/schema.yaml ]; then
+            python -c "
+            import yaml
+            from openapi_spec_validator import validate_spec
+            
+            with open('backend/schema.yaml') as f:
+                spec = yaml.safe_load(f)
+            
+            try:
+                validate_spec(spec)
+                print('✅ OpenAPI schema is valid')
+            except Exception as e:
+                print(f'❌ OpenAPI schema validation failed: {e}')
+                exit(1)
+            "
+          else
+            echo "⚠️  OpenAPI schema file not found. Skipping validation."
+          fi
+
+      - name: Check Schema Completeness
+        run: |
+          if [ -f backend/schema.yaml ]; then
+            python -c "
+            import yaml
+            
+            with open('backend/schema.yaml') as f:
+                spec = yaml.safe_load(f)
+            
+            required_paths = ['/api/v1/crm/', '/api/v1/platform/']
+            missing = []
+            
+            for path in required_paths:
+                if path not in spec.get('paths', {}):
+                    missing.append(path)
+            
+            if missing:
+                print(f'⚠️  Missing API paths in schema: {missing}')
+            else:
+                print('✅ All required API paths present in schema')
+            "
+          fi

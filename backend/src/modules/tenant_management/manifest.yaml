@@ -24,4 +24,3 @@ ai_tools:
   - list_tenants
   - get_tenant_health
   - manage_tenant_modules
-

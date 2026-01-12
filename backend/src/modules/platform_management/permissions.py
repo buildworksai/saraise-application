@@ -14,10 +14,10 @@ class PlatformAdminPermission(permissions.BasePermission):
         # For now, check if user has platform admin role
         if not request.user or not request.user.is_authenticated:
             return False
-        
+
         # Check user roles (to be integrated with Policy Engine)
-        user_roles = getattr(request.user, 'roles', [])
-        return 'platform_admin' in user_roles or 'super_admin' in user_roles
+        user_roles = getattr(request.user, "roles", [])
+        return "platform_admin" in user_roles or "super_admin" in user_roles
 
 
 class PlatformViewerPermission(permissions.BasePermission):
@@ -27,11 +27,10 @@ class PlatformViewerPermission(permissions.BasePermission):
         """Check if user has platform viewer permissions."""
         if not request.user or not request.user.is_authenticated:
             return False
-        
+
         # Allow read-only access for platform viewers
         if request.method in permissions.SAFE_METHODS:
-            user_roles = getattr(request.user, 'roles', [])
-            return 'platform_viewer' in user_roles or 'platform_admin' in user_roles
-        
-        return False
+            user_roles = getattr(request.user, "roles", [])
+            return "platform_viewer" in user_roles or "platform_admin" in user_roles
 
+        return False

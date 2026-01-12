@@ -5,18 +5,13 @@ Task: 503.2 - Module Guardrails
 
 from __future__ import annotations
 
-import pytest
 import tempfile
 from pathlib import Path
 
-from ..module_guardrail_service import (
-    ModuleGuardrailService,
-    GuardrailError,
-)
-from ..module_guardrail_models import (
-    GuardrailViolation,
-    GuardrailViolationType,
-)
+import pytest
+
+from ..module_guardrail_models import GuardrailViolation, GuardrailViolationType
+from ..module_guardrail_service import GuardrailError, ModuleGuardrailService
 
 
 @pytest.mark.django_db
@@ -63,9 +58,7 @@ def login(username: str, password: str) -> dict:
 
             violations = service.scan_module("test-module", str(module_dir))
             assert len(violations) > 0
-            assert any(
-                v.violation_type == GuardrailViolationType.AUTH_DRIFT for v in violations
-            )
+            assert any(v.violation_type == GuardrailViolationType.AUTH_DRIFT for v in violations)
 
     def test_scan_module_policy_drift(self) -> None:
         """Test scanning module with policy drift violations."""
@@ -86,9 +79,7 @@ def check_permission(user: str) -> bool:
 
             violations = service.scan_module("test-module", str(module_dir))
             assert len(violations) > 0
-            assert any(
-                v.violation_type == GuardrailViolationType.POLICY_DRIFT for v in violations
-            )
+            assert any(v.violation_type == GuardrailViolationType.POLICY_DRIFT for v in violations)
 
     def test_record_violation(self) -> None:
         """Test recording a violation."""
@@ -119,9 +110,7 @@ def check_permission(user: str) -> bool:
             clean_file = module_dir / "models.py"
             clean_file.write_text("def create_item(): pass\n")
 
-            is_compliant, violations = service.check_module_compliance(
-                "test-module", str(module_dir)
-            )
+            is_compliant, violations = service.check_module_compliance("test-module", str(module_dir))
 
             assert is_compliant is True
             assert len(violations) == 0
@@ -137,9 +126,7 @@ def check_permission(user: str) -> bool:
             bad_file = module_dir / "auth.py"
             bad_file.write_text("def login(): pass\n")
 
-            is_compliant, violations = service.check_module_compliance(
-                "test-module", str(module_dir)
-            )
+            is_compliant, violations = service.check_module_compliance("test-module", str(module_dir))
 
             assert is_compliant is False
             assert len(violations) > 0
@@ -178,9 +165,7 @@ def check_permission(user: str) -> bool:
         assert len(module_violations) >= 1
 
         # Filter by type
-        auth_violations = service.get_violations(
-            violation_type=GuardrailViolationType.AUTH_DRIFT
-        )
+        auth_violations = service.get_violations(violation_type=GuardrailViolationType.AUTH_DRIFT)
         assert len(auth_violations) >= 1
 
     def test_resolve_violation(self) -> None:
@@ -256,4 +241,3 @@ def check_permission(user: str) -> bool:
 
         should_block = service.block_module_on_violation("test-module", "tenant-1")
         assert should_block is True
-

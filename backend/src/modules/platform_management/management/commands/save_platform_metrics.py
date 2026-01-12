@@ -5,17 +5,19 @@ This command should be run via cron or scheduler to build historical time-series
 Usage:
     python manage.py save_platform_metrics [--metric-type=complete] [--time-range=30d]
 """
+
 from django.core.management.base import BaseCommand
-from src.modules.platform_management.services import AnalyticsService
+
 from src.modules.platform_management.models import PlatformMetrics
+from src.modules.platform_management.services import AnalyticsService
 
 
 class Command(BaseCommand):
-    help = 'Save current platform metrics to database for historical tracking'
+    help = "Save current platform metrics to database for historical tracking"
 
     def add_arguments(self, parser):
         parser.add_argument(
-            '--metric-type',
+            "--metric-type",
             type=str,
             default=PlatformMetrics.MetricType.COMPLETE,
             choices=[
@@ -25,20 +27,20 @@ class Command(BaseCommand):
                 PlatformMetrics.MetricType.REVENUE,
                 PlatformMetrics.MetricType.COMPLETE,
             ],
-            help='Type of metrics to save',
+            help="Type of metrics to save",
         )
         parser.add_argument(
-            '--time-range',
+            "--time-range",
             type=str,
-            default='30d',
-            help='Time range for metrics (e.g., 7d, 30d, 90d)',
+            default="30d",
+            help="Time range for metrics (e.g., 7d, 30d, 90d)",
         )
 
     def handle(self, *args, **options):
-        metric_type = options['metric_type']
-        time_range = options['time_range']
+        metric_type = options["metric_type"]
+        time_range = options["time_range"]
 
-        self.stdout.write(f'Saving {metric_type} metrics for {time_range}...')
+        self.stdout.write(f"Saving {metric_type} metrics for {time_range}...")
 
         service = AnalyticsService()
         try:
@@ -49,11 +51,9 @@ class Command(BaseCommand):
             )
             self.stdout.write(
                 self.style.SUCCESS(
-                    f'Successfully saved metrics: {metric.id} ({metric.metric_type}, {metric.time_range})'
+                    f"Successfully saved metrics: {metric.id} ({metric.metric_type}, {metric.time_range})"
                 )
             )
         except Exception as e:
-            self.stdout.write(
-                self.style.ERROR(f'Failed to save metrics: {str(e)}')
-            )
+            self.stdout.write(self.style.ERROR(f"Failed to save metrics: {str(e)}"))
             raise

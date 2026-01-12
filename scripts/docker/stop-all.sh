@@ -13,4 +13,3 @@ cd "$PROJECT_ROOT" || { echo "Error: Could not navigate to project root."; exit 
 docker-compose -f docker-compose.dev.yml down
 
 echo "✅ All services stopped."
-

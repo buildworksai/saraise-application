@@ -1,8 +1,8 @@
 /**
  * SPDX-License-Identifier: Apache-2.0
- * 
+ *
  * Permissions Page
- * 
+ *
  * Lists all available permissions (platform-level, read-only).
  */
 import { useQuery } from '@tanstack/react-query';
@@ -142,4 +142,3 @@ export const PermissionsPage = () => {
     </div>
   );
 };
-

@@ -1,9 +1,9 @@
 /**
  * Tenant Management Service
- * 
+ *
  * Service client for Tenant Management API endpoints.
  * CRITICAL: Platform-level operations - only platform owners can access.
- * 
+ *
  * MIGRATED: Now uses contracts.ts for types and endpoints.
  * Reference: saraise-documentation/rules/agent-rules/27-contracts-architecture.md
  */
@@ -293,4 +293,3 @@ export const tenantService = {
     },
   },
 };
-

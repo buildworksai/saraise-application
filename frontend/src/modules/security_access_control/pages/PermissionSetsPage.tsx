@@ -1,8 +1,8 @@
 /**
  * SPDX-License-Identifier: Apache-2.0
- * 
+ *
  * Permission Sets Page
- * 
+ *
  * Lists and manages permission sets for the current tenant.
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -182,4 +182,3 @@ export const PermissionSetsPage = () => {
     </div>
   );
 };
-

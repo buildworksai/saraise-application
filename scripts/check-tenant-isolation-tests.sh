@@ -1,6 +1,6 @@
 #!/bin/bash
 # SARAISE Tenant Isolation Test Checker
-# 
+#
 # This script verifies that every module with tenant-scoped models
 # has a corresponding test_isolation.py file.
 #
@@ -29,7 +29,7 @@ SKIP_MODULES="core __pycache__ __init__"
 
 for module_dir in backend/src/modules/*/; do
     module_name=$(basename "$module_dir")
-    
+
     # Check if module should be skipped
     skip=false
     for skip_module in $SKIP_MODULES; do
@@ -38,17 +38,17 @@ for module_dir in backend/src/modules/*/; do
             break
         fi
     done
-    
+
     if [[ "$skip" == "true" ]]; then
         continue
     fi
-    
+
     # Check if module has models.py
     if [[ -f "${module_dir}models.py" ]]; then
         # Check if models contain tenant_id (indicating tenant-scoped)
         if grep -q "tenant_id" "${module_dir}models.py" 2>/dev/null; then
             CHECKED=$((CHECKED + 1))
-            
+
             # Check for test_isolation.py
             if [[ -f "${module_dir}tests/test_isolation.py" ]]; then
                 echo "✅ ${module_name}: test_isolation.py found"

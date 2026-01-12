@@ -1,0 +1,25 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: blockchain-traceability
+version: 1.0.0
+description: Blockchain-based product traceability and authenticity verification
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+permissions:
+  - blockchain_traceability.resource:create
+  - blockchain_traceability.resource:read
+  - blockchain_traceability.resource:update
+  - blockchain_traceability.resource:delete
+  - blockchain_traceability.resource:activate
+  - blockchain_traceability.resource:deactivate
+sod_actions:
+  - [blockchain_traceability.resource:create, blockchain_traceability.resource:delete]
+search_indexes:
+  - blockchain_traceability_resources
+ai_tools:
+  - create_blockchain_traceability_resource
+  - update_blockchain_traceability_resource
+  - delete_blockchain_traceability_resource

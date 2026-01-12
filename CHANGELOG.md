@@ -10,12 +10,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Initial changelog
+- Phase 7.5: Licensing subsystem for self-hosted deployments
+  - 14-day trial period for new installations
+  - License validation (connected and isolated modes)
+  - Soft lock (read-only) for expired licenses
+  - 30-day grace period for connected mode
+  - Module access control (Foundation/Core/Industry)
+- Phase 7.6: Mode-aware authentication
+  - Dual-mode authentication support (self-hosted vs SaaS)
+  - Self-hosted mode: Django built-in authentication
+  - SaaS mode: Delegation to saraise-auth service
+  - Mode-aware session middleware
+  - Mode detection utilities
 
 ### Changed
 - **License**: SARAISE is licensed under Apache License 2.0
   - SARAISE is free and open source software
   - Commercial use, modification, and distribution are allowed under Apache 2.0 terms
   - See [LICENSE](LICENSE) for full license text
+- Phase 7.7: Open source preparation
+  - Repository verified for public release
+  - All documentation verified public-friendly
+  - CI/CD workflows configured for open source
+  - Release workflow created
 
 ### Deprecated
 
@@ -24,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+- Phase 7.5: License validation prevents unauthorized module access
+- Phase 7.6: Mode-aware authentication ensures proper session validation per deployment mode
 
 ---
 
@@ -91,7 +110,7 @@ For detailed release notes, see:
 
 ---
 
-**Last Updated**: 2026-01-03
+**Last Updated**: 2026-01-07
 
 ---
 

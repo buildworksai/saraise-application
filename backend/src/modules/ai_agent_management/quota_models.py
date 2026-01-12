@@ -6,10 +6,11 @@ Task: 402.2 - AI Quota Enforcement
 
 from __future__ import annotations
 
+import uuid
+from typing import Any, Dict, Optional
+
 from django.db import models
 from django.utils import timezone
-from typing import Optional, Dict, Any
-import uuid
 
 from .models import TenantBaseModel
 
@@ -42,9 +43,7 @@ class QuotaPeriod(models.TextChoices):
 class TenantQuota(TenantBaseModel):
     """Tenant-level quota definition model."""
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     quota_type = models.CharField(
         max_length=50,
         choices=QuotaType.choices,
@@ -57,9 +56,7 @@ class TenantQuota(TenantBaseModel):
         db_index=True,
         help_text="Quota period",
     )
-    limit_value = models.BigIntegerField(
-        help_text="Quota limit value"
-    )
+    limit_value = models.BigIntegerField(help_text="Quota limit value")
     current_usage = models.BigIntegerField(
         default=0,
         help_text="Current usage in this period",
@@ -89,9 +86,7 @@ class TenantQuota(TenantBaseModel):
 class QuotaUsage(TenantBaseModel):
     """Quota usage tracking model."""
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     quota = models.ForeignKey(
         TenantQuota,
         on_delete=models.CASCADE,
@@ -106,15 +101,9 @@ class QuotaUsage(TenantBaseModel):
         blank=True,
         db_index=True,
     )
-    usage_value = models.BigIntegerField(
-        help_text="Amount of quota used"
-    )
-    usage_timestamp = models.DateTimeField(
-        auto_now_add=True, db_index=True
-    )
-    metadata = models.JSONField(
-        default=dict, help_text="Usage metadata"
-    )
+    usage_value = models.BigIntegerField(help_text="Amount of quota used")
+    usage_timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    metadata = models.JSONField(default=dict, help_text="Usage metadata")
 
     class Meta:
         db_table = "ai_quota_usage"
@@ -131,9 +120,7 @@ class QuotaUsage(TenantBaseModel):
 class ShardSaturation(TenantBaseModel):
     """Shard-level saturation monitoring model."""
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     shard_id = models.CharField(
         max_length=100,
         db_index=True,
@@ -161,9 +148,7 @@ class ShardSaturation(TenantBaseModel):
         blank=True,
         help_text="Memory usage percentage",
     )
-    measured_at = models.DateTimeField(
-        auto_now_add=True, db_index=True
-    )
+    measured_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
         db_table = "ai_shard_saturation"
@@ -183,15 +168,9 @@ class KillSwitch(TenantBaseModel):
     Global or tenant-specific kill switches for AI agent execution.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
-    name = models.CharField(
-        max_length=255, db_index=True, help_text="Kill switch name"
-    )
-    description = models.TextField(
-        blank=True, help_text="Kill switch description"
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
+    name = models.CharField(max_length=255, db_index=True, help_text="Kill switch name")
+    description = models.TextField(blank=True, help_text="Kill switch description")
     scope = models.CharField(
         max_length=50,
         choices=[
@@ -210,21 +189,11 @@ class KillSwitch(TenantBaseModel):
         db_index=True,
         help_text="Scope identifier (tenant_id, shard_id, agent_id)",
     )
-    is_active = models.BooleanField(
-        default=True, db_index=True, help_text="Whether kill switch is active"
-    )
-    reason = models.TextField(
-        blank=True, help_text="Reason for kill switch activation"
-    )
-    activated_by = models.CharField(
-        max_length=36, db_index=True, help_text="User who activated kill switch"
-    )
-    activated_at = models.DateTimeField(
-        auto_now_add=True, db_index=True
-    )
-    deactivated_at = models.DateTimeField(
-        null=True, blank=True, help_text="When kill switch was deactivated"
-    )
+    is_active = models.BooleanField(default=True, db_index=True, help_text="Whether kill switch is active")
+    reason = models.TextField(blank=True, help_text="Reason for kill switch activation")
+    activated_by = models.CharField(max_length=36, db_index=True, help_text="User who activated kill switch")
+    activated_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    deactivated_at = models.DateTimeField(null=True, blank=True, help_text="When kill switch was deactivated")
 
     class Meta:
         db_table = "ai_kill_switches"
@@ -237,4 +206,3 @@ class KillSwitch(TenantBaseModel):
 
     def __str__(self) -> str:
         return f"Kill Switch {self.name} ({self.scope})"
-

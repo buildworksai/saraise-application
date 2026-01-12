@@ -1,8 +1,8 @@
 /**
  * AI Agent Management Service
- * 
+ *
  * Service client for AI Agent Management module API calls.
- * 
+ *
  * MIGRATED: Now uses contracts.ts for types and endpoints.
  * Reference: saraise-documentation/rules/agent-rules/27-contracts-architecture.md
  */

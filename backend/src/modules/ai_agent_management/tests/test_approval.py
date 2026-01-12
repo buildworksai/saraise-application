@@ -5,15 +5,16 @@ Task: 401.3 - Human Approval Gates
 
 from __future__ import annotations
 
-import pytest
-from django.utils import timezone
 from datetime import timedelta
 
+import pytest
+from django.utils import timezone
+
+from ..approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy
+from ..approval_service import ApprovalService
 from ..models import Agent, AgentExecution, AgentIdentityType
 from ..tool_models import Tool
 from ..tool_registry import ToolSideEffectClass
-from ..approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy
-from ..approval_service import ApprovalService
 
 
 @pytest.mark.django_db
@@ -37,10 +38,7 @@ class TestApprovalService:
         )
 
         service = ApprovalService()
-        assert (
-            service.requires_approval(tool, tenant_id, "user-1", "user-1")
-            is True
-        )
+        assert service.requires_approval(tool, tenant_id, "user-1", "user-1") is True
 
     def test_requires_approval_external_integration(self) -> None:
         """Test that external integration tools with write require approval."""
@@ -60,10 +58,7 @@ class TestApprovalService:
         )
 
         service = ApprovalService()
-        assert (
-            service.requires_approval(tool, tenant_id, "user-1", "user-1")
-            is True
-        )
+        assert service.requires_approval(tool, tenant_id, "user-1", "user-1") is True
 
     def test_create_approval_request(self) -> None:
         """Test creating approval request."""
@@ -164,9 +159,7 @@ class TestApprovalService:
             tool_input={"input": "test"},
         )
 
-        approved = service.approve_request(
-            approval.id, tenant_id, "approver-1", "Approved"
-        )
+        approved = service.approve_request(approval.id, tenant_id, "approver-1", "Approved")
 
         assert approved.status == ApprovalStatus.APPROVED
         assert approved.approver_id == "approver-1"
@@ -218,11 +211,8 @@ class TestApprovalService:
             tool_input={"input": "test"},
         )
 
-        rejected = service.reject_request(
-            approval.id, tenant_id, "approver-1", "Not approved"
-        )
+        rejected = service.reject_request(approval.id, tenant_id, "approver-1", "Not approved")
 
         assert rejected.status == ApprovalStatus.REJECTED
         assert rejected.approver_id == "approver-1"
         assert rejected.rejection_reason == "Not approved"
-

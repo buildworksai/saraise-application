@@ -8,4 +8,3 @@ Phase: Phase 4 (AI Enablement & Agent Infrastructure)
 """
 
 __version__ = "1.0.0"
-

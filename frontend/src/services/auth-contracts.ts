@@ -10,7 +10,6 @@
  * Reference: saraise-documentation/rules/agent-rules/27-contracts-architecture.md
  */
 
-import type { components } from '@/types/api';
 import type { User } from '../stores/auth-store';
 
 // =============================================================================
@@ -29,13 +28,13 @@ export interface LoginRequest {
 
 /** Login response */
 export interface LoginResponse {
-  user: import('../stores/auth-store').User;
+  user: User;
   session_id: string;
 }
 
 /** Current user response */
 export interface CurrentUserResponse {
-  user: import('../stores/auth-store').User;
+  user: User;
 }
 
 /** Register request payload */
@@ -133,4 +132,3 @@ export const EXAMPLES = {
     } as LoginResponse,
   },
 } as const;
-

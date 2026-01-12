@@ -78,4 +78,3 @@ pytest src/core/licensing/tests/ -v --cov=src/core/licensing --cov-report=html -
 ---
 
 **Ready to execute!** Run the commands above to rebuild and test.
-

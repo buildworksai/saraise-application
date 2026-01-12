@@ -1,0 +1,26 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: billing-subscriptions
+version: 1.0.0
+description: Complete SaaS billing, invoicing, payment processing, subscription plans, usage metering
+type: foundation
+lifecycle: platform
+dependencies:
+  - core-identity >=1.0
+  - tenant-management >=1.0
+permissions:
+  - billing_subscriptions.resource:create
+  - billing_subscriptions.resource:read
+  - billing_subscriptions.resource:update
+  - billing_subscriptions.resource:delete
+  - billing_subscriptions.resource:activate
+  - billing_subscriptions.resource:deactivate
+sod_actions:
+  - [billing_subscriptions.resource:create, billing_subscriptions.resource:delete]
+search_indexes:
+  - billing_subscriptions_resources
+ai_tools:
+  - create_billing_subscriptions_resource
+  - update_billing_subscriptions_resource
+  - delete_billing_subscriptions_resource

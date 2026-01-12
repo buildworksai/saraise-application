@@ -7,21 +7,16 @@ Task: 401.3 - Human Approval Gates
 from __future__ import annotations
 
 import logging
-from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
-from django.utils import timezone
 from django.db import transaction
+from django.utils import timezone
 
+from .approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy, SoDViolation
 from .models import AgentExecution
 from .tool_models import Tool, ToolInvocation
 from .tool_registry import ToolSideEffectClass
-from .approval_models import (
-    ApprovalRequest,
-    ApprovalStatus,
-    SoDPolicy,
-    SoDViolation,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -118,9 +113,7 @@ class ApprovalService:
             expires_at=expires_at,
         )
 
-        logger.info(
-            f"Created approval request {approval_request.id} for tool {tool.name}"
-        )
+        logger.info(f"Created approval request {approval_request.id} for tool {tool.name}")
 
         # TODO: Send notification (Task 401.3 - notification system)
 
@@ -147,30 +140,20 @@ class ApprovalService:
         Raises:
             ValueError: If request not found or cannot be approved.
         """
-        approval_request = ApprovalRequest.objects.filter(
-            id=approval_request_id, tenant_id=tenant_id
-        ).first()
+        approval_request = ApprovalRequest.objects.filter(id=approval_request_id, tenant_id=tenant_id).first()
 
         if not approval_request:
-            raise ValueError(
-                f"Approval request {approval_request_id} not found"
-            )
+            raise ValueError(f"Approval request {approval_request_id} not found")
 
         if approval_request.status != ApprovalStatus.PENDING:
-            raise ValueError(
-                f"Approval request {approval_request_id} is not pending"
-            )
+            raise ValueError(f"Approval request {approval_request_id} is not pending")
 
         # Check if expired
         if approval_request.expires_at and timezone.now() > approval_request.expires_at:
             approval_request.status = ApprovalStatus.EXPIRED
             approval_request.decided_at = timezone.now()
-            approval_request.save(
-                update_fields=["status", "decided_at", "updated_at"]
-            )
-            raise ValueError(
-                f"Approval request {approval_request_id} has expired"
-            )
+            approval_request.save(update_fields=["status", "decided_at", "updated_at"])
+            raise ValueError(f"Approval request {approval_request_id} has expired")
 
         # Check SoD constraints
         if self._violates_sod(
@@ -188,9 +171,7 @@ class ApprovalService:
                 approval_request.agent_execution,
                 approval_request.tool_invocation,
             )
-            raise ValueError(
-                "Approval violates SoD policy - cannot approve"
-            )
+            raise ValueError("Approval violates SoD policy - cannot approve")
 
         # Approve request
         approval_request.status = ApprovalStatus.APPROVED
@@ -208,9 +189,7 @@ class ApprovalService:
             ]
         )
 
-        logger.info(
-            f"Approved request {approval_request_id} by {approver_id}"
-        )
+        logger.info(f"Approved request {approval_request_id} by {approver_id}")
 
         # TODO: Send notification (Task 401.3 - notification system)
 
@@ -237,19 +216,13 @@ class ApprovalService:
         Raises:
             ValueError: If request not found or cannot be rejected.
         """
-        approval_request = ApprovalRequest.objects.filter(
-            id=approval_request_id, tenant_id=tenant_id
-        ).first()
+        approval_request = ApprovalRequest.objects.filter(id=approval_request_id, tenant_id=tenant_id).first()
 
         if not approval_request:
-            raise ValueError(
-                f"Approval request {approval_request_id} not found"
-            )
+            raise ValueError(f"Approval request {approval_request_id} not found")
 
         if approval_request.status != ApprovalStatus.PENDING:
-            raise ValueError(
-                f"Approval request {approval_request_id} is not pending"
-            )
+            raise ValueError(f"Approval request {approval_request_id} is not pending")
 
         # Reject request
         approval_request.status = ApprovalStatus.REJECTED
@@ -266,18 +239,13 @@ class ApprovalService:
             ]
         )
 
-        logger.info(
-            f"Rejected request {approval_request_id} by {approver_id}: "
-            f"{rejection_reason}"
-        )
+        logger.info(f"Rejected request {approval_request_id} by {approver_id}: " f"{rejection_reason}")
 
         # TODO: Send notification (Task 401.3 - notification system)
 
         return approval_request
 
-    def cancel_request(
-        self, approval_request_id: str, tenant_id: str
-    ) -> ApprovalRequest:
+    def cancel_request(self, approval_request_id: str, tenant_id: str) -> ApprovalRequest:
         """Cancel an approval request.
 
         Args:
@@ -290,26 +258,18 @@ class ApprovalService:
         Raises:
             ValueError: If request not found or cannot be cancelled.
         """
-        approval_request = ApprovalRequest.objects.filter(
-            id=approval_request_id, tenant_id=tenant_id
-        ).first()
+        approval_request = ApprovalRequest.objects.filter(id=approval_request_id, tenant_id=tenant_id).first()
 
         if not approval_request:
-            raise ValueError(
-                f"Approval request {approval_request_id} not found"
-            )
+            raise ValueError(f"Approval request {approval_request_id} not found")
 
         if approval_request.status != ApprovalStatus.PENDING:
-            raise ValueError(
-                f"Approval request {approval_request_id} is not pending"
-            )
+            raise ValueError(f"Approval request {approval_request_id} is not pending")
 
         # Cancel request
         approval_request.status = ApprovalStatus.CANCELLED
         approval_request.decided_at = timezone.now()
-        approval_request.save(
-            update_fields=["status", "decided_at", "updated_at"]
-        )
+        approval_request.save(update_fields=["status", "decided_at", "updated_at"])
 
         logger.info(f"Cancelled approval request {approval_request_id}")
 
@@ -387,9 +347,7 @@ class ApprovalService:
             "audit",
         ]
 
-        return any(
-            risk_module in module_name.lower() for risk_module in high_risk_modules
-        )
+        return any(risk_module in module_name.lower() for risk_module in high_risk_modules)
 
     def _has_write_capability(self, tool: Tool) -> bool:
         """Check if tool has write or destructive capability.
@@ -427,9 +385,7 @@ class ApprovalService:
             True if violates SoD, False otherwise.
         """
         # Get SoD policies for this tenant
-        policies = SoDPolicy.objects.filter(
-            tenant_id=tenant_id, is_active=True
-        )
+        policies = SoDPolicy.objects.filter(tenant_id=tenant_id, is_active=True)
 
         # Check if tool action violates any SoD policy
         tool_action = f"{tool.owning_module}.{tool.name}"
@@ -439,9 +395,7 @@ class ApprovalService:
             if (
                 policy.action_1 == tool_action
                 and self._user_performed_action(tenant_id, user_1, policy.action_1)
-                and policy.action_2 in self._get_user_recent_actions(
-                    tenant_id, user_2
-                )
+                and policy.action_2 in self._get_user_recent_actions(tenant_id, user_2)
             ):
                 return True
 
@@ -449,17 +403,13 @@ class ApprovalService:
             if (
                 policy.action_2 == tool_action
                 and self._user_performed_action(tenant_id, user_1, policy.action_2)
-                and policy.action_1 in self._get_user_recent_actions(
-                    tenant_id, user_2
-                )
+                and policy.action_1 in self._get_user_recent_actions(tenant_id, user_2)
             ):
                 return True
 
         return False
 
-    def _user_performed_action(
-        self, tenant_id: str, user_id: str, action: str
-    ) -> bool:
+    def _user_performed_action(self, tenant_id: str, user_id: str, action: str) -> bool:
         """Check if user performed an action recently.
 
         Args:
@@ -544,12 +494,8 @@ class ApprovalService:
                 blocked=True,
             )
 
-            logger.warning(
-                f"Recorded SoD violation: {policy.name} "
-                f"(user_1={user_1}, user_2={user_2})"
-            )
+            logger.warning(f"Recorded SoD violation: {policy.name} " f"(user_1={user_1}, user_2={user_2})")
 
 
 # Global approval service instance
 approval_service = ApprovalService()
-

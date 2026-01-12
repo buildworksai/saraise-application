@@ -108,20 +108,19 @@
 # 3. Handle agent action responses appropriately
 #
 # Example:
-#   import { 
-#     Agent, AgentRequest, AgentExecution, 
-#     ApprovalRequest, ENDPOINTS, AgentActionResponse 
+#   import {
+#     Agent, AgentRequest, AgentExecution,
+#     ApprovalRequest, ENDPOINTS, AgentActionResponse
 #   } from '../contracts';
-#   
+#
 #   export const aiAgentService = {
 #     agents: {
 #       list: () => apiClient.get<Agent[]>(ENDPOINTS.AGENTS.LIST),
-#       execute: (id: string, task: unknown) => 
+#       execute: (id: string, task: unknown) =>
 #         apiClient.post<AgentActionResponse>(ENDPOINTS.AGENTS.EXECUTE(id), { task_definition: task }),
 #     },
 #     approvals: {
-#       approve: (id: string) => 
+#       approve: (id: string) =>
 #         apiClient.post<ApprovalActionResponse>(ENDPOINTS.APPROVALS.APPROVE(id)),
 #     },
 #   };
-

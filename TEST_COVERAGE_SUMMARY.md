@@ -248,4 +248,3 @@ open coverage/index.html
 
 **Last Updated:** 2026-01-07  
 **Next Review:** After coverage verification
-

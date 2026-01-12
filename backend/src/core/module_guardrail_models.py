@@ -6,10 +6,16 @@ Task: 503.2 - Module Guardrails
 
 from __future__ import annotations
 
+import uuid
+from typing import Any, Dict, Optional
+
 from django.db import models
 from django.utils import timezone
-from typing import Optional, Dict, Any
-import uuid
+
+
+def generate_uuid():
+    """Generate UUID for model primary keys."""
+    return str(uuid.uuid4())
 
 
 class GuardrailViolationType(models.TextChoices):
@@ -30,9 +36,7 @@ class GuardrailViolation(models.Model):
     Tracks guardrail violations detected in modules.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     tenant_id = models.CharField(max_length=36, db_index=True)
     module_name = models.CharField(max_length=255, db_index=True)
     violation_type = models.CharField(
@@ -57,9 +61,7 @@ class GuardrailViolation(models.Model):
         default="guardrail_scanner",
         help_text="Detection method/scanner",
     )
-    violation_details = models.JSONField(
-        default=dict, help_text="Detailed violation information"
-    )
+    violation_details = models.JSONField(default=dict, help_text="Detailed violation information")
     code_location = models.CharField(
         max_length=500,
         null=True,
@@ -92,10 +94,7 @@ class GuardrailViolation(models.Model):
         ]
 
     def __str__(self) -> str:
-        return (
-            f"{self.violation_type} violation in {self.module_name} "
-            f"(Tenant: {self.tenant_id}) - {self.status}"
-        )
+        return f"{self.violation_type} violation in {self.module_name} " f"(Tenant: {self.tenant_id}) - {self.status}"
 
 
 class GuardrailRule(models.Model):
@@ -104,9 +103,7 @@ class GuardrailRule(models.Model):
     Defines guardrail rules for enforcement.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     rule_name = models.CharField(max_length=255, unique=True, db_index=True)
     violation_type = models.CharField(
         max_length=50,
@@ -114,9 +111,7 @@ class GuardrailRule(models.Model):
         db_index=True,
     )
     description = models.TextField(blank=True, null=True)
-    pattern = models.TextField(
-        help_text="Pattern/regex to detect violation"
-    )
+    pattern = models.TextField(help_text="Pattern/regex to detect violation")
     is_active = models.BooleanField(default=True, db_index=True)
     severity = models.CharField(
         max_length=20,
@@ -138,9 +133,7 @@ class GuardrailRule(models.Model):
         default="block",
         help_text="Action to take on violation",
     )
-    metadata = models.JSONField(
-        default=dict, help_text="Rule metadata"
-    )
+    metadata = models.JSONField(default=dict, help_text="Rule metadata")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -153,4 +146,3 @@ class GuardrailRule(models.Model):
 
     def __str__(self) -> str:
         return f"{self.rule_name} ({self.violation_type})"
-

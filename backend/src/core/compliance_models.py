@@ -6,10 +6,16 @@ Task: 503.3 - Compliance Checks
 
 from __future__ import annotations
 
+import uuid
+from typing import Any, Dict, Optional
+
 from django.db import models
 from django.utils import timezone
-from typing import Optional, Dict, Any
-import uuid
+
+
+def generate_uuid():
+    """Generate UUID for model primary keys."""
+    return str(uuid.uuid4())
 
 
 class ComplianceCheckType(models.TextChoices):
@@ -28,9 +34,7 @@ class ComplianceCheck(models.Model):
     Tracks compliance checks for modules and tenants.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     tenant_id = models.CharField(max_length=36, db_index=True, null=True, blank=True)
     module_name = models.CharField(max_length=255, db_index=True, null=True, blank=True)
     check_type = models.CharField(
@@ -55,15 +59,9 @@ class ComplianceCheck(models.Model):
         default="compliance_scanner",
         help_text="Check method/scanner",
     )
-    check_details = models.JSONField(
-        default=dict, help_text="Detailed check information"
-    )
-    violations = models.JSONField(
-        default=list, help_text="List of violations found"
-    )
-    metadata = models.JSONField(
-        default=dict, help_text="Check metadata"
-    )
+    check_details = models.JSONField(default=dict, help_text="Detailed check information")
+    violations = models.JSONField(default=list, help_text="List of violations found")
+    metadata = models.JSONField(default=dict, help_text="Check metadata")
 
     class Meta:
         db_table = "compliance_checks"
@@ -76,10 +74,7 @@ class ComplianceCheck(models.Model):
         ]
 
     def __str__(self) -> str:
-        return (
-            f"{self.check_type} check for "
-            f"{self.module_name or 'tenant ' + self.tenant_id} - {self.status}"
-        )
+        return f"{self.check_type} check for " f"{self.module_name or 'tenant ' + self.tenant_id} - {self.status}"
 
 
 class ResidencyRule(models.Model):
@@ -88,23 +83,17 @@ class ResidencyRule(models.Model):
     Defines data residency requirements.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     tenant_id = models.CharField(
         max_length=36, db_index=True, null=True, blank=True, help_text="Tenant-specific rule (null = global)"
     )
     module_name = models.CharField(
         max_length=255, db_index=True, null=True, blank=True, help_text="Module-specific rule (null = all modules)"
     )
-    required_region = models.CharField(
-        max_length=100, db_index=True, help_text="Required data residency region"
-    )
+    required_region = models.CharField(max_length=100, db_index=True, help_text="Required data residency region")
     is_active = models.BooleanField(default=True, db_index=True)
     description = models.TextField(blank=True, null=True)
-    metadata = models.JSONField(
-        default=dict, help_text="Rule metadata"
-    )
+    metadata = models.JSONField(default=dict, help_text="Rule metadata")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -118,9 +107,7 @@ class ResidencyRule(models.Model):
 
     def __str__(self) -> str:
         scope = (
-            f"{self.module_name}" if self.module_name
-            else f"Tenant {self.tenant_id}" if self.tenant_id
-            else "Global"
+            f"{self.module_name}" if self.module_name else f"Tenant {self.tenant_id}" if self.tenant_id else "Global"
         )
         return f"Residency rule: {scope} → {self.required_region}"
 
@@ -131,9 +118,7 @@ class PolicyBundleValidation(models.Model):
     Tracks policy bundle validation results.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     tenant_id = models.CharField(max_length=36, db_index=True)
     module_name = models.CharField(max_length=255, db_index=True)
     policy_bundle_version = models.CharField(max_length=50, db_index=True)
@@ -147,15 +132,9 @@ class PolicyBundleValidation(models.Model):
         db_index=True,
     )
     validated_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    validation_errors = models.JSONField(
-        default=list, help_text="Validation errors"
-    )
-    validation_warnings = models.JSONField(
-        default=list, help_text="Validation warnings"
-    )
-    metadata = models.JSONField(
-        default=dict, help_text="Validation metadata"
-    )
+    validation_errors = models.JSONField(default=list, help_text="Validation errors")
+    validation_warnings = models.JSONField(default=list, help_text="Validation warnings")
+    metadata = models.JSONField(default=dict, help_text="Validation metadata")
 
     class Meta:
         db_table = "policy_bundle_validations"
@@ -167,7 +146,5 @@ class PolicyBundleValidation(models.Model):
 
     def __str__(self) -> str:
         return (
-            f"Policy bundle validation: {self.module_name} "
-            f"v{self.policy_bundle_version} - {self.validation_status}"
+            f"Policy bundle validation: {self.module_name} " f"v{self.policy_bundle_version} - {self.validation_status}"
         )
-

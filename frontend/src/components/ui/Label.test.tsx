@@ -29,4 +29,3 @@ describe('Label', () => {
     expect(ref.current).toBeInstanceOf(HTMLLabelElement);
   });
 });
-

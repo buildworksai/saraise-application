@@ -381,7 +381,7 @@ export interface ApprovalActionResponse {
 
 /**
  * EXAMPLES - Type-safe examples for AI agents
- * 
+ *
  * These examples use `satisfies` to ensure type correctness at compile time.
  */
 export const EXAMPLES = {
@@ -421,4 +421,3 @@ export const EXAMPLES = {
     } as AgentExecution,
   },
 } as const;
-

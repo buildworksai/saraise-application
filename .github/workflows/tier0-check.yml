@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: Apache-2.0
+# ===================================
+# SARAISE Tier 0 Review Enforcement
+# ===================================
+# Ensures Tier 0 changes have proper review checklist
+# ===================================
+
+name: Tier 0 Review Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  tier0-check:
+    name: Verify Tier 0 Review Requirements
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect Tier 0 changes
+        id: tier0
+        run: |
+          TIER0_PATHS=(
+            "backend/src/core/"
+            "backend/src/core/session_manager.py"
+            "backend/src/core/auth"
+            "backend/src/core/policy_engine"
+            "backend/src/core/control_plane"
+            "backend/src/core/runtime"
+            "backend/src/core/sod_rules.py"
+            "backend/src/core/role_hierarchy.py"
+          )
+          
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          TIER0_CHANGED=false
+          
+          for path in "${TIER0_PATHS[@]}"; do
+            if echo "$CHANGED_FILES" | grep -q "^$path"; then
+              TIER0_CHANGED=true
+              break
+            fi
+          done
+          
+          echo "tier0_changed=$TIER0_CHANGED" >> "$GITHUB_OUTPUT"
+          if [ "$TIER0_CHANGED" = "true" ]; then
+            echo "⚠️  Tier 0 critical paths modified"
+          else
+            echo "✅ No Tier 0 paths modified"
+          fi
+
+      - name: Check for Tier 0 PR template
+        if: steps.tier0.outputs.tier0_changed == 'true'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # SECURITY: Use environment variable instead of direct substitution in shell
+          # This prevents shell injection from PR body content
+          # Check for checklist items
+          if ! echo "$PR_BODY" | grep -q "\[ \].*No authentication changes"; then
+            echo "❌ Tier 0 checklist not completed: 'No authentication changes' missing"
+            exit 1
+          fi
+          
+          if ! echo "$PR_BODY" | grep -q "\[ \].*No policy semantic changes"; then
+            echo "❌ Tier 0 checklist not completed: 'No policy semantic changes' missing"
+            exit 1
+          fi
+          
+          if ! echo "$PR_BODY" | grep -q "\[ \].*No session behavior changes"; then
+            echo "❌ Tier 0 checklist not completed: 'No session behavior changes' missing"
+            exit 1
+          fi
+          
+          if ! echo "$PR_BODY" | grep -q "\[ \].*No ABAC violations"; then
+            echo "❌ Tier 0 checklist not completed: 'No ABAC violations' missing"
+            exit 1
+          fi
+          
+          if ! echo "$PR_BODY" | grep -q "\[ \].*Architecture compliance statement"; then
+            echo "❌ Tier 0 checklist not completed: 'Architecture compliance statement' missing"
+            exit 1
+          fi
+          
+          echo "✅ Tier 0 checklist completed"
+
+      - name: Check reviewer count
+        if: steps.tier0.outputs.tier0_changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: reviews } = await github.rest.pulls.listReviews({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            
+            const approvedReviews = reviews.filter(r => r.state === 'APPROVED');
+            
+            if (approvedReviews.length < 2) {
+              core.setFailed(`❌ Tier 0 PR requires 2 senior reviewers. Currently: ${approvedReviews.length}`);
+            } else {
+              console.log(`✅ Tier 0 PR has ${approvedReviews.length} approvals`);
+            }

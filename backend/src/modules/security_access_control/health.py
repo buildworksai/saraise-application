@@ -4,12 +4,12 @@ Security & Access Control Health Check.
 Health check endpoint for Security & Access Control module.
 """
 
+from django.core.cache import cache
+from django.db import connection
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from django.db import connection
-from django.core.cache import cache
 
-from .models import Role, Permission
+from .models import Permission, Role
 
 
 @api_view(["GET"])

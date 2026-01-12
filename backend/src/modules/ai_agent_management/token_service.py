@@ -7,16 +7,16 @@ Task: 402.3 - Token Metering & Cost Attribution
 from __future__ import annotations
 
 import logging
-from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import Any, Dict, List, Optional
 
-from django.utils import timezone
 from django.db import transaction
-from django.db.models import Sum, Count, Q
+from django.db.models import Count, Q, Sum
+from django.utils import timezone
 
 from .models import AgentExecution
-from .token_models import TokenUsage, CostRecord, CostSummary
+from .token_models import CostRecord, CostSummary, TokenUsage
 
 logger = logging.getLogger(__name__)
 
@@ -92,14 +92,11 @@ class TokenService:
         )
 
         logger.info(
-            f"Recorded token usage: {total_tokens} tokens "
-            f"({provider}/{model}) for execution {agent_execution.id}"
+            f"Recorded token usage: {total_tokens} tokens " f"({provider}/{model}) for execution {agent_execution.id}"
         )
 
         # Calculate and record cost
-        cost = self._calculate_token_cost(
-            provider, model, input_tokens, output_tokens
-        )
+        cost = self._calculate_token_cost(provider, model, input_tokens, output_tokens)
 
         if cost > 0:
             self._record_cost(
@@ -284,23 +281,17 @@ class TokenService:
 
         # Breakdown by type
         cost_by_type = {}
-        for record in query.values("cost_type").annotate(
-            total=Sum("amount")
-        ):
+        for record in query.values("cost_type").annotate(total=Sum("amount")):
             cost_by_type[record["cost_type"]] = float(record["total"])
 
         # Breakdown by module
         cost_by_module = {}
-        for record in query.exclude(module_name__isnull=True).values(
-            "module_name"
-        ).annotate(total=Sum("amount")):
+        for record in query.exclude(module_name__isnull=True).values("module_name").annotate(total=Sum("amount")):
             cost_by_module[record["module_name"]] = float(record["total"])
 
         # Breakdown by provider
         cost_by_provider = {}
-        for record in query.exclude(provider__isnull=True).values(
-            "provider"
-        ).annotate(total=Sum("amount")):
+        for record in query.exclude(provider__isnull=True).values("provider").annotate(total=Sum("amount")):
             cost_by_provider[record["provider"]] = float(record["total"])
 
         return {
@@ -339,23 +330,19 @@ class TokenService:
 
         # Breakdown by type
         cost_by_type = {}
-        for record in cost_records.values("cost_type").annotate(
-            total=Sum("amount")
-        ):
+        for record in cost_records.values("cost_type").annotate(total=Sum("amount")):
             cost_by_type[record["cost_type"]] = float(record["total"])
 
         # Breakdown by module
         cost_by_module = {}
-        for record in cost_records.exclude(module_name__isnull=True).values(
-            "module_name"
-        ).annotate(total=Sum("amount")):
+        for record in (
+            cost_records.exclude(module_name__isnull=True).values("module_name").annotate(total=Sum("amount"))
+        ):
             cost_by_module[record["module_name"]] = float(record["total"])
 
         # Breakdown by provider
         cost_by_provider = {}
-        for record in cost_records.exclude(provider__isnull=True).values(
-            "provider"
-        ).annotate(total=Sum("amount")):
+        for record in cost_records.exclude(provider__isnull=True).values("provider").annotate(total=Sum("amount")):
             cost_by_provider[record["provider"]] = float(record["total"])
 
         # Get token usage
@@ -390,10 +377,7 @@ class TokenService:
             },
         )
 
-        logger.info(
-            f"Generated cost summary for tenant {tenant_id} "
-            f"({period_type}): {total_cost} USD"
-        )
+        logger.info(f"Generated cost summary for tenant {tenant_id} " f"({period_type}): {total_cost} USD")
 
         return summary
 
@@ -468,16 +452,11 @@ class TokenService:
             metadata=metadata or {},
         )
 
-        logger.debug(
-            f"Recorded cost: {amount} {currency} ({cost_type}) "
-            f"for tenant {tenant_id}"
-        )
+        logger.debug(f"Recorded cost: {amount} {currency} ({cost_type}) " f"for tenant {tenant_id}")
 
         return cost_record
 
-    def update_token_costs(
-        self, provider: str, model: str, input_cost: Decimal, output_cost: Decimal
-    ) -> None:
+    def update_token_costs(self, provider: str, model: str, input_cost: Decimal, output_cost: Decimal) -> None:
         """Update token costs for a provider/model.
 
         Args:
@@ -499,4 +478,3 @@ class TokenService:
 
 # Global token service instance
 token_service = TokenService()
-

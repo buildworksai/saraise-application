@@ -270,7 +270,7 @@ export type TenantSettingsCreate = Omit<TenantSettings, 'id' | 'created_at' | 'u
 
 /**
  * EXAMPLES - Type-safe examples for AI agents
- * 
+ *
  * These examples use `satisfies` to ensure type correctness at compile time.
  */
 export const EXAMPLES = {
@@ -299,4 +299,3 @@ export const EXAMPLES = {
     },
   },
 } as const;
-

@@ -40,7 +40,7 @@ export const TableSkeleton = ({ rows = 5, columns = 6 }: TableSkeletonProps) => 
         <Skeleton className="h-10 w-32" />
         <Skeleton className="h-10 w-32" />
       </div>
-      
+
       {/* Table skeleton */}
       <div className="border rounded-lg overflow-hidden">
         {/* Table header */}
@@ -51,7 +51,7 @@ export const TableSkeleton = ({ rows = 5, columns = 6 }: TableSkeletonProps) => 
             ))}
           </div>
         </div>
-        
+
         {/* Table rows */}
         {Array.from({ length: rows }).map((_, rowIdx) => (
           <div key={rowIdx} className="flex gap-4 p-4 border-b border-border last:border-b-0">
@@ -91,6 +91,35 @@ export const ChartSkeleton = ({ height = 300 }: { height?: number }) => {
       <Skeleton className="h-5 w-48 mb-4" />
       <Skeleton className="h-4 w-32 mb-6" />
       <Skeleton style={{ height }} className="w-full" />
+    </div>
+  );
+};
+
+/**
+ * SkeletonList Component
+ *
+ * Skeleton loader for list items (EUCORA-inspired pattern).
+ */
+interface SkeletonListProps {
+  items?: number;
+  className?: string;
+}
+
+export const SkeletonList = ({ items = 5, className }: SkeletonListProps) => {
+  return (
+    <div className={cn('space-y-4', className)}>
+      {Array.from({ length: items }).map((_, i) => (
+        <div key={i} className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0">
+          <div className="flex flex-col gap-1 flex-1">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-3 w-24" />
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <Skeleton className="h-4 w-16" />
+            <Skeleton className="h-3 w-20" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 };

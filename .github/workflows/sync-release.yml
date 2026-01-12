@@ -100,27 +100,37 @@ jobs:
           fi
 
       - name: Create release commit
+        env:
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
+          RELEASE_NOTES: ${{ github.event.inputs.release_notes }}
         run: |
           cd release-repo
           echo "📦 Staging files..."
           git add .
 
+          # SECURITY: Use environment variables instead of direct substitution
+          # Validate version format (semantic versioning)
+          if ! echo "$RELEASE_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9-]+)?(\+[a-zA-Z0-9-]+)?$'; then
+            echo "❌ Invalid version format: $RELEASE_VERSION"
+            exit 1
+          fi
+
           # Check if there are changes to commit
           if git diff --staged --quiet; then
             echo "ℹ️ No changes to commit"
             # Still create/update tag even if no changes
-            git tag -f -a "${{ github.event.inputs.version }}" -m "Release ${{ github.event.inputs.version }}" 2>/dev/null || true
+            git tag -f -a "$RELEASE_VERSION" -m "Release $RELEASE_VERSION" 2>/dev/null || true
             echo "🚀 Pushing tags..."
             git push origin main --tags --force || git push -u origin main --tags
             exit 0
           fi
 
           echo "💾 Creating commit..."
-          git commit -m "Release: ${{ github.event.inputs.version }}" -m "${{ github.event.inputs.release_notes }}"
+          git commit -m "Release: $RELEASE_VERSION" -m "$RELEASE_NOTES"
 
           # Create or update tag
           echo "🏷️ Creating tag..."
-          git tag -f -a "${{ github.event.inputs.version }}" -m "Release ${{ github.event.inputs.version }}"
+          git tag -f -a "$RELEASE_VERSION" -m "Release $RELEASE_VERSION"
 
           # Push branch and tags (use -u for first push, --force for updates)
           echo "🚀 Pushing to release repository (this may take a few minutes)..."

@@ -1,5 +1,5 @@
 # SARAISE Tenant Isolation Check Workflow
-# 
+#
 # This workflow verifies that all tenant-scoped modules have
 # mandatory tenant isolation tests (test_isolation.py).
 #
@@ -25,17 +25,17 @@ jobs:
   check-isolation-tests:
     name: Check Tenant Isolation Tests
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Make script executable
         run: chmod +x ./scripts/check-tenant-isolation-tests.sh
-      
+
       - name: Run tenant isolation check
         run: ./scripts/check-tenant-isolation-tests.sh
-      
+
       - name: Post failure comment on PR
         if: failure() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -60,15 +60,15 @@ jobs:
   lint-raw-sql-tenant-filter:
     name: Lint Raw SQL Tenant Filter
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      
+
       - name: Run raw SQL tenant filter check
         run: python scripts/lint-tenant-filter.py

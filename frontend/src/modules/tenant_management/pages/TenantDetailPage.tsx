@@ -1,6 +1,6 @@
 /**
  * Tenant Detail Page
- * 
+ *
  * Displays tenant details, modules, resource usage, and health scores.
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';

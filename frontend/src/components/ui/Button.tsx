@@ -1,6 +1,6 @@
 /**
  * Button Component
- * 
+ *
  * Reusable button component with variants and sizes.
  */
 import type { ButtonHTMLAttributes} from 'react';
@@ -42,4 +42,3 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 );
 
 Button.displayName = 'Button';
-

@@ -6,10 +6,11 @@ Task: 401.2 - Tool Registry & Schema Validation
 
 from __future__ import annotations
 
+import uuid
+from typing import Any, Dict, List, Optional
+
 from django.db import models
 from django.utils import timezone
-from typing import Optional, Dict, Any, List
-import uuid
 
 from .models import TenantBaseModel
 from .tool_registry import ToolSideEffectClass
@@ -26,12 +27,8 @@ class Tool(TenantBaseModel):
     Stores tool definitions in the database for persistence and discovery.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
-    name = models.CharField(
-        max_length=255, db_index=True, help_text="Tool name (globally unique)"
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
+    name = models.CharField(max_length=255, db_index=True, help_text="Tool name (globally unique)")
     owning_module = models.CharField(
         max_length=100,
         db_index=True,
@@ -44,25 +41,18 @@ class Tool(TenantBaseModel):
         help_text="Tool version",
     )
     description = models.TextField(blank=True)
-    required_permissions = models.JSONField(
-        help_text="List of required permissions"
-    )
+    required_permissions = models.JSONField(help_text="List of required permissions")
     input_schema = models.JSONField(help_text="Input schema definition")
     output_schema = models.JSONField(help_text="Output schema definition")
     side_effect_class = models.CharField(
         max_length=30,
-        choices=[
-            (choice.value, choice.name)
-            for choice in ToolSideEffectClass
-        ],
+        choices=[(choice.value, choice.name) for choice in ToolSideEffectClass],
         db_index=True,
         help_text="Side-effect classification",
     )
     is_active = models.BooleanField(default=True, db_index=True)
     metadata = models.JSONField(default=dict, help_text="Tool metadata")
-    registered_by = models.CharField(
-        max_length=36, db_index=True, help_text="User who registered the tool"
-    )
+    registered_by = models.CharField(max_length=36, db_index=True, help_text="User who registered the tool")
     registered_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -86,9 +76,7 @@ class ToolInvocation(TenantBaseModel):
     Tracks tool invocations for audit and monitoring.
     """
 
-    id = models.CharField(
-        max_length=36, primary_key=True, default=generate_uuid
-    )
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     tool = models.ForeignKey(
         Tool,
         on_delete=models.CASCADE,
@@ -104,9 +92,7 @@ class ToolInvocation(TenantBaseModel):
         db_index=True,
     )
     input_data = models.JSONField(help_text="Tool input data")
-    output_data = models.JSONField(
-        null=True, blank=True, help_text="Tool output data"
-    )
+    output_data = models.JSONField(null=True, blank=True, help_text="Tool output data")
     success = models.BooleanField(default=True, db_index=True)
     error_message = models.TextField(blank=True)
     invoked_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -124,4 +110,3 @@ class ToolInvocation(TenantBaseModel):
 
     def __str__(self) -> str:
         return f"Invocation {self.id} of {self.tool.name}"
-

@@ -49,4 +49,3 @@ describe('Input', () => {
     expect(screen.queryByText(/error/i)).not.toBeInTheDocument();
   });
 });
-

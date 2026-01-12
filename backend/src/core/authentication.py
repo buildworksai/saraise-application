@@ -6,6 +6,7 @@ Implements proper CSRF handling per authentication-and-session-management-spec.m
 - Login endpoint is exempted (cannot have CSRF token before authentication)
 - All other endpoints enforce CSRF protection
 """
+
 from rest_framework.authentication import SessionAuthentication
 
 
@@ -42,7 +43,7 @@ class RelaxedCsrfSessionAuthentication(SessionAuthentication):
 
     This allows GET requests to work immediately after login while maintaining
     CSRF protection for state-changing operations.
-    
+
     CRITICAL: This class ensures that users authenticated by Django's
     AuthenticationMiddleware are properly recognized by DRF's permission system.
     """
@@ -50,44 +51,50 @@ class RelaxedCsrfSessionAuthentication(SessionAuthentication):
     def authenticate(self, request):
         """
         Authenticate using session.
-        
+
         CRITICAL FIX: DRF's SessionAuthentication.authenticate() may return None
         even when Django's AuthenticationMiddleware has already set request.user.
         This happens when the session doesn't have a session_key yet or when
         the session authentication check fails.
-        
+
         We check if Django's middleware has already authenticated the user,
         and if so, return that user. This ensures consistent authentication
         across all requests.
-        
+
         IMPORTANT: We access the underlying Django HttpRequest's user directly
         (via request._request.user) to avoid triggering DRF's authentication
         mechanism which would cause recursion.
         """
-        # CRITICAL: Check Django middleware FIRST to avoid recursion
-        # Access the underlying Django HttpRequest's user directly to avoid
-        # triggering DRF's authentication mechanism
-        from django.contrib.auth.models import AnonymousUser
-        
-        # Get the underlying Django HttpRequest
-        django_request = getattr(request, '_request', request)
-        
-        # Check if Django's AuthenticationMiddleware has already authenticated the user
-        if hasattr(django_request, 'user') and not isinstance(django_request.user, AnonymousUser):
-            # User is already authenticated by Django middleware
-            # Return (user, None) to indicate successful authentication
-            return (django_request.user, None)
-        
-        # If Django middleware hasn't authenticated, try parent's authentication
-        # (standard DRF session auth)
+        # CRITICAL: Try parent's authentication FIRST (standard DRF session auth)
+        # This is the primary authentication mechanism and should be tried first
         try:
             result = super().authenticate(request)
             if result:
                 return result
         except RecursionError:
-            # If recursion occurs, return None (shouldn't happen with our fix above)
+            # If recursion occurs, we're in a loop - return None to break it
             return None
-        
+        except Exception:
+            # If authentication fails for any reason, fall through to check Django middleware
+            pass
+
+        # FALLBACK: Check if Django's AuthenticationMiddleware has already authenticated the user
+        # This handles cases where DRF's SessionAuthentication.authenticate() returns None
+        # even though Django middleware has authenticated the user
+        from django.contrib.auth.models import AnonymousUser
+
+        # Get the underlying Django HttpRequest
+        # CRITICAL: Use getattr with default to avoid triggering __getattribute__ recursion
+        django_request = request._request if hasattr(request, "_request") else request
+
+        # Check if Django's AuthenticationMiddleware has already authenticated the user
+        # CRITICAL: Access user via getattr to avoid triggering property accessors
+        django_user = getattr(django_request, "user", None)
+        if django_user and not isinstance(django_user, AnonymousUser):
+            # User is already authenticated by Django middleware
+            # Return (user, None) to indicate successful authentication
+            return (django_user, None)
+
         # No authentication found
         return None
 
@@ -99,9 +106,8 @@ class RelaxedCsrfSessionAuthentication(SessionAuthentication):
         because they don't change server state.
         """
         # Safe methods don't require CSRF protection
-        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        if request.method in ("GET", "HEAD", "OPTIONS"):
             return
 
         # For unsafe methods, enforce CSRF (call parent)
         return super().enforce_csrf(request)
-

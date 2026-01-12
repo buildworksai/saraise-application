@@ -102,4 +102,3 @@ All new modules follow this structure for consistency.
 ## License
 
 Apache-2.0
-

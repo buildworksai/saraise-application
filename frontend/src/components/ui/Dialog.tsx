@@ -1,6 +1,6 @@
 /**
  * Dialog Component
- * 
+ *
  * Modal dialog using Radix UI primitives.
  */
 import * as DialogPrimitive from '@radix-ui/react-dialog';

@@ -14,28 +14,22 @@ CRITICAL: Only platform owners can access these endpoints.
 Tenant lifecycle operations are FORBIDDEN here - use Control Plane APIs.
 """
 
+from django.db.models import Q
 from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Q
+from rest_framework.response import Response
 
 from src.core.auth_utils import get_user_platform_role
 
-from .models import (
-    Tenant,
-    TenantModule,
-    TenantResourceUsage,
-    TenantSettings,
-    TenantHealthScore,
-)
+from .models import Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
 from .serializers import (
-    TenantSerializer,
+    TenantHealthScoreSerializer,
     TenantListSerializer,
     TenantModuleSerializer,
     TenantResourceUsageSerializer,
+    TenantSerializer,
     TenantSettingsSerializer,
-    TenantHealthScoreSerializer,
 )
 
 

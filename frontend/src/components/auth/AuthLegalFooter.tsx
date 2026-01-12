@@ -6,8 +6,8 @@ import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 
 const legalLinks = [
-  { label: 'Terms of Service', href: '/legal/terms' },
-  { label: 'Privacy Policy', href: '/legal/privacy' },
+  { label: 'Terms of Service', href: '/terms' },
+  { label: 'Privacy Policy', href: '/privacy' },
   { label: 'Security', href: '/security' },
   { label: 'Support', href: '/support' },
 ]
@@ -36,4 +36,3 @@ export function AuthLegalFooter({ className }: AuthLegalFooterProps) {
     </div>
   )
 }
-

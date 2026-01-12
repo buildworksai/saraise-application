@@ -5,20 +5,16 @@ CRITICAL: These tests verify platform-level access control.
 Only platform owners can access tenant management endpoints.
 """
 
-import pytest
-from django.contrib.auth import get_user_model
-from rest_framework.test import APIClient
-from rest_framework import status
 from unittest.mock import patch
 
-from ..models import (
-    Tenant,
-    TenantModule,
-    TenantResourceUsage,
-    TenantSettings,
-    TenantHealthScore,
-)
+import pytest
+from django.contrib.auth import get_user_model
+from rest_framework import status
+from rest_framework.test import APIClient
+
 from src.core.user_models import UserProfile
+
+from ..models import Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
 
 User = get_user_model()
 
@@ -100,17 +96,11 @@ class TestTenantViewSet:
         Tenant.objects.create(name="Tenant A", slug="tenant-a")
         Tenant.objects.create(name="Tenant B", slug="tenant-b")
 
-        response = authenticated_platform_client.get(
-            "/api/v1/tenant-management/tenants/"
-        )
+        response = authenticated_platform_client.get("/api/v1/tenant-management/tenants/")
 
         assert response.status_code == status.HTTP_200_OK
         # DRF may return paginated or direct list
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) >= 2
 
     def test_list_tenants_as_tenant_user_denied(self, authenticated_tenant_client):
@@ -119,16 +109,10 @@ class TestTenantViewSet:
 
         assert response.status_code == status.HTTP_200_OK  # Returns empty list, not 403
         # DRF may return paginated or direct list
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) == 0  # Empty queryset
 
-    def test_create_tenant_as_platform_owner(
-        self, authenticated_platform_client, platform_owner
-    ):
+    def test_create_tenant_as_platform_owner(self, authenticated_platform_client, platform_owner):
         """Test: Platform owner can create tenant."""
         data = {
             "name": "New Tenant",
@@ -136,9 +120,7 @@ class TestTenantViewSet:
             "subdomain": "new-tenant",
             "status": "trial",
         }
-        response = authenticated_platform_client.post(
-            "/api/v1/tenant-management/tenants/", data, format="json"
-        )
+        response = authenticated_platform_client.post("/api/v1/tenant-management/tenants/", data, format="json")
 
         # Serializer validation requires subdomain OR custom_domain
         if response.status_code == status.HTTP_400_BAD_REQUEST:
@@ -149,9 +131,7 @@ class TestTenantViewSet:
                 "custom_domain": "new-tenant.example.com",
                 "status": "trial",
             }
-            response = authenticated_platform_client.post(
-                "/api/v1/tenant-management/tenants/", data, format="json"
-            )
+            response = authenticated_platform_client.post("/api/v1/tenant-management/tenants/", data, format="json")
 
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["name"] == "New Tenant"
@@ -168,31 +148,23 @@ class TestTenantViewSet:
             "slug": "unauthorized-tenant",
             "subdomain": "unauthorized-tenant",
         }
-        response = authenticated_tenant_client.post(
-            "/api/v1/tenant-management/tenants/", data, format="json"
-        )
+        response = authenticated_tenant_client.post("/api/v1/tenant-management/tenants/", data, format="json")
 
         # perform_create checks platform_role and raises PermissionDenied
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
     def test_get_tenant_detail(self, authenticated_platform_client):
         """Test: Platform owner can get tenant detail."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
 
-        response = authenticated_platform_client.get(
-            f"/api/v1/tenant-management/tenants/{tenant.id}/"
-        )
+        response = authenticated_platform_client.get(f"/api/v1/tenant-management/tenants/{tenant.id}/")
 
         assert response.status_code == status.HTTP_200_OK
         assert response.data["name"] == "Test Tenant"
 
     def test_update_tenant(self, authenticated_platform_client, platform_owner):
         """Test: Platform owner can update tenant."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
 
         data = {"name": "Updated Tenant"}
         response = authenticated_platform_client.patch(
@@ -214,9 +186,7 @@ class TestTenantViewSet:
             status=Tenant.TenantStatus.ACTIVE,
         )
 
-        response = authenticated_platform_client.post(
-            f"/api/v1/tenant-management/tenants/{tenant.id}/suspend/"
-        )
+        response = authenticated_platform_client.post(f"/api/v1/tenant-management/tenants/{tenant.id}/suspend/")
 
         assert response.status_code == status.HTTP_200_OK
         tenant.refresh_from_db()
@@ -231,9 +201,7 @@ class TestTenantViewSet:
             status=Tenant.TenantStatus.SUSPENDED,
         )
 
-        response = authenticated_platform_client.post(
-            f"/api/v1/tenant-management/tenants/{tenant.id}/activate/"
-        )
+        response = authenticated_platform_client.post(f"/api/v1/tenant-management/tenants/{tenant.id}/activate/")
 
         assert response.status_code == status.HTTP_200_OK
         tenant.refresh_from_db()
@@ -248,9 +216,7 @@ class TestTenantViewSet:
             status=Tenant.TenantStatus.ACTIVE,
         )
 
-        response = authenticated_platform_client.delete(
-            f"/api/v1/tenant-management/tenants/{tenant.id}/"
-        )
+        response = authenticated_platform_client.delete(f"/api/v1/tenant-management/tenants/{tenant.id}/")
 
         # perform_destroy raises PermissionDenied which becomes 403
         assert response.status_code == status.HTTP_403_FORBIDDEN
@@ -266,31 +232,21 @@ class TestTenantViewSet:
             status=Tenant.TenantStatus.CANCELLED,
         )
 
-        response = authenticated_platform_client.delete(
-            f"/api/v1/tenant-management/tenants/{tenant.id}/"
-        )
+        response = authenticated_platform_client.delete(f"/api/v1/tenant-management/tenants/{tenant.id}/")
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         assert not Tenant.objects.filter(id=tenant.id).exists()
 
     def test_get_tenant_modules(self, authenticated_platform_client):
         """Test: Get modules for a tenant."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
         TenantModule.objects.create(tenant=tenant, module_name="crm", is_enabled=True)
 
-        response = authenticated_platform_client.get(
-            f"/api/v1/tenant-management/tenants/{tenant.id}/modules/"
-        )
+        response = authenticated_platform_client.get(f"/api/v1/tenant-management/tenants/{tenant.id}/modules/")
 
         assert response.status_code == status.HTTP_200_OK
         # Action endpoints return direct list
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) == 1
         assert data[0]["module_name"] == "crm"
 
@@ -298,24 +254,14 @@ class TestTenantViewSet:
         """Test: Get resource usage for a tenant."""
         from datetime import date
 
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
-        TenantResourceUsage.objects.create(
-            tenant=tenant, date=date.today(), active_users=10, api_calls=1000
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
+        TenantResourceUsage.objects.create(tenant=tenant, date=date.today(), active_users=10, api_calls=1000)
 
-        response = authenticated_platform_client.get(
-            f"/api/v1/tenant-management/tenants/{tenant.id}/resource_usage/"
-        )
+        response = authenticated_platform_client.get(f"/api/v1/tenant-management/tenants/{tenant.id}/resource_usage/")
 
         assert response.status_code == status.HTTP_200_OK
         # Action endpoints return direct list
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) >= 1
         assert data[0]["active_users"] == 10
 
@@ -326,51 +272,33 @@ class TestTenantModuleViewSet:
 
     def test_list_modules_as_platform_owner(self, authenticated_platform_client):
         """Test: Platform owner can list tenant modules."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
         TenantModule.objects.create(tenant=tenant, module_name="crm")
         TenantModule.objects.create(tenant=tenant, module_name="accounting")
 
-        response = authenticated_platform_client.get(
-            "/api/v1/tenant-management/modules/"
-        )
+        response = authenticated_platform_client.get("/api/v1/tenant-management/modules/")
 
         assert response.status_code == status.HTTP_200_OK
         # DRF may return paginated or direct list
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) >= 2
 
     def test_install_module(self, authenticated_platform_client, platform_owner):
         """Test: Platform owner can install module for tenant."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
 
         data = {"tenant": tenant.id, "module_name": "crm", "is_enabled": True}
-        response = authenticated_platform_client.post(
-            "/api/v1/tenant-management/modules/", data, format="json"
-        )
+        response = authenticated_platform_client.post("/api/v1/tenant-management/modules/", data, format="json")
 
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["module_name"] == "crm"
 
     def test_enable_module(self, authenticated_platform_client):
         """Test: Platform owner can enable module."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
-        module = TenantModule.objects.create(
-            tenant=tenant, module_name="crm", is_enabled=False
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
+        module = TenantModule.objects.create(tenant=tenant, module_name="crm", is_enabled=False)
 
-        response = authenticated_platform_client.post(
-            f"/api/v1/tenant-management/modules/{module.id}/enable/"
-        )
+        response = authenticated_platform_client.post(f"/api/v1/tenant-management/modules/{module.id}/enable/")
 
         assert response.status_code == status.HTTP_200_OK
         module.refresh_from_db()
@@ -378,16 +306,10 @@ class TestTenantModuleViewSet:
 
     def test_disable_module(self, authenticated_platform_client):
         """Test: Platform owner can disable module."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
-        module = TenantModule.objects.create(
-            tenant=tenant, module_name="crm", is_enabled=True
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
+        module = TenantModule.objects.create(tenant=tenant, module_name="crm", is_enabled=True)
 
-        response = authenticated_platform_client.post(
-            f"/api/v1/tenant-management/modules/{module.id}/disable/"
-        )
+        response = authenticated_platform_client.post(f"/api/v1/tenant-management/modules/{module.id}/disable/")
 
         assert response.status_code == status.HTTP_200_OK
         module.refresh_from_db()
@@ -400,9 +322,7 @@ class TestTenantSettingsViewSet:
 
     def test_create_setting(self, authenticated_platform_client, platform_owner):
         """Test: Platform owner can create tenant setting."""
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
 
         data = {
             "tenant": tenant.id,
@@ -410,9 +330,7 @@ class TestTenantSettingsViewSet:
             "key": "smtp_host",
             "value": {"host": "smtp.example.com"},
         }
-        response = authenticated_platform_client.post(
-            "/api/v1/tenant-management/settings/", data, format="json"
-        )
+        response = authenticated_platform_client.post("/api/v1/tenant-management/settings/", data, format="json")
 
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["category"] == "email"
@@ -420,12 +338,8 @@ class TestTenantSettingsViewSet:
 
     def test_list_settings_filtered_by_tenant(self, authenticated_platform_client):
         """Test: List settings filtered by tenant."""
-        tenant_a = Tenant.objects.create(
-            name="Tenant A", slug="tenant-a", subdomain="tenant-a"
-        )
-        tenant_b = Tenant.objects.create(
-            name="Tenant B", slug="tenant-b", subdomain="tenant-b"
-        )
+        tenant_a = Tenant.objects.create(name="Tenant A", slug="tenant-a", subdomain="tenant-a")
+        tenant_b = Tenant.objects.create(name="Tenant B", slug="tenant-b", subdomain="tenant-b")
 
         TenantSettings.objects.create(
             tenant=tenant_a,
@@ -440,17 +354,11 @@ class TestTenantSettingsViewSet:
             value={"host": "smtp.b.com"},
         )
 
-        response = authenticated_platform_client.get(
-            f"/api/v1/tenant-management/settings/?tenant_id={tenant_a.id}"
-        )
+        response = authenticated_platform_client.get(f"/api/v1/tenant-management/settings/?tenant_id={tenant_a.id}")
 
         assert response.status_code == status.HTTP_200_OK
         # DRF may return paginated or direct list
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) == 1
         assert data[0]["tenant"] == tenant_a.id
 
@@ -463,24 +371,14 @@ class TestTenantResourceUsageViewSet:
         """Test: Platform owner can list resource usage."""
         from datetime import date
 
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
-        TenantResourceUsage.objects.create(
-            tenant=tenant, date=date.today(), active_users=10, api_calls=1000
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
+        TenantResourceUsage.objects.create(tenant=tenant, date=date.today(), active_users=10, api_calls=1000)
 
-        response = authenticated_platform_client.get(
-            "/api/v1/tenant-management/resource-usage/"
-        )
+        response = authenticated_platform_client.get("/api/v1/tenant-management/resource-usage/")
 
         assert response.status_code == status.HTTP_200_OK
         # DRF may return paginated or direct list
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) >= 1
 
 
@@ -492,22 +390,12 @@ class TestTenantHealthScoreViewSet:
         """Test: Platform owner can list health scores."""
         from datetime import date
 
-        tenant = Tenant.objects.create(
-            name="Test Tenant", slug="test-tenant", subdomain="test-tenant"
-        )
-        TenantHealthScore.objects.create(
-            tenant=tenant, date=date.today(), overall_score=85
-        )
+        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
+        TenantHealthScore.objects.create(tenant=tenant, date=date.today(), overall_score=85)
 
-        response = authenticated_platform_client.get(
-            "/api/v1/tenant-management/health-scores/"
-        )
+        response = authenticated_platform_client.get("/api/v1/tenant-management/health-scores/")
 
         assert response.status_code == status.HTTP_200_OK
         # DRF may return paginated or direct list
-        data = (
-            response.data
-            if isinstance(response.data, list)
-            else response.data.get("results", [])
-        )
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) >= 1

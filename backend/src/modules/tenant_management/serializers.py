@@ -5,13 +5,8 @@ DRF serializers for Tenant Management API endpoints.
 """
 
 from rest_framework import serializers
-from .models import (
-    Tenant,
-    TenantModule,
-    TenantResourceUsage,
-    TenantSettings,
-    TenantHealthScore,
-)
+
+from .models import Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
 
 
 class TenantSerializer(serializers.ModelSerializer):
@@ -86,9 +81,7 @@ class TenantSerializer(serializers.ModelSerializer):
                 custom_domain = instance.custom_domain
 
         if not subdomain and not custom_domain:
-            raise serializers.ValidationError(
-                "Either subdomain or custom_domain must be provided."
-            )
+            raise serializers.ValidationError("Either subdomain or custom_domain must be provided.")
 
         # Validate trial dates
         trial_ends_at = data.get("trial_ends_at")
@@ -103,9 +96,7 @@ class TenantSerializer(serializers.ModelSerializer):
 
         if trial_ends_at and subscription_start_date:
             if trial_ends_at > subscription_start_date:
-                raise serializers.ValidationError(
-                    "Trial end date must be before subscription start date."
-                )
+                raise serializers.ValidationError("Trial end date must be before subscription start date.")
 
         return data
 

@@ -8,9 +8,9 @@ from __future__ import annotations
 import pytest
 from django.utils import timezone
 
-from ..models import Agent, AgentExecution, AgentIdentityType
+from ..audit_models import AuditEvent, AuditEventType, AuditTrail
 from ..audit_service import AuditService
-from ..audit_models import AuditTrail, AuditEvent, AuditEventType
+from ..models import Agent, AgentExecution, AgentIdentityType
 
 
 @pytest.mark.django_db
@@ -84,15 +84,20 @@ class TestAuditService:
             initiating_principal="user-1",
         )
 
-        event = service.add_audit_event(
-            trail_id=trail.id,
-            event_type=AuditEventType.TOOL_INVOCATION,
-            event_data={"tool": "create_invoice", "input": {"amount": 100}},
+        event = service.record_event(
+            tenant_id=tenant_id,
+            event_type=AuditEventType.TOOL_INVOKED,
+            initiating_principal="user-1",
+            subject_id="user-1",
+            outcome="success",
+            agent_execution=execution,
+            request_id="req-123",
+            outcome_details={"tool": "create_invoice", "input": {"amount": 100}},
         )
 
         assert event is not None
-        assert event.event_type == AuditEventType.TOOL_INVOCATION
-        assert event.event_data["tool"] == "create_invoice"
+        assert event.event_type == AuditEventType.TOOL_INVOKED
+        assert event.outcome_details.get("tool") == "create_invoice"
 
     def test_get_audit_trail(self) -> None:
         """Test getting audit trail."""
@@ -125,7 +130,7 @@ class TestAuditService:
             initiating_principal="user-1",
         )
 
-        retrieved = service.get_audit_trail(trail_id=trail.id)
+        retrieved = service.get_audit_trail(request_id="req-123", tenant_id=tenant_id)
 
         assert retrieved is not None
         assert retrieved.id == trail.id
@@ -162,9 +167,7 @@ class TestAuditService:
             initiating_principal="user-1",
         )
 
-        retrieved = service.get_audit_trail_by_request_id(
-            tenant_id=tenant_id, request_id="req-123"
-        )
+        retrieved = service.get_audit_trail(request_id="req-123", tenant_id=tenant_id)
 
         assert retrieved is not None
         assert retrieved.request_id == "req-123"
@@ -200,23 +203,33 @@ class TestAuditService:
             initiating_principal="user-1",
         )
 
-        # Create events
-        AuditEvent.objects.create(
-            trail=trail,
-            event_type=AuditEventType.TOOL_INVOCATION,
-            event_data={"tool": "tool1"},
+        # Create events using service
+        service.record_event(
+            tenant_id=tenant_id,
+            event_type=AuditEventType.TOOL_INVOKED,
+            initiating_principal="user-1",
+            subject_id="user-1",
+            outcome="success",
+            agent_execution=execution,
+            request_id="req-123",
+            outcome_details={"tool": "tool1"},
         )
 
-        AuditEvent.objects.create(
-            trail=trail,
-            event_type=AuditEventType.TOOL_RESULT,
-            event_data={"result": "success"},
+        service.record_event(
+            tenant_id=tenant_id,
+            event_type="tool_result",
+            initiating_principal="user-1",
+            subject_id="user-1",
+            outcome="success",
+            agent_execution=execution,
+            request_id="req-123",
+            outcome_details={"result": "success"},
         )
 
-        events = service.get_audit_events(trail_id=trail.id)
+        events = service.query_audit_events(tenant_id=tenant_id, limit=100)
 
         assert len(events) >= 2
-        assert all(e.trail_id == trail.id for e in events)
+        assert all(e.tenant_id == tenant_id for e in events)
 
     def test_search_audit_trails(self) -> None:
         """Test searching audit trails."""
@@ -249,11 +262,7 @@ class TestAuditService:
             initiating_principal="user-1",
         )
 
-        results = service.search_audit_trails(
-            tenant_id=tenant_id,
-            request_id="req-123",
-        )
+        result = service.get_audit_trail(request_id="req-123", tenant_id=tenant_id)
 
-        assert len(results) >= 1
-        assert any(r.request_id == "req-123" for r in results)
-
+        assert result is not None
+        assert result.request_id == "req-123"
