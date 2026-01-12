@@ -13,7 +13,7 @@ import json
 import logging
 import socket
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Tuple
 
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
