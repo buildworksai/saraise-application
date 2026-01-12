@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-from django.test import TestCase
 from django.utils import timezone
 
 from ..models import License, LicenseStatus, LicenseValidationLog, Organization

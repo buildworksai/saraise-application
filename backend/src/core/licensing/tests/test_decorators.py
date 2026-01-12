@@ -25,7 +25,6 @@ from ..decorators import (
 )
 from ..models import License, LicenseStatus, Organization
 from ..services import ModuleAccessService
-from ..validator import get_license_validator
 
 # Enable database access for all tests in this module
 pytestmark = pytest.mark.django_db

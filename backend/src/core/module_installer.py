@@ -6,10 +6,8 @@ Task: 502.1 - Module Installation
 
 from __future__ import annotations
 
-import importlib
 import logging
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from django.apps import apps
 from django.core.management import call_command
