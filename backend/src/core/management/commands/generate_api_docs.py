@@ -130,7 +130,8 @@ All endpoints are prefixed with `/api/v1/{module_name_kebab}/`
 
 ### Authentication
 
-All endpoints require authentication. See [Authentication Documentation](../../../architecture/existing/authentication-and-session-management-spec.md) for details.
+All endpoints require authentication. See [Authentication Documentation](
+../../../architecture/existing/authentication-and-session-management-spec.md) for details.
 
 ## Endpoint Reference
 
@@ -158,7 +159,8 @@ See [Error Handling](../../../standards/coding-standards.md#error-handling) for 
 
 ## Rate Limiting
 
-All endpoints are subject to rate limiting. See [Rate Limiting](../../../architecture/existing/rate-limiting.md) for details.
+All endpoints are subject to rate limiting. See [Rate Limiting](
+../../../architecture/existing/rate-limiting.md) for details.
 
 ## Tenant Isolation
 
