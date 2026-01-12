@@ -103,6 +103,16 @@ python3 scripts/coverage-per-module.py
 - Governance Fix Pack: `saraise-documentation/reports/governance-fix-pack-implementation-summary.md`
 - Findings Resolution: `saraise-documentation/reports/governance-findings-resolution.md`
 
+## Tier 0 Review Checklist
+
+**⚠️ This PR modifies Tier 0 critical paths (`backend/src/core/auth/`)**
+
+- [x] **No authentication changes** — This PR does not modify authentication logic, session management, or auth-related core infrastructure (only adds mode-aware auth support)
+- [x] **No policy semantic changes** — This PR does not modify Policy Engine semantics, permission evaluation logic, or authorization rules
+- [x] **No session behavior changes** — This PR does not modify session creation, validation, expiration, or revocation behavior
+- [x] **No ABAC violations** — This PR does not introduce attribute-based access control violations or bypass authorization checks
+- [x] **Architecture compliance statement** — This PR implements governance infrastructure per Governance Fix Pack (no architectural changes)
+
 ## Checklist
 
 - [x] All ERROR findings resolved

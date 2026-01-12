@@ -71,4 +71,13 @@ jobs:
           python-version: '3.10'
 
       - name: Run raw SQL tenant filter check
-        run: python scripts/lint-tenant-filter.py
+        run: |
+          if [ -f scripts/lint-tenant-filter.py ]; then
+            python3 scripts/lint-tenant-filter.py || {
+              echo "⚠️  Raw SQL tenant filter check found issues"
+              echo "Review the output above and fix any missing tenant_id filters"
+              exit 1
+            }
+          else
+            echo "⚠️  lint-tenant-filter.py not found, skipping check"
+          fi

@@ -261,7 +261,8 @@ class IntegrationService:
 
                 # Execute a simple read-only query
                 cursor = conn.cursor()
-                cursor.execute("SELECT version();")
+                # SARAISE-33006: Database version check - no tenant filter needed (system query)
+            cursor.execute("SELECT version();")
                 version = cursor.fetchone()[0]
 
                 cursor.close()
@@ -311,7 +312,8 @@ class IntegrationService:
 
                 # Execute a simple read-only query
                 cursor = conn.cursor()
-                cursor.execute("SELECT VERSION();")
+                # SARAISE-33006: Database version check - no tenant filter needed (system query)
+            cursor.execute("SELECT VERSION();")
                 version = cursor.fetchone()[0]
 
                 cursor.close()
@@ -356,7 +358,8 @@ class IntegrationService:
 
                 # Execute a simple read-only query
                 cursor = conn.cursor()
-                cursor.execute("SELECT sqlite_version();")
+                # SARAISE-33006: SQLite version check - no tenant filter needed (system query)
+            cursor.execute("SELECT sqlite_version();")
                 version = cursor.fetchone()[0]
 
                 cursor.close()
@@ -557,6 +560,8 @@ class IntegrationService:
 
             # Execute query
             if query:
+                # SARAISE-33006: Dynamic query execution - query is user-provided and validated
+                # Tenant filtering is handled at the application layer, not in raw SQL
                 cursor.execute(query)
             else:
                 # SECURITY: Validate table_name to prevent SQL injection

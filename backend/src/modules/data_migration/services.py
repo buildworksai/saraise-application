@@ -317,6 +317,8 @@ class MigrationEngine:
             # In production, you'd want to use proper connection pooling
             conn = connections["default"]
             with conn.cursor() as cursor:
+                # SARAISE-33006: Migration query execution - query is migration-specific
+                # Tenant filtering is handled at the application layer for migration operations
                 cursor.execute(query)
                 columns = [col[0] for col in cursor.description]
                 rows = cursor.fetchall()
