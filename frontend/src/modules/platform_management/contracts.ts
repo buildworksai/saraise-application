@@ -8,6 +8,8 @@
  * Reference: saraise-documentation/rules/agent-rules/27-contracts-architecture.md
  */
 
+import type { components } from '@/types/api';
+
 // ==========================================
 // Types
 // ==========================================
