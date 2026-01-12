@@ -10,10 +10,8 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 from django.db import models, transaction
-from django.utils import timezone
 
 from .compliance_models import ComplianceCheck, ComplianceCheckType, PolicyBundleValidation, ResidencyRule
-from .module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
 
 logger = logging.getLogger(__name__)
 
