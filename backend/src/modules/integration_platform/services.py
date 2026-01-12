@@ -570,12 +570,10 @@ class IntegrationService:
                 import re
                 if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', table_name):
                     raise ValueError(f"Invalid table name: {table_name}")
-                # SARAISE-33006: Dynamic table query - table name is validated via regex (alphanumeric + underscores only)
-                # Table names cannot be parameterized in SQL, so validation is the appropriate mitigation
-                # Tenant filtering is handled at the application layer for integration operations
                 # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                 # Justification: Table name is validated via regex (alphanumeric + underscores only)
                 # Table names cannot be parameterized in SQL, so validation is the appropriate mitigation
+                # SARAISE-33006: Dynamic table query - table name validated, tenant filtering at application layer
                 cursor.execute(f"SELECT * FROM {table_name}")
 
             # Fetch records
@@ -852,10 +850,9 @@ class IntegrationService:
                     # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                     # Justification: Table and column names are validated via regex (alphanumeric + underscores only)
                     # Values are parameterized (%s placeholders). Table/column names cannot be parameterized in SQL.
+                    # SARAISE-33006: Parameterized query execution - table/column names validated, tenant filtering at application layer
                     query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
-                    # SARAISE-33006: Parameterized query execution - query is user-provided and validated
-                # Tenant filtering is handled at the application layer, not in raw SQL
-                cursor.execute(query, values)
+                    cursor.execute(query, values)
                     records_synced += 1
 
                 except Exception as e:
