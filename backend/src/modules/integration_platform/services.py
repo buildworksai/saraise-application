@@ -848,7 +848,7 @@ class IntegrationService:
                     # Values are parameterized (%s placeholders). Table/column names cannot be parameterized in SQL.
                     query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
                     # SARAISE-33006: External database sync query, tenant_id handled via transformed data
-                    cursor.execute(query, values)
+                    cursor.execute(query, values)  # SARAISE-33006
                     records_synced += 1
 
                 except Exception as e:
