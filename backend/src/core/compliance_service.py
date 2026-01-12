@@ -7,7 +7,6 @@ Task: 503.3 - Compliance Checks
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from django.db import models, transaction

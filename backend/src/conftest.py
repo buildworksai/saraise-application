@@ -1,5 +1,4 @@
 import pytest
-from django.conf import settings as django_settings
 
 
 @pytest.fixture(autouse=True)
