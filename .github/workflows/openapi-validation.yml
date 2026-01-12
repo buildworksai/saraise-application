@@ -44,20 +44,20 @@ jobs:
       - name: Validate OpenAPI Schema
         run: |
           if [ -f backend/schema.yaml ]; then
-            python -c "
-            import yaml
-            from openapi_spec_validator import validate_spec
-            
-            with open('backend/schema.yaml') as f:
-                spec = yaml.safe_load(f)
-            
-            try:
-                validate_spec(spec)
-                print('✅ OpenAPI schema is valid')
-            except Exception as e:
-                print(f'❌ OpenAPI schema validation failed: {e}')
-                exit(1)
-            "
+            python3 -c "
+import yaml
+from openapi_spec_validator import validate_spec
+
+with open('backend/schema.yaml') as f:
+    spec = yaml.safe_load(f)
+
+try:
+    validate_spec(spec)
+    print('✅ OpenAPI schema is valid')
+except Exception as e:
+    print(f'❌ OpenAPI schema validation failed: {e}')
+    exit(1)
+"
           else
             echo "⚠️  OpenAPI schema file not found. Skipping validation."
           fi
