@@ -847,8 +847,8 @@ class IntegrationService:
                     # Justification: Table and column names are validated via regex (alphanumeric + underscores only)
                     # Values are parameterized (%s placeholders). Table/column names cannot be parameterized in SQL.
                     query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
-                    # SARAISE-33006: External database query, not tenant-scoped
-                cursor.execute(query, values)
+                    # SARAISE-33006: External database sync query, tenant_id handled via transformed data
+                    cursor.execute(query, values)
                     records_synced += 1
 
                 except Exception as e:
