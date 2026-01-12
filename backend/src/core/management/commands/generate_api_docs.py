@@ -7,12 +7,10 @@ Usage:
 """
 
 import inspect
-import re
 from pathlib import Path
+
 from django.core.management.base import BaseCommand
-from django.apps import apps
 from rest_framework import viewsets
-from rest_framework.routers import DefaultRouter
 
 
 class Command(BaseCommand):
