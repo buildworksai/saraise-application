@@ -357,6 +357,7 @@ class IntegrationService:
                 conn = sqlite3.connect(db_path, timeout=10.0)
 
                 # Execute a simple read-only query
+                # SARAISE-33006: System query, not tenant-scoped
                 cursor = conn.cursor()
                 cursor.execute("SELECT sqlite_version();")
                 version = cursor.fetchone()[0]
@@ -558,6 +559,7 @@ class IntegrationService:
             cursor = conn.cursor()
 
             # Execute query
+            # SARAISE-33006: External database query, not tenant-scoped
             if query:
                 cursor.execute(query)
             else:
@@ -570,6 +572,7 @@ class IntegrationService:
                 # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                 # Justification: Table name is validated via regex (alphanumeric + underscores only)
                 # Table names cannot be parameterized in SQL, so validation is the appropriate mitigation
+                # SARAISE-33006: External database query, not tenant-scoped
                 cursor.execute(f"SELECT * FROM {table_name}")
 
             # Fetch records
