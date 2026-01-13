@@ -1,0 +1,553 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- /Users/raghunathchava/Code/saraise-application/backend/test_venv/bin/python
+cachedir: .pytest_cache
+django: version: 5.2.10, settings: saraise_backend.settings (from ini)
+rootdir: /Users/raghunathchava/Code/saraise-application/backend
+configfile: pytest.ini
+plugins: anyio-4.12.1, Faker-40.1.0, django-4.11.1, asyncio-1.3.0, cov-7.0.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... collected 837 items / 49 errors
+
+==================================== ERRORS ====================================
+________ ERROR collecting src/core/encryption/tests/test_encryption.py _________
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/core/encryption/tests/test_encryption.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/core/encryption/tests/test_encryption.py:11: in <module>
+    from ..service import EncryptionService
+E   ImportError: attempted relative import with no known parent package
+___ ERROR collecting src/modules/ai_provider_configuration/tests/test_api.py ___
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/ai_provider_configuration/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/ai_provider_configuration/tests/test_api.py:15: in <module>
+    from ..models import AiProviderConfigurationResource
+E   ImportError: cannot import name 'AiProviderConfigurationResource' from 'src.modules.ai_provider_configuration.models' (/Users/raghunathchava/Code/saraise-application/backend/src/modules/ai_provider_configuration/models.py)
+_ ERROR collecting src/modules/ai_provider_configuration/tests/test_models.py __
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/ai_provider_configuration/tests/test_models.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/ai_provider_configuration/tests/test_models.py:9: in <module>
+    from ..models import AiProviderConfigurationResource
+E   ImportError: cannot import name 'AiProviderConfigurationResource' from 'src.modules.ai_provider_configuration.models' (/Users/raghunathchava/Code/saraise-application/backend/src/modules/ai_provider_configuration/models.py)
+_ ERROR collecting src/modules/ai_provider_configuration/tests/test_services.py _
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/ai_provider_configuration/tests/test_services.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/ai_provider_configuration/tests/test_services.py:8: in <module>
+    from ..models import AiProviderConfigurationResource
+E   ImportError: cannot import name 'AiProviderConfigurationResource' from 'src.modules.ai_provider_configuration.models' (/Users/raghunathchava/Code/saraise-application/backend/src/modules/ai_provider_configuration/models.py)
+________ ERROR collecting src/modules/api_management/tests/test_api.py _________
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/api_management/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_api.py:15: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_____ ERROR collecting src/modules/api_management/tests/test_isolation.py ______
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/api_management/tests/test_isolation.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_isolation.py:16: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_______ ERROR collecting src/modules/api_management/tests/test_models.py _______
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/api_management/tests/test_models.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_models.py:9: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+______ ERROR collecting src/modules/api_management/tests/test_services.py ______
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/api_management/tests/test_services.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_services.py:8: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+___ ERROR collecting src/modules/automation_orchestration/tests/test_api.py ____
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/automation_orchestration/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_api.py:15: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_ ERROR collecting src/modules/automation_orchestration/tests/test_isolation.py _
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/automation_orchestration/tests/test_isolation.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_isolation.py:16: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+__ ERROR collecting src/modules/automation_orchestration/tests/test_models.py __
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/automation_orchestration/tests/test_models.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_models.py:9: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_ ERROR collecting src/modules/automation_orchestration/tests/test_services.py _
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/automation_orchestration/tests/test_services.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_services.py:8: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+___ ERROR collecting src/modules/backup_disaster_recovery/tests/test_api.py ____
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/backup_disaster_recovery/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_api.py:15: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_ ERROR collecting src/modules/backup_disaster_recovery/tests/test_isolation.py _
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/backup_disaster_recovery/tests/test_isolation.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_isolation.py:16: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+__ ERROR collecting src/modules/backup_disaster_recovery/tests/test_models.py __
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/backup_disaster_recovery/tests/test_models.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_models.py:9: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_ ERROR collecting src/modules/backup_disaster_recovery/tests/test_services.py _
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/backup_disaster_recovery/tests/test_services.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_services.py:8: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_____ ERROR collecting src/modules/billing_subscriptions/tests/test_api.py _____
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/billing_subscriptions/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/billing_subscriptions/tests/test_api.py:15: in <module>
+    from ..models import BillingSubscriptionsResource
+E   ImportError: cannot import name 'BillingSubscriptionsResource' from 'src.modules.billing_subscriptions.models' (/Users/raghunathchava/Code/saraise-application/backend/src/modules/billing_subscriptions/models.py)
+___ ERROR collecting src/modules/billing_subscriptions/tests/test_models.py ____
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/billing_subscriptions/tests/test_models.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/billing_subscriptions/tests/test_models.py:9: in <module>
+    from ..models import BillingSubscriptionsResource
+E   ImportError: cannot import name 'BillingSubscriptionsResource' from 'src.modules.billing_subscriptions.models' (/Users/raghunathchava/Code/saraise-application/backend/src/modules/billing_subscriptions/models.py)
+__ ERROR collecting src/modules/billing_subscriptions/tests/test_services.py ___
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/billing_subscriptions/tests/test_services.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/billing_subscriptions/tests/test_services.py:8: in <module>
+    from ..models import BillingSubscriptionsResource
+E   ImportError: cannot import name 'BillingSubscriptionsResource' from 'src.modules.billing_subscriptions.models' (/Users/raghunathchava/Code/saraise-application/backend/src/modules/billing_subscriptions/models.py)
+____ ERROR collecting src/modules/blockchain_traceability/tests/test_api.py ____
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/blockchain_traceability/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_api.py:15: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_ ERROR collecting src/modules/blockchain_traceability/tests/test_isolation.py _
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/blockchain_traceability/tests/test_isolation.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_isolation.py:16: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+__ ERROR collecting src/modules/blockchain_traceability/tests/test_models.py ___
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/blockchain_traceability/tests/test_models.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_models.py:9: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_ ERROR collecting src/modules/blockchain_traceability/tests/test_services.py __
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/blockchain_traceability/tests/test_services.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_services.py:8: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+____ ERROR collecting src/modules/customization_framework/tests/test_api.py ____
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/customization_framework/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_api.py:15: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_ ERROR collecting src/modules/customization_framework/tests/test_isolation.py _
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/customization_framework/tests/test_isolation.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_isolation.py:16: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+__ ERROR collecting src/modules/customization_framework/tests/test_models.py ___
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/customization_framework/tests/test_models.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_models.py:9: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_ ERROR collecting src/modules/customization_framework/tests/test_services.py __
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/customization_framework/tests/test_services.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_services.py:8: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_____ ERROR collecting src/modules/document_intelligence/tests/test_api.py _____
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/document_intelligence/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_api.py:15: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+__ ERROR collecting src/modules/document_intelligence/tests/test_isolation.py __
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/document_intelligence/tests/test_isolation.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_isolation.py:16: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+___ ERROR collecting src/modules/document_intelligence/tests/test_models.py ____
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/document_intelligence/tests/test_models.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_models.py:9: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+__ ERROR collecting src/modules/document_intelligence/tests/test_services.py ___
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/document_intelligence/tests/test_services.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_services.py:8: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_____ ERROR collecting src/modules/integration_platform/tests/test_api.py ______
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/integration_platform/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/integration_platform/tests/test_api.py:15: in <module>
+    from ..models import IntegrationPlatformResource
+E   ImportError: cannot import name 'IntegrationPlatformResource' from 'src.modules.integration_platform.models' (/Users/raghunathchava/Code/saraise-application/backend/src/modules/integration_platform/models.py)
+____ ERROR collecting src/modules/integration_platform/tests/test_models.py ____
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/integration_platform/tests/test_models.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/integration_platform/tests/test_models.py:9: in <module>
+    from ..models import IntegrationPlatformResource
+E   ImportError: cannot import name 'IntegrationPlatformResource' from 'src.modules.integration_platform.models' (/Users/raghunathchava/Code/saraise-application/backend/src/modules/integration_platform/models.py)
+___ ERROR collecting src/modules/integration_platform/tests/test_services.py ___
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/integration_platform/tests/test_services.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/integration_platform/tests/test_services.py:8: in <module>
+    from ..models import IntegrationPlatformResource
+E   ImportError: cannot import name 'IntegrationPlatformResource' from 'src.modules.integration_platform.models' (/Users/raghunathchava/Code/saraise-application/backend/src/modules/integration_platform/models.py)
+_________ ERROR collecting src/modules/localization/tests/test_api.py __________
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/localization/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/localization/tests/test_api.py:15: in <module>
+    from ..models import LocalizationResource
+E   ImportError: cannot import name 'LocalizationResource' from 'src.modules.localization.models' (/Users/raghunathchava/Code/saraise-application/backend/src/modules/localization/models.py)
+________ ERROR collecting src/modules/localization/tests/test_models.py ________
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/localization/tests/test_models.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/localization/tests/test_models.py:9: in <module>
+    from ..models import LocalizationResource
+E   ImportError: cannot import name 'LocalizationResource' from 'src.modules.localization.models' (/Users/raghunathchava/Code/saraise-application/backend/src/modules/localization/models.py)
+_______ ERROR collecting src/modules/localization/tests/test_services.py _______
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/localization/tests/test_services.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/localization/tests/test_services.py:8: in <module>
+    from ..models import LocalizationResource
+E   ImportError: cannot import name 'LocalizationResource' from 'src.modules.localization.models' (/Users/raghunathchava/Code/saraise-application/backend/src/modules/localization/models.py)
+____ ERROR collecting src/modules/performance_monitoring/tests/test_api.py _____
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/performance_monitoring/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_api.py:15: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_ ERROR collecting src/modules/performance_monitoring/tests/test_isolation.py __
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/performance_monitoring/tests/test_isolation.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_isolation.py:16: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+___ ERROR collecting src/modules/performance_monitoring/tests/test_models.py ___
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/performance_monitoring/tests/test_models.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_models.py:9: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+__ ERROR collecting src/modules/performance_monitoring/tests/test_services.py __
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/performance_monitoring/tests/test_services.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_services.py:8: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+________ ERROR collecting src/modules/process_mining/tests/test_api.py _________
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/process_mining/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_api.py:15: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_____ ERROR collecting src/modules/process_mining/tests/test_isolation.py ______
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/process_mining/tests/test_isolation.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_isolation.py:16: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_______ ERROR collecting src/modules/process_mining/tests/test_models.py _______
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/process_mining/tests/test_models.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_models.py:9: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+______ ERROR collecting src/modules/process_mining/tests/test_services.py ______
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/process_mining/tests/test_services.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_services.py:8: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+___________ ERROR collecting src/modules/regional/tests/test_api.py ____________
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/regional/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_api.py:15: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+________ ERROR collecting src/modules/regional/tests/test_isolation.py _________
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/regional/tests/test_isolation.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_isolation.py:16: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+__________ ERROR collecting src/modules/regional/tests/test_models.py __________
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/regional/tests/test_models.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_models.py:9: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+_________ ERROR collecting src/modules/regional/tests/test_services.py _________
+ImportError while importing test module '/Users/raghunathchava/Code/saraise-application/backend/src/modules/regional/tests/test_services.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/modules/api_management/tests/test_services.py:8: in <module>
+    from ..models import ApiManagementResource
+E   ImportError: attempted relative import beyond top-level package
+=========================== short test summary info ============================
+ERROR src/core/encryption/tests/test_encryption.py
+ERROR src/modules/ai_provider_configuration/tests/test_api.py
+ERROR src/modules/ai_provider_configuration/tests/test_models.py
+ERROR src/modules/ai_provider_configuration/tests/test_services.py
+ERROR src/modules/api_management/tests/test_api.py
+ERROR src/modules/api_management/tests/test_isolation.py
+ERROR src/modules/api_management/tests/test_models.py
+ERROR src/modules/api_management/tests/test_services.py
+ERROR src/modules/automation_orchestration/tests/test_api.py
+ERROR src/modules/automation_orchestration/tests/test_isolation.py
+ERROR src/modules/automation_orchestration/tests/test_models.py
+ERROR src/modules/automation_orchestration/tests/test_services.py
+ERROR src/modules/backup_disaster_recovery/tests/test_api.py
+ERROR src/modules/backup_disaster_recovery/tests/test_isolation.py
+ERROR src/modules/backup_disaster_recovery/tests/test_models.py
+ERROR src/modules/backup_disaster_recovery/tests/test_services.py
+ERROR src/modules/billing_subscriptions/tests/test_api.py
+ERROR src/modules/billing_subscriptions/tests/test_models.py
+ERROR src/modules/billing_subscriptions/tests/test_services.py
+ERROR src/modules/blockchain_traceability/tests/test_api.py
+ERROR src/modules/blockchain_traceability/tests/test_isolation.py
+ERROR src/modules/blockchain_traceability/tests/test_models.py
+ERROR src/modules/blockchain_traceability/tests/test_services.py
+ERROR src/modules/customization_framework/tests/test_api.py
+ERROR src/modules/customization_framework/tests/test_isolation.py
+ERROR src/modules/customization_framework/tests/test_models.py
+ERROR src/modules/customization_framework/tests/test_services.py
+ERROR src/modules/document_intelligence/tests/test_api.py
+ERROR src/modules/document_intelligence/tests/test_isolation.py
+ERROR src/modules/document_intelligence/tests/test_models.py
+ERROR src/modules/document_intelligence/tests/test_services.py
+ERROR src/modules/integration_platform/tests/test_api.py
+ERROR src/modules/integration_platform/tests/test_models.py
+ERROR src/modules/integration_platform/tests/test_services.py
+ERROR src/modules/localization/tests/test_api.py
+ERROR src/modules/localization/tests/test_models.py
+ERROR src/modules/localization/tests/test_services.py
+ERROR src/modules/performance_monitoring/tests/test_api.py
+ERROR src/modules/performance_monitoring/tests/test_isolation.py
+ERROR src/modules/performance_monitoring/tests/test_models.py
+ERROR src/modules/performance_monitoring/tests/test_services.py
+ERROR src/modules/process_mining/tests/test_api.py
+ERROR src/modules/process_mining/tests/test_isolation.py
+ERROR src/modules/process_mining/tests/test_models.py
+ERROR src/modules/process_mining/tests/test_services.py
+ERROR src/modules/regional/tests/test_api.py
+ERROR src/modules/regional/tests/test_isolation.py
+ERROR src/modules/regional/tests/test_models.py
+ERROR src/modules/regional/tests/test_services.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 49 errors during collection !!!!!!!!!!!!!!!!!!!
+============================== 49 errors in 3.56s ==============================

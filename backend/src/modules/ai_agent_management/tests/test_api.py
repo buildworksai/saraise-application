@@ -18,9 +18,9 @@ from rest_framework.test import APIClient
 
 from src.core.auth_utils import get_user_tenant_id
 
-from ..approval_models import ApprovalRequest, ApprovalStatus
-from ..models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState
-from ..tool_models import Tool
+from src.modules.ai_agent_management.approval_models import ApprovalRequest, ApprovalStatus
+from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState
+from src.modules.ai_agent_management.tool_models import Tool
 
 User = get_user_model()
 

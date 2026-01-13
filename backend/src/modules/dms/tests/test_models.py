@@ -6,7 +6,7 @@ Tests model creation, validation, and relationships.
 import pytest
 from django.core.exceptions import ValidationError
 
-from ..models import Document, DocumentPermission, DocumentShare, DocumentVersion, Folder
+from src.modules.dms.models import Document, DocumentPermission, DocumentShare, DocumentVersion, Folder
 
 
 @pytest.mark.django_db

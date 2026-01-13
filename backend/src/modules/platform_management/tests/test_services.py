@@ -2,8 +2,8 @@ import uuid
 
 import pytest
 
-from ..models import FeatureFlag, PlatformMetrics, PlatformSetting
-from ..services import AnalyticsService, PlatformManagementService
+from src.modules.platform_management.models import FeatureFlag, PlatformMetrics, PlatformSetting
+from src.modules.platform_management.services import AnalyticsService, PlatformManagementService
 
 
 @pytest.mark.django_db

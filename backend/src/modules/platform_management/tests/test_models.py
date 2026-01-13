@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from ..models import FeatureFlag, PlatformAuditEvent, PlatformSetting, SystemHealth
+from src.modules.platform_management.models import FeatureFlag, PlatformAuditEvent, PlatformSetting, SystemHealth
 
 
 @pytest.mark.django_db

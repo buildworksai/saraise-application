@@ -5,8 +5,8 @@ Tests business logic in services layer.
 """
 import pytest
 
-from ..models import LocalizationResource
-from ..services import LocalizationService
+from src.modules.localization.models import TenantBaseModel
+from src.modules.localization.services import LocalizationService
 
 
 @pytest.mark.django_db
@@ -105,7 +105,7 @@ class TestLocalizationService:
         
         result = service.delete_resource(resource.id, "tenant-123")
         assert result is True
-        assert not LocalizationResource.objects.filter(id=resource.id).exists()
+        assert not TenantBaseModel.objects.filter(id=resource.id).exists()
 
     def test_activate_resource(self, db):
         """Test activating a resource."""

@@ -13,7 +13,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from ..models import DataMapping, Integration, Webhook
+from src.modules.integration_platform.models import DataMapping, Integration, Webhook
 from src.core.auth_utils import get_user_tenant_id
 
 User = get_user_model()

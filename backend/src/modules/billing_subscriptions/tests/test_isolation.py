@@ -14,7 +14,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from ..models import Invoice, Payment, Subscription, SubscriptionPlan, UsageRecord
+from src.modules.billing_subscriptions.models import Invoice, Payment, Subscription, SubscriptionPlan, UsageRecord
 from src.core.auth_utils import get_user_tenant_id
 
 User = get_user_model()

@@ -9,8 +9,8 @@ from unittest.mock import Mock, patch, mock_open, MagicMock
 from django.utils import timezone
 from decimal import Decimal
 
-from ..models import MigrationJob, MigrationLog, MigrationMapping, MigrationRollback, MigrationValidation
-from ..services import MigrationEngine, MigrationResult
+from src.modules.data_migration.models import MigrationJob, MigrationLog, MigrationMapping, MigrationRollback, MigrationValidation
+from src.modules.data_migration.services import MigrationEngine, MigrationResult
 
 
 @pytest.mark.django_db

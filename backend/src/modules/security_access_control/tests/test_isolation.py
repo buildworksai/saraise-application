@@ -17,7 +17,7 @@ from rest_framework.test import APIClient
 from src.core.user_models import UserProfile
 from src.modules.tenant_management.models import Tenant
 
-from ..models import PermissionSet, Role, SecurityProfile
+from src.modules.security_access_control.models import PermissionSet, Role, SecurityProfile
 
 User = get_user_model()
 

@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-from ..module_manifest_schema import ModuleLifecycle, ModuleManifest, ModuleType
-from ..module_signing import ManifestSigner, SigningError, VerificationError
+from src.core.module_manifest_schema import ModuleLifecycle, ModuleManifest, ModuleType
+from src.core.module_signing import ManifestSigner, SigningError, VerificationError
 
 
 class TestManifestSigner:

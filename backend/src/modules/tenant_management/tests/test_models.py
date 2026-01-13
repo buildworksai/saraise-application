@@ -7,7 +7,7 @@ from datetime import date, timedelta
 import pytest
 from django.utils import timezone
 
-from ..models import Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
+from src.modules.tenant_management.models import Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
 
 
 @pytest.mark.django_db

@@ -14,9 +14,9 @@ from django.http import JsonResponse
 from django.test import RequestFactory
 from django.utils import timezone
 
-from ..middleware import LicenseValidationMiddleware
-from ..models import License, LicenseStatus, Organization
-from ..services import LicenseService
+from src.core.licensing.middleware import LicenseValidationMiddleware
+from src.core.licensing.models import License, LicenseStatus, Organization
+from src.core.licensing.services import LicenseService
 
 # Enable database access for all tests in this module
 pytestmark = pytest.mark.django_db

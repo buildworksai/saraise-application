@@ -6,7 +6,7 @@ Tests model creation, validation, and relationships.
 import pytest
 from django.utils import timezone
 
-from ..models import BackupArchive, BackupJob, BackupJobStatus, BackupRetentionPolicy, BackupSchedule
+from src.modules.backup_recovery.models import BackupArchive, BackupJob, BackupJobStatus, BackupRetentionPolicy, BackupSchedule
 
 
 @pytest.mark.django_db

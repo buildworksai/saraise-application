@@ -10,9 +10,9 @@ from unittest.mock import patch
 
 import pytest
 
-from ..client import LicenseClient
-from ..models import LicenseInfo, LicenseTier, LicenseValidationStatus, ModuleLicense
-from ..validator import LicenseValidator, get_license_validator
+from src.core.licensing.client import LicenseClient
+from src.core.licensing.models import LicenseInfo, LicenseTier, LicenseValidationStatus, ModuleLicense
+from src.core.licensing.validator import LicenseValidator, get_license_validator
 
 # Enable database access for all tests in this module
 pytestmark = pytest.mark.django_db

@@ -15,8 +15,8 @@ import pytest
 import requests
 from django.utils import timezone
 
-from ..models import License, LicenseStatus, LicenseValidationLog, Organization
-from ..services import LicenseService, ModuleAccessService
+from src.core.licensing.models import License, LicenseStatus, LicenseValidationLog, Organization
+from src.core.licensing.services import LicenseService, ModuleAccessService
 
 # Enable database access for all tests in this module
 pytestmark = pytest.mark.django_db

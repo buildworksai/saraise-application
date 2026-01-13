@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from src.core.user_models import UserProfile
 from src.modules.tenant_management.models import Tenant
 from src.core.licensing.models import Organization, License, LicenseStatus
-from ..models import Workflow, WorkflowStep, WorkflowInstance, WorkflowTask
+from src.modules.workflow_automation.models import Workflow, WorkflowStep, WorkflowInstance, WorkflowTask
 
 User = get_user_model()
 

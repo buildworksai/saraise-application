@@ -13,7 +13,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from ..models import MigrationJob, MigrationLog, MigrationMapping, MigrationValidation
+from src.modules.data_migration.models import MigrationJob, MigrationLog, MigrationMapping, MigrationValidation
 from src.core.auth_utils import get_user_tenant_id
 
 User = get_user_model()

@@ -13,7 +13,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from ..models import Workflow, WorkflowInstance, WorkflowTask, WorkflowStatus
+from src.modules.workflow_automation.models import Workflow, WorkflowInstance, WorkflowTask, WorkflowStatus
 from src.core.auth_utils import get_user_tenant_id
 
 User = get_user_model()
@@ -307,7 +307,7 @@ class TestWorkflowTaskTenantIsolation:
         )
 
         # Create steps
-        from ..models import WorkflowStep, WorkflowStepType
+        from src.modules.workflow_automation.models import WorkflowStep, WorkflowStepType
 
         step_a = WorkflowStep.objects.create(
             workflow=workflow_a,
@@ -368,7 +368,7 @@ class TestWorkflowTaskTenantIsolation:
             started_by=tenant_b_user,
         )
 
-        from ..models import WorkflowStep, WorkflowStepType
+        from src.modules.workflow_automation.models import WorkflowStep, WorkflowStepType
 
         step_b = WorkflowStep.objects.create(
             workflow=workflow_b,

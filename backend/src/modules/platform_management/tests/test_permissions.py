@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from rest_framework.test import APIRequestFactory
 
-from ..permissions import PlatformAdminPermission, PlatformViewerPermission
+from src.modules.platform_management.permissions import PlatformAdminPermission, PlatformViewerPermission
 
 
 def build_request(method="get", roles=None, authenticated=True):

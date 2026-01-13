@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from ..tool_registry import ToolDefinition, ToolRegistry, ToolSchema, ToolSideEffectClass
+from src.modules.ai_agent_management.tool_registry import ToolDefinition, ToolRegistry, ToolSchema, ToolSideEffectClass
 
 
 class TestToolRegistry:

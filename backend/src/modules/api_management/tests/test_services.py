@@ -5,8 +5,8 @@ Tests business logic in services layer.
 """
 import pytest
 
-from ..models import ApiManagementResource
-from ..services import ApiManagementService
+from src.modules.api_management.models import TenantBaseModel
+from src.modules.api_management.services import ApiManagementService
 
 
 @pytest.mark.django_db
@@ -105,7 +105,7 @@ class TestApiManagementService:
         
         result = service.delete_resource(resource.id, "tenant-123")
         assert result is True
-        assert not ApiManagementResource.objects.filter(id=resource.id).exists()
+        assert not TenantBaseModel.objects.filter(id=resource.id).exists()
 
     def test_activate_resource(self, db):
         """Test activating a resource."""

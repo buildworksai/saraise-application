@@ -13,7 +13,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from ..models import AutomationOrchestrationResource
+from src.modules.automation_orchestration.models import TenantBaseModel
 from src.core.auth_utils import get_user_tenant_id
 
 User = get_user_model()
@@ -82,7 +82,7 @@ def tenant_b_user(db):
 @pytest.mark.django_db
 class TestAutomationOrchestrationTenantIsolation:
     """
-    CRITICAL: Tenant isolation tests for AutomationOrchestrationResource model.
+    CRITICAL: Tenant isolation tests for TenantBaseModel model.
     These tests verify that tenants cannot access each other's resources.
     """
 
@@ -92,7 +92,7 @@ class TestAutomationOrchestrationTenantIsolation:
         tenant_b_id = get_user_tenant_id(tenant_b_user)
 
         # Create resource for tenant A
-        resource_a = AutomationOrchestrationResource.objects.create(
+        resource_a = TenantBaseModel.objects.create(
             tenant_id=tenant_a_id,
             name="Tenant A Resource",
             description="Resource for tenant A",
@@ -100,7 +100,7 @@ class TestAutomationOrchestrationTenantIsolation:
         )
 
         # Create resource for tenant B
-        resource_b = AutomationOrchestrationResource.objects.create(
+        resource_b = TenantBaseModel.objects.create(
             tenant_id=tenant_b_id,
             name="Tenant B Resource",
             description="Resource for tenant B",
@@ -125,7 +125,7 @@ class TestAutomationOrchestrationTenantIsolation:
         tenant_b_id = get_user_tenant_id(tenant_b_user)
 
         # Create resource for tenant B
-        resource_b = AutomationOrchestrationResource.objects.create(
+        resource_b = TenantBaseModel.objects.create(
             tenant_id=tenant_b_id,
             name="Tenant B Resource",
             description="Resource for tenant B",
@@ -144,7 +144,7 @@ class TestAutomationOrchestrationTenantIsolation:
         tenant_b_id = get_user_tenant_id(tenant_b_user)
 
         # Create resource for tenant B
-        resource_b = AutomationOrchestrationResource.objects.create(
+        resource_b = TenantBaseModel.objects.create(
             tenant_id=tenant_b_id,
             name="Tenant B Resource",
             description="Resource for tenant B",
@@ -172,7 +172,7 @@ class TestAutomationOrchestrationTenantIsolation:
         tenant_b_id = get_user_tenant_id(tenant_b_user)
 
         # Create resource for tenant B
-        resource_b = AutomationOrchestrationResource.objects.create(
+        resource_b = TenantBaseModel.objects.create(
             tenant_id=tenant_b_id,
             name="Tenant B Resource",
             description="Resource for tenant B",
@@ -187,4 +187,4 @@ class TestAutomationOrchestrationTenantIsolation:
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
         # Verify resource still exists
-        assert AutomationOrchestrationResource.objects.filter(id=resource_b.id).exists()
+        assert TenantBaseModel.objects.filter(id=resource_b.id).exists()

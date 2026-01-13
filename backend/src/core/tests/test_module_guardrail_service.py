@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from ..module_guardrail_models import GuardrailViolation, GuardrailViolationType
-from ..module_guardrail_service import GuardrailError, ModuleGuardrailService
+from src.core.module_guardrail_models import GuardrailViolation, GuardrailViolationType
+from src.core.module_guardrail_service import GuardrailError, ModuleGuardrailService
 
 
 @pytest.mark.django_db
@@ -24,7 +24,7 @@ class TestModuleGuardrailService:
 
         # Create temporary module directory with clean code
         with tempfile.TemporaryDirectory() as tmpdir:
-            module_dir = Path(tmpdir) / "test-module"
+            module_dir = Path(tmpdir) / "sample-module"
             module_dir.mkdir()
 
             # Create clean Python file
@@ -36,7 +36,7 @@ def create_customer(name: str) -> dict:
 """
             )
 
-            violations = service.scan_module("test-module", str(module_dir))
+            violations = service.scan_module("sample-module", str(module_dir))
             assert len(violations) == 0
 
     def test_scan_module_auth_drift(self) -> None:
@@ -44,7 +44,7 @@ def create_customer(name: str) -> dict:
         service = ModuleGuardrailService()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            module_dir = Path(tmpdir) / "test-module"
+            module_dir = Path(tmpdir) / "sample-module"
             module_dir.mkdir()
 
             # Create file with auth drift
@@ -56,7 +56,7 @@ def login(username: str, password: str) -> dict:
 """
             )
 
-            violations = service.scan_module("test-module", str(module_dir))
+            violations = service.scan_module("sample-module", str(module_dir))
             assert len(violations) > 0
             assert any(v.violation_type == GuardrailViolationType.AUTH_DRIFT for v in violations)
 
@@ -65,7 +65,7 @@ def login(username: str, password: str) -> dict:
         service = ModuleGuardrailService()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            module_dir = Path(tmpdir) / "test-module"
+            module_dir = Path(tmpdir) / "sample-module"
             module_dir.mkdir()
 
             # Create file with policy drift
@@ -77,7 +77,7 @@ def check_permission(user: str) -> bool:
 """
             )
 
-            violations = service.scan_module("test-module", str(module_dir))
+            violations = service.scan_module("sample-module", str(module_dir))
             assert len(violations) > 0
             assert any(v.violation_type == GuardrailViolationType.POLICY_DRIFT for v in violations)
 
@@ -104,13 +104,13 @@ def check_permission(user: str) -> bool:
         service = ModuleGuardrailService()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            module_dir = Path(tmpdir) / "test-module"
+            module_dir = Path(tmpdir) / "sample-module"
             module_dir.mkdir()
 
             clean_file = module_dir / "models.py"
             clean_file.write_text("def create_item(): pass\n")
 
-            is_compliant, violations = service.check_module_compliance("test-module", str(module_dir))
+            is_compliant, violations = service.check_module_compliance("sample-module", str(module_dir))
 
             assert is_compliant is True
             assert len(violations) == 0
@@ -120,13 +120,13 @@ def check_permission(user: str) -> bool:
         service = ModuleGuardrailService()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            module_dir = Path(tmpdir) / "test-module"
+            module_dir = Path(tmpdir) / "sample-module"
             module_dir.mkdir()
 
             bad_file = module_dir / "auth.py"
             bad_file.write_text("def login(): pass\n")
 
-            is_compliant, violations = service.check_module_compliance("test-module", str(module_dir))
+            is_compliant, violations = service.check_module_compliance("sample-module", str(module_dir))
 
             assert is_compliant is False
             assert len(violations) > 0

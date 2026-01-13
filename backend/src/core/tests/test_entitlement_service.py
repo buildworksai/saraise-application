@@ -8,8 +8,8 @@ from __future__ import annotations
 import pytest
 from django.utils import timezone
 
-from ..entitlement_models import EntitlementCheck, PlanEntitlement, SubscriptionPlan, TenantSubscription
-from ..entitlement_service import EntitlementError, EntitlementService
+from src.core.entitlement_models import EntitlementCheck, PlanEntitlement, SubscriptionPlan, TenantSubscription
+from src.core.entitlement_service import EntitlementError, EntitlementService
 
 
 @pytest.mark.django_db
@@ -77,8 +77,9 @@ class TestEntitlementService:
             started_at=timezone.now(),
         )
 
-        has_access = service.check_module_access(tenant_id, "test-module")
+        has_access, reason = service.check_module_access(tenant_id, "test-module")
         assert has_access is True
+        assert reason is None
 
     def test_check_module_access_no_entitlement(self) -> None:
         """Test checking module access without entitlement."""
@@ -99,7 +100,7 @@ class TestEntitlementService:
             started_at=timezone.now(),
         )
 
-        has_access = service.check_module_access(tenant_id, "premium-module")
+        has_access, reason = service.check_module_access(tenant_id, "premium-module")
         assert has_access is False
 
     def test_check_feature_access(self) -> None:
@@ -128,7 +129,7 @@ class TestEntitlementService:
             started_at=timezone.now(),
         )
 
-        has_access = service.check_feature_access(tenant_id, "advanced-reports")
+        has_access, reason = service.check_feature_access(tenant_id, "advanced-reports")
         assert has_access is True
 
     def test_check_resource_limit(self) -> None:
@@ -157,10 +158,10 @@ class TestEntitlementService:
             started_at=timezone.now(),
         )
 
-        within_limit = service.check_resource_limit(tenant_id, "api_calls_per_month", 5000)
+        within_limit, reason, limit_value = service.check_resource_limit(tenant_id, "api_calls_per_month", 5000)
         assert within_limit is True
 
-        exceeds_limit = service.check_resource_limit(tenant_id, "api_calls_per_month", 15000)
+        exceeds_limit, reason, limit_value = service.check_resource_limit(tenant_id, "api_calls_per_month", 15000)
         assert exceeds_limit is False
 
     def test_create_subscription(self) -> None:
@@ -200,11 +201,12 @@ class TestEntitlementService:
         service = EntitlementService()
 
         tenant_id = "tenant-1"
-        service.log_entitlement_check(
+        # Use private method _log_check (or test via public methods that call it)
+        service._log_check(
             tenant_id=tenant_id,
             entitlement_type="module",
             resource_name="test-module",
-            granted=True,
+            allowed=True,
             reason="Plan includes module",
         )
 
@@ -212,4 +214,4 @@ class TestEntitlementService:
 
         assert check is not None
         assert check.resource_name == "test-module"
-        assert check.granted is True
+        assert check.allowed is True

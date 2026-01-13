@@ -13,7 +13,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from ..models import (
+from src.modules.ai_provider_configuration.models import (
     AIModel,
     AIModelDeployment,
     AIProvider,

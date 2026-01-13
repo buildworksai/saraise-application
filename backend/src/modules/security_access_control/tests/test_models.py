@@ -10,7 +10,7 @@ from django.utils import timezone
 
 from src.modules.tenant_management.models import Tenant
 
-from ..models import (
+from src.modules.security_access_control.models import (
     FieldSecurity,
     Permission,
     PermissionSet,

@@ -14,15 +14,15 @@ from django.http import JsonResponse
 from django.test import RequestFactory
 from django.utils import timezone
 
-from ..decorators import (
+from src.core.licensing.decorators import (
     require_license,
     require_module,
     requires_license,
     requires_module,
     requires_write_access,
 )
-from ..models import License, LicenseStatus, Organization
-from ..services import ModuleAccessService
+from src.core.licensing.models import License, LicenseStatus, Organization
+from src.core.licensing.services import ModuleAccessService
 
 # Enable database access for all tests in this module
 pytestmark = pytest.mark.django_db

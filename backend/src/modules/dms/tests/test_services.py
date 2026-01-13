@@ -8,8 +8,8 @@ import io
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 
-from ..models import Document, DocumentVersion, Folder
-from ..services import DocumentStorageService
+from src.modules.dms.models import Document, DocumentVersion, Folder
+from src.modules.dms.services import DocumentStorageService
 
 
 @pytest.mark.django_db

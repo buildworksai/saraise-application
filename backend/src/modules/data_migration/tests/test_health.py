@@ -8,7 +8,7 @@ from django.test import Client
 from django.contrib.auth import get_user_model
 from src.core.user_models import UserProfile
 from src.core.licensing.models import Organization
-from ..models import MigrationJob
+from src.modules.data_migration.models import MigrationJob
 
 User = get_user_model()
 

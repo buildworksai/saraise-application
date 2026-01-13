@@ -6,79 +6,27 @@ from datetime import date, timedelta
 
 import pytest
 
-from ..models import Tenant, TenantModule
-from ..services import TenantManagementService
+from src.modules.tenant_management.models import Tenant, TenantModule
+from src.modules.tenant_management.services import TenantManagementService
 
 
 @pytest.mark.django_db
 class TestTenantManagementService:
     """Test TenantManagementService business logic."""
 
-    def test_create_tenant(self):
-        """Test: Create tenant with service."""
-        tenant = TenantManagementService.create_tenant(
-            name="Service Test Tenant",
-            slug="service-test-tenant",
-            created_by="test-user-id",
-        )
-        assert tenant.id is not None
-        assert tenant.name == "Service Test Tenant"
-        assert tenant.created_by == "test-user-id"
-
-    def test_activate_tenant(self):
-        """Test: Activate tenant."""
-        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.TRIAL)
-        activated = TenantManagementService.activate_tenant(tenant.id)
-        assert activated.status == Tenant.TenantStatus.ACTIVE
-
-    def test_suspend_tenant(self):
-        """Test: Suspend tenant."""
-        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.ACTIVE)
-        suspended = TenantManagementService.suspend_tenant(tenant.id)
-        assert suspended.status == Tenant.TenantStatus.SUSPENDED
-
-    def test_cancel_tenant(self):
-        """Test: Cancel tenant."""
-        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.ACTIVE)
-        cancelled = TenantManagementService.cancel_tenant(tenant.id)
-        assert cancelled.status == Tenant.TenantStatus.CANCELLED
-
-    def test_archive_tenant(self):
-        """Test: Archive tenant."""
-        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", status=Tenant.TenantStatus.ACTIVE)
-        archived = TenantManagementService.archive_tenant(tenant.id)
-        assert archived.status == Tenant.TenantStatus.ARCHIVED
-
-    def test_install_module(self):
-        """Test: Install module for tenant."""
-        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
-        module = TenantManagementService.install_module(
-            tenant_id=tenant.id,
-            module_name="crm",
-            installed_by="test-user-id",
-            version="1.0.0",
-        )
-        assert module.module_name == "crm"
-        assert module.is_enabled is True
-        assert module.version == "1.0.0"
-
-    def test_enable_disable_module(self):
-        """Test: Enable and disable module."""
-        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
-        TenantModule.objects.create(tenant=tenant, module_name="crm", is_enabled=False)
-
-        enabled = TenantManagementService.enable_module(tenant.id, "crm")
-        assert enabled.is_enabled is True
-
-        disabled = TenantManagementService.disable_module(tenant.id, "crm")
-        assert disabled.is_enabled is False
-
-    def test_uninstall_module(self):
-        """Test: Uninstall module."""
-        tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
-        TenantModule.objects.create(tenant=tenant, module_name="crm", is_enabled=True)
-        TenantManagementService.uninstall_module(tenant.id, "crm")
-        assert not TenantModule.objects.filter(tenant=tenant, module_name="crm").exists()
+    # ⚠️ ARCHITECTURAL NOTE: Lifecycle operations removed from service
+    # These operations MUST be performed via Control Plane services.
+    # Tests for lifecycle operations are removed per architectural compliance.
+    #
+    # Removed tests:
+    # - test_create_tenant → Use Control Plane
+    # - test_activate_tenant → Use Control Plane
+    # - test_suspend_tenant → Use Control Plane
+    # - test_cancel_tenant → Use Control Plane
+    # - test_archive_tenant → Use Control Plane
+    # - test_install_module → Use Control Plane
+    # - test_enable_disable_module → Use Control Plane
+    # - test_uninstall_module → Use Control Plane
 
     def test_record_resource_usage(self):
         """Test: Record resource usage."""
@@ -114,7 +62,7 @@ class TestTenantManagementService:
 
     def test_set_get_tenant_setting(self):
         """Test: Set and get tenant setting."""
-        from ..models import TenantSettings
+        from src.modules.tenant_management.models import TenantSettings
 
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
         # Create setting directly (set_tenant_setting was removed for architectural reasons)

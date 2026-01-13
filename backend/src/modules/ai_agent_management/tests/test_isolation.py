@@ -17,10 +17,10 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from ..approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy, SoDViolation
-from ..models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState, AgentSchedulerTask
-from ..quota_models import QuotaPeriod, QuotaType, QuotaUsage, TenantQuota
-from ..tool_models import Tool, ToolInvocation
+from src.modules.ai_agent_management.approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy, SoDViolation
+from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState, AgentSchedulerTask
+from src.modules.ai_agent_management.quota_models import QuotaPeriod, QuotaType, QuotaUsage, TenantQuota
+from src.modules.ai_agent_management.tool_models import Tool, ToolInvocation
 
 User = get_user_model()
 

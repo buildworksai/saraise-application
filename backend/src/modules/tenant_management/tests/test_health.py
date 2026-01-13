@@ -4,8 +4,8 @@ from django.core.cache import cache
 from django.db import connection
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from ..health import health_check
-from ..models import Tenant
+from src.modules.tenant_management.health import health_check
+from src.modules.tenant_management.models import Tenant
 
 
 @pytest.mark.django_db

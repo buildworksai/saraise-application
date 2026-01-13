@@ -1,7 +1,7 @@
 import pytest
 from django.contrib import admin
 
-from ..models import Tenant
+from src.modules.tenant_management.models import Tenant
 
 
 @pytest.mark.django_db

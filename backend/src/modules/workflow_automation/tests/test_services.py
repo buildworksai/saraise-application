@@ -8,7 +8,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from ..models import (
+from src.modules.workflow_automation.models import (
     Workflow,
     WorkflowStep,
     WorkflowInstance,
@@ -19,7 +19,7 @@ from ..models import (
     WorkflowInstanceState,
     WorkflowTaskStatus,
 )
-from ..services import WorkflowEngine
+from src.modules.workflow_automation.services import WorkflowEngine
 
 User = get_user_model()
 
@@ -56,7 +56,11 @@ class TestWorkflowEngine:
         assert instance.tenant_id == tenant_id
         assert instance.workflow == workflow
         assert instance.state == WorkflowInstanceState.COMPLETED  # Action step completes immediately
-        assert instance.context_data == {"key": "value"}
+        # Context data includes original data plus action results
+        assert "key" in instance.context_data
+        assert instance.context_data["key"] == "value"
+        # Action results are added to context
+        assert any(k.startswith("action_result_") for k in instance.context_data.keys())
 
     def test_start_workflow_not_published(self, db):
         """Test that starting a non-published workflow raises error."""

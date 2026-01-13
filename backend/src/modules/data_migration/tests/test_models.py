@@ -6,7 +6,7 @@ Tests model creation, validation, and relationships.
 import pytest
 from django.core.exceptions import ValidationError
 
-from ..models import MigrationJob, MigrationMapping, MigrationLog, MigrationValidation, MigrationRollback
+from src.modules.data_migration.models import MigrationJob, MigrationMapping, MigrationLog, MigrationValidation, MigrationRollback
 
 
 @pytest.mark.django_db

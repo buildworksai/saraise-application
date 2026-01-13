@@ -6,16 +6,16 @@ Tests model creation, validation, and relationships.
 import pytest
 from django.core.exceptions import ValidationError
 
-from ..models import BackupDisasterRecoveryResource
+from src.modules.backup_disaster_recovery.models import TenantBaseModel
 
 
 @pytest.mark.django_db
-class TestBackupDisasterRecoveryResourceModel:
-    """Test BackupDisasterRecoveryResource model."""
+class TestTenantBaseModelModel:
+    """Test TenantBaseModel model."""
 
     def test_create_resource(self, db):
         """Test creating a resource."""
-        resource = BackupDisasterRecoveryResource.objects.create(
+        resource = TenantBaseModel.objects.create(
             tenant_id="tenant-123",
             name="Test Resource",
             description="Test description",
@@ -28,7 +28,7 @@ class TestBackupDisasterRecoveryResourceModel:
 
     def test_resource_str_representation(self, db):
         """Test resource string representation."""
-        resource = BackupDisasterRecoveryResource.objects.create(
+        resource = TenantBaseModel.objects.create(
             tenant_id="tenant-123",
             name="Test Resource",
             created_by="user-123",
@@ -37,7 +37,7 @@ class TestBackupDisasterRecoveryResourceModel:
 
     def test_resource_has_tenant_id(self, db):
         """Test that resource requires tenant_id."""
-        resource = BackupDisasterRecoveryResource(
+        resource = TenantBaseModel(
             name="Test Resource",
             created_by="user-123",
         )
@@ -48,7 +48,7 @@ class TestBackupDisasterRecoveryResourceModel:
     def test_resource_config_field(self, db):
         """Test resource config JSON field."""
         config = {"key1": "value1", "key2": 123}
-        resource = BackupDisasterRecoveryResource.objects.create(
+        resource = TenantBaseModel.objects.create(
             tenant_id="tenant-123",
             name="Test Resource",
             config=config,

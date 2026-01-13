@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from src.core.user_models import UserProfile
 from src.modules.tenant_management.models import Tenant
 from src.core.licensing.models import Organization, License, LicenseStatus
-from ..models import EntityDefinition, FieldDefinition, DynamicResource
+from src.modules.metadata_modeling.models import EntityDefinition, FieldDefinition, DynamicResource
 
 User = get_user_model()
 

@@ -11,7 +11,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from ..models import FeatureFlag, PlatformSetting
+from src.modules.platform_management.models import FeatureFlag, PlatformSetting
 
 User = get_user_model()
 

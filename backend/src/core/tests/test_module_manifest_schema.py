@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from ..module_manifest_schema import (
+from src.core.module_manifest_schema import (
     ManifestValidationError,
     ManifestValidator,
     ModuleLifecycle,

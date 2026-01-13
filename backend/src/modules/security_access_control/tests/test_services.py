@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 
 from src.modules.tenant_management.models import Tenant
 
-from ..models import (
+from src.modules.security_access_control.models import (
     FieldSecurity,
     Permission,
     PermissionSet,
@@ -18,7 +18,7 @@ from ..models import (
     SecurityProfile,
     UserRole,
 )
-from ..services import SecurityAccessControlService
+from src.modules.security_access_control.services import SecurityAccessControlService
 
 User = get_user_model()
 

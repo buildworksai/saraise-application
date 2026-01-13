@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from ..models import FeatureFlag, PlatformAuditEvent, PlatformSetting, SystemHealth
+from src.modules.platform_management.models import FeatureFlag, PlatformAuditEvent, PlatformSetting, SystemHealth
 
 User = get_user_model()
 

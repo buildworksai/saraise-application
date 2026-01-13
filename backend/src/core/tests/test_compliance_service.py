@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-from ..compliance_models import ComplianceCheck, ComplianceCheckType, ResidencyRule
-from ..compliance_service import ComplianceService
+from src.core.compliance_models import ComplianceCheck, ComplianceCheckType, ResidencyRule
+from src.core.compliance_service import ComplianceService
 
 
 @pytest.mark.django_db

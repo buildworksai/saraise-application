@@ -14,7 +14,7 @@ from rest_framework.test import APIClient
 
 from src.core.user_models import UserProfile
 
-from ..models import Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
+from src.modules.tenant_management.models import Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
 
 User = get_user_model()
 
@@ -113,7 +113,7 @@ class TestTenantViewSet:
         assert len(data) == 0  # Empty queryset
 
     def test_create_tenant_as_platform_owner(self, authenticated_platform_client, platform_owner):
-        """Test: Platform owner can create tenant."""
+        """Test: CREATE operation returns 405 Method Not Allowed (read-only API per architecture)."""
         data = {
             "name": "New Tenant",
             "slug": "new-tenant",
@@ -122,27 +122,11 @@ class TestTenantViewSet:
         }
         response = authenticated_platform_client.post("/api/v1/tenant-management/tenants/", data, format="json")
 
-        # Serializer validation requires subdomain OR custom_domain
-        if response.status_code == status.HTTP_400_BAD_REQUEST:
-            # Try with custom_domain instead
-            data = {
-                "name": "New Tenant",
-                "slug": "new-tenant",
-                "custom_domain": "new-tenant.example.com",
-                "status": "trial",
-            }
-            response = authenticated_platform_client.post("/api/v1/tenant-management/tenants/", data, format="json")
-
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data["name"] == "New Tenant"
-        assert response.data["slug"] == "new-tenant"
-        # Verify tenant was created
-        tenant = Tenant.objects.get(slug="new-tenant")
-        assert tenant.name == "New Tenant"
+        # ReadOnlyModelViewSet returns 405 Method Not Allowed for POST
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
     def test_create_tenant_as_tenant_user_denied(self, authenticated_tenant_client):
-        """Test: Tenant user cannot create tenant."""
-        # Provide valid data to pass serializer validation
+        """Test: CREATE operation returns 405 Method Not Allowed (read-only API per architecture)."""
         data = {
             "name": "Unauthorized Tenant",
             "slug": "unauthorized-tenant",
@@ -150,8 +134,8 @@ class TestTenantViewSet:
         }
         response = authenticated_tenant_client.post("/api/v1/tenant-management/tenants/", data, format="json")
 
-        # perform_create checks platform_role and raises PermissionDenied
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        # ReadOnlyModelViewSet returns 405 Method Not Allowed for POST
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
     def test_get_tenant_detail(self, authenticated_platform_client):
         """Test: Platform owner can get tenant detail."""
@@ -163,7 +147,7 @@ class TestTenantViewSet:
         assert response.data["name"] == "Test Tenant"
 
     def test_update_tenant(self, authenticated_platform_client, platform_owner):
-        """Test: Platform owner can update tenant."""
+        """Test: UPDATE operation returns 405 Method Not Allowed (read-only API per architecture)."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
 
         data = {"name": "Updated Tenant"}
@@ -171,14 +155,11 @@ class TestTenantViewSet:
             f"/api/v1/tenant-management/tenants/{tenant.id}/", data, format="json"
         )
 
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["name"] == "Updated Tenant"
-        # Verify tenant was updated
-        tenant.refresh_from_db()
-        assert tenant.name == "Updated Tenant"
+        # ReadOnlyModelViewSet returns 405 Method Not Allowed for PATCH
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
     def test_suspend_tenant(self, authenticated_platform_client):
-        """Test: Platform owner can suspend tenant."""
+        """Test: SUSPEND operation returns 405 Method Not Allowed (read-only API per architecture)."""
         tenant = Tenant.objects.create(
             name="Test Tenant",
             slug="test-tenant",
@@ -188,12 +169,11 @@ class TestTenantViewSet:
 
         response = authenticated_platform_client.post(f"/api/v1/tenant-management/tenants/{tenant.id}/suspend/")
 
-        assert response.status_code == status.HTTP_200_OK
-        tenant.refresh_from_db()
-        assert tenant.status == Tenant.TenantStatus.SUSPENDED
+        # Custom action not available in ReadOnlyModelViewSet - returns 404
+        assert response.status_code == status.HTTP_404_NOT_FOUND
 
     def test_activate_tenant(self, authenticated_platform_client):
-        """Test: Platform owner can activate tenant."""
+        """Test: ACTIVATE operation returns 405 Method Not Allowed (read-only API per architecture)."""
         tenant = Tenant.objects.create(
             name="Test Tenant",
             slug="test-tenant",
@@ -203,12 +183,11 @@ class TestTenantViewSet:
 
         response = authenticated_platform_client.post(f"/api/v1/tenant-management/tenants/{tenant.id}/activate/")
 
-        assert response.status_code == status.HTTP_200_OK
-        tenant.refresh_from_db()
-        assert tenant.status == Tenant.TenantStatus.ACTIVE
+        # Custom action not available in ReadOnlyModelViewSet - returns 404
+        assert response.status_code == status.HTTP_404_NOT_FOUND
 
     def test_delete_active_tenant_denied(self, authenticated_platform_client):
-        """Test: Cannot delete active tenant."""
+        """Test: DELETE operation returns 405 Method Not Allowed (read-only API per architecture)."""
         tenant = Tenant.objects.create(
             name="Active Tenant",
             slug="active-tenant",
@@ -218,13 +197,13 @@ class TestTenantViewSet:
 
         response = authenticated_platform_client.delete(f"/api/v1/tenant-management/tenants/{tenant.id}/")
 
-        # perform_destroy raises PermissionDenied which becomes 403
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        # ReadOnlyModelViewSet returns 405 Method Not Allowed for DELETE
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
         # Verify tenant still exists
         assert Tenant.objects.filter(id=tenant.id).exists()
 
     def test_delete_cancelled_tenant(self, authenticated_platform_client):
-        """Test: Can delete cancelled tenant."""
+        """Test: DELETE operation returns 405 Method Not Allowed (read-only API per architecture)."""
         tenant = Tenant.objects.create(
             name="Cancelled Tenant",
             slug="cancelled-tenant",
@@ -234,8 +213,10 @@ class TestTenantViewSet:
 
         response = authenticated_platform_client.delete(f"/api/v1/tenant-management/tenants/{tenant.id}/")
 
-        assert response.status_code == status.HTTP_204_NO_CONTENT
-        assert not Tenant.objects.filter(id=tenant.id).exists()
+        # ReadOnlyModelViewSet returns 405 Method Not Allowed for DELETE
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+        # Verify tenant still exists
+        assert Tenant.objects.filter(id=tenant.id).exists()
 
     def test_get_tenant_modules(self, authenticated_platform_client):
         """Test: Get modules for a tenant."""
@@ -284,14 +265,14 @@ class TestTenantModuleViewSet:
         assert len(data) >= 2
 
     def test_install_module(self, authenticated_platform_client, platform_owner):
-        """Test: Platform owner can install module for tenant."""
+        """Test: INSTALL operation returns 405 Method Not Allowed (read-only API per architecture)."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
 
         data = {"tenant": tenant.id, "module_name": "crm", "is_enabled": True}
         response = authenticated_platform_client.post("/api/v1/tenant-management/modules/", data, format="json")
 
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data["module_name"] == "crm"
+        # ReadOnlyModelViewSet returns 405 Method Not Allowed for POST
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
     def test_enable_module(self, authenticated_platform_client):
         """Test: Platform owner can enable module."""
@@ -300,20 +281,18 @@ class TestTenantModuleViewSet:
 
         response = authenticated_platform_client.post(f"/api/v1/tenant-management/modules/{module.id}/enable/")
 
-        assert response.status_code == status.HTTP_200_OK
-        module.refresh_from_db()
-        assert module.is_enabled is True
+        # Custom action not available in ReadOnlyModelViewSet - returns 404
+        assert response.status_code == status.HTTP_404_NOT_FOUND
 
     def test_disable_module(self, authenticated_platform_client):
-        """Test: Platform owner can disable module."""
+        """Test: DISABLE operation returns 404 Not Found (read-only API per architecture)."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
         module = TenantModule.objects.create(tenant=tenant, module_name="crm", is_enabled=True)
 
         response = authenticated_platform_client.post(f"/api/v1/tenant-management/modules/{module.id}/disable/")
 
-        assert response.status_code == status.HTTP_200_OK
-        module.refresh_from_db()
-        assert module.is_enabled is False
+        # Custom action not available in ReadOnlyModelViewSet - returns 404
+        assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 @pytest.mark.django_db
@@ -321,7 +300,7 @@ class TestTenantSettingsViewSet:
     """Test cases for Tenant Settings API."""
 
     def test_create_setting(self, authenticated_platform_client, platform_owner):
-        """Test: Platform owner can create tenant setting."""
+        """Test: CREATE operation returns 405 Method Not Allowed (read-only API per architecture)."""
         tenant = Tenant.objects.create(name="Test Tenant", slug="test-tenant", subdomain="test-tenant")
 
         data = {
@@ -332,9 +311,8 @@ class TestTenantSettingsViewSet:
         }
         response = authenticated_platform_client.post("/api/v1/tenant-management/settings/", data, format="json")
 
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data["category"] == "email"
-        assert response.data["key"] == "smtp_host"
+        # ReadOnlyModelViewSet returns 405 Method Not Allowed for POST
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
     def test_list_settings_filtered_by_tenant(self, authenticated_platform_client):
         """Test: List settings filtered by tenant."""

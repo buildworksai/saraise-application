@@ -2,8 +2,8 @@ import pytest
 from django.core.cache import cache
 from django.db import connection
 
-from ..health import check_cache_health, check_database_health, update_health_metrics
-from ..models import SystemHealth
+from src.modules.platform_management.health import check_cache_health, check_database_health, update_health_metrics
+from src.modules.platform_management.models import SystemHealth
 
 
 @pytest.mark.django_db

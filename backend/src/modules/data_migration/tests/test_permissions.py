@@ -4,7 +4,7 @@ Permissions Tests for DataMigration module.
 Tests permission declarations and SoD actions.
 """
 import pytest
-from ..permissions import PERMISSIONS, SOD_ACTIONS
+from src.modules.data_migration.permissions import PERMISSIONS, SOD_ACTIONS
 
 
 class TestDataMigrationPermissions:

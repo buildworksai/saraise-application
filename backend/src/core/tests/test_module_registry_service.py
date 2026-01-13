@@ -8,9 +8,9 @@ from __future__ import annotations
 import pytest
 from django.utils import timezone
 
-from ..module_manifest_schema import ModuleLifecycle, ModuleType
-from ..module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
-from ..module_registry_service import (
+from src.core.module_manifest_schema import ModuleLifecycle, ModuleType
+from src.core.module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
+from src.core.module_registry_service import (
     DependencyResolutionError,
     ModuleRegistryService,
     RegistryError,

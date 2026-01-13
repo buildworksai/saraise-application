@@ -10,9 +10,9 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
-from ..egress_models import Secret, SecretAccess
-from ..models import Agent, AgentExecution, AgentIdentityType
-from ..secret_service import SecretService
+from src.modules.ai_agent_management.egress_models import Secret, SecretAccess
+from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType
+from src.modules.ai_agent_management.secret_service import SecretService
 
 
 @pytest.mark.django_db
@@ -255,7 +255,7 @@ class TestSecretService:
 
         assert value == "secret-value"
         # Verify access was logged
-        from ..egress_models import SecretAccess
+        from src.modules.ai_agent_management.egress_models import SecretAccess
 
         access = SecretAccess.objects.filter(secret=secret, agent_execution=execution).first()
         assert access is not None

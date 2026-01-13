@@ -10,8 +10,8 @@ from datetime import datetime
 import pytest
 from django.utils import timezone
 
-from ..models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState
-from ..runtime import AgentExecutionContext, AgentRuntime
+from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState
+from src.modules.ai_agent_management.runtime import AgentExecutionContext, AgentRuntime
 
 
 @pytest.mark.django_db

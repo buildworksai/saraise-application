@@ -8,9 +8,9 @@ from __future__ import annotations
 import pytest
 from django.utils import timezone
 
-from ..audit_models import AuditEvent, AuditEventType, AuditTrail
-from ..audit_service import AuditService
-from ..models import Agent, AgentExecution, AgentIdentityType
+from src.modules.ai_agent_management.audit_models import AuditEvent, AuditEventType, AuditTrail
+from src.modules.ai_agent_management.audit_service import AuditService
+from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType
 
 
 @pytest.mark.django_db

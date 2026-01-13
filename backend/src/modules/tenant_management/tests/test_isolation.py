@@ -15,7 +15,7 @@ from rest_framework.test import APIClient
 
 from src.core.user_models import UserProfile
 
-from ..models import Tenant
+from src.modules.tenant_management.models import Tenant
 
 User = get_user_model()
 
@@ -125,7 +125,7 @@ class TestPlatformLevelAccessControl:
         assert len(data) == 0
 
     def test_tenant_user_cannot_create_tenant(self, api_client, tenant_a_user):
-        """Test: Tenant user cannot create tenant."""
+        """Test: Tenant user cannot create tenant (405 Method Not Allowed - read-only API)."""
         # Provide valid data to pass serializer validation
         data = {
             "name": "Unauthorized Tenant",
@@ -136,8 +136,8 @@ class TestPlatformLevelAccessControl:
         api_client.force_authenticate(user=tenant_a_user)
         response = api_client.post("/api/v1/tenant-management/tenants/", data, format="json")
 
-        # perform_create checks platform_role and raises PermissionDenied
-        assert response.status_code == status.HTTP_403_FORBIDDEN
+        # ReadOnlyModelViewSet returns 405 Method Not Allowed for POST
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
     def test_tenant_user_cannot_access_tenant_detail(self, api_client, tenant_a_user):
         """Test: Tenant user cannot access tenant detail."""
@@ -150,7 +150,7 @@ class TestPlatformLevelAccessControl:
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
     def test_tenant_user_cannot_update_tenant(self, api_client, tenant_a_user):
-        """Test: Tenant user cannot update tenant."""
+        """Test: Tenant user cannot update tenant (405 Method Not Allowed - read-only API)."""
         tenant = Tenant.objects.create(
             name="Isolation Update Tenant",
             slug="isolation-update-tenant",
@@ -164,10 +164,11 @@ class TestPlatformLevelAccessControl:
             format="json",
         )
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        # ReadOnlyModelViewSet returns 405 Method Not Allowed for PATCH
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
     def test_tenant_user_cannot_delete_tenant(self, api_client, tenant_a_user):
-        """Test: Tenant user cannot delete tenant."""
+        """Test: Tenant user cannot delete tenant (405 Method Not Allowed - read-only API)."""
         tenant = Tenant.objects.create(
             name="Isolation Delete Tenant",
             slug="isolation-delete-tenant",
@@ -177,7 +178,8 @@ class TestPlatformLevelAccessControl:
         api_client.force_authenticate(user=tenant_a_user)
         response = api_client.delete(f"/api/v1/tenant-management/tenants/{tenant.id}/")
 
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+        # ReadOnlyModelViewSet returns 405 Method Not Allowed for DELETE
+        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
     def test_tenant_user_cannot_manage_modules(self, api_client, tenant_a_user):
         """Test: Tenant user cannot manage tenant modules."""

@@ -4,8 +4,8 @@ from django.core.cache import cache
 from django.db import connection
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from ..health import check_security_module_health
-from ..models import Permission, Role
+from src.modules.security_access_control.health import check_security_module_health
+from src.modules.security_access_control.models import Permission, Role
 
 
 @pytest.mark.django_db

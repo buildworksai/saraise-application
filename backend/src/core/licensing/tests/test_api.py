@@ -45,7 +45,7 @@ class LicenseViewSetTests(APITestCase):
         url = reverse("licensing-activate")
 
         data = {"license_key": "valid_key"}
-        response = self.client.post(url, data)
+        response = self.client.post(url, data, format="json")
         # Should be forbidden for non-admin
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
@@ -57,7 +57,7 @@ class LicenseViewSetTests(APITestCase):
         url = reverse("licensing-activate")
 
         data = {"license_key": "new_license_key"}
-        response = self.client.post(url, data)
+        response = self.client.post(url, data, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         # Verify DB update

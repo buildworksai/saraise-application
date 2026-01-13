@@ -10,7 +10,7 @@ from decimal import Decimal
 import pytest
 from django.core.exceptions import ValidationError
 
-from ..models import (
+from src.modules.crm.models import (
     Account,
     AccountType,
     Activity,
@@ -23,7 +23,7 @@ from ..models import (
     OpportunityStatus,
     RelatedToType,
 )
-from ..services import (
+from src.modules.crm.services import (
     AccountService,
     ActivityService,
     ContactService,

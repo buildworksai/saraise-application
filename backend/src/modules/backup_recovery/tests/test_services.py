@@ -6,8 +6,8 @@ Tests business logic in services layer.
 import pytest
 from django.utils import timezone
 
-from ..models import BackupArchive, BackupJob, BackupJobStatus, BackupRetentionPolicy, BackupSchedule
-from ..services import BackupRecoveryService
+from src.modules.backup_recovery.models import BackupArchive, BackupJob, BackupJobStatus, BackupRetentionPolicy, BackupSchedule
+from src.modules.backup_recovery.services import BackupRecoveryService
 
 
 @pytest.mark.django_db

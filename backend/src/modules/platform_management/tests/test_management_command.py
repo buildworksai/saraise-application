@@ -1,7 +1,7 @@
 import pytest
 from django.core.management import call_command
 
-from ..models import PlatformMetrics
+from src.modules.platform_management.models import PlatformMetrics
 
 
 @pytest.mark.django_db

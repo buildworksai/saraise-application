@@ -10,11 +10,11 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
-from ..approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy
-from ..approval_service import ApprovalService
-from ..models import Agent, AgentExecution, AgentIdentityType
-from ..tool_models import Tool
-from ..tool_registry import ToolSideEffectClass
+from src.modules.ai_agent_management.approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy
+from src.modules.ai_agent_management.approval_service import ApprovalService
+from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType
+from src.modules.ai_agent_management.tool_models import Tool
+from src.modules.ai_agent_management.tool_registry import ToolSideEffectClass
 
 
 @pytest.mark.django_db

@@ -8,9 +8,9 @@ from __future__ import annotations
 import pytest
 from django.utils import timezone
 
-from ..egress_models import EgressRequest, EgressRule
-from ..egress_service import EgressService
-from ..models import Agent, AgentExecution, AgentIdentityType
+from src.modules.ai_agent_management.egress_models import EgressRequest, EgressRule
+from src.modules.ai_agent_management.egress_service import EgressService
+from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType
 
 
 @pytest.mark.django_db

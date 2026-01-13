@@ -5,8 +5,8 @@ Tests business logic in services layer.
 """
 import pytest
 
-from ..models import BlockchainTraceabilityResource
-from ..services import BlockchainTraceabilityService
+from src.modules.blockchain_traceability.models import TenantBaseModel
+from src.modules.blockchain_traceability.services import BlockchainTraceabilityService
 
 
 @pytest.mark.django_db
@@ -105,7 +105,7 @@ class TestBlockchainTraceabilityService:
         
         result = service.delete_resource(resource.id, "tenant-123")
         assert result is True
-        assert not BlockchainTraceabilityResource.objects.filter(id=resource.id).exists()
+        assert not TenantBaseModel.objects.filter(id=resource.id).exists()
 
     def test_activate_resource(self, db):
         """Test activating a resource."""

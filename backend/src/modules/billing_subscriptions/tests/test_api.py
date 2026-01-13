@@ -12,7 +12,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from ..models import BillingSubscriptionsResource
+from src.modules.billing_subscriptions.models import TenantBaseModel
 from src.core.auth_utils import get_user_tenant_id
 
 User = get_user_model()
@@ -62,8 +62,8 @@ def override_saraise_mode(settings):
 
 
 @pytest.mark.django_db
-class TestBillingSubscriptionsResourceViewSet:
-    """Test BillingSubscriptionsResourceViewSet CRUD operations."""
+class TestTenantBaseModelViewSet:
+    """Test TenantBaseModelViewSet CRUD operations."""
 
     def test_list_resources_requires_authentication(self, api_client):
         """Test that listing resources requires authentication."""
@@ -75,13 +75,13 @@ class TestBillingSubscriptionsResourceViewSet:
         tenant_id = get_user_tenant_id(tenant_user)
         
         # Create test resources
-        BillingSubscriptionsResource.objects.create(
+        TenantBaseModel.objects.create(
             tenant_id=tenant_id,
             name="Test Resource 1",
             description="Test description 1",
             created_by=str(tenant_user.id),
         )
-        BillingSubscriptionsResource.objects.create(
+        TenantBaseModel.objects.create(
             tenant_id=tenant_id,
             name="Test Resource 2",
             description="Test description 2",
@@ -116,7 +116,7 @@ class TestBillingSubscriptionsResourceViewSet:
         """Test getting resource detail."""
         tenant_id = get_user_tenant_id(tenant_user)
         
-        resource = BillingSubscriptionsResource.objects.create(
+        resource = TenantBaseModel.objects.create(
             tenant_id=tenant_id,
             name="Test Resource",
             description="Test description",
@@ -132,7 +132,7 @@ class TestBillingSubscriptionsResourceViewSet:
         """Test updating a resource."""
         tenant_id = get_user_tenant_id(tenant_user)
         
-        resource = BillingSubscriptionsResource.objects.create(
+        resource = TenantBaseModel.objects.create(
             tenant_id=tenant_id,
             name="Original Name",
             description="Original description",
@@ -152,7 +152,7 @@ class TestBillingSubscriptionsResourceViewSet:
         """Test deleting a resource."""
         tenant_id = get_user_tenant_id(tenant_user)
         
-        resource = BillingSubscriptionsResource.objects.create(
+        resource = TenantBaseModel.objects.create(
             tenant_id=tenant_id,
             name="To Delete",
             description="Will be deleted",
@@ -163,4 +163,4 @@ class TestBillingSubscriptionsResourceViewSet:
         assert response.status_code == status.HTTP_204_NO_CONTENT
         
         # Verify resource is deleted
-        assert not BillingSubscriptionsResource.objects.filter(id=resource.id).exists()
+        assert not TenantBaseModel.objects.filter(id=resource.id).exists()

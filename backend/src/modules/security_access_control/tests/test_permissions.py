@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 from rest_framework.test import APIRequestFactory
 
-from ..permissions import SecurityAdminPermission, SecurityViewerPermission
+from src.modules.security_access_control.permissions import SecurityAdminPermission, SecurityViewerPermission
 
 
 def build_request(method="get", roles=None, authenticated=True):

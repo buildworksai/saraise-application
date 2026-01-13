@@ -5,8 +5,8 @@ Tests business logic in services layer.
 """
 import pytest
 
-from ..models import ProcessMiningResource
-from ..services import ProcessMiningService
+from src.modules.process_mining.models import TenantBaseModel
+from src.modules.process_mining.services import ProcessMiningService
 
 
 @pytest.mark.django_db
@@ -105,7 +105,7 @@ class TestProcessMiningService:
         
         result = service.delete_resource(resource.id, "tenant-123")
         assert result is True
-        assert not ProcessMiningResource.objects.filter(id=resource.id).exists()
+        assert not TenantBaseModel.objects.filter(id=resource.id).exists()
 
     def test_activate_resource(self, db):
         """Test activating a resource."""

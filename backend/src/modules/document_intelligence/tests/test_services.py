@@ -5,8 +5,8 @@ Tests business logic in services layer.
 """
 import pytest
 
-from ..models import DocumentIntelligenceResource
-from ..services import DocumentIntelligenceService
+from src.modules.document_intelligence.models import TenantBaseModel
+from src.modules.document_intelligence.services import DocumentIntelligenceService
 
 
 @pytest.mark.django_db
@@ -105,7 +105,7 @@ class TestDocumentIntelligenceService:
         
         result = service.delete_resource(resource.id, "tenant-123")
         assert result is True
-        assert not DocumentIntelligenceResource.objects.filter(id=resource.id).exists()
+        assert not TenantBaseModel.objects.filter(id=resource.id).exists()
 
     def test_activate_resource(self, db):
         """Test activating a resource."""

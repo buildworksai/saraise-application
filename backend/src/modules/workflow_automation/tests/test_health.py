@@ -8,7 +8,7 @@ from django.test import Client
 from django.contrib.auth import get_user_model
 from src.core.user_models import UserProfile
 from src.core.licensing.models import Organization
-from ..models import Workflow, WorkflowInstance, WorkflowTask
+from src.modules.workflow_automation.models import Workflow, WorkflowInstance, WorkflowTask
 
 User = get_user_model()
 

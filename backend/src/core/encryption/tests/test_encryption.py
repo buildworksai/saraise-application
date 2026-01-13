@@ -8,7 +8,7 @@ import base64
 import pytest
 from cryptography.fernet import Fernet
 
-from ..service import EncryptionService
+from src.core.encryption.service import EncryptionService
 
 
 class TestEncryptionService:
@@ -54,7 +54,8 @@ class TestEncryptionService:
 
         # Try to decrypt with wrong key
         encrypted_bytes = base64.urlsafe_b64decode(ciphertext.encode("utf-8"))
-        with pytest.raises(ValueError, match="Invalid token"):
+        from cryptography.fernet import InvalidToken
+        with pytest.raises(InvalidToken):
             different_fernet.decrypt(encrypted_bytes)
 
     def test_encrypt_empty_string(self):
