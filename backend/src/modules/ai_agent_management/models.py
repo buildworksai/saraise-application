@@ -7,11 +7,8 @@ All models include tenant_id for Row-Level Multitenancy.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
-from typing import Any, Dict, Optional
 
 from django.db import models
-from django.utils import timezone
 
 
 def generate_uuid():

@@ -116,6 +116,7 @@ export const SecretManagementPage = () => {
 
           {!secrets || secrets.length === 0 ? (
             <EmptyState
+              icon={Shield}
               title="No secrets found"
               description="No encrypted secrets are currently stored."
             />

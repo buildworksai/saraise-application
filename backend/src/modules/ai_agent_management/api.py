@@ -11,10 +11,9 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from src.core.auth_utils import get_user_tenant_id
-from src.core.authentication import RelaxedCsrfSessionAuthentication
 
 from .approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy, SoDViolation
-from .models import Agent, AgentExecution, AgentLifecycleState, AgentSchedulerTask
+from .models import Agent, AgentExecution, AgentSchedulerTask
 from .quota_models import QuotaUsage, TenantQuota
 from .serializers import (
     AgentExecutionSerializer,
@@ -362,7 +361,7 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """Set tenant_id from agent_execution."""
-        approval = serializer.save()
+        _approval = serializer.save()  # F841: assigned but never used
         # tenant_id is inherited from agent_execution via TenantBaseModel
 
     @action(detail=True, methods=["post"])
