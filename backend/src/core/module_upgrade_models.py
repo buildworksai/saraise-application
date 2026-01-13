@@ -7,7 +7,6 @@ Task: 502.2 - Module Upgrade & Rollback
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, Optional
 
 from django.db import models
 

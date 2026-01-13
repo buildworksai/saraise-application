@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections import defaultdict, deque
-from typing import Any, Dict, List, Optional, Set, Tuple
+from collections import deque
+from typing import Dict, List, Optional, Set, Tuple
 
 from django.db import models, transaction
 

@@ -27,17 +27,17 @@ PHONE_NUMBER_REGEX = re.compile(r"^\+[1-9]\d{1,14}$")
 def _convert_user_id_to_uuid(user_id_str: str) -> uuid.UUID:
     """
     Convert Django user ID (integer as string) to UUID.
-    
+
     Uses uuid5 with a fixed namespace to generate deterministic UUIDs
     from user IDs. This allows Notification.user_id (UUIDField) to work
     with Django's integer-based user IDs.
     """
     if not user_id_str:
         raise ValueError("user_id_str cannot be empty")
-    
+
     # Use a fixed namespace UUID for user ID conversion
     NAMESPACE_USER_ID = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
-    
+
     try:
         # Try to parse as UUID first (in case it's already a UUID string)
         return uuid.UUID(user_id_str)
@@ -237,7 +237,8 @@ class NotificationService:
                     error_message = e.response.get("Error", {}).get("Message", str(e))
 
                     # Check if error is retryable
-                    if error_code in ["Throttling", "ServiceUnavailable", "InternalError"] and attempt < max_retries - 1:
+                    retryable_errors = ["Throttling", "ServiceUnavailable", "InternalError"]
+                    if error_code in retryable_errors and attempt < max_retries - 1:
                         wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
                         logger.warning(
                             f"SMS send attempt {attempt + 1} failed (retryable): {error_code}. "

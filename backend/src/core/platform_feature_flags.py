@@ -25,7 +25,7 @@ CONTROL_PLANE_URL = getattr(settings, "SARAISE_PLATFORM_URL", "http://localhost:
 class PlatformFeatureFlagService:
     """
     Mode-aware service for checking feature flags at runtime.
-    
+
     - Self-Hosted: Queries local FeatureFlag models
     - SaaS: Queries Control Plane API
     """
@@ -39,13 +39,13 @@ class PlatformFeatureFlagService:
     ) -> bool:
         """
         Check if a feature flag is enabled.
-        
+
         Args:
             name: Feature flag name
             tenant_id: Optional tenant ID for tenant-specific flags
             user_id: Optional user ID for rollout percentage checks
             default: Default value if flag not found or API unavailable
-            
+
         Returns:
             True if feature is enabled, False otherwise
         """
@@ -137,12 +137,12 @@ class PlatformFeatureFlagService:
     ):
         """
         Get a platform setting value.
-        
+
         Args:
             key: Setting key
             tenant_id: Optional tenant ID for tenant-specific settings
             default: Default value if setting not found or API unavailable
-            
+
         Returns:
             Setting value or default
         """

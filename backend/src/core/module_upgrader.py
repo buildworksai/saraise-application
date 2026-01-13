@@ -7,8 +7,7 @@ Task: 502.2 - Module Upgrade & Rollback
 from __future__ import annotations
 
 import logging
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from django.apps import apps
 from django.core.management import call_command

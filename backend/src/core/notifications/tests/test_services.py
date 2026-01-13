@@ -7,10 +7,9 @@ SPDX-License-Identifier: Apache-2.0
 import uuid
 from unittest.mock import MagicMock, patch
 
-import pytest
 from django.test import TestCase
 
-from src.core.notifications.models import Notification, NotificationPreference, PushNotificationToken
+from src.core.notifications.models import Notification, PushNotificationToken
 from src.core.notifications.services import NotificationService, PHONE_NUMBER_REGEX
 
 
@@ -109,7 +108,7 @@ class NotificationServiceTestCase(TestCase):
             mock_firebase = MagicMock()
             mock_messaging = MagicMock()
             mock_credentials = MagicMock()
-            
+
             def import_side_effect(name, *args, **kwargs):
                 if name == "firebase_admin":
                     return mock_firebase
@@ -119,14 +118,14 @@ class NotificationServiceTestCase(TestCase):
                     return mock_credentials
                 else:
                     return __import__(name, *args, **kwargs)
-            
+
             mock_import.side_effect = import_side_effect
-            
+
             # Configure mocks
             mock_firebase.get_app.side_effect = ValueError("Not initialized")
             mock_credentials.Certificate.return_value = MagicMock()
             mock_firebase.initialize_app.return_value = MagicMock()
-            
+
             mock_response = MagicMock()
             mock_response.success_count = 1
             mock_response.failure_count = 0
