@@ -14,7 +14,9 @@ from rest_framework.test import APIClient
 
 from src.core.user_models import UserProfile
 
-from src.modules.tenant_management.models import Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
+from src.modules.tenant_management.models import (
+    Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
+)
 
 User = get_user_model()
 

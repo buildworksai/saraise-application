@@ -3,7 +3,6 @@ Permissions Tests for WorkflowAutomation module.
 
 Tests permission declarations and SoD actions.
 """
-import pytest
 from src.modules.workflow_automation.permissions import PERMISSIONS, SOD_ACTIONS
 
 

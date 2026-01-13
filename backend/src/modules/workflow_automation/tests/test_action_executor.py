@@ -7,7 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 import uuid
 from unittest.mock import MagicMock, patch
 
-import pytest
 from django.test import TestCase
 
 from src.modules.workflow_automation.action_executor import ActionExecutor
@@ -46,7 +45,7 @@ class ActionExecutorTestCase(TestCase):
             mock_meta.get_fields.return_value = [mock_field_id, mock_field_tenant, mock_field_status]
             mock_model._meta = mock_meta
             mock_model._meta.get_fields.return_value = [mock_field_id, mock_field_tenant, mock_field_status]
-            
+
             # Mock queryset chain
             mock_queryset = MagicMock()
             mock_queryset.count.return_value = 1
@@ -58,7 +57,7 @@ class ActionExecutorTestCase(TestCase):
             # Mock settings for allowed models
             with patch("src.modules.workflow_automation.action_executor.settings") as mock_settings:
                 mock_settings.WORKFLOW_ALLOWED_UPDATE_MODELS = ["billing_subscriptions.Invoice"]
-                
+
                 # PlatformManagementService is imported inside the function
                 with patch(
                     "src.modules.platform_management.services.PlatformManagementService.log_audit_event"
@@ -92,7 +91,7 @@ class ActionExecutorTestCase(TestCase):
             mock_field_status.name = "status"
             mock_meta.get_fields.return_value = [mock_field_id, mock_field_tenant, mock_field_status]
             mock_model._meta = mock_meta
-            
+
             # Mock queryset chain
             mock_queryset = MagicMock()
             mock_queryset.count.return_value = 1
@@ -104,12 +103,12 @@ class ActionExecutorTestCase(TestCase):
             # Mock settings for allowed models
             with patch("src.modules.workflow_automation.action_executor.settings") as mock_settings:
                 mock_settings.WORKFLOW_ALLOWED_UPDATE_MODELS = ["billing_subscriptions.Invoice"]
-                
+
                 # PlatformManagementService is imported inside the function
                 with patch(
                     "src.modules.platform_management.services.PlatformManagementService.log_audit_event"
                 ) as mock_log:
-                    result = ActionExecutor._execute_database_update(
+                    ActionExecutor._execute_database_update(
                         action_config, self.workflow_context, self.tenant_id
                     )
 

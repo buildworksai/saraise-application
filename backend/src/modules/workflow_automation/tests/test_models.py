@@ -6,7 +6,6 @@ Tests model creation, validation, and relationships.
 import uuid
 import pytest
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
 
 from src.modules.workflow_automation.models import (
     Workflow,

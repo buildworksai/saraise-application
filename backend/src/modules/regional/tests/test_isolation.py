@@ -110,7 +110,7 @@ class TestRegionalTenantIsolation:
         # Login as tenant A
         api_client.force_authenticate(user=tenant_a_user)
 
-        response = api_client.get(f"/api/v1/regional/resources/")
+        response = api_client.get("/api/v1/regional/resources/")
         assert response.status_code == status.HTTP_200_OK
         data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         resource_ids = [r["id"] for r in data]
@@ -122,7 +122,7 @@ class TestRegionalTenantIsolation:
     def test_user_cannot_get_other_tenant_resource_by_id(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot GET other tenant's resource by ID (returns 404)."""
         tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
+        tenant_b_id = get_user_tenant_id(tenant_b_user)  # noqa: F841
 
         # Create resource for tenant B
         resource_b = TenantBaseModel.objects.create(

@@ -6,7 +6,6 @@ Tests business logic in services layer.
 import uuid
 import pytest
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 
 from src.modules.workflow_automation.models import (
     Workflow,
@@ -42,7 +41,7 @@ class TestWorkflowEngine:
         )
 
         # Create a step
-        step = WorkflowStep.objects.create(
+        WorkflowStep.objects.create(
             workflow=workflow,
             name="First Step",
             step_type=WorkflowStepType.ACTION,
@@ -73,7 +72,7 @@ class TestWorkflowEngine:
             status=WorkflowStatus.DRAFT,
             created_by=user,
         )
-        
+
         engine = WorkflowEngine()
         with pytest.raises(ValueError, match="Cannot start a workflow that is not published"):
             engine.start_workflow(workflow.id, tenant_id, user)
@@ -89,7 +88,7 @@ class TestWorkflowEngine:
             status=WorkflowStatus.PUBLISHED,
             created_by=user,
         )
-        
+
         engine = WorkflowEngine()
         instance = engine.start_workflow(workflow.id, tenant_id, user)
 
@@ -137,7 +136,7 @@ class TestWorkflowEngine:
             assignee=user,
             status=WorkflowTaskStatus.PENDING,
         )
-        
+
         engine = WorkflowEngine()
         updated_task = engine.transition_task(task.id, tenant_id, "complete", {"comment": "Approved"})
 
@@ -156,7 +155,7 @@ class TestWorkflowEngine:
             status=WorkflowStatus.PUBLISHED,
             created_by=user,
         )
-        
+
         step = WorkflowStep.objects.create(
             workflow=workflow,
             name="Approval Step",
@@ -202,7 +201,7 @@ class TestWorkflowEngine:
             status=WorkflowStatus.PUBLISHED,
             created_by=user,
         )
-        
+
         step = WorkflowStep.objects.create(
             workflow=workflow,
             name="Approval Step",
@@ -241,7 +240,7 @@ class TestWorkflowEngine:
             status=WorkflowStatus.PUBLISHED,
             created_by=user,
         )
-        
+
         step = WorkflowStep.objects.create(
             workflow=workflow,
             name="Approval Step",
