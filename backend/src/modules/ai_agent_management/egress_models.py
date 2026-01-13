@@ -7,10 +7,8 @@ Task: 402.1 - Egress Allowlisting & Secret Isolation
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, Optional
 
 from django.db import models
-from django.utils import timezone
 
 from .models import TenantBaseModel
 

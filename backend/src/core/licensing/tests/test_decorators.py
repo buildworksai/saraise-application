@@ -15,8 +15,6 @@ from django.test import RequestFactory
 from django.utils import timezone
 
 from ..decorators import (
-    LicenseRequiredMixin,
-    ModuleRequiredMixin,
     require_license,
     require_module,
     requires_license,

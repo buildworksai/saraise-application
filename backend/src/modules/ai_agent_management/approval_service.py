@@ -7,10 +7,9 @@ Task: 401.3 - Human Approval Gates
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+, timedelta
 from typing import Any, Dict, List, Optional
 
-from django.db import transaction
 from django.utils import timezone
 
 from .approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy, SoDViolation

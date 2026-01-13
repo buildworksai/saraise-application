@@ -10,7 +10,6 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from django.db import transaction
 from django.utils import timezone
 
 from .audit_models import AuditEvent, AuditEventType, AuditTrail

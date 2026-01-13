@@ -7,10 +7,8 @@ Task: 401.3 - Human Approval Gates
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, Optional
 
 from django.db import models
-from django.utils import timezone
 
 from .models import AgentExecution, TenantBaseModel
 from .tool_models import Tool

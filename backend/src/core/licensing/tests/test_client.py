@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from ..client import LicenseClient, LicenseValidationError
-from ..models import LicenseInfo, LicenseTier, LicenseValidationStatus, ModuleLicense
+from ..models import LicenseInfo, LicenseTier, LicenseValidationStatus
 
 # Note: These tests don't require database access - they test LicenseClient
 # which doesn't interact with Django models directly
