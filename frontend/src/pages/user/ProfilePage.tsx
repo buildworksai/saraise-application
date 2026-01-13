@@ -76,10 +76,10 @@ export const ProfilePage = () => {
         updateData.current_password = formData.currentPassword;
       }
 
-      const response = await apiClient.patch('/api/v1/auth/profile/', updateData);
+      const response = await apiClient.patch<{ user?: typeof user }>('/api/v1/auth/profile/', updateData);
       
       // Update user in store
-      if (response.user) {
+      if (response && 'user' in response && response.user) {
         setUser(response.user);
       }
 

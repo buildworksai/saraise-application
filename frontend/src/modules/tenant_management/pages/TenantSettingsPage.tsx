@@ -39,8 +39,9 @@ export const TenantSettingsPage = () => {
 
   const filteredSettings = settings?.filter((setting) => {
     return deferredSearchTerm === '' || 
-      setting.tenant_id.toLowerCase().includes(deferredSearchTerm.toLowerCase()) ||
-      setting.setting_key.toLowerCase().includes(deferredSearchTerm.toLowerCase());
+      (typeof setting.tenant === 'string' ? setting.tenant : '').toLowerCase().includes(deferredSearchTerm.toLowerCase()) ||
+      (setting.tenant_name || '').toLowerCase().includes(deferredSearchTerm.toLowerCase()) ||
+      (setting.key || '').toLowerCase().includes(deferredSearchTerm.toLowerCase());
   });
 
   const handleDelete = async (id: string) => {
@@ -152,13 +153,13 @@ export const TenantSettingsPage = () => {
               filteredSettings?.map((setting) => (
                 <tr key={setting.id} className="hover:bg-muted/50">
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium">{setting.tenant_id}</div>
+                    <div className="text-sm font-medium">{setting.tenant_name || (typeof setting.tenant === 'string' ? setting.tenant : 'N/A')}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium">{setting.setting_key}</div>
+                    <div className="text-sm font-medium">{setting.key || 'N/A'}</div>
                   </td>
                   <td className="px-6 py-4 text-sm text-muted-foreground">
-                    {setting.setting_value || 'N/A'}
+                    {setting.value ? (typeof setting.value === 'string' ? setting.value : JSON.stringify(setting.value)) : 'N/A'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
                     {setting.created_at ? new Date(setting.created_at).toLocaleDateString() : 'N/A'}
@@ -172,7 +173,9 @@ export const TenantSettingsPage = () => {
                     </button>
                     <button
                       onClick={() => {
-                        void handleDelete(setting.id);
+                        if (setting.id) {
+                          void handleDelete(setting.id);
+                        }
                       }}
                       className="text-destructive hover:opacity-80"
                     >

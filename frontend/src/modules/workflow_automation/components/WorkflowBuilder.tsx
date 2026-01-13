@@ -4,7 +4,7 @@ import { Plus, Save, Trash, ArrowLeft } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Select } from "@/components/ui/Select";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/Select";
 import { toast } from "sonner";
 import { workflowService } from "../services/workflow-service";
 import { WorkflowStep } from "../contracts";
@@ -115,15 +115,16 @@ export const WorkflowBuilder = () => {
             </div>
             <div>
               <label className="text-sm font-medium">Trigger Type</label>
-              <Select
-                value={triggerType}
-                onChange={(e) => setTriggerType(e.target.value)}
-                options={[
-                  { value: "manual", label: "Manual" },
-                  { value: "event", label: "Event" },
-                  { value: "scheduled", label: "Scheduled" },
-                ]}
-              />
+              <Select value={triggerType} onValueChange={setTriggerType}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select trigger type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manual">Manual</SelectItem>
+                  <SelectItem value="event">Event</SelectItem>
+                  <SelectItem value="scheduled">Scheduled</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </Card>
@@ -171,12 +172,16 @@ export const WorkflowBuilder = () => {
                   </label>
                   <Select
                     value={step.step_type}
-                    onChange={(e) =>
-                      updateStep(index, "step_type", e.target.value)
+                    onValueChange={(value) =>
+                      updateStep(index, "step_type", value)
                     }
-                    options={[
-                      { value: "action", label: "Action" },
-                      { value: "approval", label: "Approval" },
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select step type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="action">Action</SelectItem>
+                      <SelectItem value="approval">Approval</SelectItem>
                       { value: "notification", label: "Notification" },
                     ]}
                   />

@@ -25,7 +25,8 @@ export const TenantResourceUsagePage = () => {
 
   const filteredUsage = resourceUsage?.filter((usage) => {
     return deferredSearchTerm === '' || 
-      usage.tenant_id.toLowerCase().includes(deferredSearchTerm.toLowerCase());
+      (typeof usage.tenant === 'string' ? usage.tenant : '').toLowerCase().includes(deferredSearchTerm.toLowerCase()) ||
+      (usage.tenant_name || '').toLowerCase().includes(deferredSearchTerm.toLowerCase());
   });
 
   if (isLoading) {
@@ -123,19 +124,19 @@ export const TenantResourceUsagePage = () => {
               filteredUsage?.map((usage) => (
                 <tr key={usage.id} className="hover:bg-muted/50">
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium">{usage.tenant_id}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm capitalize">
-                    {usage.resource_type}
+                    <div className="text-sm font-medium">{usage.tenant_name || (typeof usage.tenant === 'string' ? usage.tenant : 'N/A')}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    {usage.usage_value}
+                    {usage.date ? new Date(usage.date).toLocaleDateString() : 'N/A'}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm">
+                    {usage.active_users || 0}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                    {usage.limit_value || 'Unlimited'}
+                    {usage.api_calls || 0}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                    {usage.period_start ? new Date(usage.period_start).toLocaleDateString() : 'N/A'}
+                    {usage.storage_used_gb ? `${usage.storage_used_gb} GB` : '0 GB'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <button
