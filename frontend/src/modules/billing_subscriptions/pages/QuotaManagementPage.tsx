@@ -46,7 +46,7 @@ export const QuotaManagementPage = () => {
   }
 
   if (!quotas) {
-    return <EmptyState title="No quota information" description="Quota information is not available." />;
+    return <EmptyState icon={BarChart3} title="No quota information" description="Quota information is not available." />;
   }
 
   return (

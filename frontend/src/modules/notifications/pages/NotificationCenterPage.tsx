@@ -116,6 +116,7 @@ export const NotificationCenterPage = () => {
 
       {!notifications || notifications.length === 0 ? (
         <EmptyState
+          icon={Bell}
           title="No notifications"
           description={filter === 'unread' ? "You're all caught up!" : "No notifications yet."}
         />
