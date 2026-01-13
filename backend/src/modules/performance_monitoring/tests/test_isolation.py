@@ -110,7 +110,7 @@ class TestPerformanceMonitoringTenantIsolation:
         # Login as tenant A
         api_client.force_authenticate(user=tenant_a_user)
 
-        response = api_client.get(f"/api/v1/performance-monitoring/resources/")
+        response = api_client.get("/api/v1/performance-monitoring/resources/")
         assert response.status_code == status.HTTP_200_OK
         data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         resource_ids = [r["id"] for r in data]

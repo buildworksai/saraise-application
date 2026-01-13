@@ -88,7 +88,7 @@ class TestMetadataModelingTenantIsolation:
 
     def test_user_cannot_list_other_tenant_entity_definitions(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User sees only their tenant's entity definitions in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
+        tenant_a_id = get_user_tenant_id(tenant_a_user)  # noqa: F841
         tenant_b_id = get_user_tenant_id(tenant_b_user)
 
         # Create entity definition for tenant A
@@ -121,7 +121,7 @@ class TestMetadataModelingTenantIsolation:
 
     def test_user_cannot_get_other_tenant_entity_definition(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot GET other tenant's entity definition by ID (returns 404)."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
+        tenant_a_id = get_user_tenant_id(tenant_a_user)  # noqa: F841
         tenant_b_id = get_user_tenant_id(tenant_b_user)
 
         # Create entity definition for tenant B
@@ -192,7 +192,7 @@ class TestMetadataModelingTenantIsolation:
 
     def test_user_cannot_list_other_tenant_resources(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User sees only their tenant's dynamic resources in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
+        tenant_a_id = get_user_tenant_id(tenant_a_user)  # noqa: F841
         tenant_b_id = get_user_tenant_id(tenant_b_user)
 
         # Create entity definitions for both tenants
@@ -240,7 +240,7 @@ class TestMetadataModelingTenantIsolation:
 
     def test_user_cannot_get_other_tenant_resource(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot GET other tenant's dynamic resource by ID (returns 404)."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
+        tenant_a_id = get_user_tenant_id(tenant_a_user)  # noqa: F841
         tenant_b_id = get_user_tenant_id(tenant_b_user)
 
         # Create entity definition for tenant B

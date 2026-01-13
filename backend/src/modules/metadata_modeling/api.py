@@ -1,12 +1,11 @@
 import uuid
 
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from django.core.exceptions import ValidationError
-from django.db import transaction
 
 from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
@@ -74,7 +73,6 @@ class DynamicResourceViewSet(viewsets.ModelViewSet):
             tenant_id = uuid.UUID(tenant_id_str)
         except (ValueError, TypeError):
             return Response({"error": "Invalid tenant_id format."}, status=status.HTTP_400_BAD_REQUEST)
-        
         entity_id = request.data.get("entity_definition")
         data_payload = request.data.get("data", {})
 
@@ -99,9 +97,9 @@ class DynamicResourceViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
-        partial = kwargs.pop("partial", False)
+        kwargs.pop("partial", False)  # noqa: F841
         instance = self.get_object()
-        tenant_id = get_user_tenant_id(request.user)
+        get_user_tenant_id(request.user)  # Verify tenant exists
 
         # If updating data, merge and validate
         if "data" in request.data:

@@ -1,8 +1,6 @@
 from django.core.exceptions import ValidationError
-from typing import Dict, Any, List
-from .models import EntityDefinition, FieldDefinition, DynamicResource
-import re
-from datetime import datetime
+from typing import Dict, Any
+from .models import EntityDefinition
 
 
 class MetadataService:

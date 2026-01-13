@@ -4,7 +4,6 @@ Model Unit Tests for PerformanceMonitoring module.
 Tests model creation, validation, and relationships.
 """
 import pytest
-from django.core.exceptions import ValidationError
 
 from src.modules.performance_monitoring.models import TenantBaseModel
 
