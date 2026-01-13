@@ -121,8 +121,8 @@ class TestProcessMiningTenantIsolation:
 
     def test_user_cannot_get_other_tenant_resource_by_id(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot GET other tenant's resource by ID (returns 404)."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
+        tenant_a_id = get_user_tenant_id(tenant_a_user)  # noqa: F841
+        get_user_tenant_id(tenant_b_user)  # Verify tenant B exists
 
         # Create resource for tenant B
         resource_b = TenantBaseModel.objects.create(

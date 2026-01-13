@@ -29,7 +29,6 @@ def tenant_user(db):
     """Create a test user with tenant."""
     from src.core.user_models import UserProfile
     from src.core.licensing.models import Organization
-    import uuid
 
     # Create a valid Organization for the tenant
     org = Organization.objects.create(name="Test Organization")

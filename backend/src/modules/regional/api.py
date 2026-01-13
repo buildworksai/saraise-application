@@ -3,7 +3,6 @@ DRF ViewSets for Regional module.
 Provides REST API endpoints for all models.
 """
 
-from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
