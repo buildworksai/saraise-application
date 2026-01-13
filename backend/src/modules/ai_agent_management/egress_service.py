@@ -12,8 +12,6 @@ import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-from django.db import transaction
-from django.utils import timezone
 
 from .egress_models import EgressRequest, EgressRule
 from .models import AgentExecution

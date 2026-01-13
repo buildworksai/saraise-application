@@ -7,7 +7,7 @@ Task: 401.3 - Human Approval Gates
 from __future__ import annotations
 
 import logging
-, timedelta
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 from django.utils import timezone
@@ -422,7 +422,7 @@ class ApprovalService:
         # Check recent tool invocations
         from .tool_models import ToolInvocation
 
-        recent_invocations = ToolInvocation.objects.filter(
+        _recent_invocations = ToolInvocation.objects.filter(  # F841: assigned but never used
             tenant_id=tenant_id,
             tool__name=action.split(".")[-1] if "." in action else action,
             invoked_at__gte=timezone.now() - timedelta(hours=24),
