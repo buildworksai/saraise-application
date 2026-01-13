@@ -73,7 +73,7 @@ class TestTenantBaseModelViewSet:
     def test_list_resources(self, authenticated_client, tenant_user):
         """Test listing resources for authenticated user."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         # Create test resources
         TenantBaseModel.objects.create(
             tenant_id=tenant_id,
@@ -96,7 +96,7 @@ class TestTenantBaseModelViewSet:
     def test_create_resource(self, authenticated_client, tenant_user):
         """Test creating a resource."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         data = {
             "name": "New Resource",
             "description": "New resource description",
@@ -115,7 +115,7 @@ class TestTenantBaseModelViewSet:
     def test_get_resource_detail(self, authenticated_client, tenant_user):
         """Test getting resource detail."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         resource = TenantBaseModel.objects.create(
             tenant_id=tenant_id,
             name="Test Resource",
@@ -131,7 +131,7 @@ class TestTenantBaseModelViewSet:
     def test_update_resource(self, authenticated_client, tenant_user):
         """Test updating a resource."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         resource = TenantBaseModel.objects.create(
             tenant_id=tenant_id,
             name="Original Name",
@@ -151,7 +151,7 @@ class TestTenantBaseModelViewSet:
     def test_delete_resource(self, authenticated_client, tenant_user):
         """Test deleting a resource."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         resource = TenantBaseModel.objects.create(
             tenant_id=tenant_id,
             name="To Delete",
@@ -161,6 +161,6 @@ class TestTenantBaseModelViewSet:
 
         response = authenticated_client.delete(f"/api/v1/integration-platform/resources/{resource.id}/")
         assert response.status_code == status.HTTP_204_NO_CONTENT
-        
+
         # Verify resource is deleted
         assert not TenantBaseModel.objects.filter(id=resource.id).exists()

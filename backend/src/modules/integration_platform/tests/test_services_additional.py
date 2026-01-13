@@ -7,8 +7,6 @@ SPDX-License-Identifier: Apache-2.0
 import uuid
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
-
-import pytest
 from django.test import TestCase
 from django.utils import timezone
 from datetime import timedelta

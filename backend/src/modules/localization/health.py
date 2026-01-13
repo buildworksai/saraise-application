@@ -56,6 +56,5 @@ def health_check(request):
         health_status['status'] = 'unhealthy'
         health_status['checks']['module_model'] = f'error: {str(e)}'
 
-
     status_code = 200 if health_status['status'] == 'healthy' else 503
     return JsonResponse(health_status, status=status_code)

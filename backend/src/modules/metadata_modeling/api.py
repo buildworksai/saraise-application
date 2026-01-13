@@ -1,10 +1,8 @@
 import uuid
 
 from rest_framework import viewsets, status, serializers
-from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import ValidationError as DRFValidationError
 from django.core.exceptions import ValidationError
 
 from src.core.auth_utils import get_user_tenant_id

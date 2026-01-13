@@ -4,7 +4,7 @@ from rest_framework.test import APITestCase
 from django.contrib.auth import get_user_model
 from src.modules.tenant_management.models import Tenant
 from src.core.licensing.models import Organization, License, LicenseStatus
-from src.modules.metadata_modeling.models import EntityDefinition, FieldDefinition, DynamicResource
+from src.modules.metadata_modeling.models import EntityDefinition, FieldDefinition
 
 User = get_user_model()
 
@@ -32,10 +32,7 @@ class MetadataAPITestCase(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         entity_id = response.data["id"]
 
-        # 2. Add Fields (Directly in DB for simplicity of test, or via nested update if supported)
-        # Assuming ViewSet supports standard model viewing, adding fields requires either nested write (not implemented in serializer)
-        # or separate endpoint. For Phase 8 we probably rely on admin or direct usage.
-        # But wait, Models allow separate editing. Let's create fields manually to test Resource API.
+        # 2. Add Fields - Create fields manually to test Resource API.
         entity = EntityDefinition.objects.get(id=entity_id)
         FieldDefinition.objects.create(
             tenant_id=self.tenant.id,

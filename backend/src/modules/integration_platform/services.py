@@ -834,14 +834,14 @@ class IntegrationService:
                     import re
                     if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', table_name):
                         raise ValueError(f"Invalid table name: {table_name}")
-                    
+
                     # Validate column names
                     validated_columns = []
                     for col in transformed.keys():
                         if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', col):
                             raise ValueError(f"Invalid column name: {col}")
                         validated_columns.append(col)
-                    
+
                     columns = ", ".join(validated_columns)
                     placeholders = ", ".join(["%s"] * len(transformed))
                     values = list(transformed.values())

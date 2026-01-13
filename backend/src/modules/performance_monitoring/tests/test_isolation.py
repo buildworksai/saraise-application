@@ -88,7 +88,7 @@ class TestPerformanceMonitoringTenantIsolation:
 
     def test_user_cannot_list_other_tenant_resources(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User sees only their tenant's resources in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
+        tenant_a_id = get_user_tenant_id(tenant_a_user)  # noqa: F841
         tenant_b_id = get_user_tenant_id(tenant_b_user)
 
         # Create resource for tenant A
@@ -121,7 +121,7 @@ class TestPerformanceMonitoringTenantIsolation:
 
     def test_user_cannot_get_other_tenant_resource_by_id(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot GET other tenant's resource by ID (returns 404)."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
+        tenant_a_id = get_user_tenant_id(tenant_a_user)  # noqa: F841
         tenant_b_id = get_user_tenant_id(tenant_b_user)
 
         # Create resource for tenant B
