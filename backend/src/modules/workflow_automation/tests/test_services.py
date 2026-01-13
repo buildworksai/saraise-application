@@ -114,7 +114,7 @@ class TestWorkflowEngine:
             order=1,
         )
 
-        step2 = WorkflowStep.objects.create(
+        WorkflowStep.objects.create(
             workflow=workflow,
             name="Step 2",
             step_type=WorkflowStepType.ACTION,
