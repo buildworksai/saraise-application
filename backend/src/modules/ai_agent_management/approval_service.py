@@ -422,7 +422,7 @@ class ApprovalService:
         # Check recent tool invocations
         from .tool_models import ToolInvocation
 
-        _recent_invocations = ToolInvocation.objects.filter(  # F841: assigned but never used
+        _recent_invocations = ToolInvocation.objects.filter(  # noqa: F841
             tenant_id=tenant_id,
             tool__name=action.split(".")[-1] if "." in action else action,
             invoked_at__gte=timezone.now() - timedelta(hours=24),

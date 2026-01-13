@@ -361,7 +361,7 @@ class ApprovalRequestViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """Set tenant_id from agent_execution."""
-        _approval = serializer.save()  # F841: assigned but never used
+        _approval = serializer.save()  # noqa: F841
         # tenant_id is inherited from agent_execution via TenantBaseModel
 
     @action(detail=True, methods=["post"])
