@@ -182,9 +182,10 @@ export const WorkflowBuilder = () => {
                     <SelectContent>
                       <SelectItem value="action">Action</SelectItem>
                       <SelectItem value="approval">Approval</SelectItem>
-                      { value: "notification", label: "Notification" },
-                    ]}
-                  />
+                      <SelectItem value="notification">Notification</SelectItem>
+                      <SelectItem value="decision">Decision</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 {step.step_type === "approval" && (
                   <div className="col-span-2">
