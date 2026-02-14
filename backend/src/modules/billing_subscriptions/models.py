@@ -26,7 +26,7 @@ class TenantBaseModel(models.Model):
     and include tenant_id. All queries MUST filter explicitly by tenant_id.
     """
 
-    tenant_id = models.CharField(max_length=36, db_index=True)
+    tenant_id = models.UUIDField(db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -40,7 +40,33 @@ class TenantBaseModel(models.Model):
 
 
 class SubscriptionPlan(models.Model):
-    """Subscription plan model (platform-level, no tenant_id)."""
+    """
+    Subscription plan model (platform-level, no tenant_id).
+
+    CRITICAL: This is a platform-level reference data model.
+    Subscription plans are defined by the platform and shared across all tenants.
+    Tenants cannot create/modify plans - they can only subscribe to existing plans.
+
+    Rationale:
+    - Plans are platform-wide products/pricing tiers
+    - Ensures consistent pricing across all tenants
+    - Prevents tenant-specific plan conflicts
+    - Enables platform-wide billing and subscription management
+    - Simplifies plan updates and feature rollouts
+    - Required for SaaS mode multi-tenant billing
+
+    Access Control:
+    - READ: All authenticated users (tenants can view available plans)
+    - WRITE: Platform owners only (via platform admin interface)
+    - DELETE: Platform owners only (soft delete via is_active flag)
+
+    This model does NOT have tenant_id because:
+    1. Plans are platform-wide products, not tenant-specific
+    2. Same plan can be subscribed to by multiple tenants
+    3. Platform controls pricing and feature sets
+    4. Required for centralized billing in SaaS mode
+    5. Prevents tenant-specific plan manipulation
+    """
 
     BILLING_CYCLE_CHOICES = [
         ("monthly", "Monthly"),
@@ -203,7 +229,7 @@ class Invoice(TenantBaseModel):
         return f"Invoice {self.invoice_number} - {self.total_amount}"
 
 
-class InvoiceLineItem(models.Model):
+class InvoiceLineItem(TenantBaseModel):
     """Invoice line item model for detailed billing."""
 
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
@@ -233,12 +259,17 @@ class InvoiceLineItem(models.Model):
     class Meta:
         app_label = "billing_subscriptions"
         db_table = "billing_subscriptions_invoice_line_items"
+        indexes = [
+            models.Index(fields=["tenant_id", "invoice"]),
+        ]
 
     def __str__(self) -> str:
         return f"{self.invoice.invoice_number} - {self.description}"
 
     def save(self, *args, **kwargs):
-        """Calculate total_price on save."""
+        """Calculate total_price on save and set tenant_id from invoice."""
+        if not self.tenant_id and self.invoice:
+            self.tenant_id = self.invoice.tenant_id
         self.total_price = self.quantity * self.unit_price
         super().save(*args, **kwargs)
 

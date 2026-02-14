@@ -42,7 +42,7 @@ class TenantBaseModel(models.Model):
     and include tenant_id. All queries MUST filter explicitly by tenant_id.
     """
 
-    tenant_id = models.CharField(max_length=36, db_index=True)
+    tenant_id = models.UUIDField(db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

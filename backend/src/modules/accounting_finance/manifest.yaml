@@ -1,0 +1,51 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: accounting_finance
+version: 1.0.0
+category: core_business
+display_name: Accounting & Finance
+description: |
+  Comprehensive financial management including Chart of Accounts, Journal Entries,
+  Accounts Payable, Accounts Receivable, and Financial Reporting.
+
+# Dependencies
+dependencies:
+  - name: master_data_management
+    version: ">=1.0.0"
+    required: false
+    purpose: Supplier and customer master data
+
+# Permissions
+permissions:
+  - accounting.account:create
+  - accounting.account:read
+  - accounting.account:update
+  - accounting.account:delete
+  - accounting.journal_entry:create
+  - accounting.journal_entry:read
+  - accounting.journal_entry:update
+  - accounting.journal_entry:post
+  - accounting.ap_invoice:create
+  - accounting.ap_invoice:read
+  - accounting.ap_invoice:update
+  - accounting.ap_invoice:delete
+  - accounting.ar_invoice:create
+  - accounting.ar_invoice:read
+  - accounting.ar_invoice:update
+  - accounting.ar_invoice:delete
+  - accounting.payment:create
+  - accounting.payment:read
+  - accounting.payment:update
+  - accounting.report:read
+
+# SoD (Segregation of Duties) actions
+sod_actions:
+  - [accounting.journal_entry:create, accounting.journal_entry:post]
+  - [accounting.ap_invoice:create, accounting.payment:create]
+
+# Health Checks
+health_checks:
+  - name: database_connectivity
+    endpoint: /health/db
+    interval: 60

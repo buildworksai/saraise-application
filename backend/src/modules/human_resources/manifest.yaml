@@ -1,0 +1,44 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: human_resources
+version: 1.0.0
+category: core_business
+display_name: Human Resources Management
+description: |
+  Complete HRMS with payroll, attendance, leave management, recruitment,
+  performance reviews, and employee lifecycle management.
+
+# Dependencies
+dependencies:
+  - name: master_data_management
+    version: ">=1.0.0"
+    required: false
+    purpose: Employee master data
+
+# Permissions
+permissions:
+  - hr.employee:create
+  - hr.employee:read
+  - hr.employee:update
+  - hr.employee:delete
+  - hr.department:create
+  - hr.department:read
+  - hr.department:update
+  - hr.attendance:create
+  - hr.attendance:read
+  - hr.leave:create
+  - hr.leave:read
+  - hr.leave:update
+  - hr.payroll:read
+  - hr.performance:read
+
+# SoD (Segregation of Duties) actions
+sod_actions:
+  - [hr.employee:create, hr.payroll:create]
+
+# Health Checks
+health_checks:
+  - name: database_connectivity
+    endpoint: /health/db
+    interval: 60

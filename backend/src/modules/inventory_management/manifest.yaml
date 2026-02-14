@@ -1,0 +1,41 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: inventory_management
+version: 1.0.0
+category: core_business
+display_name: Inventory & Warehouse Management
+description: |
+  Comprehensive inventory control from stock tracking to warehouse operations,
+  batch/serial management, and real-time inventory visibility.
+
+# Dependencies
+dependencies:
+  - name: master_data_management
+    version: ">=1.0.0"
+    required: false
+    purpose: Product master data
+
+# Permissions
+permissions:
+  - inventory.warehouse:create
+  - inventory.warehouse:read
+  - inventory.warehouse:update
+  - inventory.item:create
+  - inventory.item:read
+  - inventory.item:update
+  - inventory.stock_entry:create
+  - inventory.stock_entry:read
+  - inventory.stock_entry:update
+  - inventory.stock_balance:read
+  - inventory.report:read
+
+# SoD (Segregation of Duties) actions
+sod_actions:
+  - [inventory.stock_entry:create, inventory.stock_entry:approve]
+
+# Health Checks
+health_checks:
+  - name: database_connectivity
+    endpoint: /health/db
+    interval: 60

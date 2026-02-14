@@ -1,0 +1,25 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: multi_company
+version: 1.0.0
+category: core_business
+display_name: Multi-Company Management
+description: |
+  Support for managing multiple companies within a single tenant.
+
+# Dependencies
+dependencies: []
+
+# Permissions
+permissions:
+  - multi_company.company:create
+  - multi_company.company:read
+  - multi_company.company:update
+  - multi_company.company:delete
+
+# Health Checks
+health_checks:
+  - name: database_connectivity
+    endpoint: /health/db
+    interval: 60

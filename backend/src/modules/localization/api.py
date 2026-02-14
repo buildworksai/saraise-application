@@ -31,6 +31,20 @@ class LanguageViewSet(viewsets.ReadOnlyModelViewSet):
     """
     ViewSet for Language read operations (platform-level).
 
+    CRITICAL: This ViewSet provides read-only access to platform-level language data.
+    Languages are shared across all tenants and managed by platform administrators.
+
+    Access Control:
+    - READ: All authenticated users (tenants can view available languages)
+    - WRITE: Not available via this endpoint (platform owners use admin interface)
+    - DELETE: Not available via this endpoint (platform owners use admin interface)
+
+    Rationale for ReadOnlyModelViewSet:
+    - Prevents tenants from creating/modifying platform-level reference data
+    - Ensures language consistency across the platform
+    - Platform owners manage languages via Django admin or platform admin interface
+    - If write access is needed in the future, it MUST be restricted to platform_owner role
+
     Endpoints:
     - GET /api/v1/localization/languages/ - List all languages
     - GET /api/v1/localization/languages/{id}/ - Get language detail
@@ -41,7 +55,12 @@ class LanguageViewSet(viewsets.ReadOnlyModelViewSet):
     authentication_classes = [RelaxedCsrfSessionAuthentication]
 
     def get_queryset(self):
-        """List all active languages (platform-level, no tenant filtering)."""
+        """
+        List all active languages (platform-level, no tenant filtering).
+
+        CRITICAL: No tenant filtering because Language is platform-level.
+        All tenants see the same language list.
+        """
         queryset = Language.objects.filter(is_active=True)
 
         # Filter by code
@@ -50,6 +69,32 @@ class LanguageViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(code=code)
 
         return queryset.order_by("name")
+
+    # NOTE: If this ViewSet is ever changed to ModelViewSet to allow writes,
+    # the following access control MUST be added:
+    #
+    # def perform_create(self, serializer):
+    #     """Restrict create to platform owners only."""
+    #     from src.core.auth_utils import get_user_platform_role
+    #     if get_user_platform_role(self.request.user) != "platform_owner":
+    #         raise PermissionDenied("Only platform owners can create languages")
+    #     serializer.save()
+    #
+    # def perform_update(self, serializer):
+    #     """Restrict update to platform owners only."""
+    #     from src.core.auth_utils import get_user_platform_role
+    #     if get_user_platform_role(self.request.user) != "platform_owner":
+    #         raise PermissionDenied("Only platform owners can update languages")
+    #     super().perform_update(serializer)
+    #
+    # def perform_destroy(self, instance):
+    #     """Restrict delete to platform owners only."""
+    #     from src.core.auth_utils import get_user_platform_role
+    #     if get_user_platform_role(self.request.user) != "platform_owner":
+    #         raise PermissionDenied("Only platform owners can delete languages")
+    #     # Soft delete via is_active flag instead of hard delete
+    #     instance.is_active = False
+    #     instance.save()
 
 
 class TranslationViewSet(viewsets.ModelViewSet):

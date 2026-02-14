@@ -1,0 +1,31 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: email_marketing
+version: 1.0.0
+category: core_business
+display_name: Email Marketing
+description: |
+  Email campaign management, templates, and analytics.
+
+# Dependencies
+dependencies:
+  - name: crm
+    version: ">=1.0.0"
+    required: false
+    purpose: Contact list integration
+
+# Permissions
+permissions:
+  - email.campaign:create
+  - email.campaign:read
+  - email.campaign:update
+  - email.template:create
+  - email.template:read
+  - email.template:update
+
+# Health Checks
+health_checks:
+  - name: database_connectivity
+    endpoint: /health/db
+    interval: 60

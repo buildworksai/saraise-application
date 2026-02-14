@@ -1,0 +1,25 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: notifications
+version: 1.0.0
+category: foundation
+display_name: Notifications
+description: |
+  System-wide notification management for users and tenants.
+
+# Dependencies
+dependencies: []
+
+# Permissions
+permissions:
+  - notifications.notification:read
+  - notifications.notification:update
+  - notifications.preference:read
+  - notifications.preference:update
+
+# Health Checks
+health_checks:
+  - name: database_connectivity
+    endpoint: /health/db
+    interval: 60

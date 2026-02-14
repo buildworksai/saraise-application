@@ -1,0 +1,30 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: fixed_assets
+version: 1.0.0
+category: core_business
+display_name: Fixed Assets
+description: |
+  Fixed asset lifecycle management, depreciation, and asset tracking.
+
+# Dependencies
+dependencies:
+  - name: accounting_finance
+    version: ">=1.0.0"
+    required: false
+    purpose: Depreciation journal entries
+
+# Permissions
+permissions:
+  - fixed_asset.asset:create
+  - fixed_asset.asset:read
+  - fixed_asset.asset:update
+  - fixed_asset.asset:delete
+  - fixed_asset.depreciation:read
+
+# Health Checks
+health_checks:
+  - name: database_connectivity
+    endpoint: /health/db
+    interval: 60

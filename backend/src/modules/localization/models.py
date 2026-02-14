@@ -23,7 +23,7 @@ class TenantBaseModel(models.Model):
     and include tenant_id. All queries MUST filter explicitly by tenant_id.
     """
 
-    tenant_id = models.CharField(max_length=36, db_index=True)
+    tenant_id = models.UUIDField(db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -37,7 +37,32 @@ class TenantBaseModel(models.Model):
 
 
 class Language(models.Model):
-    """Language model (platform-level, no tenant_id)."""
+    """
+    Language model (platform-level, no tenant_id).
+
+    CRITICAL: This is a platform-level reference data model.
+    Languages are shared across all tenants and managed by platform administrators.
+    Tenants cannot create/modify languages - they can only use existing ones.
+
+    Rationale:
+    - Language codes (ISO 639-1) are standardized globally
+    - Prevents tenant-specific language code conflicts
+    - Enables platform-wide language consistency
+    - Reduces data duplication
+    - Ensures all tenants have access to the same language set
+    - Simplifies translation management across the platform
+
+    Access Control:
+    - READ: All authenticated users (tenants can view available languages)
+    - WRITE: Platform owners only (via platform admin interface)
+    - DELETE: Platform owners only (soft delete via is_active flag)
+
+    This model does NOT have tenant_id because:
+    1. Languages are universal reference data
+    2. ISO 639-1 codes are globally standardized
+    3. Platform-wide consistency is required
+    4. No tenant-specific language definitions needed
+    """
 
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     code = models.CharField(

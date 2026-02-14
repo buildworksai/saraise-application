@@ -1,0 +1,32 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: bank_reconciliation
+version: 1.0.0
+category: core_business
+display_name: Bank Reconciliation
+description: |
+  Bank statement import, reconciliation, and bank account management.
+
+# Dependencies
+dependencies:
+  - name: accounting_finance
+    version: ">=1.0.0"
+    required: false
+    purpose: Journal entry creation
+
+# Permissions
+permissions:
+  - bank.bank_account:create
+  - bank.bank_account:read
+  - bank.bank_account:update
+  - bank.statement:create
+  - bank.statement:read
+  - bank.reconciliation:create
+  - bank.reconciliation:read
+
+# Health Checks
+health_checks:
+  - name: database_connectivity
+    endpoint: /health/db
+    interval: 60

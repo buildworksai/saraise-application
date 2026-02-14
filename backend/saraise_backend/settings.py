@@ -102,6 +102,26 @@ INSTALLED_APPS = [
     "src.modules.localization",
     "src.modules.regional",
     "src.modules.crm",
+    # ===== Core Business Modules =====
+    "src.modules.accounting_finance",
+    "src.modules.inventory_management",
+    "src.modules.human_resources",
+    "src.modules.purchase_management",
+    "src.modules.sales_management",
+    "src.modules.project_management",
+    "src.modules.master_data_management",
+    "src.modules.multi_company",
+    "src.modules.asset_management",
+    "src.modules.bank_reconciliation",
+    "src.modules.budget_management",
+    "src.modules.business_intelligence",
+    "src.modules.compliance_management",
+    "src.modules.compliance_risk_management",
+    "src.modules.email_marketing",
+    "src.modules.fixed_assets",
+    # ===== Foundation Modules =====
+    "src.modules.communication_hub",
+    # Note: notifications module is in src.core.notifications
 ]
 
 MIDDLEWARE = [

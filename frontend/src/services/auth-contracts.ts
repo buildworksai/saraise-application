@@ -79,6 +79,8 @@ export const ENDPOINTS = {
   FORGOT_PASSWORD: '/api/v1/auth/forgot-password/',
   /** POST - Reset password with token */
   RESET_PASSWORD: '/api/v1/auth/reset-password/',
+  /** PATCH - Update user profile */
+  PROFILE: '/api/v1/auth/profile/',
 } as const;
 
 // =============================================================================

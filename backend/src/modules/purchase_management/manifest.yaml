@@ -1,0 +1,47 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: purchase_management
+version: 1.0.0
+category: core_business
+display_name: Purchase & Procurement Management
+description: |
+  Comprehensive procure-to-pay workflow from purchase requisitions to supplier invoices,
+  payments, and supplier performance analytics.
+
+# Dependencies
+dependencies:
+  - name: inventory_management
+    version: ">=1.0.0"
+    required: false
+    purpose: Stock receipt integration
+  - name: accounting_finance
+    version: ">=1.0.0"
+    required: false
+    purpose: AP invoice creation
+
+# Permissions
+permissions:
+  - purchase.supplier:create
+  - purchase.supplier:read
+  - purchase.supplier:update
+  - purchase.purchase_requisition:create
+  - purchase.purchase_requisition:read
+  - purchase.purchase_requisition:update
+  - purchase.purchase_order:create
+  - purchase.purchase_order:read
+  - purchase.purchase_order:update
+  - purchase.purchase_receipt:create
+  - purchase.purchase_receipt:read
+  - purchase.rfq:create
+  - purchase.rfq:read
+
+# SoD (Segregation of Duties) actions
+sod_actions:
+  - [purchase.purchase_order:create, purchase.purchase_receipt:create]
+
+# Health Checks
+health_checks:
+  - name: database_connectivity
+    endpoint: /health/db
+    interval: 60

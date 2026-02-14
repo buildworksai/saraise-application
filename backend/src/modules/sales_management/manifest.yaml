@@ -1,0 +1,48 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: sales_management
+version: 1.0.0
+category: core_business
+display_name: Sales Management
+description: |
+  Comprehensive order-to-cash workflow from quotations to delivery, invoicing, and revenue analytics.
+
+# Dependencies
+dependencies:
+  - name: crm
+    version: ">=1.0.0"
+    required: false
+    purpose: Won opportunities create quotations
+  - name: inventory_management
+    version: ">=1.0.0"
+    required: false
+    purpose: Delivery note reduces stock
+  - name: accounting_finance
+    version: ">=1.0.0"
+    required: false
+    purpose: Sales order triggers AR invoice creation
+
+# Permissions
+permissions:
+  - sales.customer:create
+  - sales.customer:read
+  - sales.customer:update
+  - sales.quotation:create
+  - sales.quotation:read
+  - sales.quotation:update
+  - sales.sales_order:create
+  - sales.sales_order:read
+  - sales.sales_order:update
+  - sales.delivery_note:create
+  - sales.delivery_note:read
+
+# SoD (Segregation of Duties) actions
+sod_actions:
+  - [sales.sales_order:create, sales.delivery_note:create]
+
+# Health Checks
+health_checks:
+  - name: database_connectivity
+    endpoint: /health/db
+    interval: 60

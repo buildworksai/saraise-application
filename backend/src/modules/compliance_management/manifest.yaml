@@ -1,0 +1,26 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Status: Implemented - v1.0.0
+
+name: compliance_management
+version: 1.0.0
+category: core_business
+display_name: Compliance Management
+description: |
+  Regulatory compliance tracking, audit trails, and policy management.
+
+# Dependencies
+dependencies: []
+
+# Permissions
+permissions:
+  - compliance.policy:create
+  - compliance.policy:read
+  - compliance.policy:update
+  - compliance.audit:read
+  - compliance.requirement:read
+
+# Health Checks
+health_checks:
+  - name: database_connectivity
+    endpoint: /health/db
+    interval: 60

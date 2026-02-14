@@ -49,5 +49,24 @@ urlpatterns = [
     path("api/v1/regional/", include("src.modules.regional.urls")),
     # CRM Module
     path("api/v1/crm/", include("src.modules.crm.urls")),
-    # Add other module routes here as they're implemented
+    # ===== Core Business Modules =====
+    path("api/v1/accounting-finance/", include("src.modules.accounting_finance.urls")),
+    path("api/v1/inventory-management/", include("src.modules.inventory_management.urls")),
+    path("api/v1/human-resources/", include("src.modules.human_resources.urls")),
+    path("api/v1/purchase-management/", include("src.modules.purchase_management.urls")),
+    path("api/v1/sales-management/", include("src.modules.sales_management.urls")),
+    path("api/v1/project-management/", include("src.modules.project_management.urls")),
+    path("api/v1/master-data-management/", include("src.modules.master_data_management.urls")),
+    path("api/v1/multi-company/", include("src.modules.multi_company.urls")),
+    path("api/v1/asset-management/", include("src.modules.asset_management.urls")),
+    path("api/v1/bank-reconciliation/", include("src.modules.bank_reconciliation.urls")),
+    path("api/v1/budget-management/", include("src.modules.budget_management.urls")),
+    path("api/v1/business-intelligence/", include("src.modules.business_intelligence.urls")),
+    path("api/v1/compliance-management/", include("src.modules.compliance_management.urls")),
+    path("api/v1/compliance-risk-management/", include("src.modules.compliance_risk_management.urls")),
+    path("api/v1/email-marketing/", include("src.modules.email_marketing.urls")),
+    path("api/v1/fixed-assets/", include("src.modules.fixed_assets.urls")),
+    # ===== Foundation Modules =====
+    path("api/v1/communication-hub/", include("src.modules.communication_hub.urls")),
+    # Note: notifications is already registered in Core Services section above
 ]

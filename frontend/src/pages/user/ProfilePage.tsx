@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { useAuthStore } from '../../stores/auth-store';
 import { authService } from '../../services/auth-service';
 import { apiClient } from '../../services/api-client';
+import { ENDPOINTS as AUTH_ENDPOINTS } from '../../services/auth-contracts';
 import { User, Mail, Key, Save, X, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -76,7 +77,7 @@ export const ProfilePage = () => {
         updateData.current_password = formData.currentPassword;
       }
 
-      const response = await apiClient.patch<{ user?: typeof user }>('/api/v1/auth/profile/', updateData);
+      const response = await apiClient.patch<{ user?: typeof user }>(AUTH_ENDPOINTS.PROFILE, updateData);
       
       // Update user in store
       if (response && 'user' in response && response.user) {

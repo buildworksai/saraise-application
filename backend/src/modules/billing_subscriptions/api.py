@@ -37,6 +37,20 @@ class SubscriptionPlanViewSet(viewsets.ReadOnlyModelViewSet):
     """
     ViewSet for SubscriptionPlan read operations (platform-level).
 
+    CRITICAL: This ViewSet provides read-only access to platform-level subscription plans.
+    Plans are defined by the platform and shared across all tenants.
+
+    Access Control:
+    - READ: All authenticated users (tenants can view available plans)
+    - WRITE: Not available via this endpoint (platform owners use admin interface)
+    - DELETE: Not available via this endpoint (platform owners use admin interface)
+
+    Rationale for ReadOnlyModelViewSet:
+    - Prevents tenants from creating/modifying platform-level pricing plans
+    - Ensures consistent pricing across all tenants
+    - Platform owners manage plans via Django admin or platform admin interface
+    - If write access is needed in the future, it MUST be restricted to platform_owner role
+
     Endpoints:
     - GET /api/v1/billing-subscriptions/plans/ - List all plans
     - GET /api/v1/billing-subscriptions/plans/{id}/ - Get plan detail
@@ -47,7 +61,12 @@ class SubscriptionPlanViewSet(viewsets.ReadOnlyModelViewSet):
     authentication_classes = [RelaxedCsrfSessionAuthentication]
 
     def get_queryset(self):
-        """List all active plans (platform-level, no tenant filtering)."""
+        """
+        List all active plans (platform-level, no tenant filtering).
+
+        CRITICAL: No tenant filtering because SubscriptionPlan is platform-level.
+        All tenants see the same plan list.
+        """
         queryset = SubscriptionPlan.objects.filter(is_active=True)
 
         # Filter by billing cycle
@@ -56,6 +75,32 @@ class SubscriptionPlanViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(billing_cycle=billing_cycle)
 
         return queryset.order_by("price")
+
+    # NOTE: If this ViewSet is ever changed to ModelViewSet to allow writes,
+    # the following access control MUST be added:
+    #
+    # def perform_create(self, serializer):
+    #     """Restrict create to platform owners only."""
+    #     from src.core.auth_utils import get_user_platform_role
+    #     if get_user_platform_role(self.request.user) != "platform_owner":
+    #         raise PermissionDenied("Only platform owners can create subscription plans")
+    #     serializer.save()
+    #
+    # def perform_update(self, serializer):
+    #     """Restrict update to platform owners only."""
+    #     from src.core.auth_utils import get_user_platform_role
+    #     if get_user_platform_role(self.request.user) != "platform_owner":
+    #         raise PermissionDenied("Only platform owners can update subscription plans")
+    #     super().perform_update(serializer)
+    #
+    # def perform_destroy(self, instance):
+    #     """Restrict delete to platform owners only."""
+    #     from src.core.auth_utils import get_user_platform_role
+    #     if get_user_platform_role(self.request.user) != "platform_owner":
+    #         raise PermissionDenied("Only platform owners can delete subscription plans")
+    #     # Soft delete via is_active flag instead of hard delete
+    #     instance.is_active = False
+    #     instance.save()
 
 
 class SubscriptionViewSet(viewsets.ModelViewSet):

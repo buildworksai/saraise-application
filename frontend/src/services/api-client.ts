@@ -1,3 +1,5 @@
+import { ENDPOINTS as AUTH_ENDPOINTS } from './auth-contracts';
+
 export interface ApiClientOptions {
   baseUrl?: string;
 }
@@ -53,7 +55,7 @@ export class ApiClient {
     // Add CSRF token for authenticated requests (all except login)
     // Login endpoint uses CsrfExemptSessionAuthentication
     const csrfToken = this.getCsrfToken();
-    if (csrfToken && path !== '/api/v1/auth/login/') {
+    if (csrfToken && path !== AUTH_ENDPOINTS.LOGIN) {
       headers['X-CSRFToken'] = csrfToken;
     }
 
@@ -91,8 +93,8 @@ export class ApiClient {
       // CRITICAL: backend session is the source of truth.
       // Only auto-logout on 401 (Unauthorized) - this means not authenticated.
       // 403 (Forbidden) can mean "not authorized" (permission issue), not "not authenticated".
-      // Exception: For /api/v1/auth/me/, 403 means not authenticated, so logout.
-      if (response.status === 401 || (response.status === 403 && path.includes('/auth/me/'))) {
+      // Exception: For auth/me endpoint, 403 means not authenticated, so logout.
+      if (response.status === 401 || (response.status === 403 && path === AUTH_ENDPOINTS.ME)) {
         try {
           const { useAuthStore } = await import('@/stores/auth-store');
           useAuthStore.getState().logout();
