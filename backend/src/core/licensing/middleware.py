@@ -92,6 +92,7 @@ class LicenseValidationMiddleware:
         skip_paths = [
             "/api/v1/health/",
             "/api/v1/auth/",  # Allow login/logout
+            "/api/v1/licensing/",  # Allow license status/activate (needed when no license yet)
             "/static/",
             "/admin/",
             "/api/schema/",  # OpenAPI schema

@@ -7,66 +7,50 @@
  * Read this file FIRST when working on this module.
  * All types and endpoints for Multi-Company are defined here.
  *
- * TODO: This is a scaffold. API endpoints and types must be defined when:
- * 1. Backend API is implemented
- * 2. OpenAPI schema is generated
- * 3. Types are available in @/types/api
- *
  * SPDX-License-Identifier: Apache-2.0
  */
-
-import type { components } from '@/types/api';
 
 // =============================================================================
 // EXPORTED TYPES - Import these in your components
 // =============================================================================
 
-// TODO: Define types when backend API is implemented
-// Example:
-// export type Entity = components['schemas']['Entity'];
-// export type EntityCreate = components['schemas']['EntityCreate'];
-// export type EntityUpdate = components['schemas']['PatchedEntityRequest'];
+/** Company - Company within a tenant */
+export type Company = {
+  id: string;
+  tenant_id: string;
+  company_code: string;
+  company_name: string;
+  legal_name?: string;
+  tax_id?: string;
+  address?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Company create request */
+export type CompanyCreate = {
+  company_code: string;
+  company_name: string;
+  legal_name?: string;
+  tax_id?: string;
+  address?: string;
+  is_active?: boolean;
+};
 
 // =============================================================================
 // ENDPOINT REGISTRY - Use these for all API calls
 // =============================================================================
 
-/**
- * Multi-Company API Endpoints
- *
- * TODO: Define actual endpoints when backend API is implemented.
- * All endpoints should be prefixed with /api/v1/multi-company/
- *
- * Usage:
- * ```typescript
- * import { ENDPOINTS } from './contracts';
- * apiClient.get(ENDPOINTS.ENTITIES.LIST);
- * ```
- */
 export const MODULE_API_PREFIX = '/api/v1/multi-company';
 
 export const ENDPOINTS = {
-  // TODO: Define actual endpoints when backend API is implemented
-  // Example structure:
-  // ENTITIES: {
-  //   LIST: `${MODULE_API_PREFIX}/entities/`,
-  //   DETAIL: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   CREATE: `${MODULE_API_PREFIX}/entities/`,
-  //   UPDATE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   DELETE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  // },
+  COMPANIES: {
+    LIST: `${MODULE_API_PREFIX}/companies/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/companies/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/companies/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/companies/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/companies/${id}/` as const,
+  },
+  HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
-
-// =============================================================================
-// TYPE GUARDS - Use for runtime type checking
-// =============================================================================
-
-// TODO: Add type guards when types are defined
-
-// =============================================================================
-// EXAMPLES - Reference for agents writing new code
-// =============================================================================
-
-/**
- * TODO: Add usage examples when backend API is implemented
- */

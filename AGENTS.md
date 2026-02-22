@@ -1,8 +1,10 @@
 # SARAISE Application — Agent Instructions
 
-**SPDX-License-Identifier: Apache-2.0**  
-**Version**: 4.0.0  
-**Last Updated**: January 7, 2026
+**BuildWorks.AI | Innovation, Automation, Transformation, Architecture & AI Practice**
+
+**SPDX-License-Identifier: Apache-2.0**
+**Version**: 5.0.0
+**Last Updated**: February 8, 2026
 
 ---
 
@@ -12,19 +14,18 @@
 
 ```
 AUTHORITATIVE SOURCE: saraise-documentation/
-├── AGENTS.md                  ← Master agent instructions
+├── AGENTS.md                  ← Master agent instructions (SUPREME)
 ├── architecture/              ← System architecture (FROZEN)
 ├── rules/                     ← Compliance rules (MANDATORY)
 ├── standards/                 ← Coding standards (REQUIRED)
 ├── modules/                   ← Module specifications
-└── .agents/data/              ← Machine-readable rules (FAST ACCESS)
-    ├── rules-index.json       ← Query rules by scope/type/severity
-    └── checklists.json        ← Task-level checklists
+├── .agents/data/              ← Machine-readable rules (FAST ACCESS)
+└── .cursor/skills/            ← Agent skills (BuildWorks Chief Practice)
 ```
 
 **Before ANY operation, agents MUST read `saraise-documentation/AGENTS.md`.**
 
-**For rule queries, use `saraise-documentation/.agents/data/rules-index.json` for fast access.**
+**Engineering Philosophy (Kaizen, Monozukuri, Jidoka, Ordnung, Vorsprung durch Technik, Stabilitat) and Operational Disciplines (Shokunin, Nemawashi, Marveling, First-Principles) are defined in the master AGENTS.md and enforced here.**
 
 ---
 
@@ -60,67 +61,59 @@ saraise-application/
 
 ## What This Repository Does NOT Contain
 
-❌ Internal architecture documents → `saraise-documentation/`  
-❌ Agent rules or prompts → `saraise-documentation/`  
-❌ Business logic specifications → `saraise-documentation/`  
-❌ Phase planning documents → `saraise-documentation/`  
-❌ Internal reports → `saraise-documentation/`  
-❌ Workspace file → `saraise-documentation/`  
+- Internal architecture documents → `saraise-documentation/` *(Ordnung)*
+- Agent rules or prompts → `saraise-documentation/` *(Ordnung)*
+- Business logic specifications → `saraise-documentation/` *(Ordnung)*
+- Phase planning documents → `saraise-documentation/` *(Ordnung)*
+- Internal reports → `saraise-documentation/` *(Ordnung)*
 
 ---
 
 ## Operating Modes
 
-This application operates in different modes based on configuration:
-
 ### Development Mode
 ```yaml
 SARAISE_MODE: development
 ```
-- License checks skipped
-- All modules enabled
-- Debug mode
+License checks skipped. All modules enabled. Debug mode.
 
 ### Self-Hosted Mode
 ```yaml
 SARAISE_MODE: self-hosted
 SARAISE_LICENSE_MODE: connected | isolated
 ```
-- Single-tenant
-- Built-in Django auth
-- License validation required
+Single-tenant. Built-in Django auth. License validation required.
 
 ### SaaS Mode
 ```yaml
 SARAISE_MODE: saas
 SARAISE_PLATFORM_URL: https://platform.saraise.com
 ```
-- Multi-tenant
-- Auth delegated to platform
-- Full platform integration
+Multi-tenant. Auth delegated to platform. Full platform integration.
 
 ---
 
 ## Quick Rules (Summary)
 
-Full rules are in `saraise-documentation/rules/`.
+Full rules in `saraise-documentation/rules/`. Machine-readable: `saraise-documentation/.agents/data/rules-index.json`.
 
-**For machine-readable access:** Use `saraise-documentation/.agents/data/rules-index.json`
-
-| Rule | Enforcement |
-|------|-------------|
-| Tenant isolation | ALL tenant-scoped models have `tenant_id` |
-| Tenant filtering | ALL queries filter by `tenant_id` |
-| Session-based auth | NO JWT for interactive users |
-| Full-stack modules | Backend + Frontend + Tests required |
-| Test coverage | ≥90% with isolation tests |
-| Quality gates | Pre-commit hooks MUST pass |
-| Module contracts | ALL modules have `contracts.ts` |
-| Endpoint registry | Use ENDPOINTS constant, NO hardcoded URLs |
+| Rule | Enforcement | Principle |
+|------|-------------|-----------|
+| Tenant isolation | ALL tenant-scoped models have `tenant_id` | Stabilität |
+| Tenant filtering | ALL queries filter by `tenant_id` | Jidoka |
+| Session-based auth | NO JWT for interactive users | Stabilität |
+| Full-stack modules | Backend + Frontend + Tests required | Monozukuri |
+| Test coverage | >=90% with isolation tests | Monozukuri |
+| Quality gates | Pre-commit hooks MUST pass | Shokunin |
+| Module contracts | ALL modules have `contracts.ts` | Ordnung |
+| Endpoint registry | Use ENDPOINTS constant, NO hardcoded URLs | Ordnung |
+| Circuit breakers | ALL external HTTP calls use circuit breakers | Jidoka |
+| Graceful degradation | Dependency failures handled, not fatal | Stabilität |
+| Structured logging | All logs structured JSON with `correlation_id` | Ordnung |
 
 ---
 
-## Module Contracts Architecture (CRITICAL for AI Agents)
+## Module Contracts Architecture (CRITICAL — Ordnung)
 
 **Every frontend module MUST have a `contracts.ts` file.**
 
@@ -133,41 +126,40 @@ frontend/src/modules/{module_name}/
 └── services/
 ```
 
-### Before Writing Frontend Code
+### Before Writing Frontend Code (Nemawashi)
 
 1. **Read `contracts.ts` FIRST** — Contains all types and endpoints
 2. **Import types from `contracts.ts`** — NOT from `@/types/api`
 3. **Use `ENDPOINTS` constant** — NO hardcoded URL strings
 
-### Example Usage
-
 ```typescript
-// ✅ CORRECT
+// CORRECT (Ordnung)
 import { PlatformSetting, ENDPOINTS } from '../contracts';
 const settings = await apiClient.get<PlatformSetting[]>(ENDPOINTS.SETTINGS.LIST);
 
-// ❌ FORBIDDEN
+// FORBIDDEN (Ordnung violation)
 const settings = await apiClient.get('/api/v1/platform/settings/');
 ```
 
-### Validation Checkpoints
+### After Each Edit (Shokunin + Jidoka)
 
-After editing TypeScript files:
 ```bash
 cd frontend && npx tsc --noEmit src/modules/{path}.tsx
 npx eslint src/modules/{path}.tsx --max-warnings 0
 ```
 
-See `saraise-documentation/rules/agent-rules/27-contracts-architecture.md` for full details
+Fix errors IMMEDIATELY. Broken code does not get committed. Period.
 
 ---
 
 ## Forbidden in This Repository
 
-❌ Tenant lifecycle (SaaS mode) → Use `saraise-platform`  
-❌ Platform configuration → Use `saraise-platform`  
-❌ Platform UI → Use `saraise-platform/frontend`  
-❌ Internal documentation → Use `saraise-documentation`  
+| Violation | Redirect | Principle |
+|-----------|----------|-----------|
+| Tenant lifecycle (SaaS mode) | `saraise-platform` | Ordnung |
+| Platform configuration | `saraise-platform` | Ordnung |
+| Platform UI | `saraise-platform/frontend` | Ordnung |
+| Internal documentation | `saraise-documentation` | Ordnung |
 
 ---
 
@@ -190,118 +182,69 @@ npx eslint src --max-warnings 0
 
 ---
 
-## Pre-Commit Hooks & Quality Gates
-
-**MANDATORY: All commits MUST pass pre-commit hooks before being pushed.**
-
-### Setup Pre-Commit Hooks
+## Quality Gates (MANDATORY — Shokunin)
 
 ```bash
-# Install pre-commit (Python tool)
-pip install pre-commit
-
-# Install hooks
-pre-commit install
-
-# Run manually on all files
 pre-commit run --all-files
 ```
 
-### Pre-Commit Checks (SARAISE-04001, SARAISE-04002)
+| Check | Rule | Enforcement | Principle |
+|-------|------|-------------|-----------|
+| TypeScript | `tsc --noEmit` — ZERO errors | Block commit | Monozukuri |
+| ESLint | `npm run lint` — ZERO warnings | Block commit | Monozukuri |
+| Python: Black | Formatting required | Block commit | Ordnung |
+| Python: Flake8 | Linting required | Block commit | Ordnung |
+| Python: MyPy | Type checking | Block commit | Jidoka |
+| File Quality | Trailing whitespace, EOF, YAML/JSON | Block commit | Ordnung |
+| Security | Secret detection — No hardcoded secrets | Block commit | Stabilität |
 
-The following checks are **MANDATORY** and **BLOCKING**:
-
-| Check | Rule | Enforcement |
-|-------|------|-------------|
-| TypeScript | `tsc --noEmit` — ZERO errors | Block commit |
-| ESLint | `npm run lint` — ZERO warnings | Block commit |
-| Python: Black | Formatting required | Block commit |
-| Python: Flake8 | Linting required | Block commit |
-| Python: MyPy | Type checking | Block commit |
-| File Quality | Trailing whitespace, EOF, YAML/JSON validation | Block commit |
-| Security | Secret detection — No hardcoded secrets | Block commit |
-
-**No exceptions. No bypasses. All checks must pass.**
+**Skipping quality gates is a Shokunin violation. There is no shortcut that preserves integrity.**
 
 ---
 
-## GitHub Workflows
+## Phase Completion & PR Process (Monozukuri + Kaizen)
 
-**MANDATORY: All workflows must pass before merge.**
-
-### Quality Guardrails Workflow
-
-- Runs on: Push to `main`, `develop`, `release/*`, `hotfix/*` and all PRs
-- Enforces: TypeScript (zero errors), ESLint (zero warnings), Python quality checks, Tests (≥90% coverage)
-- **Status**: Blocking — PR cannot be merged if this fails
-
-### CI/CD Workflow
-
-- Runs on: All pushes and PRs
-- Includes: Quality checks, Tests, Build, Security scan
-- **Status**: Blocking — PR cannot be merged if this fails
-
----
-
-## Phase Completion & PR Process
-
-**CRITICAL: After successful completion of every phase, follow this process:**
+**NEVER propose next phase without completing current phase 100%. Incomplete phases are lies.**
 
 ### 1. Testing (MANDATORY)
 
-Before creating a PR, **ALL tests must pass**:
-
 ```bash
 # Backend tests
-cd backend
-pytest tests/ -v --cov=src --cov-fail-under=90
+cd backend && pytest tests/ -v --cov=src --cov-fail-under=90
 
 # Frontend tests
 cd frontend
-npm run typecheck     # TypeScript (must pass with zero errors)
-npm run lint          # ESLint (must pass with zero warnings)
-npm run build         # Build must succeed
+npm run typecheck     # ZERO errors
+npm run lint          # ZERO warnings
+npm run build         # Must succeed
 ```
 
-**If any check fails, fix the issues before proceeding.**
-
 ### 2. Pre-Commit Validation
-
-Ensure pre-commit hooks pass:
 
 ```bash
 pre-commit run --all-files
 ```
 
-**All hooks must pass. No exceptions.**
+### 3. Retrospective (Kaizen)
 
-### 3. Create Pull Request
+Write `reports/RETRO_PHASE_{N}.md` with: what worked, what failed, metrics comparison, prevention items.
 
-Once **ALL tests pass** and **ALL pre-commit hooks pass**:
+### 4. Create Pull Request
 
-1. **Commit changes** with descriptive commit messages
-2. **Push to feature branch**
-3. **Create Pull Request** in GitHub targeting `main` or `develop`
-4. **Wait for CI/CD workflows** to complete and pass
-5. **Request review** from team members
-6. **Merge only after** all checks pass and approval received
-
-**DO NOT create PRs with failing tests or pre-commit hooks.**
-
-**DO NOT merge PRs that fail CI/CD workflows.**
+Only after ALL tests pass, ALL hooks pass, AND retrospective written.
 
 ---
 
 ## Quality Standards
 
-| Standard | Requirement | Enforcement |
-|----------|-------------|-------------|
-| TypeScript Errors | ZERO | Pre-commit + CI |
-| ESLint Warnings | ZERO | Pre-commit + CI |
-| Python Formatting | Black compliant | Pre-commit + CI |
-| Test Coverage | ≥90% | CI |
-| Build Success | Must build without errors | CI |
-| Security | No secrets, no vulnerabilities | Pre-commit + CI |
+| Standard | Requirement | Enforcement | Principle |
+|----------|-------------|-------------|-----------|
+| TypeScript Errors | ZERO | Pre-commit + CI | Monozukuri |
+| ESLint Warnings | ZERO | Pre-commit + CI | Monozukuri |
+| Python Formatting | Black compliant | Pre-commit + CI | Ordnung |
+| Test Coverage | >=90% | CI | Monozukuri |
+| Build Success | Must build without errors | CI | Jidoka |
+| Security | No secrets, no vulnerabilities | Pre-commit + CI | Stabilität |
 
 ---
 
@@ -310,6 +253,7 @@ Once **ALL tests pass** and **ALL pre-commit hooks pass**:
 | Need | Location |
 |------|----------|
 | Full agent instructions | `saraise-documentation/AGENTS.md` |
+| Engineering philosophy | `saraise-documentation/AGENTS.md` (Core Principles + Operational Disciplines) |
 | Machine-readable rules | `saraise-documentation/.agents/data/rules-index.json` |
 | System architecture | `saraise-documentation/architecture/` |
 | Compliance rules | `saraise-documentation/rules/` |
@@ -318,5 +262,6 @@ Once **ALL tests pass** and **ALL pre-commit hooks pass**:
 
 ---
 
-**Classification:** Open Source (Apache 2.0)  
+**Classification:** Open Source (Apache 2.0)
 **Authority Source:** saraise-documentation/
+**Engineering Philosophy:** BuildWorks.AI Principles — enforced without exception

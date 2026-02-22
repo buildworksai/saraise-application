@@ -7,66 +7,75 @@
  * Read this file FIRST when working on this module.
  * All types and endpoints for Email Marketing are defined here.
  *
- * TODO: This is a scaffold. API endpoints and types must be defined when:
- * 1. Backend API is implemented
- * 2. OpenAPI schema is generated
- * 3. Types are available in @/types/api
- *
  * SPDX-License-Identifier: Apache-2.0
  */
-
-import type { components } from '@/types/api';
 
 // =============================================================================
 // EXPORTED TYPES - Import these in your components
 // =============================================================================
 
-// TODO: Define types when backend API is implemented
-// Example:
-// export type Entity = components['schemas']['Entity'];
-// export type EntityCreate = components['schemas']['EntityCreate'];
-// export type EntityUpdate = components['schemas']['PatchedEntityRequest'];
+/** Email Campaign - Marketing email campaign */
+export type EmailCampaign = {
+  id: string;
+  tenant_id: string;
+  campaign_code: string;
+  campaign_name: string;
+  subject: string;
+  template_id?: string;
+  status: string;
+  scheduled_at?: string;
+  sent_at?: string;
+  recipient_count: number;
+  opened_count: number;
+  clicked_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Email Campaign create request */
+export type EmailCampaignCreate = {
+  campaign_code: string;
+  campaign_name: string;
+  subject: string;
+  template_id?: string;
+  status: string;
+  scheduled_at?: string;
+};
+
+/** Email Template - Reusable email template */
+export type EmailTemplate = {
+  id: string;
+  tenant_id: string;
+  template_code: string;
+  template_name: string;
+  subject: string;
+  body_html: string;
+  body_text?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
 
 // =============================================================================
 // ENDPOINT REGISTRY - Use these for all API calls
 // =============================================================================
 
-/**
- * Email Marketing API Endpoints
- *
- * TODO: Define actual endpoints when backend API is implemented.
- * All endpoints should be prefixed with /api/v1/email-marketing/
- *
- * Usage:
- * ```typescript
- * import { ENDPOINTS } from './contracts';
- * apiClient.get(ENDPOINTS.ENTITIES.LIST);
- * ```
- */
 export const MODULE_API_PREFIX = '/api/v1/email-marketing';
 
 export const ENDPOINTS = {
-  // TODO: Define actual endpoints when backend API is implemented
-  // Example structure:
-  // ENTITIES: {
-  //   LIST: `${MODULE_API_PREFIX}/entities/`,
-  //   DETAIL: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   CREATE: `${MODULE_API_PREFIX}/entities/`,
-  //   UPDATE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   DELETE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  // },
+  CAMPAIGNS: {
+    LIST: `${MODULE_API_PREFIX}/campaigns/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/campaigns/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/campaigns/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/campaigns/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/campaigns/${id}/` as const,
+  },
+  TEMPLATES: {
+    LIST: `${MODULE_API_PREFIX}/templates/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/templates/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/templates/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/templates/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/templates/${id}/` as const,
+  },
+  HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
-
-// =============================================================================
-// TYPE GUARDS - Use for runtime type checking
-// =============================================================================
-
-// TODO: Add type guards when types are defined
-
-// =============================================================================
-// EXAMPLES - Reference for agents writing new code
-// =============================================================================
-
-/**
- * TODO: Add usage examples when backend API is implemented
- */

@@ -499,6 +499,278 @@ const SalesDashboardPage = lazy(() =>
   }))
 );
 
+// Accounting & Finance
+const AccountingAccountListPage = lazy(() =>
+  import("./modules/accounting_finance/pages/AccountListPage").then((m) => ({
+    default: m.AccountListPage,
+  }))
+);
+const AccountingAccountDetailPage = lazy(() =>
+  import("./modules/accounting_finance/pages/AccountDetailPage").then((m) => ({
+    default: m.AccountDetailPage,
+  }))
+);
+const CreateAccountingAccountPage = lazy(() =>
+  import("./modules/accounting_finance/pages/CreateAccountPage").then((m) => ({
+    default: m.CreateAccountPage,
+  }))
+);
+
+// Sales Management
+const SalesCustomerListPage = lazy(() =>
+  import("./modules/sales_management/pages/CustomerListPage").then((m) => ({
+    default: m.CustomerListPage,
+  }))
+);
+const SalesCustomerDetailPage = lazy(() =>
+  import("./modules/sales_management/pages/CustomerDetailPage").then((m) => ({
+    default: m.CustomerDetailPage,
+  }))
+);
+const CreateSalesCustomerPage = lazy(() =>
+  import("./modules/sales_management/pages/CreateCustomerPage").then((m) => ({
+    default: m.CreateCustomerPage,
+  }))
+);
+
+// Purchase Management
+const PurchaseSupplierListPage = lazy(() =>
+  import("./modules/purchase_management/pages/SupplierListPage").then((m) => ({
+    default: m.SupplierListPage,
+  }))
+);
+const PurchaseSupplierDetailPage = lazy(() =>
+  import("./modules/purchase_management/pages/SupplierDetailPage").then((m) => ({
+    default: m.SupplierDetailPage,
+  }))
+);
+const CreatePurchaseSupplierPage = lazy(() =>
+  import("./modules/purchase_management/pages/CreateSupplierPage").then((m) => ({
+    default: m.CreateSupplierPage,
+  }))
+);
+
+// Inventory Management
+const InventoryWarehouseListPage = lazy(() =>
+  import("./modules/inventory_management/pages/WarehouseListPage").then((m) => ({
+    default: m.WarehouseListPage,
+  }))
+);
+const InventoryWarehouseDetailPage = lazy(() =>
+  import("./modules/inventory_management/pages/WarehouseDetailPage").then((m) => ({
+    default: m.WarehouseDetailPage,
+  }))
+);
+const CreateInventoryWarehousePage = lazy(() =>
+  import("./modules/inventory_management/pages/CreateWarehousePage").then((m) => ({
+    default: m.CreateWarehousePage,
+  }))
+);
+
+// Human Resources
+const HrEmployeeListPage = lazy(() =>
+  import("./modules/human_resources/pages/EmployeeListPage").then((m) => ({
+    default: m.EmployeeListPage,
+  }))
+);
+const HrEmployeeDetailPage = lazy(() =>
+  import("./modules/human_resources/pages/EmployeeDetailPage").then((m) => ({
+    default: m.EmployeeDetailPage,
+  }))
+);
+const CreateHrEmployeePage = lazy(() =>
+  import("./modules/human_resources/pages/CreateEmployeePage").then((m) => ({
+    default: m.CreateEmployeePage,
+  }))
+);
+
+// Project Management
+const ProjectListPage = lazy(() =>
+  import("./modules/project_management/pages/ProjectListPage").then((m) => ({
+    default: m.ProjectListPage,
+  }))
+);
+const ProjectDetailPage = lazy(() =>
+  import("./modules/project_management/pages/ProjectDetailPage").then((m) => ({
+    default: m.ProjectDetailPage,
+  }))
+);
+const CreateProjectPage = lazy(() =>
+  import("./modules/project_management/pages/CreateProjectPage").then((m) => ({
+    default: m.CreateProjectPage,
+  }))
+);
+
+// Business Intelligence
+const BiReportListPage = lazy(() =>
+  import("./modules/business_intelligence/pages/ReportListPage").then((m) => ({
+    default: m.ReportListPage,
+  }))
+);
+const BiReportDetailPage = lazy(() =>
+  import("./modules/business_intelligence/pages/ReportDetailPage").then((m) => ({
+    default: m.ReportDetailPage,
+  }))
+);
+const CreateBiReportPage = lazy(() =>
+  import("./modules/business_intelligence/pages/CreateReportPage").then((m) => ({
+    default: m.CreateReportPage,
+  }))
+);
+
+// Bank Reconciliation
+const BankAccountListPage = lazy(() =>
+  import("./modules/bank_reconciliation/pages/BankAccountListPage").then((m) => ({
+    default: m.BankAccountListPage,
+  }))
+);
+const BankAccountDetailPage = lazy(() =>
+  import("./modules/bank_reconciliation/pages/BankAccountDetailPage").then((m) => ({
+    default: m.BankAccountDetailPage,
+  }))
+);
+const CreateBankAccountPage = lazy(() =>
+  import("./modules/bank_reconciliation/pages/CreateBankAccountPage").then((m) => ({
+    default: m.CreateBankAccountPage,
+  }))
+);
+
+// Budget Management
+const BudgetListPage = lazy(() =>
+  import("./modules/budget_management/pages/BudgetListPage").then((m) => ({
+    default: m.BudgetListPage,
+  }))
+);
+const BudgetDetailPage = lazy(() =>
+  import("./modules/budget_management/pages/BudgetDetailPage").then((m) => ({
+    default: m.BudgetDetailPage,
+  }))
+);
+const CreateBudgetPage = lazy(() =>
+  import("./modules/budget_management/pages/CreateBudgetPage").then((m) => ({
+    default: m.CreateBudgetPage,
+  }))
+);
+
+// Asset Management
+const AssetListPage = lazy(() =>
+  import("./modules/asset_management/pages/AssetListPage").then((m) => ({
+    default: m.AssetListPage,
+  }))
+);
+const AssetDetailPage = lazy(() =>
+  import("./modules/asset_management/pages/AssetDetailPage").then((m) => ({
+    default: m.AssetDetailPage,
+  }))
+);
+const CreateAssetPage = lazy(() =>
+  import("./modules/asset_management/pages/CreateAssetPage").then((m) => ({
+    default: m.CreateAssetPage,
+  }))
+);
+
+// Fixed Assets
+const FixedAssetListPage = lazy(() =>
+  import("./modules/fixed_assets/pages/FixedAssetListPage").then((m) => ({
+    default: m.FixedAssetListPage,
+  }))
+);
+const FixedAssetDetailPage = lazy(() =>
+  import("./modules/fixed_assets/pages/FixedAssetDetailPage").then((m) => ({
+    default: m.FixedAssetDetailPage,
+  }))
+);
+const CreateFixedAssetPage = lazy(() =>
+  import("./modules/fixed_assets/pages/CreateFixedAssetPage").then((m) => ({
+    default: m.CreateFixedAssetPage,
+  }))
+);
+
+// Compliance Management
+const CompliancePolicyListPage = lazy(() =>
+  import("./modules/compliance_management/pages/CompliancePolicyListPage").then((m) => ({
+    default: m.CompliancePolicyListPage,
+  }))
+);
+const CompliancePolicyDetailPage = lazy(() =>
+  import("./modules/compliance_management/pages/CompliancePolicyDetailPage").then((m) => ({
+    default: m.CompliancePolicyDetailPage,
+  }))
+);
+const CreateCompliancePolicyPage = lazy(() =>
+  import("./modules/compliance_management/pages/CreateCompliancePolicyPage").then((m) => ({
+    default: m.CreateCompliancePolicyPage,
+  }))
+);
+
+// Compliance Risk Management
+const ComplianceRiskListPage = lazy(() =>
+  import("./modules/compliance_risk_management/pages/ComplianceRiskListPage").then((m) => ({
+    default: m.ComplianceRiskListPage,
+  }))
+);
+const ComplianceRiskDetailPage = lazy(() =>
+  import("./modules/compliance_risk_management/pages/ComplianceRiskDetailPage").then((m) => ({
+    default: m.ComplianceRiskDetailPage,
+  }))
+);
+const CreateComplianceRiskPage = lazy(() =>
+  import("./modules/compliance_risk_management/pages/CreateComplianceRiskPage").then((m) => ({
+    default: m.CreateComplianceRiskPage,
+  }))
+);
+
+// Email Marketing
+const EmailCampaignListPage = lazy(() =>
+  import("./modules/email_marketing/pages/EmailCampaignListPage").then((m) => ({
+    default: m.EmailCampaignListPage,
+  }))
+);
+const EmailCampaignDetailPage = lazy(() =>
+  import("./modules/email_marketing/pages/EmailCampaignDetailPage").then((m) => ({
+    default: m.EmailCampaignDetailPage,
+  }))
+);
+const CreateEmailCampaignPage = lazy(() =>
+  import("./modules/email_marketing/pages/CreateEmailCampaignPage").then((m) => ({
+    default: m.CreateEmailCampaignPage,
+  }))
+);
+
+// Master Data Management
+const MasterDataEntityListPage = lazy(() =>
+  import("./modules/master_data_management/pages/MasterDataEntityListPage").then((m) => ({
+    default: m.MasterDataEntityListPage,
+  }))
+);
+const MasterDataEntityDetailPage = lazy(() =>
+  import("./modules/master_data_management/pages/MasterDataEntityDetailPage").then((m) => ({
+    default: m.MasterDataEntityDetailPage,
+  }))
+);
+const CreateMasterDataEntityPage = lazy(() =>
+  import("./modules/master_data_management/pages/CreateMasterDataEntityPage").then((m) => ({
+    default: m.CreateMasterDataEntityPage,
+  }))
+);
+
+// Multi-Company
+const MultiCompanyListPage = lazy(() =>
+  import("./modules/multi_company/pages/CompanyListPage").then((m) => ({
+    default: m.CompanyListPage,
+  }))
+);
+const MultiCompanyDetailPage = lazy(() =>
+  import("./modules/multi_company/pages/CompanyDetailPage").then((m) => ({
+    default: m.CompanyDetailPage,
+  }))
+);
+const CreateMultiCompanyPage = lazy(() =>
+  import("./modules/multi_company/pages/CreateCompanyPage").then((m) => ({
+    default: m.CreateCompanyPage,
+  }))
+);
+
 // Lazy load pages for code splitting
 const AgentListPage = lazy(() =>
   import("./modules/ai_agent_management/pages/AgentListPage").then((m) => ({
@@ -899,6 +1171,518 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <SecurityAuditLogPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Accounting & Finance */}
+          <Route
+            path="/accounting-finance/accounts"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <AccountingAccountListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/accounts/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateAccountingAccountPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/accounts/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <AccountingAccountDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Sales Management */}
+          <Route
+            path="/sales-management/customers"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <SalesCustomerListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/sales-management/customers/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateSalesCustomerPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/sales-management/customers/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <SalesCustomerDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Purchase Management */}
+          <Route
+            path="/purchase-management/suppliers"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <PurchaseSupplierListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/purchase-management/suppliers/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreatePurchaseSupplierPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/purchase-management/suppliers/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <PurchaseSupplierDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Inventory Management */}
+          <Route
+            path="/inventory-management/warehouses"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <InventoryWarehouseListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/inventory-management/warehouses/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateInventoryWarehousePage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/inventory-management/warehouses/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <InventoryWarehouseDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Human Resources */}
+          <Route
+            path="/human-resources/employees"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <HrEmployeeListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/human-resources/employees/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateHrEmployeePage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/human-resources/employees/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <HrEmployeeDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Project Management */}
+          <Route
+            path="/project-management/projects"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <ProjectListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/project-management/projects/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateProjectPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/project-management/projects/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <ProjectDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Business Intelligence */}
+          <Route
+            path="/business-intelligence/reports"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <BiReportListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/business-intelligence/reports/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateBiReportPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/business-intelligence/reports/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <BiReportDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Bank Reconciliation */}
+          <Route
+            path="/bank-reconciliation/accounts"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <BankAccountListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/bank-reconciliation/accounts/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateBankAccountPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/bank-reconciliation/accounts/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <BankAccountDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Budget Management */}
+          <Route
+            path="/budget-management/budgets"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <BudgetListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/budget-management/budgets/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateBudgetPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/budget-management/budgets/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <BudgetDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Asset Management */}
+          <Route
+            path="/asset-management/assets"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <AssetListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/asset-management/assets/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateAssetPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/asset-management/assets/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <AssetDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Fixed Assets */}
+          <Route
+            path="/fixed-assets/assets"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <FixedAssetListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/fixed-assets/assets/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateFixedAssetPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/fixed-assets/assets/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <FixedAssetDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Compliance Management */}
+          <Route
+            path="/compliance-management/policies"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CompliancePolicyListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/compliance-management/policies/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateCompliancePolicyPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/compliance-management/policies/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CompliancePolicyDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Compliance Risk Management */}
+          <Route
+            path="/compliance-risk-management/risks"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <ComplianceRiskListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/compliance-risk-management/risks/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateComplianceRiskPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/compliance-risk-management/risks/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <ComplianceRiskDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Email Marketing */}
+          <Route
+            path="/email-marketing/campaigns"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <EmailCampaignListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/email-marketing/campaigns/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateEmailCampaignPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/email-marketing/campaigns/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <EmailCampaignDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Master Data Management */}
+          <Route
+            path="/master-data/entities"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <MasterDataEntityListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master-data/entities/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateMasterDataEntityPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/master-data/entities/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <MasterDataEntityDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Multi-Company */}
+          <Route
+            path="/multi-company/companies"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <MultiCompanyListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/multi-company/companies/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateMultiCompanyPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/multi-company/companies/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <MultiCompanyDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

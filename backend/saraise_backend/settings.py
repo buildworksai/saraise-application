@@ -37,8 +37,16 @@ SARAISE_PLATFORM_URL: str = os.getenv("SARAISE_PLATFORM_URL", "http://localhost:
 SARAISE_LICENSE_SERVER_URL: str = os.getenv("SARAISE_LICENSE_SERVER_URL", "https://license.saraise.com")
 
 # License public key for offline validation (PEM format)
-# Set this in production for isolated mode license validation
-SARAISE_LICENSE_PUBLIC_KEY: str = os.getenv("SARAISE_LICENSE_PUBLIC_KEY", "")
+# Set via env in production. Falls back to embedded dev key when unset.
+_license_public_key_env = os.getenv("SARAISE_LICENSE_PUBLIC_KEY", "")
+if _license_public_key_env:
+    SARAISE_LICENSE_PUBLIC_KEY = _license_public_key_env
+else:
+    _license_key_path = BASE_DIR / "src" / "core" / "licensing" / "saraise_public_key.pem"
+    SARAISE_LICENSE_PUBLIC_KEY = _license_key_path.read_text() if _license_key_path.exists() else ""
+
+# Application version for license server validation requests
+SARAISE_VERSION = os.getenv("SARAISE_VERSION", "1.0.0")
 
 # Module registry URL for downloading industry modules
 SARAISE_REGISTRY_URL: str = os.getenv("SARAISE_REGISTRY_URL", "https://registry.saraise.com")
@@ -170,8 +178,13 @@ DATABASES = {
     }
 }
 
-# For tests, use SQLite if DATABASE_URL not set
-if "test" in os.sys.argv:
+# For tests, use SQLite (pytest/manage.py test)
+_use_sqlite = (
+    os.getenv("DJANGO_USE_SQLITE_FOR_TESTS") == "1"
+    or "test" in os.sys.argv
+    or "pytest" in os.sys.argv
+)
+if _use_sqlite:
     DATABASES["default"] = {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": ":memory:",

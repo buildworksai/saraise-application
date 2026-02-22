@@ -6,9 +6,10 @@ Tests for LicenseClient.
 """
 
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from src.core.licensing.client import LicenseClient, LicenseValidationError
 from src.core.licensing.models import LicenseInfo, LicenseTier, LicenseValidationStatus
@@ -52,23 +53,46 @@ class TestLicenseClient:
             assert result.status == LicenseValidationStatus.VALID
             assert len(result.licensed_modules) == 3
 
-    def test_validate_connected_mode_not_implemented(self):
-        """Test validate in connected mode (not yet implemented)."""
+    def test_validate_connected_mode_success(self):
+        """Test validate in connected mode with successful server response."""
+        with patch("django.conf.settings.SARAISE_MODE", "self-hosted"):
+            with patch("django.conf.settings.SARAISE_LICENSE_MODE", "connected"):
+                mock_response = MagicMock()
+                mock_response.status_code = 200
+                mock_response.json.return_value = {
+                    "valid": True,
+                    "license": {"tier": "professional", "expires_at": "2027-01-07T00:00:00Z"},
+                    "core": {"tier": "free", "limits": {"max_companies": 1}},
+                    "modules": {"allowed": ["manufacturing"], "denied": []},
+                    "features": [],
+                    "next_check": "2026-01-08T00:00:00Z",
+                }
+                with patch("requests.post", return_value=mock_response):
+                    client = LicenseClient(base_url="https://license.test.com")
+                    result = client.validate("sk_live_xxx", "org-123")
+                    assert isinstance(result, LicenseInfo)
+                    assert result.organization_id == "org-123"
+                    assert result.status == LicenseValidationStatus.VALID
+                    assert result.tier == LicenseTier.PROFESSIONAL
+
+    def test_validate_connected_mode_server_unreachable(self):
+        """Test validate in connected mode when server is unreachable."""
         with patch("django.conf.settings.SARAISE_MODE", "self-hosted"):
             with patch("django.conf.settings.SARAISE_LICENSE_MODE", "connected"):
                 client = LicenseClient()
-                with pytest.raises(NotImplementedError) as exc_info:
-                    client.validate("test-key", "org-123")
-                assert "Online license validation not yet implemented" in str(exc_info.value)
+                with patch("requests.post", side_effect=requests.RequestException("Connection refused")):
+                    with pytest.raises(LicenseValidationError) as exc_info:
+                        client.validate("test-key", "org-123")
+                    assert exc_info.value.status == LicenseValidationStatus.INVALID
 
-    def test_validate_isolated_mode_not_implemented(self):
-        """Test validate in isolated mode (not yet implemented)."""
+    def test_validate_isolated_mode_invalid_key(self):
+        """Test validate in isolated mode with invalid key."""
         with patch("django.conf.settings.SARAISE_MODE", "self-hosted"):
             with patch("django.conf.settings.SARAISE_LICENSE_MODE", "isolated"):
                 client = LicenseClient()
-                with pytest.raises(NotImplementedError) as exc_info:
-                    client.validate("test-key", "org-123")
-                assert "Offline license validation not yet implemented" in str(exc_info.value)
+                with pytest.raises(LicenseValidationError) as exc_info:
+                    client.validate("invalid-key-format", "org-123")
+                assert exc_info.value.status == LicenseValidationStatus.INVALID
 
     def test_mock_development_license(self):
         """Test _mock_development_license method."""

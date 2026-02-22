@@ -7,66 +7,78 @@
  * Read this file FIRST when working on this module.
  * All types and endpoints for Asset Management are defined here.
  *
- * TODO: This is a scaffold. API endpoints and types must be defined when:
- * 1. Backend API is implemented
- * 2. OpenAPI schema is generated
- * 3. Types are available in @/types/api
- *
  * SPDX-License-Identifier: Apache-2.0
  */
-
-import type { components } from '@/types/api';
 
 // =============================================================================
 // EXPORTED TYPES - Import these in your components
 // =============================================================================
 
-// TODO: Define types when backend API is implemented
-// Example:
-// export type Entity = components['schemas']['Entity'];
-// export type EntityCreate = components['schemas']['EntityCreate'];
-// export type EntityUpdate = components['schemas']['PatchedEntityRequest'];
+/** Asset - Fixed or intangible asset */
+export type Asset = {
+  id: string;
+  tenant_id: string;
+  asset_code: string;
+  asset_name: string;
+  category: 'fixed' | 'intangible' | 'current';
+  purchase_date: string;
+  purchase_cost: string;
+  current_value: string;
+  depreciation_method: string;
+  useful_life_years?: number;
+  location?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Asset create request */
+export type AssetCreate = {
+  asset_code: string;
+  asset_name: string;
+  category: 'fixed' | 'intangible' | 'current';
+  purchase_date: string;
+  purchase_cost: string;
+  current_value: string;
+  depreciation_method: string;
+  useful_life_years?: number;
+  location?: string;
+  is_active?: boolean;
+};
+
+/** Depreciation Entry - Monthly/Annual depreciation record */
+export type DepreciationEntry = {
+  id: string;
+  tenant_id: string;
+  asset: string;
+  entry_date: string;
+  depreciation_amount: string;
+  accumulated_depreciation: string;
+  book_value: string;
+  created_at: string;
+  updated_at: string;
+};
 
 // =============================================================================
 // ENDPOINT REGISTRY - Use these for all API calls
 // =============================================================================
 
-/**
- * Asset Management API Endpoints
- *
- * TODO: Define actual endpoints when backend API is implemented.
- * All endpoints should be prefixed with /api/v1/asset-management/
- *
- * Usage:
- * ```typescript
- * import { ENDPOINTS } from './contracts';
- * apiClient.get(ENDPOINTS.ENTITIES.LIST);
- * ```
- */
 export const MODULE_API_PREFIX = '/api/v1/asset-management';
 
 export const ENDPOINTS = {
-  // TODO: Define actual endpoints when backend API is implemented
-  // Example structure:
-  // ENTITIES: {
-  //   LIST: `${MODULE_API_PREFIX}/entities/`,
-  //   DETAIL: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   CREATE: `${MODULE_API_PREFIX}/entities/`,
-  //   UPDATE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   DELETE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  // },
+  ASSETS: {
+    LIST: `${MODULE_API_PREFIX}/assets/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/assets/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/assets/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/assets/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/assets/${id}/` as const,
+  },
+  DEPRECIATION_ENTRIES: {
+    LIST: `${MODULE_API_PREFIX}/depreciation-entries/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/depreciation-entries/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/depreciation-entries/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/depreciation-entries/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/depreciation-entries/${id}/` as const,
+  },
+  HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
-
-// =============================================================================
-// TYPE GUARDS - Use for runtime type checking
-// =============================================================================
-
-// TODO: Add type guards when types are defined
-
-// =============================================================================
-// EXAMPLES - Reference for agents writing new code
-// =============================================================================
-
-/**
- * TODO: Add usage examples when backend API is implemented
- */

@@ -7,66 +7,72 @@
  * Read this file FIRST when working on this module.
  * All types and endpoints for Compliance Management are defined here.
  *
- * TODO: This is a scaffold. API endpoints and types must be defined when:
- * 1. Backend API is implemented
- * 2. OpenAPI schema is generated
- * 3. Types are available in @/types/api
- *
  * SPDX-License-Identifier: Apache-2.0
  */
-
-import type { components } from '@/types/api';
 
 // =============================================================================
 // EXPORTED TYPES - Import these in your components
 // =============================================================================
 
-// TODO: Define types when backend API is implemented
-// Example:
-// export type Entity = components['schemas']['Entity'];
-// export type EntityCreate = components['schemas']['EntityCreate'];
-// export type EntityUpdate = components['schemas']['PatchedEntityRequest'];
+/** Compliance Policy - Regulatory policy definition */
+export type CompliancePolicy = {
+  id: string;
+  tenant_id: string;
+  policy_code: string;
+  policy_name: string;
+  regulation_type: string;
+  description?: string;
+  effective_date: string;
+  expiry_date?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Compliance Policy create request */
+export type CompliancePolicyCreate = {
+  policy_code: string;
+  policy_name: string;
+  regulation_type: string;
+  description?: string;
+  effective_date: string;
+  expiry_date?: string;
+  is_active?: boolean;
+};
+
+/** Compliance Requirement - Specific compliance requirement */
+export type ComplianceRequirement = {
+  id: string;
+  tenant_id: string;
+  policy: string;
+  requirement_code: string;
+  requirement_name: string;
+  description?: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
 
 // =============================================================================
 // ENDPOINT REGISTRY - Use these for all API calls
 // =============================================================================
 
-/**
- * Compliance Management API Endpoints
- *
- * TODO: Define actual endpoints when backend API is implemented.
- * All endpoints should be prefixed with /api/v1/compliance-management/
- *
- * Usage:
- * ```typescript
- * import { ENDPOINTS } from './contracts';
- * apiClient.get(ENDPOINTS.ENTITIES.LIST);
- * ```
- */
 export const MODULE_API_PREFIX = '/api/v1/compliance-management';
 
 export const ENDPOINTS = {
-  // TODO: Define actual endpoints when backend API is implemented
-  // Example structure:
-  // ENTITIES: {
-  //   LIST: `${MODULE_API_PREFIX}/entities/`,
-  //   DETAIL: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   CREATE: `${MODULE_API_PREFIX}/entities/`,
-  //   UPDATE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   DELETE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  // },
+  POLICIES: {
+    LIST: `${MODULE_API_PREFIX}/policies/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/policies/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/policies/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/policies/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/policies/${id}/` as const,
+  },
+  REQUIREMENTS: {
+    LIST: `${MODULE_API_PREFIX}/requirements/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/requirements/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/requirements/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/requirements/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/requirements/${id}/` as const,
+  },
+  HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
-
-// =============================================================================
-// TYPE GUARDS - Use for runtime type checking
-// =============================================================================
-
-// TODO: Add type guards when types are defined
-
-// =============================================================================
-// EXAMPLES - Reference for agents writing new code
-// =============================================================================
-
-/**
- * TODO: Add usage examples when backend API is implemented
- */

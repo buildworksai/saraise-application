@@ -7,66 +7,120 @@
  * Read this file FIRST when working on this module.
  * All types and endpoints for Sales Management are defined here.
  *
- * TODO: This is a scaffold. API endpoints and types must be defined when:
- * 1. Backend API is implemented
- * 2. OpenAPI schema is generated
- * 3. Types are available in @/types/api
- *
  * SPDX-License-Identifier: Apache-2.0
  */
-
-import type { components } from '@/types/api';
 
 // =============================================================================
 // EXPORTED TYPES - Import these in your components
 // =============================================================================
 
-// TODO: Define types when backend API is implemented
-// Example:
-// export type Entity = components['schemas']['Entity'];
-// export type EntityCreate = components['schemas']['EntityCreate'];
-// export type EntityUpdate = components['schemas']['PatchedEntityRequest'];
+/** Customer - Buyer entity */
+export type Customer = {
+  id: string;
+  tenant_id: string;
+  customer_code: string;
+  customer_name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  credit_limit?: string;
+  currency: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Customer create request */
+export type CustomerCreate = {
+  customer_code: string;
+  customer_name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  credit_limit?: string;
+  currency: string;
+  is_active?: boolean;
+};
+
+/** Quotation - Sales quote (pre-order) */
+export type Quotation = {
+  id: string;
+  tenant_id: string;
+  quotation_number: string;
+  quotation_date: string;
+  valid_until?: string;
+  customer: string;
+  total_amount: string;
+  currency: string;
+  status: 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'converted';
+  created_at: string;
+  updated_at: string;
+};
+
+/** Sales Order - Confirmed customer order */
+export type SalesOrder = {
+  id: string;
+  tenant_id: string;
+  order_number: string;
+  order_date: string;
+  delivery_date?: string;
+  customer: string;
+  quotation?: string;
+  total_amount: string;
+  currency: string;
+  status: 'draft' | 'confirmed' | 'picking' | 'packing' | 'ready_to_ship' | 'shipped' | 'delivered' | 'invoiced' | 'cancelled';
+  warehouse_id?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Delivery Note - Shipment record */
+export type DeliveryNote = {
+  id: string;
+  tenant_id: string;
+  delivery_number: string;
+  delivery_date: string;
+  sales_order: string;
+  warehouse_id: string;
+  status: 'draft' | 'completed' | 'cancelled';
+  created_at: string;
+  updated_at: string;
+};
 
 // =============================================================================
 // ENDPOINT REGISTRY - Use these for all API calls
 // =============================================================================
 
-/**
- * Sales Management API Endpoints
- *
- * TODO: Define actual endpoints when backend API is implemented.
- * All endpoints should be prefixed with /api/v1/sales-management/
- *
- * Usage:
- * ```typescript
- * import { ENDPOINTS } from './contracts';
- * apiClient.get(ENDPOINTS.ENTITIES.LIST);
- * ```
- */
 export const MODULE_API_PREFIX = '/api/v1/sales-management';
 
 export const ENDPOINTS = {
-  // TODO: Define actual endpoints when backend API is implemented
-  // Example structure:
-  // ENTITIES: {
-  //   LIST: `${MODULE_API_PREFIX}/entities/`,
-  //   DETAIL: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   CREATE: `${MODULE_API_PREFIX}/entities/`,
-  //   UPDATE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   DELETE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  // },
+  CUSTOMERS: {
+    LIST: `${MODULE_API_PREFIX}/customers/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/customers/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/customers/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/customers/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/customers/${id}/` as const,
+  },
+  QUOTATIONS: {
+    LIST: `${MODULE_API_PREFIX}/quotations/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/quotations/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/quotations/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/quotations/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/quotations/${id}/` as const,
+  },
+  SALES_ORDERS: {
+    LIST: `${MODULE_API_PREFIX}/sales-orders/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/sales-orders/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/sales-orders/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/sales-orders/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/sales-orders/${id}/` as const,
+  },
+  DELIVERY_NOTES: {
+    LIST: `${MODULE_API_PREFIX}/delivery-notes/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/delivery-notes/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/delivery-notes/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/delivery-notes/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/delivery-notes/${id}/` as const,
+  },
+  HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
-
-// =============================================================================
-// TYPE GUARDS - Use for runtime type checking
-// =============================================================================
-
-// TODO: Add type guards when types are defined
-
-// =============================================================================
-// EXAMPLES - Reference for agents writing new code
-// =============================================================================
-
-/**
- * TODO: Add usage examples when backend API is implemented
- */

@@ -327,31 +327,37 @@ class TestLicenseServiceHelpers:
         assert isinstance(instance_id, str)
 
     def test_decode_license_key(self):
-        """Test license key decoding."""
-        payload = '{"org": "test"}'
-        signature = b"test_signature"
+        """Test license key decoding (platform format: base64(JSON+signature))."""
+        import json
 
-        # Encode
-        payload_b64 = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
-        sig_b64 = base64.urlsafe_b64encode(signature).decode().rstrip("=")
-        key = f"{payload_b64}.{sig_b64}"
+        key_data = {"version": "1.0", "organization": {"id": "org-123"}, "signature": "dGVzdF9zaWc="}
+        json_str = json.dumps(key_data, sort_keys=True, separators=(",", ":"))
+        key = base64.b64encode(json_str.encode("utf-8")).decode("utf-8")
 
-        # Decode
-        decoded_payload, decoded_sig = LicenseService._decode_license_key(key)
+        decoded_data, decoded_sig = LicenseService._decode_license_key(key)
 
-        assert decoded_payload == payload
-        assert decoded_sig == signature
+        assert decoded_data["organization"]["id"] == "org-123"
+        assert decoded_sig == "dGVzdF9zaWc="
 
     def test_decode_invalid_key(self):
         """Test decoding invalid key format."""
         with pytest.raises(ValueError, match="Invalid license key format"):
             LicenseService._decode_license_key("invalid_key")
 
+    def test_decode_key_missing_signature(self):
+        """Test decoding key without signature field."""
+        import json
+
+        key_data = {"version": "1.0", "organization": {"id": "org-123"}}
+        key = base64.b64encode(json.dumps(key_data).encode("utf-8")).decode("utf-8")
+        with pytest.raises(ValueError, match="missing signature"):
+            LicenseService._decode_license_key(key)
+
     def test_verify_signature_development_mode(self):
-        """Test signature verification in development mode."""
+        """Test signature verification in development mode (skips when no key)."""
         with patch("django.conf.settings.SARAISE_MODE", "development"):
-            with patch("django.conf.settings.SARAISE_LICENSE_PUBLIC_KEY", None):
-                result = LicenseService._verify_signature("payload", b"signature")
+            with patch("django.conf.settings.SARAISE_LICENSE_PUBLIC_KEY", ""):
+                result = LicenseService._verify_signature({"a": 1}, "fake_sig")
                 assert result is True  # Development mode allows unsigned
 
     def test_verify_signature_no_public_key(self):
@@ -396,11 +402,18 @@ class TestLicenseServiceHelpers:
 
     def test_isolated_validation_organization_mismatch(self, active_license):
         """Test isolated validation with organization mismatch."""
-        active_license.license_key = "eyJvcmciOiAidGVzdCJ9.signature"
+        active_license.license_key = "base64key"
         active_license.save()
 
+        # Platform format: dict with organization.id
+        wrong_org_data = {
+            "organization": {"id": "wrong-org-id"},
+            "validity": {"expires_at": (timezone.now() + timedelta(days=365)).isoformat()},
+            "core": {"tier": "free", "limits": {"max_companies": 1}},
+            "modules": {"included": []},
+        }
         with patch.object(
-            LicenseService, "_decode_license_key", return_value=('{"organization_id": "wrong-id"}', b"sig")
+            LicenseService, "_decode_license_key", return_value=(wrong_org_data, "sig")
         ):
             with patch.object(LicenseService, "_verify_signature", return_value=True):
                 is_valid, message = LicenseService._validate_isolated(active_license)
@@ -410,12 +423,16 @@ class TestLicenseServiceHelpers:
     def test_isolated_validation_expired_key(self, active_license):
         """Test isolated validation with expired key."""
         expired_date = (timezone.now() - timedelta(days=1)).isoformat()
-        payload = f'{{"organization_id": "{active_license.organization_id}", "expires_at": "{expired_date}"}}'
-
-        active_license.license_key = "key.signature"
+        payload = {
+            "organization": {"id": str(active_license.organization_id)},
+            "validity": {"expires_at": expired_date},
+            "core": {"tier": "free", "limits": {"max_companies": 1}},
+            "modules": {"included": []},
+        }
+        active_license.license_key = "base64key"
         active_license.save()
 
-        with patch.object(LicenseService, "_decode_license_key", return_value=(payload, b"sig")):
+        with patch.object(LicenseService, "_decode_license_key", return_value=(payload, "sig")):
             with patch.object(LicenseService, "_verify_signature", return_value=True):
                 is_valid, message = LicenseService._validate_isolated(active_license)
                 assert not is_valid

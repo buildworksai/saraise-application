@@ -83,13 +83,19 @@ class LicenseService:
     @classmethod
     def _validate_connected(cls, license: License) -> Tuple[bool, str]:
         """Validate license via license server."""
+        version = getattr(settings, "SARAISE_VERSION", "1.0.0")
+        license_server_url = getattr(
+            settings, "SARAISE_LICENSE_SERVER_URL", cls.LICENSE_SERVER_URL
+        )
         try:
             response = requests.post(
-                f"{cls.LICENSE_SERVER_URL}/api/v1/validate",
+                f"{license_server_url}/api/v1/validate/",
                 json={
                     "organization_id": str(license.organization_id),
                     "license_key": license.license_key,
                     "instance_id": cls._get_instance_id(),
+                    "version": version,
+                    "modules_requested": [],
                 },
                 timeout=10,
             )
@@ -114,29 +120,29 @@ class LicenseService:
 
     @classmethod
     def _validate_isolated(cls, license: License) -> Tuple[bool, str]:
-        """Validate offline license key."""
+        """Validate offline license key (platform format: base64(JSON+signature))."""
         if not license.license_key:
             return False, "No license key configured"
 
         try:
-            # Decode and verify key
-            payload, signature = cls._decode_license_key(license.license_key)
+            # Decode and verify key (platform format)
+            data, signature = cls._decode_license_key(license.license_key)
 
             # Verify signature
-            if not cls._verify_signature(payload, signature):
+            if not cls._verify_signature(data, signature):
                 cls._log_validation(license, "isolated", False, "Invalid signature")
                 return False, "Invalid license key signature"
 
-            # Parse payload
-            data = json.loads(payload)
-
-            # Verify organization
-            if data.get("organization_id") != str(license.organization_id):
+            # Extract org ID (platform uses organization.id)
+            org_data = data.get("organization", {})
+            org_id = org_data.get("id") or data.get("organization_id")
+            if org_id != str(license.organization_id):
                 cls._log_validation(license, "isolated", False, "Organization mismatch")
                 return False, "License key does not match organization"
 
-            # Check expiry
-            expires_at_str = data.get("expires_at", "")
+            # Check expiry (platform uses validity.expires_at)
+            validity = data.get("validity", {})
+            expires_at_str = validity.get("expires_at") or data.get("expires_at", "")
             if expires_at_str:
                 expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
                 expires_at = timezone.make_aware(expires_at) if timezone.is_naive(expires_at) else expires_at
@@ -146,10 +152,13 @@ class LicenseService:
                     return False, "License has expired"
                 license.license_expires_at = expires_at
 
-            # Update license from key data
-            license.core_tier = data.get("core_tier", "free")
-            license.max_companies = data.get("core_limits", {}).get("max_companies", 1)
-            license.industry_modules = data.get("industry_modules", [])
+            # Update license from key data (platform nested structure)
+            core = data.get("core", {})
+            core_limits = core.get("limits", data.get("core_limits", {}))
+            modules = data.get("modules", {})
+            license.core_tier = core.get("tier", data.get("core_tier", "free"))
+            license.max_companies = core_limits.get("max_companies", 1)
+            license.industry_modules = modules.get("included", data.get("industry_modules", []))
             license.status = LicenseStatus.ACTIVE
             license.last_validated_at = timezone.now()
             license.save()
@@ -157,6 +166,10 @@ class LicenseService:
             cls._log_validation(license, "isolated", True)
             return True, "License valid"
 
+        except ValueError as e:
+            logger.error(f"License key decode error: {e}")
+            cls._log_validation(license, "isolated", False, str(e))
+            return False, str(e)
         except Exception as e:
             logger.error(f"License validation error: {e}", exc_info=True)
             cls._log_validation(license, "isolated", False, str(e))
@@ -231,33 +244,60 @@ class LicenseService:
         license.save()
 
     @classmethod
-    def _decode_license_key(cls, key: str) -> Tuple[str, bytes]:
-        """Decode license key into payload and signature."""
-        parts = key.split(".")
-        if len(parts) != 2:
-            raise ValueError("Invalid license key format")
-        payload = base64.urlsafe_b64decode(parts[0] + "==").decode("utf-8")
-        signature = base64.urlsafe_b64decode(parts[1] + "==")
-        return payload, signature
+    def _decode_license_key(cls, key: str) -> Tuple[dict, str]:
+        """
+        Decode license key into payload dict and signature.
+
+        Platform format: base64(JSON{...payload, "signature": "base64_sig"})
+        Matches license-server KeyGeneratorService.format_license_key().
+        """
+        try:
+            decoded = base64.b64decode(key)
+            key_data = json.loads(decoded.decode("utf-8"))
+        except (ValueError, json.JSONDecodeError) as e:
+            raise ValueError(f"Invalid license key format: {e}") from e
+
+        signature = key_data.get("signature")
+        if not signature:
+            raise ValueError("License key missing signature")
+
+        return key_data, signature
 
     @classmethod
-    def _verify_signature(cls, payload: str, signature: bytes) -> bool:
-        """Verify RSA signature."""
+    def _verify_signature(cls, payload_dict: dict, signature_b64: str) -> bool:
+        """
+        Verify RSA signature.
+
+        Serialization must match platform CryptoService.serialize_payload()
+        for deterministic verification.
+        """
         try:
-            # TODO: Load actual public key from settings or key file
-            # For now, this is a placeholder
-            # In production, the public key should be stored securely
             public_key_pem = getattr(settings, "SARAISE_LICENSE_PUBLIC_KEY", None)
 
             if not public_key_pem:
                 logger.warning("License public key not configured - signature verification skipped")
-                # In development, allow unsigned keys
                 if getattr(settings, "SARAISE_MODE", "development") == "development":
                     return True
                 return False
 
+            # Serialize payload without signature (matches platform crypto.py)
+            payload_clean = {k: v for k, v in payload_dict.items() if k != "signature"}
+            payload_bytes = json.dumps(payload_clean, sort_keys=True, separators=(",", ":")).encode(
+                "utf-8"
+            )
+            signature_bytes = base64.b64decode(signature_b64)
+
             public_key = serialization.load_pem_public_key(public_key_pem.encode())
-            public_key.verify(signature, payload.encode(), padding.PKCS1v15(), hashes.SHA256())
+            # PSS padding must match platform crypto.py (RSA-PSS with SHA256)
+            public_key.verify(
+                signature_bytes,
+                payload_bytes,
+                padding.PSS(
+                    mgf=padding.MGF1(hashes.SHA256()),
+                    salt_length=padding.PSS.MAX_LENGTH,
+                ),
+                hashes.SHA256(),
+            )
             return True
         except Exception as e:
             logger.error(f"Signature verification failed: {e}")

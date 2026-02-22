@@ -7,66 +7,95 @@
  * Read this file FIRST when working on this module.
  * All types and endpoints for Bank Reconciliation are defined here.
  *
- * TODO: This is a scaffold. API endpoints and types must be defined when:
- * 1. Backend API is implemented
- * 2. OpenAPI schema is generated
- * 3. Types are available in @/types/api
- *
  * SPDX-License-Identifier: Apache-2.0
  */
-
-import type { components } from '@/types/api';
 
 // =============================================================================
 // EXPORTED TYPES - Import these in your components
 // =============================================================================
 
-// TODO: Define types when backend API is implemented
-// Example:
-// export type Entity = components['schemas']['Entity'];
-// export type EntityCreate = components['schemas']['EntityCreate'];
-// export type EntityUpdate = components['schemas']['PatchedEntityRequest'];
+/** Bank Account - Bank account for reconciliation */
+export type BankAccount = {
+  id: string;
+  tenant_id: string;
+  account_number: string;
+  bank_name: string;
+  account_name: string;
+  account_type: string;
+  currency: string;
+  ledger_account_id?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Bank Account create request */
+export type BankAccountCreate = {
+  account_number: string;
+  bank_name: string;
+  account_name: string;
+  account_type: string;
+  currency: string;
+  ledger_account_id?: string;
+  is_active?: boolean;
+};
+
+/** Bank Statement - Imported bank statement */
+export type BankStatement = {
+  id: string;
+  tenant_id: string;
+  bank_account: string;
+  statement_date: string;
+  opening_balance: string;
+  closing_balance: string;
+  is_reconciled: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Bank Transaction - Individual transaction in a statement */
+export type BankTransaction = {
+  id: string;
+  tenant_id: string;
+  bank_statement: string;
+  transaction_date: string;
+  description: string;
+  amount: string;
+  transaction_type: 'debit' | 'credit';
+  reference_number?: string;
+  is_reconciled: boolean;
+  matched_payment_id?: string;
+  created_at: string;
+  updated_at: string;
+};
 
 // =============================================================================
 // ENDPOINT REGISTRY - Use these for all API calls
 // =============================================================================
 
-/**
- * Bank Reconciliation API Endpoints
- *
- * TODO: Define actual endpoints when backend API is implemented.
- * All endpoints should be prefixed with /api/v1/bank-reconciliation/
- *
- * Usage:
- * ```typescript
- * import { ENDPOINTS } from './contracts';
- * apiClient.get(ENDPOINTS.ENTITIES.LIST);
- * ```
- */
 export const MODULE_API_PREFIX = '/api/v1/bank-reconciliation';
 
 export const ENDPOINTS = {
-  // TODO: Define actual endpoints when backend API is implemented
-  // Example structure:
-  // ENTITIES: {
-  //   LIST: `${MODULE_API_PREFIX}/entities/`,
-  //   DETAIL: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   CREATE: `${MODULE_API_PREFIX}/entities/`,
-  //   UPDATE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   DELETE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  // },
+  ACCOUNTS: {
+    LIST: `${MODULE_API_PREFIX}/accounts/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/accounts/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/accounts/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/accounts/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/accounts/${id}/` as const,
+  },
+  STATEMENTS: {
+    LIST: `${MODULE_API_PREFIX}/statements/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/statements/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/statements/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/statements/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/statements/${id}/` as const,
+  },
+  TRANSACTIONS: {
+    LIST: `${MODULE_API_PREFIX}/transactions/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/transactions/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/transactions/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/transactions/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/transactions/${id}/` as const,
+  },
+  HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
-
-// =============================================================================
-// TYPE GUARDS - Use for runtime type checking
-// =============================================================================
-
-// TODO: Add type guards when types are defined
-
-// =============================================================================
-// EXAMPLES - Reference for agents writing new code
-// =============================================================================
-
-/**
- * TODO: Add usage examples when backend API is implemented
- */

@@ -7,66 +7,141 @@
  * Read this file FIRST when working on this module.
  * All types and endpoints for Project Management are defined here.
  *
- * TODO: This is a scaffold. API endpoints and types must be defined when:
- * 1. Backend API is implemented
- * 2. OpenAPI schema is generated
- * 3. Types are available in @/types/api
- *
  * SPDX-License-Identifier: Apache-2.0
  */
-
-import type { components } from '@/types/api';
 
 // =============================================================================
 // EXPORTED TYPES - Import these in your components
 // =============================================================================
 
-// TODO: Define types when backend API is implemented
-// Example:
-// export type Entity = components['schemas']['Entity'];
-// export type EntityCreate = components['schemas']['EntityCreate'];
-// export type EntityUpdate = components['schemas']['PatchedEntityRequest'];
+/** Project - Project container */
+export type Project = {
+  id: string;
+  tenant_id: string;
+  project_code: string;
+  project_name: string;
+  description?: string;
+  start_date?: string;
+  end_date?: string;
+  status: 'planning' | 'active' | 'on_hold' | 'completed' | 'cancelled';
+  project_manager_id?: string;
+  budget?: string;
+  currency: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Project create request */
+export type ProjectCreate = {
+  project_code: string;
+  project_name: string;
+  description?: string;
+  start_date?: string;
+  end_date?: string;
+  status?: 'planning' | 'active' | 'on_hold' | 'completed' | 'cancelled';
+  project_manager_id?: string;
+  budget?: string;
+  currency: string;
+};
+
+/** Task - Individual task within a project */
+export type Task = {
+  id: string;
+  tenant_id: string;
+  project: string;
+  task_code: string;
+  task_name: string;
+  description?: string;
+  assigned_to_id?: string;
+  due_date?: string;
+  estimated_hours?: string;
+  actual_hours: string;
+  status: 'todo' | 'in_progress' | 'review' | 'done' | 'blocked' | 'cancelled';
+  parent_task_id?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Project Member - Team member assigned to project */
+export type ProjectMember = {
+  id: string;
+  tenant_id: string;
+  project: string;
+  employee_id: string;
+  role: string;
+  allocation_percentage: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Time Entry - Time logged on tasks */
+export type TimeEntry = {
+  id: string;
+  tenant_id: string;
+  project: string;
+  task?: string;
+  employee_id: string;
+  entry_date: string;
+  hours_worked: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Project Milestone - Key project milestone */
+export type ProjectMilestone = {
+  id: string;
+  tenant_id: string;
+  project: string;
+  milestone_name: string;
+  target_date: string;
+  achieved_date?: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+};
 
 // =============================================================================
 // ENDPOINT REGISTRY - Use these for all API calls
 // =============================================================================
 
-/**
- * Project Management API Endpoints
- *
- * TODO: Define actual endpoints when backend API is implemented.
- * All endpoints should be prefixed with /api/v1/project-management/
- *
- * Usage:
- * ```typescript
- * import { ENDPOINTS } from './contracts';
- * apiClient.get(ENDPOINTS.ENTITIES.LIST);
- * ```
- */
 export const MODULE_API_PREFIX = '/api/v1/project-management';
 
 export const ENDPOINTS = {
-  // TODO: Define actual endpoints when backend API is implemented
-  // Example structure:
-  // ENTITIES: {
-  //   LIST: `${MODULE_API_PREFIX}/entities/`,
-  //   DETAIL: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   CREATE: `${MODULE_API_PREFIX}/entities/`,
-  //   UPDATE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   DELETE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  // },
+  PROJECTS: {
+    LIST: `${MODULE_API_PREFIX}/projects/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/projects/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/projects/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/projects/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/projects/${id}/` as const,
+  },
+  TASKS: {
+    LIST: `${MODULE_API_PREFIX}/tasks/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/tasks/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/tasks/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/tasks/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/tasks/${id}/` as const,
+  },
+  MEMBERS: {
+    LIST: `${MODULE_API_PREFIX}/members/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/members/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/members/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/members/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/members/${id}/` as const,
+  },
+  TIME_ENTRIES: {
+    LIST: `${MODULE_API_PREFIX}/time-entries/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/time-entries/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/time-entries/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/time-entries/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/time-entries/${id}/` as const,
+  },
+  MILESTONES: {
+    LIST: `${MODULE_API_PREFIX}/milestones/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/milestones/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/milestones/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/milestones/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/milestones/${id}/` as const,
+  },
+  HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
-
-// =============================================================================
-// TYPE GUARDS - Use for runtime type checking
-// =============================================================================
-
-// TODO: Add type guards when types are defined
-
-// =============================================================================
-// EXAMPLES - Reference for agents writing new code
-// =============================================================================
-
-/**
- * TODO: Add usage examples when backend API is implemented
- */

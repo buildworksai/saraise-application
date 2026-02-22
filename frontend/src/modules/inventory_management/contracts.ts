@@ -7,66 +7,117 @@
  * Read this file FIRST when working on this module.
  * All types and endpoints for Inventory Management are defined here.
  *
- * TODO: This is a scaffold. API endpoints and types must be defined when:
- * 1. Backend API is implemented
- * 2. OpenAPI schema is generated
- * 3. Types are available in @/types/api
- *
  * SPDX-License-Identifier: Apache-2.0
  */
-
-import type { components } from '@/types/api';
 
 // =============================================================================
 // EXPORTED TYPES - Import these in your components
 // =============================================================================
 
-// TODO: Define types when backend API is implemented
-// Example:
-// export type Entity = components['schemas']['Entity'];
-// export type EntityCreate = components['schemas']['EntityCreate'];
-// export type EntityUpdate = components['schemas']['PatchedEntityRequest'];
+/** Warehouse - Physical storage location */
+export type Warehouse = {
+  id: string;
+  tenant_id: string;
+  warehouse_code: string;
+  warehouse_name: string;
+  warehouse_type: string;
+  address?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Warehouse create request */
+export type WarehouseCreate = {
+  warehouse_code: string;
+  warehouse_name: string;
+  warehouse_type: string;
+  address?: string;
+  is_active?: boolean;
+};
+
+/** Item - Stock item / Product / SKU */
+export type Item = {
+  id: string;
+  tenant_id: string;
+  item_code: string;
+  item_name: string;
+  description?: string;
+  category?: string;
+  barcode?: string;
+  has_batch_no: boolean;
+  has_serial_no: boolean;
+  valuation_method: string;
+  reorder_point?: string;
+  reorder_qty?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Stock Entry - Stock movement transaction */
+export type StockEntry = {
+  id: string;
+  tenant_id: string;
+  entry_number: string;
+  entry_type: 'receipt' | 'issue' | 'transfer' | 'adjustment' | 'manufacturing' | 'return' | 'scrap';
+  posting_date: string;
+  warehouse: string;
+  reference_document?: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Stock Balance - Current stock level per item per warehouse */
+export type StockBalance = {
+  id: string;
+  tenant_id: string;
+  item: string;
+  warehouse: string;
+  quantity_on_hand: string;
+  quantity_allocated: string;
+  quantity_available: string;
+  stock_value: string;
+  valuation_rate?: string;
+  created_at: string;
+  updated_at: string;
+};
 
 // =============================================================================
 // ENDPOINT REGISTRY - Use these for all API calls
 // =============================================================================
 
-/**
- * Inventory Management API Endpoints
- *
- * TODO: Define actual endpoints when backend API is implemented.
- * All endpoints should be prefixed with /api/v1/inventory-management/
- *
- * Usage:
- * ```typescript
- * import { ENDPOINTS } from './contracts';
- * apiClient.get(ENDPOINTS.ENTITIES.LIST);
- * ```
- */
 export const MODULE_API_PREFIX = '/api/v1/inventory-management';
 
 export const ENDPOINTS = {
-  // TODO: Define actual endpoints when backend API is implemented
-  // Example structure:
-  // ENTITIES: {
-  //   LIST: `${MODULE_API_PREFIX}/entities/`,
-  //   DETAIL: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   CREATE: `${MODULE_API_PREFIX}/entities/`,
-  //   UPDATE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   DELETE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  // },
+  WAREHOUSES: {
+    LIST: `${MODULE_API_PREFIX}/warehouses/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/warehouses/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/warehouses/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/warehouses/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/warehouses/${id}/` as const,
+  },
+  ITEMS: {
+    LIST: `${MODULE_API_PREFIX}/items/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/items/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/items/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/items/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/items/${id}/` as const,
+  },
+  STOCK_ENTRIES: {
+    LIST: `${MODULE_API_PREFIX}/stock-entries/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/stock-entries/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/stock-entries/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/stock-entries/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/stock-entries/${id}/` as const,
+  },
+  STOCK_BALANCES: {
+    LIST: `${MODULE_API_PREFIX}/stock-balances/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/stock-balances/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/stock-balances/`,
+    UPDATE: (id: string) => `${MODULE_API_PREFIX}/stock-balances/${id}/` as const,
+    DELETE: (id: string) => `${MODULE_API_PREFIX}/stock-balances/${id}/` as const,
+  },
+  HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
-
-// =============================================================================
-// TYPE GUARDS - Use for runtime type checking
-// =============================================================================
-
-// TODO: Add type guards when types are defined
-
-// =============================================================================
-// EXAMPLES - Reference for agents writing new code
-// =============================================================================
-
-/**
- * TODO: Add usage examples when backend API is implemented
- */
