@@ -348,28 +348,11 @@ def get_queryset(self):
 
 ## Documentation
 
-### Architecture Specifications
+Architecture, rules, standards, module specifications, and reports are maintained in the documentation repository and published at:
 
-| Document | Description |
-|----------|-------------|
-| [Application Architecture](docs/architecture/application-architecture.md) | System overview and design |
-| [Security Model](docs/architecture/security-model.md) | Threat model, controls, enforcement |
-| [Authentication Spec](docs/architecture/authentication-and-session-management-spec.md) | Session-based auth details |
-| [Policy Engine](docs/architecture/policy-engine-spec.md) | Authorization engine design |
-| [Module Framework](docs/architecture/module-framework.md) | Module patterns and contracts |
-| [Performance SLAs](docs/architecture/performance-slas.md) | Latency targets and budgets |
-| [Event-Driven Architecture](docs/architecture/event-driven-architecture.md) | Event sourcing patterns |
-| [Real-Time Architecture](docs/architecture/realtime-architecture.md) | WebSocket and live updates |
+**https://docs.saraise.com**
 
-### Module Documentation
-
-| Category | Count | Directory |
-|----------|-------|-----------|
-| Foundation | 22 | [docs/modules/01-foundation/](docs/modules/01-foundation/) |
-| Core | 21 | [docs/modules/02-core/](docs/modules/02-core/) |
-| Industry-Specific | 65+ | [docs/modules/03-industry-specific/](docs/modules/03-industry-specific/) |
-
-**Module Index**: [docs/modules/00-MODULE-INDEX.md](docs/modules/00-MODULE-INDEX.md)
+This repository contains only the runtime application (backend + frontend). For architecture specs, security model, module framework, phase reports, and operational guides, see the link above.
 
 ---
 
@@ -493,7 +476,7 @@ See [LICENSE](LICENSE) for full text.
 
 ## Support
 
-- **Documentation**: [docs/](docs/)
+- **Documentation**: [docs.saraise.com](https://docs.saraise.com)
 - **Issues**: [GitHub Issues](https://github.com/your-org/saraise/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/your-org/saraise/discussions)
 - **Email**: support@saraise.com
