@@ -6,7 +6,7 @@ Supports three operating modes:
 - self-hosted: Single-tenant, built-in auth, license validation
 - saas: Multi-tenant, delegated auth to platform
 
-Reference: saraise-documentation/AGENTS.md
+Reference: https://docs.saraise.com (architecture and configuration)
 """
 
 import os
@@ -21,9 +21,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # =============================================================================
 # Mode determines authentication, tenant handling, and license behavior
 # Valid values: 'development', 'self-hosted', 'saas'
-SARAISE_MODE: Literal["development", "self-hosted", "saas"] = os.getenv(
-    "SARAISE_MODE", "self-hosted"  # Default to self-hosted for production readiness
-)
+_VALID_MODES = ("development", "self-hosted", "saas")
+_raw_mode = os.getenv("SARAISE_MODE", "self-hosted")
+if _raw_mode not in _VALID_MODES:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(f"SARAISE_MODE must be one of {_VALID_MODES}, got: {_raw_mode!r}")
+SARAISE_MODE: Literal["development", "self-hosted", "saas"] = _raw_mode
 
 # Self-hosted license mode (only applicable when SARAISE_MODE='self-hosted')
 # - 'connected': Validates against license.saraise.com
@@ -31,7 +35,26 @@ SARAISE_MODE: Literal["development", "self-hosted", "saas"] = os.getenv(
 SARAISE_LICENSE_MODE: Literal["connected", "isolated"] = os.getenv("SARAISE_LICENSE_MODE", "connected")
 
 # Platform URL for SaaS mode (auth delegation and policy engine)
+# Required when SARAISE_MODE=saas (Phase 7.6)
 SARAISE_PLATFORM_URL: str = os.getenv("SARAISE_PLATFORM_URL", "http://localhost:18000")
+if SARAISE_MODE == "saas" and not (SARAISE_PLATFORM_URL or "").strip():
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured("SARAISE_PLATFORM_URL must be set when SARAISE_MODE=saas")
+
+# Control Plane API URL (platform settings, feature flags) — distinct from SARAISE_PLATFORM_URL
+# Docker: http://control-plane:8004 | Local: http://localhost:18004
+SARAISE_CONTROL_PLANE_URL: str = os.getenv(
+    "SARAISE_CONTROL_PLANE_URL",
+    "http://localhost:18004",
+)
+
+# Policy Engine URL for SaaS mode authorization evaluation
+# Docker: http://policy-engine:8003 | Local: http://localhost:18003
+SARAISE_POLICY_ENGINE_URL: str = os.getenv(
+    "SARAISE_POLICY_ENGINE_URL",
+    "http://localhost:18003",
+)
 
 # License server URL for self-hosted connected mode
 SARAISE_LICENSE_SERVER_URL: str = os.getenv("SARAISE_LICENSE_SERVER_URL", "https://license.saraise.com")
@@ -65,13 +88,37 @@ SARAISE_LICENSE_GRACE_PERIOD_DAYS: int = 30
 # Trial period for new self-hosted installations
 SARAISE_TRIAL_PERIOD_DAYS: int = 14
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-test-key-only-for-testing-do-not-use-in-production"
+# =============================================================================
+# SECURITY CONFIGURATION
+# =============================================================================
+# SARAISE-26001: All secrets MUST come from environment variables in production.
+# Development mode permits insecure defaults for local development ONLY.
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+_secret_key_env = os.getenv("SECRET_KEY", "")
+if not _secret_key_env and SARAISE_MODE != "development":
+    from django.core.exceptions import ImproperlyConfigured
 
-ALLOWED_HOSTS = ["*"]
+    raise ImproperlyConfigured(
+        "SECRET_KEY environment variable is REQUIRED in non-development modes. "
+        "Generate one with: python -c 'from django.core.management.utils import "
+        "get_random_secret_key; print(get_random_secret_key())'"
+    )
+SECRET_KEY = _secret_key_env or "django-insecure-dev-only-not-for-production"  # pragma: allowlist secret
+
+DEBUG = os.getenv("DEBUG", "false").lower() == "true" if SARAISE_MODE != "development" else True
+
+_allowed_hosts_env = os.getenv("ALLOWED_HOSTS", "")
+if SARAISE_MODE == "development":
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0"]
+elif _allowed_hosts_env:
+    ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_env.split(",") if h.strip()]
+else:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "ALLOWED_HOSTS environment variable is REQUIRED in non-development modes. "
+        "Example: ALLOWED_HOSTS=app.saraise.com,api.saraise.com"
+    )
 
 # Application definition
 INSTALLED_APPS = [
@@ -113,6 +160,7 @@ INSTALLED_APPS = [
     # ===== Core Business Modules =====
     "src.modules.accounting_finance",
     "src.modules.inventory_management",
+    # ===== Manufacturing Industry Modules =====
     "src.modules.human_resources",
     "src.modules.purchase_management",
     "src.modules.sales_management",
@@ -129,17 +177,20 @@ INSTALLED_APPS = [
     "src.modules.fixed_assets",
     # ===== Foundation Modules =====
     "src.modules.communication_hub",
-    # Note: notifications module is in src.core.notifications
+    "src.modules.notifications",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "src.core.middleware.correlation.CorrelationIdMiddleware",  # SARAISE-17007: Correlation ID tracing
     "corsheaders.middleware.CorsMiddleware",  # CORS middleware (should be early)
     "django.contrib.sessions.middleware.SessionMiddleware",  # Session middleware
     "src.core.auth.middleware.ModeAwareSessionMiddleware",  # Phase 7.6: Mode-aware session validation
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",  # CSRF protection (MANDATORY per auth spec)
     "django.contrib.auth.middleware.AuthenticationMiddleware",  # Authentication
+    "src.core.middleware.tenant_context.TenantContextMiddleware",  # SARAISE-33001: PostgreSQL RLS context
+    "src.core.auth.mode_auth_middleware.ModeAuthMiddleware",  # Phase 7.6: SaaS 401/redirect
     "django.contrib.messages.middleware.MessageMiddleware",
     "src.core.middleware.api_tracking.APITrackingMiddleware",  # API call tracking for metrics
     # Phase 7.5: License validation middleware (only active in self-hosted mode)
@@ -182,7 +233,7 @@ DATABASES = {
 _use_sqlite = (
     os.getenv("DJANGO_USE_SQLITE_FOR_TESTS") == "1"
     or "test" in os.sys.argv
-    or "pytest" in os.sys.argv
+    or any("pytest" in arg for arg in os.sys.argv)
 )
 if _use_sqlite:
     DATABASES["default"] = {
@@ -190,14 +241,24 @@ if _use_sqlite:
         "NAME": ":memory:",
     }
 
+# SaaS mode: platform_management tables live in Control Plane DB — no migrations in application
+# Skip when running tests (tests need platform_management tables for self-hosted/development coverage)
+_in_test = "test" in os.sys.argv or "pytest" in os.sys.argv
+if SARAISE_MODE == "saas" and not _in_test:
+    MIGRATION_MODULES = {
+        "platform_management": "src.modules.platform_management.migrations_saas",
+    }
+
 # Redis configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+# Domain events (Stream A3) — disable in unit tests via env if needed
+SARAISE_EVENTS_ENABLED = os.getenv("SARAISE_EVENTS_ENABLED", "true").lower() in ("1", "true", "yes")
 
 # Session configuration
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
 SESSION_COOKIE_NAME = "saraise_sessionid"
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SECURE = False  # Set to True in production with HTTPS
+SESSION_COOKIE_SECURE = not DEBUG  # HTTPS-only cookies in production (SARAISE-26001)
 # CRITICAL: For cross-origin requests (different ports on localhost), we need None
 # Modern browsers allow SameSite=None with Secure=False for localhost in development
 # In production with HTTPS, this should be 'None' with Secure=True
@@ -209,19 +270,25 @@ SESSION_COOKIE_AGE = 86400  # 24 hours
 SESSION_COOKIE_DOMAIN = None
 
 # CORS configuration
-# Application frontend: 25173 (2xxxx port convention)
-# Platform frontend: 17000 (1xxxx port convention)
-# Also allow standard Vite dev server port for local development
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:25173",  # Application frontend (Runtime Plane)
-    "http://localhost:17000",  # Platform frontend (Control Plane UI)
-    "http://localhost:15173",  # Legacy/alternative port
-    "http://localhost:5173",  # Standard Vite dev server port
-    "http://127.0.0.1:25173",
-    "http://127.0.0.1:17000",
-    "http://127.0.0.1:15173",
-    "http://127.0.0.1:5173",
-]
+# Production: set CORS_ALLOWED_ORIGINS env var (comma-separated)
+# Development: hardcoded localhost origins for local development
+_cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "")
+if _cors_origins_env:
+    CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+elif SARAISE_MODE == "development":
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:25173",  # Application frontend (Runtime Plane)
+        "http://localhost:17000",  # Platform frontend (Control Plane UI)
+        "http://localhost:15173",  # Legacy/alternative port
+        "http://localhost:5173",  # Standard Vite dev server port
+        "http://127.0.0.1:25173",
+        "http://127.0.0.1:17000",
+        "http://127.0.0.1:15173",
+        "http://127.0.0.1:5173",
+    ]
+else:
+    # Non-development mode without explicit CORS origins: deny all cross-origin
+    CORS_ALLOWED_ORIGINS = []
 
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
@@ -237,20 +304,48 @@ CORS_ALLOW_HEADERS = [
 ]
 
 # CSRF configuration
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:25173",  # Application frontend (Runtime Plane)
-    "http://localhost:17000",  # Platform frontend (Control Plane UI)
-    "http://localhost:15173",  # Legacy/alternative port
-    "http://localhost:5173",  # Standard Vite dev server port
-    "http://127.0.0.1:25173",
-    "http://127.0.0.1:17000",
-    "http://127.0.0.1:15173",
-    "http://127.0.0.1:5173",
-]
+# Production: set CSRF_TRUSTED_ORIGINS env var (comma-separated)
+_csrf_origins_env = os.getenv("CSRF_TRUSTED_ORIGINS", "")
+if _csrf_origins_env:
+    CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins_env.split(",") if o.strip()]
+elif SARAISE_MODE == "development":
+    CSRF_TRUSTED_ORIGINS = [
+        "http://localhost:25173",  # Application frontend (Runtime Plane)
+        "http://localhost:17000",  # Platform frontend (Control Plane UI)
+        "http://localhost:15173",  # Legacy/alternative port
+        "http://localhost:5173",  # Standard Vite dev server port
+        "http://127.0.0.1:25173",
+        "http://127.0.0.1:17000",
+        "http://127.0.0.1:15173",
+        "http://127.0.0.1:5173",
+    ]
+else:
+    CSRF_TRUSTED_ORIGINS = []
 CSRF_COOKIE_NAME = "saraise_csrftoken"
 CSRF_COOKIE_HTTPONLY = False  # Must be False for JavaScript access
-CSRF_COOKIE_SECURE = False  # Set to True in production with HTTPS
+CSRF_COOKIE_SECURE = not DEBUG  # HTTPS-only cookies in production (SARAISE-26001)
 CSRF_COOKIE_SAMESITE = "Lax"
+
+# =============================================================================
+# SECURITY HEADERS (SARAISE-26001, OWASP)
+# =============================================================================
+# HSTS: Force HTTPS for all subsequent requests (production only)
+SECURE_HSTS_SECONDS = 31536000 if not DEBUG else 0  # 1 year in production
+SECURE_HSTS_INCLUDE_SUBDOMAINS = not DEBUG
+SECURE_HSTS_PRELOAD = not DEBUG
+
+# X-Frame-Options: Prevent clickjacking
+X_FRAME_OPTIONS = "DENY"
+
+# X-Content-Type-Options: Prevent MIME type sniffing
+SECURE_CONTENT_TYPE_NOSNIFF = True
+
+# Redirect HTTP to HTTPS in production
+SECURE_SSL_REDIRECT = not DEBUG
+
+# Content Security Policy (enforced via middleware in production)
+# CSP_DEFAULT_SRC is processed by django-csp if installed
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
 # Internationalization
 LANGUAGE_CODE = "en-us"
@@ -279,6 +374,7 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
+        "src.core.auth.policy_permissions.PolicyRequiredPermission",
     ],
 }
 
@@ -300,9 +396,14 @@ SPECTACULAR_SETTINGS = {
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+    "filters": {
+        "correlation_id": {
+            "()": "src.core.middleware.correlation.CorrelationIdFilter",
+        },
+    },
     "formatters": {
         "verbose": {
-            "format": "{levelname} {asctime} [{name}] {message}",
+            "format": "{levelname} {asctime} [{name}] [cid:{correlation_id}] {message}",
             "style": "{",
         },
     },
@@ -310,6 +411,7 @@ LOGGING = {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
+            "filters": ["correlation_id"],
         },
     },
     "root": {

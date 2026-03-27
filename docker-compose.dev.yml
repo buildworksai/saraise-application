@@ -102,7 +102,7 @@ services:
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
       - DEBUG=True
       - ALLOWED_HOSTS=localhost,backend,0.0.0.0
-      - SARAISE_MODE=${SARAISE_MODE:-self-hosted}
+      - SARAISE_MODE=${SARAISE_MODE:-development}
       - SARAISE_LICENSE_MODE=${SARAISE_LICENSE_MODE:-connected}
     ports:
       - "28000:8000" # Application: 2xxxx (fixed port)

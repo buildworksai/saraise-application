@@ -123,8 +123,20 @@ skip = ["venv", "migrations"]
 [tool.mypy]
 python_version = "3.10"
 plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+strict = true
+
+[[tool.mypy.overrides]]
+module = [
+    "rest_framework.*",
+    "drf_spectacular.*",
+    "corsheaders.*",
+    "celery.*",
+    "redis.*",
+    "django_redis.*",
+    "prometheus_client.*",
+    "defusedxml.*",
+]
 ignore_missing_imports = true
-strict = false  # Gradually enable
 
 [tool.django-stubs]
 django_settings_module = "saraise_backend.settings"

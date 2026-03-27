@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0
+name: License Compliance
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  license-check:
+    name: Check dependency licenses
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install license checker
+        run: pip install pip-licenses
+
+      - name: Check Python licenses
+        run: |
+          pip install -r requirements.txt 2>/dev/null || pip install -e . 2>/dev/null || true
+          pip-licenses --format=table --with-urls --order=license
+          # Fail on copyleft licenses that conflict with Apache 2.0
+          pip-licenses --fail-on="GPL;AGPL;LGPL;SSPL;EUPL;OSL;CPAL;RPL;Watcom" || {
+            echo "::error::Found dependencies with copyleft licenses incompatible with Apache 2.0"
+            exit 1
+          }
+
+      - name: Check SPDX headers
+        run: |
+          # Verify key Python files have SPDX headers
+          MISSING_SPDX=0
+          for f in $(find . -name "*.py" -not -path "*/venv/*" -not -path "*/.venv/*" -not -path "*/node_modules/*" -not -path "*/__pycache__/*" -not -path "*/migrations/*" | head -50); do
+            if ! head -5 "$f" | grep -q "SPDX-License-Identifier"; then
+              echo "Missing SPDX header: $f"
+              MISSING_SPDX=$((MISSING_SPDX + 1))
+            fi
+          done
+          if [ $MISSING_SPDX -gt 0 ]; then
+            echo "::warning::$MISSING_SPDX files missing SPDX license headers"
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Check npm licenses
+        working-directory: frontend
+        run: |
+          npm ci
+          npx license-checker --production --onlyAllow "MIT;ISC;BSD-2-Clause;BSD-3-Clause;Apache-2.0;0BSD;CC0-1.0;Unlicense;CC-BY-3.0;CC-BY-4.0;BlueOak-1.0.0;Python-2.0" || {
+            echo "::error::Found npm dependencies with incompatible licenses"
+            exit 1
+          }

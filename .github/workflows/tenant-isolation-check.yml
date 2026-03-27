@@ -57,6 +57,56 @@ jobs:
             **Rule:** SARAISE-33004`
             })
 
+  execute-isolation-tests:
+    name: Execute Tenant Isolation Tests
+    needs: check-isolation-tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install -r backend/requirements-dev.txt
+
+      - name: Run tenant isolation tests
+        env:
+          DJANGO_USE_SQLITE_FOR_TESTS: '1'
+        run: |
+          cd backend
+          pytest src/modules/*/tests/test_isolation.py -v --tb=short
+
+      - name: Post failure comment on PR
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `❌ **Tenant Isolation Tests Failed**
+
+            One or more tenant isolation tests failed. This means tenant-scoped modules may be vulnerable to cross-tenant data leakage.
+
+            **Required Action:**
+            1. Review the test failure output above
+            2. Fix the isolation vulnerability
+            3. Ensure all tenant isolation tests pass before merge
+
+            See: [Tenant Isolation Enforcement](https://github.com/${context.repo.owner}/saraise-documentation/blob/main/rules/agent-rules/33-tenant-isolation-enforcement.md)
+
+            **Rule:** SARAISE-33004`
+            })
+
   lint-raw-sql-tenant-filter:
     name: Lint Raw SQL Tenant Filter
     runs-on: ubuntu-latest

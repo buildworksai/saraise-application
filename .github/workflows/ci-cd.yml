@@ -61,6 +61,12 @@ jobs:
           pip install -e .
           pip install -e .[dev,test]
 
+      - name: Audit Python dependencies (SARAISE-26001)
+        if: ${{ steps.backend.outputs.present == 'true' }}
+        run: |
+          pip install pip-audit
+          pip-audit --desc --strict
+
       - name: Run Python linting (flake8)
         if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
@@ -137,6 +143,12 @@ jobs:
             exit 1
           fi
 
+      - name: Build frontend (Phase 7.7 - fresh clone verification)
+        run: |
+          cd frontend
+          npm run build
+        continue-on-error: false
+
       # Security Scanning - SARAISE-01003, SARAISE-01004
       - name: Python security audit (safety)
         if: ${{ steps.backend.outputs.present == 'true' }}
@@ -157,7 +169,7 @@ jobs:
           semgrep --config=auto --config=.semgrep/custom-rules.yaml \
             --json --output=semgrep-results.json \
             --error || true
-          
+
           # Check for critical/high findings
           if [ -f semgrep-results.json ]; then
             CRITICAL=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' semgrep-results.json)
@@ -169,7 +181,7 @@ jobs:
               echo "✅ SAST scan passed (no critical/high findings)"
             fi
           fi
-          
+
           # Upload SARIF for GitHub Security tab
           semgrep --config=auto --config=.semgrep/custom-rules.yaml \
             --sarif --output=semgrep-results.sarif || true
