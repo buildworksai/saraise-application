@@ -185,12 +185,11 @@ MIDDLEWARE = [
     "src.core.middleware.correlation.CorrelationIdMiddleware",  # SARAISE-17007: Correlation ID tracing
     "corsheaders.middleware.CorsMiddleware",  # CORS middleware (should be early)
     "django.contrib.sessions.middleware.SessionMiddleware",  # Session middleware
-    "src.core.auth.middleware.ModeAwareSessionMiddleware",  # Phase 7.6: Mode-aware session validation
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",  # CSRF protection (MANDATORY per auth spec)
     "django.contrib.auth.middleware.AuthenticationMiddleware",  # Authentication
+    "src.core.auth.middleware.ModeAwareSessionMiddleware",  # Phase 7.6: Mode-aware session validation
     "src.core.middleware.tenant_context.TenantContextMiddleware",  # SARAISE-33001: PostgreSQL RLS context
-    "src.core.auth.mode_auth_middleware.ModeAuthMiddleware",  # Phase 7.6: SaaS 401/redirect
     "django.contrib.messages.middleware.MessageMiddleware",
     "src.core.middleware.api_tracking.APITrackingMiddleware",  # API call tracking for metrics
     # Phase 7.5: License validation middleware (only active in self-hosted mode)
