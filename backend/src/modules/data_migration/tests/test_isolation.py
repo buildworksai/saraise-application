@@ -7,14 +7,18 @@ This is the PRIMARY security mechanism for multi-tenant isolation.
 Reference: saraise-documentation/rules/compliance-enforcement.md
 Rule: ALL tenant-scoped queries MUST filter by tenant_id
 """
+
 import uuid
+from unittest.mock import MagicMock, patch
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.modules.data_migration.models import MigrationJob, MigrationLog, MigrationMapping, MigrationValidation
 from src.core.auth_utils import get_user_tenant_id
+from src.modules.data_migration.models import MigrationJob, MigrationLog, MigrationMapping, MigrationValidation
+from src.modules.data_migration.services import MigrationEngine
 
 User = get_user_model()
 
@@ -23,6 +27,11 @@ User = get_user_model()
 def override_saraise_mode(settings):
     """Force development mode for tests to bypass licensing."""
     settings.SARAISE_MODE = "development"
+    settings.MIDDLEWARE = [
+        middleware
+        for middleware in settings.MIDDLEWARE
+        if middleware != "src.core.auth.mode_auth_middleware.ModeAuthMiddleware"
+    ]
 
 
 @pytest.fixture
@@ -35,6 +44,7 @@ def api_client():
 def tenant_a_user(db):
     """Create user for tenant A."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
@@ -59,6 +69,7 @@ def tenant_a_user(db):
 def tenant_b_user(db):
     """Create user for tenant B."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
@@ -134,6 +145,117 @@ class TestMigrationJobTenantIsolation:
         # Try to access tenant B's job
         response = api_client.get(f"/api/v1/data-migration/jobs/{job_b.id}/")
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_user_cannot_execute_other_tenant_job(self, api_client, tenant_a_user, tenant_b_user):
+        """Execution lookup is tenant-scoped and cannot reach another tenant's source."""
+        job_b = MigrationJob.objects.create(
+            tenant_id=get_user_tenant_id(tenant_b_user),
+            name="Tenant B database job",
+            source_type="database",
+            source_config={
+                "connection_string": "postgresql://external/source",
+                "table": "customers",
+            },
+            created_by=str(tenant_b_user.id),
+        )
+        api_client.force_authenticate(user=tenant_a_user)
+
+        with patch.object(MigrationEngine, "execute_migration") as execute:
+            response = api_client.post(f"/api/v1/data-migration/jobs/{job_b.id}/execute/")
+
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        execute.assert_not_called()
+
+
+class TestExternalDatabaseSourceSecurity:
+    """Database migration sources never execute caller SQL on the application DB."""
+
+    def test_raw_query_payload_is_rejected_by_api(self, api_client, tenant_a_user):
+        api_client.force_authenticate(user=tenant_a_user)
+        response = api_client.post(
+            "/api/v1/data-migration/jobs/",
+            {
+                "name": "Injected source",
+                "source_type": "database",
+                "source_config": {
+                    "connection_string": "postgresql://external/source",
+                    "table": "customers",
+                    "query": "SELECT * FROM crm_customer",
+                },
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Raw SQL queries are not supported" in str(response.data)
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            {
+                "connection_string": "postgresql://external/source",
+                "table": "customers; DROP TABLE users",
+            },
+            {
+                "connection_string": "postgresql://external/source",
+                "table": "customers",
+                "columns": ["name, (SELECT password FROM users)"],
+            },
+            {
+                "connection_string": "postgresql://external/source",
+                "table": "customers",
+                "filters": {"tenant_id OR 1=1": "attacker"},
+            },
+        ],
+    )
+    def test_identifier_injection_is_rejected_before_connect(self, config):
+        with patch("src.modules.data_migration.services._connect_external_database") as connect:
+            with pytest.raises(ValueError, match="Invalid"):
+                MigrationEngine()._load_database_data(config, str(uuid.uuid4()))
+        connect.assert_not_called()
+
+    def test_uses_only_external_connection_and_parameterized_filters(self):
+        cursor = MagicMock()
+        cursor.__enter__.return_value = cursor
+        cursor.description = [("id",), ("name",)]
+        cursor.fetchall.return_value = [(1, "Acme")]
+        external_connection = MagicMock()
+        external_connection.cursor.return_value = cursor
+
+        with patch(
+            "src.modules.data_migration.services._connect_external_database",
+            return_value=external_connection,
+        ) as connect:
+            records = MigrationEngine()._load_database_data(
+                {
+                    "connection_string": "postgresql://external/source",
+                    "table": "customers",
+                    "columns": ["id", "name"],
+                    "filters": {"account_id": "tenant-supplied-value"},
+                },
+                str(uuid.uuid4()),
+            )
+
+        connect.assert_called_once_with("postgresql://external/source")
+        cursor.execute.assert_called_once_with(
+            "SELECT id, name FROM customers WHERE account_id = %s",
+            ["tenant-supplied-value"],
+        )
+        external_connection.close.assert_called_once_with()
+        assert records == [{"id": 1, "name": "Acme"}]
+
+    def test_raw_sql_never_reaches_any_connection(self):
+        with patch("src.modules.data_migration.services._connect_external_database") as connect:
+            with pytest.raises(ValueError, match="Raw SQL"):
+                MigrationEngine()._load_database_data(
+                    {
+                        "connection_string": "postgresql://external/source",
+                        "table": "customers",
+                        "query": "SELECT * FROM crm_customer",
+                    },
+                    str(uuid.uuid4()),
+                )
+        connect.assert_not_called()
 
 
 @pytest.mark.django_db
@@ -233,7 +355,7 @@ class TestMigrationLogTenantIsolation:
         response = api_client.get("/api/v1/data-migration/logs/")
         assert response.status_code == status.HTTP_200_OK
         data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        log_ids = [l["id"] for l in data]
+        log_ids = [log["id"] for log in data]
 
         # User A should see tenant A's log, but NOT tenant B's log
         assert log_a.id in log_ids

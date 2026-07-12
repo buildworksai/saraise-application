@@ -6,7 +6,6 @@ Provides REST API endpoints for all models.
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from src.core.auth_utils import get_user_tenant_id
@@ -16,14 +15,13 @@ from .models import (
     MigrationJob,
     MigrationLog,
     MigrationMapping,
-    MigrationRollback,
     MigrationValidation,
 )
+from .permissions import DataMigrationPermission
 from .serializers import (
     MigrationJobSerializer,
     MigrationLogSerializer,
     MigrationMappingSerializer,
-    MigrationRollbackSerializer,
     MigrationValidationSerializer,
 )
 from .services import MigrationEngine
@@ -44,7 +42,7 @@ class MigrationJobViewSet(viewsets.ModelViewSet):
     """
 
     serializer_class = MigrationJobSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [DataMigrationPermission]
     authentication_classes = [RelaxedCsrfSessionAuthentication]
 
     def get_queryset(self):
@@ -134,7 +132,7 @@ class MigrationMappingViewSet(viewsets.ModelViewSet):
     """
 
     serializer_class = MigrationMappingSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [DataMigrationPermission]
     authentication_classes = [RelaxedCsrfSessionAuthentication]
 
     def get_queryset(self):
@@ -170,7 +168,7 @@ class MigrationLogViewSet(viewsets.ReadOnlyModelViewSet):
     """
 
     serializer_class = MigrationLogSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [DataMigrationPermission]
     authentication_classes = [RelaxedCsrfSessionAuthentication]
 
     def get_queryset(self):
@@ -204,7 +202,7 @@ class MigrationValidationViewSet(viewsets.ReadOnlyModelViewSet):
     """
 
     serializer_class = MigrationValidationSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [DataMigrationPermission]
     authentication_classes = [RelaxedCsrfSessionAuthentication]
 
     def get_queryset(self):

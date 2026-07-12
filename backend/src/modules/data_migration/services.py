@@ -7,7 +7,9 @@ High-level service layer for DataMigration business logic.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from django.db import transaction
 from django.utils import timezone
@@ -15,6 +17,31 @@ from django.utils import timezone
 from .models import MigrationJob, MigrationLog, MigrationMapping, MigrationRollback, MigrationValidation
 
 logger = logging.getLogger(__name__)
+
+IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validated_identifier(value: Any, field_name: str) -> str:
+    """Validate a SQL identifier that cannot be passed as a query parameter."""
+    if not isinstance(value, str) or not IDENTIFIER_PATTERN.fullmatch(value):
+        raise ValueError(f"Invalid {field_name}: {value}")
+    return value
+
+
+def _connect_external_database(connection_string: str):
+    """Open an isolated external connection; never use a Django DB alias."""
+    scheme = urlparse(connection_string).scheme.lower()
+    if scheme in {"postgres", "postgresql"}:
+        import psycopg2
+
+        connection = psycopg2.connect(connection_string)
+        connection.set_session(readonly=True, autocommit=False)
+        return connection
+    if scheme == "mysql":
+        import pymysql
+
+        return pymysql.connect(connection_string)
+    raise ValueError(f"Unsupported external database type: {scheme or 'missing'}")
 
 
 class MigrationResult:
@@ -173,7 +200,7 @@ class MigrationEngine:
             elif source_type == "json":
                 return self._load_json_data(source_config)
             elif source_type == "database":
-                return self._load_database_data(source_config)
+                return self._load_database_data(source_config, str(job.tenant_id))
             elif source_type == "api":
                 return self._load_api_data(source_config)
             else:
@@ -192,6 +219,7 @@ class MigrationEngine:
             List of records as dictionaries.
         """
         import csv
+
         from django.core.files.storage import default_storage
 
         file_path = config.get("file_path")
@@ -259,6 +287,7 @@ class MigrationEngine:
             List of records as dictionaries.
         """
         import json
+
         from django.core.files.storage import default_storage
 
         if "data" in config:
@@ -294,38 +323,60 @@ class MigrationEngine:
         except Exception as e:
             raise ValueError(f"Failed to read JSON file: {str(e)}")
 
-    def _load_database_data(self, config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _load_database_data(self, config: Dict[str, Any], tenant_id: str) -> List[Dict[str, Any]]:
         """Load data from external database.
 
         Args:
-            config: Configuration dict with database connection details and query.
+            config: Structured external database connection, table, columns, and filters.
+            tenant_id: Tenant owning the already-scoped migration job.
 
         Returns:
             List of records as dictionaries.
         """
-        from django.db import connections
-
         connection_string = config.get("connection_string")
-        query = config.get("query")
+        if not tenant_id:
+            raise ValueError("Tenant context is required for database migrations")
+        if not isinstance(connection_string, str) or not connection_string:
+            raise ValueError("Database connection_string is required in source_config")
+        if "query" in config or "sql_query" in config:
+            raise ValueError("Raw SQL queries are not supported")
 
-        if not connection_string or not query:
-            raise ValueError("Database connection_string and query are required in source_config")
+        table = _validated_identifier(config.get("table"), "table")
+        configured_columns = config.get("columns", ["*"])
+        if not isinstance(configured_columns, list) or not configured_columns:
+            raise ValueError("Database columns must be a non-empty list")
+        if configured_columns == ["*"]:
+            columns_sql = "*"
+        else:
+            columns_sql = ", ".join(_validated_identifier(column, "column") for column in configured_columns)
 
+        filters = config.get("filters", {})
+        if not isinstance(filters, dict):
+            raise ValueError("Database filters must be an object")
+        where_parts = []
+        values = []
+        for column, value in filters.items():
+            where_parts.append(f"{_validated_identifier(column, 'filter column')} = %s")
+            values.append(value)
+        where_sql = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
+        select_sql = f"SELECT {columns_sql} FROM {table}{where_sql}"
+
+        connection = None
         try:
-            # Create a temporary database connection
-            # Note: This is a simplified implementation
-            # In production, you'd want to use proper connection pooling
-            # SARAISE-33006: Data migration queries external databases, not tenant-scoped
-            conn = connections["default"]
-            with conn.cursor() as cursor:
-                cursor.execute(query)
+            # The tenant-scoped job may read only from its explicitly configured external source.
+            connection = _connect_external_database(connection_string)
+            with connection.cursor() as cursor:
+                cursor.execute(select_sql, values)
                 columns = [col[0] for col in cursor.description]
                 rows = cursor.fetchall()
                 records = [dict(zip(columns, row)) for row in rows]
         except Exception as e:
             raise ValueError(f"Failed to query database: {str(e)}")
+        finally:
+            if connection is not None:
+                connection.close()
 
-        logger.info(f"Loaded {len(records)} records from database")
+        logger.info("Loaded %s records from external database for tenant %s", len(records), tenant_id)
         return records
 
     def _load_api_data(self, config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -404,6 +455,7 @@ class MigrationEngine:
                     source_value = int(source_value) if source_value else 0
                 elif target_type == "decimal":
                     from decimal import Decimal
+
                     source_value = Decimal(str(source_value)) if source_value else Decimal("0.00")
 
             if "default" in transform and source_value is None:
@@ -476,6 +528,7 @@ class MigrationEngine:
                 type_valid = isinstance(value, bool) or str(value).lower() in ("true", "false", "1", "0", "yes", "no")
             elif expected_type == "date":
                 from datetime import datetime
+
                 try:
                     datetime.fromisoformat(str(value))
                     type_valid = True
@@ -483,6 +536,7 @@ class MigrationEngine:
                     type_valid = False
             elif expected_type == "email":
                 import re
+
                 email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
                 type_valid = isinstance(value, str) and bool(re.match(email_pattern, value))
             else:
@@ -586,6 +640,7 @@ class MigrationEngine:
             # Pattern/regex constraint
             if "pattern" in constraints:
                 import re
+
                 pattern = constraints["pattern"]
                 if isinstance(value, str) and not re.match(pattern, value):
                     error_msg = f"Field {field} does not match required pattern at record {index}"
@@ -762,10 +817,6 @@ class MigrationEngine:
 
                         module = import_module(module_path)
                         Model = getattr(module, model_name)
-
-                        # Get records imported after checkpoint timestamp
-                        checkpoint_time = checkpoint.created_at
-                        lookup_field = target_config.get("lookup_field", "id")
 
                         # Find records created/updated after checkpoint
                         # Note: This is a simplified rollback - in production, you'd want to

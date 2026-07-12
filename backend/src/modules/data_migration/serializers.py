@@ -14,6 +14,17 @@ from .models import (
 )
 
 
+def validate_database_source_config(config):
+    """Reject raw SQL and require a structured external database source."""
+    if not isinstance(config, dict):
+        raise serializers.ValidationError("source_config must be an object")
+    if "query" in config or "sql_query" in config:
+        raise serializers.ValidationError("Raw SQL queries are not supported")
+    if not config.get("connection_string") or not config.get("table"):
+        raise serializers.ValidationError("Database source_config requires connection_string and table")
+    return config
+
+
 class MigrationJobSerializer(serializers.ModelSerializer):
     """Serializer for MigrationJob model."""
 
@@ -71,6 +82,14 @@ class MigrationJobSerializer(serializers.ModelSerializer):
         if not value or not value.strip():
             raise serializers.ValidationError("Name cannot be empty")
         return value.strip()
+
+    def validate(self, attrs):
+        """Validate database sources before caller-controlled config is stored."""
+        source_type = attrs.get("source_type", getattr(self.instance, "source_type", None))
+        source_config = attrs.get("source_config", getattr(self.instance, "source_config", None))
+        if source_type == "database":
+            attrs["source_config"] = validate_database_source_config(source_config)
+        return attrs
 
 
 class MigrationMappingSerializer(serializers.ModelSerializer):
