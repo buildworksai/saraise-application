@@ -23,6 +23,7 @@ from rest_framework.response import Response
 from src.core.auth_utils import get_user_platform_role
 
 from .models import Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
+from .permissions import TenantManagementPermission
 from .serializers import (
     TenantHealthScoreSerializer,
     TenantListSerializer,
@@ -64,7 +65,7 @@ class TenantViewSet(viewsets.ReadOnlyModelViewSet):
     """
 
     serializer_class = TenantSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantManagementPermission]
 
     def get_queryset(self):
         """Get all tenants (platform owners only)."""
@@ -160,7 +161,7 @@ class TenantModuleViewSet(viewsets.ReadOnlyModelViewSet):
     """
 
     serializer_class = TenantModuleSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantManagementPermission]
 
     def get_queryset(self):
         """Get all tenant modules (platform owners only)."""
@@ -199,7 +200,7 @@ class TenantResourceUsageViewSet(viewsets.ReadOnlyModelViewSet):
     """
 
     serializer_class = TenantResourceUsageSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantManagementPermission]
 
     def get_queryset(self):
         """Get all tenant resource usage (platform owners only)."""
@@ -240,7 +241,7 @@ class TenantSettingsViewSet(viewsets.ReadOnlyModelViewSet):
     """
 
     serializer_class = TenantSettingsSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantManagementPermission]
 
     def get_queryset(self):
         """Get all tenant settings (platform owners only)."""
@@ -274,7 +275,7 @@ class TenantHealthScoreViewSet(viewsets.ReadOnlyModelViewSet):
     """
 
     serializer_class = TenantHealthScoreSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, TenantManagementPermission]
 
     def get_queryset(self):
         """Get all tenant health scores (platform owners only)."""

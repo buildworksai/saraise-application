@@ -29,6 +29,7 @@ from .models import (
     UserPermissionSet,
     UserRole,
 )
+from .permissions import SecurityAdminPermission
 from .serializers import (
     FieldSecurityCreateSerializer,
     FieldSecuritySerializer,
@@ -59,7 +60,7 @@ class RoleViewSet(viewsets.ModelViewSet):
     - ✅ Audit logging on mutations
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, SecurityAdminPermission]
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
@@ -226,7 +227,7 @@ class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     CRITICAL: Permissions are platform-level (no tenant_id).
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, SecurityAdminPermission]
     serializer_class = PermissionSerializer
     queryset = Permission.objects.all()
 
@@ -244,7 +245,7 @@ class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
 class UserRoleViewSet(viewsets.ModelViewSet):
     """API endpoints for user-role assignments."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, SecurityAdminPermission]
     serializer_class = UserRoleSerializer
 
     def get_queryset(self):
@@ -295,7 +296,7 @@ class UserRoleViewSet(viewsets.ModelViewSet):
 class PermissionSetViewSet(viewsets.ModelViewSet):
     """API endpoints for permission sets."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, SecurityAdminPermission]
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
@@ -368,7 +369,7 @@ class PermissionSetViewSet(viewsets.ModelViewSet):
 class UserPermissionSetViewSet(viewsets.ModelViewSet):
     """API endpoints for user permission set grants."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, SecurityAdminPermission]
     serializer_class = UserPermissionSetSerializer
 
     def get_queryset(self):
@@ -414,7 +415,7 @@ class UserPermissionSetViewSet(viewsets.ModelViewSet):
 class FieldSecurityViewSet(viewsets.ModelViewSet):
     """API endpoints for field-level security."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, SecurityAdminPermission]
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
@@ -494,7 +495,7 @@ class FieldSecurityViewSet(viewsets.ModelViewSet):
 class RowSecurityRuleViewSet(viewsets.ModelViewSet):
     """API endpoints for row-level security rules."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, SecurityAdminPermission]
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
@@ -574,7 +575,7 @@ class RowSecurityRuleViewSet(viewsets.ModelViewSet):
 class SecurityProfileViewSet(viewsets.ModelViewSet):
     """API endpoints for security profiles."""
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, SecurityAdminPermission]
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
@@ -656,7 +657,7 @@ class SecurityAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     CRITICAL: No create/update/delete allowed.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, SecurityAdminPermission]
     serializer_class = SecurityAuditLogSerializer
 
     def get_queryset(self):

@@ -341,9 +341,7 @@ class AccountService:
         account = Account.objects.get(id=account_id, tenant_id=tenant_id, is_deleted=False)
 
         def build_tree(acc: Account) -> Dict[str, Any]:
-            children = Account.objects.filter(
-                parent_account_id=acc.id, tenant_id=tenant_id, is_deleted=False
-            )
+            children = Account.objects.filter(parent_account_id=acc.id, tenant_id=tenant_id, is_deleted=False)
             return {
                 "id": str(acc.id),
                 "name": acc.name,
@@ -551,9 +549,7 @@ class OpportunityService:
             Opportunity.DoesNotExist: If opportunity not found.
             ValidationError: If validation fails.
         """
-        opportunity = Opportunity.objects.get(
-            id=opportunity_id, tenant_id=tenant_id, is_deleted=False
-        )
+        opportunity = Opportunity.objects.get(id=opportunity_id, tenant_id=tenant_id, is_deleted=False)
 
         # Update fields
         for field, value in data.items():
@@ -594,9 +590,7 @@ class OpportunityService:
             ValidationError: If opportunity cannot be closed.
         """
         with transaction.atomic():
-            opportunity = Opportunity.objects.get(
-                id=opportunity_id, tenant_id=tenant_id, is_deleted=False
-            )
+            opportunity = Opportunity.objects.get(id=opportunity_id, tenant_id=tenant_id, is_deleted=False)
 
             if opportunity.status != OpportunityStatus.OPEN:
                 raise ValidationError("Opportunity is already closed")
@@ -663,9 +657,7 @@ class OpportunityService:
             raise ValidationError("Loss reason is required for lost opportunities")
 
         with transaction.atomic():
-            opportunity = Opportunity.objects.get(
-                id=opportunity_id, tenant_id=tenant_id, is_deleted=False
-            )
+            opportunity = Opportunity.objects.get(id=opportunity_id, tenant_id=tenant_id, is_deleted=False)
 
             if opportunity.status != OpportunityStatus.OPEN:
                 raise ValidationError("Opportunity is already closed")
@@ -708,9 +700,7 @@ class OpportunityService:
         Raises:
             Opportunity.DoesNotExist: If opportunity not found.
         """
-        opportunity = Opportunity.objects.get(
-            id=opportunity_id, tenant_id=tenant_id, is_deleted=False
-        )
+        opportunity = Opportunity.objects.get(id=opportunity_id, tenant_id=tenant_id, is_deleted=False)
         opportunity.is_deleted = True
         opportunity.deleted_at = timezone.now()
         opportunity.save()
@@ -745,7 +735,7 @@ class ActivityService:
                     owner_id = None  # Invalid type, set to None
             except (ValueError, TypeError):
                 owner_id = None  # Invalid UUID string, set to None
-        
+
         activity = Activity.objects.create(
             tenant_id=tenant_id,
             activity_type=data.get("activity_type", ActivityType.NOTE),
@@ -764,9 +754,7 @@ class ActivityService:
         # Update last_activity_at on related opportunity (CRM-BR-008)
         if activity.related_to_type == RelatedToType.OPPORTUNITY:
             try:
-                opportunity = Opportunity.objects.get(
-                    id=activity.related_to_id, tenant_id=tenant_id, is_deleted=False
-                )
+                opportunity = Opportunity.objects.get(id=activity.related_to_id, tenant_id=tenant_id, is_deleted=False)
                 opportunity.last_activity_at = timezone.now()
                 opportunity.save(update_fields=["last_activity_at"])
             except Opportunity.DoesNotExist:
@@ -954,9 +942,7 @@ class ForecastingService:
         if owner_id:
             queryset = queryset.filter(owner_id=owner_id)
 
-        closed_opportunities = queryset.filter(
-            status__in=[OpportunityStatus.WON, OpportunityStatus.LOST]
-        ).all()
+        closed_opportunities = queryset.filter(status__in=[OpportunityStatus.WON, OpportunityStatus.LOST]).all()
 
         won_count = sum(1 for opp in closed_opportunities if opp.status == OpportunityStatus.WON)
         total_count = len(closed_opportunities)
@@ -976,7 +962,7 @@ class ForecastingService:
         tenant_id: UUID,
         period_days: int = 90,
     ) -> Dict[str, Any]:
-        """Get AI-predicted revenue (placeholder for Phase 8).
+        """Reject AI prediction requests until a governed model is integrated.
 
         Args:
             tenant_id: Tenant ID.
@@ -988,15 +974,7 @@ class ForecastingService:
         Note:
             This is a placeholder. Full AI integration will be in Phase 9.
         """
-        # For now, return weighted pipeline as prediction
-        pipeline = self.get_weighted_pipeline(tenant_id=tenant_id, period_days=period_days)
-
-        return {
-            "predicted_revenue": pipeline["weighted_pipeline_value"],
-            "confidence": 0.75,  # Placeholder
-            "factors": ["historical_win_rate", "pipeline_velocity", "deal_stage_distribution"],
-            "period_days": period_days,
-        }
+        raise NotImplementedError("AI revenue prediction is not implemented")
 
 
 class IntegrationService:
@@ -1088,9 +1066,7 @@ class IntegrationService:
                     )
 
             # Step 3: Create opportunity
-            opportunity_name = opportunity_data.get(
-                "name", f"{lead.company} - {lead.first_name} {lead.last_name}"
-            )
+            opportunity_name = opportunity_data.get("name", f"{lead.company} - {lead.first_name} {lead.last_name}")
             # Use lead's owner_id if available, otherwise generate a default UUID
             # Note: In production, this should use the actual user's UUID, not a generated one
             owner_id = lead.owner_id if lead.owner_id else uuid.uuid4()

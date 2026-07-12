@@ -1,36 +1,29 @@
-"""
-Security & Access Control Permissions
-"""
+"""Policy-engine-backed permissions for security administration."""
 
-from rest_framework import permissions
+from types import SimpleNamespace
 
+from rest_framework.permissions import SAFE_METHODS
 
-class SecurityAdminPermission(permissions.BasePermission):
-    """Permission check for security administrators."""
-
-    def has_permission(self, request, view):
-        """Check if user has security admin permissions."""
-        # TODO: Integrate with Policy Engine
-        # For now, check if user has security admin role
-        if not request.user or not request.user.is_authenticated:
-            return False
-
-        # Check user roles (to be integrated with Policy Engine)
-        user_roles = getattr(request.user, "roles", [])
-        return "security_admin" in user_roles or "super_admin" in user_roles
+from src.core.auth.policy_permissions import PolicyRequiredPermission
 
 
-class SecurityViewerPermission(permissions.BasePermission):
-    """Permission check for security viewers (read-only)."""
+class SecurityAdminPermission(PolicyRequiredPermission):
+    """Require manifest-declared role administration permissions."""
 
     def has_permission(self, request, view):
-        """Check if user has security viewer permissions."""
-        if not request.user or not request.user.is_authenticated:
+        view = view or SimpleNamespace()
+        view.required_permissions = [
+            "security.roles:read" if request.method in SAFE_METHODS else "security.roles:update"
+        ]
+        return super().has_permission(request, view)
+
+
+class SecurityViewerPermission(PolicyRequiredPermission):
+    """Require read access and reject mutation attempts."""
+
+    def has_permission(self, request, view):
+        if request.method not in SAFE_METHODS:
             return False
-
-        # Allow read-only access for security viewers
-        if request.method in permissions.SAFE_METHODS:
-            user_roles = getattr(request.user, "roles", [])
-            return "security_viewer" in user_roles or "security_admin" in user_roles
-
-        return False
+        view = view or SimpleNamespace()
+        view.required_permissions = ["security.roles:read"]
+        return super().has_permission(request, view)

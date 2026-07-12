@@ -13,7 +13,6 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import httpx
-from django.db import transaction
 from django.utils import timezone
 
 from src.core.encryption import EncryptionService
@@ -207,7 +206,6 @@ class IntegrationService:
             - MySQL: mysql://user:pass@host:port/dbname
             - SQLite: sqlite:///path/to/database.db
         """
-        import urllib.parse
         from urllib.parse import urlparse
 
         try:
@@ -515,9 +513,7 @@ class IntegrationService:
             records = data if isinstance(data, list) else data.get("data", []) or data.get("results", [])
 
             # Transform and store records
-            return IntegrationService._transform_and_store_records(
-                integration, records, data_mapping, "pull"
-            )
+            return IntegrationService._transform_and_store_records(integration, records, data_mapping, "pull")
 
         except Exception as e:
             logger.error(f"API pull failed: {e}")
@@ -567,7 +563,8 @@ class IntegrationService:
                 # Table names must be alphanumeric with underscores only
                 # Note: Table names cannot be parameterized in SQL, so validation is required
                 import re
-                if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', table_name):
+
+                if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", table_name):
                     raise ValueError(f"Invalid table name: {table_name}")
                 # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                 # Justification: Table name is validated via regex (alphanumeric + underscores only)
@@ -583,9 +580,7 @@ class IntegrationService:
             conn.close()
 
             # Transform and store records
-            return IntegrationService._transform_and_store_records(
-                integration, records, data_mapping, "pull"
-            )
+            return IntegrationService._transform_and_store_records(integration, records, data_mapping, "pull")
 
         except Exception as e:
             logger.error(f"Database pull failed: {e}")
@@ -616,11 +611,8 @@ class IntegrationService:
         for record in records:
             try:
                 # Apply transformations
-                transformed_record = IntegrationService._apply_transformations(record, mappings, direction)
-
-                # Store in local database (simplified - would need target model configuration)
-                # For now, just count as synced
-                records_synced += 1
+                IntegrationService._apply_transformations(record, mappings, direction)
+                raise NotImplementedError("Local persistence requires an explicit target-model contract")
 
             except Exception as e:
                 errors.append(f"Record transformation failed: {str(e)}")
@@ -629,9 +621,7 @@ class IntegrationService:
         return {"records_synced": records_synced, "errors": errors}
 
     @staticmethod
-    def _apply_transformations(
-        record: Dict[str, Any], mappings: list, direction: str
-    ) -> Dict[str, Any]:
+    def _apply_transformations(record: Dict[str, Any], mappings: list, direction: str) -> Dict[str, Any]:
         """Apply field transformations based on mappings."""
         transformed = record.copy()
 
@@ -832,13 +822,14 @@ class IntegrationService:
                     # Build INSERT statement
                     # SECURITY: Validate table_name and column names to prevent SQL injection
                     import re
-                    if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', table_name):
+
+                    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", table_name):
                         raise ValueError(f"Invalid table name: {table_name}")
 
                     # Validate column names
                     validated_columns = []
                     for col in transformed.keys():
-                        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', col):
+                        if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", col):
                             raise ValueError(f"Invalid column name: {col}")
                         validated_columns.append(col)
 
@@ -1067,14 +1058,9 @@ class WebhookProcessor:
         if not workflow_id:
             return {"success": False, "error": "No workflow_id in configuration"}
 
-        # TODO: Trigger workflow
-        # This would:
-        # 1. Get workflow instance
-        # 2. Start workflow with payload as context
-        # 3. Return workflow instance ID
-
-        logger.info(f"Triggering workflow {workflow_id} via webhook")
-        return {"success": True, "message": f"Workflow triggered (placeholder)", "workflow_instance_id": None}
+        raise NotImplementedError(
+            f"Workflow trigger {workflow_id} is unavailable until workflow_automation exposes a runtime contract"
+        )
 
     @staticmethod
     def _handle_custom_script(

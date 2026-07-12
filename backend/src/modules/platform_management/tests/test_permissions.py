@@ -10,6 +10,7 @@ def build_request(method="get", roles=None, authenticated=True):
     request.user = SimpleNamespace(
         is_authenticated=authenticated,
         roles=roles or [],
+        has_perm=lambda permission: permission in {"platform.settings:read", "platform.settings:update"},
     )
     return request
 
@@ -20,18 +21,15 @@ def test_platform_admin_permission_denies_unauthenticated():
     assert permission.has_permission(request, None) is False
 
 
-def test_platform_admin_permission_allows_admin_roles():
+def test_platform_admin_permission_uses_declared_permissions():
     permission = PlatformAdminPermission()
-    request = build_request(roles=["platform_admin"])
-    assert permission.has_permission(request, None) is True
-
-    request = build_request(roles=["super_admin"])
+    request = build_request()
     assert permission.has_permission(request, None) is True
 
 
 def test_platform_viewer_permission_safe_methods_only():
     permission = PlatformViewerPermission()
-    request = build_request(method="get", roles=["platform_viewer"])
+    request = build_request(method="get")
     assert permission.has_permission(request, None) is True
 
     request = build_request(method="post", roles=["platform_viewer"])

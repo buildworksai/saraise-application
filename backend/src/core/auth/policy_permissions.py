@@ -41,7 +41,7 @@ class PolicyRequiredPermission(BasePermission):
     Evaluation logic:
     - SaaS mode: Calls saraise-policy-engine via HTTP (with circuit breaker)
     - Self-hosted: Evaluates local role-permission mappings
-    - Development: Logs policy evaluation, permits by default (configurable)
+    - Development: Uses the same local RBAC evaluation as self-hosted mode
     """
 
     def has_permission(self, request: Request, view: APIView) -> bool:
@@ -52,15 +52,13 @@ class PolicyRequiredPermission(BasePermission):
 
         # Extract required permissions from view
         required_perms = getattr(view, "required_permissions", None)
-        if required_perms is None:
-            # No explicit permissions declared — default to authenticated-only
-            # This preserves backward compatibility during migration
-            logger.debug(
-                "No required_permissions on %s.%s — defaulting to authenticated-only",
+        if not required_perms:
+            logger.error(
+                "Policy DENIED: no required_permissions declared on %s.%s",
                 type(view).__name__,
                 request.method,
             )
-            return True
+            return False
 
         # Get user context
         user = request.user
@@ -102,20 +100,14 @@ class PolicyRequiredPermission(BasePermission):
         """
         Evaluate policy via saraise-policy-engine service.
 
-        Falls back to local evaluation if policy engine is unavailable
-        (circuit breaker open).
+        Fails closed if policy configuration or the service is unavailable.
         """
         import requests as http_requests
 
         policy_engine_url = getattr(settings, "SARAISE_POLICY_ENGINE_URL", None)
         if not policy_engine_url:
-            logger.warning("SARAISE_POLICY_ENGINE_URL not configured — falling back to local RBAC")
-            return self._evaluate_local_policy(
-                user=request.user,
-                user_roles=user_roles,
-                required_perms=required_perms,
-                request=request,
-            )
+            logger.error("Policy DENIED: SARAISE_POLICY_ENGINE_URL is not configured")
+            return False
 
         try:
             response = http_requests.post(
@@ -143,17 +135,11 @@ class PolicyRequiredPermission(BasePermission):
                     )
                 return allowed
             else:
-                logger.error("Policy engine returned %d — falling back to local RBAC", response.status_code)
+                logger.error("Policy DENIED: policy engine returned %d", response.status_code)
         except http_requests.RequestException as exc:
-            logger.error("Policy engine unavailable: %s — falling back to local RBAC", exc)
+            logger.error("Policy DENIED: policy engine unavailable: %s", exc)
 
-        # Fallback to local evaluation
-        return self._evaluate_local_policy(
-            user=request.user,
-            user_roles=user_roles,
-            required_perms=required_perms,
-            request=request,
-        )
+        return False
 
     def _evaluate_local_policy(
         self,

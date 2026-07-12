@@ -8,14 +8,27 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import httpx
-from django.db import transaction
+from django.conf import settings
 
 from .models import AIProvider, AIProviderCredential
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_PROVIDER_BASE_URLS = {
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
+    "google": "https://generativelanguage.googleapis.com/v1",
+    "groq": "https://api.groq.com/openai/v1",
+    "huggingface": "https://api-inference.huggingface.co",
+}
+
+
+def _provider_base_url(provider: str, override: Optional[str]) -> str:
+    configured = getattr(settings, "SARAISE_AI_PROVIDER_BASE_URLS", {})
+    return override or configured.get(provider) or DEFAULT_PROVIDER_BASE_URLS[provider]
 
 
 class AIProviderService(ABC):
@@ -53,7 +66,6 @@ class AIProviderService(ABC):
         Raises:
             Exception: If API call fails.
         """
-        pass
 
 
 class OpenAIProvider(AIProviderService):
@@ -62,7 +74,7 @@ class OpenAIProvider(AIProviderService):
     def __init__(self, api_key: str, base_url: Optional[str] = None):
         """Initialize OpenAI provider."""
         super().__init__(api_key, base_url)
-        self.base_url = base_url or "https://api.openai.com/v1"
+        self.base_url = _provider_base_url("openai", base_url)
 
     def complete(
         self,
@@ -103,7 +115,7 @@ class AnthropicProvider(AIProviderService):
     def __init__(self, api_key: str, base_url: Optional[str] = None):
         """Initialize Anthropic provider."""
         super().__init__(api_key, base_url)
-        self.base_url = base_url or "https://api.anthropic.com/v1"
+        self.base_url = _provider_base_url("anthropic", base_url)
 
     def complete(
         self,
@@ -145,7 +157,7 @@ class GoogleGeminiProvider(AIProviderService):
     def __init__(self, api_key: str, base_url: Optional[str] = None):
         """Initialize Google Gemini provider."""
         super().__init__(api_key, base_url)
-        self.base_url = base_url or "https://generativelanguage.googleapis.com/v1"
+        self.base_url = _provider_base_url("google", base_url)
 
     def complete(
         self,
@@ -184,7 +196,7 @@ class GroqProvider(AIProviderService):
     def __init__(self, api_key: str, base_url: Optional[str] = None):
         """Initialize Groq provider."""
         super().__init__(api_key, base_url)
-        self.base_url = base_url or "https://api.groq.com/openai/v1"
+        self.base_url = _provider_base_url("groq", base_url)
 
     def complete(
         self,
@@ -225,7 +237,7 @@ class HuggingFaceProvider(AIProviderService):
     def __init__(self, api_key: str, base_url: Optional[str] = None):
         """Initialize HuggingFace provider."""
         super().__init__(api_key, base_url)
-        self.base_url = base_url or "https://api-inference.huggingface.co"
+        self.base_url = _provider_base_url("huggingface", base_url)
 
     def complete(
         self,

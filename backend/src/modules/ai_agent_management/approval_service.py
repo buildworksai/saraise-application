@@ -297,9 +297,7 @@ class ApprovalService:
         )
 
         if approver_id:
-            # Filter by approver (if SoD policies specify)
-            # For now, return all pending requests
-            pass
+            query = query.exclude(requested_by=approver_id)
 
         return list(query.order_by("requested_at")[:limit])
 
@@ -422,15 +420,12 @@ class ApprovalService:
         # Check recent tool invocations
         from .tool_models import ToolInvocation
 
-        _recent_invocations = ToolInvocation.objects.filter(  # noqa: F841
+        return ToolInvocation.objects.filter(
             tenant_id=tenant_id,
             tool__name=action.split(".")[-1] if "." in action else action,
+            agent_execution__agent__subject_id=user_id,
             invoked_at__gte=timezone.now() - timedelta(hours=24),
-        )
-
-        # TODO: Check actual user attribution from agent execution
-        # For now, return False (placeholder)
-        return False
+        ).exists()
 
     def _get_user_recent_actions(self, tenant_id: str, user_id: str) -> List[str]:
         """Get user's recent actions.
@@ -442,9 +437,12 @@ class ApprovalService:
         Returns:
             List of action identifiers.
         """
-        # TODO: Implement actual action tracking
-        # For now, return empty list (placeholder)
-        return []
+        invocations = ToolInvocation.objects.filter(
+            tenant_id=tenant_id,
+            agent_execution__agent__subject_id=user_id,
+            invoked_at__gte=timezone.now() - timedelta(hours=24),
+        ).select_related("tool")
+        return [f"{invocation.tool.owning_module}.{invocation.tool.name}" for invocation in invocations]
 
     def _record_sod_violation(
         self,

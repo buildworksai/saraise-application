@@ -148,9 +148,9 @@ class NotificationService:
             notification: Notification instance.
         """
         try:
-            # Get user email (simplified - in production, fetch from User model)
-            # For now, use a placeholder
-            user_email = notification.metadata.get("user_email", "user@example.com")
+            user_email = notification.metadata.get("user_email")
+            if not user_email:
+                raise ValueError("Notification email delivery requires metadata.user_email")
 
             send_mail(
                 subject=notification.title,
@@ -239,7 +239,7 @@ class NotificationService:
                     # Check if error is retryable
                     retryable_errors = ["Throttling", "ServiceUnavailable", "InternalError"]
                     if error_code in retryable_errors and attempt < max_retries - 1:
-                        wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                        wait_time = retry_delay * (2**attempt)  # Exponential backoff
                         logger.warning(
                             f"SMS send attempt {attempt + 1} failed (retryable): {error_code}. "
                             f"Retrying in {wait_time}s..."
@@ -249,8 +249,7 @@ class NotificationService:
                     else:
                         # Non-retryable error or max retries reached
                         logger.error(
-                            f"SMS send failed for notification {notification.id}: "
-                            f"{error_code} - {error_message}"
+                            f"SMS send failed for notification {notification.id}: " f"{error_code} - {error_message}"
                         )
                         return
 
@@ -373,9 +372,7 @@ class NotificationService:
                                         )
                                         token_obj.is_active = False
                                         token_obj.save(update_fields=["is_active"])
-                                        logger.info(
-                                            f"Deactivated invalid FCM token for user {notification.user_id}"
-                                        )
+                                        logger.info(f"Deactivated invalid FCM token for user {notification.user_id}")
                                     except PushNotificationToken.DoesNotExist:
                                         pass
 
@@ -395,9 +392,7 @@ class NotificationService:
             notification.save(update_fields=["metadata"])
 
         except ImportError:
-            logger.error(
-                "firebase-admin library not installed. Install with: pip install firebase-admin"
-            )
+            logger.error("firebase-admin library not installed. Install with: pip install firebase-admin")
         except Exception as e:
             logger.error(f"Failed to send push notification {notification.id}: {e}", exc_info=True)
 
@@ -477,9 +472,9 @@ class NotificationService:
             logger.warning(f"Invalid tenant_id or user_id format: {e}")
             return 0
 
-        count = Notification.objects.filter(
-            tenant_id=tenant_id_uuid, user_id=user_id_uuid, read=False
-        ).update(read=True, read_at=timezone.now())
+        count = Notification.objects.filter(tenant_id=tenant_id_uuid, user_id=user_id_uuid, read=False).update(
+            read=True, read_at=timezone.now()
+        )
 
         logger.info(f"Marked {count} notifications as read for user {user_id}")
         return count

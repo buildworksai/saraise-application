@@ -1,36 +1,29 @@
-"""
-Platform Management Permissions
-"""
+"""Policy-engine-backed permissions for platform management."""
 
-from rest_framework import permissions
+from types import SimpleNamespace
 
+from rest_framework.permissions import SAFE_METHODS
 
-class PlatformAdminPermission(permissions.BasePermission):
-    """Permission check for platform administrators."""
-
-    def has_permission(self, request, view):
-        """Check if user has platform admin permissions."""
-        # TODO: Integrate with Policy Engine
-        # For now, check if user has platform admin role
-        if not request.user or not request.user.is_authenticated:
-            return False
-
-        # Check user roles (to be integrated with Policy Engine)
-        user_roles = getattr(request.user, "roles", [])
-        return "platform_admin" in user_roles or "super_admin" in user_roles
+from src.core.auth.policy_permissions import PolicyRequiredPermission
 
 
-class PlatformViewerPermission(permissions.BasePermission):
-    """Permission check for platform viewers (read-only)."""
+class PlatformAdminPermission(PolicyRequiredPermission):
+    """Require the manifest-declared setting write permission."""
 
     def has_permission(self, request, view):
-        """Check if user has platform viewer permissions."""
-        if not request.user or not request.user.is_authenticated:
+        view = view or SimpleNamespace()
+        view.required_permissions = [
+            "platform.settings:read" if request.method in SAFE_METHODS else "platform.settings:update"
+        ]
+        return super().has_permission(request, view)
+
+
+class PlatformViewerPermission(PolicyRequiredPermission):
+    """Require read access and reject mutation attempts."""
+
+    def has_permission(self, request, view):
+        if request.method not in SAFE_METHODS:
             return False
-
-        # Allow read-only access for platform viewers
-        if request.method in permissions.SAFE_METHODS:
-            user_roles = getattr(request.user, "roles", [])
-            return "platform_viewer" in user_roles or "platform_admin" in user_roles
-
-        return False
+        view = view or SimpleNamespace()
+        view.required_permissions = ["platform.settings:read"]
+        return super().has_permission(request, view)

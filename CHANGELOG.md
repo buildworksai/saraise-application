@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Envelope encryption with pluggable key-management backends and master-key rewrapping
+- Reversible initial migrations for the notifications module
+- Policy-backed tenant-management permission declarations
 - Initial changelog
 - Phase 7.5: Licensing subsystem for self-hosted deployments
   - 14-day trial period for new installations
@@ -37,10 +40,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 
 ### Removed
+- Unused direct PyJWT dependency and committed backend test/coverage/migration-backup artifacts
+- Nine unfinished scaffold modules from the always-enabled foundation entitlement list
 
 ### Fixed
+- User-bound AI executions now validate active sessions on every execution transition
+- AI approval separation-of-duties checks now use attributed tool invocations
+- Provider base URLs can now be overridden through deployment configuration
+- Placeholder workflow triggers, AI revenue predictions, and module lifecycle operations fail explicitly
 
 ### Security
+- Policy evaluation fails closed in SaaS when configuration or the Policy Engine is unavailable
+- Login rejects the unsupported MFA field instead of silently ignoring it
 - Phase 7.5: License validation prevents unauthorized module access
 - Phase 7.6: Mode-aware authentication ensures proper session validation per deployment mode
 

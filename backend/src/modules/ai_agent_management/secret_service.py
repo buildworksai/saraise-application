@@ -6,14 +6,13 @@ Task: 402.1 - Egress Allowlisting & Secret Isolation
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from django.db import transaction
 from django.utils import timezone
+
+from src.core.encryption.key_management import EnvelopeEncryptionService
 
 from .egress_models import Secret, SecretAccess
 from .models import AgentExecution
@@ -24,9 +23,16 @@ logger = logging.getLogger(__name__)
 class SecretService:
     """Service for managing secrets with per-tenant isolation."""
 
-    def __init__(self) -> None:
+    def __init__(self, encryption: Optional[EnvelopeEncryptionService] = None) -> None:
         """Initialize secret service."""
-        self._encryption_key_id = "default"  # TODO: Implement key management
+        self._encryption = encryption
+
+    @property
+    def encryption(self) -> EnvelopeEncryptionService:
+        """Resolve key management lazily so imports never mask configuration failures."""
+        if self._encryption is None:
+            self._encryption = EnvelopeEncryptionService()
+        return self._encryption
 
     def create_secret(
         self,
@@ -64,7 +70,7 @@ class SecretService:
             raise ValueError(f"Secret {name} already exists for tenant {tenant_id}")
 
         # Encrypt secret value
-        encrypted_value = self._encrypt_secret(secret_value)
+        envelope = self.encryption.encrypt(secret_value)
 
         # Create secret
         secret = Secret.objects.create(
@@ -72,8 +78,9 @@ class SecretService:
             name=name,
             description=description,
             secret_type=secret_type,
-            encrypted_value=encrypted_value,
-            encryption_key_id=self._encryption_key_id,
+            encrypted_value=envelope.ciphertext,
+            encryption_key_id=envelope.key_id,
+            wrapped_data_key=envelope.wrapped_data_key,
             expires_at=expires_at,
             rotation_interval_days=rotation_interval_days,
             created_by=created_by,
@@ -115,7 +122,11 @@ class SecretService:
             raise ValueError(f"Secret {secret_name} has expired")
 
         # Decrypt secret
-        secret_value = self._decrypt_secret(secret.encrypted_value)
+        if not secret.wrapped_data_key:
+            raise ValueError("Legacy secret requires explicit re-encryption before it can be read")
+        secret_value = self.encryption.decrypt(
+            secret.encrypted_value, secret.wrapped_data_key, secret.encryption_key_id
+        )
 
         # Log access
         SecretAccess.objects.create(
@@ -155,19 +166,29 @@ class SecretService:
 
         if not secret:
             raise ValueError(f"Secret {secret_name} not found")
-
         # Encrypt new value
-        encrypted_value = self._encrypt_secret(new_secret_value)
+        envelope = self.encryption.encrypt(new_secret_value)
 
         # Update secret
-        secret.encrypted_value = encrypted_value
+        secret.encrypted_value = envelope.ciphertext
+        secret.wrapped_data_key = envelope.wrapped_data_key
+        secret.encryption_key_id = envelope.key_id
         secret.last_rotated_at = timezone.now()
 
         # Update expiration if rotation interval is set
         if secret.rotation_interval_days:
             secret.expires_at = timezone.now() + timedelta(days=secret.rotation_interval_days)
 
-        secret.save(update_fields=["encrypted_value", "last_rotated_at", "expires_at", "updated_at"])
+        secret.save(
+            update_fields=[
+                "encrypted_value",
+                "wrapped_data_key",
+                "encryption_key_id",
+                "last_rotated_at",
+                "expires_at",
+                "updated_at",
+            ]
+        )
 
         logger.info(f"Rotated secret {secret_name} for tenant {tenant_id}")
 
@@ -241,37 +262,19 @@ class SecretService:
 
         return list(expired)
 
-    def _encrypt_secret(self, secret_value: str) -> str:
-        """Encrypt secret value.
-
-        Args:
-            secret_value: Secret value to encrypt.
-
-        Returns:
-            Encrypted value (base64 encoded).
-
-        Note:
-            Uses Fernet symmetric encryption from EncryptionService.
-        """
-        from src.core.encryption import EncryptionService
-
-        return EncryptionService.encrypt(secret_value)
-
-    def _decrypt_secret(self, encrypted_value: str) -> str:
-        """Decrypt secret value.
-
-        Args:
-            encrypted_value: Encrypted value (base64 encoded).
-
-        Returns:
-            Decrypted secret value.
-
-        Note:
-            Uses Fernet symmetric decryption from EncryptionService.
-        """
-        from src.core.encryption import EncryptionService
-
-        return EncryptionService.decrypt(encrypted_value)
+    def rotate_master_key(self, secret_name: str, tenant_id: str) -> Secret:
+        """Rewrap a secret's data key under the active master key without exposing plaintext."""
+        secret = Secret.objects.filter(tenant_id=tenant_id, name=secret_name, is_active=True).first()
+        if not secret:
+            raise ValueError(f"Secret {secret_name} not found")
+        if not secret.wrapped_data_key:
+            raise ValueError("Legacy secret cannot be rewrapped; rotate its value explicitly")
+        wrapped_data_key, key_id = self.encryption.rewrap(secret.wrapped_data_key, secret.encryption_key_id)
+        secret.wrapped_data_key = wrapped_data_key
+        secret.encryption_key_id = key_id
+        secret.last_rotated_at = timezone.now()
+        secret.save(update_fields=["wrapped_data_key", "encryption_key_id", "last_rotated_at", "updated_at"])
+        return secret
 
 
 # Global secret service instance

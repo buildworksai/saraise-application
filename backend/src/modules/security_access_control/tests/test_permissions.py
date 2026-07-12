@@ -10,6 +10,7 @@ def build_request(method="get", roles=None, authenticated=True):
     request.user = SimpleNamespace(
         is_authenticated=authenticated,
         roles=roles or [],
+        has_perm=lambda permission: permission in {"security.roles:read", "security.roles:update"},
     )
     return request
 
@@ -20,18 +21,15 @@ def test_security_admin_permission_denies_unauthenticated():
     assert permission.has_permission(request, None) is False
 
 
-def test_security_admin_permission_allows_admin_roles():
+def test_security_admin_permission_uses_declared_permissions():
     permission = SecurityAdminPermission()
-    request = build_request(roles=["security_admin"])
-    assert permission.has_permission(request, None) is True
-
-    request = build_request(roles=["super_admin"])
+    request = build_request()
     assert permission.has_permission(request, None) is True
 
 
 def test_security_viewer_permission_safe_methods_only():
     permission = SecurityViewerPermission()
-    request = build_request(method="get", roles=["security_viewer"])
+    request = build_request(method="get")
     assert permission.has_permission(request, None) is True
 
     request = build_request(method="post", roles=["security_viewer"])
