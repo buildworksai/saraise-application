@@ -3,8 +3,8 @@
 **BuildWorks.AI | Innovation, Automation, Transformation, Architecture & AI Practice**
 
 **SPDX-License-Identifier: Apache-2.0**
-**Version**: 5.0.0
-**Last Updated**: February 8, 2026
+**Version**: 5.1.0
+**Last Updated**: July 13, 2026
 
 ---
 
@@ -26,6 +26,20 @@ AUTHORITATIVE SOURCE: saraise-documentation/
 **Before ANY operation, agents MUST read `saraise-documentation/AGENTS.md`.**
 
 **Engineering Philosophy (Kaizen, Monozukuri, Jidoka, Ordnung, Vorsprung durch Technik, Stabilitat) and Operational Disciplines (Shokunin, Nemawashi, Marveling, First-Principles) are defined in the master AGENTS.md and enforced here.**
+
+---
+
+## Adopted Engineering Principles (Cross-Lab Agent Contract)
+
+Inherited from `saraise-documentation/AGENTS.md` § *Adopted Engineering Principles* — NON-NEGOTIABLE in this repository:
+
+1. **Mirror rule** — `AGENTS.md` is the only editable agent guide. Any `CLAUDE.md` is a verbatim generated mirror (`cp AGENTS.md CLAUDE.md` after edits); divergence is a defect.
+2. **Scoped authority** — this file governs saraise-application only; on conflict, the master file in `saraise-documentation/` wins.
+3. **Declared flows only** — this app calls `license-server` and `module-registry` through their published APIs only. It never implements platform control-plane behavior and never calls platform internals directly. *(Ordnung)*
+4. **False confidence is worse than absence** — stub or mock code that returns fabricated success data is a defect, not progress. Development-mode shortcuts (skipped license checks, relaxed auth) must be impossible to enable in production and visibly marked. *(Jidoka)*
+5. **Artifact discipline** — built artifacts (JS bundles, wheels, coverage output) never enter git history; documents over ~30 MB move to Git LFS. *(Ordnung)*
+6. **Jidoka engagement** — plan before multi-step work; delegate independent workstreams to parallel subagents; stop the line on any red check and fix before continuing. Completion claims require passing evidence (test/build output). *(Shokunin)*
+7. **Indexed knowledge first** — query `rules-index.json`, module `contracts.ts`, and `manifest.yaml` before falling back to grep or full-file reads. *(Vorsprung durch Technik)*
 
 ---
 
@@ -265,3 +279,27 @@ Only after ALL tests pass, ALL hooks pass, AND retrospective written.
 **Classification:** Open Source (Apache 2.0)
 **Authority Source:** saraise-documentation/
 **Engineering Philosophy:** BuildWorks.AI Principles — enforced without exception
+---
+
+## Commit Policy (MANDATORY — MACHINE-ENFORCED)
+
+**Commits are authored by the engineer accountable for them. AI attribution is FORBIDDEN.**
+
+| Rule | Requirement |
+| ---- | ----------- |
+| Author identity | `Raghunath Chava <raghunath@buildworks.ai>` — no other identity permitted |
+| AI co-author trailer | **FORBIDDEN.** No `Co-Authored-By:` line naming Claude, Codex, GPT, Copilot, or any AI |
+| AI generation footer | **FORBIDDEN.** No "Generated with [Claude Code]" or equivalent, in commit messages **or PR bodies** |
+| AI attribution markers | **FORBIDDEN.** No 🤖 marker in commit messages |
+
+This is enforced by a `commit-msg` git hook that **blocks the commit** on violation.
+
+Install it after cloning (git hooks are not version-controlled):
+
+```bash
+git config user.email "raghunath@buildworks.ai"
+git config user.name  "Raghunath Chava"
+# Ensure .git/hooks/commit-msg is present and executable — see the ecosystem commit-msg hook.
+```
+
+Agents operating on this repository MUST NOT add AI attribution of any kind to commits or pull requests.
