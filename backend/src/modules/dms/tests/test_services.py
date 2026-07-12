@@ -3,12 +3,11 @@ Service Unit Tests for Dms module.
 
 Tests business logic in services layer.
 """
-import io
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 
-from src.modules.dms.models import Document, DocumentVersion, Folder
+from src.modules.dms.models import Document, Folder
 from src.modules.dms.services import DocumentStorageService
 
 

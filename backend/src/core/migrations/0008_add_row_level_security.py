@@ -21,16 +21,19 @@ def create_rls_functions(apps, schema_editor):
     if connection.vendor != "postgresql":
         return
 
-    schema_editor.execute("""
+    schema_editor.execute(
+        """
         CREATE OR REPLACE FUNCTION saraise_current_tenant_id()
         RETURNS TEXT AS $$
         BEGIN
             RETURN current_setting('app.current_tenant_id', TRUE);
         END;
         $$ LANGUAGE plpgsql STABLE;
-    """)
+    """
+    )
 
-    schema_editor.execute("""
+    schema_editor.execute(
+        """
         CREATE OR REPLACE FUNCTION saraise_enable_rls(table_name TEXT)
         RETURNS VOID AS $$
         BEGIN
@@ -56,7 +59,8 @@ def create_rls_functions(apps, schema_editor):
             );
         END;
         $$ LANGUAGE plpgsql;
-    """)
+    """
+    )
 
 
 def drop_rls_functions(apps, schema_editor):

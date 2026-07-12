@@ -7,14 +7,16 @@ This is the PRIMARY security mechanism for multi-tenant isolation.
 Reference: saraise-documentation/rules/compliance-enforcement.md
 Rule: ALL tenant-scoped queries MUST filter by tenant_id
 """
+
 import uuid
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.modules.api_management.models import TenantBaseModel
 from src.core.auth_utils import get_user_tenant_id
+from src.modules.api_management.models import TenantBaseModel
 
 User = get_user_model()
 
@@ -35,6 +37,7 @@ def api_client():
 def tenant_a_user(db):
     """Create user for tenant A."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
@@ -59,6 +62,7 @@ def tenant_a_user(db):
 def tenant_b_user(db):
     """Create user for tenant B."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
@@ -110,7 +114,7 @@ class TestApiManagementTenantIsolation:
         # Login as tenant A
         api_client.force_authenticate(user=tenant_a_user)
 
-        response = api_client.get(f"/api/v1/api-management/resources/")
+        response = api_client.get("/api/v1/api-management/resources/")
         assert response.status_code == status.HTTP_200_OK
         data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         resource_ids = [r["id"] for r in data]
@@ -121,7 +125,7 @@ class TestApiManagementTenantIsolation:
 
     def test_user_cannot_get_other_tenant_resource_by_id(self, api_client, tenant_a_user, tenant_b_user):
         """Test: User cannot GET other tenant's resource by ID (returns 404)."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
+        get_user_tenant_id(tenant_a_user)
         tenant_b_id = get_user_tenant_id(tenant_b_user)
 
         # Create resource for tenant B
@@ -156,11 +160,7 @@ class TestApiManagementTenantIsolation:
 
         # Try to update tenant B's resource
         data = {"name": "Hacked Name"}
-        response = api_client.put(
-            f"/api/v1/api-management/resources/{resource_b.id}/",
-            data,
-            format="json"
-        )
+        response = api_client.put(f"/api/v1/api-management/resources/{resource_b.id}/", data, format="json")
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
         # Verify resource was not modified

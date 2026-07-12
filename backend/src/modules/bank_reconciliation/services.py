@@ -9,7 +9,9 @@ class BankAccountService:
     """Service for bank account operations."""
 
     @staticmethod
-    def create_bank_account(tenant_id: str, account_number: str, bank_name: str, account_name: str, **kwargs) -> BankAccount:
+    def create_bank_account(
+        tenant_id: str, account_number: str, bank_name: str, account_name: str, **kwargs
+    ) -> BankAccount:
         """Create a new bank account."""
         return BankAccount.objects.create(
             tenant_id=tenant_id,

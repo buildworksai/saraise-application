@@ -3,6 +3,7 @@ Service Unit Tests for Regional module.
 
 Tests business logic in services layer.
 """
+
 import pytest
 
 from src.modules.regional.models import TenantBaseModel

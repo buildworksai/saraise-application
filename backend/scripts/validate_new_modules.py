@@ -10,9 +10,8 @@ Checks for common issues that prevent migrations from working:
 - Missing __init__.py files
 """
 
-import os
-import sys
 import ast
+import sys
 from pathlib import Path
 
 # Add backend to path
@@ -77,7 +76,7 @@ def check_models_structure(module_path):
     try:
         with open(models_file, "r") as f:
             content = f.read()
-            tree = ast.parse(content, filename=str(models_file))
+            _ = ast.parse(content, filename=str(models_file))
 
         # Check for TenantBaseModel
         has_tenant_base = "TenantBaseModel" in content
@@ -132,7 +131,7 @@ def main():
     for module in MODULES:
         validate_module(module)
 
-    print(f"\n📊 Validation Summary:")
+    print("\n📊 Validation Summary:")
     print(f"   Modules checked: {len(MODULES)}")
     print(f"   Errors: {len(errors)}")
     print(f"   Warnings: {len(warnings)}\n")

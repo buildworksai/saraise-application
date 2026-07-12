@@ -3,11 +3,10 @@ Business logic services for Inventory Management module.
 """
 
 from decimal import Decimal
-from typing import Optional
 
 from django.db import transaction
 
-from .models import Item, StockBalance, StockEntry, StockEntryLine, Warehouse
+from .models import StockBalance, StockEntry, Warehouse
 
 
 class WarehouseService:

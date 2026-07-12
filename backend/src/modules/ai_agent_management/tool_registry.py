@@ -6,11 +6,12 @@ Task: 401.2 - Tool Registry & Schema Validation
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 try:
     import jsonschema
@@ -19,11 +20,6 @@ try:
 except ImportError:
     JSONSCHEMA_AVAILABLE = False
     logger.warning("jsonschema not available, schema validation will be limited")
-
-from django.db import models
-from django.utils import timezone
-
-logger = logging.getLogger(__name__)
 
 
 class ToolSideEffectClass(str, Enum):
@@ -312,8 +308,8 @@ class ToolRegistry:
         # Check required fields for objects
         if schema.type == "object" and isinstance(data, dict):
             if schema.required:
-                for field in schema.required:
-                    if field not in data:
+                for required_field in schema.required:
+                    if required_field not in data:
                         return False
 
         return True

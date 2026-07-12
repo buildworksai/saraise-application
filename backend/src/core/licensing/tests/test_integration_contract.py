@@ -33,9 +33,7 @@ def _generate_signature_platform_format(payload: dict, private_key_pem: bytes) -
     Matches license-server CryptoService.sign_license().
     """
     payload_clean = {k: v for k, v in payload.items() if k != "signature"}
-    payload_bytes = json.dumps(payload_clean, sort_keys=True, separators=(",", ":")).encode(
-        "utf-8"
-    )
+    payload_bytes = json.dumps(payload_clean, sort_keys=True, separators=(",", ":")).encode("utf-8")
     private_key = serialization.load_pem_private_key(private_key_pem, password=None)
     signature = private_key.sign(
         payload_bytes,

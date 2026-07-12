@@ -37,18 +37,14 @@ repos:
         files: ^backend/
         exclude: ^backend/src/modules/.*/migrations/
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.8.0
+  - repo: local
     hooks:
       - id: mypy
         name: "Python: Type Checking (MyPy)"
-        args: ["--ignore-missing-imports", "--exclude=tests/"]
+        entry: bash -c 'cd backend && mypy --config-file mypy-precommit.ini src'
+        language: system
         files: ^backend/src/
-        additional_dependencies:
-          - types-redis
-          - types-requests
-          - types-PyMySQL
-          - django-stubs>=5.0.2
+        pass_filenames: false
 
   # ===================================
   # TypeScript / Frontend Quality

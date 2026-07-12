@@ -11,7 +11,6 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
-from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType
 from src.modules.ai_agent_management.quota_models import QuotaPeriod, QuotaType, QuotaUsage, TenantQuota
 from src.modules.ai_agent_management.quota_service import QuotaService
 
@@ -126,7 +125,7 @@ class TestQuotaService:
 
     def test_get_quota_usage(self) -> None:
         """Test getting quota usage."""
-        service = QuotaService()
+        QuotaService()
 
         tenant_id = "test-tenant-1"
 
@@ -177,7 +176,7 @@ class TestQuotaService:
 
     def test_update_quota(self) -> None:
         """Test updating a quota."""
-        service = QuotaService()
+        QuotaService()
 
         tenant_id = "test-tenant-1"
 

@@ -11,12 +11,7 @@ from django.test import TestCase, override_settings
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.core.auth.mode import (
-    get_saraise_mode,
-    is_development,
-    is_saas,
-    is_self_hosted,
-)
+from src.core.auth.mode import get_saraise_mode, is_development, is_saas, is_self_hosted
 
 User = get_user_model()
 

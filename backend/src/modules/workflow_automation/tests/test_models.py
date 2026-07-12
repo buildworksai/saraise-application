@@ -3,20 +3,22 @@ Model Unit Tests for WorkflowAutomation module.
 
 Tests model creation, validation, and relationships.
 """
+
 import uuid
+
 import pytest
 from django.contrib.auth import get_user_model
 
 from src.modules.workflow_automation.models import (
     Workflow,
-    WorkflowStep,
     WorkflowInstance,
-    WorkflowTask,
-    WorkflowStatus,
-    WorkflowTriggerType,
-    WorkflowStepType,
     WorkflowInstanceState,
+    WorkflowStatus,
+    WorkflowStep,
+    WorkflowStepType,
+    WorkflowTask,
     WorkflowTaskStatus,
+    WorkflowTriggerType,
 )
 
 User = get_user_model()

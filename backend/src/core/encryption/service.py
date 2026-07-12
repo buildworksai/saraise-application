@@ -52,8 +52,7 @@ class EncryptionService:
         salt = getattr(settings, "SARAISE_ENCRYPTION_SALT", b"saraise-salt-change-in-production")
 
         logger.warning(
-            "Using password-based key derivation. "
-            "Set SARAISE_ENCRYPTION_KEY environment variable for production."
+            "Using password-based key derivation. " "Set SARAISE_ENCRYPTION_KEY environment variable for production."
         )
 
         kdf = PBKDF2HMAC(

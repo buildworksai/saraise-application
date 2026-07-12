@@ -3,9 +3,9 @@ Model tests for Accounting & Finance module.
 """
 
 import uuid
-import pytest
 from decimal import Decimal
-from django.core.exceptions import ValidationError
+
+import pytest
 from django.db import IntegrityError
 
 from src.modules.accounting_finance.models import Account, JournalEntry, JournalLine, PostingPeriod

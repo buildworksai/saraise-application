@@ -138,7 +138,7 @@ module = [
 ignore_missing_imports = true
 
 [tool.django-stubs]
-django_settings_module = "saraise_backend.settings"
+django_settings_module = "saraise_backend.settings_static_analysis"
 
 # Pytest configuration is in pytest.ini
 # [tool.pytest.ini_options]

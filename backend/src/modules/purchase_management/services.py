@@ -2,8 +2,6 @@
 Business logic services for Purchase Management module.
 """
 
-from typing import Optional
-
 from django.db import transaction
 
 from .models import PurchaseOrder, PurchaseReceipt, Supplier

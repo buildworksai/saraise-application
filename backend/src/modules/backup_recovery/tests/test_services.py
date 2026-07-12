@@ -3,10 +3,10 @@ Service Unit Tests for Backup & Recovery (Extended) module.
 
 Tests business logic in services layer.
 """
-import pytest
-from django.utils import timezone
 
-from src.modules.backup_recovery.models import BackupArchive, BackupJob, BackupJobStatus, BackupRetentionPolicy, BackupSchedule
+import pytest
+
+from src.modules.backup_recovery.models import BackupJobStatus
 from src.modules.backup_recovery.services import BackupRecoveryService
 
 
@@ -36,7 +36,7 @@ class TestBackupRecoveryService:
             backup_type="full",
             created_by="user-123",
         )
-        
+
         started_job = service.start_backup_job(job.id, "tenant-123")
         assert started_job is not None
         assert started_job.status == BackupJobStatus.RUNNING
@@ -51,7 +51,7 @@ class TestBackupRecoveryService:
             created_by="user-123",
         )
         service.start_backup_job(job.id, "tenant-123")
-        
+
         completed_job = service.complete_backup_job(
             job.id,
             "tenant-123",
@@ -73,7 +73,7 @@ class TestBackupRecoveryService:
             created_by="user-123",
         )
         service.start_backup_job(job.id, "tenant-123")
-        
+
         failed_job = service.fail_backup_job(
             job.id,
             "tenant-123",
@@ -92,7 +92,7 @@ class TestBackupRecoveryService:
             backup_type="full",
             created_by="user-123",
         )
-        
+
         retrieved = service.get_backup_job(created.id, "tenant-123")
         assert retrieved is not None
         assert retrieved.id == created.id
@@ -105,7 +105,7 @@ class TestBackupRecoveryService:
             backup_type="full",
             created_by="user-123",
         )
-        
+
         retrieved = service.get_backup_job(created.id, "tenant-456")
         assert retrieved is None
 
@@ -127,7 +127,7 @@ class TestBackupRecoveryService:
             backup_type="full",
             created_by="user-456",
         )
-        
+
         jobs = service.list_backup_jobs("tenant-123")
         assert len(jobs) == 2
         assert all(j.tenant_id == "tenant-123" for j in jobs)
@@ -190,7 +190,7 @@ class TestBackupRecoveryService:
             backup_size_bytes=1024000,
             storage_location="s3://bucket/backup-123",
         )
-        
+
         archive = service.archive_backup_job(
             job.id,
             "tenant-123",
@@ -217,7 +217,7 @@ class TestBackupRecoveryService:
         )
         service.complete_backup_job(job1.id, "tenant-123", storage_location="s3://bucket/job1")
         service.complete_backup_job(job2.id, "tenant-123", storage_location="s3://bucket/job2")
-        
+
         service.archive_backup_job(
             job1.id,
             "tenant-123",
@@ -230,7 +230,7 @@ class TestBackupRecoveryService:
             archive_location="s3://bucket/archive-2",
             created_by="user-123",
         )
-        
+
         archives = service.list_backup_archives("tenant-123")
         assert len(archives) == 2
         assert all(a.tenant_id == "tenant-123" for a in archives)

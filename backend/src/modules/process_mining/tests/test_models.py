@@ -3,6 +3,7 @@ Model Unit Tests for ProcessMining module.
 
 Tests model creation, validation, and relationships.
 """
+
 import pytest
 
 from src.modules.process_mining.models import TenantBaseModel

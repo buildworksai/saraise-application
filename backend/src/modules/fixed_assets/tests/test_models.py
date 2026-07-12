@@ -3,9 +3,10 @@ Model tests for Fixed Assets module.
 """
 
 import uuid
-import pytest
 from datetime import date
 from decimal import Decimal
+
+import pytest
 
 from src.modules.fixed_assets.models import FixedAsset
 

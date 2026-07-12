@@ -5,11 +5,12 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
+
 from django.test import TestCase
 from django.utils import timezone
-from datetime import timedelta
 
 from src.modules.integration_platform.models import Integration
 from src.modules.integration_platform.services import IntegrationService
@@ -40,9 +41,7 @@ class IntegrationServiceAdditionalTestCase(TestCase):
                 "message": "PostgreSQL connection successful (version: PostgreSQL 14.0)",
             }
 
-            result = IntegrationService._test_database_connection(
-                self.integration, connection_string
-            )
+            result = IntegrationService._test_database_connection(self.integration, connection_string)
 
             self.assertTrue(result["success"])
             self.assertIn("PostgreSQL", result["message"])
@@ -58,9 +57,7 @@ class IntegrationServiceAdditionalTestCase(TestCase):
                 "message": "MySQL connection successful (version: 8.0.33)",
             }
 
-            result = IntegrationService._test_database_connection(
-                self.integration, connection_string
-            )
+            result = IntegrationService._test_database_connection(self.integration, connection_string)
 
             self.assertTrue(result["success"])
             self.assertIn("MySQL", result["message"])
@@ -80,9 +77,7 @@ class IntegrationServiceAdditionalTestCase(TestCase):
             mock_response.raise_for_status.return_value = None
             mock_request.return_value = mock_response
 
-            result = IntegrationService._pull_data(
-                self.integration, "test_credential", None
-            )
+            result = IntegrationService._pull_data(self.integration, "test_credential", None)
 
             self.assertTrue(result["success"])
 

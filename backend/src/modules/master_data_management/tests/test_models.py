@@ -3,6 +3,7 @@ Model tests for Master Data Management module.
 """
 
 import uuid
+
 import pytest
 
 from src.modules.master_data_management.models import MasterDataEntity

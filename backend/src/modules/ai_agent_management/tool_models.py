@@ -7,10 +7,8 @@ Task: 401.2 - Tool Registry & Schema Validation
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, List, Optional
 
 from django.db import models
-from django.utils import timezone
 
 from .models import TenantBaseModel
 from .tool_registry import ToolSideEffectClass

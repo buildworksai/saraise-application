@@ -7,13 +7,11 @@ Task: 402.3 - Token Metering & Cost Attribution
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from django.db import transaction
-from django.db.models import Count, Q, Sum
-from django.utils import timezone
+from django.db.models import Sum
 
 from .models import AgentExecution
 from .token_models import CostRecord, CostSummary, TokenUsage

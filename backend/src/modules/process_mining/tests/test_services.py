@@ -3,6 +3,7 @@ Service Unit Tests for ProcessMining module.
 
 Tests business logic in services layer.
 """
+
 import pytest
 
 from src.modules.process_mining.models import TenantBaseModel

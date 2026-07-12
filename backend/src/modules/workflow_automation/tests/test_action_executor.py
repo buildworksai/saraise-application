@@ -108,9 +108,7 @@ class ActionExecutorTestCase(TestCase):
                 with patch(
                     "src.modules.platform_management.services.PlatformManagementService.log_audit_event"
                 ) as mock_log:
-                    ActionExecutor._execute_database_update(
-                        action_config, self.workflow_context, self.tenant_id
-                    )
+                    ActionExecutor._execute_database_update(action_config, self.workflow_context, self.tenant_id)
 
                     # Verify tenant_id was added to filters
                     call_args = mock_model.objects.filter.call_args
@@ -126,9 +124,7 @@ class ActionExecutorTestCase(TestCase):
             "updates": {"id": "new_id", "tenant_id": "new_tenant"},  # Protected fields
         }
 
-        result = ActionExecutor._execute_database_update(
-            action_config, self.workflow_context, self.tenant_id
-        )
+        result = ActionExecutor._execute_database_update(action_config, self.workflow_context, self.tenant_id)
 
         self.assertFalse(result["success"])
         self.assertIn("protected fields", result["error"].lower())
@@ -145,9 +141,7 @@ class ActionExecutorTestCase(TestCase):
             mock_compile.return_value = compile("result = 'Hello, World!'", "<test>", "exec")
 
             with patch("src.modules.workflow_automation.action_executor.signal"):
-                result = ActionExecutor._execute_script(
-                    action_config, self.workflow_context, self.tenant_id
-                )
+                result = ActionExecutor._execute_script(action_config, self.workflow_context, self.tenant_id)
 
                 # Should execute successfully (mocked)
                 self.assertIsNotNone(result)
@@ -161,9 +155,7 @@ class ActionExecutorTestCase(TestCase):
         with patch("src.modules.workflow_automation.action_executor.compile_restricted") as mock_compile:
             mock_compile.side_effect = SyntaxError("Invalid syntax", ("<test>", 1, 1, "invalid"))
 
-            result = ActionExecutor._execute_script(
-                action_config, self.workflow_context, self.tenant_id
-            )
+            result = ActionExecutor._execute_script(action_config, self.workflow_context, self.tenant_id)
 
             self.assertFalse(result["success"])
             self.assertIn("syntax error", result["error"].lower())

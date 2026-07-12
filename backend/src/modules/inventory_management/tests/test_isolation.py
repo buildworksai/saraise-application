@@ -5,6 +5,7 @@ CRITICAL: These tests verify that tenants cannot access each other's data.
 """
 
 import uuid
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
@@ -32,6 +33,7 @@ def api_client():
 def tenant_a_user(db):
     """Create user for tenant A."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
@@ -56,6 +58,7 @@ def tenant_a_user(db):
 def tenant_b_user(db):
     """Create user for tenant B."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())

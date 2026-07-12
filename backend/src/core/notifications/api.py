@@ -12,11 +12,11 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from src.core.auth_utils import get_user_tenant_id, get_user_id
+from src.core.auth_utils import get_user_id, get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
 
 from .models import Notification, NotificationPreference
-from .serializers import NotificationSerializer, NotificationPreferenceSerializer
+from .serializers import NotificationPreferenceSerializer, NotificationSerializer
 from .services import NotificationService
 
 logger = logging.getLogger(__name__)
@@ -168,6 +168,7 @@ class NotificationPreferenceViewSet(viewsets.ModelViewSet):
 
         if not tenant_id or not user_id_str:
             from rest_framework.exceptions import ValidationError
+
             raise ValidationError({"error": "User must belong to a tenant"})
 
         try:
@@ -175,6 +176,7 @@ class NotificationPreferenceViewSet(viewsets.ModelViewSet):
             tenant_id_uuid = uuid.UUID(tenant_id)
         except (ValueError, TypeError) as e:
             from rest_framework.exceptions import ValidationError
+
             raise ValidationError({"error": f"Invalid user or tenant ID format: {e}"})
 
         serializer.save(tenant_id=tenant_id_uuid, user_id=user_id_uuid)

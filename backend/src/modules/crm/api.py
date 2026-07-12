@@ -5,29 +5,19 @@ Provides REST API endpoints for all models.
 """
 
 import uuid
-from datetime import date, timedelta
 
 from django.db import models
-from django.shortcuts import get_object_or_404
-from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError as DRFValidationError
+from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from src.core.auth_utils import get_user_id, get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
 
-from .models import (
-    Account,
-    Activity,
-    Contact,
-    Lead,
-    LeadStatus,
-    Opportunity,
-    OpportunityStatus,
-)
+from .models import Account, Activity, Contact, Lead, Opportunity
+from .pagination import CRMResultsSetPagination
 from .serializers import (
     AccountCreateSerializer,
     AccountHierarchySerializer,
@@ -53,7 +43,6 @@ from .serializers import (
     OpportunityUpdateSerializer,
     WinRateSerializer,
 )
-from .pagination import CRMResultsSetPagination
 from .services import (
     AccountService,
     ActivityService,
@@ -63,7 +52,6 @@ from .services import (
     LeadService,
     OpportunityService,
 )
-
 
 # ===== Lead ViewSet =====
 
@@ -133,11 +121,16 @@ class LeadViewSet(viewsets.ModelViewSet):
         ordering = self.request.query_params.get("ordering", "-created_at")
         # Validate ordering field to prevent SQL injection
         allowed_ordering_fields = [
-            "created_at", "-created_at",
-            "updated_at", "-updated_at",
-            "score", "-score",
-            "last_name", "-last_name",
-            "company", "-company",
+            "created_at",
+            "-created_at",
+            "updated_at",
+            "-updated_at",
+            "score",
+            "-score",
+            "last_name",
+            "-last_name",
+            "company",
+            "-company",
         ]
         if ordering in allowed_ordering_fields:
             queryset = queryset.order_by(ordering)
@@ -316,9 +309,12 @@ class AccountViewSet(viewsets.ModelViewSet):
         # Ordering (default: -created_at)
         ordering = self.request.query_params.get("ordering", "-created_at")
         allowed_ordering_fields = [
-            "created_at", "-created_at",
-            "updated_at", "-updated_at",
-            "name", "-name",
+            "created_at",
+            "-created_at",
+            "updated_at",
+            "-updated_at",
+            "name",
+            "-name",
         ]
         if ordering in allowed_ordering_fields:
             queryset = queryset.order_by(ordering)
@@ -573,11 +569,16 @@ class OpportunityViewSet(viewsets.ModelViewSet):
         # Ordering (default: -created_at)
         ordering = self.request.query_params.get("ordering", "-created_at")
         allowed_ordering_fields = [
-            "created_at", "-created_at",
-            "updated_at", "-updated_at",
-            "close_date", "-close_date",
-            "amount", "-amount",
-            "name", "-name",
+            "created_at",
+            "-created_at",
+            "updated_at",
+            "-updated_at",
+            "close_date",
+            "-close_date",
+            "amount",
+            "-amount",
+            "name",
+            "-name",
         ]
         if ordering in allowed_ordering_fields:
             queryset = queryset.order_by(ordering)
@@ -758,9 +759,12 @@ class ActivityViewSet(viewsets.ModelViewSet):
         # Ordering (default: -created_at)
         ordering = self.request.query_params.get("ordering", "-created_at")
         allowed_ordering_fields = [
-            "created_at", "-created_at",
-            "updated_at", "-updated_at",
-            "due_date", "-due_date",
+            "created_at",
+            "-created_at",
+            "updated_at",
+            "-updated_at",
+            "due_date",
+            "-due_date",
         ]
         if ordering in allowed_ordering_fields:
             queryset = queryset.order_by(ordering)
@@ -838,9 +842,7 @@ class ActivityViewSet(viewsets.ModelViewSet):
             raise DRFValidationError("Invalid tenant ID")
 
         activity_service = ActivityService()
-        updated_activity = activity_service.complete_activity(
-            activity_id=activity.id, tenant_id=tenant_id
-        )
+        updated_activity = activity_service.complete_activity(activity_id=activity.id, tenant_id=tenant_id)
 
         serializer = ActivitySerializer(updated_activity)
         return Response(serializer.data)
@@ -915,9 +917,7 @@ class ForecastingViewSet(viewsets.ViewSet):
         period_days = int(request.query_params.get("period", 90))
 
         forecasting_service = ForecastingService()
-        result = forecasting_service.get_win_rate(
-            tenant_id=tenant_id, owner_id=owner_uuid, period_days=period_days
-        )
+        result = forecasting_service.get_win_rate(tenant_id=tenant_id, owner_id=owner_uuid, period_days=period_days)
 
         serializer = WinRateSerializer(result)
         return Response(serializer.data)

@@ -3,14 +3,16 @@ Additional API Tests for DataMigration module.
 
 Tests for MigrationMapping, MigrationLog, and MigrationValidation ViewSets.
 """
-import pytest
+
 import json
+
+import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.modules.data_migration.models import MigrationJob, MigrationMapping, MigrationLog, MigrationValidation
 from src.core.auth_utils import get_user_tenant_id
+from src.modules.data_migration.models import MigrationJob, MigrationLog, MigrationMapping, MigrationValidation
 
 User = get_user_model()
 
@@ -24,8 +26,8 @@ def api_client():
 @pytest.fixture
 def tenant_user(db):
     """Create a test user with tenant."""
-    from src.core.user_models import UserProfile
     from src.core.licensing.models import Organization
+    from src.core.user_models import UserProfile
 
     org = Organization.objects.create(name="Test Organization")
     tenant_id = str(org.id)
@@ -76,7 +78,7 @@ class TestMigrationMappingViewSet:
     def test_list_mappings(self, authenticated_client, tenant_user, migration_job):
         """Test listing migration mappings."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         MigrationMapping.objects.create(
             tenant_id=tenant_id,
             job=migration_job,
@@ -99,18 +101,14 @@ class TestMigrationMappingViewSet:
             "transform": {"type": "string"},
         }
 
-        response = authenticated_client.post(
-            "/api/v1/data-migration/mappings/",
-            data,
-            format="json"
-        )
+        response = authenticated_client.post("/api/v1/data-migration/mappings/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["source_field"] == "old_field"
 
     def test_filter_mappings_by_job(self, authenticated_client, tenant_user, migration_job):
         """Test filtering mappings by job."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         job2 = MigrationJob.objects.create(
             tenant_id=tenant_id,
             name="Job 2",
@@ -148,7 +146,7 @@ class TestMigrationLogViewSet:
     def test_list_logs(self, authenticated_client, tenant_user, migration_job):
         """Test listing migration logs."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         MigrationLog.objects.create(
             tenant_id=tenant_id,
             job=migration_job,
@@ -164,7 +162,7 @@ class TestMigrationLogViewSet:
     def test_filter_logs_by_job(self, authenticated_client, tenant_user, migration_job):
         """Test filtering logs by job."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         job2 = MigrationJob.objects.create(
             tenant_id=tenant_id,
             name="Job 2",
@@ -194,7 +192,7 @@ class TestMigrationLogViewSet:
     def test_filter_logs_by_level(self, authenticated_client, tenant_user, migration_job):
         """Test filtering logs by level."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         MigrationLog.objects.create(
             tenant_id=tenant_id,
             job=migration_job,
@@ -222,7 +220,7 @@ class TestMigrationValidationViewSet:
     def test_list_validations(self, authenticated_client, tenant_user, migration_job):
         """Test listing migration validations."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         MigrationValidation.objects.create(
             tenant_id=tenant_id,
             job=migration_job,
@@ -241,7 +239,7 @@ class TestMigrationValidationViewSet:
     def test_filter_validations_by_job(self, authenticated_client, tenant_user, migration_job):
         """Test filtering validations by job."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         job2 = MigrationJob.objects.create(
             tenant_id=tenant_id,
             name="Job 2",
@@ -277,7 +275,7 @@ class TestMigrationValidationViewSet:
     def test_filter_validations_by_status(self, authenticated_client, tenant_user, migration_job):
         """Test filtering validations by status."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         MigrationValidation.objects.create(
             tenant_id=tenant_id,
             job=migration_job,

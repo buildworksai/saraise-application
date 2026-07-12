@@ -5,8 +5,6 @@ Security & Access Control Service Tests
 import pytest
 from django.contrib.auth import get_user_model
 
-from src.modules.tenant_management.models import Tenant
-
 from src.modules.security_access_control.models import (
     FieldSecurity,
     Permission,
@@ -19,6 +17,7 @@ from src.modules.security_access_control.models import (
     UserRole,
 )
 from src.modules.security_access_control.services import SecurityAccessControlService
+from src.modules.tenant_management.models import Tenant
 
 User = get_user_model()
 

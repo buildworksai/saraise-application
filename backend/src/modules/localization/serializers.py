@@ -5,13 +5,7 @@ Provides request/response validation for all models.
 
 from rest_framework import serializers
 
-from .models import (
-    CurrencyConfig,
-    Language,
-    LocaleConfig,
-    RegionalSettings,
-    Translation,
-)
+from .models import CurrencyConfig, Language, LocaleConfig, RegionalSettings, Translation
 
 
 class LanguageSerializer(serializers.ModelSerializer):

@@ -3,9 +3,9 @@ Service tests for Notifications module.
 """
 
 import uuid
+
 import pytest
 
-from src.modules.notifications.models import Notification
 from src.modules.notifications.services import NotificationService
 
 

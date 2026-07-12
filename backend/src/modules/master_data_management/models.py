@@ -8,6 +8,7 @@ All models include tenant_id for Row-Level Multitenancy.
 from __future__ import annotations
 
 import uuid
+
 from django.db import models
 
 
@@ -54,7 +55,9 @@ class MasterDataEntity(TenantBaseModel):
             models.Index(fields=["tenant_id", "entity_code"]),
         ]
         constraints = [
-            models.UniqueConstraint(fields=["tenant_id", "entity_type", "entity_code"], name="unique_entity_per_tenant"),
+            models.UniqueConstraint(
+                fields=["tenant_id", "entity_type", "entity_code"], name="unique_entity_per_tenant"
+            ),
         ]
 
     def __str__(self) -> str:

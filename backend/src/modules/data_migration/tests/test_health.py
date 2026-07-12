@@ -3,11 +3,13 @@ Health Check Tests for DataMigration module.
 
 Tests the health check endpoint functionality.
 """
+
 import pytest
-from django.test import Client
 from django.contrib.auth import get_user_model
-from src.core.user_models import UserProfile
+from django.test import Client
+
 from src.core.licensing.models import Organization
+from src.core.user_models import UserProfile
 from src.modules.data_migration.models import MigrationJob
 
 User = get_user_model()
@@ -97,6 +99,7 @@ class TestDataMigrationHealthCheck:
     def test_health_check_database_error(self, client):
         """Test health check when database has errors."""
         from unittest.mock import patch
+
         with patch("django.db.connection.cursor") as mock_cursor:
             mock_cursor.side_effect = Exception("Database error")
             response = client.get("/api/v1/data-migration/health/")
@@ -107,6 +110,7 @@ class TestDataMigrationHealthCheck:
     def test_health_check_cache_error(self, client):
         """Test health check when cache has errors."""
         from unittest.mock import patch
+
         with patch("django.core.cache.cache.set") as mock_set:
             mock_set.side_effect = Exception("Cache error")
             response = client.get("/api/v1/data-migration/health/")
@@ -117,6 +121,7 @@ class TestDataMigrationHealthCheck:
     def test_health_check_model_error(self, client):
         """Test health check when model query has errors."""
         from unittest.mock import patch
+
         with patch("src.modules.data_migration.models.MigrationJob.objects.count") as mock_count:
             mock_count.side_effect = Exception("Model error")
             response = client.get("/api/v1/data-migration/health/")

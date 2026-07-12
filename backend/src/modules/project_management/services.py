@@ -2,8 +2,6 @@
 Business logic services for Project Management module.
 """
 
-from typing import Optional
-
 from django.db import models, transaction
 
 from .models import Project, Task, TimeEntry

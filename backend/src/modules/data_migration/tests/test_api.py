@@ -7,13 +7,14 @@ Tests all DRF ViewSet endpoints:
 - Tenant isolation
 - Custom actions
 """
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.modules.data_migration.models import MigrationJob
 from src.core.auth_utils import get_user_tenant_id
+from src.modules.data_migration.models import MigrationJob
 
 User = get_user_model()
 
@@ -27,9 +28,9 @@ def api_client():
 @pytest.fixture
 def tenant_user(db):
     """Create a test user with tenant."""
-    from src.core.user_models import UserProfile
+
     from src.core.licensing.models import Organization
-    import uuid
+    from src.core.user_models import UserProfile
 
     # Create a valid Organization for the tenant
     org = Organization.objects.create(name="Test Organization")
@@ -67,14 +68,14 @@ class TestMigrationJobViewSet:
 
     def test_list_jobs_requires_authentication(self, api_client):
         """Test that listing jobs requires authentication."""
-        response = api_client.get(f"/api/v1/data-migration/jobs/")
+        response = api_client.get("/api/v1/data-migration/jobs/")
         # In development mode, may allow unauthenticated access
         assert response.status_code in [status.HTTP_200_OK, status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN]
 
     def test_list_jobs(self, authenticated_client, tenant_user):
         """Test listing migration jobs for authenticated user."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         # Create test jobs
         MigrationJob.objects.create(
             tenant_id=tenant_id,
@@ -91,7 +92,7 @@ class TestMigrationJobViewSet:
             created_by=str(tenant_user.id),
         )
 
-        response = authenticated_client.get(f"/api/v1/data-migration/jobs/")
+        response = authenticated_client.get("/api/v1/data-migration/jobs/")
         assert response.status_code == status.HTTP_200_OK
         data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) == 2
@@ -99,18 +100,14 @@ class TestMigrationJobViewSet:
     def test_create_job(self, authenticated_client, tenant_user):
         """Test creating a migration job."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         data = {
             "name": "New Migration Job",
             "source_type": "csv",
             "source_config": {"file_path": "/tmp/test.csv"},
         }
 
-        response = authenticated_client.post(
-            f"/api/v1/data-migration/jobs/",
-            data,
-            format="json"
-        )
+        response = authenticated_client.post("/api/v1/data-migration/jobs/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["name"] == "New Migration Job"
         assert response.data["tenant_id"] == tenant_id
@@ -118,7 +115,7 @@ class TestMigrationJobViewSet:
     def test_get_job_detail(self, authenticated_client, tenant_user):
         """Test getting job detail."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         job = MigrationJob.objects.create(
             tenant_id=tenant_id,
             name="Test Job",
@@ -135,7 +132,7 @@ class TestMigrationJobViewSet:
     def test_update_job(self, authenticated_client, tenant_user):
         """Test updating a migration job."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         job = MigrationJob.objects.create(
             tenant_id=tenant_id,
             name="Original Name",
@@ -149,18 +146,14 @@ class TestMigrationJobViewSet:
             "source_type": "csv",
             "source_config": {},
         }
-        response = authenticated_client.put(
-            f"/api/v1/data-migration/jobs/{job.id}/",
-            data,
-            format="json"
-        )
+        response = authenticated_client.put(f"/api/v1/data-migration/jobs/{job.id}/", data, format="json")
         assert response.status_code == status.HTTP_200_OK
         assert response.data["name"] == "Updated Name"
 
     def test_delete_job(self, authenticated_client, tenant_user):
         """Test deleting a migration job."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         job = MigrationJob.objects.create(
             tenant_id=tenant_id,
             name="To Delete",
@@ -171,14 +164,14 @@ class TestMigrationJobViewSet:
 
         response = authenticated_client.delete(f"/api/v1/data-migration/jobs/{job.id}/")
         assert response.status_code == status.HTTP_204_NO_CONTENT
-        
+
         # Verify job is deleted
         assert not MigrationJob.objects.filter(id=job.id).exists()
 
     def test_filter_jobs_by_status(self, authenticated_client, tenant_user):
         """Test filtering jobs by status."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         MigrationJob.objects.create(
             tenant_id=tenant_id,
             name="Pending Job",
@@ -196,7 +189,7 @@ class TestMigrationJobViewSet:
             created_by=str(tenant_user.id),
         )
 
-        response = authenticated_client.get(f"/api/v1/data-migration/jobs/?status=pending")
+        response = authenticated_client.get("/api/v1/data-migration/jobs/?status=pending")
         assert response.status_code == status.HTTP_200_OK
         data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) == 1
@@ -205,7 +198,7 @@ class TestMigrationJobViewSet:
     def test_filter_jobs_by_source_type(self, authenticated_client, tenant_user):
         """Test filtering jobs by source type."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         MigrationJob.objects.create(
             tenant_id=tenant_id,
             name="CSV Job",
@@ -221,7 +214,7 @@ class TestMigrationJobViewSet:
             created_by=str(tenant_user.id),
         )
 
-        response = authenticated_client.get(f"/api/v1/data-migration/jobs/?source_type=json")
+        response = authenticated_client.get("/api/v1/data-migration/jobs/?source_type=json")
         assert response.status_code == status.HTTP_200_OK
         data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) == 1
@@ -230,8 +223,9 @@ class TestMigrationJobViewSet:
     def test_execute_job_action(self, authenticated_client, tenant_user):
         """Test executing a migration job."""
         import json
+
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         job = MigrationJob.objects.create(
             tenant_id=tenant_id,
             name="Test Job",
@@ -250,8 +244,9 @@ class TestMigrationJobViewSet:
     def test_dry_run_job_action(self, authenticated_client, tenant_user):
         """Test dry run of a migration job."""
         import json
+
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         job = MigrationJob.objects.create(
             tenant_id=tenant_id,
             name="Test Job",
@@ -266,9 +261,9 @@ class TestMigrationJobViewSet:
         response = authenticated_client.post(f"/api/v1/data-migration/jobs/{job.id}/dry-run/")
         # Endpoint may not exist (404) or may succeed/fail (200/400/500)
         assert response.status_code in [
-            status.HTTP_200_OK, 
-            status.HTTP_400_BAD_REQUEST, 
+            status.HTTP_200_OK,
+            status.HTTP_400_BAD_REQUEST,
             status.HTTP_404_NOT_FOUND,
-            status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            status.HTTP_503_SERVICE_UNAVAILABLE
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status.HTTP_503_SERVICE_UNAVAILABLE,
         ]

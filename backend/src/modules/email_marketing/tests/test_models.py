@@ -3,6 +3,7 @@ Model tests for Email Marketing module.
 """
 
 import uuid
+
 import pytest
 
 from src.modules.email_marketing.models import EmailCampaign

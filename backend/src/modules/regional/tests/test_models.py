@@ -3,8 +3,8 @@ Model Unit Tests for Regional module.
 
 Tests model creation, validation, and relationships.
 """
+
 import pytest
-from django.core.exceptions import ValidationError
 
 from src.modules.regional.models import TenantBaseModel
 

@@ -1,5 +1,6 @@
 from rest_framework import serializers
-from .models import EntityDefinition, FieldDefinition, DynamicResource
+
+from .models import DynamicResource, EntityDefinition, FieldDefinition
 
 
 class FieldDefinitionSerializer(serializers.ModelSerializer):

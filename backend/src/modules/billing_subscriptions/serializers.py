@@ -5,14 +5,7 @@ Provides request/response validation for all models.
 
 from rest_framework import serializers
 
-from .models import (
-    Invoice,
-    InvoiceLineItem,
-    Payment,
-    Subscription,
-    SubscriptionPlan,
-    UsageRecord,
-)
+from .models import Invoice, InvoiceLineItem, Payment, Subscription, SubscriptionPlan, UsageRecord
 
 
 class SubscriptionPlanSerializer(serializers.ModelSerializer):
@@ -136,7 +129,9 @@ class PaymentSerializer(serializers.ModelSerializer):
     """Serializer for Payment model."""
 
     invoice_number = serializers.CharField(source="invoice.invoice_number", read_only=True)
-    invoice_total = serializers.DecimalField(source="invoice.total_amount", read_only=True, max_digits=10, decimal_places=2)
+    invoice_total = serializers.DecimalField(
+        source="invoice.total_amount", read_only=True, max_digits=10, decimal_places=2
+    )
 
     class Meta:
         model = Payment

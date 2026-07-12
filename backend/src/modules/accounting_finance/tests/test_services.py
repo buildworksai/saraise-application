@@ -3,9 +3,10 @@ Service tests for Accounting & Finance module.
 """
 
 import uuid
-import pytest
-from decimal import Decimal
 from datetime import date
+from decimal import Decimal
+
+import pytest
 
 from src.modules.accounting_finance.models import Account, PostingPeriod
 from src.modules.accounting_finance.services import AccountService, JournalEntryService

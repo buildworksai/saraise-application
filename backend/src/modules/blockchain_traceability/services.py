@@ -64,10 +64,7 @@ class BlockchainTraceabilityService:
         Returns:
             BlockchainTraceabilityResource instance or None if not found.
         """
-        return BlockchainTraceabilityResource.objects.filter(
-            id=resource_id,
-            tenant_id=tenant_id
-        ).first()
+        return BlockchainTraceabilityResource.objects.filter(id=resource_id, tenant_id=tenant_id).first()
 
     def list_resources(self, tenant_id: str, is_active: Optional[bool] = None) -> list[BlockchainTraceabilityResource]:
         """List all resources for tenant.
@@ -85,10 +82,7 @@ class BlockchainTraceabilityService:
         return list(queryset)
 
     def update_resource(
-        self,
-        resource_id: str,
-        tenant_id: str,
-        **updates: Any
+        self, resource_id: str, tenant_id: str, **updates: Any
     ) -> Optional[BlockchainTraceabilityResource]:
         """Update resource.
 

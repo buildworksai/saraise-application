@@ -3,10 +3,16 @@ Model Unit Tests for Backup & Recovery (Extended) module.
 
 Tests model creation, validation, and relationships.
 """
-import pytest
-from django.utils import timezone
 
-from src.modules.backup_recovery.models import BackupArchive, BackupJob, BackupJobStatus, BackupRetentionPolicy, BackupSchedule
+import pytest
+
+from src.modules.backup_recovery.models import (
+    BackupArchive,
+    BackupJob,
+    BackupJobStatus,
+    BackupRetentionPolicy,
+    BackupSchedule,
+)
 
 
 @pytest.mark.django_db

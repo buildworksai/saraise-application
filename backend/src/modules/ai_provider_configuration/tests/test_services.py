@@ -3,6 +3,7 @@ Service Unit Tests for AiProviderConfiguration module.
 
 Tests business logic in services layer.
 """
+
 import pytest
 
 from src.modules.ai_provider_configuration.models import TenantBaseModel
@@ -34,7 +35,7 @@ class TestAiProviderConfigurationService:
             name="Test Resource",
             created_by="user-123",
         )
-        
+
         retrieved = service.get_resource(created.id, "tenant-123")
         assert retrieved is not None
         assert retrieved.id == created.id
@@ -48,7 +49,7 @@ class TestAiProviderConfigurationService:
             name="Test Resource",
             created_by="user-123",
         )
-        
+
         retrieved = service.get_resource(created.id, "tenant-456")
         assert retrieved is None
 
@@ -70,7 +71,7 @@ class TestAiProviderConfigurationService:
             name="Resource 3",
             created_by="user-456",
         )
-        
+
         resources = service.list_resources("tenant-123")
         assert len(resources) == 2
         assert all(r.tenant_id == "tenant-123" for r in resources)
@@ -83,7 +84,7 @@ class TestAiProviderConfigurationService:
             name="Original Name",
             created_by="user-123",
         )
-        
+
         updated = service.update_resource(
             resource.id,
             "tenant-123",
@@ -102,7 +103,7 @@ class TestAiProviderConfigurationService:
             name="To Delete",
             created_by="user-123",
         )
-        
+
         result = service.delete_resource(resource.id, "tenant-123")
         assert result is True
         assert not TenantBaseModel.objects.filter(id=resource.id).exists()
@@ -117,7 +118,7 @@ class TestAiProviderConfigurationService:
         )
         resource.is_active = False
         resource.save()
-        
+
         activated = service.activate_resource(resource.id, "tenant-123")
         assert activated is not None
         assert activated.is_active is True
@@ -130,7 +131,7 @@ class TestAiProviderConfigurationService:
             name="Test Resource",
             created_by="user-123",
         )
-        
+
         deactivated = service.deactivate_resource(resource.id, "tenant-123")
         assert deactivated is not None
         assert deactivated.is_active is False

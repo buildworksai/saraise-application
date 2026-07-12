@@ -3,8 +3,8 @@ Model tests for Inventory Management module.
 """
 
 import uuid
+
 import pytest
-from decimal import Decimal
 
 from src.modules.inventory_management.models import Item, Warehouse
 

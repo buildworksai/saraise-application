@@ -3,9 +3,9 @@ Service tests for Master Data Management module.
 """
 
 import uuid
+
 import pytest
 
-from src.modules.master_data_management.models import MasterDataEntity
 from src.modules.master_data_management.services import MasterDataService
 
 

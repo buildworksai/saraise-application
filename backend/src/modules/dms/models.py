@@ -8,7 +8,7 @@ All models include tenant_id for Row-Level Multitenancy.
 from __future__ import annotations
 
 import uuid
-from django.conf import settings
+
 from django.db import models
 from django.utils import timezone
 

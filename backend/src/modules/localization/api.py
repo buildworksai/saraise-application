@@ -10,13 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
 
-from .models import (
-    CurrencyConfig,
-    Language,
-    LocaleConfig,
-    RegionalSettings,
-    Translation,
-)
+from .models import CurrencyConfig, Language, LocaleConfig, RegionalSettings, Translation
 from .serializers import (
     CurrencyConfigSerializer,
     LanguageSerializer,

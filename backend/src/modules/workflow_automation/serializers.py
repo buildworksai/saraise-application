@@ -1,10 +1,6 @@
 from rest_framework import serializers
-from .models import (
-    Workflow,
-    WorkflowStep,
-    WorkflowInstance,
-    WorkflowTask,
-)
+
+from .models import Workflow, WorkflowInstance, WorkflowStep, WorkflowTask
 
 
 class WorkflowStepSerializer(serializers.ModelSerializer):

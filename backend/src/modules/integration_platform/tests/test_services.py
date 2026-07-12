@@ -3,6 +3,7 @@ Service Unit Tests for IntegrationPlatform module.
 
 Tests business logic in services layer.
 """
+
 import pytest
 
 from src.modules.integration_platform.models import TenantBaseModel

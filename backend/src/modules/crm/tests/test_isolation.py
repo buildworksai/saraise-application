@@ -7,6 +7,7 @@ This is the PRIMARY security mechanism for multi-tenant isolation.
 Reference: saraise-documentation/rules/compliance-enforcement.md
 Rule: ALL tenant-scoped queries MUST filter by tenant_id
 """
+
 import uuid
 from datetime import date, timedelta
 
@@ -37,6 +38,7 @@ def api_client():
 def tenant_a_user(db):
     """Create user for tenant A."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
@@ -61,6 +63,7 @@ def tenant_a_user(db):
 def tenant_b_user(db):
     """Create user for tenant B."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())

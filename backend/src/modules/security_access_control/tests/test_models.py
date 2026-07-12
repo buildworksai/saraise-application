@@ -8,8 +8,6 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from src.modules.tenant_management.models import Tenant
-
 from src.modules.security_access_control.models import (
     FieldSecurity,
     Permission,
@@ -22,6 +20,7 @@ from src.modules.security_access_control.models import (
     UserPermissionSet,
     UserRole,
 )
+from src.modules.tenant_management.models import Tenant
 
 User = get_user_model()
 

@@ -3,11 +3,13 @@ Health Check Tests for WorkflowAutomation module.
 
 Tests the health check endpoint functionality.
 """
+
 import pytest
-from django.test import Client
 from django.contrib.auth import get_user_model
-from src.core.user_models import UserProfile
+from django.test import Client
+
 from src.core.licensing.models import Organization
+from src.core.user_models import UserProfile
 from src.modules.workflow_automation.models import Workflow
 
 User = get_user_model()

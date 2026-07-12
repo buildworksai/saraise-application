@@ -3,9 +3,9 @@ Service tests for Project Management module.
 """
 
 import uuid
+
 import pytest
 
-from src.modules.project_management.models import Project
 from src.modules.project_management.services import ProjectService
 
 

@@ -8,12 +8,9 @@ All models include tenant_id for Row-Level Multitenancy.
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
-from typing import Any, Dict, Optional
 
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.utils import timezone
 
 
 def generate_uuid():
@@ -80,9 +77,7 @@ class Lead(TenantBaseModel):
 
     # Assignment & Status
     owner_id = models.UUIDField(db_index=True, null=True, blank=True)  # FK to User
-    status = models.CharField(
-        max_length=50, default=LeadStatus.NEW, db_index=True, choices=LeadStatus.choices
-    )
+    status = models.CharField(max_length=50, default=LeadStatus.NEW, db_index=True, choices=LeadStatus.choices)
 
     # Conversion
     converted_at = models.DateTimeField(null=True, blank=True)
@@ -209,9 +204,7 @@ class Account(TenantBaseModel):
                 if depth >= 3:  # Max 3 levels: parent -> child -> grandchild (depth 0, 1, 2)
                     raise ValidationError("Account hierarchy cannot exceed 3 levels")
 
-                parent = Account.objects.filter(
-                    id=current_parent_id, tenant_id=self.tenant_id
-                ).first()
+                parent = Account.objects.filter(id=current_parent_id, tenant_id=self.tenant_id).first()
                 current_parent_id = parent.parent_account_id if parent else None
 
     def __str__(self):
@@ -397,9 +390,7 @@ class Activity(TenantBaseModel):
     tenant_id = models.UUIDField(db_index=True)
 
     # Activity Type
-    activity_type = models.CharField(
-        max_length=50, db_index=True, choices=ActivityType.choices
-    )
+    activity_type = models.CharField(max_length=50, db_index=True, choices=ActivityType.choices)
 
     # Polymorphic Relation
     related_to_type = models.CharField(
@@ -410,9 +401,7 @@ class Activity(TenantBaseModel):
     # Content
     subject = models.CharField(max_length=500)
     description = models.TextField(blank=True)
-    outcome = models.CharField(
-        max_length=100, blank=True
-    )  # For calls: connected, voicemail, no_answer
+    outcome = models.CharField(max_length=100, blank=True)  # For calls: connected, voicemail, no_answer
 
     # Scheduling
     due_date = models.DateTimeField(null=True, blank=True, db_index=True)
@@ -423,9 +412,7 @@ class Activity(TenantBaseModel):
     owner_id = models.UUIDField(db_index=True, null=True, blank=True)
 
     # External Reference (for synced activities)
-    external_id = models.CharField(
-        max_length=255, blank=True, db_index=True
-    )  # e.g., email_marketing event ID
+    external_id = models.CharField(max_length=255, blank=True, db_index=True)  # e.g., email_marketing event ID
 
     # Custom Fields
     metadata = models.JSONField(default=dict, blank=True)

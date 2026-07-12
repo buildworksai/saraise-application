@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 
 from src.core.notifications.models import Notification, PushNotificationToken
-from src.core.notifications.services import NotificationService, PHONE_NUMBER_REGEX
+from src.core.notifications.services import PHONE_NUMBER_REGEX, NotificationService
 
 
 class NotificationServiceTestCase(TestCase):

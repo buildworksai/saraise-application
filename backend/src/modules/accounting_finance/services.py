@@ -10,7 +10,7 @@ from typing import Optional
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Account, APInvoice, ARInvoice, JournalEntry, JournalLine, Payment
+from .models import Account, APInvoice, ARInvoice, JournalEntry, Payment
 
 
 class AccountService:

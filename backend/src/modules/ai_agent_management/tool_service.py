@@ -7,15 +7,12 @@ Task: 401.2 - Tool Registry & Schema Validation
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from django.db import transaction
 from django.utils import timezone
 
-from .models import AgentExecution
 from .tool_models import Tool, ToolInvocation
-from .tool_registry import ToolDefinition, ToolRegistry, ToolSchema, ToolSideEffectClass
+from .tool_registry import ToolDefinition, ToolRegistry
 
 logger = logging.getLogger(__name__)
 

@@ -3,6 +3,7 @@ Service Layer Tests for CRM module.
 
 Tests business logic, workflows, and service methods.
 """
+
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -13,20 +14,14 @@ from django.core.exceptions import ValidationError
 from src.modules.crm.models import (
     Account,
     AccountType,
-    Activity,
-    ActivityType,
-    Contact,
     Lead,
     LeadStatus,
     Opportunity,
     OpportunityStage,
     OpportunityStatus,
-    RelatedToType,
 )
 from src.modules.crm.services import (
     AccountService,
-    ActivityService,
-    ContactService,
     ForecastingService,
     IntegrationService,
     LeadService,

@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 import base64
+
 import pytest
 from cryptography.fernet import Fernet
 
@@ -55,6 +56,7 @@ class TestEncryptionService:
         # Try to decrypt with wrong key
         encrypted_bytes = base64.urlsafe_b64decode(ciphertext.encode("utf-8"))
         from cryptography.fernet import InvalidToken
+
         with pytest.raises(InvalidToken):
             different_fernet.decrypt(encrypted_bytes)
 

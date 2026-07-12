@@ -3,6 +3,7 @@ Model tests for Bank Reconciliation module.
 """
 
 import uuid
+
 import pytest
 
 from src.modules.bank_reconciliation.models import BankAccount

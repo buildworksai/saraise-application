@@ -8,13 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 from typing import Any, Dict, Optional, Tuple
 
-from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.utils import timezone
 
 from .models import Document, DocumentVersion, Folder
 
@@ -153,11 +150,7 @@ class DocumentStorageService:
         saved_path = default_storage.save(storage_path, file)
 
         # Get next version number
-        latest_version = (
-            DocumentVersion.objects.filter(document=document)
-            .order_by("-version_number")
-            .first()
-        )
+        latest_version = DocumentVersion.objects.filter(document=document).order_by("-version_number").first()
         next_version = (latest_version.version_number + 1) if latest_version else 1
 
         with transaction.atomic():

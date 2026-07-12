@@ -3,7 +3,6 @@ DRF ViewSets for Backup & Recovery (Extended) module.
 Provides REST API endpoints for all models.
 """
 
-from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
@@ -60,25 +59,19 @@ class BackupJobViewSet(viewsets.ModelViewSet):
         tenant_id = get_user_tenant_id(self.request.user)
         if not tenant_id:
             raise PermissionDenied("User must belong to a tenant")
-        serializer.save(
-            tenant_id=tenant_id,
-            created_by=str(self.request.user.id)
-        )
+        serializer.save(tenant_id=tenant_id, created_by=str(self.request.user.id))
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=["post"])
     def start(self, request, pk=None):
         """Start a backup job."""
         job = self.get_object()
         service = BackupRecoveryService()
         updated_job = service.start_backup_job(job.id, get_user_tenant_id(request.user))
         if not updated_job:
-            return Response(
-                {"error": "Backup job not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Backup job not found"}, status=status.HTTP_404_NOT_FOUND)
         return Response(BackupJobSerializer(updated_job).data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=["post"])
     def complete(self, request, pk=None):
         """Complete a backup job."""
         job = self.get_object()
@@ -92,13 +85,10 @@ class BackupJobViewSet(viewsets.ModelViewSet):
             storage_location=storage_location,
         )
         if not updated_job:
-            return Response(
-                {"error": "Backup job not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Backup job not found"}, status=status.HTTP_404_NOT_FOUND)
         return Response(BackupJobSerializer(updated_job).data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=["post"])
     def fail(self, request, pk=None):
         """Mark a backup job as failed."""
         job = self.get_object()
@@ -110,10 +100,7 @@ class BackupJobViewSet(viewsets.ModelViewSet):
             error_message=error_message,
         )
         if not updated_job:
-            return Response(
-                {"error": "Backup job not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
+            return Response({"error": "Backup job not found"}, status=status.HTTP_404_NOT_FOUND)
         return Response(BackupJobSerializer(updated_job).data, status=status.HTTP_200_OK)
 
 
@@ -151,12 +138,9 @@ class BackupScheduleViewSet(viewsets.ModelViewSet):
         tenant_id = get_user_tenant_id(self.request.user)
         if not tenant_id:
             raise PermissionDenied("User must belong to a tenant")
-        serializer.save(
-            tenant_id=tenant_id,
-            created_by=str(self.request.user.id)
-        )
+        serializer.save(tenant_id=tenant_id, created_by=str(self.request.user.id))
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=["post"])
     def activate(self, request, pk=None):
         """Activate a schedule."""
         schedule = self.get_object()
@@ -164,7 +148,7 @@ class BackupScheduleViewSet(viewsets.ModelViewSet):
         schedule.save()
         return Response(BackupScheduleSerializer(schedule).data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=["post"])
     def deactivate(self, request, pk=None):
         """Deactivate a schedule."""
         schedule = self.get_object()
@@ -207,10 +191,7 @@ class BackupRetentionPolicyViewSet(viewsets.ModelViewSet):
         tenant_id = get_user_tenant_id(self.request.user)
         if not tenant_id:
             raise PermissionDenied("User must belong to a tenant")
-        serializer.save(
-            tenant_id=tenant_id,
-            created_by=str(self.request.user.id)
-        )
+        serializer.save(tenant_id=tenant_id, created_by=str(self.request.user.id))
 
 
 class BackupArchiveViewSet(viewsets.ReadOnlyModelViewSet):

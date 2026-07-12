@@ -64,10 +64,7 @@ class RegionalService:
         Returns:
             RegionalResource instance or None if not found.
         """
-        return RegionalResource.objects.filter(
-            id=resource_id,
-            tenant_id=tenant_id
-        ).first()
+        return RegionalResource.objects.filter(id=resource_id, tenant_id=tenant_id).first()
 
     def list_resources(self, tenant_id: str, is_active: Optional[bool] = None) -> list[RegionalResource]:
         """List all resources for tenant.
@@ -84,12 +81,7 @@ class RegionalService:
             queryset = queryset.filter(is_active=is_active)
         return list(queryset)
 
-    def update_resource(
-        self,
-        resource_id: str,
-        tenant_id: str,
-        **updates: Any
-    ) -> Optional[RegionalResource]:
+    def update_resource(self, resource_id: str, tenant_id: str, **updates: Any) -> Optional[RegionalResource]:
         """Update resource.
 
         Args:

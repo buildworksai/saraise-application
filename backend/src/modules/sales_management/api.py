@@ -3,21 +3,16 @@ DRF ViewSets for Sales Management module.
 """
 
 import uuid
-from rest_framework import status, viewsets
+
+from rest_framework import viewsets
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
 
 from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
 
 from .models import Customer, DeliveryNote, Quotation, SalesOrder
-from .serializers import (
-    CustomerSerializer,
-    DeliveryNoteSerializer,
-    QuotationSerializer,
-    SalesOrderSerializer,
-)
+from .serializers import CustomerSerializer, DeliveryNoteSerializer, QuotationSerializer, SalesOrderSerializer
 
 
 class CustomerViewSet(viewsets.ModelViewSet):

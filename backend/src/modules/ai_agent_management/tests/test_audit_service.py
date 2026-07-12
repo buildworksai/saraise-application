@@ -6,9 +6,8 @@ Task: 403.1 - AI Audit Trail
 from __future__ import annotations
 
 import pytest
-from django.utils import timezone
 
-from src.modules.ai_agent_management.audit_models import AuditEvent, AuditEventType, AuditTrail
+from src.modules.ai_agent_management.audit_models import AuditEventType, AuditTrail
 from src.modules.ai_agent_management.audit_service import AuditService
 from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType
 
@@ -77,7 +76,7 @@ class TestAuditService:
             task_definition={"goal": "test"},
         )
 
-        trail = AuditTrail.objects.create(
+        _ = AuditTrail.objects.create(
             tenant_id=tenant_id,
             request_id="req-123",
             agent_execution=execution,
@@ -196,7 +195,7 @@ class TestAuditService:
             task_definition={"goal": "test"},
         )
 
-        trail = AuditTrail.objects.create(
+        _ = AuditTrail.objects.create(
             tenant_id=tenant_id,
             request_id="req-123",
             agent_execution=execution,

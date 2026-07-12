@@ -3,8 +3,8 @@ Model Unit Tests for BillingSubscriptions module.
 
 Tests model creation, validation, and relationships.
 """
+
 import pytest
-from django.core.exceptions import ValidationError
 
 from src.modules.billing_subscriptions.models import TenantBaseModel
 

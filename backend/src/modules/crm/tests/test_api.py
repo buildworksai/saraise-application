@@ -3,6 +3,7 @@ API Endpoint Tests for CRM module.
 
 Tests DRF ViewSets and API endpoints.
 """
+
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -12,19 +13,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.modules.crm.models import (
-    Account,
-    AccountType,
-    Activity,
-    ActivityType,
-    Contact,
-    Lead,
-    LeadStatus,
-    Opportunity,
-    OpportunityStage,
-    OpportunityStatus,
-    RelatedToType,
-)
+from src.modules.crm.models import Account, Lead, LeadStatus, Opportunity, OpportunityStatus
 
 User = get_user_model()
 
@@ -45,6 +34,7 @@ def api_client():
 def authenticated_user(db):
     """Create authenticated user for testing."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())

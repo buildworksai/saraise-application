@@ -9,13 +9,14 @@ Rule: ALL tenant-scoped queries MUST filter by tenant_id
 """
 
 import uuid
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from src.core.auth_utils import get_user_tenant_id
-from src.modules.accounting_finance.models import Account, APInvoice, ARInvoice, JournalEntry
+from src.modules.accounting_finance.models import Account, JournalEntry
 
 User = get_user_model()
 
@@ -36,6 +37,7 @@ def api_client():
 def tenant_a_user(db):
     """Create user for tenant A."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
@@ -60,6 +62,7 @@ def tenant_a_user(db):
 def tenant_b_user(db):
     """Create user for tenant B."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
@@ -192,9 +195,9 @@ class TestJournalEntryTenantIsolation:
         tenant_a_id = uuid.UUID(get_user_tenant_id(tenant_a_user))
         tenant_b_id = uuid.UUID(get_user_tenant_id(tenant_b_user))
 
-        from src.modules.accounting_finance.models import PostingPeriod
-        from django.utils import timezone
         from datetime import date
+
+        from src.modules.accounting_finance.models import PostingPeriod
 
         # Create posting periods
         period_a = PostingPeriod.objects.create(
@@ -244,8 +247,9 @@ class TestJournalEntryTenantIsolation:
         """Test: User cannot GET other tenant's journal entry by ID (returns 404)."""
         tenant_b_id = uuid.UUID(get_user_tenant_id(tenant_b_user))
 
-        from src.modules.accounting_finance.models import PostingPeriod
         from datetime import date
+
+        from src.modules.accounting_finance.models import PostingPeriod
 
         period_b = PostingPeriod.objects.create(
             tenant_id=tenant_b_id,

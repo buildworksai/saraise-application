@@ -7,8 +7,7 @@ High-level service layer for backup business logic.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
-from uuid import UUID
+from typing import Optional
 
 from django.db import transaction
 from django.utils import timezone
@@ -113,9 +112,7 @@ class BackupRecoveryService:
             logger.info(f"Completed backup job {job_id}")
             return job
 
-    def fail_backup_job(
-        self, job_id: str, tenant_id: str, error_message: str = ""
-    ) -> Optional[BackupJob]:
+    def fail_backup_job(self, job_id: str, tenant_id: str, error_message: str = "") -> Optional[BackupJob]:
         """Mark a backup job as failed.
 
         Args:
@@ -213,9 +210,7 @@ class BackupRecoveryService:
             logger.info(f"Created backup schedule {schedule.id} for tenant {tenant_id}")
             return schedule
 
-    def get_backup_schedule(
-        self, schedule_id: str, tenant_id: str
-    ) -> Optional[BackupSchedule]:
+    def get_backup_schedule(self, schedule_id: str, tenant_id: str) -> Optional[BackupSchedule]:
         """Get backup schedule by ID.
 
         Args:
@@ -227,9 +222,7 @@ class BackupRecoveryService:
         """
         return BackupSchedule.objects.filter(id=schedule_id, tenant_id=tenant_id).first()
 
-    def list_backup_schedules(
-        self, tenant_id: str, is_active: Optional[bool] = None
-    ) -> list[BackupSchedule]:
+    def list_backup_schedules(self, tenant_id: str, is_active: Optional[bool] = None) -> list[BackupSchedule]:
         """List all backup schedules for tenant.
 
         Args:
@@ -318,9 +311,7 @@ class BackupRecoveryService:
             logger.info(f"Archived backup job {job_id} to {archive_location}")
             return archive
 
-    def list_backup_archives(
-        self, tenant_id: str, job_id: Optional[str] = None
-    ) -> list[BackupArchive]:
+    def list_backup_archives(self, tenant_id: str, job_id: Optional[str] = None) -> list[BackupArchive]:
         """List all backup archives for tenant.
 
         Args:

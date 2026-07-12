@@ -3,10 +3,10 @@ Service tests for Human Resources module.
 """
 
 import uuid
-import pytest
 from datetime import date
 
-from src.modules.human_resources.models import Department, Employee
+import pytest
+
 from src.modules.human_resources.services import DepartmentService, EmployeeService
 
 

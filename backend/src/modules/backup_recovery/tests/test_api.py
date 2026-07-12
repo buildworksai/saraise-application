@@ -7,13 +7,14 @@ Tests all DRF ViewSet endpoints:
 - Tenant isolation
 - Custom actions
 """
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.modules.backup_recovery.models import BackupArchive, BackupJob, BackupRetentionPolicy, BackupSchedule
 from src.core.auth_utils import get_user_tenant_id
+from src.modules.backup_recovery.models import BackupArchive, BackupJob, BackupRetentionPolicy, BackupSchedule
 
 User = get_user_model()
 
@@ -27,9 +28,9 @@ def api_client():
 @pytest.fixture
 def tenant_user(db):
     """Create a test user with tenant."""
-    from src.core.user_models import UserProfile
+
     from src.core.licensing.models import Organization
-    import uuid
+    from src.core.user_models import UserProfile
 
     # Create a valid Organization for the tenant
     org = Organization.objects.create(name="Test Organization")
@@ -68,7 +69,7 @@ class TestBackupJobViewSet:
     def test_list_backup_jobs(self, authenticated_client, tenant_user):
         """Test listing backup jobs for authenticated user."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         # Create test backup jobs
         BackupJob.objects.create(
             tenant_id=tenant_id,
@@ -89,17 +90,13 @@ class TestBackupJobViewSet:
     def test_create_backup_job(self, authenticated_client, tenant_user):
         """Test creating a backup job."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         data = {
             "backup_type": "full",
             "description": "Test backup",
         }
 
-        response = authenticated_client.post(
-            "/api/v1/backup-recovery/jobs/",
-            data,
-            format="json"
-        )
+        response = authenticated_client.post("/api/v1/backup-recovery/jobs/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["backup_type"] == "full"
         assert response.data["tenant_id"] == tenant_id
@@ -107,7 +104,7 @@ class TestBackupJobViewSet:
     def test_get_backup_job_detail(self, authenticated_client, tenant_user):
         """Test getting backup job detail."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         job = BackupJob.objects.create(
             tenant_id=tenant_id,
             backup_type="full",
@@ -122,7 +119,7 @@ class TestBackupJobViewSet:
     def test_start_backup_job(self, authenticated_client, tenant_user):
         """Test starting a backup job."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         job = BackupJob.objects.create(
             tenant_id=tenant_id,
             backup_type="full",
@@ -136,7 +133,7 @@ class TestBackupJobViewSet:
     def test_complete_backup_job(self, authenticated_client, tenant_user):
         """Test completing a backup job."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         job = BackupJob.objects.create(
             tenant_id=tenant_id,
             backup_type="full",
@@ -149,11 +146,7 @@ class TestBackupJobViewSet:
             "backup_size_bytes": 1024000,
             "storage_location": "s3://bucket/backup-123",
         }
-        response = authenticated_client.post(
-            f"/api/v1/backup-recovery/jobs/{job.id}/complete/",
-            data,
-            format="json"
-        )
+        response = authenticated_client.post(f"/api/v1/backup-recovery/jobs/{job.id}/complete/", data, format="json")
         assert response.status_code == status.HTTP_200_OK
         assert response.data["status"] == "completed"
         assert response.data["backup_size_bytes"] == 1024000
@@ -166,7 +159,7 @@ class TestBackupScheduleViewSet:
     def test_list_backup_schedules(self, authenticated_client, tenant_user):
         """Test listing backup schedules for authenticated user."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         BackupSchedule.objects.create(
             tenant_id=tenant_id,
             frequency="daily",
@@ -182,7 +175,7 @@ class TestBackupScheduleViewSet:
     def test_create_backup_schedule(self, authenticated_client, tenant_user):
         """Test creating a backup schedule."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         data = {
             "frequency": "daily",
             "retention_days": 30,
@@ -190,11 +183,7 @@ class TestBackupScheduleViewSet:
             "description": "Daily full backup",
         }
 
-        response = authenticated_client.post(
-            "/api/v1/backup-recovery/schedules/",
-            data,
-            format="json"
-        )
+        response = authenticated_client.post("/api/v1/backup-recovery/schedules/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["frequency"] == "daily"
         assert response.data["tenant_id"] == tenant_id
@@ -202,7 +191,7 @@ class TestBackupScheduleViewSet:
     def test_activate_schedule(self, authenticated_client, tenant_user):
         """Test activating a schedule."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         schedule = BackupSchedule.objects.create(
             tenant_id=tenant_id,
             frequency="daily",
@@ -223,7 +212,7 @@ class TestBackupRetentionPolicyViewSet:
     def test_list_retention_policies(self, authenticated_client, tenant_user):
         """Test listing retention policies for authenticated user."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         BackupRetentionPolicy.objects.create(
             tenant_id=tenant_id,
             policy_name="Standard Policy",
@@ -240,7 +229,7 @@ class TestBackupRetentionPolicyViewSet:
     def test_create_retention_policy(self, authenticated_client, tenant_user):
         """Test creating a retention policy."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         data = {
             "policy_name": "Standard Policy",
             "retention_days": 30,
@@ -248,11 +237,7 @@ class TestBackupRetentionPolicyViewSet:
             "description": "Standard retention policy",
         }
 
-        response = authenticated_client.post(
-            "/api/v1/backup-recovery/retention-policies/",
-            data,
-            format="json"
-        )
+        response = authenticated_client.post("/api/v1/backup-recovery/retention-policies/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["policy_name"] == "Standard Policy"
         assert response.data["tenant_id"] == tenant_id
@@ -265,7 +250,7 @@ class TestBackupArchiveViewSet:
     def test_list_backup_archives(self, authenticated_client, tenant_user):
         """Test listing backup archives for authenticated user."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         job = BackupJob.objects.create(
             tenant_id=tenant_id,
             backup_type="full",
@@ -286,7 +271,7 @@ class TestBackupArchiveViewSet:
     def test_get_backup_archive_detail(self, authenticated_client, tenant_user):
         """Test getting backup archive detail."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         job = BackupJob.objects.create(
             tenant_id=tenant_id,
             backup_type="full",

@@ -14,12 +14,11 @@ import uuid
 from typing import Any, Dict
 
 import httpx
-from RestrictedPython import compile_restricted, safe_globals
-from RestrictedPython.Guards import guarded_iter_unpack_sequence, guarded_unpack_sequence
-
 from django.apps import apps
 from django.conf import settings
 from django.db import transaction
+from RestrictedPython import compile_restricted, safe_globals
+from RestrictedPython.Guards import guarded_iter_unpack_sequence, guarded_unpack_sequence
 
 logger = logging.getLogger(__name__)
 
@@ -96,9 +95,7 @@ class ActionExecutor:
                 return {"success": False, "error": "Model name is required"}
 
             # Get allowed models from settings or use default
-            allowed_models = getattr(
-                settings, "WORKFLOW_ALLOWED_UPDATE_MODELS", DEFAULT_ALLOWED_MODELS
-            )
+            allowed_models = getattr(settings, "WORKFLOW_ALLOWED_UPDATE_MODELS", DEFAULT_ALLOWED_MODELS)
 
             if model_name not in allowed_models:
                 logger.warning(f"Model {model_name} not in whitelist for workflow updates")
@@ -172,8 +169,7 @@ class ActionExecutor:
             if record_count > max_records:
                 return {
                     "success": False,
-                    "error": f"Update would affect {record_count} records, "
-                    f"exceeds limit of {max_records}",
+                    "error": f"Update would affect {record_count} records, " f"exceeds limit of {max_records}",
                 }
 
             # 9. Execute update in transaction with audit logging
@@ -203,8 +199,7 @@ class ActionExecutor:
                     logger.error(f"Failed to log audit event: {audit_error}")
 
                 logger.info(
-                    f"Database update: {updated_count} records updated in {model_name} "
-                    f"for tenant {tenant_id}"
+                    f"Database update: {updated_count} records updated in {model_name} " f"for tenant {tenant_id}"
                 )
 
                 return {
@@ -388,9 +383,7 @@ class ActionExecutor:
 
             # Set memory limit (in bytes)
             try:
-                resource.setrlimit(
-                    resource.RLIMIT_AS, (max_memory_mb * 1024 * 1024, max_memory_mb * 1024 * 1024)
-                )
+                resource.setrlimit(resource.RLIMIT_AS, (max_memory_mb * 1024 * 1024, max_memory_mb * 1024 * 1024))
             except (ValueError, OSError) as e:
                 logger.warning(f"Could not set memory limit: {e}")
 
@@ -420,7 +413,7 @@ class ActionExecutor:
                 # Limit result size (max 1MB)
                 result_str = str(script_result)
                 if len(result_str.encode("utf-8")) > 1024 * 1024:
-                    result_str = result_str[:1024 * 100] + "... (truncated)"
+                    result_str = result_str[: 1024 * 100] + "... (truncated)"
 
                 execution_result["output"] = result_str
                 execution_result["execution_time"] = execution_time

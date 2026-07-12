@@ -28,7 +28,16 @@ class EmailCampaignSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "tenant_id", "sent_at", "recipient_count", "opened_count", "clicked_count", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "tenant_id",
+            "sent_at",
+            "recipient_count",
+            "opened_count",
+            "clicked_count",
+            "created_at",
+            "updated_at",
+        ]
 
 
 class EmailTemplateSerializer(serializers.ModelSerializer):

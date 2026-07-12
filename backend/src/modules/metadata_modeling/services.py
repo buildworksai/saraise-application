@@ -1,5 +1,7 @@
+from typing import Any, Dict
+
 from django.core.exceptions import ValidationError
-from typing import Dict, Any
+
 from .models import EntityDefinition
 
 

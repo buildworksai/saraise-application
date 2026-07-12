@@ -9,7 +9,9 @@ class ReportService:
     """Service for report operations."""
 
     @staticmethod
-    def create_report(tenant_id: str, report_code: str, report_name: str, report_type: str, query: str, **kwargs) -> Report:
+    def create_report(
+        tenant_id: str, report_code: str, report_name: str, report_type: str, query: str, **kwargs
+    ) -> Report:
         """Create a new report."""
         return Report.objects.create(
             tenant_id=tenant_id,
