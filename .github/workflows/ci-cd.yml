@@ -100,7 +100,7 @@ jobs:
         if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           cd backend
-          pytest tests/ --cov=src --cov-report=xml --cov-report=term
+          pytest src/ --cov=src --cov-report=xml --cov-report=term
         continue-on-error: false
 
       - name: Check Python coverage threshold (≥90%) - SARAISE-01002
