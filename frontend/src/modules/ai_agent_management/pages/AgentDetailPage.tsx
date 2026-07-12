@@ -3,14 +3,13 @@
  *
  * Displays agent details, execution history, quota usage, and controls.
  */
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { aiAgentService } from '../services/ai-agent-service';
-import { Play, Pause, Square, Edit } from 'lucide-react';
+import { Play, Pause, Square } from 'lucide-react';
 
 export const AgentDetailPage = () => {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const { data: agent, isLoading: agentLoading } = useQuery({
@@ -108,13 +107,6 @@ export const AgentDetailPage = () => {
           >
             <Play className="w-4 h-4" />
             Execute
-          </button>
-          <button
-            onClick={() => navigate(`/ai-agents/${id}/edit`)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-          >
-            <Edit className="w-4 h-4" />
-            Edit
           </button>
         </div>
       </div>

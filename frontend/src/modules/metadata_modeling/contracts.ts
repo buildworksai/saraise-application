@@ -21,8 +21,8 @@ export interface FieldDefinition {
     | "reference"
     | "json";
   is_required: boolean;
-  default_value?: any;
-  validation_rules?: Record<string, any>;
+  default_value?: MetadataValue;
+  validation_rules?: Record<string, MetadataValue>;
   options?: string[];
   order: number;
 }
@@ -30,10 +30,14 @@ export interface FieldDefinition {
 export interface DynamicResource {
   id: string;
   entity_definition: string; // ID
-  data: Record<string, any>;
+  data: DynamicFormData;
   created_at: string;
   updated_at: string;
 }
+
+export type MetadataValue = string | number | boolean | null | string[];
+
+export type DynamicFormData = Record<string, MetadataValue>;
 
 export const METADATA_ENDPOINTS = {
   ENTITIES: "/api/v1/metadata-modeling/entity-definitions/",

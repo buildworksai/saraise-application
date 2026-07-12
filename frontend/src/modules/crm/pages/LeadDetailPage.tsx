@@ -11,7 +11,6 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { crmService } from '../services/crm-service';
-import type { Lead, Activity } from '../contracts';
 
 export const LeadDetailPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -132,7 +131,7 @@ export const LeadDetailPage = () => {
           <Button variant="outline" onClick={() => void scoreMutation.mutate()}>
             Score Lead
           </Button>
-          <Button variant="destructive" onClick={handleDelete}>
+          <Button variant="danger" onClick={handleDelete}>
             <Trash2 className="w-4 h-4 mr-2" />
             Delete
           </Button>
@@ -164,30 +163,30 @@ export const LeadDetailPage = () => {
                   <label className="text-sm font-medium text-muted-foreground">Email</label>
                   <p className="text-sm flex items-center gap-2">
                     <Mail className="w-4 h-4" />
-                    {lead.email || '-'}
+                    {lead.email ?? '-'}
                   </p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Phone</label>
                   <p className="text-sm flex items-center gap-2">
                     <Phone className="w-4 h-4" />
-                    {lead.phone || '-'}
+                    {lead.phone ?? '-'}
                   </p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Company</label>
                   <p className="text-sm flex items-center gap-2">
                     <Building className="w-4 h-4" />
-                    {lead.company || '-'}
+                    {lead.company ?? '-'}
                   </p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Title</label>
-                  <p className="text-sm">{lead.title || '-'}</p>
+                  <p className="text-sm">{lead.title ?? '-'}</p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Source</label>
-                  <p className="text-sm">{lead.source || '-'}</p>
+                  <p className="text-sm">{lead.source ?? '-'}</p>
                 </div>
                 <div>
                   <label className="text-sm font-medium text-muted-foreground">Score</label>
@@ -216,10 +215,12 @@ export const LeadDetailPage = () => {
                             {new Date(activity.created_at).toLocaleString()}
                           </p>
                         </div>
-                        <StatusBadge
-                          status={activity.completed ? 'active' : 'inactive'}
-                          label={activity.activity_type}
-                        />
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs capitalize text-muted-foreground">
+                            {activity.activity_type}
+                          </span>
+                          <StatusBadge status={activity.completed ? 'active' : 'inactive'} />
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -238,13 +239,6 @@ export const LeadDetailPage = () => {
               <CardTitle>Quick Actions</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => navigate(`/crm/activities/new?related_to_type=Lead&related_to_id=${lead.id}`)}
-              >
-                Log Activity
-              </Button>
               {lead.status !== 'converted' && (
                 <Button className="w-full" onClick={handleConvert}>
                   Convert to Opportunity

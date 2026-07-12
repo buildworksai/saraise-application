@@ -26,8 +26,6 @@ import {
   TrendingUp,
   Building2,
   Briefcase,
-  CheckSquare,
-  Settings,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
@@ -145,15 +143,6 @@ const tenantItems: NavItem[] = [
           { path: "/crm/opportunities", label: "All Opportunities", icon: Briefcase },
           { path: "/crm/opportunities/my", label: "My Opportunities", icon: Briefcase },
           { path: "/crm/opportunities/closed", label: "Closed Opportunities", icon: Briefcase },
-        ],
-      },
-      {
-        path: "/crm/activities",
-        label: "Activities",
-        icon: CheckSquare,
-        children: [
-          { path: "/crm/activities/tasks", label: "My Tasks", icon: CheckSquare },
-          { path: "/crm/activities", label: "Activity Log", icon: CheckSquare },
         ],
       },
     ],

@@ -92,9 +92,8 @@ export function LoginForm() {
       });
 
       // Update auth store
-      const { setUser, setAuthenticated } = useAuthStore.getState();
+      const { setUser } = useAuthStore.getState();
       setUser(response.user);
-      setAuthenticated(true);
 
       // Navigate based on roles
       if (response.user.platform_role === "platform_owner") {

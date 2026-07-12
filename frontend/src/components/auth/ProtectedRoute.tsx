@@ -20,7 +20,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
 
   useEffect(() => {
     // Verify session on mount (CRITICAL):
-    // - Zustand persists auth state, but the server session cookie can expire or be cleared.
+    // - Authentication state is memory-only; the server session is authoritative after reload.
     // - We must treat the backend as source of truth and re-validate identity.
     // - Only verify if we don't have a user AND we're not authenticated (avoid unnecessary calls after login)
     const verifySession = async () => {

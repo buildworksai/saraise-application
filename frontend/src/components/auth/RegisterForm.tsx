@@ -157,9 +157,8 @@ export function RegisterForm() {
       });
 
       // Update auth store (auto-login after registration)
-      const { setUser, setAuthenticated } = useAuthStore.getState();
+      const { setUser } = useAuthStore.getState();
       setUser(response.user);
-      setAuthenticated(true);
 
       setSuccess(true);
       // Redirect after 2 seconds

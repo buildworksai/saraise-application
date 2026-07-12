@@ -7,6 +7,8 @@ export interface WorkflowStep {
   config: Record<string, unknown>;
 }
 
+export type WorkflowStepInput = Pick<WorkflowStep, "name" | "step_type" | "order" | "config">;
+
 export interface Workflow {
   id: string;
   tenant_id: string;

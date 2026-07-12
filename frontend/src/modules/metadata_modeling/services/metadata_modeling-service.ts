@@ -6,14 +6,8 @@
  * Uses contracts.ts for types and endpoints.
  */
 import { apiClient } from '@/services/api-client';
-import { METADATA_ENDPOINTS, DynamicResource } from '../contracts';
-
-export type DynamicResourceCreate = {
-  entity_definition: string;
-  data: Record<string, any>;
-};
-
-export type DynamicResourceUpdate = Partial<DynamicResourceCreate>;
+import { METADATA_ENDPOINTS } from '../contracts';
+import type { DynamicResource } from '../contracts';
 
 export const metadata_modelingService = {
   /**
@@ -33,14 +27,14 @@ export const metadata_modelingService = {
   /**
    * Create new resource
    */
-  createResource: async (data: DynamicResourceCreate): Promise<DynamicResource> => {
+  createResource: async (data: Record<string, unknown>): Promise<DynamicResource> => {
     return apiClient.post<DynamicResource>(METADATA_ENDPOINTS.RESOURCES, data);
   },
 
   /**
    * Update resource
    */
-  updateResource: async (id: string, data: DynamicResourceUpdate): Promise<DynamicResource> => {
+  updateResource: async (id: string, data: Record<string, unknown>): Promise<DynamicResource> => {
     return apiClient.put<DynamicResource>(`${METADATA_ENDPOINTS.RESOURCES}${id}/`, data);
   },
 

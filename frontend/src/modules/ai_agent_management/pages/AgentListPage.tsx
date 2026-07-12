@@ -217,13 +217,6 @@ export const AgentListPage = () => {
                       View
                     </button>
                     <button
-                      onClick={() => agent.id && navigate(`/ai-agents/${agent.id}/edit`)}
-                      className="text-primary hover:opacity-80 mr-4"
-                      disabled={!agent.id}
-                    >
-                      Edit
-                    </button>
-                    <button
                       onClick={() => {
                         if (agent.id) {
                           void handleDelete(agent.id);

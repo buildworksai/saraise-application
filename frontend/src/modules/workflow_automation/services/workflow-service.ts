@@ -1,10 +1,10 @@
 import { apiClient } from "@/services/api-client";
 import {
   ENDPOINTS,
-  Workflow,
-  WorkflowInstance,
-  WorkflowTask,
 } from "../contracts";
+import type { Workflow, WorkflowInstance, WorkflowStepInput, WorkflowTask } from "../contracts";
+
+type WorkflowDraft = Omit<Partial<Workflow>, "steps"> & { steps?: WorkflowStepInput[] };
 
 export const workflowService = {
   workflows: {
@@ -14,7 +14,7 @@ export const workflowService = {
     get: async (id: string) => {
       return apiClient.get<Workflow>(ENDPOINTS.WORKFLOWS.DETAIL(id));
     },
-    create: async (data: Partial<Workflow>) => {
+    create: async (data: WorkflowDraft) => {
       return apiClient.post<Workflow>(ENDPOINTS.WORKFLOWS.CREATE, data);
     },
     update: async (id: string, data: Partial<Workflow>) => {

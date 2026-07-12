@@ -7,14 +7,14 @@ import { Input } from "@/components/ui/Input";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/Select";
 import { toast } from "sonner";
 import { workflowService } from "../services/workflow-service";
-import { WorkflowStep } from "../contracts";
+import type { Workflow, WorkflowStepInput } from "../contracts";
 
 export const WorkflowBuilder = () => {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [triggerType, setTriggerType] = useState("manual");
-  const [steps, setSteps] = useState<Partial<WorkflowStep>[]>([]);
+  const [triggerType, setTriggerType] = useState<Workflow["trigger_type"]>("manual");
+  const [steps, setSteps] = useState<WorkflowStepInput[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
   const addStep = () => {
@@ -39,9 +39,15 @@ export const WorkflowBuilder = () => {
     setSteps(newSteps);
   };
 
-  const updateStep = (index: number, field: keyof WorkflowStep, value: any) => {
+  const updateStep = <Field extends keyof WorkflowStepInput>(
+    index: number,
+    field: Field,
+    value: WorkflowStepInput[Field]
+  ) => {
     const newSteps = [...steps];
-    newSteps[index] = { ...newSteps[index], [field]: value };
+    const step = newSteps[index];
+    if (!step) return;
+    newSteps[index] = { ...step, [field]: value };
     setSteps(newSteps);
   };
 
@@ -60,8 +66,8 @@ export const WorkflowBuilder = () => {
       await workflowService.workflows.create({
         name,
         description,
-        trigger_type: triggerType as any,
-        steps: steps as any,
+        trigger_type: triggerType,
+        steps,
         status: "draft",
       });
       toast.success("Workflow created successfully");
@@ -87,7 +93,7 @@ export const WorkflowBuilder = () => {
           </Button>
           <h1 className="text-3xl font-bold">Create Workflow</h1>
         </div>
-        <Button onClick={handleSave} disabled={isSaving}>
+        <Button onClick={() => void handleSave()} disabled={isSaving}>
           <Save className="w-4 h-4 mr-2" />
           {isSaving ? "Saving..." : "Save Workflow"}
         </Button>
@@ -115,7 +121,14 @@ export const WorkflowBuilder = () => {
             </div>
             <div>
               <label className="text-sm font-medium">Trigger Type</label>
-              <Select value={triggerType} onValueChange={setTriggerType}>
+              <Select
+                value={triggerType}
+                onValueChange={(value) => {
+                  if (value === "manual" || value === "event" || value === "scheduled") {
+                    setTriggerType(value);
+                  }
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select trigger type" />
                 </SelectTrigger>
@@ -172,9 +185,16 @@ export const WorkflowBuilder = () => {
                   </label>
                   <Select
                     value={step.step_type}
-                    onValueChange={(value) =>
-                      updateStep(index, "step_type", value)
-                    }
+                    onValueChange={(value) => {
+                      if (
+                        value === "action" ||
+                        value === "approval" ||
+                        value === "notification" ||
+                        value === "decision"
+                      ) {
+                        updateStep(index, "step_type", value);
+                      }
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select step type" />

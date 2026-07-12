@@ -10,12 +10,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
-import { EntityDefinition, FieldDefinition } from "../contracts";
+import type { DynamicFormData, EntityDefinition, FieldDefinition } from "../contracts";
 
 interface DynamicFormProps {
   entityDef: EntityDefinition;
-  onSubmit: (data: any) => void;
-  initialData?: any;
+  onSubmit: (data: DynamicFormData) => void;
+  initialData?: DynamicFormData;
 }
 
 export const DynamicForm: React.FC<DynamicFormProps> = ({
@@ -28,7 +28,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
     handleSubmit,
     formState: { errors },
     setValue,
-  } = useForm({
+  } = useForm<DynamicFormData>({
     defaultValues: initialData,
   });
 
@@ -96,7 +96,7 @@ export const DynamicForm: React.FC<DynamicFormProps> = ({
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+    <form onSubmit={(event) => void handleSubmit(onSubmit)(event)} className="space-y-4">
       {entityDef.fields
         ?.sort((a, b) => a.order - b.order)
         .map((field) => (

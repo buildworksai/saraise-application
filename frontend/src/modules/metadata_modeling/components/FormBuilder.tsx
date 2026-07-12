@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import {
@@ -8,8 +8,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/Select";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { FieldDefinition } from "../contracts";
+import { Card } from "@/components/ui/Card";
+import type { FieldDefinition } from "../contracts";
 import { Plus, Trash2 } from "lucide-react";
 
 interface FormBuilderProps {
@@ -35,7 +35,9 @@ export const FormBuilder: React.FC<FormBuilderProps> = ({
 
   const updateField = (index: number, updates: Partial<FieldDefinition>) => {
     const newFields = [...fields];
-    newFields[index] = { ...newFields[index], ...updates };
+    const field = newFields[index];
+    if (!field) return;
+    newFields[index] = { ...field, ...updates };
     onChange(newFields);
   };
 
@@ -73,8 +75,10 @@ export const FormBuilder: React.FC<FormBuilderProps> = ({
                   <label className="text-sm font-medium">Type</label>
                   <Select
                     value={field.field_type}
-                    onValueChange={(val: any) =>
-                      updateField(index, { field_type: val })
+                    onValueChange={(value) =>
+                      updateField(index, {
+                        field_type: value as FieldDefinition["field_type"],
+                      })
                     }
                   >
                     <SelectTrigger>
@@ -104,7 +108,7 @@ export const FormBuilder: React.FC<FormBuilderProps> = ({
                 {field.field_type === "select" && (
                   <Input
                     placeholder="Options (comma separated)"
-                    value={field.options?.join(",") || ""}
+                    value={field.options?.join(",") ?? ""}
                     onChange={(e) =>
                       updateField(index, { options: e.target.value.split(",") })
                     }

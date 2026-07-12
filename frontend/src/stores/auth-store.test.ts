@@ -107,11 +107,7 @@ describe('useAuthStore', () => {
     expect(useAuthStore.getState().isLoading).toBe(false);
   });
 
-  it('should set authenticated state directly', () => {
-    useAuthStore.getState().setAuthenticated(true);
-    expect(useAuthStore.getState().isAuthenticated).toBe(true);
-
-    useAuthStore.getState().setAuthenticated(false);
-    expect(useAuthStore.getState().isAuthenticated).toBe(false);
+  it('does not expose persistence middleware', () => {
+    expect('persist' in useAuthStore).toBe(false);
   });
 });

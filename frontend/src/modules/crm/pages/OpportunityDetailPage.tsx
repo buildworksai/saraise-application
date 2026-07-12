@@ -6,7 +6,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, Edit, Trash2, CheckCircle, XCircle } from 'lucide-react';
+import { ArrowLeft, Edit, CheckCircle, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { StatusBadge } from '@/components/ui/StatusBadge';
@@ -176,15 +176,6 @@ export const OpportunityDetailPage = () => {
                   </Button>
                 </>
               )}
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() =>
-                  navigate(`/crm/activities/new?related_to_type=Opportunity&related_to_id=${opportunity.id}`)
-                }
-              >
-                Log Activity
-              </Button>
             </CardContent>
           </Card>
         </div>

@@ -16,7 +16,6 @@ vi.mock('@/stores/auth-store', () => ({
   useAuthStore: {
     getState: vi.fn(() => ({
       setUser: vi.fn(),
-      setAuthenticated: vi.fn(),
     })),
   },
 }));

@@ -29,7 +29,6 @@ describe('Navigation', () => {
       login: vi.fn(),
       logout: vi.fn(),
       setUser: vi.fn(),
-      setAuthenticated: vi.fn(),
       setLoading: vi.fn(),
     });
 
@@ -56,7 +55,6 @@ describe('Navigation', () => {
       login: vi.fn(),
       logout: vi.fn(),
       setUser: vi.fn(),
-      setAuthenticated: vi.fn(),
       setLoading: vi.fn(),
     });
 

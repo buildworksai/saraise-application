@@ -6,10 +6,9 @@
  */
 import { useState } from 'react';
 import { useAuthStore } from '../../stores/auth-store';
-import { authService } from '../../services/auth-service';
-import { apiClient } from '../../services/api-client';
+import { ApiError, apiClient } from '../../services/api-client';
 import { ENDPOINTS as AUTH_ENDPOINTS } from '../../services/auth-contracts';
-import { User, Mail, Key, Save, X, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { User, Mail, Key, Save, X, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 export const ProfilePage = () => {
@@ -17,8 +16,8 @@ export const ProfilePage = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
-    username: user?.username || '',
-    email: user?.email || '',
+    username: user?.username ?? '',
+    email: user?.email ?? '',
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
@@ -94,8 +93,8 @@ export const ProfilePage = () => {
 
       setIsEditing(false);
       toast.success('Your profile has been successfully updated');
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.error || 'Failed to update profile';
+    } catch (error: unknown) {
+      const errorMessage = error instanceof ApiError ? error.message : 'Failed to update profile';
       toast.error(errorMessage);
     } finally {
       setIsSaving(false);
@@ -104,8 +103,8 @@ export const ProfilePage = () => {
 
   const handleCancel = () => {
     setFormData({
-      username: user?.username || '',
-      email: user?.email || '',
+      username: user?.username ?? '',
+      email: user?.email ?? '',
       currentPassword: '',
       newPassword: '',
       confirmPassword: '',
@@ -135,10 +134,10 @@ export const ProfilePage = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <div className="w-16 h-16 bg-primary rounded-full flex items-center justify-center text-primary-foreground text-2xl font-bold">
-                {user.username?.[0]?.toUpperCase() || user.email[0].toUpperCase()}
+                {user.username?.[0]?.toUpperCase() ?? user.email.charAt(0).toUpperCase()}
               </div>
               <div>
-                <h2 className="text-xl font-semibold">{user.username || user.email}</h2>
+                <h2 className="text-xl font-semibold">{user.username ?? user.email}</h2>
                 <p className="text-sm text-muted-foreground">{user.email}</p>
                 {user.tenant_role && (
                   <span className="inline-block mt-1 px-2 py-1 text-xs bg-primary/10 text-primary rounded-md">
@@ -185,7 +184,7 @@ export const ProfilePage = () => {
                 )}
               </div>
             ) : (
-              <p className="text-muted-foreground">{user.username || 'Not set'}</p>
+              <p className="text-muted-foreground">{user.username ?? 'Not set'}</p>
             )}
           </div>
 
@@ -312,7 +311,7 @@ export const ProfilePage = () => {
           {isEditing && (
             <div className="flex items-center gap-4 pt-6 border-t border-border">
               <button
-                onClick={handleSave}
+                onClick={() => void handleSave()}
                 disabled={isSaving}
                 className="flex items-center gap-2 px-6 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
