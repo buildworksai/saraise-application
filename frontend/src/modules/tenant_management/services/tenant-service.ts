@@ -14,12 +14,6 @@ import type {
   TenantResourceUsage,
   TenantSettings,
   TenantHealthScore,
-  TenantRequest,
-  TenantUpdate,
-  TenantModuleRequest,
-  TenantModuleUpdate,
-  TenantSettingsRequest,
-  TenantSettingsUpdate,
 } from '../contracts';
 import { ENDPOINTS } from '../contracts';
 
@@ -31,11 +25,6 @@ export type {
   TenantSettings,
   TenantHealthScore,
 };
-
-// Request types (aliases for backward compatibility)
-export type TenantCreate = TenantRequest;
-export type TenantModuleCreate = TenantModuleRequest;
-export type TenantSettingsCreate = TenantSettingsRequest;
 
 export const tenantService = {
   /**
@@ -61,41 +50,6 @@ export const tenantService = {
      */
     get: async (id: string): Promise<Tenant> => {
       return apiClient.get<Tenant>(ENDPOINTS.TENANTS.DETAIL(id));
-    },
-
-    /**
-     * Create tenant
-     */
-    create: async (data: TenantCreate): Promise<Tenant> => {
-      return apiClient.post<Tenant>(ENDPOINTS.TENANTS.CREATE, data);
-    },
-
-    /**
-     * Update tenant
-     */
-    update: async (id: string, data: TenantUpdate): Promise<Tenant> => {
-      return apiClient.patch<Tenant>(ENDPOINTS.TENANTS.UPDATE(id), data);
-    },
-
-    /**
-     * Delete tenant
-     */
-    delete: async (id: string): Promise<void> => {
-      return apiClient.delete(ENDPOINTS.TENANTS.DELETE(id));
-    },
-
-    /**
-     * Suspend tenant
-     */
-    suspend: async (id: string): Promise<{ status: string; message: string }> => {
-      return apiClient.post<{ status: string; message: string }>(ENDPOINTS.TENANTS.SUSPEND(id));
-    },
-
-    /**
-     * Activate tenant
-     */
-    activate: async (id: string): Promise<{ status: string; message: string }> => {
-      return apiClient.post<{ status: string; message: string }>(ENDPOINTS.TENANTS.ACTIVATE(id));
     },
 
     /**
@@ -158,40 +112,6 @@ export const tenantService = {
       return apiClient.get<TenantModule>(ENDPOINTS.MODULES.DETAIL(id));
     },
 
-    /**
-     * Create tenant module
-     */
-    create: async (data: TenantModuleCreate): Promise<TenantModule> => {
-      return apiClient.post<TenantModule>(ENDPOINTS.MODULES.CREATE, data);
-    },
-
-    /**
-     * Update tenant module
-     */
-    update: async (id: string, data: Partial<TenantModuleCreate>): Promise<TenantModule> => {
-      return apiClient.patch<TenantModule>(ENDPOINTS.MODULES.UPDATE(id), data);
-    },
-
-    /**
-     * Delete tenant module
-     */
-    delete: async (id: string): Promise<void> => {
-      return apiClient.delete(ENDPOINTS.MODULES.DELETE(id));
-    },
-
-    /**
-     * Enable module
-     */
-    enable: async (id: string): Promise<{ status: string; message: string }> => {
-      return apiClient.post<{ status: string; message: string }>(ENDPOINTS.MODULES.ENABLE(id));
-    },
-
-    /**
-     * Disable module
-     */
-    disable: async (id: string): Promise<{ status: string; message: string }> => {
-      return apiClient.post<{ status: string; message: string }>(ENDPOINTS.MODULES.DISABLE(id));
-    },
   },
 
   /**
@@ -244,26 +164,6 @@ export const tenantService = {
       return apiClient.get<TenantSettings>(ENDPOINTS.SETTINGS.DETAIL(id));
     },
 
-    /**
-     * Create setting
-     */
-    create: async (data: TenantSettingsCreate): Promise<TenantSettings> => {
-      return apiClient.post<TenantSettings>(ENDPOINTS.SETTINGS.CREATE, data);
-    },
-
-    /**
-     * Update setting
-     */
-    update: async (id: string, data: Partial<TenantSettingsCreate>): Promise<TenantSettings> => {
-      return apiClient.patch<TenantSettings>(ENDPOINTS.SETTINGS.UPDATE(id), data);
-    },
-
-    /**
-     * Delete setting
-     */
-    delete: async (id: string): Promise<void> => {
-      return apiClient.delete(ENDPOINTS.SETTINGS.DELETE(id));
-    },
   },
 
   /**

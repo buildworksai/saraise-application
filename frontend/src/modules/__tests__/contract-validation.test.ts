@@ -15,13 +15,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 // Static imports to avoid dynamic import issues
-// ⚠️ ARCHITECTURAL ENFORCEMENT: platform_management removed from application repo
+import * as platformContracts from '../platform_management/contracts';
 import * as tenantContracts from '../tenant_management/contracts';
 import * as securityContracts from '../security_access_control/contracts';
 import * as aiAgentContracts from '../ai_agent_management/contracts';
 
 const MODULES_DIR = path.join(__dirname, '..');
 const MODULES = [
+  { name: 'platform_management', contracts: platformContracts },
   { name: 'tenant_management', contracts: tenantContracts },
   { name: 'security_access_control', contracts: securityContracts },
   { name: 'ai_agent_management', contracts: aiAgentContracts },
