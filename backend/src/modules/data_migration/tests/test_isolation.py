@@ -63,7 +63,7 @@ def tenant_a_user(db):
     user = User.objects.create_user(
         username="user_a",
         email="usera@example.com",
-        password="testpass123",
+        password="testpass123",  # pragma: allowlist secret
     )
     with patch.object(UserProfile, "clean"):
         profile, _ = UserProfile.objects.get_or_create(
@@ -88,7 +88,7 @@ def tenant_b_user(db):
     user = User.objects.create_user(
         username="user_b",
         email="userb@example.com",
-        password="testpass123",
+        password="testpass123",  # pragma: allowlist secret
     )
     with patch.object(UserProfile, "clean"):
         profile, _ = UserProfile.objects.get_or_create(
@@ -108,7 +108,7 @@ def platform_operator_user(db):
     user = User.objects.create_user(
         username="platform_operator",
         email="operator@example.com",
-        password="testpass123",
+        password="testpass123",  # pragma: allowlist secret
     )
     profile = user.profile
     profile.platform_role = "platform_operator"
@@ -299,7 +299,7 @@ class TestExternalDatabaseSourceSecurity:
                 "port": 5432,
                 "database": "warehouse",
                 "username": "readonly_user",
-                "password": "must-not-be-stored",
+                "password": "must-not-be-stored",  # pragma: allowlist secret
             },
             format="json",
         )
@@ -321,7 +321,9 @@ class TestExternalDatabaseSourceSecurity:
         api_client,
         tenant_a_user,
         platform_operator_user,
+        monkeypatch,
     ):
+        monkeypatch.setenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", "warehouse.partner.example")
         tenant_id = get_user_tenant_id(tenant_a_user)
         api_client.force_authenticate(user=platform_operator_user)
         registration = api_client.post(
@@ -334,7 +336,7 @@ class TestExternalDatabaseSourceSecurity:
                 "port": 5432,
                 "database": "warehouse",
                 "username": "readonly_user",
-                "password": "operator-secret",
+                "password": "operator-secret",  # pragma: allowlist secret
             },
             format="json",
         )
@@ -342,8 +344,10 @@ class TestExternalDatabaseSourceSecurity:
         assert registration.status_code == status.HTTP_201_CREATED
         assert "password" not in registration.data
         connection_config = ExternalConnection.objects.get(id=registration.data["id"])
-        assert connection_config.password_encrypted != "operator-secret"
-        assert EncryptionService.decrypt(connection_config.password_encrypted) == "operator-secret"
+        assert connection_config.password_encrypted != "operator-secret"  # pragma: allowlist secret
+        assert (
+            EncryptionService.decrypt(connection_config.password_encrypted) == "operator-secret"
+        )  # pragma: allowlist secret
 
         api_client.force_authenticate(user=tenant_a_user)
         listing = api_client.get("/api/v1/data-migration/connections/")
@@ -393,7 +397,7 @@ class TestExternalDatabaseSourceSecurity:
         connect_kwargs = connect.call_args.kwargs
         assert connect_kwargs["host"] == "warehouse.partner.example"
         assert connect_kwargs["hostaddr"] == "8.8.8.8"
-        assert connect_kwargs["password"] == "operator-secret"
+        assert connect_kwargs["password"] == "operator-secret"  # pragma: allowlist secret
         assert connect_kwargs["connect_timeout"] == 10
         assert connect_kwargs["options"] == "-c statement_timeout=30000"
         assert connect_kwargs["service"] == ""
@@ -494,6 +498,33 @@ class TestExternalDatabaseSourceSecurity:
             with pytest.raises(ValueError, match="configured Django database address"):
                 _validated_external_hostaddr("warehouse.partner.example")
 
+    def test_unset_allowlist_still_rejects_internal_address(self, settings, monkeypatch):
+        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
+        monkeypatch.delenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", raising=False)
+        private_ip = ipaddress.ip_address("10.1.2.3")
+
+        with patch("src.modules.data_migration.services._resolved_addresses", return_value={private_ip}):
+            with pytest.raises(ValueError, match="internal or non-routable"):
+                _validated_external_hostaddr("warehouse.partner.example")
+
+    def test_unset_allowlist_rejects_public_host(self, settings, monkeypatch):
+        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
+        monkeypatch.delenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", raising=False)
+        public_ip = ipaddress.ip_address("8.8.8.8")
+
+        with patch("src.modules.data_migration.services._resolved_addresses", return_value={public_ip}):
+            with pytest.raises(ValueError, match="allowlist"):
+                _validated_external_hostaddr("warehouse.partner.example")
+
+    def test_empty_allowlist_rejects_public_host(self, settings, monkeypatch):
+        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
+        monkeypatch.setenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", "")
+        public_ip = ipaddress.ip_address("8.8.8.8")
+
+        with patch("src.modules.data_migration.services._resolved_addresses", return_value={public_ip}):
+            with pytest.raises(ValueError, match="allowlist"):
+                _validated_external_hostaddr("warehouse.partner.example")
+
     def test_empty_host_is_rejected(self, settings):
         settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
         with pytest.raises(ValueError, match="non-empty canonical"):
@@ -502,8 +533,11 @@ class TestExternalDatabaseSourceSecurity:
     def test_allowlist_blocks_hosts_not_listed(self, settings, monkeypatch):
         settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
         monkeypatch.setenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", "warehouse.partner.example")
-        with pytest.raises(ValueError, match="allowlist"):
-            _validated_external_hostaddr("other.example")
+        public_ip = ipaddress.ip_address("8.8.8.8")
+
+        with patch("src.modules.data_migration.services._resolved_addresses", return_value={public_ip}):
+            with pytest.raises(ValueError, match="allowlist"):
+                _validated_external_hostaddr("other.example")
 
     def test_allowlist_never_exempts_unresolvable_host(self, settings, monkeypatch):
         settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}

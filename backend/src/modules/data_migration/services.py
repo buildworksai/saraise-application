@@ -61,7 +61,7 @@ FORBIDDEN_DATABASE_SOURCE_KEYS = frozenset(
 
 
 def _configured_allowed_hosts() -> Set[str]:
-    """Optional operator allowlist of external DB hosts (comma-separated env)."""
+    """Return the operator allowlist; missing or empty configuration denies all hosts."""
     raw = os.environ.get("DATA_MIGRATION_ALLOWED_DB_HOSTS", "")
     return {host.strip().lower() for host in raw.split(",") if host.strip()}
 
@@ -124,7 +124,12 @@ def _primary_db_addresses() -> Set[IPAddress]:
 
 
 def _validated_external_hostaddr(host: str) -> str:
-    """Validate every resolved address and return one DNS-pinned public IP."""
+    """Return a DNS-pinned public IP only for an explicitly allowlisted host.
+
+    Primary and internal destination checks are unconditional and run before
+    the allowlist gate. A missing or empty allowlist therefore denies every
+    otherwise-valid public destination instead of enabling unrestricted egress.
+    """
     if not isinstance(host, str) or not host or host != host.strip():
         raise ValueError("External database host must be a non-empty canonical hostname or IP")
     normalized_host = host.lower()
@@ -134,10 +139,6 @@ def _validated_external_hostaddr(host: str) -> str:
     primary_hosts = _primary_db_hosts()
     if normalized_host in primary_hosts:
         raise ValueError("External database may not target a configured Django database host")
-
-    allowed_hosts = _configured_allowed_hosts()
-    if allowed_hosts and normalized_host not in allowed_hosts:
-        raise ValueError("External database host is not in DATA_MIGRATION_ALLOWED_DB_HOSTS allowlist")
 
     addresses = _resolved_addresses(normalized_host)
     if not addresses:
@@ -156,6 +157,10 @@ def _validated_external_hostaddr(host: str) -> str:
             or address.is_unspecified
         ):
             raise ValueError("External database may not target internal or non-routable addresses")
+
+    allowed_hosts = _configured_allowed_hosts()
+    if normalized_host not in allowed_hosts:
+        raise ValueError("External database host is not in DATA_MIGRATION_ALLOWED_DB_HOSTS allowlist")
 
     pinned = min(addresses, key=lambda address: (address.version, int(address)))
     return str(pinned)
@@ -224,6 +229,7 @@ def _connect_external_database(connection_config: ExternalConnection):
             autocommit=False,
             local_infile=False,
         )
+        # SARAISE-33006: External-session hardening on an operator-registered non-application database.
         with connection.cursor() as cursor:
             cursor.execute("SET SESSION MAX_EXECUTION_TIME = %s", (statement_timeout,))
             cursor.execute("SET SESSION TRANSACTION READ ONLY")
@@ -588,6 +594,7 @@ class MigrationEngine:
         connection = None
         try:
             connection = _connect_external_database(connection_config)
+            # SARAISE-33006: External-source read on an operator-registered non-application database.
             with connection.cursor() as cursor:
                 cursor.execute(select_sql, values)
                 columns = [col[0] for col in cursor.description]

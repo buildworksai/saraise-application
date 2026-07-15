@@ -11,13 +11,7 @@ from rest_framework.response import Response
 from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
 
-from .models import (
-    ExternalConnection,
-    MigrationJob,
-    MigrationLog,
-    MigrationMapping,
-    MigrationValidation,
-)
+from .models import ExternalConnection, MigrationJob, MigrationLog, MigrationMapping, MigrationValidation
 from .permissions import DataMigrationPermission, ExternalConnectionPermission, is_platform_operator
 from .serializers import (
     ExternalConnectionManagementSerializer,
