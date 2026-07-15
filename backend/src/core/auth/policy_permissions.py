@@ -40,7 +40,12 @@ class _PolicyCircuitBreaker:
         self._opened_at = 0.0
         self._lock = threading.Lock()
 
-    def call(self, operation: Callable[[], T]) -> T:
+    def call(
+        self,
+        operation: Callable[[], T],
+        *,
+        is_failure: Callable[[T], bool] | None = None,
+    ) -> T:
         with self._lock:
             if self._failures >= self.threshold and time.monotonic() - self._opened_at < self.reset_seconds:
                 raise RuntimeError("policy engine circuit breaker is open")
@@ -52,7 +57,11 @@ class _PolicyCircuitBreaker:
                 self._opened_at = time.monotonic()
             raise
         with self._lock:
-            self._failures = 0
+            if is_failure is not None and is_failure(result):
+                self._failures += 1
+                self._opened_at = time.monotonic()
+            else:
+                self._failures = 0
         return result
 
 
@@ -154,7 +163,8 @@ class PolicyRequiredPermission(BasePermission):
                         "action": request.method,
                     },
                     timeout=2,
-                )
+                ),
+                is_failure=lambda result: result.status_code == 429 or result.status_code >= 500,
             )
             if response.status_code == 200:
                 result = response.json()

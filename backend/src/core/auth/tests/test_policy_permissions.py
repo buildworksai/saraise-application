@@ -9,7 +9,7 @@ from django.contrib.auth import get_user_model
 from django.test import override_settings
 from rest_framework.test import APIRequestFactory
 
-from src.core.auth.policy_permissions import PolicyRequiredPermission
+from src.core.auth.policy_permissions import PolicyRequiredPermission, _PolicyCircuitBreaker
 from src.core.user_models import UserProfile
 
 
@@ -42,6 +42,23 @@ def test_saas_policy_outage_is_denied(mock_post):
     view = SimpleNamespace(required_permissions=["crm.lead:read"])
     assert PolicyRequiredPermission().has_permission(_request(), view) is False
     mock_post.assert_called_once()
+
+
+@override_settings(SARAISE_MODE="saas", SARAISE_POLICY_ENGINE_URL="https://policy.invalid")
+@patch("requests.post")
+@pytest.mark.parametrize("status_code", [429, 500])
+def test_saas_policy_breaker_opens_after_http_failure_threshold(mock_post, status_code):
+    mock_post.return_value.status_code = status_code
+    permission = PolicyRequiredPermission()
+    permission._circuit_breaker = _PolicyCircuitBreaker(threshold=2, reset_seconds=30)
+    view = SimpleNamespace(required_permissions=["crm.lead:read"])
+
+    assert permission.has_permission(_request(), view) is False
+    assert permission.has_permission(_request(), view) is False
+    assert permission.has_permission(_request(), view) is False
+
+    assert mock_post.call_count == 2
+    assert permission._circuit_breaker._failures == 2
 
 
 @pytest.mark.django_db
