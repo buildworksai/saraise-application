@@ -15,6 +15,7 @@ from src.core.module_manifest_schema import (
     ModuleManifest,
     ModuleStatus,
     ModuleType,
+    manifest_validator,
 )
 
 
