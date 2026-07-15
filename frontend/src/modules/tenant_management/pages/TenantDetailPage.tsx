@@ -3,10 +3,9 @@
  *
  * Displays tenant details, modules, resource usage, and health scores.
  */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
-import { Building2, Package, Activity, Heart, ArrowLeft, Edit, Trash2, Power, PowerOff } from 'lucide-react';
+import { Building2, Package, Activity, Heart, ArrowLeft } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { TableSkeleton, ErrorState } from '@/components/ui';
@@ -16,7 +15,6 @@ import { TenantStatusBadge, type TenantStatus } from '../components';
 export const TenantDetailPage = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
   const { data: tenant, isLoading, error, refetch } = useQuery<Tenant>({
     queryKey: ['tenant', id],
@@ -41,60 +39,6 @@ export const TenantDetailPage = () => {
     queryFn: () => tenantService.tenants.getHealthScores(id!),
     enabled: !!id,
   });
-
-  const suspendMutation = useMutation({
-    mutationFn: (id: string) => tenantService.tenants.suspend(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['tenant', id] });
-      void queryClient.invalidateQueries({ queryKey: ['tenants'] });
-      toast.success('Tenant suspended successfully');
-    },
-    onError: () => {
-      toast.error('Failed to suspend tenant. Please try again.');
-    },
-  });
-
-  const activateMutation = useMutation({
-    mutationFn: (id: string) => tenantService.tenants.activate(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['tenant', id] });
-      void queryClient.invalidateQueries({ queryKey: ['tenants'] });
-      toast.success('Tenant activated successfully');
-    },
-    onError: () => {
-      toast.error('Failed to activate tenant. Please try again.');
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => tenantService.tenants.delete(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['tenants'] });
-      toast.success('Tenant deleted successfully');
-      navigate('/tenant-management');
-    },
-    onError: () => {
-      toast.error('Failed to delete tenant. Please try again.');
-    },
-  });
-
-  const handleSuspend = async () => {
-    if (window.confirm('Are you sure you want to suspend this tenant?')) {
-      await suspendMutation.mutateAsync(id!);
-    }
-  };
-
-  const handleActivate = async () => {
-    if (window.confirm('Are you sure you want to activate this tenant?')) {
-      await activateMutation.mutateAsync(id!);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (window.confirm('Are you sure you want to delete this tenant? This action cannot be undone.')) {
-      await deleteMutation.mutateAsync(id!);
-    }
-  };
 
   if (isLoading) {
     return (
@@ -131,7 +75,7 @@ export const TenantDetailPage = () => {
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back to Tenants
         </Button>
-        <div className="flex items-start justify-between">
+        <div className="flex items-start">
           <div className="flex items-center gap-4">
             <div className="p-3 bg-primary-main/10 dark:bg-primary-main/20 rounded-lg">
               <Building2 className="w-8 h-8 text-primary-main" />
@@ -141,48 +85,6 @@ export const TenantDetailPage = () => {
               <p className="text-muted-foreground">{tenant.slug}</p>
             </div>
             <TenantStatusBadge status={(tenant.status ?? 'trial') as TenantStatus} />
-          </div>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={() => navigate(`/tenant-management/${id}/edit`)}
-            >
-              <Edit className="w-4 h-4 mr-2" />
-              Edit
-            </Button>
-            {tenant.status === 'active' ? (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  void handleSuspend();
-                }}
-                disabled={suspendMutation.isPending}
-              >
-                <PowerOff className="w-4 h-4 mr-2" />
-                Suspend
-              </Button>
-            ) : tenant.status === 'suspended' ? (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  void handleActivate();
-                }}
-                disabled={activateMutation.isPending}
-              >
-                <Power className="w-4 h-4 mr-2" />
-                Activate
-              </Button>
-            ) : null}
-            <Button
-              variant="danger"
-              onClick={() => {
-                void handleDelete();
-              }}
-              disabled={deleteMutation.isPending}
-            >
-              <Trash2 className="w-4 h-4 mr-2" />
-              Delete
-            </Button>
           </div>
         </div>
       </div>

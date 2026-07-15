@@ -10,7 +10,8 @@ import { Key, Lock, CheckCircle2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { ENDPOINTS, LicenseActivationRequest } from "../contracts";
+import { ENDPOINTS } from "../contracts";
+import type { LicenseActivationRequest } from "../contracts";
 import { apiClient } from "@/services/api-client";
 
 export const LicenseActivationForm = () => {
