@@ -41,7 +41,18 @@ jobs:
       - name: Generate OpenAPI Schema
         run: |
           cd backend
-          python manage.py spectacular --file schema.yaml --format openapi-json
+          set -o pipefail
+          python manage.py spectacular --file schema.yaml --format openapi-json --validate 2>&1 | tee /tmp/spectacular-output.txt
+
+          schema_errors="$(sed -n 's/^Errors: *\([0-9][0-9]*\).*/\1/p' /tmp/spectacular-output.txt | tail -1)"
+          if [ -z "$schema_errors" ]; then
+            echo "drf-spectacular did not report an error count"
+            exit 1
+          fi
+          if [ "$schema_errors" -ne 0 ]; then
+            echo "drf-spectacular reported $schema_errors schema-generation errors"
+            exit 1
+          fi
 
       - name: Validate OpenAPI Schema
         run: |
