@@ -54,6 +54,8 @@ htmlcov/
 .hypothesis/
 nosetests.xml
 coverage.xml
+coverage.json
+test_output*.txt
 *.mo
 *.pot
 
@@ -175,6 +177,7 @@ site/
 *.swo
 *~
 .cache/
+migration-backups-*/
 
 # ====================
 # Redis / Session storage (dev)
