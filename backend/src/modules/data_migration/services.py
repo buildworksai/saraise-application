@@ -6,15 +6,265 @@ High-level service layer for DataMigration business logic.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
-from typing import Any, Dict, List, Optional
+import os
+import re
+import socket
+from typing import Any, Dict, List, Optional, Set, Union
 
+from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from .models import MigrationJob, MigrationLog, MigrationMapping, MigrationRollback, MigrationValidation
+from src.core.encryption.service import EncryptionService
+
+from .models import (
+    ExternalConnection,
+    MigrationJob,
+    MigrationLog,
+    MigrationMapping,
+    MigrationRollback,
+    MigrationValidation,
+)
 
 logger = logging.getLogger(__name__)
+
+IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+
+DATABASE_SOURCE_CONFIG_KEYS = frozenset({"connection_id", "table", "columns", "filters"})
+FORBIDDEN_DATABASE_SOURCE_KEYS = frozenset(
+    {
+        "connection_string",
+        "query",
+        "sql_query",
+        "dsn",
+        "hostaddr",
+        "host",
+        "service",
+        "port",
+        "database",
+        "dbname",
+        "db_scheme",
+        "scheme",
+        "username",
+        "user",
+        "password",
+        "passfile",
+        "options",
+        "sslmode",
+        "socket",
+    }
+)
+
+
+def _configured_allowed_hosts() -> Set[str]:
+    """Return the operator allowlist; missing or empty configuration denies all hosts."""
+    raw = os.environ.get("DATA_MIGRATION_ALLOWED_DB_HOSTS", "")
+    return {host.strip().lower() for host in raw.split(",") if host.strip()}
+
+
+def _primary_db_hosts() -> Set[str]:
+    """Host identifiers of the application's own databases — never a valid source."""
+    hosts: Set[str] = set()
+    for alias_config in (settings.DATABASES or {}).values():
+        host = str(alias_config.get("HOST") or "").strip().lower()
+        if host:
+            hosts.add(host)
+    return hosts
+
+
+def _resolved_addresses(host: str) -> Set[IPAddress]:
+    """Resolve a hostname to every IP it maps to; empty set if unresolvable."""
+    addresses: Set[IPAddress] = set()
+    try:
+        for info in socket.getaddrinfo(host, None):
+            try:
+                addresses.add(ipaddress.ip_address(info[4][0]))
+            except ValueError:
+                continue
+    except socket.gaierror:
+        return set()
+    return addresses
+
+
+def _validate_database_source_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate the caller contract without accepting connection parameters."""
+    if not isinstance(config, dict):
+        raise ValueError("Database source_config must be an object")
+    if "connection_string" in config:
+        raise ValueError(
+            "Legacy database source_config contains connection_string; migration required: "
+            "register an ExternalConnection and replace it with connection_id"
+        )
+    if "query" in config or "sql_query" in config:
+        raise ValueError("Raw SQL queries are not supported")
+    forbidden = sorted(FORBIDDEN_DATABASE_SOURCE_KEYS.intersection(config))
+    if forbidden:
+        raise ValueError(f"Database source_config contains forbidden connection or SQL fields: {', '.join(forbidden)}")
+    unsupported = sorted(set(config).difference(DATABASE_SOURCE_CONFIG_KEYS))
+    if unsupported:
+        raise ValueError(f"Database source_config contains unsupported fields: {', '.join(unsupported)}")
+    if not config.get("connection_id") or not config.get("table"):
+        raise ValueError("Database source_config requires connection_id and table")
+    return config
+
+
+def _primary_db_addresses() -> Set[IPAddress]:
+    """Resolve every configured Django database host for destination blocking."""
+    addresses: Set[IPAddress] = set()
+    for host in _primary_db_hosts():
+        try:
+            addresses.add(ipaddress.ip_address(host))
+        except ValueError:
+            addresses.update(_resolved_addresses(host))
+    return addresses
+
+
+def _validated_external_hostaddr(host: str) -> str:
+    """Return a DNS-pinned public IP only for an explicitly allowlisted host.
+
+    Primary and internal destination checks are unconditional and run before
+    the allowlist gate. A missing or empty allowlist therefore denies every
+    otherwise-valid public destination instead of enabling unrestricted egress.
+    """
+    if not isinstance(host, str) or not host or host != host.strip():
+        raise ValueError("External database host must be a non-empty canonical hostname or IP")
+    normalized_host = host.lower()
+    if normalized_host.startswith("/") or "," in normalized_host or "\x00" in normalized_host:
+        raise ValueError("Unix-socket and multi-host external database hosts are forbidden")
+
+    primary_hosts = _primary_db_hosts()
+    if normalized_host in primary_hosts:
+        raise ValueError("External database may not target a configured Django database host")
+
+    addresses = _resolved_addresses(normalized_host)
+    if not addresses:
+        raise ValueError(f"External database host could not be resolved: {normalized_host}")
+
+    primary_addresses = _primary_db_addresses()
+    for address in addresses:
+        if address in primary_addresses:
+            raise ValueError("External database may not target a configured Django database address")
+        if (
+            address.is_loopback
+            or address.is_link_local
+            or address.is_private
+            or address.is_reserved
+            or address.is_multicast
+            or address.is_unspecified
+        ):
+            raise ValueError("External database may not target internal or non-routable addresses")
+
+    allowed_hosts = _configured_allowed_hosts()
+    if normalized_host not in allowed_hosts:
+        raise ValueError("External database host is not in DATA_MIGRATION_ALLOWED_DB_HOSTS allowlist")
+
+    pinned = min(addresses, key=lambda address: (address.version, int(address)))
+    return str(pinned)
+
+
+def _validated_identifier(value: Any, field_name: str) -> str:
+    """Validate a SQL identifier that cannot be passed as a query parameter."""
+    if not isinstance(value, str) or not IDENTIFIER_PATTERN.fullmatch(value):
+        raise ValueError(f"Invalid {field_name}: {value}")
+    return value
+
+
+def _positive_timeout(setting_name: str, default: int) -> int:
+    """Read an operator timeout setting and fail closed on invalid values."""
+    value = getattr(settings, setting_name, default)
+    if isinstance(value, bool):
+        raise ValueError(f"{setting_name} must be a positive integer")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{setting_name} must be a positive integer") from exc
+    if parsed <= 0:
+        raise ValueError(f"{setting_name} must be a positive integer")
+    return parsed
+
+
+def _connect_external_database(connection_config: ExternalConnection):
+    """Open a DNS-pinned, read-only external connection from server state."""
+    pinned_hostaddr = _validated_external_hostaddr(connection_config.host)
+    password = EncryptionService.decrypt(connection_config.password_encrypted)
+    connect_timeout = _positive_timeout("DATA_MIGRATION_DB_CONNECT_TIMEOUT_SECONDS", 10)
+    statement_timeout = _positive_timeout("DATA_MIGRATION_DB_STATEMENT_TIMEOUT_MS", 30000)
+
+    if connection_config.db_scheme == "postgresql":
+        import psycopg2
+
+        connection = psycopg2.connect(
+            host=connection_config.host,
+            hostaddr=pinned_hostaddr,
+            port=connection_config.port,
+            dbname=connection_config.database,
+            user=connection_config.username,
+            password=password,
+            connect_timeout=connect_timeout,
+            options=f"-c statement_timeout={statement_timeout}",
+            sslmode=getattr(settings, "DATA_MIGRATION_POSTGRES_SSLMODE", "verify-full"),
+            application_name="saraise-data-migration-readonly",
+            target_session_attrs="any",
+            client_encoding="UTF8",
+            service="",
+        )
+        connection.set_session(readonly=True, autocommit=False)
+        return connection
+    if connection_config.db_scheme == "mysql":
+        import pymysql
+
+        connection = pymysql.connect(
+            host=pinned_hostaddr,
+            port=connection_config.port,
+            user=connection_config.username,
+            password=password,
+            database=connection_config.database,
+            connect_timeout=connect_timeout,
+            read_timeout=max(1, statement_timeout // 1000),
+            write_timeout=max(1, statement_timeout // 1000),
+            autocommit=False,
+            local_infile=False,
+        )
+        # SARAISE-33006: External-session hardening on an operator-registered non-application database.
+        with connection.cursor() as cursor:
+            cursor.execute("SET SESSION MAX_EXECUTION_TIME = %s", (statement_timeout,))
+            cursor.execute("SET SESSION TRANSACTION READ ONLY")
+        return connection
+    raise ValueError(f"Unsupported external database type: {connection_config.db_scheme}")
+
+
+class ExternalConnectionService:
+    """Persist operator-managed connections without storing plaintext secrets."""
+
+    @staticmethod
+    @transaction.atomic
+    def register(*, tenant_id: Any, created_by: str, data: Dict[str, Any]) -> ExternalConnection:
+        """Encrypt the password and register a canonical external connection."""
+        values = dict(data)
+        password = values.pop("password")
+        return ExternalConnection.objects.create(
+            tenant_id=tenant_id,
+            created_by=created_by,
+            password_encrypted=EncryptionService.encrypt(password),
+            **values,
+        )
+
+    @staticmethod
+    @transaction.atomic
+    def update(*, connection: ExternalConnection, data: Dict[str, Any]) -> ExternalConnection:
+        """Update canonical fields and rotate the encrypted password if supplied."""
+        values = dict(data)
+        password = values.pop("password", None)
+        for field, value in values.items():
+            setattr(connection, field, value)
+        if password is not None:
+            connection.password_encrypted = EncryptionService.encrypt(password)
+        connection.save()
+        return connection
 
 
 class MigrationResult:
@@ -173,7 +423,7 @@ class MigrationEngine:
             elif source_type == "json":
                 return self._load_json_data(source_config)
             elif source_type == "database":
-                return self._load_database_data(source_config)
+                return self._load_database_data(source_config, str(job.tenant_id))
             elif source_type == "api":
                 return self._load_api_data(source_config)
             else:
@@ -192,6 +442,7 @@ class MigrationEngine:
             List of records as dictionaries.
         """
         import csv
+
         from django.core.files.storage import default_storage
 
         file_path = config.get("file_path")
@@ -259,6 +510,7 @@ class MigrationEngine:
             List of records as dictionaries.
         """
         import json
+
         from django.core.files.storage import default_storage
 
         if "data" in config:
@@ -294,38 +546,67 @@ class MigrationEngine:
         except Exception as e:
             raise ValueError(f"Failed to read JSON file: {str(e)}")
 
-    def _load_database_data(self, config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _load_database_data(self, config: Dict[str, Any], tenant_id: str) -> List[Dict[str, Any]]:
         """Load data from external database.
 
         Args:
-            config: Configuration dict with database connection details and query.
+            config: Structured external database connection, table, columns, and filters.
+            tenant_id: Tenant owning the already-scoped migration job.
 
         Returns:
             List of records as dictionaries.
         """
-        from django.db import connections
-
-        connection_string = config.get("connection_string")
-        query = config.get("query")
-
-        if not connection_string or not query:
-            raise ValueError("Database connection_string and query are required in source_config")
+        if not tenant_id:
+            raise ValueError("Tenant context is required for database migrations")
+        _validate_database_source_config(config)
 
         try:
-            # Create a temporary database connection
-            # Note: This is a simplified implementation
-            # In production, you'd want to use proper connection pooling
-            # SARAISE-33006: Data migration queries external databases, not tenant-scoped
-            conn = connections["default"]
-            with conn.cursor() as cursor:
-                cursor.execute(query)
+            connection_config = ExternalConnection.objects.filter(
+                id=config["connection_id"],
+                tenant_id=tenant_id,
+                is_active=True,
+            ).first()
+        except (DjangoValidationError, ValueError, TypeError) as exc:
+            raise ValueError("Database connection_id is invalid") from exc
+        if connection_config is None:
+            raise ValueError("Active external connection not found for tenant")
+
+        table = _validated_identifier(config.get("table"), "table")
+        configured_columns = config.get("columns", ["*"])
+        if not isinstance(configured_columns, list) or not configured_columns:
+            raise ValueError("Database columns must be a non-empty list")
+        if configured_columns == ["*"]:
+            columns_sql = "*"
+        else:
+            columns_sql = ", ".join(_validated_identifier(column, "column") for column in configured_columns)
+
+        filters = config.get("filters", {})
+        if not isinstance(filters, dict):
+            raise ValueError("Database filters must be an object")
+        where_parts = []
+        values = []
+        for column, value in filters.items():
+            where_parts.append(f"{_validated_identifier(column, 'filter column')} = %s")
+            values.append(value)
+        where_sql = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
+        select_sql = f"SELECT {columns_sql} FROM {table}{where_sql}"
+
+        connection = None
+        try:
+            connection = _connect_external_database(connection_config)
+            # SARAISE-33006: External-source read on an operator-registered non-application database.
+            with connection.cursor() as cursor:
+                cursor.execute(select_sql, values)
                 columns = [col[0] for col in cursor.description]
                 rows = cursor.fetchall()
                 records = [dict(zip(columns, row)) for row in rows]
         except Exception as e:
             raise ValueError(f"Failed to query database: {str(e)}")
+        finally:
+            if connection is not None:
+                connection.close()
 
-        logger.info(f"Loaded {len(records)} records from database")
+        logger.info("Loaded %s records from external database for tenant %s", len(records), tenant_id)
         return records
 
     def _load_api_data(self, config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -404,6 +685,7 @@ class MigrationEngine:
                     source_value = int(source_value) if source_value else 0
                 elif target_type == "decimal":
                     from decimal import Decimal
+
                     source_value = Decimal(str(source_value)) if source_value else Decimal("0.00")
 
             if "default" in transform and source_value is None:
@@ -476,6 +758,7 @@ class MigrationEngine:
                 type_valid = isinstance(value, bool) or str(value).lower() in ("true", "false", "1", "0", "yes", "no")
             elif expected_type == "date":
                 from datetime import datetime
+
                 try:
                     datetime.fromisoformat(str(value))
                     type_valid = True
@@ -483,6 +766,7 @@ class MigrationEngine:
                     type_valid = False
             elif expected_type == "email":
                 import re
+
                 email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
                 type_valid = isinstance(value, str) and bool(re.match(email_pattern, value))
             else:
@@ -586,6 +870,7 @@ class MigrationEngine:
             # Pattern/regex constraint
             if "pattern" in constraints:
                 import re
+
                 pattern = constraints["pattern"]
                 if isinstance(value, str) and not re.match(pattern, value):
                     error_msg = f"Field {field} does not match required pattern at record {index}"
@@ -762,10 +1047,6 @@ class MigrationEngine:
 
                         module = import_module(module_path)
                         Model = getattr(module, model_name)
-
-                        # Get records imported after checkpoint timestamp
-                        checkpoint_time = checkpoint.created_at
-                        lookup_field = target_config.get("lookup_field", "id")
 
                         # Find records created/updated after checkpoint
                         # Note: This is a simplified rollback - in production, you'd want to

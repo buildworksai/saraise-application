@@ -8,8 +8,8 @@ All models include tenant_id for Row-Level Multitenancy.
 from __future__ import annotations
 
 import uuid
+
 from django.db import models
-from django.utils import timezone
 
 
 def generate_uuid():
@@ -35,6 +35,48 @@ class TenantBaseModel(models.Model):
             models.Index(fields=["tenant_id"]),
             models.Index(fields=["tenant_id", "created_at"]),
         ]
+
+
+class ExternalConnection(TenantBaseModel):
+    """Operator-managed external database connection for migration reads.
+
+    Connection parameters are stored as canonical fields so tenant-controlled
+    libpq/MySQL connection strings never enter the connection path. The password
+    is encrypted before persistence and is never exposed through serializers.
+    """
+
+    DB_SCHEME_CHOICES = [
+        ("postgresql", "PostgreSQL"),
+        ("mysql", "MySQL"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255)
+    db_scheme = models.CharField(max_length=20, choices=DB_SCHEME_CHOICES)
+    host = models.CharField(max_length=255)
+    port = models.PositiveIntegerField()
+    database = models.CharField(max_length=128)
+    username = models.CharField(max_length=128)
+    password_encrypted = models.TextField(help_text="Fernet-encrypted database password")
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_by = models.CharField(max_length=36, db_index=True)
+
+    class Meta:
+        app_label = "data_migration"
+        db_table = "data_migration_external_connections"
+        indexes = [
+            models.Index(fields=["tenant_id", "is_active"]),
+            models.Index(fields=["tenant_id", "name"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "name"],
+                name="unique_data_migration_connection_name_per_tenant",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.db_scheme})"
 
 
 class MigrationJob(TenantBaseModel):
