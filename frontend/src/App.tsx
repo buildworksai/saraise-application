@@ -823,10 +823,8 @@ const TaskInboxPage = lazy(() =>
   }))
 );
 
-// ⚠️ ARCHITECTURAL NOTE: Platform Management UI removed
-// Platform dashboards, settings, and feature flags MUST be in a separate
-// platform frontend (saraise-platform/frontend/), not in the application frontend.
-// The application frontend serves tenant-scoped users only.
+// Control Plane dashboards, settings, and feature flags are intentionally absent.
+// Self-hosted license management remains as a runtime-plane exception.
 
 // Tenant Management Pages (READ-ONLY - for display only)
 // Tenant lifecycle operations MUST be performed via Control Plane APIs
@@ -1030,9 +1028,7 @@ function AnimatedRoutes() {
             }
           />
 
-          {/* ⚠️ ARCHITECTURAL ENFORCEMENT: Platform Management routes removed
-              Platform settings, feature flags, health, and audit logs MUST be
-              in a separate platform frontend (saraise-platform/frontend/). */}
+          {/* Control Plane platform routes are intentionally absent. */}
 
           {/* Tenant Management routes (READ-ONLY - for display only)
               ⚠️ Tenant lifecycle operations (create, update, delete) MUST be
@@ -1079,16 +1075,18 @@ function AnimatedRoutes() {
               </ProtectedRoute>
             }
           />
-          <Route
-            path="/settings/license"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <LicenseSettingsPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
+          {import.meta.env.VITE_SARAISE_MODE === "self-hosted" && (
+            <Route
+              path="/settings/license"
+              element={
+                <ProtectedRoute>
+                  <ModuleLayout>
+                    <LicenseSettingsPage />
+                  </ModuleLayout>
+                </ProtectedRoute>
+              }
+            />
+          )}
 
           {/* Metadata Modeling Routes */}
           <Route

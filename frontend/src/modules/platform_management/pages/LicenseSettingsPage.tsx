@@ -7,7 +7,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Shield, Check, X, AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { LicenseActivationForm } from "../components/LicenseActivationForm";
-import { ENDPOINTS, LicenseInfo } from "../contracts";
+import { ENDPOINTS } from "../contracts";
+import type { LicenseInfo } from "../contracts";
 import { apiClient } from "@/services/api-client";
 
 export const LicenseSettingsPage = () => {

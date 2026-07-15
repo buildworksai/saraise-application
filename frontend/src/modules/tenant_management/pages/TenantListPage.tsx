@@ -7,9 +7,8 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Plus, Search, Building2 } from "lucide-react";
+import { Search, Building2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { TableSkeleton, EmptyState, ErrorState } from "@/components/ui";
