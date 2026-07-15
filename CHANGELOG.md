@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **data-migration (CRITICAL):** Closed a cross-tenant read. The external-database source path executed a
+  caller-controlled query/DSN against the application's own primary database with no tenant scoping, so a
+  privileged tenant user could read another tenant's rows. Caller-supplied connection strings are removed
+  entirely: a migration job now references an operator-registered `ExternalConnection` by opaque id, the
+  connection is built from server-side parameters (never a caller string), the validated IP is pinned via
+  `hostaddr` to defeat DNS rebinding, and connections to the primary/internal network are denied fail-closed.
+  Connection registration is restricted to platform operators (#9).
+
+### Changed
+- **BREAKING (data-migration):** A database migration source's `source_config` no longer accepts
+  `connection_string` (or any raw connection/SQL field); it must supply a `connection_id` referencing an
+  operator-registered `ExternalConnection`. Existing jobs that still carry a `connection_string` fail closed
+  with a migration-required error and must be re-registered (#9).
+
 ### Fixed
 - Application boot failure: removed an orphaned `ModeAuthMiddleware` registration that referenced a
   module which never existed, and reordered the mode-aware session middleware to run after Django's
