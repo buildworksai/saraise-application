@@ -4,6 +4,8 @@ from typing import List
 
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 
+from src.core.auth_utils import get_user_platform_role, get_user_tenant_id
+
 PERMISSIONS: List[str] = [
     "data_migration.resource:create",
     "data_migration.resource:read",
@@ -17,6 +19,29 @@ SOD_ACTIONS: List[str] = [
     "data_migration.resource:create",
     "data_migration.resource:delete",
 ]
+
+
+def is_platform_operator(user) -> bool:
+    """Return whether a user holds a platform/operator-level identity."""
+    if not user or not user.is_authenticated:
+        return False
+    roles = set(getattr(user, "roles", []))
+    return bool(
+        getattr(user, "is_superuser", False)
+        or get_user_platform_role(user) in {"platform_owner", "platform_operator"}
+        or roles.intersection({"system_admin", "super_admin"})
+    )
+
+
+class ExternalConnectionPermission(BasePermission):
+    """Allow tenant references but reserve all mutations for operators."""
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.method in SAFE_METHODS:
+            return is_platform_operator(request.user) or bool(get_user_tenant_id(request.user))
+        return is_platform_operator(request.user)
 
 
 class DataMigrationPermission(BasePermission):

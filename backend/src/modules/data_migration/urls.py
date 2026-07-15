@@ -1,10 +1,12 @@
 """
 URL routing for DataMigration module.
 """
+
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
 from .api import (
+    ExternalConnectionViewSet,
     MigrationJobViewSet,
     MigrationLogViewSet,
     MigrationMappingViewSet,
@@ -14,6 +16,7 @@ from .health import health_check
 
 # Create router and register ViewSets
 router = DefaultRouter()
+router.register(r"connections", ExternalConnectionViewSet, basename="external-connection")
 router.register(r"jobs", MigrationJobViewSet, basename="migration-job")
 router.register(r"mappings", MigrationMappingViewSet, basename="migration-mapping")
 router.register(r"logs", MigrationLogViewSet, basename="migration-log")

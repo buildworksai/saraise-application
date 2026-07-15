@@ -12,19 +12,67 @@ from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
 
 from .models import (
+    ExternalConnection,
     MigrationJob,
     MigrationLog,
     MigrationMapping,
     MigrationValidation,
 )
-from .permissions import DataMigrationPermission
+from .permissions import DataMigrationPermission, ExternalConnectionPermission, is_platform_operator
 from .serializers import (
+    ExternalConnectionManagementSerializer,
+    ExternalConnectionReferenceSerializer,
     MigrationJobSerializer,
     MigrationLogSerializer,
     MigrationMappingSerializer,
     MigrationValidationSerializer,
 )
-from .services import MigrationEngine
+from .services import ExternalConnectionService, MigrationEngine
+
+
+class ExternalConnectionViewSet(viewsets.ModelViewSet):
+    """Manage named external connections and expose credential-free references."""
+
+    permission_classes = [ExternalConnectionPermission]
+    authentication_classes = [RelaxedCsrfSessionAuthentication]
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+
+    def get_queryset(self):
+        """Operators manage all records; tenants see only their active records."""
+        if is_platform_operator(self.request.user):
+            queryset = ExternalConnection.objects.all()
+            tenant_id = self.request.query_params.get("tenant_id")
+            if tenant_id:
+                queryset = queryset.filter(tenant_id=tenant_id)
+            return queryset.order_by("name")
+
+        tenant_id = get_user_tenant_id(self.request.user)
+        if not tenant_id:
+            return ExternalConnection.objects.none()
+        return ExternalConnection.objects.filter(tenant_id=tenant_id, is_active=True).order_by("name")
+
+    def get_serializer_class(self):
+        """Never expose host or username through a tenant-user response."""
+        if is_platform_operator(self.request.user):
+            return ExternalConnectionManagementSerializer
+        return ExternalConnectionReferenceSerializer
+
+    def perform_create(self, serializer):
+        """Register through the encryption service; never persist plaintext."""
+        connection = ExternalConnectionService.register(
+            tenant_id=serializer.validated_data["tenant_id"],
+            created_by=str(self.request.user.id),
+            data={key: value for key, value in serializer.validated_data.items() if key != "tenant_id"},
+        )
+        serializer.instance = connection
+
+    def perform_update(self, serializer):
+        """Update through the encryption service and preserve tenant ownership."""
+        connection = ExternalConnectionService.update(
+            connection=serializer.instance,
+            data={key: value for key, value in serializer.validated_data.items() if key != "tenant_id"},
+        )
+        serializer.instance = connection
 
 
 class MigrationJobViewSet(viewsets.ModelViewSet):
