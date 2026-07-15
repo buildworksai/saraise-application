@@ -3,6 +3,7 @@
 
 name: api-management
 version: 1.0.0
+status: unimplemented
 description: GraphQL & REST API gateway, rate limiting, API versioning, developer portal
 type: foundation
 lifecycle: platform

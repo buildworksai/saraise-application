@@ -3,6 +3,7 @@
 
 name: document-intelligence
 version: 1.0.0
+status: unimplemented
 description: AI-powered document processing, OCR, data extraction, classification
 type: foundation
 lifecycle: platform

@@ -3,11 +3,14 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 import requests
+from django.contrib.auth import get_user_model
 from django.test import override_settings
 from rest_framework.test import APIRequestFactory
 
 from src.core.auth.policy_permissions import PolicyRequiredPermission
+from src.core.user_models import UserProfile
 
 
 def _request():
@@ -39,3 +42,20 @@ def test_saas_policy_outage_is_denied(mock_post):
     view = SimpleNamespace(required_permissions=["crm.lead:read"])
     assert PolicyRequiredPermission().has_permission(_request(), view) is False
     mock_post.assert_called_once()
+
+
+@pytest.mark.django_db
+def test_real_profile_roles_are_used_without_universal_tenant_bypass():
+    user = get_user_model().objects.create_user(username="role-test", password="testpass123")
+    profile = UserProfile.objects.get(user=user)
+    profile.tenant_id = "11111111-1111-4111-8111-111111111111"
+    profile.tenant_role = "tenant_admin"
+    with patch.object(UserProfile, "clean"):
+        profile.save()
+    request = _request()
+    request.user = get_user_model().objects.select_related("profile").get(pk=user.pk)
+    permission = PolicyRequiredPermission()
+
+    assert permission.has_permission(request, SimpleNamespace(required_permissions=["tenant:read"])) is True
+    assert permission.has_permission(request, SimpleNamespace(required_permissions=["platform.settings:read"])) is False
+    assert permission.has_permission(request, SimpleNamespace(required_permissions=["security.roles:read"])) is False

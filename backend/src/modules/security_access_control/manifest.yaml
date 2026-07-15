@@ -19,6 +19,14 @@ permissions:
   - security.security-profiles:read
   - security.security-profiles:update
   - security.security-profiles:delete
+  - security.field-security:create
+  - security.field-security:read
+  - security.field-security:update
+  - security.field-security:delete
+  - security.row-security:create
+  - security.row-security:read
+  - security.row-security:update
+  - security.row-security:delete
   - security.audit-logs:read
 sod_actions:
   - security.roles:delete

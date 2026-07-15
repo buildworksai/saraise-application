@@ -3,6 +3,7 @@
 
 name: backup-disaster-recovery
 version: 1.0.0
+status: unimplemented
 description: Automated backups, point-in-time recovery, disaster recovery orchestration
 type: foundation
 lifecycle: platform

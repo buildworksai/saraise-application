@@ -3,6 +3,7 @@
 
 name: performance-monitoring
 version: 1.0.0
+status: unimplemented
 description: APM, distributed tracing, logging, metrics, alerting, SLA monitoring
 type: foundation
 lifecycle: platform

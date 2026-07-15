@@ -3,6 +3,7 @@
 
 name: blockchain-traceability
 version: 1.0.0
+status: unimplemented
 description: Blockchain-based product traceability and authenticity verification
 type: foundation
 lifecycle: platform

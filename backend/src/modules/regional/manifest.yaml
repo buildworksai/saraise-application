@@ -3,6 +3,7 @@
 
 name: regional
 version: 1.0.0
+status: unimplemented
 description: Country-specific regulatory compliance, tax rules, legal requirements
 type: foundation
 lifecycle: platform

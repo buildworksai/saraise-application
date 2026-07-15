@@ -3,6 +3,7 @@
 
 name: customization-framework
 version: 1.0.0
+status: unimplemented
 description: No-code/low-code customization engine, custom scripts, client scripts, server scripts
 type: foundation
 lifecycle: platform

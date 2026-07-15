@@ -3,6 +3,7 @@
 
 name: process-mining
 version: 1.0.0
+status: unimplemented
 description: Discover and optimize business processes using AI, process analytics, bottleneck detection
 type: foundation
 lifecycle: platform

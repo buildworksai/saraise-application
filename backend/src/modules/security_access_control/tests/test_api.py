@@ -10,11 +10,10 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.test import APIClient
+from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from src.core.user_models import UserProfile
-from src.modules.tenant_management.models import Tenant
-
+from src.modules.security_access_control.api import RoleViewSet
 from src.modules.security_access_control.models import (
     FieldSecurity,
     Permission,
@@ -27,6 +26,7 @@ from src.modules.security_access_control.models import (
     UserPermissionSet,
     UserRole,
 )
+from src.modules.tenant_management.models import Tenant
 
 User = get_user_model()
 
@@ -49,11 +49,11 @@ def tenant_user(db):
     with patch.object(UserProfile, "clean"):
         profile, _ = UserProfile.objects.get_or_create(
             user=user,
-            defaults={"tenant_id": str(tenant.id), "tenant_role": "tenant_admin"},
+            defaults={"tenant_id": str(tenant.id), "tenant_role": "security_admin"},
         )
         if not profile.tenant_id:
             profile.tenant_id = str(tenant.id)
-            profile.tenant_role = "tenant_admin"
+            profile.tenant_role = "security_admin"
             profile.save()
     # Force reload user to ensure profile is accessible
     user = User.objects.select_related("profile").get(pk=user.pk)
@@ -65,6 +65,19 @@ def authenticated_client(api_client, tenant_user):
     """Create authenticated API client."""
     api_client.force_authenticate(user=tenant_user)
     return api_client
+
+
+@pytest.fixture
+def tenant_admin_user(db):
+    """Create a real tenant administrator without security-administration authority."""
+    tenant = Tenant.objects.create(name="Denied Tenant", slug="denied-tenant")
+    user = User.objects.create_user(username="denied-tenant-admin", password="testpass123")
+    profile = UserProfile.objects.get(user=user)
+    profile.tenant_id = str(tenant.id)
+    profile.tenant_role = "tenant_admin"
+    with patch.object(UserProfile, "clean"):
+        profile.save()
+    return User.objects.select_related("profile").get(pk=user.pk)
 
 
 @pytest.fixture
@@ -87,6 +100,12 @@ def client_no_tenant(api_client, user_no_tenant):
 @pytest.mark.django_db
 class TestRoleViewSet:
     """Test cases for Roles API."""
+
+    def test_tenant_admin_cannot_read_security_roles(self, tenant_admin_user):
+        request = APIRequestFactory().get("/api/v1/security-access-control/roles/")
+        force_authenticate(request, user=tenant_admin_user)
+        response = RoleViewSet.as_view({"get": "list"})(request)
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
     def test_create_role_success(self, authenticated_client, tenant_user):
         """Test: Create role with valid data."""
@@ -228,16 +247,15 @@ class TestRoleViewSet:
         assert response.status_code == status.HTTP_204_NO_CONTENT
 
     def test_create_role_without_tenant(self, client_no_tenant):
-        """Test: Create role without tenant fails."""
+        """Unprivileged users are denied before tenant validation."""
         data = {"name": "No Tenant", "code": "no_tenant"}
         response = client_no_tenant.post("/api/v1/security-access-control/roles/", data, format="json")
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
     def test_list_roles_no_tenant(self, client_no_tenant):
         """Test: List roles returns empty for users without tenant."""
         response = client_no_tenant.get("/api/v1/security-access-control/roles/")
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data == []
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
     def test_list_roles_invalid_tenant(self, authenticated_client, monkeypatch):
         """Test: Invalid tenant ID returns empty role list."""
@@ -332,10 +350,9 @@ class TestUserRoleViewSet:
         assert len(response.data) >= 1
 
     def test_list_user_roles_no_tenant(self, client_no_tenant):
-        """Test: List user roles returns empty without tenant."""
+        """Unprivileged users cannot enumerate role assignments."""
         response = client_no_tenant.get("/api/v1/security-access-control/user-roles/")
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data == []
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.django_db
@@ -385,7 +402,7 @@ class TestPermissionSetViewSet:
             {"name": "No Tenant", "permission_ids": []},
             format="json",
         )
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.django_db
@@ -432,8 +449,7 @@ class TestUserPermissionSetViewSet:
 
     def test_list_user_permission_sets_no_tenant(self, client_no_tenant):
         response = client_no_tenant.get("/api/v1/security-access-control/user-permission-sets/")
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data == []
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.django_db
@@ -478,8 +494,7 @@ class TestSecurityProfileViewSet:
 
     def test_list_security_profiles_no_tenant(self, client_no_tenant):
         response = client_no_tenant.get("/api/v1/security-access-control/security-profiles/")
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data == []
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.django_db
@@ -518,8 +533,7 @@ class TestFieldSecurityViewSet:
 
     def test_list_field_security_no_tenant(self, client_no_tenant):
         response = client_no_tenant.get("/api/v1/security-access-control/field-security/")
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data == []
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.django_db
@@ -560,8 +574,7 @@ class TestRowSecurityRuleViewSet:
 
     def test_list_row_security_rules_no_tenant(self, client_no_tenant):
         response = client_no_tenant.get("/api/v1/security-access-control/row-security-rules/")
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data == []
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.django_db
@@ -603,5 +616,4 @@ class TestSecurityAuditLogViewSet:
 
     def test_list_audit_logs_no_tenant(self, client_no_tenant):
         response = client_no_tenant.get("/api/v1/security-access-control/audit-logs/")
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data == []
+        assert response.status_code == status.HTTP_403_FORBIDDEN

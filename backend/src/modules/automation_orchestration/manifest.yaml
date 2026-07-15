@@ -3,6 +3,7 @@
 
 name: automation-orchestration
 version: 1.0.0
+status: unimplemented
 description: Advanced orchestration for multi-agent workflows and workstreams
 type: foundation
 lifecycle: platform
