@@ -3,12 +3,13 @@ API tests for Inventory Management module.
 """
 
 import uuid
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.modules.inventory_management.models import Item, Warehouse
+from src.modules.inventory_management.models import Warehouse
 
 User = get_user_model()
 
@@ -29,6 +30,7 @@ def api_client():
 def authenticated_user(db):
     """Create authenticated user with tenant."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())

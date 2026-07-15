@@ -3,8 +3,9 @@ Model tests for Budget Management module.
 """
 
 import uuid
-import pytest
 from datetime import date
+
+import pytest
 
 from src.modules.budget_management.models import Budget
 

@@ -5,12 +5,7 @@ URL routing for Purchase Management module.
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .api import (
-    PurchaseOrderViewSet,
-    PurchaseReceiptViewSet,
-    PurchaseRequisitionViewSet,
-    SupplierViewSet,
-)
+from .api import PurchaseOrderViewSet, PurchaseReceiptViewSet, PurchaseRequisitionViewSet, SupplierViewSet
 from .health import health_check
 
 # Create router and register ViewSets

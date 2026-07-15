@@ -3,7 +3,8 @@ DRF ViewSets for Notifications module.
 """
 
 import uuid
-from rest_framework import status, viewsets
+
+from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
@@ -48,6 +49,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         """Mark notification as read."""
         notification = self.get_object()
         from django.utils import timezone
+
         notification.status = "read"
         notification.read_at = timezone.now()
         notification.save()
@@ -59,6 +61,7 @@ class NotificationViewSet(viewsets.ModelViewSet):
         """Mark all notifications as read."""
         queryset = self.get_queryset().filter(status="unread")
         from django.utils import timezone
+
         queryset.update(status="read", read_at=timezone.now())
         return Response({"count": queryset.count()})
 

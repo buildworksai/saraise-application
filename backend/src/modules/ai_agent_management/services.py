@@ -10,10 +10,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from django.db import transaction
-from django.utils import timezone
-
-from .models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState, AgentSchedulerTask
+from .models import Agent, AgentExecution, AgentIdentityType
 from .runtime import AgentExecutionContext, AgentRuntime
 from .scheduler import AgentScheduler, ScheduledTask
 

@@ -5,14 +5,7 @@ URL routing for CRM module.
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .api import (
-    AccountViewSet,
-    ActivityViewSet,
-    ContactViewSet,
-    ForecastingViewSet,
-    LeadViewSet,
-    OpportunityViewSet,
-)
+from .api import AccountViewSet, ActivityViewSet, ContactViewSet, ForecastingViewSet, LeadViewSet, OpportunityViewSet
 from .health import health_check
 
 # Create router and register ViewSets

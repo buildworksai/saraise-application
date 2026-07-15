@@ -7,14 +7,16 @@ This is the PRIMARY security mechanism for multi-tenant isolation.
 Reference: saraise-documentation/rules/compliance-enforcement.md
 Rule: ALL tenant-scoped queries MUST filter by tenant_id
 """
+
 import uuid
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.modules.backup_recovery.models import BackupArchive, BackupJob, BackupRetentionPolicy, BackupSchedule
 from src.core.auth_utils import get_user_tenant_id
+from src.modules.backup_recovery.models import BackupArchive, BackupJob, BackupRetentionPolicy, BackupSchedule
 
 User = get_user_model()
 
@@ -35,6 +37,7 @@ def api_client():
 def tenant_a_user(db):
     """Create user for tenant A."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
@@ -59,6 +62,7 @@ def tenant_a_user(db):
 def tenant_b_user(db):
     """Create user for tenant B."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
@@ -152,11 +156,7 @@ class TestBackupJobTenantIsolation:
 
         # Try to update tenant B's backup job
         data = {"description": "Hacked description"}
-        response = api_client.patch(
-            f"/api/v1/backup-recovery/jobs/{job_b.id}/",
-            data,
-            format="json"
-        )
+        response = api_client.patch(f"/api/v1/backup-recovery/jobs/{job_b.id}/", data, format="json")
         assert response.status_code == status.HTTP_404_NOT_FOUND
 
         # Verify backup job was not modified

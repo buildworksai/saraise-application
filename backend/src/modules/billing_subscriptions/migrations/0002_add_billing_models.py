@@ -1,10 +1,12 @@
 # Generated migration for Billing Subscriptions models
 
-import src.modules.billing_subscriptions.models
-from django.db import migrations, models
+from decimal import Decimal
+
 import django.db.models.deletion
 from django.core.validators import MinValueValidator
-from decimal import Decimal
+from django.db import migrations, models
+
+import src.modules.billing_subscriptions.models
 
 
 class Migration(migrations.Migration):

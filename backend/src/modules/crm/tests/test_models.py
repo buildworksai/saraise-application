@@ -3,6 +3,7 @@ Model Unit Tests for CRM module.
 
 Tests model creation, validation, and relationships.
 """
+
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -20,7 +21,6 @@ from src.modules.crm.models import (
     Lead,
     LeadStatus,
     Opportunity,
-    OpportunityStage,
     OpportunityStatus,
     RelatedToType,
 )

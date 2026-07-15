@@ -3,8 +3,8 @@ Model Unit Tests for CustomizationFramework module.
 
 Tests model creation, validation, and relationships.
 """
+
 import pytest
-from django.core.exceptions import ValidationError
 
 from src.modules.customization_framework.models import TenantBaseModel
 

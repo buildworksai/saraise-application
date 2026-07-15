@@ -1,10 +1,12 @@
 # Generated migration for AI Provider Configuration models
 
-import src.modules.ai_provider_configuration.models
-from django.db import migrations, models
+from decimal import Decimal
+
 import django.db.models.deletion
 from django.core.validators import MinValueValidator
-from decimal import Decimal
+from django.db import migrations, models
+
+import src.modules.ai_provider_configuration.models
 
 
 class Migration(migrations.Migration):

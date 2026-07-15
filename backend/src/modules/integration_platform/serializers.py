@@ -5,14 +5,7 @@ Provides request/response validation for all models.
 
 from rest_framework import serializers
 
-from .models import (
-    Connector,
-    DataMapping,
-    Integration,
-    IntegrationCredential,
-    Webhook,
-    WebhookDelivery,
-)
+from .models import Connector, DataMapping, Integration, IntegrationCredential, Webhook, WebhookDelivery
 
 
 class IntegrationSerializer(serializers.ModelSerializer):

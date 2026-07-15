@@ -3,8 +3,8 @@ Model Unit Tests for BackupDisasterRecovery module.
 
 Tests model creation, validation, and relationships.
 """
+
 import pytest
-from django.core.exceptions import ValidationError
 
 from src.modules.backup_disaster_recovery.models import TenantBaseModel
 

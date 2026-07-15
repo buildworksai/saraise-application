@@ -7,13 +7,14 @@ Tests all DRF ViewSet endpoints:
 - Tenant isolation
 - Custom actions
 """
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.modules.performance_monitoring.models import TenantBaseModel
 from src.core.auth_utils import get_user_tenant_id
+from src.modules.performance_monitoring.models import TenantBaseModel
 
 User = get_user_model()
 
@@ -27,8 +28,8 @@ def api_client():
 @pytest.fixture
 def tenant_user(db):
     """Create a test user with tenant."""
-    from src.core.user_models import UserProfile
     from src.core.licensing.models import Organization
+    from src.core.user_models import UserProfile
 
     # Create a valid Organization for the tenant
     org = Organization.objects.create(name="Test Organization")
@@ -100,11 +101,7 @@ class TestTenantBaseModelViewSet:
             "config": {"key": "value"},
         }
 
-        response = authenticated_client.post(
-            "/api/v1/performance-monitoring/resources/",
-            data,
-            format="json"
-        )
+        response = authenticated_client.post("/api/v1/performance-monitoring/resources/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["name"] == "New Resource"
         assert response.data["tenant_id"] == tenant_id
@@ -136,9 +133,7 @@ class TestTenantBaseModelViewSet:
 
         data = {"name": "Updated Name", "description": "Updated description"}
         response = authenticated_client.put(
-            f"/api/v1/performance-monitoring/resources/{resource.id}/",  # noqa: F541
-            data,
-            format="json"
+            f"/api/v1/performance-monitoring/resources/{resource.id}/", data, format="json"  # noqa: F541
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.data["name"] == "Updated Name"

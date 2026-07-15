@@ -3,6 +3,7 @@ Model tests for Business Intelligence module.
 """
 
 import uuid
+
 import pytest
 
 from src.modules.business_intelligence.models import Report

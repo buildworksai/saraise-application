@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+
 from django.core.validators import MinValueValidator
 from django.db import models
 

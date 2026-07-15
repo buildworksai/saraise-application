@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+
 from django.core.validators import MinValueValidator
 from django.db import models
 
@@ -47,7 +48,9 @@ class FixedAsset(TenantBaseModel):
     asset_name = models.CharField(max_length=255)
     asset_category = models.CharField(max_length=100, db_index=True)  # machinery, vehicle, building, etc.
     purchase_date = models.DateField(db_index=True)
-    purchase_cost = models.DecimalField(max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))])
+    purchase_cost = models.DecimalField(
+        max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))]
+    )
     current_value = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal("0.00"))
     depreciation_method = models.CharField(max_length=50, default="straight_line")
     useful_life_years = models.IntegerField(null=True, blank=True)

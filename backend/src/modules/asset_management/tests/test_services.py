@@ -3,11 +3,11 @@ Service tests for Asset Management module.
 """
 
 import uuid
-import pytest
 from datetime import date
 from decimal import Decimal
 
-from src.modules.asset_management.models import Asset
+import pytest
+
 from src.modules.asset_management.services import AssetService
 
 

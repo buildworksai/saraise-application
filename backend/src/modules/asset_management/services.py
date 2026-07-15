@@ -2,9 +2,9 @@
 Business logic services for Asset Management module.
 """
 
-from typing import Optional
-from decimal import Decimal
 from datetime import date
+from decimal import Decimal
+
 from django.db import transaction
 
 from .models import Asset, DepreciationEntry
@@ -14,7 +14,9 @@ class AssetService:
     """Service for asset operations."""
 
     @staticmethod
-    def create_asset(tenant_id: str, asset_code: str, asset_name: str, purchase_date: str, purchase_cost: Decimal, **kwargs) -> Asset:
+    def create_asset(
+        tenant_id: str, asset_code: str, asset_name: str, purchase_date: str, purchase_cost: Decimal, **kwargs
+    ) -> Asset:
         """Create a new asset."""
         asset = Asset.objects.create(
             tenant_id=tenant_id,
@@ -42,7 +44,9 @@ class DepreciationService:
 
         # Get accumulated depreciation
         previous_entries = DepreciationEntry.objects.filter(asset=asset).order_by("-entry_date")
-        accumulated = previous_entries.first().accumulated_depreciation if previous_entries.exists() else Decimal("0.00")
+        accumulated = (
+            previous_entries.first().accumulated_depreciation if previous_entries.exists() else Decimal("0.00")
+        )
         accumulated += monthly_depreciation
 
         entry = DepreciationEntry.objects.create(

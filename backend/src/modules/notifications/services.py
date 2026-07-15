@@ -2,7 +2,6 @@
 Business logic services for Notifications module.
 """
 
-from typing import Optional
 from django.utils import timezone
 
 from .models import Notification
@@ -13,12 +12,7 @@ class NotificationService:
 
     @staticmethod
     def create_notification(
-        tenant_id: str,
-        user_id: str,
-        title: str,
-        message: str,
-        notification_type: str = "info",
-        **kwargs
+        tenant_id: str, user_id: str, title: str, message: str, notification_type: str = "info", **kwargs
     ) -> Notification:
         """Create a new notification."""
         return Notification.objects.create(

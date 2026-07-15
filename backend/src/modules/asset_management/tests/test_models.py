@@ -3,9 +3,10 @@ Model tests for Asset Management module.
 """
 
 import uuid
-import pytest
 from datetime import date
 from decimal import Decimal
+
+import pytest
 
 from src.modules.asset_management.models import Asset
 

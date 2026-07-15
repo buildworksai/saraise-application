@@ -12,11 +12,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
-from .models import Agent, AgentExecution, AgentLifecycleState, AgentSchedulerTask
+from .models import Agent, AgentExecution, AgentSchedulerTask
 
 logger = logging.getLogger(__name__)
 

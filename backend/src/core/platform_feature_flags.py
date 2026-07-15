@@ -50,7 +50,7 @@ class PlatformFeatureFlagService:
             True if feature is enabled, False otherwise
         """
         # Mode-aware: Use local models in self-hosted, Control Plane in SaaS
-        if settings.SARAISE_MODE in ('self-hosted', 'development'):
+        if settings.SARAISE_MODE in ("self-hosted", "development"):
             return PlatformFeatureFlagService._check_local_flag(name, tenant_id, user_id, default)
         else:
             return PlatformFeatureFlagService._check_control_plane_flag(name, tenant_id, user_id, default)
@@ -69,7 +69,7 @@ class PlatformFeatureFlagService:
             # Build query: tenant-specific or platform-wide
             query = models.Q(name=name)
             if tenant_id:
-                query &= (models.Q(tenant_id=tenant_id) | models.Q(tenant_id__isnull=True))
+                query &= models.Q(tenant_id=tenant_id) | models.Q(tenant_id__isnull=True)
             else:
                 query &= models.Q(tenant_id__isnull=True)
 
@@ -147,7 +147,7 @@ class PlatformFeatureFlagService:
             Setting value or default
         """
         # Mode-aware: Use local models in self-hosted, Control Plane in SaaS
-        if settings.SARAISE_MODE in ('self-hosted', 'development'):
+        if settings.SARAISE_MODE in ("self-hosted", "development"):
             return PlatformFeatureFlagService._get_local_setting(key, tenant_id, default)
         else:
             return PlatformFeatureFlagService._get_control_plane_setting(key, tenant_id, default)
@@ -165,7 +165,7 @@ class PlatformFeatureFlagService:
             # Build query: tenant-specific or platform-wide
             query = models.Q(key=key)
             if tenant_id:
-                query &= (models.Q(tenant_id=tenant_id) | models.Q(tenant_id__isnull=True))
+                query &= models.Q(tenant_id=tenant_id) | models.Q(tenant_id__isnull=True)
             else:
                 query &= models.Q(tenant_id__isnull=True)
 

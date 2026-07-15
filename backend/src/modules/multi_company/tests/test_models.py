@@ -3,6 +3,7 @@ Model tests for Multi-Company module.
 """
 
 import uuid
+
 import pytest
 
 from src.modules.multi_company.models import Company

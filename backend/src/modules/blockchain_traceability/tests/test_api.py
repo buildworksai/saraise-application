@@ -7,13 +7,14 @@ Tests all DRF ViewSet endpoints:
 - Tenant isolation
 - Custom actions
 """
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.modules.blockchain_traceability.models import TenantBaseModel
 from src.core.auth_utils import get_user_tenant_id
+from src.modules.blockchain_traceability.models import TenantBaseModel
 
 User = get_user_model()
 
@@ -27,9 +28,9 @@ def api_client():
 @pytest.fixture
 def tenant_user(db):
     """Create a test user with tenant."""
-    from src.core.user_models import UserProfile
+
     from src.core.licensing.models import Organization
-    import uuid
+    from src.core.user_models import UserProfile
 
     # Create a valid Organization for the tenant
     org = Organization.objects.create(name="Test Organization")
@@ -67,13 +68,13 @@ class TestTenantBaseModelViewSet:
 
     def test_list_resources_requires_authentication(self, api_client):
         """Test that listing resources requires authentication."""
-        response = api_client.get(f"/api/v1/blockchain-traceability/resources/")
+        response = api_client.get("/api/v1/blockchain-traceability/resources/")
         assert response.status_code == status.HTTP_200_OK
 
     def test_list_resources(self, authenticated_client, tenant_user):
         """Test listing resources for authenticated user."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         # Create test resources
         TenantBaseModel.objects.create(
             tenant_id=tenant_id,
@@ -88,7 +89,7 @@ class TestTenantBaseModelViewSet:
             created_by=str(tenant_user.id),
         )
 
-        response = authenticated_client.get(f"/api/v1/blockchain-traceability/resources/")
+        response = authenticated_client.get("/api/v1/blockchain-traceability/resources/")
         assert response.status_code == status.HTTP_200_OK
         data = response.data if isinstance(response.data, list) else response.data.get("results", [])
         assert len(data) == 2
@@ -96,18 +97,14 @@ class TestTenantBaseModelViewSet:
     def test_create_resource(self, authenticated_client, tenant_user):
         """Test creating a resource."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         data = {
             "name": "New Resource",
             "description": "New resource description",
             "config": {"key": "value"},
         }
 
-        response = authenticated_client.post(
-            f"/api/v1/blockchain-traceability/resources/",
-            data,
-            format="json"
-        )
+        response = authenticated_client.post("/api/v1/blockchain-traceability/resources/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["name"] == "New Resource"
         assert response.data["tenant_id"] == tenant_id
@@ -115,7 +112,7 @@ class TestTenantBaseModelViewSet:
     def test_get_resource_detail(self, authenticated_client, tenant_user):
         """Test getting resource detail."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         resource = TenantBaseModel.objects.create(
             tenant_id=tenant_id,
             name="Test Resource",
@@ -131,7 +128,7 @@ class TestTenantBaseModelViewSet:
     def test_update_resource(self, authenticated_client, tenant_user):
         """Test updating a resource."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         resource = TenantBaseModel.objects.create(
             tenant_id=tenant_id,
             name="Original Name",
@@ -141,9 +138,7 @@ class TestTenantBaseModelViewSet:
 
         data = {"name": "Updated Name", "description": "Updated description"}
         response = authenticated_client.put(
-            f"/api/v1/blockchain-traceability/resources/{resource.id}/",
-            data,
-            format="json"
+            f"/api/v1/blockchain-traceability/resources/{resource.id}/", data, format="json"
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.data["name"] == "Updated Name"
@@ -151,7 +146,7 @@ class TestTenantBaseModelViewSet:
     def test_delete_resource(self, authenticated_client, tenant_user):
         """Test deleting a resource."""
         tenant_id = get_user_tenant_id(tenant_user)
-        
+
         resource = TenantBaseModel.objects.create(
             tenant_id=tenant_id,
             name="To Delete",
@@ -161,6 +156,6 @@ class TestTenantBaseModelViewSet:
 
         response = authenticated_client.delete(f"/api/v1/blockchain-traceability/resources/{resource.id}/")
         assert response.status_code == status.HTTP_204_NO_CONTENT
-        
+
         # Verify resource is deleted
         assert not TenantBaseModel.objects.filter(id=resource.id).exists()

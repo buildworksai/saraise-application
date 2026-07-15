@@ -37,18 +37,21 @@ repos:
         files: ^backend/
         exclude: ^backend/src/modules/.*/migrations/
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.8.0
+  - repo: local
     hooks:
       - id: mypy
         name: "Python: Type Checking (MyPy)"
-        args: ["--ignore-missing-imports", "--exclude=tests/"]
+        entry: bash -c 'cd backend && python scripts/mypy_baseline.py check'
+        language: system
         files: ^backend/src/
-        additional_dependencies:
-          - types-redis
-          - types-requests
-          - types-PyMySQL
-          - django-stubs>=5.0.2
+        pass_filenames: false
+
+      - id: mypy-baseline-mutation-test
+        name: "Python: MyPy Baseline Mutation Test"
+        entry: bash -c 'cd backend && python scripts/test_mypy_baseline.py'
+        language: system
+        files: ^backend/(mypy-baseline\.txt|mypy-precommit\.ini|scripts/(mypy_baseline|test_mypy_baseline)\.py)$
+        pass_filenames: false
 
   # ===================================
   # TypeScript / Frontend Quality

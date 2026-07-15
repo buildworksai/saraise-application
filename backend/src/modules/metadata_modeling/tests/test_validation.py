@@ -1,8 +1,10 @@
-from django.test import TestCase
+import uuid
+
 from django.core.exceptions import ValidationError
+from django.test import TestCase
+
 from src.modules.metadata_modeling.models import EntityDefinition, FieldDefinition
 from src.modules.metadata_modeling.services import MetadataService
-import uuid
 
 
 class ValidationTestCase(TestCase):

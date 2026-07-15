@@ -67,7 +67,7 @@ class TestSecretService:
 
         tenant_id = "11111111-1111-4111-8111-111111111111"
 
-        service.create_secret(
+        _ = service.create_secret(
             tenant_id=tenant_id,
             name="api-key",
             secret_value="secret-value",
@@ -91,7 +91,7 @@ class TestSecretService:
         tenant1 = "11111111-1111-4111-8111-111111111111"
         tenant2 = "22222222-2222-4222-8222-222222222222"
 
-        service.create_secret(
+        _ = service.create_secret(
             tenant_id=tenant1,
             name="api-key",
             secret_value="secret-value",
@@ -140,7 +140,7 @@ class TestSecretService:
 
         tenant_id = "11111111-1111-4111-8111-111111111111"
 
-        service.create_secret(
+        _ = service.create_secret(
             tenant_id=tenant_id,
             name="api-key",
             secret_value="original-value",
@@ -162,7 +162,7 @@ class TestSecretService:
 
         tenant_id = "11111111-1111-4111-8111-111111111111"
 
-        service.create_secret(
+        _ = service.create_secret(
             tenant_id=tenant_id,
             name="api-key",
             secret_value="old-value",
@@ -188,7 +188,7 @@ class TestSecretService:
 
         tenant_id = "11111111-1111-4111-8111-111111111111"
 
-        service.create_secret(
+        _ = service.create_secret(
             tenant_id=tenant_id,
             name="api-key",
             secret_value="secret-value",
@@ -212,7 +212,7 @@ class TestSecretService:
 
         tenant_id = "11111111-1111-4111-8111-111111111111"
 
-        service.create_secret(
+        _ = service.create_secret(
             tenant_id=tenant_id,
             name="api-key",
             secret_value="old-value",

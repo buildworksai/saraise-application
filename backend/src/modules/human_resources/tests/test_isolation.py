@@ -3,13 +3,14 @@ Tenant Isolation Tests for Human Resources module.
 """
 
 import uuid
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from src.core.auth_utils import get_user_tenant_id
-from src.modules.human_resources.models import Department, Employee
+from src.modules.human_resources.models import Employee
 
 User = get_user_model()
 
@@ -30,6 +31,7 @@ def api_client():
 def tenant_a_user(db):
     """Create user for tenant A."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
@@ -54,6 +56,7 @@ def tenant_a_user(db):
 def tenant_b_user(db):
     """Create user for tenant B."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())

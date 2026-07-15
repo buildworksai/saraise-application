@@ -8,6 +8,7 @@ All models include tenant_id for Row-Level Multitenancy.
 from __future__ import annotations
 
 import uuid
+
 from django.db import models
 
 
@@ -62,7 +63,9 @@ class Notification(TenantBaseModel):
     notification_type = models.CharField(max_length=20, choices=NotificationType.choices, default=NotificationType.INFO)
     title = models.CharField(max_length=255)
     message = models.TextField()
-    status = models.CharField(max_length=20, choices=NotificationStatus.choices, default=NotificationStatus.UNREAD, db_index=True)
+    status = models.CharField(
+        max_length=20, choices=NotificationStatus.choices, default=NotificationStatus.UNREAD, db_index=True
+    )
     read_at = models.DateTimeField(null=True, blank=True)
     action_url = models.URLField(max_length=500, blank=True)
 
@@ -96,7 +99,9 @@ class NotificationPreference(TenantBaseModel):
             models.Index(fields=["tenant_id", "channel"]),
         ]
         constraints = [
-            models.UniqueConstraint(fields=["tenant_id", "user_id", "channel", "notification_type"], name="unique_preference_per_user"),
+            models.UniqueConstraint(
+                fields=["tenant_id", "user_id", "channel", "notification_type"], name="unique_preference_per_user"
+            ),
         ]
 
     def __str__(self) -> str:

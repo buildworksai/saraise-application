@@ -3,8 +3,8 @@ Model Unit Tests for AiProviderConfiguration module.
 
 Tests model creation, validation, and relationships.
 """
+
 import pytest
-from django.core.exceptions import ValidationError
 
 from src.modules.ai_provider_configuration.models import TenantBaseModel
 

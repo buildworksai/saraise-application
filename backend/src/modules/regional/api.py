@@ -46,12 +46,9 @@ class RegionalResourceViewSet(viewsets.ModelViewSet):
         tenant_id = get_user_tenant_id(self.request.user)
         if not tenant_id:
             raise PermissionDenied("User must belong to a tenant")
-        serializer.save(
-            tenant_id=tenant_id,
-            created_by=str(self.request.user.id)
-        )
+        serializer.save(tenant_id=tenant_id, created_by=str(self.request.user.id))
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=["post"])
     def activate(self, request, pk=None):
         """Activate resource."""
         resource = self.get_object()
@@ -59,7 +56,7 @@ class RegionalResourceViewSet(viewsets.ModelViewSet):
         service.activate_resource(resource.id, get_user_tenant_id(request.user))
         return Response({"status": "activated"}, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=["post"])
     def deactivate(self, request, pk=None):
         """Deactivate resource."""
         resource = self.get_object()

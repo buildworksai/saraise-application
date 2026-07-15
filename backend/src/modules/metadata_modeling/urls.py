@@ -1,6 +1,7 @@
-from django.urls import path, include
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from .api import EntityDefinitionViewSet, DynamicResourceViewSet
+
+from .api import DynamicResourceViewSet, EntityDefinitionViewSet
 
 router = DefaultRouter()
 router.register(r"entity-definitions", EntityDefinitionViewSet, basename="entity-definition")

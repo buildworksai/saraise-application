@@ -110,8 +110,6 @@ class ModuleManifest:
 class ManifestValidationError(ValidationError):
     """Manifest validation error."""
 
-    pass
-
 
 class ManifestValidator:
     """Manifest validator.
@@ -187,7 +185,6 @@ class ManifestValidator:
                 f"Invalid lifecycle '{lifecycle_str}': must be one of "
                 f"{[lifecycle.value for lifecycle in ModuleLifecycle]}"
             )
-
         status_str = manifest_data.get("status", ModuleStatus.AVAILABLE.value)
         try:
             module_status = ModuleStatus(status_str)

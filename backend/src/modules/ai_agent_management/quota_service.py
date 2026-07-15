@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from django.db import transaction
 from django.utils import timezone
 
 from .models import AgentExecution
-from .quota_models import KillSwitch, QuotaPeriod, QuotaType, QuotaUsage, ShardSaturation, TenantQuota
+from .quota_models import KillSwitch, QuotaPeriod, QuotaUsage, ShardSaturation, TenantQuota
 
 logger = logging.getLogger(__name__)
 

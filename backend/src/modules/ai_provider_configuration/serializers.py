@@ -5,13 +5,7 @@ Provides request/response validation for all models.
 
 from rest_framework import serializers
 
-from .models import (
-    AIModel,
-    AIModelDeployment,
-    AIProvider,
-    AIProviderCredential,
-    AIUsageLog,
-)
+from .models import AIModel, AIModelDeployment, AIProvider, AIProviderCredential, AIUsageLog
 
 
 class AIProviderSerializer(serializers.ModelSerializer):

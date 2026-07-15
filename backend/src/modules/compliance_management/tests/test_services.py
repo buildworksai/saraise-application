@@ -3,10 +3,10 @@ Service tests for Compliance Management module.
 """
 
 import uuid
-import pytest
 from datetime import date
 
-from src.modules.compliance_management.models import CompliancePolicy
+import pytest
+
 from src.modules.compliance_management.services import CompliancePolicyService
 
 

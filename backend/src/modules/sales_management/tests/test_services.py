@@ -3,10 +3,11 @@ Service tests for Sales Management module.
 """
 
 import uuid
-import pytest
 from datetime import date
 
-from src.modules.sales_management.models import Customer, Quotation, SalesOrder
+import pytest
+
+from src.modules.sales_management.models import Customer, Quotation
 from src.modules.sales_management.services import CustomerService, QuotationService
 
 

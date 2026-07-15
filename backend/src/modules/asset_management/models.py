@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+
 from django.core.validators import MinValueValidator
 from django.db import models
 
@@ -55,7 +56,9 @@ class Asset(TenantBaseModel):
     asset_name = models.CharField(max_length=255)
     category = models.CharField(max_length=50, choices=AssetCategory.choices, default=AssetCategory.FIXED)
     purchase_date = models.DateField(db_index=True)
-    purchase_cost = models.DecimalField(max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))])
+    purchase_cost = models.DecimalField(
+        max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))]
+    )
     current_value = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal("0.00"))
     depreciation_method = models.CharField(max_length=50, default="straight_line")  # straight_line, declining_balance
     useful_life_years = models.IntegerField(null=True, blank=True)
@@ -84,7 +87,9 @@ class DepreciationEntry(TenantBaseModel):
 
     asset = models.ForeignKey(Asset, on_delete=models.CASCADE, related_name="depreciation_entries")
     entry_date = models.DateField(db_index=True)
-    depreciation_amount = models.DecimalField(max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))])
+    depreciation_amount = models.DecimalField(
+        max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))]
+    )
     accumulated_depreciation = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal("0.00"))
     book_value = models.DecimalField(max_digits=15, decimal_places=2, default=Decimal("0.00"))
 

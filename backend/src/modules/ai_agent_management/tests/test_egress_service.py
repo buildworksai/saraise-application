@@ -6,7 +6,6 @@ Task: 402.1 - Egress Allowlisting & Secret Isolation
 from __future__ import annotations
 
 import pytest
-from django.utils import timezone
 
 from src.modules.ai_agent_management.egress_models import EgressRequest, EgressRule
 from src.modules.ai_agent_management.egress_service import EgressService
@@ -98,11 +97,10 @@ class TestEgressService:
         """Test checking egress denied by explicit deny rule."""
         # Note: Current implementation is allowlist-only, no explicit deny rules.
         # This test is effectively verifying that a rule without match denies access.
-        pass
 
     def test_create_egress_request(self) -> None:
         """Test creating egress request."""
-        service = EgressService()
+        EgressService()
 
         tenant_id = "test-tenant-1"
         agent = Agent.objects.create(

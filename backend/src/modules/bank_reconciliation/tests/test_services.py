@@ -3,9 +3,9 @@ Service tests for Bank Reconciliation module.
 """
 
 import uuid
+
 import pytest
 
-from src.modules.bank_reconciliation.models import BankAccount
 from src.modules.bank_reconciliation.services import BankAccountService
 
 

@@ -3,6 +3,7 @@ Service Unit Tests for Localization module.
 
 Tests business logic in services layer.
 """
+
 import pytest
 
 from src.modules.localization.models import TenantBaseModel

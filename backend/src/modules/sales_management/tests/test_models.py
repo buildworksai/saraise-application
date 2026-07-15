@@ -3,8 +3,9 @@ Model tests for Sales Management module.
 """
 
 import uuid
-import pytest
 from datetime import date
+
+import pytest
 
 from src.modules.sales_management.models import Customer, SalesOrder
 

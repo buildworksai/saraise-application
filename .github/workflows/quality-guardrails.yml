@@ -131,9 +131,8 @@ jobs:
       - name: "🔒 Type Check: MyPy (SARAISE-02013)"
         if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
-          # Enforces type safety. Configuration in backend/pyproject.toml or mypy.ini
-          # New files must be strict.
-          mypy src
+          python scripts/mypy_baseline.py check
+          python scripts/test_mypy_baseline.py
 
       - name: "🔒 Unit Tests & Coverage (SARAISE-01002)"
         if: ${{ steps.backend.outputs.present == 'true' }}

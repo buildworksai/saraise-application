@@ -3,6 +3,7 @@ Model Unit Tests for IntegrationPlatform module.
 
 Tests model creation, validation, and relationships.
 """
+
 import pytest
 
 from src.modules.integration_platform.models import TenantBaseModel

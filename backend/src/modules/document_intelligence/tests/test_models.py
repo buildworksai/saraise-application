@@ -3,8 +3,8 @@ Model Unit Tests for DocumentIntelligence module.
 
 Tests model creation, validation, and relationships.
 """
+
 import pytest
-from django.core.exceptions import ValidationError
 
 from src.modules.document_intelligence.models import TenantBaseModel
 

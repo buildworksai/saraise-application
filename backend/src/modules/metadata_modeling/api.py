@@ -1,14 +1,15 @@
 import uuid
 
-from rest_framework import viewsets, status, serializers
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
 from django.core.exceptions import ValidationError
+from rest_framework import serializers, status, viewsets
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
 
 from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
-from .models import EntityDefinition, DynamicResource
-from .serializers import EntityDefinitionSerializer, DynamicResourceSerializer
+
+from .models import DynamicResource, EntityDefinition
+from .serializers import DynamicResourceSerializer, EntityDefinitionSerializer
 from .services import MetadataService
 
 

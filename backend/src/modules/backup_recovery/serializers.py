@@ -153,9 +153,7 @@ class BackupRetentionPolicySerializer(serializers.ModelSerializer):
         retention_days = data.get("retention_days")
         archive_after_days = data.get("archive_after_days")
         if retention_days and archive_after_days and archive_after_days >= retention_days:
-            raise serializers.ValidationError(
-                "Archive after days must be less than retention days"
-            )
+            raise serializers.ValidationError("Archive after days must be less than retention days")
         return data
 
 

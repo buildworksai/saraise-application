@@ -1,8 +1,9 @@
 # Generated migration for Integration Platform models
 
-import src.modules.integration_platform.models
-from django.db import migrations, models
 import django.db.models.deletion
+from django.db import migrations, models
+
+import src.modules.integration_platform.models
 
 
 class Migration(migrations.Migration):
@@ -258,7 +259,9 @@ class Migration(migrations.Migration):
             options={
                 "db_table": "integration_platform_data_mappings",
                 "indexes": [
-                    models.Index(fields=["tenant_id", "integration"], name="integration_mapping_tenant__integration_idx"),
+                    models.Index(
+                        fields=["tenant_id", "integration"], name="integration_mapping_tenant__integration_idx"
+                    ),
                 ],
                 "unique_together": {("integration", "source_field", "target_field")},
             },

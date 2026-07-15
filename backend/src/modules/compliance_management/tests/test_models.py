@@ -3,8 +3,9 @@ Model tests for Compliance Management module.
 """
 
 import uuid
-import pytest
 from datetime import date
+
+import pytest
 
 from src.modules.compliance_management.models import CompliancePolicy
 

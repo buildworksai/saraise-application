@@ -3,8 +3,8 @@ Model Unit Tests for AutomationOrchestration module.
 
 Tests model creation, validation, and relationships.
 """
+
 import pytest
-from django.core.exceptions import ValidationError
 
 from src.modules.automation_orchestration.models import TenantBaseModel
 

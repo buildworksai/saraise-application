@@ -3,8 +3,8 @@ Model Unit Tests for Dms module.
 
 Tests model creation, validation, and relationships.
 """
+
 import pytest
-from django.core.exceptions import ValidationError
 
 from src.modules.dms.models import Document, DocumentPermission, DocumentShare, DocumentVersion, Folder
 
@@ -213,8 +213,9 @@ class TestDocumentShareModel:
 
     def test_expired_share(self, db):
         """Test expired share link."""
-        from django.utils import timezone
         from datetime import timedelta
+
+        from django.utils import timezone
 
         document = Document.objects.create(
             tenant_id="tenant-123",

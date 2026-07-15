@@ -14,15 +14,7 @@ from rest_framework.response import Response
 from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
 
-logger = logging.getLogger(__name__)
-
-from .models import (
-    AIModel,
-    AIModelDeployment,
-    AIProvider,
-    AIProviderCredential,
-    AIUsageLog,
-)
+from .models import AIModel, AIModelDeployment, AIProvider, AIProviderCredential, AIUsageLog
 from .serializers import (
     AIModelDeploymentSerializer,
     AIModelSerializer,
@@ -30,6 +22,8 @@ from .serializers import (
     AIProviderSerializer,
     AIUsageLogSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AIProviderViewSet(viewsets.ReadOnlyModelViewSet):
@@ -235,8 +229,8 @@ class SecretManagementViewSet(viewsets.ViewSet):
         Returns:
             Number of re-encrypted secrets.
         """
-        from src.core.encryption import EncryptionService
         from src.core.auth_utils import get_user_tenant_id
+        from src.core.encryption import EncryptionService
 
         tenant_id = get_user_tenant_id(request.user)
         if not tenant_id:
@@ -258,9 +252,7 @@ class SecretManagementViewSet(viewsets.ViewSet):
         for credential in credentials:
             try:
                 # Re-encrypt with new key
-                new_encrypted = EncryptionService.re_encrypt(
-                    credential.api_key_encrypted, old_key, new_key
-                )
+                new_encrypted = EncryptionService.re_encrypt(credential.api_key_encrypted, old_key, new_key)
                 credential.api_key_encrypted = new_encrypted
                 credential.save()
                 re_encrypted_count += 1

@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Connection registration is restricted to platform operators (#9).
 
 ### Changed
+- Replaced broad per-module MyPy exemptions with a pinned, fingerprint-based ratchet that preserves the
+  repository's existing type-checking debt while rejecting every new or changed finding (#14).
 - **BREAKING (data-migration):** A database migration source's `source_config` no longer accepts
   `connection_string` (or any raw connection/SQL field); it must supply a `connection_id` referencing an
   operator-registered `ExternalConnection`. Existing jobs that still carry a `connection_string` fail closed

@@ -3,9 +3,6 @@ DRF ViewSets for Dms module.
 Provides REST API endpoints for all models.
 """
 
-import uuid
-
-from django.core.files.storage import default_storage
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, PermissionDenied

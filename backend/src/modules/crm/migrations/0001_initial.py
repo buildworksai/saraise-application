@@ -26,6 +26,7 @@ from django.db import migrations
 # Run: python manage.py makemigrations crm
 # Then review and adjust the generated migration as needed.
 
+
 class Migration(migrations.Migration):
 
     initial = True

@@ -3,8 +3,8 @@ Model Unit Tests for ApiManagement module.
 
 Tests model creation, validation, and relationships.
 """
+
 import pytest
-from django.core.exceptions import ValidationError
 
 from src.modules.api_management.models import TenantBaseModel
 

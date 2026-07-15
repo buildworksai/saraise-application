@@ -9,20 +9,7 @@ from datetime import date
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import (
-    Account,
-    AccountType,
-    Activity,
-    ActivityType,
-    Contact,
-    Lead,
-    LeadStatus,
-    Opportunity,
-    OpportunityStage,
-    OpportunityStatus,
-    RelatedToType,
-)
-
+from .models import Account, Activity, ActivityType, Contact, Lead, Opportunity
 
 # ===== Lead Serializers =====
 
@@ -510,9 +497,7 @@ class ActivityCreateSerializer(serializers.ModelSerializer):
         """Validate activity data."""
         # Related entity is required
         if not data.get("related_to_type") or not data.get("related_to_id"):
-            raise serializers.ValidationError(
-                {"related_to": "Activity must have related_to_type and related_to_id"}
-            )
+            raise serializers.ValidationError({"related_to": "Activity must have related_to_type and related_to_id"})
 
         # Subject is required
         if not data.get("subject"):

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.utils import timezone
@@ -162,9 +163,7 @@ class Subscription(TenantBaseModel):
     @property
     def is_active(self) -> bool:
         """Check if subscription is currently active."""
-        return self.status == "active" and (
-            self.end_date is None or timezone.now().date() <= self.end_date
-        )
+        return self.status == "active" and (self.end_date is None or timezone.now().date() <= self.end_date)
 
 
 class Invoice(TenantBaseModel):

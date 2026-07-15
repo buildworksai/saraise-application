@@ -3,9 +3,9 @@ Service tests for Email Marketing module.
 """
 
 import uuid
+
 import pytest
 
-from src.modules.email_marketing.models import EmailCampaign
 from src.modules.email_marketing.services import EmailCampaignService
 
 

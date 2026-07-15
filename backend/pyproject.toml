@@ -86,9 +86,9 @@ dev = [
     "black>=24.0.0",
     "isort>=5.13.2",
     "flake8>=7.0.0",
-    "mypy>=1.8.0",
-    "django-stubs>=4.2.7",
-    "djangorestframework-stubs>=3.14.0",
+    "mypy==2.3.0",
+    "django-stubs==6.0.7",
+    "djangorestframework-stubs==3.17.0",
 ]
 
 [build-system]
@@ -138,7 +138,7 @@ module = [
 ignore_missing_imports = true
 
 [tool.django-stubs]
-django_settings_module = "saraise_backend.settings"
+django_settings_module = "saraise_backend.settings_static_analysis"
 
 # Pytest configuration is in pytest.ini
 # [tool.pytest.ini_options]

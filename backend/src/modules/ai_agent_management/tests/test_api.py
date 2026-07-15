@@ -12,12 +12,10 @@ from __future__ import annotations
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from src.core.auth_utils import get_user_tenant_id
-
 from src.modules.ai_agent_management.approval_models import ApprovalRequest, ApprovalStatus
 from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState
 from src.modules.ai_agent_management.tool_models import Tool
@@ -34,7 +32,6 @@ def api_client():
 @pytest.fixture
 def tenant_user(db):
     """Create a test user with tenant."""
-    import uuid
 
     from src.core.licensing.models import Organization
     from src.core.user_models import UserProfile

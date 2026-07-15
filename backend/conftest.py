@@ -1,6 +1,7 @@
 """
 Root conftest - runs before any tests. Sets SQLite for tests when Postgres unavailable.
 """
+
 import os
 import sys
 

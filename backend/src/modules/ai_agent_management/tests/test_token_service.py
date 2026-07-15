@@ -6,13 +6,11 @@ Task: 402.3 - Token Metering & Cost Attribution
 from __future__ import annotations
 
 from datetime import timedelta
-from decimal import Decimal
 
 import pytest
 from django.utils import timezone
 
 from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType
-from src.modules.ai_agent_management.token_models import CostRecord, CostSummary, TokenUsage
 from src.modules.ai_agent_management.token_service import TokenService
 
 
@@ -82,7 +80,7 @@ class TestTokenService:
             task_definition={"goal": "test"},
         )
 
-        usage = service.record_token_usage(
+        _ = service.record_token_usage(
             tenant_id=tenant_id,
             agent_execution=execution,
             provider="openai",
@@ -94,6 +92,7 @@ class TestTokenService:
         # Cost is automatically calculated and recorded in record_token_usage
         # Check that cost record was created
         from src.modules.ai_agent_management.token_models import CostRecord
+
         cost_records = CostRecord.objects.filter(
             tenant_id=tenant_id,
             agent_execution=execution,

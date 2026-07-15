@@ -5,12 +5,10 @@ Task: 401.1 - Agent Runtime & Scheduler
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 import pytest
 from django.utils import timezone
 
-from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType, AgentSchedulerTask
+from src.modules.ai_agent_management.models import Agent, AgentIdentityType, AgentSchedulerTask
 from src.modules.ai_agent_management.scheduler import AgentScheduler, ScheduledTask
 
 
@@ -266,14 +264,14 @@ class TestAgentScheduler:
 
         # Execute task - it will fail and auto-retry
         # Mock the runtime module where it's imported inside execute_task
-        from unittest.mock import patch, MagicMock
-        
+        from unittest.mock import MagicMock, patch
+
         # Patch the runtime module where it's imported inside execute_task
-        with patch('src.modules.ai_agent_management.runtime.AgentRuntime') as mock_runtime_class:
+        with patch("src.modules.ai_agent_management.runtime.AgentRuntime") as mock_runtime_class:
             mock_runtime_instance = MagicMock()
             mock_runtime_class.return_value = mock_runtime_instance
             mock_runtime_instance.create_execution.side_effect = Exception("Execution failed")
-            
+
             try:
                 scheduler.execute_task(task.id, tenant_id)
             except Exception:
@@ -315,14 +313,14 @@ class TestAgentScheduler:
         )
 
         # Execute task - it will fail and should be marked as failed permanently
-        from unittest.mock import patch, MagicMock
-        
+        from unittest.mock import MagicMock, patch
+
         # Patch the runtime module where it's imported inside execute_task
-        with patch('src.modules.ai_agent_management.runtime.AgentRuntime') as mock_runtime_class:
+        with patch("src.modules.ai_agent_management.runtime.AgentRuntime") as mock_runtime_class:
             mock_runtime_instance = MagicMock()
             mock_runtime_class.return_value = mock_runtime_instance
             mock_runtime_instance.create_execution.side_effect = Exception("Execution failed")
-            
+
             try:
                 scheduler.execute_task(task.id, tenant_id)
             except Exception:

@@ -3,6 +3,7 @@ Model tests for Compliance Risk Management module.
 """
 
 import uuid
+
 import pytest
 
 from src.modules.compliance_risk_management.models import ComplianceRisk

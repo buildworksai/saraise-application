@@ -1,12 +1,13 @@
 from django.utils import timezone
+
 from .models import (
     Workflow,
     WorkflowInstance,
+    WorkflowInstanceState,
+    WorkflowStatus,
     WorkflowStep,
     WorkflowTask,
-    WorkflowInstanceState,
     WorkflowTaskStatus,
-    WorkflowStatus,
 )
 
 

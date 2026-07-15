@@ -2,8 +2,6 @@
 Business logic services for Human Resources module.
 """
 
-from typing import Optional
-
 from .models import Department, Employee
 
 

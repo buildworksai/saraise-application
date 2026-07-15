@@ -1,6 +1,7 @@
-from django.urls import path, include
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from .api import WorkflowViewSet, WorkflowInstanceViewSet, WorkflowTaskViewSet
+
+from .api import WorkflowInstanceViewSet, WorkflowTaskViewSet, WorkflowViewSet
 from .health import health_check
 
 router = DefaultRouter()

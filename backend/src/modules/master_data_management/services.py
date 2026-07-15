@@ -9,7 +9,9 @@ class MasterDataService:
     """Service for master data operations."""
 
     @staticmethod
-    def create_entity(tenant_id: str, entity_type: str, entity_code: str, entity_name: str, **kwargs) -> MasterDataEntity:
+    def create_entity(
+        tenant_id: str, entity_type: str, entity_code: str, entity_name: str, **kwargs
+    ) -> MasterDataEntity:
         """Create a new master data entity."""
         return MasterDataEntity.objects.create(
             tenant_id=tenant_id,

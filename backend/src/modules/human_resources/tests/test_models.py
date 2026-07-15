@@ -3,8 +3,9 @@ Model tests for Human Resources module.
 """
 
 import uuid
-import pytest
 from datetime import date
+
+import pytest
 
 from src.modules.human_resources.models import Department, Employee
 

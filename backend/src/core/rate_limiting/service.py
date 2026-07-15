@@ -5,7 +5,6 @@ SPDX-License-Identifier: Apache-2.0
 """
 
 import logging
-from datetime import datetime, timedelta
 from typing import Optional
 
 from django.core.cache import cache

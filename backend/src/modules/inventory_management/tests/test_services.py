@@ -3,9 +3,9 @@ Service tests for Inventory Management module.
 """
 
 import uuid
+
 import pytest
 
-from src.modules.inventory_management.models import Warehouse
 from src.modules.inventory_management.services import WarehouseService
 
 
