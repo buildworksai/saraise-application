@@ -5,12 +5,9 @@ Task: 401.3 - Human Approval Gates
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 import pytest
-from django.utils import timezone
 
-from src.modules.ai_agent_management.approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy
+from src.modules.ai_agent_management.approval_models import ApprovalStatus
 from src.modules.ai_agent_management.approval_service import ApprovalService
 from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType
 from src.modules.ai_agent_management.tool_models import Tool
@@ -23,7 +20,7 @@ class TestApprovalService:
 
     def test_requires_approval_data_mutation(self) -> None:
         """Test that data mutation tools require approval."""
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
         tool = Tool.objects.create(
             tenant_id=tenant_id,
             name="create_invoice",
@@ -42,7 +39,7 @@ class TestApprovalService:
 
     def test_requires_approval_external_integration(self) -> None:
         """Test that external integration tools with write require approval."""
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
         tool = Tool.objects.create(
             tenant_id=tenant_id,
             name="send_email",
@@ -62,7 +59,7 @@ class TestApprovalService:
 
     def test_create_approval_request(self) -> None:
         """Test creating approval request."""
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
         agent = Agent.objects.create(
             tenant_id=tenant_id,
             name="Test Agent",
@@ -115,7 +112,7 @@ class TestApprovalService:
 
     def test_approve_request(self) -> None:
         """Test approving request."""
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
         agent = Agent.objects.create(
             tenant_id=tenant_id,
             name="Test Agent",
@@ -167,7 +164,7 @@ class TestApprovalService:
 
     def test_reject_request(self) -> None:
         """Test rejecting request."""
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
         agent = Agent.objects.create(
             tenant_id=tenant_id,
             name="Test Agent",

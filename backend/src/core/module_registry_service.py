@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from django.db import models, transaction
 
-from .module_manifest_schema import ModuleManifest, manifest_validator
+from .module_manifest_schema import ModuleManifest, ModuleStatus, manifest_validator
 from .module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
 from .module_signing import ManifestSigner, VerificationError
 from .module_versioning import Version, compatibility_checker
@@ -72,6 +72,8 @@ class ModuleRegistryService:
             manifest = self.validator.validate_from_yaml(manifest_yaml)
         except Exception as e:
             raise RegistryError(f"Manifest validation failed: {e}") from e
+        if manifest.status is not ModuleStatus.AVAILABLE:
+            raise RegistryError(f"Module {manifest.name} is {manifest.status.value} and cannot be registered")
 
         # Verify signature if provided
         if verify_signature and signature and signature_algorithm:
@@ -83,6 +85,7 @@ class ModuleRegistryService:
                     description=manifest.description,
                     type=manifest.type,
                     lifecycle=manifest.lifecycle,
+                    status=manifest.status,
                     dependencies=manifest.dependencies,
                     permissions=manifest.permissions,
                     sod_actions=manifest.sod_actions,

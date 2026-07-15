@@ -6,16 +6,13 @@ Task: 401.1 - Agent Runtime & Scheduler
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, Optional
 
-from django.db import transaction
 from django.utils import timezone
 
-from .models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState, AgentSchedulerTask
+from .models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +40,35 @@ class AgentRuntime:
     - Agent execution isolation
     """
 
-    def __init__(self) -> None:
+    def __init__(self, session_validator: Optional[Callable[[str, str], bool]] = None) -> None:
         """Initialize agent runtime."""
         self._active_executions: Dict[str, AgentExecution] = {}
+        self._session_validator = session_validator or self._validate_session
+
+    @staticmethod
+    def _validate_session(session_id: str, subject_id: str) -> bool:
+        """Validate a SaaS session remotely or a local Django session in-place."""
+        from src.core.auth.mode import is_saas
+
+        if is_saas():
+            from src.core.auth.saas import validate_session
+
+            session = validate_session(session_id)
+            if not session:
+                return False
+            session_user = session.get("user", {}).get("id") or session.get("user_id")
+            return str(session_user) == str(subject_id)
+
+        from django.contrib.sessions.models import Session
+
+        session = Session.objects.filter(session_key=session_id, expire_date__gt=timezone.now()).first()
+        if not session:
+            return False
+        return str(session.get_decoded().get("_auth_user_id")) == str(subject_id)
+
+    def _require_active_session(self, session_id: Optional[str], subject_id: str) -> None:
+        if not session_id or not self._session_validator(session_id, subject_id):
+            raise ValueError("User-bound agent requires an active session for its subject")
 
     def create_execution(self, context: AgentExecutionContext) -> AgentExecution:
         """Create a new agent execution.
@@ -73,9 +96,7 @@ class AgentRuntime:
 
         # Validate session binding for user-bound agents
         if context.identity_type == AgentIdentityType.USER_BOUND:
-            if not context.session_id:
-                raise ValueError("User-bound agents require session_id")
-            # TODO: Validate session is active (Task 401.3)
+            self._require_active_session(context.session_id, context.subject_id)
 
         # Create execution
         execution = AgentExecution.objects.create(
@@ -114,9 +135,7 @@ class AgentRuntime:
 
         # Validate session binding for user-bound agents
         if execution.agent.identity_type == AgentIdentityType.USER_BOUND:
-            if not execution.session_id:
-                raise ValueError("User-bound agent execution missing session_id")
-            # TODO: Validate session is still active (Task 401.3)
+            self._require_active_session(execution.session_id, execution.agent.subject_id)
 
         # Update state to validated
         execution.state = AgentLifecycleState.VALIDATED
@@ -153,9 +172,7 @@ class AgentRuntime:
 
         # Validate session binding for user-bound agents
         if execution.agent.identity_type == AgentIdentityType.USER_BOUND:
-            if not execution.session_id:
-                raise ValueError("User-bound agent execution missing session_id")
-            # TODO: Validate session is still active (Task 401.3)
+            self._require_active_session(execution.session_id, execution.agent.subject_id)
 
         # Update state to running
         execution.state = AgentLifecycleState.RUNNING
@@ -225,9 +242,7 @@ class AgentRuntime:
 
         # Validate session binding for user-bound agents
         if execution.agent.identity_type == AgentIdentityType.USER_BOUND:
-            if not execution.session_id:
-                raise ValueError("User-bound agent execution missing session_id")
-            # TODO: Validate session is still active (Task 401.3)
+            self._require_active_session(execution.session_id, execution.agent.subject_id)
 
         # Update state to running
         execution.state = AgentLifecycleState.RUNNING
@@ -385,12 +400,7 @@ class AgentRuntime:
             return True
 
         # User-bound agents require valid session
-        if not execution.session_id:
-            return False
-
-        # TODO: Validate session is active (Task 401.3)
-        # For now, return True if session_id exists
-        return True
+        return bool(execution.session_id and self._session_validator(execution.session_id, execution.agent.subject_id))
 
     def terminate_expired_sessions(self, tenant_id: str) -> int:
         """Terminate all agent executions with expired sessions.

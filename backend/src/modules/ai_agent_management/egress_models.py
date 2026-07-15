@@ -141,6 +141,11 @@ class Secret(TenantBaseModel):
         max_length=100,
         help_text="Key ID used for encryption",
     )
+    wrapped_data_key = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Per-secret data key wrapped by the configured KMS backend",
+    )
     is_active = models.BooleanField(default=True, db_index=True)
     expires_at = models.DateTimeField(null=True, blank=True, db_index=True, help_text="Secret expiration time")
     last_rotated_at = models.DateTimeField(null=True, blank=True, help_text="When secret was last rotated")

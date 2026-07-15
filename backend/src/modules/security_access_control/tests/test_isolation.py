@@ -15,9 +15,8 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from src.core.user_models import UserProfile
-from src.modules.tenant_management.models import Tenant
-
 from src.modules.security_access_control.models import PermissionSet, Role, SecurityProfile
+from src.modules.tenant_management.models import Tenant
 
 User = get_user_model()
 
@@ -35,17 +34,15 @@ def tenant_a_user(db):
     user = User.objects.create_user(
         username="user_a",
         email="user_a@example.com",
-        password="testpass123",
     )
     with patch.object(UserProfile, "clean"):
         profile, _ = UserProfile.objects.get_or_create(
             user=user,
-            defaults={"tenant_id": str(tenant_a.id), "tenant_role": "tenant_admin"},
+            defaults={"tenant_id": str(tenant_a.id), "tenant_role": "security_admin"},
         )
-        if not profile.tenant_id:
-            profile.tenant_id = str(tenant_a.id)
-            profile.tenant_role = "tenant_admin"
-            profile.save()
+        profile.tenant_id = str(tenant_a.id)
+        profile.tenant_role = "security_admin"
+        profile.save()
     # Force reload user to ensure profile is accessible
     user = User.objects.select_related("profile").get(pk=user.pk)
     return user
@@ -58,17 +55,15 @@ def tenant_b_user(db):
     user = User.objects.create_user(
         username="user_b",
         email="user_b@example.com",
-        password="testpass123",
     )
     with patch.object(UserProfile, "clean"):
         profile, _ = UserProfile.objects.get_or_create(
             user=user,
-            defaults={"tenant_id": str(tenant_b.id), "tenant_role": "tenant_admin"},
+            defaults={"tenant_id": str(tenant_b.id), "tenant_role": "security_admin"},
         )
-        if not profile.tenant_id:
-            profile.tenant_id = str(tenant_b.id)
-            profile.tenant_role = "tenant_admin"
-            profile.save()
+        profile.tenant_id = str(tenant_b.id)
+        profile.tenant_role = "security_admin"
+        profile.save()
     # Force reload user to ensure profile is accessible
     user = User.objects.select_related("profile").get(pk=user.pk)
     return user

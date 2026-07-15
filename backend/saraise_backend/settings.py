@@ -9,6 +9,7 @@ Supports three operating modes:
 Reference: https://docs.saraise.com (architecture and configuration)
 """
 
+import json
 import os
 from pathlib import Path
 from typing import Literal
@@ -55,6 +56,38 @@ SARAISE_POLICY_ENGINE_URL: str = os.getenv(
     "SARAISE_POLICY_ENGINE_URL",
     "http://localhost:18003",
 )
+
+# Envelope-encryption master key ring. The JSON object maps stable key IDs to
+# Fernet keys; both variables must be supplied together so startup fails closed
+# on partial or malformed rotation configuration.
+_encryption_keys_env = os.getenv("SARAISE_ENCRYPTION_KEYS", "")
+SARAISE_ACTIVE_ENCRYPTION_KEY_ID = os.getenv("SARAISE_ACTIVE_ENCRYPTION_KEY_ID", "")
+SARAISE_KEY_MANAGEMENT_BACKEND = os.getenv(
+    "SARAISE_KEY_MANAGEMENT_BACKEND",
+    "src.core.encryption.key_management.SettingsKeyRingBackend",
+)
+try:
+    SARAISE_ENCRYPTION_KEYS = json.loads(_encryption_keys_env) if _encryption_keys_env else {}
+except json.JSONDecodeError as exc:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured("SARAISE_ENCRYPTION_KEYS must be a JSON object") from exc
+if not isinstance(SARAISE_ENCRYPTION_KEYS, dict) or not all(
+    isinstance(key_id, str) and isinstance(key, str) for key_id, key in SARAISE_ENCRYPTION_KEYS.items()
+):
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured("SARAISE_ENCRYPTION_KEYS must map string key IDs to string Fernet keys")
+if bool(SARAISE_ENCRYPTION_KEYS) != bool(SARAISE_ACTIVE_ENCRYPTION_KEY_ID):
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "SARAISE_ENCRYPTION_KEYS and SARAISE_ACTIVE_ENCRYPTION_KEY_ID must be configured together"
+    )
+if SARAISE_ACTIVE_ENCRYPTION_KEY_ID and SARAISE_ACTIVE_ENCRYPTION_KEY_ID not in SARAISE_ENCRYPTION_KEYS:
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured("SARAISE_ACTIVE_ENCRYPTION_KEY_ID is not present in SARAISE_ENCRYPTION_KEYS")
 
 # License server URL for self-hosted connected mode
 SARAISE_LICENSE_SERVER_URL: str = os.getenv("SARAISE_LICENSE_SERVER_URL", "https://license.saraise.com")

@@ -8,6 +8,14 @@ from src.modules.tenant_management.health import health_check
 from src.modules.tenant_management.models import Tenant
 
 
+def test_health_check_requires_authentication():
+    request = APIRequestFactory().get("/api/v1/tenant-management/health/")
+
+    response = health_check(request)
+
+    assert response.status_code == 403
+
+
 @pytest.mark.django_db
 def test_health_check_ok():
     Tenant.objects.create(name="Test Tenant", slug="test-tenant")
@@ -15,7 +23,6 @@ def test_health_check_ok():
     user = get_user_model().objects.create_user(
         username="health-user",
         email="health@example.com",
-        password="testpass123",
     )
     force_authenticate(request, user=user)
     response = health_check(request)
@@ -31,7 +38,6 @@ def test_health_check_unhealthy(monkeypatch):
     user = get_user_model().objects.create_user(
         username="health-user-2",
         email="health2@example.com",
-        password="testpass123",
     )
 
     class BrokenCursor:

@@ -26,8 +26,8 @@ from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
 
 from .models import FeatureFlag, PlatformAuditEvent, PlatformMetrics, PlatformSetting, SystemHealth
+from .permissions import PlatformAdminPermission
 from .serializers import (
-    FeatureFlagCreateSerializer,
     FeatureFlagSerializer,
     PlatformAuditEventSerializer,
     PlatformMetricsRequestSerializer,
@@ -36,7 +36,7 @@ from .serializers import (
     PlatformSettingSerializer,
     SystemHealthSerializer,
 )
-from .services import AnalyticsService, PlatformManagementService
+from .services import AnalyticsService
 
 
 def _get_viewset_base():
@@ -61,7 +61,8 @@ class PlatformSettingViewSet(_get_viewset_base()):
     """
 
     authentication_classes = [RelaxedCsrfSessionAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PlatformAdminPermission]
+    permission_resource = "platform.settings"
 
     def check_object_permissions(self, request, obj):
         """Override to skip object permission check for list action."""
@@ -203,7 +204,8 @@ class FeatureFlagViewSet(_get_viewset_base()):
     """
 
     authentication_classes = [RelaxedCsrfSessionAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PlatformAdminPermission]
+    permission_resource = "platform.feature-flags"
 
     def check_object_permissions(self, request, obj):
         """Override to skip object permission check for list action."""
@@ -344,7 +346,8 @@ class SystemHealthViewSet(_get_viewset_base()):
     """
 
     authentication_classes = [RelaxedCsrfSessionAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PlatformAdminPermission]
+    permission_resource = "platform.health"
     serializer_class = SystemHealthSerializer
     queryset = SystemHealth.objects.all()
 
@@ -397,7 +400,8 @@ class PlatformAuditEventViewSet(viewsets.ReadOnlyModelViewSet):
     """
 
     authentication_classes = [RelaxedCsrfSessionAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PlatformAdminPermission]
+    permission_resource = "platform.audit"
     serializer_class = PlatformAuditEventSerializer
 
     def get_queryset(self):
@@ -479,7 +483,8 @@ class PlatformMetricsViewSet(_get_viewset_base()):
     SaaS Mode: Read-only + save action (metrics reported to Control Plane)
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, PlatformAdminPermission]
+    permission_resource = "platform.metrics"
     serializer_class = PlatformMetricsSerializer
 
     def get_queryset(self):

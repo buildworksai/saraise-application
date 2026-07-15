@@ -5,12 +5,9 @@ Task: 401.1 - Agent Runtime & Scheduler
 
 from __future__ import annotations
 
-from datetime import datetime
-
 import pytest
-from django.utils import timezone
 
-from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState
+from src.modules.ai_agent_management.models import Agent, AgentIdentityType, AgentLifecycleState
 from src.modules.ai_agent_management.runtime import AgentExecutionContext, AgentRuntime
 
 
@@ -20,7 +17,7 @@ class TestAgentRuntime:
 
     def test_create_execution_user_bound(self) -> None:
         """Test creating user-bound agent execution."""
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
         agent = Agent.objects.create(
             tenant_id=tenant_id,
             name="Test Agent",
@@ -33,7 +30,7 @@ class TestAgentRuntime:
             created_by="user-1",
         )
 
-        runtime = AgentRuntime()
+        runtime = AgentRuntime(session_validator=lambda session_id, subject_id: True)
         context = AgentExecutionContext(
             agent_id=agent.id,
             tenant_id=tenant_id,
@@ -54,7 +51,7 @@ class TestAgentRuntime:
 
     def test_create_execution_system_bound(self) -> None:
         """Test creating system-bound agent execution."""
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
         agent = Agent.objects.create(
             tenant_id=tenant_id,
             name="Test Agent",
@@ -67,7 +64,7 @@ class TestAgentRuntime:
             created_by="user-1",
         )
 
-        runtime = AgentRuntime()
+        runtime = AgentRuntime(session_validator=lambda session_id, subject_id: True)
         context = AgentExecutionContext(
             agent_id=agent.id,
             tenant_id=tenant_id,
@@ -88,7 +85,7 @@ class TestAgentRuntime:
 
     def test_create_execution_missing_session(self) -> None:
         """Test creating user-bound execution without session fails."""
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
         agent = Agent.objects.create(
             tenant_id=tenant_id,
             name="Test Agent",
@@ -101,7 +98,7 @@ class TestAgentRuntime:
             created_by="user-1",
         )
 
-        runtime = AgentRuntime()
+        runtime = AgentRuntime(session_validator=lambda session_id, subject_id: True)
         context = AgentExecutionContext(
             agent_id=agent.id,
             tenant_id=tenant_id,
@@ -112,12 +109,12 @@ class TestAgentRuntime:
             metadata={},
         )
 
-        with pytest.raises(ValueError, match="User-bound agents require session_id"):
+        with pytest.raises(ValueError, match="User-bound agent requires an active session for its subject"):
             runtime.create_execution(context)
 
     def test_lifecycle_transitions(self) -> None:
         """Test agent execution lifecycle transitions."""
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
         agent = Agent.objects.create(
             tenant_id=tenant_id,
             name="Test Agent",
@@ -130,7 +127,7 @@ class TestAgentRuntime:
             created_by="user-1",
         )
 
-        runtime = AgentRuntime()
+        runtime = AgentRuntime(session_validator=lambda session_id, subject_id: True)
         context = AgentExecutionContext(
             agent_id=agent.id,
             tenant_id=tenant_id,
@@ -170,7 +167,7 @@ class TestAgentRuntime:
 
     def test_terminate_execution(self) -> None:
         """Test terminating agent execution."""
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
         agent = Agent.objects.create(
             tenant_id=tenant_id,
             name="Test Agent",
@@ -183,7 +180,7 @@ class TestAgentRuntime:
             created_by="user-1",
         )
 
-        runtime = AgentRuntime()
+        runtime = AgentRuntime(session_validator=lambda session_id, subject_id: True)
         context = AgentExecutionContext(
             agent_id=agent.id,
             tenant_id=tenant_id,

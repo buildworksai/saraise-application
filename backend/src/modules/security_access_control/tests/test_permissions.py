@@ -10,6 +10,7 @@ def build_request(method="get", roles=None, authenticated=True):
     request.user = SimpleNamespace(
         is_authenticated=authenticated,
         roles=roles or [],
+        has_perm=lambda permission: permission in {"security.roles:read", "security.roles:update"},
     )
     return request
 
@@ -20,19 +21,27 @@ def test_security_admin_permission_denies_unauthenticated():
     assert permission.has_permission(request, None) is False
 
 
-def test_security_admin_permission_allows_admin_roles():
+def test_security_admin_permission_uses_declared_permissions():
     permission = SecurityAdminPermission()
     request = build_request(roles=["security_admin"])
-    assert permission.has_permission(request, None) is True
+    view = SimpleNamespace(action="list", permission_resource="security.roles")
+    assert permission.has_permission(request, view) is True
 
-    request = build_request(roles=["super_admin"])
-    assert permission.has_permission(request, None) is True
+
+def test_security_admin_permission_uses_resource_delete_permission():
+    seen = []
+    request = build_request(method="delete")
+    request.user.has_perm = lambda value: seen.append(value) or True
+    view = SimpleNamespace(action="destroy", permission_resource="security.permission-sets")
+    assert SecurityAdminPermission().has_permission(request, view) is True
+    assert seen == ["security.permission-sets:delete"]
 
 
 def test_security_viewer_permission_safe_methods_only():
     permission = SecurityViewerPermission()
-    request = build_request(method="get", roles=["security_viewer"])
-    assert permission.has_permission(request, None) is True
+    request = build_request(method="get")
+    view = SimpleNamespace(permission_resource="security.roles")
+    assert permission.has_permission(request, view) is True
 
     request = build_request(method="post", roles=["security_viewer"])
-    assert permission.has_permission(request, None) is False
+    assert permission.has_permission(request, view) is False

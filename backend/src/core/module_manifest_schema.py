@@ -35,6 +35,13 @@ class ModuleLifecycle(str, Enum):
     INTEGRATION = "integration"  # External integration modules
 
 
+class ModuleStatus(str, Enum):
+    """Machine-enforced implementation readiness."""
+
+    AVAILABLE = "available"
+    UNIMPLEMENTED = "unimplemented"
+
+
 @dataclass
 class ModuleManifest:
     """Module manifest data structure.
@@ -47,6 +54,7 @@ class ModuleManifest:
     description: str
     type: ModuleType
     lifecycle: ModuleLifecycle
+    status: ModuleStatus = ModuleStatus.AVAILABLE
     dependencies: List[Dict[str, str]] = field(default_factory=list)
     permissions: List[str] = field(default_factory=list)
     sod_actions: List[str] = field(default_factory=list)
@@ -64,6 +72,7 @@ class ModuleManifest:
             "description": self.description,
             "type": self.type.value,
             "lifecycle": self.lifecycle.value,
+            "status": self.status.value,
             "dependencies": self.dependencies,
             "permissions": self.permissions,
             "sod_actions": self.sod_actions,
@@ -86,6 +95,7 @@ class ModuleManifest:
             "description": self.description,
             "type": self.type.value,
             "lifecycle": self.lifecycle.value,
+            "status": self.status.value,
             "dependencies": self.dependencies,
             "permissions": self.permissions,
             "sod_actions": self.sod_actions,
@@ -173,7 +183,16 @@ class ManifestValidator:
         try:
             lifecycle = ModuleLifecycle(lifecycle_str)
         except ValueError:
-            errors.append(f"Invalid lifecycle '{lifecycle_str}': must be one of {[l.value for l in ModuleLifecycle]}")
+            errors.append(
+                f"Invalid lifecycle '{lifecycle_str}': must be one of "
+                f"{[lifecycle.value for lifecycle in ModuleLifecycle]}"
+            )
+
+        status_str = manifest_data.get("status", ModuleStatus.AVAILABLE.value)
+        try:
+            module_status = ModuleStatus(status_str)
+        except ValueError:
+            errors.append(f"Invalid status '{status_str}': must be one of {[s.value for s in ModuleStatus]}")
 
         # Validate dependencies
         dependencies = manifest_data.get("dependencies", [])
@@ -242,6 +261,7 @@ class ManifestValidator:
             description=manifest_data.get("description", ""),
             type=module_type,
             lifecycle=lifecycle,
+            status=module_status,
             dependencies=dependencies,
             permissions=permissions,
             sod_actions=sod_actions,

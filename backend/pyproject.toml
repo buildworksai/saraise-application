@@ -37,7 +37,6 @@ dependencies = [
 
     # Security & Cryptography
     "cryptography>=42.0.0",
-    "PyJWT>=2.8.0",
     "defusedxml>=0.7.1",  # Secure XML parsing
 
     # Versioning

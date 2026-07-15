@@ -6,13 +6,15 @@ Health check endpoint for Security & Access Control module.
 
 from django.core.cache import cache
 from django.db import connection
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .models import Permission, Role
 
 
 @api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def check_security_module_health(request):
     """
     Health check endpoint for Security & Access Control module.

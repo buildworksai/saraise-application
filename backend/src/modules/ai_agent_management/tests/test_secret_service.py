@@ -5,12 +5,10 @@ Task: 402.1 - Egress Allowlisting & Secret Isolation
 
 from __future__ import annotations
 
-from datetime import timedelta
-
 import pytest
-from django.utils import timezone
+from cryptography.fernet import Fernet
+from django.test import override_settings
 
-from src.modules.ai_agent_management.egress_models import Secret, SecretAccess
 from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentIdentityType
 from src.modules.ai_agent_management.secret_service import SecretService
 
@@ -19,11 +17,20 @@ from src.modules.ai_agent_management.secret_service import SecretService
 class TestSecretService:
     """Test SecretService."""
 
+    @pytest.fixture(autouse=True)
+    def key_ring(self):
+        """Use explicit test master keys; production code never invents one."""
+        with override_settings(
+            SARAISE_ENCRYPTION_KEYS={"test-key-1": Fernet.generate_key().decode("ascii")},
+            SARAISE_ACTIVE_ENCRYPTION_KEY_ID="test-key-1",
+        ):
+            yield
+
     def test_create_secret(self) -> None:
         """Test creating a secret."""
         service = SecretService()
 
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
 
         secret = service.create_secret(
             tenant_id=tenant_id,
@@ -40,14 +47,27 @@ class TestSecretService:
         assert secret.secret_type == "api_key"
         # Secret value should be encrypted
         assert secret.encrypted_value != "secret-value-123"
+        assert secret.encryption_key_id == "test-key-1"
+        assert secret.wrapped_data_key
+
+    def test_missing_key_management_fails_closed(self) -> None:
+        """A missing key ring must prevent secret creation in every mode."""
+        with override_settings(SARAISE_ENCRYPTION_KEYS={}, SARAISE_ACTIVE_ENCRYPTION_KEY_ID=""):
+            with pytest.raises(RuntimeError, match="required"):
+                SecretService().create_secret(
+                    tenant_id="11111111-1111-4111-8111-111111111111",
+                    name="unprotected",
+                    secret_value="must-not-store",
+                    secret_type="token",
+                )
 
     def test_get_secret(self) -> None:
         """Test getting a secret."""
         service = SecretService()
 
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
 
-        created = service.create_secret(
+        service.create_secret(
             tenant_id=tenant_id,
             name="api-key",
             secret_value="secret-value",
@@ -68,10 +88,10 @@ class TestSecretService:
         """Test getting secret from wrong tenant returns None."""
         service = SecretService()
 
-        tenant1 = "tenant-1"
-        tenant2 = "tenant-2"
+        tenant1 = "11111111-1111-4111-8111-111111111111"
+        tenant2 = "22222222-2222-4222-8222-222222222222"
 
-        secret = service.create_secret(
+        service.create_secret(
             tenant_id=tenant1,
             name="api-key",
             secret_value="secret-value",
@@ -91,7 +111,7 @@ class TestSecretService:
         """Test listing secrets."""
         service = SecretService()
 
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
 
         service.create_secret(
             tenant_id=tenant_id,
@@ -112,15 +132,15 @@ class TestSecretService:
         secrets = service.list_secrets(tenant_id=tenant_id)
 
         assert len(secrets) >= 2
-        assert all(s.tenant_id == tenant_id for s in secrets)
+        assert all(str(s.tenant_id) == tenant_id for s in secrets)
 
     def test_get_secret_value(self) -> None:
         """Test getting decrypted secret value."""
         service = SecretService()
 
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
 
-        secret = service.create_secret(
+        service.create_secret(
             tenant_id=tenant_id,
             name="api-key",
             secret_value="original-value",
@@ -140,9 +160,9 @@ class TestSecretService:
         """Test updating a secret."""
         service = SecretService()
 
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
 
-        secret = service.create_secret(
+        service.create_secret(
             tenant_id=tenant_id,
             name="api-key",
             secret_value="old-value",
@@ -166,9 +186,9 @@ class TestSecretService:
         """Test deleting a secret."""
         service = SecretService()
 
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
 
-        secret = service.create_secret(
+        service.create_secret(
             tenant_id=tenant_id,
             name="api-key",
             secret_value="secret-value",
@@ -190,9 +210,9 @@ class TestSecretService:
         """Test rotating a secret."""
         service = SecretService()
 
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
 
-        secret = service.create_secret(
+        service.create_secret(
             tenant_id=tenant_id,
             name="api-key",
             secret_value="old-value",
@@ -217,7 +237,7 @@ class TestSecretService:
         """Test logging secret access."""
         service = SecretService()
 
-        tenant_id = "test-tenant-1"
+        tenant_id = "11111111-1111-4111-8111-111111111111"
         agent = Agent.objects.create(
             tenant_id=tenant_id,
             name="Test Agent",

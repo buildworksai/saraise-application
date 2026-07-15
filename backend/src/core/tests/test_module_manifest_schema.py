@@ -13,6 +13,7 @@ from src.core.module_manifest_schema import (
     ManifestValidator,
     ModuleLifecycle,
     ModuleManifest,
+    ModuleStatus,
     ModuleType,
     manifest_validator,
 )
@@ -35,6 +36,7 @@ class TestModuleManifest:
         assert manifest.version == "1.0.0"
         assert manifest.type == ModuleType.DOMAIN
         assert manifest.lifecycle == ModuleLifecycle.MANAGED
+        assert manifest.status == ModuleStatus.AVAILABLE
 
     def test_to_dict(self) -> None:
         """Test converting manifest to dictionary."""
@@ -108,6 +110,19 @@ class TestModuleManifest:
 
 class TestManifestValidator:
     """Test ManifestValidator."""
+
+    def test_unimplemented_status_is_machine_readable(self) -> None:
+        manifest = manifest_validator.validate(
+            {
+                "name": "scaffold-module",
+                "version": "1.0.0",
+                "description": "Scaffold",
+                "type": "foundation",
+                "lifecycle": "managed",
+                "status": "unimplemented",
+            }
+        )
+        assert manifest.status == ModuleStatus.UNIMPLEMENTED
 
     def test_validate_valid_manifest(self) -> None:
         """Test validating a valid manifest."""

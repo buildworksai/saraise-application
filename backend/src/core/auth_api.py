@@ -49,7 +49,11 @@ def login_view(request):
     """
     email = request.data.get("email")
     password = request.data.get("password")
-    mfa_token = request.data.get("mfa_token")
+    if "mfa_token" in request.data:
+        return Response(
+            {"error": "MFA is not supported by this endpoint"},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     if not email or not password:
         return Response({"error": "Email and password are required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -82,11 +86,6 @@ def login_view(request):
     # Check password
     if not user.check_password(password):
         return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
-
-    # TODO: MFA validation (for now, skip if mfa_token provided)
-    if mfa_token:
-        # Placeholder for MFA validation
-        pass
 
     # Login user (creates session)
     login(request, user)

@@ -1,36 +1,71 @@
-"""
-Security & Access Control Permissions
-"""
+"""Policy-engine-backed permissions for security administration."""
 
-from rest_framework import permissions
+from rest_framework.permissions import SAFE_METHODS
+
+from src.core.auth.policy_permissions import PolicyRequiredPermission
 
 
-class SecurityAdminPermission(permissions.BasePermission):
-    """Permission check for security administrators."""
+class SecurityAdminPermission(PolicyRequiredPermission):
+    """Require the exact manifest permission for the ViewSet resource/action."""
+
+    ACTIONS = {
+        "create": "create",
+        "destroy": "delete",
+        "list": "read",
+        "retrieve": "read",
+        "update": "update",
+        "partial_update": "update",
+        "assign_permission": "update",
+        "revoke_permission": "update",
+    }
+    ALLOWED_PERMISSIONS = {
+        "security.roles:create",
+        "security.roles:read",
+        "security.roles:update",
+        "security.roles:delete",
+        "security.permissions:read",
+        "security.permission-sets:create",
+        "security.permission-sets:read",
+        "security.permission-sets:update",
+        "security.permission-sets:delete",
+        "security.security-profiles:create",
+        "security.security-profiles:read",
+        "security.security-profiles:update",
+        "security.security-profiles:delete",
+        "security.field-security:create",
+        "security.field-security:read",
+        "security.field-security:update",
+        "security.field-security:delete",
+        "security.row-security:create",
+        "security.row-security:read",
+        "security.row-security:update",
+        "security.row-security:delete",
+        "security.audit-logs:read",
+    }
 
     def has_permission(self, request, view):
-        """Check if user has security admin permissions."""
-        # TODO: Integrate with Policy Engine
-        # For now, check if user has security admin role
-        if not request.user or not request.user.is_authenticated:
+        resource = getattr(view, "permission_resource", None)
+        action = self.ACTIONS.get(getattr(view, "action", ""))
+        if not resource or not action:
             return False
+        permission = f"{resource}:{action}"
+        if permission not in self.ALLOWED_PERMISSIONS:
+            return False
+        view.required_permissions = [permission]
+        return super().has_permission(request, view)
 
-        # Check user roles (to be integrated with Policy Engine)
-        user_roles = getattr(request.user, "roles", [])
-        return "security_admin" in user_roles or "super_admin" in user_roles
 
-
-class SecurityViewerPermission(permissions.BasePermission):
-    """Permission check for security viewers (read-only)."""
+class SecurityViewerPermission(PolicyRequiredPermission):
+    """Require read access and reject mutation attempts."""
 
     def has_permission(self, request, view):
-        """Check if user has security viewer permissions."""
-        if not request.user or not request.user.is_authenticated:
+        if request.method not in SAFE_METHODS:
             return False
-
-        # Allow read-only access for security viewers
-        if request.method in permissions.SAFE_METHODS:
-            user_roles = getattr(request.user, "roles", [])
-            return "security_viewer" in user_roles or "security_admin" in user_roles
-
-        return False
+        resource = getattr(view, "permission_resource", None)
+        if not resource:
+            return False
+        permission = f"{resource}:read"
+        if permission not in SecurityAdminPermission.ALLOWED_PERMISSIONS:
+            return False
+        view.required_permissions = [permission]
+        return super().has_permission(request, view)
