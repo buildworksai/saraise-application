@@ -3,6 +3,7 @@ DRF Serializers for DataMigration module.
 Provides request/response validation for all models.
 """
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from src.core.auth_utils import get_user_tenant_id
@@ -31,7 +32,7 @@ def validate_database_source_config(config, tenant_id=None):
                 tenant_id=tenant_id,
                 is_active=True,
             ).exists()
-        except (ValueError, TypeError):
+        except (DjangoValidationError, ValueError, TypeError):
             exists = False
         if not exists:
             raise serializers.ValidationError("Active external connection not found for tenant")

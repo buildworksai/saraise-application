@@ -3,14 +3,24 @@ Service Unit Tests for DataMigration module.
 
 Tests business logic in services layer.
 """
-import json
-import pytest
-from unittest.mock import Mock, patch, mock_open, MagicMock
-from django.utils import timezone
-from decimal import Decimal
 
-from src.modules.data_migration.models import MigrationJob, MigrationLog, MigrationMapping, MigrationRollback, MigrationValidation
+import json
+import uuid
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.core.encryption.service import EncryptionService
+from src.modules.data_migration.models import (
+    ExternalConnection,
+    MigrationJob,
+    MigrationLog,
+    MigrationMapping,
+    MigrationRollback,
+)
 from src.modules.data_migration.services import MigrationEngine, MigrationResult
+
+TEST_TENANT_ID = uuid.uuid4()
 
 
 @pytest.mark.django_db
@@ -53,28 +63,27 @@ class TestMigrationEngine:
         """Test executing migration with non-existent job."""
         engine = MigrationEngine()
         with pytest.raises(ValueError, match="not found"):
-            engine.execute_migration("non-existent-id", "tenant-123")
+            engine.execute_migration("non-existent-id", TEST_TENANT_ID)
 
     def test_execute_migration_job_already_running(self, db):
         """Test executing migration when job is already running."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
-            source_config={"data": json.dumps([{"name": "Test"}]),
-                          "validation_rules": {}},
+            source_config={"data": json.dumps([{"name": "Test"}]), "validation_rules": {}},
             status="running",
             created_by="user-123",
         )
 
         engine = MigrationEngine()
         with pytest.raises(ValueError, match="already running"):
-            engine.execute_migration(job.id, "tenant-123")
+            engine.execute_migration(job.id, TEST_TENANT_ID)
 
     def test_execute_migration_dry_run_json(self, db):
         """Test executing a migration in dry-run mode with JSON data."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={
@@ -85,7 +94,7 @@ class TestMigrationEngine:
         )
 
         engine = MigrationEngine()
-        result = engine.execute_migration(job.id, "tenant-123", dry_run=True)
+        result = engine.execute_migration(job.id, TEST_TENANT_ID, dry_run=True)
 
         assert result is not None
         assert isinstance(result, MigrationResult)
@@ -100,7 +109,7 @@ class TestMigrationEngine:
     def test_execute_migration_with_validation_errors(self, db):
         """Test executing migration with validation errors."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={
@@ -113,7 +122,7 @@ class TestMigrationEngine:
         )
 
         engine = MigrationEngine()
-        result = engine.execute_migration(job.id, "tenant-123", dry_run=True)
+        result = engine.execute_migration(job.id, TEST_TENANT_ID, dry_run=True)
 
         assert result is not None
         assert result.records_failed == 1
@@ -126,7 +135,7 @@ class TestMigrationEngine:
     def test_create_checkpoint(self, db):
         """Test creating a checkpoint."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={},
@@ -146,7 +155,7 @@ class TestMigrationEngine:
     def test_load_json_data_from_string(self, db):
         """Test loading JSON data from string."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={
@@ -165,7 +174,7 @@ class TestMigrationEngine:
     def test_load_json_data_invalid(self, db):
         """Test loading invalid JSON data."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={"data": "invalid json"},
@@ -179,7 +188,7 @@ class TestMigrationEngine:
     def test_load_source_data_unsupported_type(self, db):
         """Test loading data from unsupported source type."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="unsupported",
             source_config={},
@@ -194,6 +203,7 @@ class TestMigrationEngine:
     def test_load_csv_data(self, mock_storage, db):
         """Test loading CSV data."""
         from io import StringIO
+
         mock_storage.open.return_value = StringIO("name,value\nTest,123")
 
         config = {"file_path": "/tmp/test.csv", "delimiter": ","}
@@ -214,7 +224,7 @@ class TestMigrationEngine:
     def test_apply_mappings(self, db):
         """Test applying field mappings."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={},
@@ -222,7 +232,7 @@ class TestMigrationEngine:
         )
 
         MigrationMapping.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             job=job,
             source_field="old_name",
             target_field="new_name",
@@ -239,7 +249,7 @@ class TestMigrationEngine:
     def test_apply_mappings_with_type_conversion(self, db):
         """Test applying mappings with type conversion."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={},
@@ -247,7 +257,7 @@ class TestMigrationEngine:
         )
 
         MigrationMapping.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             job=job,
             source_field="value",
             target_field="amount",
@@ -264,7 +274,7 @@ class TestMigrationEngine:
     def test_apply_mappings_with_default_value(self, db):
         """Test applying mappings with default value."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={},
@@ -272,7 +282,7 @@ class TestMigrationEngine:
         )
 
         MigrationMapping.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             job=job,
             source_field="missing_field",
             target_field="target_field",
@@ -288,7 +298,7 @@ class TestMigrationEngine:
     def test_validate_record_required_fields(self, db):
         """Test validating required fields."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={
@@ -309,7 +319,7 @@ class TestMigrationEngine:
     def test_validate_record_field_types(self, db):
         """Test validating field types."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={
@@ -332,7 +342,7 @@ class TestMigrationEngine:
     def test_validate_record_field_constraints(self, db):
         """Test validating field constraints."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={
@@ -359,7 +369,7 @@ class TestMigrationEngine:
     def test_validate_record_pattern(self, db):
         """Test validating field pattern."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={
@@ -383,7 +393,7 @@ class TestMigrationEngine:
     def test_import_record_no_target_model(self, db):
         """Test importing record without target model."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={},
@@ -392,7 +402,7 @@ class TestMigrationEngine:
 
         engine = MigrationEngine()
         record = {"name": "Test"}
-        result = engine._import_record(job, record, "tenant-123")
+        result = engine._import_record(job, record, TEST_TENANT_ID)
 
         assert result is None
         # Verify log was created
@@ -403,12 +413,12 @@ class TestMigrationEngine:
         """Test rollback with non-existent checkpoint."""
         engine = MigrationEngine()
         with pytest.raises(ValueError, match="not found"):
-            engine.rollback("non-existent-id", "tenant-123")
+            engine.rollback("non-existent-id", TEST_TENANT_ID)
 
     def test_rollback_success(self, db):
         """Test successful rollback."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={},
@@ -418,7 +428,7 @@ class TestMigrationEngine:
         )
 
         checkpoint = MigrationRollback.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             job=job,
             checkpoint_data={
                 "status": "pending",
@@ -427,7 +437,7 @@ class TestMigrationEngine:
         )
 
         engine = MigrationEngine()
-        engine.rollback(checkpoint.id, "tenant-123")
+        engine.rollback(checkpoint.id, TEST_TENANT_ID)
 
         # Verify job status restored
         job.refresh_from_db()
@@ -440,7 +450,7 @@ class TestMigrationEngine:
 
     @pytest.mark.skipif(
         True,  # Skip if pandas not available - test would require pandas installation
-        reason="Requires pandas to be installed"
+        reason="Requires pandas to be installed",
     )
     def test_load_excel_data(self, db):
         """Test loading Excel data - skipped if pandas not available."""
@@ -452,11 +462,12 @@ class TestMigrationEngine:
         # We'll test the error path by checking the code handles ImportError
         config = {"file_path": "/tmp/test.xlsx"}
         engine = MigrationEngine()
-        
+
         # If pandas is not installed, this should raise ValueError
         # If pandas is installed, we skip this test
         try:
             import pandas  # noqa: F401
+
             pytest.skip("pandas is installed, cannot test missing pandas scenario")
         except ImportError:
             with pytest.raises(ValueError, match="pandas is required"):
@@ -469,7 +480,7 @@ class TestMigrationEngine:
             import pandas  # noqa: F401
         except ImportError:
             pytest.skip("pandas not installed, cannot test file_path validation")
-        
+
         config = {}
         engine = MigrationEngine()
         with pytest.raises(ValueError, match="file_path is required"):
@@ -478,13 +489,14 @@ class TestMigrationEngine:
     def test_load_json_data_from_file(self, db):
         """Test loading JSON data from file path."""
         from io import StringIO
+
         with patch("django.core.files.storage.default_storage") as mock_storage:
             mock_storage.open.return_value = StringIO(json.dumps([{"name": "Test"}]))
-            
+
             config = {"file_path": "/tmp/test.json"}
             engine = MigrationEngine()
             data = engine._load_json_data(config)
-            
+
             assert len(data) == 1
             assert data[0]["name"] == "Test"
 
@@ -493,22 +505,16 @@ class TestMigrationEngine:
         config = {"data": json.dumps({"name": "Test"})}
         engine = MigrationEngine()
         data = engine._load_json_data(config)
-        
+
         assert len(data) == 1
         assert data[0]["name"] == "Test"
 
-    @pytest.mark.skipif(
-        True,  # Skip if httpx not available
-        reason="Requires httpx to be installed"
-    )
+    @pytest.mark.skipif(True, reason="Requires httpx to be installed")  # Skip if httpx not available
     def test_load_api_data(self, db):
         """Test loading data from API - skipped if httpx not available."""
         pass
 
-    @pytest.mark.skipif(
-        True,  # Skip if httpx not available
-        reason="Requires httpx to be installed"
-    )
+    @pytest.mark.skipif(True, reason="Requires httpx to be installed")  # Skip if httpx not available
     def test_load_api_data_with_results_key(self, db):
         """Test loading API data with 'results' key - skipped if httpx not available."""
         pass
@@ -517,11 +523,12 @@ class TestMigrationEngine:
         """Test loading API data when httpx is not installed."""
         config = {"url": "https://api.example.com/data"}
         engine = MigrationEngine()
-        
+
         # If httpx is not installed, this should raise ValueError
         # If httpx is installed, we skip this test
         try:
             import httpx  # noqa: F401
+
             pytest.skip("httpx is installed, cannot test missing httpx scenario")
         except ImportError:
             with pytest.raises(ValueError, match="httpx is required"):
@@ -537,7 +544,7 @@ class TestMigrationEngine:
     def test_validate_record_max_length(self, db):
         """Test validating max_length constraint."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={
@@ -559,7 +566,7 @@ class TestMigrationEngine:
     def test_validate_record_min_value(self, db):
         """Test validating min_value constraint."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={
@@ -581,7 +588,7 @@ class TestMigrationEngine:
     def test_validate_record_max_value(self, db):
         """Test validating max_value constraint."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={
@@ -602,13 +609,15 @@ class TestMigrationEngine:
 
     def test_import_record_with_target_model(self, db):
         """Test importing record with target model specified."""
-        from src.modules.workflow_automation.models import Workflow
-        from django.contrib.auth import get_user_model
         import uuid
-        
+
+        from django.contrib.auth import get_user_model
+
+        from src.modules.workflow_automation.models import Workflow
+
         User = get_user_model()
         user = User.objects.create_user(username="testuser2", email="test2@example.com", password="pass")
-        
+
         job = MigrationJob.objects.create(
             tenant_id=str(uuid.uuid4()),
             name="Test Migration",
@@ -629,10 +638,10 @@ class TestMigrationEngine:
             "trigger_type": "manual",
             "created_by_id": user.id,  # Use created_by_id for ForeignKey
         }
-        
+
         # This will create a Workflow record
         record_id = engine._import_record(job, record, job.tenant_id)
-        
+
         assert record_id is not None
         # Verify workflow was created
         workflow = Workflow.objects.filter(tenant_id=job.tenant_id, name="Test Workflow").first()
@@ -640,14 +649,16 @@ class TestMigrationEngine:
 
     def test_import_record_with_update_action(self, db):
         """Test importing record with update action."""
-        from src.modules.workflow_automation.models import Workflow
-        from django.contrib.auth import get_user_model
         import uuid
-        
+
+        from django.contrib.auth import get_user_model
+
+        from src.modules.workflow_automation.models import Workflow
+
         User = get_user_model()
         user = User.objects.create_user(username="testuser3", email="test3@example.com", password="pass")
         tenant_id = str(uuid.uuid4())
-        
+
         # Create existing workflow
         existing_workflow = Workflow.objects.create(
             tenant_id=tenant_id,
@@ -655,7 +666,7 @@ class TestMigrationEngine:
             trigger_type="manual",
             created_by=user,
         )
-        
+
         job = MigrationJob.objects.create(
             tenant_id=tenant_id,
             name="Test Migration",
@@ -677,10 +688,10 @@ class TestMigrationEngine:
             "description": "Updated",
             "trigger_type": "manual",
         }
-        
+
         # This should update the existing workflow
         record_id = engine._import_record(job, record, tenant_id)
-        
+
         assert record_id is not None
         # Verify workflow was updated
         existing_workflow.refresh_from_db()
@@ -688,14 +699,16 @@ class TestMigrationEngine:
 
     def test_import_record_update_not_found(self, db):
         """Test importing record with update action when record not found."""
-        from src.modules.workflow_automation.models import Workflow
-        from django.contrib.auth import get_user_model
         import uuid
-        
+
+        from django.contrib.auth import get_user_model
+
+        from src.modules.workflow_automation.models import Workflow
+
         User = get_user_model()
         user = User.objects.create_user(username="testuser4", email="test4@example.com", password="pass")
         tenant_id = str(uuid.uuid4())
-        
+
         job = MigrationJob.objects.create(
             tenant_id=tenant_id,
             name="Test Migration",
@@ -716,10 +729,10 @@ class TestMigrationEngine:
             "name": "New Workflow",
             "trigger_type": "manual",
         }
-        
+
         # This should create a new workflow since update target not found
         record_id = engine._import_record(job, record, tenant_id)
-        
+
         assert record_id is not None
         # Verify new workflow was created
         workflow = Workflow.objects.filter(tenant_id=tenant_id, name="New Workflow").first()
@@ -727,14 +740,14 @@ class TestMigrationEngine:
 
     def test_import_record_update_missing_lookup(self, db):
         """Test importing record with update action but missing lookup field."""
-        from src.modules.workflow_automation.models import Workflow
-        from django.contrib.auth import get_user_model
         import uuid
-        
+
+        from django.contrib.auth import get_user_model
+
         User = get_user_model()
         user = User.objects.create_user(username="testuser5", email="test5@example.com", password="pass")
         tenant_id = str(uuid.uuid4())
-        
+
         job = MigrationJob.objects.create(
             tenant_id=tenant_id,
             name="Test Migration",
@@ -755,7 +768,7 @@ class TestMigrationEngine:
             "trigger_type": "manual",
             # Missing "id" field
         }
-        
+
         # This should raise ValueError
         with pytest.raises(ValueError, match="Lookup field"):
             engine._import_record(job, record, tenant_id)
@@ -763,7 +776,7 @@ class TestMigrationEngine:
     def test_import_record_import_error(self, db):
         """Test importing record with invalid model path."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="json",
             source_config={
@@ -777,41 +790,57 @@ class TestMigrationEngine:
 
         engine = MigrationEngine()
         record = {"name": "Test"}
-        
+
         with pytest.raises(ValueError, match="Failed to import target model"):
-            engine._import_record(job, record, "tenant-123")
+            engine._import_record(job, record, TEST_TENANT_ID)
 
     def test_load_database_data(self, db):
-        """Test loading data from database."""
-        job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
-            name="Test Migration",
-            source_type="database",
-            source_config={
-                "connection_string": "postgresql://test",
-                "query": "SELECT 'name' as name, 'value' as value",
-            },
+        """Test loading structured data through a named connection."""
+        connection_config = ExternalConnection.objects.create(
+            tenant_id=TEST_TENANT_ID,
+            name="Test source",
+            db_scheme="postgresql",
+            host="external.example",
+            port=5432,
+            database="source",
+            username="readonly_user",
+            password_encrypted=EncryptionService.encrypt("secret"),
             created_by="user-123",
         )
+        cursor = MagicMock()
+        cursor.__enter__.return_value = cursor
+        cursor.description = [("name",), ("value",)]
+        cursor.fetchall.return_value = [("record", "42")]
+        connection = MagicMock()
+        connection.cursor.return_value = cursor
 
         engine = MigrationEngine()
-        # This will use the default Django connection
-        data = engine._load_database_data(job.source_config)
-        
-        # Should return list (may be empty if query doesn't match actual schema)
-        assert isinstance(data, list)
+        with patch(
+            "src.modules.data_migration.services._connect_external_database",
+            return_value=connection,
+        ):
+            data = engine._load_database_data(
+                {
+                    "connection_id": str(connection_config.id),
+                    "table": "source_records",
+                    "columns": ["name", "value"],
+                },
+                str(TEST_TENANT_ID),
+            )
+
+        assert data == [{"name": "record", "value": "42"}]
 
     def test_load_database_data_missing_config(self, db):
-        """Test loading database data with missing configuration."""
+        """Test the named-connection source contract is mandatory."""
         config = {}
         engine = MigrationEngine()
-        with pytest.raises(ValueError, match="connection_string and query are required"):
-            engine._load_database_data(config)
+        with pytest.raises(ValueError, match="connection_id and table"):
+            engine._load_database_data(config, str(TEST_TENANT_ID))
 
     def test_execute_migration_with_exception(self, db):
         """Test executing migration that raises an exception."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="unsupported",
             source_config={},
@@ -820,7 +849,7 @@ class TestMigrationEngine:
 
         engine = MigrationEngine()
         with pytest.raises(ValueError):
-            engine.execute_migration(job.id, "tenant-123")
+            engine.execute_migration(job.id, TEST_TENANT_ID)
 
         # Verify job status is set to failed (exception handler sets it)
         # Note: The exception handler saves the job with status="failed" before raising
