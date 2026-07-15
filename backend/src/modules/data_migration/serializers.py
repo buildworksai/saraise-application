@@ -5,24 +5,94 @@ Provides request/response validation for all models.
 
 from rest_framework import serializers
 
+from src.core.auth_utils import get_user_tenant_id
+
 from .models import (
+    ExternalConnection,
     MigrationJob,
     MigrationLog,
     MigrationMapping,
     MigrationRollback,
     MigrationValidation,
 )
+from .services import _validate_database_source_config
 
 
-def validate_database_source_config(config):
-    """Reject raw SQL and require a structured external database source."""
-    if not isinstance(config, dict):
-        raise serializers.ValidationError("source_config must be an object")
-    if "query" in config or "sql_query" in config:
-        raise serializers.ValidationError("Raw SQL queries are not supported")
-    if not config.get("connection_string") or not config.get("table"):
-        raise serializers.ValidationError("Database source_config requires connection_string and table")
+def validate_database_source_config(config, tenant_id=None):
+    """Enforce the named-connection contract and optional tenant ownership."""
+    try:
+        _validate_database_source_config(config)
+    except ValueError as exc:
+        raise serializers.ValidationError(str(exc)) from exc
+    if tenant_id:
+        try:
+            exists = ExternalConnection.objects.filter(
+                id=config["connection_id"],
+                tenant_id=tenant_id,
+                is_active=True,
+            ).exists()
+        except (ValueError, TypeError):
+            exists = False
+        if not exists:
+            raise serializers.ValidationError("Active external connection not found for tenant")
     return config
+
+
+class ExternalConnectionReferenceSerializer(serializers.ModelSerializer):
+    """Credential-free connection reference visible to tenant users."""
+
+    class Meta:
+        model = ExternalConnection
+        fields = ["id", "name", "db_scheme", "is_active", "created_at", "updated_at"]
+        read_only_fields = fields
+
+
+class ExternalConnectionManagementSerializer(serializers.ModelSerializer):
+    """Operator-only registration input; password is encrypted by the service."""
+
+    password = serializers.CharField(write_only=True, required=False, trim_whitespace=False)
+
+    class Meta:
+        model = ExternalConnection
+        fields = [
+            "id",
+            "tenant_id",
+            "name",
+            "db_scheme",
+            "host",
+            "port",
+            "database",
+            "username",
+            "password",
+            "is_active",
+            "created_by",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_by", "created_at", "updated_at"]
+
+    def validate(self, attrs):
+        """Require a password on registration and enforce canonical host/port values."""
+        if self.instance is None and not attrs.get("password"):
+            raise serializers.ValidationError({"password": "Password is required"})
+        if self.instance is not None and "tenant_id" in attrs and attrs["tenant_id"] != self.instance.tenant_id:
+            raise serializers.ValidationError({"tenant_id": "Tenant ownership cannot be changed"})
+        password = attrs.get("password")
+        if password is not None and not password:
+            raise serializers.ValidationError({"password": "Password cannot be empty"})
+        return attrs
+
+    def validate_host(self, value):
+        """Reject connection-list and Unix-socket syntax at registration time."""
+        if value != value.strip() or value.startswith("/") or "," in value or "\x00" in value:
+            raise serializers.ValidationError("Unix-socket and multi-host values are forbidden")
+        return value
+
+    def validate_port(self, value):
+        """Restrict ports to the valid TCP range."""
+        if value < 1 or value > 65535:
+            raise serializers.ValidationError("Port must be between 1 and 65535")
+        return value
 
 
 class MigrationJobSerializer(serializers.ModelSerializer):
@@ -88,7 +158,9 @@ class MigrationJobSerializer(serializers.ModelSerializer):
         source_type = attrs.get("source_type", getattr(self.instance, "source_type", None))
         source_config = attrs.get("source_config", getattr(self.instance, "source_config", None))
         if source_type == "database":
-            attrs["source_config"] = validate_database_source_config(source_config)
+            request = self.context.get("request")
+            tenant_id = get_user_tenant_id(request.user) if request else None
+            attrs["source_config"] = validate_database_source_config(source_config, tenant_id)
         return attrs
 
 

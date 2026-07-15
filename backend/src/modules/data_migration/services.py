@@ -11,18 +11,53 @@ import logging
 import os
 import re
 import socket
-from typing import Any, Dict, List, Optional, Set
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional, Set, Union
 
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from .models import MigrationJob, MigrationLog, MigrationMapping, MigrationRollback, MigrationValidation
+from src.core.encryption.service import EncryptionService
+
+from .models import (
+    ExternalConnection,
+    MigrationJob,
+    MigrationLog,
+    MigrationMapping,
+    MigrationRollback,
+    MigrationValidation,
+)
 
 logger = logging.getLogger(__name__)
 
 IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+
+DATABASE_SOURCE_CONFIG_KEYS = frozenset({"connection_id", "table", "columns", "filters"})
+FORBIDDEN_DATABASE_SOURCE_KEYS = frozenset(
+    {
+        "connection_string",
+        "query",
+        "sql_query",
+        "dsn",
+        "hostaddr",
+        "host",
+        "service",
+        "port",
+        "database",
+        "dbname",
+        "db_scheme",
+        "scheme",
+        "username",
+        "user",
+        "password",
+        "passfile",
+        "options",
+        "sslmode",
+        "socket",
+    }
+)
 
 
 def _configured_allowed_hosts() -> Set[str]:
@@ -41,9 +76,9 @@ def _primary_db_hosts() -> Set[str]:
     return hosts
 
 
-def _resolved_addresses(host: str) -> Set[ipaddress._BaseAddress]:
+def _resolved_addresses(host: str) -> Set[IPAddress]:
     """Resolve a hostname to every IP it maps to; empty set if unresolvable."""
-    addresses: Set[ipaddress._BaseAddress] = set()
+    addresses: Set[IPAddress] = set()
     try:
         for info in socket.getaddrinfo(host, None):
             try:
@@ -55,35 +90,61 @@ def _resolved_addresses(host: str) -> Set[ipaddress._BaseAddress]:
     return addresses
 
 
-def _assert_external_dsn_allowed(connection_string: str) -> None:
-    """Reject DSNs that could target the primary DB or internal infrastructure.
+def _validate_database_source_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate the caller contract without accepting connection parameters."""
+    if not isinstance(config, dict):
+        raise ValueError("Database source_config must be an object")
+    if "connection_string" in config:
+        raise ValueError(
+            "Legacy database source_config contains connection_string; migration required: "
+            "register an ExternalConnection and replace it with connection_id"
+        )
+    forbidden = sorted(FORBIDDEN_DATABASE_SOURCE_KEYS.intersection(config))
+    if forbidden:
+        raise ValueError(f"Database source_config contains forbidden connection or SQL fields: {', '.join(forbidden)}")
+    unsupported = sorted(set(config).difference(DATABASE_SOURCE_CONFIG_KEYS))
+    if unsupported:
+        raise ValueError(f"Database source_config contains unsupported fields: {', '.join(unsupported)}")
+    if not config.get("connection_id") or not config.get("table"):
+        raise ValueError("Database source_config requires connection_id and table")
+    return config
 
-    Closes the confused-deputy vector: a tenant-directed connection string must
-    not point back at the application's own database host, loopback, link-local
-    metadata endpoints, or otherwise-private ranges. An optional operator
-    allowlist further restricts which external hosts are permitted.
-    """
-    host = (urlparse(connection_string).hostname or "").strip().lower()
-    if not host:
-        raise ValueError("Database connection_string must specify a host")
+
+def _primary_db_addresses() -> Set[IPAddress]:
+    """Resolve every configured Django database host for destination blocking."""
+    addresses: Set[IPAddress] = set()
+    for host in _primary_db_hosts():
+        try:
+            addresses.add(ipaddress.ip_address(host))
+        except ValueError:
+            addresses.update(_resolved_addresses(host))
+    return addresses
+
+
+def _validated_external_hostaddr(host: str) -> str:
+    """Validate every resolved address and return one DNS-pinned public IP."""
+    if not isinstance(host, str) or not host or host != host.strip():
+        raise ValueError("External database host must be a non-empty canonical hostname or IP")
+    normalized_host = host.lower()
+    if normalized_host.startswith("/") or "," in normalized_host or "\x00" in normalized_host:
+        raise ValueError("Unix-socket and multi-host external database hosts are forbidden")
 
     primary_hosts = _primary_db_hosts()
-    if host in primary_hosts:
-        raise ValueError("Database source may not target the application's primary database host")
+    if normalized_host in primary_hosts:
+        raise ValueError("External database may not target a configured Django database host")
 
     allowed_hosts = _configured_allowed_hosts()
-    if allowed_hosts and host not in allowed_hosts:
-        raise ValueError("Database host is not in DATA_MIGRATION_ALLOWED_DB_HOSTS allowlist")
+    if allowed_hosts and normalized_host not in allowed_hosts:
+        raise ValueError("External database host is not in DATA_MIGRATION_ALLOWED_DB_HOSTS allowlist")
 
-    # Resolve and reject internal / non-routable targets. An unresolvable host
-    # (empty set) fails closed below unless an operator allowlist vouched for it.
-    addresses = _resolved_addresses(host)
+    addresses = _resolved_addresses(normalized_host)
     if not addresses:
-        if allowed_hosts and host in allowed_hosts:
-            return
-        raise ValueError(f"Database host could not be resolved: {host}")
+        raise ValueError(f"External database host could not be resolved: {normalized_host}")
 
+    primary_addresses = _primary_db_addresses()
     for address in addresses:
+        if address in primary_addresses:
+            raise ValueError("External database may not target a configured Django database address")
         if (
             address.is_loopback
             or address.is_link_local
@@ -92,12 +153,10 @@ def _assert_external_dsn_allowed(connection_string: str) -> None:
             or address.is_multicast
             or address.is_unspecified
         ):
-            if allowed_hosts and host in allowed_hosts:
-                continue
-            raise ValueError("Database source may not target loopback or internal network addresses")
-        # Guard against a hostname that resolves to a primary-DB IP.
-        if str(address) in primary_hosts:
-            raise ValueError("Database source may not target the application's primary database host")
+            raise ValueError("External database may not target internal or non-routable addresses")
+
+    pinned = min(addresses, key=lambda address: (address.version, int(address)))
+    return str(pinned)
 
 
 def _validated_identifier(value: Any, field_name: str) -> str:
@@ -107,21 +166,96 @@ def _validated_identifier(value: Any, field_name: str) -> str:
     return value
 
 
-def _connect_external_database(connection_string: str):
-    """Open an isolated external connection; never use a Django DB alias."""
-    _assert_external_dsn_allowed(connection_string)
-    scheme = urlparse(connection_string).scheme.lower()
-    if scheme in {"postgres", "postgresql"}:
+def _positive_timeout(setting_name: str, default: int) -> int:
+    """Read an operator timeout setting and fail closed on invalid values."""
+    value = getattr(settings, setting_name, default)
+    if isinstance(value, bool):
+        raise ValueError(f"{setting_name} must be a positive integer")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{setting_name} must be a positive integer") from exc
+    if parsed <= 0:
+        raise ValueError(f"{setting_name} must be a positive integer")
+    return parsed
+
+
+def _connect_external_database(connection_config: ExternalConnection):
+    """Open a DNS-pinned, read-only external connection from server state."""
+    pinned_hostaddr = _validated_external_hostaddr(connection_config.host)
+    password = EncryptionService.decrypt(connection_config.password_encrypted)
+    connect_timeout = _positive_timeout("DATA_MIGRATION_DB_CONNECT_TIMEOUT_SECONDS", 10)
+    statement_timeout = _positive_timeout("DATA_MIGRATION_DB_STATEMENT_TIMEOUT_MS", 30000)
+
+    if connection_config.db_scheme == "postgresql":
         import psycopg2
 
-        connection = psycopg2.connect(connection_string)
+        connection = psycopg2.connect(
+            host=connection_config.host,
+            hostaddr=pinned_hostaddr,
+            port=connection_config.port,
+            dbname=connection_config.database,
+            user=connection_config.username,
+            password=password,
+            connect_timeout=connect_timeout,
+            options=f"-c statement_timeout={statement_timeout}",
+            sslmode=getattr(settings, "DATA_MIGRATION_POSTGRES_SSLMODE", "verify-full"),
+            application_name="saraise-data-migration-readonly",
+            target_session_attrs="any",
+            client_encoding="UTF8",
+            service="",
+        )
         connection.set_session(readonly=True, autocommit=False)
         return connection
-    if scheme == "mysql":
+    if connection_config.db_scheme == "mysql":
         import pymysql
 
-        return pymysql.connect(connection_string)
-    raise ValueError(f"Unsupported external database type: {scheme or 'missing'}")
+        connection = pymysql.connect(
+            host=pinned_hostaddr,
+            port=connection_config.port,
+            user=connection_config.username,
+            password=password,
+            database=connection_config.database,
+            connect_timeout=connect_timeout,
+            read_timeout=max(1, statement_timeout // 1000),
+            write_timeout=max(1, statement_timeout // 1000),
+            autocommit=False,
+            local_infile=False,
+        )
+        with connection.cursor() as cursor:
+            cursor.execute("SET SESSION TRANSACTION READ ONLY")
+        return connection
+    raise ValueError(f"Unsupported external database type: {connection_config.db_scheme}")
+
+
+class ExternalConnectionService:
+    """Persist operator-managed connections without storing plaintext secrets."""
+
+    @staticmethod
+    @transaction.atomic
+    def register(*, tenant_id: Any, created_by: str, data: Dict[str, Any]) -> ExternalConnection:
+        """Encrypt the password and register a canonical external connection."""
+        values = dict(data)
+        password = values.pop("password")
+        return ExternalConnection.objects.create(
+            tenant_id=tenant_id,
+            created_by=created_by,
+            password_encrypted=EncryptionService.encrypt(password),
+            **values,
+        )
+
+    @staticmethod
+    @transaction.atomic
+    def update(*, connection: ExternalConnection, data: Dict[str, Any]) -> ExternalConnection:
+        """Update canonical fields and rotate the encrypted password if supplied."""
+        values = dict(data)
+        password = values.pop("password", None)
+        for field, value in values.items():
+            setattr(connection, field, value)
+        if password is not None:
+            connection.password_encrypted = EncryptionService.encrypt(password)
+        connection.save()
+        return connection
 
 
 class MigrationResult:
@@ -413,13 +547,20 @@ class MigrationEngine:
         Returns:
             List of records as dictionaries.
         """
-        connection_string = config.get("connection_string")
         if not tenant_id:
             raise ValueError("Tenant context is required for database migrations")
-        if not isinstance(connection_string, str) or not connection_string:
-            raise ValueError("Database connection_string is required in source_config")
-        if "query" in config or "sql_query" in config:
-            raise ValueError("Raw SQL queries are not supported")
+        _validate_database_source_config(config)
+
+        try:
+            connection_config = ExternalConnection.objects.filter(
+                id=config["connection_id"],
+                tenant_id=tenant_id,
+                is_active=True,
+            ).first()
+        except (DjangoValidationError, ValueError, TypeError) as exc:
+            raise ValueError("Database connection_id is invalid") from exc
+        if connection_config is None:
+            raise ValueError("Active external connection not found for tenant")
 
         table = _validated_identifier(config.get("table"), "table")
         configured_columns = config.get("columns", ["*"])
@@ -443,8 +584,7 @@ class MigrationEngine:
 
         connection = None
         try:
-            # The tenant-scoped job may read only from its explicitly configured external source.
-            connection = _connect_external_database(connection_string)
+            connection = _connect_external_database(connection_config)
             with connection.cursor() as cursor:
                 cursor.execute(select_sql, values)
                 columns = [col[0] for col in cursor.description]
