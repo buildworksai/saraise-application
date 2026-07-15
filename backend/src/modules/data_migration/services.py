@@ -6,11 +6,15 @@ High-level service layer for DataMigration business logic.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
+import os
 import re
-from typing import Any, Dict, List, Optional
+import socket
+from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -19,6 +23,81 @@ from .models import MigrationJob, MigrationLog, MigrationMapping, MigrationRollb
 logger = logging.getLogger(__name__)
 
 IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _configured_allowed_hosts() -> Set[str]:
+    """Optional operator allowlist of external DB hosts (comma-separated env)."""
+    raw = os.environ.get("DATA_MIGRATION_ALLOWED_DB_HOSTS", "")
+    return {host.strip().lower() for host in raw.split(",") if host.strip()}
+
+
+def _primary_db_hosts() -> Set[str]:
+    """Host identifiers of the application's own databases — never a valid source."""
+    hosts: Set[str] = set()
+    for alias_config in (settings.DATABASES or {}).values():
+        host = str(alias_config.get("HOST") or "").strip().lower()
+        if host:
+            hosts.add(host)
+    return hosts
+
+
+def _resolved_addresses(host: str) -> Set[ipaddress._BaseAddress]:
+    """Resolve a hostname to every IP it maps to; empty set if unresolvable."""
+    addresses: Set[ipaddress._BaseAddress] = set()
+    try:
+        for info in socket.getaddrinfo(host, None):
+            try:
+                addresses.add(ipaddress.ip_address(info[4][0]))
+            except ValueError:
+                continue
+    except socket.gaierror:
+        return set()
+    return addresses
+
+
+def _assert_external_dsn_allowed(connection_string: str) -> None:
+    """Reject DSNs that could target the primary DB or internal infrastructure.
+
+    Closes the confused-deputy vector: a tenant-directed connection string must
+    not point back at the application's own database host, loopback, link-local
+    metadata endpoints, or otherwise-private ranges. An optional operator
+    allowlist further restricts which external hosts are permitted.
+    """
+    host = (urlparse(connection_string).hostname or "").strip().lower()
+    if not host:
+        raise ValueError("Database connection_string must specify a host")
+
+    primary_hosts = _primary_db_hosts()
+    if host in primary_hosts:
+        raise ValueError("Database source may not target the application's primary database host")
+
+    allowed_hosts = _configured_allowed_hosts()
+    if allowed_hosts and host not in allowed_hosts:
+        raise ValueError("Database host is not in DATA_MIGRATION_ALLOWED_DB_HOSTS allowlist")
+
+    # Resolve and reject internal / non-routable targets. An unresolvable host
+    # (empty set) fails closed below unless an operator allowlist vouched for it.
+    addresses = _resolved_addresses(host)
+    if not addresses:
+        if allowed_hosts and host in allowed_hosts:
+            return
+        raise ValueError(f"Database host could not be resolved: {host}")
+
+    for address in addresses:
+        if (
+            address.is_loopback
+            or address.is_link_local
+            or address.is_private
+            or address.is_reserved
+            or address.is_multicast
+            or address.is_unspecified
+        ):
+            if allowed_hosts and host in allowed_hosts:
+                continue
+            raise ValueError("Database source may not target loopback or internal network addresses")
+        # Guard against a hostname that resolves to a primary-DB IP.
+        if str(address) in primary_hosts:
+            raise ValueError("Database source may not target the application's primary database host")
 
 
 def _validated_identifier(value: Any, field_name: str) -> str:
@@ -30,6 +109,7 @@ def _validated_identifier(value: Any, field_name: str) -> str:
 
 def _connect_external_database(connection_string: str):
     """Open an isolated external connection; never use a Django DB alias."""
+    _assert_external_dsn_allowed(connection_string)
     scheme = urlparse(connection_string).scheme.lower()
     if scheme in {"postgres", "postgresql"}:
         import psycopg2

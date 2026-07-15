@@ -18,7 +18,7 @@ from rest_framework.test import APIClient
 
 from src.core.auth_utils import get_user_tenant_id
 from src.modules.data_migration.models import MigrationJob, MigrationLog, MigrationMapping, MigrationValidation
-from src.modules.data_migration.services import MigrationEngine
+from src.modules.data_migration.services import MigrationEngine, _assert_external_dsn_allowed
 
 User = get_user_model()
 
@@ -256,6 +256,45 @@ class TestExternalDatabaseSourceSecurity:
                     str(uuid.uuid4()),
                 )
         connect.assert_not_called()
+
+    def test_dsn_targeting_primary_db_host_is_rejected(self, settings):
+        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": "primary-db.internal"}}
+        with pytest.raises(ValueError, match="primary database host"):
+            _assert_external_dsn_allowed("postgresql://user:pw@primary-db.internal:5432/saraise")
+
+    def test_dsn_targeting_loopback_is_rejected(self, settings):
+        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
+        with pytest.raises(ValueError, match="loopback or internal"):
+            _assert_external_dsn_allowed("postgresql://user:pw@127.0.0.1:5432/source")
+
+    def test_dsn_without_host_is_rejected(self, settings):
+        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
+        with pytest.raises(ValueError, match="must specify a host"):
+            _assert_external_dsn_allowed("postgresql:///source")
+
+    def test_allowlist_blocks_hosts_not_listed(self, settings, monkeypatch):
+        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
+        monkeypatch.setenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", "warehouse.partner.example")
+        with pytest.raises(ValueError, match="allowlist"):
+            _assert_external_dsn_allowed("postgresql://user:pw@other.example:5432/source")
+
+    def test_allowlist_permits_listed_unresolvable_host(self, settings, monkeypatch):
+        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
+        monkeypatch.setenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", "warehouse.partner.example")
+        # An explicitly allowlisted host is permitted even if DNS cannot resolve it here.
+        _assert_external_dsn_allowed("postgresql://user:pw@warehouse.partner.example:5432/source")
+
+    def test_guard_runs_before_connect_for_internal_dsn(self, settings):
+        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
+        with pytest.raises(ValueError, match="loopback or internal"):
+            MigrationEngine()._load_database_data(
+                {
+                    "connection_string": "postgresql://user:pw@127.0.0.1:5432/source",
+                    "table": "customers",
+                    "columns": ["id"],
+                },
+                str(uuid.uuid4()),
+            )
 
 
 @pytest.mark.django_db
