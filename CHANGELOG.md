@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- Pinned the mutation-testing toolchain's transitive `qs` dependency to `6.15.3`, removing the
+  `GHSA-q8mj-m7cp-5q26` denial-of-service advisory introduced with StrykerJS.
 - **data-migration (CRITICAL):** Closed a cross-tenant read. The external-database source path executed a
   caller-controlled query/DSN against the application's own primary database with no tenant scoping, so a
   privileged tenant user could read another tenant's rows. Caller-supplied connection strings are removed
