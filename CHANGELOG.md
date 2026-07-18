@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- Pinned the mutation-testing toolchain's transitive `qs` dependency to `6.15.3`, removing the
+  `GHSA-q8mj-m7cp-5q26` denial-of-service advisory introduced with StrykerJS.
 - **data-migration (CRITICAL):** Closed a cross-tenant read. The external-database source path executed a
   caller-controlled query/DSN against the application's own primary database with no tenant scoping, so a
   privileged tenant user could read another tenant's rows. Caller-supplied connection strings are removed
@@ -37,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enforced and AI attribution is rejected by a `commit-msg` hook (#12).
 
 ### Added
+- Incremental mutation-testing gates require a mutation score of at least 90% for changed Python and
+  TypeScript source files, with source-only path filters keeping unrelated pull requests out of the workflow.
 - Envelope encryption with pluggable key-management backends and master-key rewrapping
 - Reversible initial migrations for the notifications module
 - Policy-backed tenant-management permission declarations

@@ -81,6 +81,7 @@ dev = [
     "pytest-asyncio>=0.23.2",
     "factory-boy>=3.3.0",
     "faker>=22.0.0",
+    "mutmut==2.5.1",
 
     # Code Quality
     "black>=24.0.0",
@@ -139,6 +140,12 @@ ignore_missing_imports = true
 
 [tool.django-stubs]
 django_settings_module = "saraise_backend.settings_static_analysis"
+
+[tool.mutmut]
+paths_to_mutate = "src"
+paths_to_exclude = "migrations,tests,test,test_*.py,*_test.py,*_tests.py,settings*.py,generated"
+runner = "sh -c 'SARAISE_MODE=development DJANGO_USE_SQLITE_FOR_TESTS=1 python -m pytest -x -q'"
+tests_dir = "src"
 
 # Pytest configuration is in pytest.ini
 # [tool.pytest.ini_options]
