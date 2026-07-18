@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enforced and AI attribution is rejected by a `commit-msg` hook (#12).
 
 ### Added
+- Incremental mutation-testing gates require a mutation score of at least 90% for changed Python and
+  TypeScript source files, with source-only path filters keeping unrelated pull requests out of the workflow.
 - Envelope encryption with pluggable key-management backends and master-key rewrapping
 - Reversible initial migrations for the notifications module
 - Policy-backed tenant-management permission declarations

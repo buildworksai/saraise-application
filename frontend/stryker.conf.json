@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "coverageAnalysis": "perTest",
+  "mutate": [
+    "src/**/*.{ts,tsx}",
+    "!src/**/*.test.{ts,tsx}",
+    "!src/**/*.spec.{ts,tsx}",
+    "!src/**/*.d.ts",
+    "!src/**/__tests__/**",
+    "!src/types/api.ts",
+    "!src/**/contracts.ts",
+    "!src/setupTests.ts"
+  ],
+  "thresholds": {
+    "high": 90,
+    "low": 90,
+    "break": 90
+  },
+  "cleanTempDir": "always",
+  "reporters": ["clear-text", "progress"]
+}
