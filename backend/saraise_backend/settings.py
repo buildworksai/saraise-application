@@ -134,6 +134,7 @@ INSTALLED_APPS = [
     "drf_spectacular",  # OpenAPI schema generation
     # SARAISE core
     "src.core",
+    "src.core.async_jobs",
     # SARAISE modules
     "src.modules.ai_agent_management",
     "src.modules.platform_management",  # Mode-aware: Full CRUD in self-hosted, read-only in SaaS
