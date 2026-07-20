@@ -27,11 +27,11 @@ import {
   Building2,
   Briefcase,
   CheckSquare,
-  Settings,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getTenantSidebarTreeForMode } from "@/navigation/tenant-route-registry";
 import type { User } from "@/stores/auth-store";
 
 interface NavItem {
@@ -160,6 +160,45 @@ const tenantItems: NavItem[] = [
   },
 ];
 
+const legacyModules = new Set(
+  tenantItems
+    .map((item) => item.module)
+    .filter((moduleName): moduleName is string => moduleName !== undefined),
+);
+
+const registryTenantItems: NavItem[] = getTenantSidebarTreeForMode(
+  import.meta.env.VITE_SARAISE_MODE,
+)
+  .filter((branch) => !legacyModules.has(branch.module))
+  .map((branch) => {
+    const firstLeaf = branch.children[0];
+    if (!firstLeaf) {
+      throw new Error(`Registered sidebar branch ${branch.id} has no routes.`);
+    }
+    if (branch.children.length === 1) {
+      return {
+        path: firstLeaf.path,
+        label: firstLeaf.label,
+        icon: firstLeaf.icon,
+        module: firstLeaf.module,
+      };
+    }
+    return {
+      path: firstLeaf.path,
+      label: branch.label,
+      icon: branch.icon,
+      module: branch.module,
+      children: branch.children.map((leaf) => ({
+        path: leaf.path,
+        label: leaf.label,
+        icon: leaf.icon,
+        module: leaf.module,
+      })),
+    };
+  });
+
+const renderedTenantItems = [...tenantItems, ...registryTenantItems];
+
 const NavGroup = ({ item, user }: { item: NavItem; user: User }) => {
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(() => {
@@ -251,7 +290,7 @@ export const TenantSidebar = ({ user }: { user: User }) => {
 
       {/* Navigation */}
       <nav className="w-full flex-1 px-3 space-y-1 overflow-y-auto">
-        {tenantItems.map((item) => {
+        {renderedTenantItems.map((item) => {
           if (item.children && item.children.length > 0) {
             return <NavGroup key={item.path} item={item} user={user} />;
           }
