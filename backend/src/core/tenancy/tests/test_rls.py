@@ -104,7 +104,7 @@ def test_middleware_rejects_malformed_profile_tenant():
 
 
 def test_rls_migration_is_postgresql_only_and_reversible():
-    migration = importlib.import_module("src.core.migrations.0010_apply_typed_rls_to_notifications")
+    migration = importlib.import_module("src.core.migrations.0011_apply_typed_rls_to_notifications")
     postgres = SimpleNamespace(
         connection=SimpleNamespace(vendor="postgresql"),
         statements=[],
