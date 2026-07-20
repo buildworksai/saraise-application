@@ -7,6 +7,7 @@ imported here for Django's app registry.
 """
 
 # Import all core models so Django can discover them
+from .access.entitlements import Entitlement, Quota
 from .compliance_models import ComplianceCheck, ResidencyRule
 from .entitlement_models import (
     EntitlementCheck,
@@ -23,6 +24,8 @@ from .module_registry_models import (
 from .module_upgrade_models import ModuleUpgrade, UpgradeStep
 
 __all__ = [
+    "Entitlement",
+    "Quota",
     "ComplianceCheck",
     "ResidencyRule",
     "ModuleRegistryEntry",
