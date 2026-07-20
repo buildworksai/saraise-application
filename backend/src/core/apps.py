@@ -13,5 +13,6 @@ class CoreConfig(AppConfig):
     verbose_name = "SARAISE Core"
 
     def ready(self) -> None:
-        """Register core model checks after Django has populated applications."""
+        """Register core model checks and observability signal handlers."""
         from .tenancy import registry  # noqa: F401
+        from src.core.observability import correlation  # noqa: F401

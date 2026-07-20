@@ -10,8 +10,9 @@ Reference: https://docs.saraise.com (architecture and configuration)
 """
 
 import os
+import sys
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 # Build paths inside the project
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -27,12 +28,12 @@ if _raw_mode not in _VALID_MODES:
     from django.core.exceptions import ImproperlyConfigured
 
     raise ImproperlyConfigured(f"SARAISE_MODE must be one of {_VALID_MODES}, got: {_raw_mode!r}")
-SARAISE_MODE: Literal["development", "self-hosted", "saas"] = _raw_mode
+SARAISE_MODE = cast(Literal["development", "self-hosted", "saas"], _raw_mode)
 
 # Self-hosted license mode (only applicable when SARAISE_MODE='self-hosted')
 # - 'connected': Validates against license.saraise.com
 # - 'isolated': Uses offline license keys
-SARAISE_LICENSE_MODE: Literal["connected", "isolated"] = os.getenv("SARAISE_LICENSE_MODE", "connected")
+SARAISE_LICENSE_MODE = cast(Literal["connected", "isolated"], os.getenv("SARAISE_LICENSE_MODE", "connected"))
 
 # Platform URL for SaaS mode (auth delegation and policy engine)
 # Required when SARAISE_MODE=saas (Phase 7.6)
@@ -182,13 +183,14 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "src.core.middleware.correlation.CorrelationIdMiddleware",  # SARAISE-17007: Correlation ID tracing
+    "src.core.observability.correlation.CorrelationMiddleware",  # UUID correlation and task tracing
     "corsheaders.middleware.CorsMiddleware",  # CORS middleware (should be early)
     "django.contrib.sessions.middleware.SessionMiddleware",  # Session middleware
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",  # CSRF protection (MANDATORY per auth spec)
     "django.contrib.auth.middleware.AuthenticationMiddleware",  # Authentication
     "src.core.auth.middleware.ModeAwareSessionMiddleware",  # Phase 7.6: Mode-aware session validation
+    "src.core.observability.correlation.ObservabilityIdentityMiddleware",  # Post-auth tenant/actor context
     "src.core.middleware.tenant_context.TenantContextMiddleware",  # SARAISE-33001: PostgreSQL RLS context
     "django.contrib.messages.middleware.MessageMiddleware",
     "src.core.middleware.api_tracking.APITrackingMiddleware",  # API call tracking for metrics
@@ -230,9 +232,7 @@ DATABASES = {
 
 # For tests, use SQLite (pytest/manage.py test)
 _use_sqlite = (
-    os.getenv("DJANGO_USE_SQLITE_FOR_TESTS") == "1"
-    or "test" in os.sys.argv
-    or any("pytest" in arg for arg in os.sys.argv)
+    os.getenv("DJANGO_USE_SQLITE_FOR_TESTS") == "1" or "test" in sys.argv or any("pytest" in arg for arg in sys.argv)
 )
 if _use_sqlite:
     DATABASES["default"] = {
@@ -242,7 +242,7 @@ if _use_sqlite:
 
 # SaaS mode: platform_management tables live in Control Plane DB — no migrations in application
 # Skip when running tests (tests need platform_management tables for self-hosted/development coverage)
-_in_test = "test" in os.sys.argv or "pytest" in os.sys.argv
+_in_test = "test" in sys.argv or "pytest" in sys.argv
 if SARAISE_MODE == "saas" and not _in_test:
     MIGRATION_MODULES = {
         "platform_management": "src.modules.platform_management.migrations_saas",
@@ -299,6 +299,8 @@ CORS_ALLOW_HEADERS = [
     "origin",
     "user-agent",
     "x-csrftoken",
+    "x-correlation-id",
+    "x-request-id",
     "x-requested-with",
 ]
 
@@ -396,21 +398,20 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "filters": {
-        "correlation_id": {
-            "()": "src.core.middleware.correlation.CorrelationIdFilter",
+        "observability_context": {
+            "()": "src.core.observability.logging.ObservabilityContextFilter",
         },
     },
     "formatters": {
-        "verbose": {
-            "format": "{levelname} {asctime} [{name}] [cid:{correlation_id}] {message}",
-            "style": "{",
+        "json": {
+            "()": "src.core.observability.logging.JSONFormatter",
         },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
-            "formatter": "verbose",
-            "filters": ["correlation_id"],
+            "formatter": "json",
+            "filters": ["observability_context"],
         },
     },
     "root": {
