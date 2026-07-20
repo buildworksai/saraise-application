@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "contracts": [
+    {
+      "selector": "src.modules.*",
+      "test_template": "backend/src/modules/{module}/tests/test_isolation.py",
+      "isolation_contract": "module tenant-isolation CRUD and action contract"
+    },
+    {
+      "selector": "src.core.notifications.*",
+      "test": "backend/src/core/tenancy/tests/test_rls.py",
+      "isolation_contract": "database-enforced notifications RLS contract"
+    },
+    {
+      "selector": "src.core.auth_api.*",
+      "test": "backend/src/core/auth/tests/test_saas_delegation.py",
+      "isolation_contract": "delegated identity and tenant-assignment boundary contract"
+    }
+  ],
+  "exemptions": [
+    {
+      "selector": "django.*",
+      "reason": "Django framework endpoint with no SARAISE tenant model"
+    },
+    {
+      "selector": "drf_spectacular.*",
+      "reason": "Generated API documentation endpoint; read-only schema metadata"
+    },
+    {
+      "selector": "rest_framework.*",
+      "reason": "DRF router metadata endpoint with no direct business-data access"
+    },
+    {
+      "selector": "saraise_backend.urls.*",
+      "reason": "Root health endpoint; infrastructure status only"
+    },
+    {
+      "selector": "src.core.metrics.*",
+      "reason": "Prometheus process metrics endpoint; no tenant business rows"
+    },
+    {
+      "selector": "src.core.licensing.*",
+      "reason": "Self-hosted licensing boundary scoped by organization, not tenant_id"
+    }
+  ],
+  "model_exemptions": [
+    {
+      "label": "core.UserProfile",
+      "reason": "Nullable external identity-to-tenant pointer; not a tenant-owned business-row model"
+    }
+  ]
+}

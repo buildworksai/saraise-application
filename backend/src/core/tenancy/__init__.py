@@ -1,4 +1,4 @@
-"""Public tenancy foundation for SARAISE modules."""
+"""Public tenancy foundation for SARAISE modules (models, scope registry, RLS)."""
 
 from .models import TenantQuerySet, TenantScopedModel, TimestampedModel
 from .registry import (
@@ -9,6 +9,13 @@ from .registry import (
     get_model_scope,
     register_model_scope,
     tenancy_scope,
+)
+from .rls import (
+    InvalidTenantContext,
+    MissingTenantContext,
+    get_current_tenant_id,
+    tenant_context,
+    tenant_context_worker,
 )
 
 __all__ = [
@@ -22,4 +29,9 @@ __all__ = [
     "get_model_scope",
     "register_model_scope",
     "tenancy_scope",
+    "InvalidTenantContext",
+    "MissingTenantContext",
+    "get_current_tenant_id",
+    "tenant_context",
+    "tenant_context_worker",
 ]
