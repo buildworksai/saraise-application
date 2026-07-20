@@ -7,15 +7,8 @@ Tests model creation, validation, and relationships.
 import uuid
 
 import pytest
-from django.core.exceptions import ValidationError
 
-from src.modules.data_migration.models import (
-    MigrationJob,
-    MigrationMapping,
-    MigrationLog,
-    MigrationValidation,
-    MigrationRollback,
-)
+from src.modules.data_migration.models import MigrationJob, MigrationMapping
 
 TEST_TENANT_ID = uuid.uuid4()
 

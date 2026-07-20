@@ -75,12 +75,12 @@ class ExternalConnectionManagementSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         """Require a password on registration and enforce canonical host/port values."""
         if self.instance is None and not attrs.get("password"):
-            raise serializers.ValidationError({"password": "Password is required"})
+            raise serializers.ValidationError({"password": "Password is required"})  # pragma: allowlist secret
         if self.instance is not None and "tenant_id" in attrs and attrs["tenant_id"] != self.instance.tenant_id:
             raise serializers.ValidationError({"tenant_id": "Tenant ownership cannot be changed"})
         password = attrs.get("password")
         if password is not None and not password:
-            raise serializers.ValidationError({"password": "Password cannot be empty"})
+            raise serializers.ValidationError({"password": "Password cannot be empty"})  # pragma: allowlist secret
         return attrs
 
     def validate_host(self, value):

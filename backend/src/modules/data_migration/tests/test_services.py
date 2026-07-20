@@ -6,11 +6,9 @@ Tests business logic in services layer.
 
 import json
 import uuid
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import Mock, patch, mock_open, MagicMock
-from django.utils import timezone
-from decimal import Decimal
 
 from src.core.encryption.service import EncryptionService
 from src.modules.data_migration.models import (
@@ -19,7 +17,6 @@ from src.modules.data_migration.models import (
     MigrationLog,
     MigrationMapping,
     MigrationRollback,
-    MigrationValidation,
 )
 from src.modules.data_migration.services import MigrationEngine, MigrationResult
 
@@ -612,9 +609,11 @@ class TestMigrationEngine:
 
     def test_import_record_with_target_model(self, db):
         """Test importing record with target model specified."""
-        from src.modules.workflow_automation.models import Workflow
-        from django.contrib.auth import get_user_model
         import uuid
+
+        from django.contrib.auth import get_user_model
+
+        from src.modules.workflow_automation.models import Workflow
 
         User = get_user_model()
         user = User.objects.create_user(username="testuser2", email="test2@example.com", password="pass")
@@ -650,9 +649,11 @@ class TestMigrationEngine:
 
     def test_import_record_with_update_action(self, db):
         """Test importing record with update action."""
-        from src.modules.workflow_automation.models import Workflow
-        from django.contrib.auth import get_user_model
         import uuid
+
+        from django.contrib.auth import get_user_model
+
+        from src.modules.workflow_automation.models import Workflow
 
         User = get_user_model()
         user = User.objects.create_user(username="testuser3", email="test3@example.com", password="pass")
@@ -698,9 +699,11 @@ class TestMigrationEngine:
 
     def test_import_record_update_not_found(self, db):
         """Test importing record with update action when record not found."""
-        from src.modules.workflow_automation.models import Workflow
-        from django.contrib.auth import get_user_model
         import uuid
+
+        from django.contrib.auth import get_user_model
+
+        from src.modules.workflow_automation.models import Workflow
 
         User = get_user_model()
         user = User.objects.create_user(username="testuser4", email="test4@example.com", password="pass")
@@ -737,9 +740,9 @@ class TestMigrationEngine:
 
     def test_import_record_update_missing_lookup(self, db):
         """Test importing record with update action but missing lookup field."""
-        from src.modules.workflow_automation.models import Workflow
-        from django.contrib.auth import get_user_model
         import uuid
+
+        from django.contrib.auth import get_user_model
 
         User = get_user_model()
         user = User.objects.create_user(username="testuser5", email="test5@example.com", password="pass")

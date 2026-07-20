@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Application boot failure: removed an orphaned `ModeAuthMiddleware` registration that referenced a
+  module which never existed, and reordered the mode-aware session middleware to run after Django's
+  authentication middleware. Added a middleware-import smoke test to prevent regressions (#8).
+
+### Changed
+- Enforced Control Plane / Runtime Plane separation: removed Control Plane mutation calls from the
+  Runtime Plane frontend (#11).
+- Adopted the cross-lab agent contract and a machine-enforced commit policy — author identity is
+  enforced and AI attribution is rejected by a `commit-msg` hook (#12).
+
 ### Added
 - Initial changelog
 - Phase 7.5: Licensing subsystem for self-hosted deployments
