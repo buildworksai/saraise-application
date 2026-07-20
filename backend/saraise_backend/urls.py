@@ -5,11 +5,15 @@ URL configuration for SARAISE backend.
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
+from src.core.health import health, health_live, health_ready
 from src.core.metrics import metrics
 
 urlpatterns = [
-    # Health check endpoint
-    path("health/", lambda request: __import__("django.http").http.JsonResponse({"status": "ok"})),
+    # Health endpoints: the legacy route is deliberately readiness, not a
+    # fabricated process-only success response.
+    path("health/", health, name="health"),
+    path("health/live/", health_live, name="health-live"),
+    path("health/ready/", health_ready, name="health-ready"),
     path("metrics/", metrics),
     # OpenAPI Schema
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
