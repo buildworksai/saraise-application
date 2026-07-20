@@ -3,10 +3,21 @@ Model Unit Tests for DataMigration module.
 
 Tests model creation, validation, and relationships.
 """
+
+import uuid
+
 import pytest
 from django.core.exceptions import ValidationError
 
-from src.modules.data_migration.models import MigrationJob, MigrationMapping, MigrationLog, MigrationValidation, MigrationRollback
+from src.modules.data_migration.models import (
+    MigrationJob,
+    MigrationMapping,
+    MigrationLog,
+    MigrationValidation,
+    MigrationRollback,
+)
+
+TEST_TENANT_ID = uuid.uuid4()
 
 
 @pytest.mark.django_db
@@ -16,7 +27,7 @@ class TestMigrationJobModel:
     def test_create_migration_job(self, db):
         """Test creating a migration job."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="csv",
             source_config={"file_path": "/tmp/test.csv"},
@@ -24,13 +35,13 @@ class TestMigrationJobModel:
         )
         assert job.id is not None
         assert job.name == "Test Migration"
-        assert job.tenant_id == "tenant-123"
+        assert job.tenant_id == TEST_TENANT_ID
         assert job.status == "pending"
 
     def test_migration_job_str_representation(self, db):
         """Test migration job string representation."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="csv",
             source_config={},
@@ -59,14 +70,14 @@ class TestMigrationMappingModel:
     def test_create_migration_mapping(self, db):
         """Test creating a migration mapping."""
         job = MigrationJob.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             name="Test Migration",
             source_type="csv",
             source_config={},
             created_by="user-123",
         )
         mapping = MigrationMapping.objects.create(
-            tenant_id="tenant-123",
+            tenant_id=TEST_TENANT_ID,
             job=job,
             source_field="source_col",
             target_field="target_col",

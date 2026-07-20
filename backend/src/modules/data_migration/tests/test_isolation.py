@@ -8,6 +8,7 @@ Reference: saraise-documentation/rules/compliance-enforcement.md
 Rule: ALL tenant-scoped queries MUST filter by tenant_id
 """
 
+import ipaddress
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -17,8 +18,19 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from src.core.auth_utils import get_user_tenant_id
-from src.modules.data_migration.models import MigrationJob, MigrationLog, MigrationMapping, MigrationValidation
-from src.modules.data_migration.services import MigrationEngine, _assert_external_dsn_allowed
+from src.core.encryption.service import EncryptionService
+from src.modules.data_migration.models import (
+    ExternalConnection,
+    MigrationJob,
+    MigrationLog,
+    MigrationMapping,
+    MigrationValidation,
+)
+from src.modules.data_migration.services import (
+    MigrationEngine,
+    _connect_external_database,
+    _validated_external_hostaddr,
+)
 
 User = get_user_model()
 
@@ -88,6 +100,36 @@ def tenant_b_user(db):
             profile.tenant_role = "tenant_admin"
             profile.save()
     return User.objects.get(pk=user.pk)
+
+
+@pytest.fixture
+def platform_operator_user(db):
+    """Create a platform-scoped operator with no tenant membership."""
+    user = User.objects.create_user(
+        username="platform_operator",
+        email="operator@example.com",
+        password="testpass123",
+    )
+    profile = user.profile
+    profile.platform_role = "platform_operator"
+    profile.save()
+    return User.objects.get(pk=user.pk)
+
+
+@pytest.fixture
+def external_connection(tenant_a_user):
+    """Create an active named connection owned by tenant A."""
+    return ExternalConnection.objects.create(
+        tenant_id=get_user_tenant_id(tenant_a_user),
+        name="Partner warehouse",
+        db_scheme="postgresql",
+        host="warehouse.partner.example",
+        port=5432,
+        database="warehouse",
+        username="readonly_user",
+        password_encrypted=EncryptionService.encrypt("operator-secret"),
+        created_by=str(tenant_a_user.id),
+    )
 
 
 @pytest.mark.django_db
@@ -170,131 +212,314 @@ class TestMigrationJobTenantIsolation:
 class TestExternalDatabaseSourceSecurity:
     """Database migration sources never execute caller SQL on the application DB."""
 
-    def test_raw_query_payload_is_rejected_by_api(self, api_client, tenant_a_user):
+    @pytest.mark.parametrize(
+        "forbidden_key",
+        ["connection_string", "query", "sql_query", "dsn", "hostaddr", "host", "service"],
+    )
+    def test_caller_connection_and_sql_fields_are_rejected_by_api(
+        self,
+        forbidden_key,
+        api_client,
+        tenant_a_user,
+        external_connection,
+    ):
         api_client.force_authenticate(user=tenant_a_user)
+        source_config = {
+            "connection_id": str(external_connection.id),
+            "table": "customers",
+            forbidden_key: "caller-controlled-value",
+        }
         response = api_client.post(
             "/api/v1/data-migration/jobs/",
             {
                 "name": "Injected source",
                 "source_type": "database",
+                "source_config": source_config,
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        error = str(response.data)
+        assert forbidden_key in error or "migration required" in error or "Raw SQL" in error
+
+    def test_legacy_stored_connection_string_fails_with_migration_required(self, tenant_a_user):
+        tenant_id = get_user_tenant_id(tenant_a_user)
+        job = MigrationJob.objects.create(
+            tenant_id=tenant_id,
+            name="Legacy database job",
+            source_type="database",
+            source_config={
+                "connection_string": "postgresql://legacy.invalid/source",
+                "table": "customers",
+            },
+            created_by=str(tenant_a_user.id),
+        )
+
+        with pytest.raises(ValueError, match="migration required"):
+            MigrationEngine().execute_migration(job.id, tenant_id, dry_run=True)
+
+    def test_cross_tenant_connection_reference_is_rejected(
+        self,
+        api_client,
+        tenant_b_user,
+        external_connection,
+    ):
+        api_client.force_authenticate(user=tenant_b_user)
+        response = api_client.post(
+            "/api/v1/data-migration/jobs/",
+            {
+                "name": "Cross-tenant source",
+                "source_type": "database",
                 "source_config": {
-                    "connection_string": "postgresql://external/source",
+                    "connection_id": str(external_connection.id),
                     "table": "customers",
-                    "query": "SELECT * FROM crm_customer",
                 },
             },
             format="json",
         )
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "Raw SQL queries are not supported" in str(response.data)
+        assert "not found for tenant" in str(response.data)
+
+    def test_non_operator_cannot_register_or_edit_connection(
+        self,
+        api_client,
+        tenant_a_user,
+        external_connection,
+    ):
+        api_client.force_authenticate(user=tenant_a_user)
+        response = api_client.post(
+            "/api/v1/data-migration/connections/",
+            {
+                "tenant_id": get_user_tenant_id(tenant_a_user),
+                "name": "Forbidden registration",
+                "db_scheme": "postgresql",
+                "host": "warehouse.partner.example",
+                "port": 5432,
+                "database": "warehouse",
+                "username": "readonly_user",
+                "password": "must-not-be-stored",
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert not ExternalConnection.objects.filter(name="Forbidden registration").exists()
+
+        edit_response = api_client.patch(
+            f"/api/v1/data-migration/connections/{external_connection.id}/",
+            {"name": "Forbidden edit"},
+            format="json",
+        )
+        assert edit_response.status_code == status.HTTP_403_FORBIDDEN
+        external_connection.refresh_from_db()
+        assert external_connection.name == "Partner warehouse"
+
+    def test_operator_registration_tenant_reference_and_pinned_readonly_connection(
+        self,
+        api_client,
+        tenant_a_user,
+        platform_operator_user,
+    ):
+        tenant_id = get_user_tenant_id(tenant_a_user)
+        api_client.force_authenticate(user=platform_operator_user)
+        registration = api_client.post(
+            "/api/v1/data-migration/connections/",
+            {
+                "tenant_id": tenant_id,
+                "name": "Operator managed warehouse",
+                "db_scheme": "postgresql",
+                "host": "warehouse.partner.example",
+                "port": 5432,
+                "database": "warehouse",
+                "username": "readonly_user",
+                "password": "operator-secret",
+            },
+            format="json",
+        )
+
+        assert registration.status_code == status.HTTP_201_CREATED
+        assert "password" not in registration.data
+        connection_config = ExternalConnection.objects.get(id=registration.data["id"])
+        assert connection_config.password_encrypted != "operator-secret"
+        assert EncryptionService.decrypt(connection_config.password_encrypted) == "operator-secret"
+
+        api_client.force_authenticate(user=tenant_a_user)
+        listing = api_client.get("/api/v1/data-migration/connections/")
+        assert listing.status_code == status.HTTP_200_OK
+        listed = listing.data if isinstance(listing.data, list) else listing.data["results"]
+        assert listed[0]["id"] == str(connection_config.id)
+        assert "host" not in listed[0]
+        assert "username" not in listed[0]
+        assert "password" not in listed[0]
+
+        job_response = api_client.post(
+            "/api/v1/data-migration/jobs/",
+            {
+                "name": "Named connection job",
+                "source_type": "database",
+                "source_config": {
+                    "connection_id": str(connection_config.id),
+                    "table": "customers",
+                    "columns": ["id", "name"],
+                    "filters": {"account_id": "tenant-value"},
+                },
+            },
+            format="json",
+        )
+        assert job_response.status_code == status.HTTP_201_CREATED
+
+        cursor = MagicMock()
+        cursor.__enter__.return_value = cursor
+        cursor.description = [("id",), ("name",)]
+        cursor.fetchall.return_value = [(1, "Acme")]
+        database_connection = MagicMock()
+        database_connection.cursor.return_value = cursor
+        public_ip = ipaddress.ip_address("8.8.8.8")
+        with (
+            patch(
+                "src.modules.data_migration.services._resolved_addresses",
+                return_value={public_ip},
+            ),
+            patch("src.modules.data_migration.services._primary_db_addresses", return_value=set()),
+            patch(
+                "psycopg2.connect",
+                return_value=database_connection,
+            ) as connect,
+        ):
+            records = MigrationEngine()._load_database_data(job_response.data["source_config"], tenant_id)
+
+        connect_kwargs = connect.call_args.kwargs
+        assert connect_kwargs["host"] == "warehouse.partner.example"
+        assert connect_kwargs["hostaddr"] == "8.8.8.8"
+        assert connect_kwargs["password"] == "operator-secret"
+        assert connect_kwargs["connect_timeout"] == 10
+        assert connect_kwargs["options"] == "-c statement_timeout=30000"
+        assert connect_kwargs["service"] == ""
+        assert connect_kwargs["sslmode"] == "verify-full"
+        database_connection.set_session.assert_called_once_with(readonly=True, autocommit=False)
+        database_connection.close.assert_called_once_with()
+        assert records == [{"id": 1, "name": "Acme"}]
 
     @pytest.mark.parametrize(
         "config",
         [
             {
-                "connection_string": "postgresql://external/source",
                 "table": "customers; DROP TABLE users",
             },
             {
-                "connection_string": "postgresql://external/source",
                 "table": "customers",
                 "columns": ["name, (SELECT password FROM users)"],
             },
             {
-                "connection_string": "postgresql://external/source",
                 "table": "customers",
                 "filters": {"tenant_id OR 1=1": "attacker"},
             },
         ],
     )
-    def test_identifier_injection_is_rejected_before_connect(self, config):
+    def test_identifier_injection_is_rejected_before_connect(self, config, tenant_a_user, external_connection):
+        config["connection_id"] = str(external_connection.id)
         with patch("src.modules.data_migration.services._connect_external_database") as connect:
             with pytest.raises(ValueError, match="Invalid"):
-                MigrationEngine()._load_database_data(config, str(uuid.uuid4()))
+                MigrationEngine()._load_database_data(config, get_user_tenant_id(tenant_a_user))
         connect.assert_not_called()
 
-    def test_uses_only_external_connection_and_parameterized_filters(self):
+    def test_uses_only_named_connection_and_parameterized_filters(self, tenant_a_user, external_connection):
         cursor = MagicMock()
         cursor.__enter__.return_value = cursor
         cursor.description = [("id",), ("name",)]
         cursor.fetchall.return_value = [(1, "Acme")]
-        external_connection = MagicMock()
-        external_connection.cursor.return_value = cursor
+        database_connection = MagicMock()
+        database_connection.cursor.return_value = cursor
 
         with patch(
             "src.modules.data_migration.services._connect_external_database",
-            return_value=external_connection,
+            return_value=database_connection,
         ) as connect:
             records = MigrationEngine()._load_database_data(
                 {
-                    "connection_string": "postgresql://external/source",
+                    "connection_id": str(external_connection.id),
                     "table": "customers",
                     "columns": ["id", "name"],
                     "filters": {"account_id": "tenant-supplied-value"},
                 },
-                str(uuid.uuid4()),
+                get_user_tenant_id(tenant_a_user),
             )
 
-        connect.assert_called_once_with("postgresql://external/source")
+        connect.assert_called_once_with(external_connection)
         cursor.execute.assert_called_once_with(
             "SELECT id, name FROM customers WHERE account_id = %s",
             ["tenant-supplied-value"],
         )
-        external_connection.close.assert_called_once_with()
+        database_connection.close.assert_called_once_with()
         assert records == [{"id": 1, "name": "Acme"}]
 
-    def test_raw_sql_never_reaches_any_connection(self):
+    def test_raw_sql_never_reaches_any_connection(self, tenant_a_user, external_connection):
         with patch("src.modules.data_migration.services._connect_external_database") as connect:
             with pytest.raises(ValueError, match="Raw SQL"):
                 MigrationEngine()._load_database_data(
                     {
-                        "connection_string": "postgresql://external/source",
+                        "connection_id": str(external_connection.id),
                         "table": "customers",
                         "query": "SELECT * FROM crm_customer",
                     },
-                    str(uuid.uuid4()),
+                    get_user_tenant_id(tenant_a_user),
                 )
         connect.assert_not_called()
 
-    def test_dsn_targeting_primary_db_host_is_rejected(self, settings):
+    def test_registered_host_targeting_primary_db_host_is_rejected(self, settings):
         settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": "primary-db.internal"}}
-        with pytest.raises(ValueError, match="primary database host"):
-            _assert_external_dsn_allowed("postgresql://user:pw@primary-db.internal:5432/saraise")
+        with pytest.raises(ValueError, match="configured Django database host"):
+            _validated_external_hostaddr("primary-db.internal")
 
-    def test_dsn_targeting_loopback_is_rejected(self, settings):
+    def test_registered_host_targeting_loopback_is_rejected_even_when_allowlisted(
+        self,
+        settings,
+        monkeypatch,
+    ):
         settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
-        with pytest.raises(ValueError, match="loopback or internal"):
-            _assert_external_dsn_allowed("postgresql://user:pw@127.0.0.1:5432/source")
+        monkeypatch.setenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", "127.0.0.1")
+        with pytest.raises(ValueError, match="internal or non-routable"):
+            _validated_external_hostaddr("127.0.0.1")
 
-    def test_dsn_without_host_is_rejected(self, settings):
+    def test_host_resolving_to_primary_database_ip_is_rejected(self, settings):
+        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": "primary-db.internal"}}
+
+        def resolve(host):
+            assert host in {"warehouse.partner.example", "primary-db.internal"}
+            return {ipaddress.ip_address("8.8.8.8")}
+
+        with patch("src.modules.data_migration.services._resolved_addresses", side_effect=resolve):
+            with pytest.raises(ValueError, match="configured Django database address"):
+                _validated_external_hostaddr("warehouse.partner.example")
+
+    def test_empty_host_is_rejected(self, settings):
         settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
-        with pytest.raises(ValueError, match="must specify a host"):
-            _assert_external_dsn_allowed("postgresql:///source")
+        with pytest.raises(ValueError, match="non-empty canonical"):
+            _validated_external_hostaddr("")
 
     def test_allowlist_blocks_hosts_not_listed(self, settings, monkeypatch):
         settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
         monkeypatch.setenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", "warehouse.partner.example")
         with pytest.raises(ValueError, match="allowlist"):
-            _assert_external_dsn_allowed("postgresql://user:pw@other.example:5432/source")
+            _validated_external_hostaddr("other.example")
 
-    def test_allowlist_permits_listed_unresolvable_host(self, settings, monkeypatch):
+    def test_allowlist_never_exempts_unresolvable_host(self, settings, monkeypatch):
         settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
         monkeypatch.setenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", "warehouse.partner.example")
-        # An explicitly allowlisted host is permitted even if DNS cannot resolve it here.
-        _assert_external_dsn_allowed("postgresql://user:pw@warehouse.partner.example:5432/source")
+        with patch("src.modules.data_migration.services._resolved_addresses", return_value=set()):
+            with pytest.raises(ValueError, match="could not be resolved"):
+                _validated_external_hostaddr("warehouse.partner.example")
 
-    def test_guard_runs_before_connect_for_internal_dsn(self, settings):
+    def test_guard_runs_before_connect_for_internal_registered_host(self, settings, external_connection):
         settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
-        with pytest.raises(ValueError, match="loopback or internal"):
-            MigrationEngine()._load_database_data(
-                {
-                    "connection_string": "postgresql://user:pw@127.0.0.1:5432/source",
-                    "table": "customers",
-                    "columns": ["id"],
-                },
-                str(uuid.uuid4()),
-            )
+        external_connection.host = "127.0.0.1"
+        external_connection.save(update_fields=["host"])
+        with patch("psycopg2.connect") as connect:
+            with pytest.raises(ValueError, match="internal or non-routable"):
+                _connect_external_database(external_connection)
+        connect.assert_not_called()
 
 
 @pytest.mark.django_db

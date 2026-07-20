@@ -99,6 +99,8 @@ def _validate_database_source_config(config: Dict[str, Any]) -> Dict[str, Any]:
             "Legacy database source_config contains connection_string; migration required: "
             "register an ExternalConnection and replace it with connection_id"
         )
+    if "query" in config or "sql_query" in config:
+        raise ValueError("Raw SQL queries are not supported")
     forbidden = sorted(FORBIDDEN_DATABASE_SOURCE_KEYS.intersection(config))
     if forbidden:
         raise ValueError(f"Database source_config contains forbidden connection or SQL fields: {', '.join(forbidden)}")
@@ -223,6 +225,7 @@ def _connect_external_database(connection_config: ExternalConnection):
             local_infile=False,
         )
         with connection.cursor() as cursor:
+            cursor.execute("SET SESSION MAX_EXECUTION_TIME = %s", (statement_timeout,))
             cursor.execute("SET SESSION TRANSACTION READ ONLY")
         return connection
     raise ValueError(f"Unsupported external database type: {connection_config.db_scheme}")
