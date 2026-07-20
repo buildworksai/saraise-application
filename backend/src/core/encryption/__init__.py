@@ -7,6 +7,6 @@ Uses Fernet (symmetric encryption) from the cryptography library.
 SPDX-License-Identifier: Apache-2.0
 """
 
-from .service import EncryptionService
+from .service import EncryptionConfigurationError, EncryptionService
 
-__all__ = ["EncryptionService"]
+__all__ = ["EncryptionConfigurationError", "EncryptionService"]

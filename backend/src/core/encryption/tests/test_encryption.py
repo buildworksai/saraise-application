@@ -4,15 +4,25 @@ Tests for Encryption Service.
 SPDX-License-Identifier: Apache-2.0
 """
 
-import base64
 import pytest
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 from src.core.encryption.service import EncryptionService
 
 
 class TestEncryptionService:
     """Test encryption and decryption functionality."""
+
+    @pytest.fixture(autouse=True)
+    def configure_real_test_key(self, monkeypatch):
+        """Development tests use the same configured-key path as production."""
+        monkeypatch.delenv(EncryptionService.KEY_RING_SETTING, raising=False)
+        monkeypatch.setenv(
+            EncryptionService.SINGLE_KEY_SETTING,
+            Fernet.generate_key().decode("ascii"),
+        )
+        EncryptionService._fernet = None
+        EncryptionService._cached_keys = None
 
     def test_encrypt_decrypt_roundtrip(self):
         """Test: Encrypt and decrypt returns original value."""
@@ -53,10 +63,8 @@ class TestEncryptionService:
         different_fernet = Fernet(different_key)
 
         # Try to decrypt with wrong key
-        encrypted_bytes = base64.urlsafe_b64decode(ciphertext.encode("utf-8"))
-        from cryptography.fernet import InvalidToken
         with pytest.raises(InvalidToken):
-            different_fernet.decrypt(encrypted_bytes)
+            different_fernet.decrypt(ciphertext.encode("ascii"))
 
     def test_encrypt_empty_string(self):
         """Test: Encrypt and decrypt empty string."""
@@ -98,15 +106,14 @@ class TestEncryptionService:
         new_key = EncryptionService.rotate_key()
 
         # Encrypt with old key manually
-        old_fernet = Fernet(base64.urlsafe_b64decode(old_key.encode()))
-        old_ciphertext = base64.urlsafe_b64encode(old_fernet.encrypt(plaintext.encode())).decode()
+        old_fernet = Fernet(old_key.encode("ascii"))
+        old_ciphertext = old_fernet.encrypt(plaintext.encode()).decode("ascii")
 
         # Re-encrypt with new key
         new_ciphertext = EncryptionService.re_encrypt(old_ciphertext, old_key, new_key)
 
         # Decrypt with new key
-        new_fernet = Fernet(base64.urlsafe_b64decode(new_key.encode()))
-        encrypted_bytes = base64.urlsafe_b64decode(new_ciphertext.encode("utf-8"))
-        decrypted = new_fernet.decrypt(encrypted_bytes).decode("utf-8")
+        new_fernet = Fernet(new_key.encode("ascii"))
+        decrypted = new_fernet.decrypt(new_ciphertext.encode("ascii")).decode("utf-8")
 
         assert decrypted == plaintext
