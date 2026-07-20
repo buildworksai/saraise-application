@@ -8,6 +8,15 @@ import { LoginForm } from "./components/auth/LoginForm";
 import { RegisterForm } from "./components/auth/RegisterForm";
 import { ForgotPasswordForm } from "./components/auth/ForgotPasswordForm";
 import { ResetPasswordForm } from "./components/auth/ResetPasswordForm";
+import {
+  getTenantRoutesForMode,
+  tenantRoutes,
+} from "./navigation/tenant-route-registry";
+
+const registryTenantRoutes = getTenantRoutesForMode(
+  tenantRoutes,
+  import.meta.env.VITE_SARAISE_MODE,
+);
 
 // Public legal/support pages
 const TermsOfService = lazy(() =>
@@ -2501,6 +2510,22 @@ function AnimatedRoutes() {
               </ProtectedRoute>
             }
           />
+
+          {/* Migration shim: module-owned routes coexist with the legacy inventory.
+              Remove matching legacy declarations as each module completes migration. */}
+          {registryTenantRoutes.map(({ id, path, Page }) => (
+            <Route
+              key={`registry:${id}`}
+              path={path}
+              element={
+                <ProtectedRoute>
+                  <ModuleLayout>
+                    <Page />
+                  </ModuleLayout>
+                </ProtectedRoute>
+              }
+            />
+          ))}
         </Routes>
       </AnimatePresence>
     </>
