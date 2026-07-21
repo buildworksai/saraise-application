@@ -1,18 +1,31 @@
-"""
-URL routing for BlockchainTraceability module.
-"""
-from django.urls import path, include
+"""API v2 routes for the blockchain traceability domain."""
+
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .api import BlockchainTraceabilityResourceViewSet
-from .health import health_check
+from .api import (
+    AuthenticityCredentialViewSet,
+    BlockchainTraceabilityHealthView,
+    ComplianceEvidenceViewSet,
+    LedgerAnchorViewSet,
+    LedgerNetworkViewSet,
+    TraceabilityAssetViewSet,
+    TraceabilityEventViewSet,
+    VerificationAttemptViewSet,
+)
 
-# Create router and register ViewSets
+app_name = "blockchain_traceability"
+
 router = DefaultRouter()
-router.register(r'resources', BlockchainTraceabilityResourceViewSet, basename='resource')
+router.register("networks", LedgerNetworkViewSet, basename="network")
+router.register("assets", TraceabilityAssetViewSet, basename="asset")
+router.register("events", TraceabilityEventViewSet, basename="event")
+router.register("anchors", LedgerAnchorViewSet, basename="anchor")
+router.register("credentials", AuthenticityCredentialViewSet, basename="credential")
+router.register("compliance-evidence", ComplianceEvidenceViewSet, basename="compliance-evidence")
+router.register("verification-attempts", VerificationAttemptViewSet, basename="verification-attempt")
 
-# URL patterns
 urlpatterns = [
-    path('', include(router.urls)),
-    path('health/', health_check, name='health_check'),
+    path("health/", BlockchainTraceabilityHealthView.as_view(), name="health"),
+    path("", include(router.urls)),
 ]

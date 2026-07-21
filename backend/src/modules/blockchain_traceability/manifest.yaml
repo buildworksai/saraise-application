@@ -1,25 +1,116 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
+# SARAISE tenant-safe traceability foundation contract
 name: blockchain-traceability
-version: 1.0.0
-description: Blockchain-based product traceability and authenticity verification
+version: 2.0.0
+description: Product chain-of-custody, deterministic proofs, authenticity credentials, and compliance evidence
 type: foundation
-lifecycle: platform
+lifecycle: core
 dependencies:
-  - core-identity >=1.0
+  - core-identity >=1.0.0
+  - core-tenancy >=1.0.0
+  - core-api >=1.0.0
+  - core-observability >=1.0.0
+  - core-resilience >=1.0.0
+  - core-async-jobs >=1.0.0
+  - core-access >=1.0.0
+  - core-state-machine >=1.0.0
 permissions:
-  - blockchain_traceability.resource:create
-  - blockchain_traceability.resource:read
-  - blockchain_traceability.resource:update
-  - blockchain_traceability.resource:delete
-  - blockchain_traceability.resource:activate
-  - blockchain_traceability.resource:deactivate
+  - blockchain_traceability.network:read
+  - blockchain_traceability.network:manage
+  - blockchain_traceability.network:probe
+  - blockchain_traceability.asset:read
+  - blockchain_traceability.asset:create
+  - blockchain_traceability.asset:update
+  - blockchain_traceability.asset:delete
+  - blockchain_traceability.asset:transition
+  - blockchain_traceability.event:read
+  - blockchain_traceability.event:append
+  - blockchain_traceability.event:verify
+  - blockchain_traceability.anchor:read
+  - blockchain_traceability.anchor:create
+  - blockchain_traceability.anchor:retry
+  - blockchain_traceability.anchor:verify
+  - blockchain_traceability.credential:read
+  - blockchain_traceability.credential:issue
+  - blockchain_traceability.credential:revoke
+  - blockchain_traceability.credential:verify
+  - blockchain_traceability.compliance:read
+  - blockchain_traceability.compliance:create
+  - blockchain_traceability.compliance:update
+  - blockchain_traceability.compliance:delete
+  - blockchain_traceability.compliance:finalize
+  - blockchain_traceability.compliance:verify
+  - blockchain_traceability.verification:read
+  - blockchain_traceability.health:read
 sod_actions:
-  - [blockchain_traceability.resource:create, blockchain_traceability.resource:delete]
+  - blockchain_traceability.network:manage
+  - blockchain_traceability.anchor:verify
+  - blockchain_traceability.credential:issue
+  - blockchain_traceability.credential:revoke
+  - blockchain_traceability.compliance:create
+  - blockchain_traceability.compliance:finalize
 search_indexes:
-  - blockchain_traceability_resources
+  - blockchain_traceability_assets
+  - blockchain_traceability_events
+  - blockchain_traceability_ledger_anchors
+  - blockchain_traceability_authenticity_credentials
+  - blockchain_traceability_compliance_evidence
 ai_tools:
-  - create_blockchain_traceability_resource
-  - update_blockchain_traceability_resource
-  - delete_blockchain_traceability_resource
+  - blockchain_traceability.product_history
+  - blockchain_traceability.verify_chain
+  - blockchain_traceability.verify_authenticity
+metadata:
+  api_version: v2
+  public_api_prefix: /api/v2/blockchain-traceability/
+  soft_dependencies:
+    - name: inventory-management
+      version: ">=1.0.0"
+      interface: blockchain_traceability.inventory_reference_resolver.v1
+  durable_job_commands:
+    - blockchain_traceability.submit_anchor
+  domain_events:
+    - blockchain_traceability.asset.registered
+    - blockchain_traceability.asset.transitioned
+    - blockchain_traceability.event.appended
+    - blockchain_traceability.anchor.queued
+    - blockchain_traceability.anchor.confirmed
+    - blockchain_traceability.anchor.failed
+    - blockchain_traceability.credential.issued
+    - blockchain_traceability.credential.revoked
+    - blockchain_traceability.compliance.finalized
+    - blockchain_traceability.verification.completed
+  extension_points:
+    - name: blockchain_traceability.ledger_provider_registry
+      spi_version: "1.0"
+      registration: app_ready
+    - name: blockchain_traceability.credential_issuer_registry
+      spi_version: "1.0"
+      registration: app_ready
+    - name: blockchain_traceability.inventory_reference_resolver
+      spi_version: "1.0"
+      registration: app_ready
+    - name: blockchain_traceability.document_reference_resolver
+      spi_version: "1.0"
+      registration: app_ready
+  entitlement_projection:
+    mode: explicit_capabilities
+    permissions: all
+  quota_resources:
+    - name: blockchain_traceability.api_reads
+      default_projection: request
+      cost: 1
+    - name: blockchain_traceability.api_writes
+      default_projection: request
+      cost: 1
+    - name: blockchain_traceability.events_appended
+      default_projection: event
+      cost: 1
+    - name: blockchain_traceability.anchor_requests
+      default_projection: anchor
+      cost: 1
+    - name: blockchain_traceability.verifications
+      default_projection: verification
+      cost: 1
+  uninstall:
+    preserve_evidence: true
+    unregister_adapters: true
+    unregister_commands: true
