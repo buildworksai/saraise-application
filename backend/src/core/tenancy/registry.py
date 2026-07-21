@@ -122,7 +122,6 @@ _TENANT_SCOPED_MODELS = (
     "asset_management.Asset",
     "asset_management.DepreciationEntry",
     "automation_orchestration.AutomationOrchestrationResource",
-    "backup_disaster_recovery.BackupDisasterRecoveryResource",
     "backup_recovery.BackupArchive",
     "backup_recovery.BackupJob",
     "backup_recovery.BackupRetentionPolicy",

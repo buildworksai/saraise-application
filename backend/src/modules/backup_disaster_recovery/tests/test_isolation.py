@@ -1,190 +1,109 @@
-"""
-Tenant Isolation Tests for BackupDisasterRecovery module.
+from __future__ import annotations
 
-CRITICAL: These tests verify that tenants cannot access each other's data.
-This is the PRIMARY security mechanism for multi-tenant isolation.
-
-Reference: saraise-documentation/rules/compliance-enforcement.md
-Rule: ALL tenant-scoped queries MUST filter by tenant_id
-"""
 import uuid
+
 import pytest
-from django.contrib.auth import get_user_model
 from rest_framework import status
-from rest_framework.test import APIClient
 
-from src.modules.backup_disaster_recovery.models import TenantBaseModel
-from src.core.auth_utils import get_user_tenant_id
+from src.core.access.decision import AccessDecision, AccessDecisionPipeline, AccessReasonCode
+from src.core.testing.tenant_contract import TenantIsolationContract
 
-User = get_user_model()
+from ..models import DRRunbook, RunbookStep, ScopeType
+from .factories import recovery_point_factory, runbook_factory, runbook_step_factory
+
+pytest_plugins = ["src.core.testing"]
+
+PREFIX = "/api/v2/backup-disaster-recovery"
 
 
 @pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
-    settings.SARAISE_MODE = "development"
+def allow_access(monkeypatch):
+    def decide(self, tenant_id, identity, required_permission, **kwargs):
+        del self, identity, required_permission, kwargs
+        return AccessDecision(True, AccessReasonCode.ALLOW, "allowed", tenant_id=uuid.UUID(str(tenant_id)))
+
+    monkeypatch.setattr(AccessDecisionPipeline, "decide", decide)
 
 
-@pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
+class V2IsolationContract(TenantIsolationContract):
+    read_denial_statuses = frozenset({status.HTTP_404_NOT_FOUND})
 
-
-@pytest.fixture
-def tenant_a_user(db):
-    """Create user for tenant A."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_a",
-        email="usera@example.com",
-        password="testpass123",
-    )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
-
-
-@pytest.fixture
-def tenant_b_user(db):
-    """Create user for tenant B."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_b",
-        email="userb@example.com",
-        password="testpass123",
-    )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+    def get_list_items(self, response):
+        return response.json()["data"]
 
 
 @pytest.mark.django_db
-class TestBackupDisasterRecoveryTenantIsolation:
-    """
-    CRITICAL: Tenant isolation tests for TenantBaseModel model.
-    These tests verify that tenants cannot access each other's resources.
-    """
+class TestDRRunbookIsolation(V2IsolationContract):
+    model = DRRunbook
+    list_url = f"{PREFIX}/runbooks/"
+    detail_url_template = f"{PREFIX}/runbooks/{{pk}}/"
+    update_payload = {"name": "Cross-tenant mutation"}
 
-    def test_user_cannot_list_other_tenant_resources(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's resources in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
+    @pytest.fixture(autouse=True)
+    def isolation_context(self, authenticated_tenant_a_client, tenant_a, tenant_b):
+        self.client = authenticated_tenant_a_client
+        self.tenant_a_row = runbook_factory(tenant_id=tenant_a.id, slug="tenant-a")
+        self.tenant_b_row = runbook_factory(tenant_id=tenant_b.id, slug="tenant-b")
+        self.create_payload = {
+            "name": "Spoof attempt",
+            "slug": f"spoof-{uuid.uuid4().hex[:8]}",
+            "description": "must bind to authenticated tenant",
+            "scope_type": ScopeType.TENANT,
+            "scope_ref": "primary",
+            "adapter_key": "local-filesystem",
+            "rpo_target_seconds": 3600,
+            "rto_target_seconds": 7200,
+            "owner_id": str(uuid.uuid4()),
+        }
 
-        # Create resource for tenant A
-        resource_a = TenantBaseModel.objects.create(
-            tenant_id=tenant_a_id,
-            name="Tenant A Resource",
-            description="Resource for tenant A",
-            created_by=str(tenant_a_user.id),
-        )
 
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
+@pytest.mark.django_db
+class TestRunbookStepIsolation(V2IsolationContract):
+    model = RunbookStep
+    detail_url_template = f"{PREFIX}/runbook-steps/{{pk}}/"
+    update_payload = {"name": "Cross-tenant mutation"}
 
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
+    @pytest.fixture(autouse=True)
+    def isolation_context(self, authenticated_tenant_a_client, tenant_a, tenant_b):
+        self.client = authenticated_tenant_a_client
+        runbook_a = runbook_factory(tenant_id=tenant_a.id, slug="steps-a")
+        runbook_b = runbook_factory(tenant_id=tenant_b.id, slug="steps-b")
+        self.tenant_a_row = runbook_step_factory(runbook_a, step_key="validate-a")
+        self.tenant_b_row = runbook_step_factory(runbook_b, step_key="validate-b")
+        self.list_url = f"{PREFIX}/runbook-steps/?runbook_id={runbook_a.id}"
+        self.create_payload = {
+            "runbook_id": str(runbook_a.id),
+            "step_key": f"step-{uuid.uuid4().hex[:8]}",
+            "position": 2,
+            "name": "Validate artifact",
+            "action_type": "validate_recovery_point",
+            "parameters": {"require_checksum": True, "require_encryption": True},
+            "timeout_seconds": 300,
+            "retry_limit": 0,
+            "on_failure": "stop",
+        }
 
-        response = api_client.get(f"/api/v1/backup-disaster-recovery/resources/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        resource_ids = [r["id"] for r in data]
 
-        # User A should see tenant A's resource, but NOT tenant B's resource
-        assert resource_a.id in resource_ids
-        assert resource_b.id not in resource_ids
+@pytest.mark.django_db
+def test_recovery_point_list_and_detail_isolation(
+    authenticated_tenant_a_client, tenant_a, tenant_b
+):
+    own = recovery_point_factory(tenant_id=tenant_a.id, scope_ref="own")
+    other = recovery_point_factory(tenant_id=tenant_b.id, scope_ref="other")
+    body = authenticated_tenant_a_client.get(f"{PREFIX}/recovery-points/").json()
+    identities = {row["id"] for row in body["data"]}
+    assert str(own.id) in identities
+    assert str(other.id) not in identities
+    assert authenticated_tenant_a_client.get(f"{PREFIX}/recovery-points/{other.id}/").status_code == 404
 
-    def test_user_cannot_get_other_tenant_resource_by_id(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot GET other tenant's resource by ID (returns 404)."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
 
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to access tenant B's resource
-        response = api_client.get(f"/api/v1/backup-disaster-recovery/resources/{resource_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    def test_user_cannot_update_other_tenant_resource(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot UPDATE other tenant's resource (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to update tenant B's resource
-        data = {"name": "Hacked Name"}
-        response = api_client.put(
-            f"/api/v1/backup-disaster-recovery/resources/{resource_b.id}/",
-            data,
-            format="json"
-        )
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-        # Verify resource was not modified
-        resource_b.refresh_from_db()
-        assert resource_b.name == "Tenant B Resource"
-
-    def test_user_cannot_delete_other_tenant_resource(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot DELETE other tenant's resource (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to delete tenant B's resource
-        response = api_client.delete(f"/api/v1/backup-disaster-recovery/resources/{resource_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-        # Verify resource still exists
-        assert TenantBaseModel.objects.filter(id=resource_b.id).exists()
+@pytest.mark.django_db
+def test_spoofed_tenant_filter_is_rejected_without_mutation(authenticated_tenant_a_client, tenant_b):
+    other = recovery_point_factory(tenant_id=tenant_b.id)
+    before = DRRunbook.objects.count()
+    response = authenticated_tenant_a_client.get(
+        f"{PREFIX}/recovery-points/?tenant_id={tenant_b.id}"
+    )
+    assert response.status_code == 400
+    assert DRRunbook.objects.count() == before
+    other.refresh_from_db()
