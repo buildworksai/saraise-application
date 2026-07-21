@@ -1,144 +1,21 @@
-/**
- * SPDX-License-Identifier: Apache-2.0
- *
- * Permissions Page
- *
- * Lists all available permissions (platform-level, read-only).
- */
-import { useQuery } from '@tanstack/react-query';
-import { Key, Search } from 'lucide-react';
-import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
-import { TableSkeleton, EmptyState, ErrorState } from '@/components/ui';
-import { securityService } from '../services/security-service';
-import { useState, useDeferredValue } from 'react';
+/* eslint-disable max-lines-per-function, complexity */
+import { useQuery } from "@tanstack/react-query";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { BookLock, Search } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { AuditTimeline, Detail, DetailGrid, EmptyPanel, GovernedError, PageHeader, PageSkeleton, Pagination, Surface, formatDate } from "../components/SecurityUI";
+import { QUERY_KEYS, ROUTES, type RiskLevel } from "../contracts";
+import { securityService } from "../services/security-service";
 
-export const PermissionsPage = () => {
-  const [searchQuery, setSearchQuery] = useState('');
-  const deferredSearchQuery = useDeferredValue(searchQuery);
-  const [moduleFilter, setModuleFilter] = useState<string>('');
+function setFilter(params: URLSearchParams, update: (next: URLSearchParams) => void, key: string, value: string): void { const next = new URLSearchParams(params); if (value) next.set(key, value); else next.delete(key); if (key !== "page") next.delete("page"); update(next); }
+function Risk({ value }: { readonly value: RiskLevel }) { const colors = { low: "bg-emerald-100 text-emerald-900", medium: "bg-blue-100 text-blue-900", high: "bg-amber-100 text-amber-950", critical: "bg-red-100 text-red-900" }; return <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${colors[value]}`}>{value}</span>; }
 
-  const { data: permissions, isLoading, error, refetch } = useQuery({
-    queryKey: ['security-permissions', moduleFilter, deferredSearchQuery],
-    queryFn: () => securityService.permissions.list({
-      module: moduleFilter || undefined,
-      search: deferredSearchQuery || undefined,
-    }),
-  });
+export function PermissionsPage() {
+  const [params, setParams] = useSearchParams(); const search = params.get("search") ?? ""; const module = params.get("module") ?? ""; const resource = params.get("resource") ?? ""; const action = params.get("action") ?? ""; const risk = params.get("risk_level") ?? ""; const ordering = params.get("ordering") ?? "module,resource,action"; const page = Math.max(1, Number(params.get("page") ?? 1));
+  const query = useQuery({ queryKey: QUERY_KEYS.permissions({ search, module, resource, action, risk_level: risk ? risk as RiskLevel : undefined, ordering, page, page_size: 25 }), queryFn: () => securityService.permissions.list({ search: search || undefined, module: module || undefined, resource: resource || undefined, action: action || undefined, risk_level: risk ? risk as RiskLevel : undefined, ordering, page, page_size: 25 }) }); const reset = () => setParams(new URLSearchParams()); const filtered = Boolean(search || module || resource || action || risk);
+  if (query.isLoading) return <PageSkeleton/>; if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()}/>; if (!query.data) return <GovernedError error={new Error("No governed permission catalog response was received.")}/>;
+  return <main className="space-y-6"><PageHeader title="Permission catalog" description="Inspect immutable, manifest-owned capabilities by canonical module.resource:action code."/><section aria-label="Permission filters" className="grid gap-3 rounded-xl border bg-card p-4 lg:grid-cols-3 xl:grid-cols-[1fr_150px_150px_130px_140px_190px_auto]"><div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground"/><Input aria-label="Search permissions" className="pl-9" value={search} onChange={(event) => setFilter(params, setParams, "search", event.target.value)} placeholder="Search name or description"/></div><Input aria-label="Filter module" value={module} onChange={(event) => setFilter(params, setParams, "module", event.target.value)} placeholder="Module"/><Input aria-label="Filter resource" value={resource} onChange={(event) => setFilter(params, setParams, "resource", event.target.value)} placeholder="Resource"/><Input aria-label="Filter action" value={action} onChange={(event) => setFilter(params, setParams, "action", event.target.value)} placeholder="Action"/><select aria-label="Filter risk" className="rounded-md border bg-background px-3" value={risk} onChange={(event) => setFilter(params, setParams, "risk_level", event.target.value)}><option value="">All risks</option>{["low", "medium", "high", "critical"].map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Sort permissions" className="rounded-md border bg-background px-3" value={ordering} onChange={(event) => setFilter(params, setParams, "ordering", event.target.value)}><option value="module,resource,action">Canonical code</option><option value="resource,action">Resource</option><option value="action">Action</option></select><Button variant="outline" onClick={reset}>Reset</Button></section>{query.data.items.length === 0 ? <EmptyPanel filtered={filtered} noun="permissions" onReset={reset}/> : <section className="overflow-hidden rounded-xl border bg-card"><div className="divide-y">{query.data.items.map((permission) => <Link key={permission.id} to={ROUTES.PERMISSION_DETAIL(permission.id)} className="grid gap-3 p-4 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:grid-cols-[minmax(280px,1fr)_160px_120px]"><div><p className="font-mono text-sm font-semibold text-primary">{permission.code}</p><p className="mt-1 text-sm">{permission.name}</p><p className="mt-1 text-xs text-muted-foreground">{permission.description || "No description"}</p></div><span className="text-sm">{permission.module}<small className="block text-muted-foreground">{permission.resource}</small></span><span><Risk value={permission.risk_level}/></span></Link>)}</div><Pagination value={query.data.pagination} onPage={(next) => setFilter(params, setParams, "page", String(next))}/>{query.isFetching ? <p role="status" className="border-t px-4 py-2 text-xs text-muted-foreground">Loading updated catalog entries…</p> : null}</section>}</main>;
+}
 
-  const filteredPermissions = permissions?.filter((permission) => {
-    if (deferredSearchQuery) {
-      const query = deferredSearchQuery.toLowerCase();
-      return (
-        (permission.permission_string ?? '').toLowerCase().includes(query) ||
-        (permission.module ?? '').toLowerCase().includes(query) ||
-        (permission.object ?? '').toLowerCase().includes(query) ||
-        (permission.action ?? '').toLowerCase().includes(query) ||
-        (permission.name ?? '').toLowerCase().includes(query)
-      );
-    }
-    return true;
-  });
-
-  // Get unique modules for filter
-  const modules = Array.from(new Set(permissions?.map((p) => p.module).filter((m): m is string => Boolean(m)) ?? []));
-
-  if (isLoading) {
-    return (
-      <div className="p-8 max-w-7xl mx-auto">
-        <TableSkeleton rows={5} columns={6} />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-8 max-w-7xl mx-auto">
-        <ErrorState
-          message="Failed to load permissions. Please check your connection and try again."
-          onRetry={() => {
-            void refetch();
-          }}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-8 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold text-foreground mb-2">Permissions</h1>
-        <p className="text-muted-foreground">View all available permissions (read-only)</p>
-      </div>
-
-      {/* Filters */}
-      <Card className="p-4 mb-6">
-        <div className="flex items-center gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              type="text"
-              placeholder="Search permissions..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-          <div className="w-48">
-            <Select
-              value={moduleFilter}
-              onChange={(e) => setModuleFilter(e.target.value)}
-              options={[
-                { value: '', label: 'All Modules' },
-                ...modules.map((module): { value: string; label: string } => ({ value: module, label: module })),
-              ]}
-            />
-          </div>
-        </div>
-      </Card>
-
-      {/* Permissions List */}
-      {filteredPermissions && filteredPermissions.length > 0 ? (
-        <div className="space-y-4">
-          {filteredPermissions.map((permission) => (
-            <Card key={permission.id} className="p-4">
-              <div className="flex items-start justify-between">
-                <div className="flex items-start gap-4">
-                  <div className="p-2 bg-primary-main/10 dark:bg-primary-main/20 rounded-lg">
-                    <Key className="w-5 h-5 text-primary-main" />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <code className="text-sm font-mono font-semibold text-foreground">
-                        {permission.permission_string}
-                      </code>
-                    </div>
-                    {permission.name && (
-                      <p className="text-sm text-muted-foreground mb-2">{permission.name}</p>
-                    )}
-                    {permission.description && (
-                      <p className="text-sm text-muted-foreground">{permission.description}</p>
-                    )}
-                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
-                      <span>Module: {permission.module}</span>
-                      <span>Object: {permission.object}</span>
-                      <span>Action: {permission.action}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      ) : (
-        <EmptyState
-          icon={Key}
-          title="No permissions found"
-          description="No permissions match your search criteria."
-        />
-      )}
-    </div>
-  );
-};
+export function PermissionDetailPage() { const { id = "" } = useParams(); const query = useQuery({ queryKey: QUERY_KEYS.permission(id), queryFn: () => securityService.permissions.get(id), enabled: Boolean(id) }); if (query.isLoading) return <PageSkeleton/>; if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()}/>; if (!query.data) return <GovernedError error={new Error("Permission not found.")}/>; const item = query.data.data; return <main className="space-y-6"><PageHeader title={item.name} description="Immutable capability catalog entry. Changes are owned by a signed module manifest." actions={<Risk value={item.risk_level}/>}/><Surface><DetailGrid><Detail label="Canonical code"><span className="font-mono">{item.code}</span></Detail><Detail label="Module">{item.module}</Detail><Detail label="Resource">{item.resource}</Detail><Detail label="Action">{item.action}</Detail><Detail label="Created">{formatDate(item.created_at)}</Detail><Detail label="Identifier"><span className="font-mono text-xs">{item.id}</span></Detail></DetailGrid><div className="mt-6 rounded-lg border bg-muted/30 p-4"><BookLock className="mb-2 h-5 w-5 text-primary"/><p className="text-sm">This catalog entry is read-only. Register or deprecate capabilities through the owning module installation lifecycle.</p></div></Surface><AuditTimeline resourceType="permission" resourceId={item.id}/></main>; }

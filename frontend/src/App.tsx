@@ -683,35 +683,6 @@ const TenantDetailPage = lazy(() =>
   }))
 );
 
-// Security & Access Control Pages
-const RolesPage = lazy(() =>
-  import("./modules/security_access_control/pages/RolesPage").then((m) => ({
-    default: m.RolesPage,
-  }))
-);
-
-const PermissionsPage = lazy(() =>
-  import("./modules/security_access_control/pages/PermissionsPage").then(
-    (m) => ({
-      default: m.PermissionsPage,
-    })
-  )
-);
-
-const PermissionSetsPage = lazy(() =>
-  import("./modules/security_access_control/pages/PermissionSetsPage").then(
-    (m) => ({
-      default: m.PermissionSetsPage,
-    })
-  )
-);
-
-const SecurityAuditLogPage = lazy(() =>
-  import("./modules/security_access_control/pages/AuditLogPage").then((m) => ({
-    default: m.AuditLogPage,
-  }))
-);
-
 // Tenant Dashboard (Home)
 const TenantDashboard = lazy(() =>
   import("./pages/tenant/TenantDashboard").then((m) => ({
@@ -972,48 +943,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <TaskInboxPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Security & Access Control routes */}
-          <Route
-            path="/security-access-control/roles"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <RolesPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/security-access-control/permissions"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <PermissionsPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/security-access-control/permission-sets"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <PermissionSetsPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/security-access-control/audit-logs"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <SecurityAuditLogPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

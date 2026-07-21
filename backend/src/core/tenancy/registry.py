@@ -246,12 +246,15 @@ _TENANT_SCOPED_MODELS = (
     "sales_management.Quotation",
     "sales_management.SalesOrder",
     "sales_management.SalesOrderLine",
+    "security_access_control.SecurityAuditLog",
     "security_access_control.FieldSecurity",
     "security_access_control.PermissionSet",
+    "security_access_control.PermissionSetPermission",
     "security_access_control.Role",
     "security_access_control.RolePermission",
     "security_access_control.RowSecurityRule",
     "security_access_control.SecurityProfile",
+    "security_access_control.SecurityProfileAssignment",
     "security_access_control.UserPermissionSet",
     "security_access_control.UserRole",
     "workflow_automation.Workflow",
@@ -290,7 +293,6 @@ _HYBRID_MODELS = (
     "platform_management.FeatureFlag",
     "platform_management.PlatformAuditEvent",
     "platform_management.PlatformSetting",
-    "security_access_control.SecurityAuditLog",
 )
 
 for _model_label in _TENANT_SCOPED_MODELS:

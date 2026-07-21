@@ -1,230 +1,49 @@
-/**
- * SPDX-License-Identifier: Apache-2.0
- *
- * Roles Page
- *
- * Lists and manages roles for the current tenant.
- */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import { Plus, Shield, Search, Edit, Trash2 } from 'lucide-react';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
-import { TableSkeleton, EmptyState, ErrorState } from '@/components/ui';
-import { securityService, type Role } from '../services/security-service';
-import { useState, useDeferredValue } from 'react';
-import { toast } from 'sonner';
+/* eslint-disable max-lines-per-function, complexity */
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Plus, Search, Shield, ShieldAlert, ShieldCheck } from "lucide-react";
+import { z } from "zod";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Textarea } from "@/components/ui/Textarea";
+import { AuditTimeline, ConfirmButton, Detail, DetailGrid, EmptyPanel, GovernedError, MutationError, PageHeader, PageSkeleton, Pagination, StatusChip, Surface, formatDate, useUnsavedChanges } from "../components/SecurityUI";
+import { QUERY_KEYS, ROUTES, type Role, type RoleCreateInput, type RolePermissionDecision, type RoleType } from "../contracts";
+import { securityService } from "../services/security-service";
 
-export const RolesPage = () => {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const [searchQuery, setSearchQuery] = useState('');
-  const deferredSearchQuery = useDeferredValue(searchQuery);
-  const [roleTypeFilter, setRoleTypeFilter] = useState<string>('');
-  const [isActiveFilter, setIsActiveFilter] = useState<string>('');
+const roleSchema = z.object({ name: z.string().trim().min(2).max(255), code: z.string().trim().regex(/^[a-z][a-z0-9_]{1,99}$/u, "Use lowercase snake_case"), description: z.string().max(4000), role_type: z.enum(["system", "functional", "custom", "temporary"]), parent_role_id: z.string().uuid().nullable() });
 
-  const { data: roles, isLoading, error, refetch } = useQuery({
-    queryKey: ['security-roles', roleTypeFilter, isActiveFilter, deferredSearchQuery],
-    queryFn: () => securityService.roles.list({
-      role_type: roleTypeFilter || undefined,
-      is_active: isActiveFilter === 'true' ? true : isActiveFilter === 'false' ? false : undefined,
-      search: deferredSearchQuery || undefined,
-    }),
-    refetchInterval: 60000, // Refetch every minute
-  });
+function updateSearch(params: URLSearchParams, setParams: (next: URLSearchParams) => void, key: string, value: string): void { const next = new URLSearchParams(params); if (value) next.set(key, value); else next.delete(key); if (key !== "page") next.delete("page"); setParams(next); }
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => securityService.roles.delete(id),
-    onSuccess: () => {
-      toast.success('Role deleted successfully');
-      void queryClient.invalidateQueries({ queryKey: ['security-roles'] });
-    },
-    onError: (error: unknown) => {
-      const message = error instanceof Error ? error.message : 'Failed to delete role';
-      toast.error(message);
-    },
-  });
+export function RolesPage() {
+  const navigate = useNavigate(); const [params, setParams] = useSearchParams();
+  const search = params.get("search") ?? ""; const roleType = params.get("role_type") ?? ""; const active = params.get("is_active") ?? ""; const ordering = params.get("ordering") ?? "name"; const page = Math.max(1, Number(params.get("page") ?? 1));
+  const query = useQuery({ queryKey: QUERY_KEYS.roles({ search, role_type: roleType ? roleType as RoleType : undefined, is_active: active ? active === "true" : undefined, ordering, page, page_size: 25 }), queryFn: () => securityService.roles.list({ search: search || undefined, role_type: roleType ? roleType as RoleType : undefined, is_active: active ? active === "true" : undefined, ordering, page, page_size: 25 }) });
+  const reset = () => setParams(new URLSearchParams()); const filtered = Boolean(search || roleType || active);
+  if (query.isLoading) return <PageSkeleton/>; if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()}/>; if (!query.data) return <GovernedError error={new Error("No governed role response was received.")}/>;
+  return <main className="space-y-6"><PageHeader title="Roles" description="Design tenant-safe role hierarchies with explicit allow and deny decisions." actions={<Button onClick={() => navigate(ROUTES.ROLE_CREATE)}><Plus className="mr-2 h-4 w-4"/>Create role</Button>}/><section aria-label="Role filters" className="grid gap-3 rounded-xl border bg-card p-4 lg:grid-cols-[1fr_180px_160px_180px_auto]"><div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground"/><Input aria-label="Search roles" className="pl-9" value={search} onChange={(event) => updateSearch(params, setParams, "search", event.target.value)} placeholder="Search name, code, description"/></div><select aria-label="Filter role type" className="rounded-md border bg-background px-3" value={roleType} onChange={(event) => updateSearch(params, setParams, "role_type", event.target.value)}><option value="">All role types</option>{["system", "functional", "custom", "temporary"].map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Filter active roles" className="rounded-md border bg-background px-3" value={active} onChange={(event) => updateSearch(params, setParams, "is_active", event.target.value)}><option value="">Any status</option><option value="true">Active</option><option value="false">Inactive</option></select><select aria-label="Sort roles" className="rounded-md border bg-background px-3" value={ordering} onChange={(event) => updateSearch(params, setParams, "ordering", event.target.value)}><option value="name">Name A–Z</option><option value="-name">Name Z–A</option><option value="-created_at">Newest</option><option value="updated_at">Oldest update</option></select><Button variant="outline" onClick={reset}>Reset</Button></section>{query.data.items.length === 0 ? <EmptyPanel filtered={filtered} noun="roles" onReset={reset} create={() => navigate(ROUTES.ROLE_CREATE)}/> : <section className="overflow-hidden rounded-xl border bg-card"><div className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-3">{query.data.items.map((role) => <Link key={role.id} to={ROUTES.ROLE_DETAIL(role.id)} className="rounded-lg border p-4 transition hover:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><div className="flex items-start justify-between gap-3"><div><h2 className="font-semibold">{role.name}</h2><p className="font-mono text-xs text-muted-foreground">{role.code}</p></div><StatusChip active={role.is_active}/></div><p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{role.description || "No description"}</p><p className="mt-4 text-xs">{role.role_type.replace("_", " ")} · hierarchy level {role.hierarchy_level}</p></Link>)}</div><Pagination value={query.data.pagination} onPage={(next) => updateSearch(params, setParams, "page", String(next))}/>{query.isFetching ? <p role="status" className="border-t px-4 py-2 text-xs text-muted-foreground">Loading updated roles…</p> : null}</section>}</main>;
+}
 
-  const filteredRoles = roles?.filter((role) => {
-    if (deferredSearchQuery) {
-      const query = deferredSearchQuery.toLowerCase();
-      return (
-        role.name?.toLowerCase().includes(query) ||
-        role.code?.toLowerCase().includes(query) ||
-        role.description?.toLowerCase().includes(query)
-      );
-    }
-    return true;
-  });
+function DecisionGroup({ title, decisions, icon: Icon }: { readonly title: string; readonly decisions: readonly RolePermissionDecision[]; readonly icon: typeof Shield }) { return <Surface title={title}>{decisions.length ? <ul className="space-y-2">{decisions.map((item) => <li key={`${item.source}-${item.id}`} className="flex items-center justify-between gap-3 rounded border p-3"><span><strong>{item.permission.code}</strong><small className="block text-muted-foreground">{item.permission.name}</small></span><span className="flex items-center gap-1 text-xs"><Icon className="h-4 w-4"/>{item.source_name ?? item.source}</span></li>)}</ul> : <p className="text-sm text-muted-foreground">No decisions in this category.</p>}</Surface>; }
 
-  const handleDelete = (role: Role) => {
-    if (role.is_system) {
-      toast.error('Cannot delete system roles');
-      return;
-    }
-    if (confirm(`Are you sure you want to delete role "${role.name}"?`)) {
-      deleteMutation.mutate(role.id!);
-    }
-  };
+export function RoleDetailPage() {
+  const { id = "" } = useParams(); const navigate = useNavigate(); const client = useQueryClient();
+  const query = useQuery({ queryKey: QUERY_KEYS.role(id), queryFn: () => securityService.roles.get(id), enabled: Boolean(id) });
+  const catalog = useQuery({ queryKey: QUERY_KEYS.permissions({ page_size: 100, ordering: "module,resource,action" }), queryFn: () => securityService.permissions.list({ page_size: 100, ordering: "module,resource,action" }) });
+  const remove = useMutation({ mutationFn: () => securityService.roles.delete(id), onSuccess: () => navigate(ROUTES.ROLES) });
+  const decision = useMutation({ mutationFn: async ({ permissionId, granted }: { permissionId: string; granted: boolean | null }) => { if (granted === null) await securityService.roles.removePermission(id, permissionId); else await securityService.roles.setPermission(id, { permission_id: permissionId, is_granted: granted }); }, onSuccess: () => void client.invalidateQueries({ queryKey: QUERY_KEYS.role(id) }) });
+  if (query.isLoading) return <PageSkeleton/>; if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()}/>; if (!query.data) return <GovernedError error={new Error("Role not found.")}/>; const role = query.data.data;
+  const direct = role.direct_permissions ?? []; const inherited = role.inherited_permissions ?? []; const denied = role.denied_permissions ?? []; const bundled = role.permission_set_permissions ?? [];
+  return <main className="space-y-6"><PageHeader title={role.name} description={role.description || "No role description."} actions={<><StatusChip active={role.is_active}/><Button variant="outline" onClick={() => navigate(ROUTES.ROLE_EDIT(role.id))}>Edit role</Button>{!role.is_system ? <ConfirmButton label="Delete role" question="Soft-delete this role? Active protected assignments will prevent the change." pending={remove.isPending} onConfirm={() => remove.mutate()}/> : null}</>}/>{remove.error || decision.error ? <MutationError error={remove.error ?? decision.error ?? new Error("Role operation failed.")}/> : null}<Surface><DetailGrid><Detail label="Role code"><span className="font-mono">{role.code}</span></Detail><Detail label="Type">{role.role_type}</Detail><Detail label="Hierarchy">Level {role.hierarchy_level}{role.parent_role_name ? ` · parent ${role.parent_role_name}` : " · root"}</Detail><Detail label="System protected">{role.is_system ? "Yes" : "No"}</Detail><Detail label="Created">{formatDate(role.created_at)}</Detail><Detail label="Updated">{formatDate(role.updated_at)}</Detail><Detail label="Identifier"><span className="font-mono text-xs">{role.id}</span></Detail><Detail label="Tenant"><span className="font-mono text-xs">{role.tenant_id}</span></Detail><Detail label="Assignments">{role.assignment_count ?? "Included in governed detail"}</Detail></DetailGrid></Surface><section aria-label="Effective access breakdown" className="grid gap-5 xl:grid-cols-2"><DecisionGroup title="Direct grants" decisions={direct.filter((item) => item.is_granted)} icon={ShieldCheck}/><DecisionGroup title="Explicit denies" decisions={denied.length ? denied : direct.filter((item) => !item.is_granted)} icon={ShieldAlert}/><DecisionGroup title="Inherited access" decisions={inherited} icon={Shield}/><DecisionGroup title="Permission-set derived" decisions={bundled} icon={Shield}/></section><Surface title="Capability matrix"><p className="mb-4 text-sm text-muted-foreground">Assign an explicit decision. Deny always takes precedence over direct and inherited grants.</p>{catalog.isLoading ? <PageSkeleton rows={3}/> : catalog.error ? <GovernedError error={catalog.error} retry={() => void catalog.refetch()}/> : <div className="max-h-[520px] overflow-auto"><table className="w-full min-w-[700px] text-sm"><thead className="sticky top-0 bg-card text-left"><tr><th className="p-3">Capability</th><th className="p-3">Risk</th><th className="p-3">Decision</th></tr></thead><tbody className="divide-y">{catalog.data?.items.map((permission) => { const current = direct.find((item) => item.permission.id === permission.id); return <tr key={permission.id}><td className="p-3"><strong>{permission.code}</strong><small className="block text-muted-foreground">{permission.name}</small></td><td className="p-3">{permission.risk_level}</td><td className="p-3"><div className="flex gap-2"><Button size="sm" variant={current?.is_granted === true ? "primary" : "outline"} disabled={decision.isPending} onClick={() => decision.mutate({ permissionId: permission.id, granted: true })}>Allow</Button><Button size="sm" variant={current?.is_granted === false ? "danger" : "outline"} disabled={decision.isPending} onClick={() => decision.mutate({ permissionId: permission.id, granted: false })}>Deny</Button>{current ? <Button size="sm" variant="ghost" disabled={decision.isPending} onClick={() => decision.mutate({ permissionId: permission.id, granted: null })}>Inherit</Button> : null}</div></td></tr>; })}</tbody></table></div>}</Surface><AuditTimeline resourceType="role" resourceId={role.id}/></main>;
+}
 
-  if (isLoading) {
-    return (
-      <div className="p-8 max-w-7xl mx-auto">
-        <TableSkeleton rows={5} columns={6} />
-      </div>
-    );
-  }
+function RoleForm({ initial }: { readonly initial?: Role }) {
+  const navigate = useNavigate(); const [name, setName] = useState(initial?.name ?? ""); const [code, setCode] = useState(initial?.code ?? ""); const [description, setDescription] = useState(initial?.description ?? ""); const [roleType, setRoleType] = useState<RoleType>(initial?.role_type ?? "custom"); const [parent, setParent] = useState(initial?.parent_role_id ?? ""); const [active, setActive] = useState(initial?.is_active ?? true); const [errors, setErrors] = useState<Readonly<Record<string, string>>>({}); const dirty = name !== (initial?.name ?? "") || code !== (initial?.code ?? "") || description !== (initial?.description ?? "") || parent !== (initial?.parent_role_id ?? "") || active !== (initial?.is_active ?? true); useUnsavedChanges(dirty);
+  const parents = useQuery({ queryKey: QUERY_KEYS.roles({ is_active: true, page_size: 100, ordering: "name" }), queryFn: () => securityService.roles.list({ is_active: true, page_size: 100, ordering: "name" }) });
+  const mutation = useMutation({ mutationFn: (input: RoleCreateInput) => initial ? securityService.roles.update(initial.id, { ...input, is_active: active }) : securityService.roles.create(input), onSuccess: (result) => navigate(ROUTES.ROLE_DETAIL(result.data.id)) });
+  const submit = (event: React.FormEvent) => { event.preventDefault(); const parsed = roleSchema.safeParse({ name, code, description, role_type: roleType, parent_role_id: parent || null }); if (!parsed.success) { const next: Record<string, string> = {}; for (const issue of parsed.error.issues) next[String(issue.path[0])] = issue.message; setErrors(next); return; } setErrors({}); mutation.mutate(parsed.data); };
+  return <main className="space-y-6"><PageHeader title={initial ? `Edit ${initial.name}` : "Create role"} description="Role hierarchy changes are cycle-checked and security mutations are recorded atomically."/><form onSubmit={submit} className="space-y-6"><Surface><div className="grid gap-5 sm:grid-cols-2"><Input id="role-name" label="Name" required value={name} error={errors.name} onChange={(event) => setName(event.target.value)}/><Input id="role-code" label="Stable code" required disabled={initial?.is_system} value={code} error={errors.code} onChange={(event) => setCode(event.target.value.toLowerCase())}/><label className="text-sm font-medium" htmlFor="role-type">Role type<select id="role-type" disabled={initial?.is_system} className="mt-1 block w-full rounded-md border bg-background p-2" value={roleType} onChange={(event) => setRoleType(event.target.value as RoleType)}>{["system", "functional", "custom", "temporary"].map((value) => <option key={value}>{value}</option>)}</select></label><label className="text-sm font-medium" htmlFor="parent-role">Parent role<select id="parent-role" className="mt-1 block w-full rounded-md border bg-background p-2" disabled={parents.isLoading} value={parent} onChange={(event) => setParent(event.target.value)}><option value="">No parent</option>{parents.data?.items.filter((item) => item.id !== initial?.id).map((item) => <option key={item.id} value={item.id}>{item.name} · level {item.hierarchy_level}</option>)}</select></label></div><Textarea id="role-description" className="mt-5" aria-label="Description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Purpose, scope, and separation-of-duties notes"/>{initial ? <label className="mt-5 flex items-center gap-2 text-sm"><input type="checkbox" checked={active} onChange={(event) => setActive(event.target.checked)}/>Role is active</label> : null}</Surface>{parents.error ? <GovernedError error={parents.error} retry={() => void parents.refetch()}/> : null}{mutation.error ? <MutationError error={mutation.error}/> : null}<div className="flex justify-end gap-3"><Button type="button" variant="outline" onClick={() => { if (!dirty || window.confirm("Discard unsaved role changes?")) navigate(initial ? ROUTES.ROLE_DETAIL(initial.id) : ROUTES.ROLES); }}>Cancel</Button><Button type="submit" disabled={mutation.isPending || parents.isLoading}>{mutation.isPending ? "Saving…" : "Save role"}</Button></div></form></main>;
+}
 
-  if (error) {
-    return (
-      <div className="p-8 max-w-7xl mx-auto">
-        <ErrorState
-          message="Failed to load roles. Please check your connection and try again."
-          onRetry={() => {
-            void refetch();
-          }}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-8 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="mb-8 flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-bold text-foreground mb-2">Roles</h1>
-          <p className="text-muted-foreground">Manage roles and their permissions</p>
-        </div>
-        <Button onClick={() => navigate('/security-access-control/roles/create')}>
-          <Plus className="w-4 h-4 mr-2" />
-          Create Role
-        </Button>
-      </div>
-
-      {/* Filters */}
-      <Card className="p-4 mb-6">
-        <div className="flex items-center gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              type="text"
-              placeholder="Search roles by name, code, or description..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-          <div className="w-48">
-            <Select
-              value={roleTypeFilter}
-              onChange={(e) => setRoleTypeFilter(e.target.value)}
-              options={[
-                { value: '', label: 'All Types' },
-                { value: 'system', label: 'System' },
-                { value: 'functional', label: 'Functional' },
-                { value: 'custom', label: 'Custom' },
-                { value: 'temporary', label: 'Temporary' },
-              ]}
-            />
-          </div>
-          <div className="w-48">
-            <Select
-              value={isActiveFilter}
-              onChange={(e) => setIsActiveFilter(e.target.value)}
-              options={[
-                { value: '', label: 'All Statuses' },
-                { value: 'true', label: 'Active' },
-                { value: 'false', label: 'Inactive' },
-              ]}
-            />
-          </div>
-        </div>
-      </Card>
-
-      {/* Roles List */}
-      {filteredRoles && filteredRoles.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredRoles.map((role) => (
-            <Card
-              key={role.id}
-              className="p-6 hover:shadow-lg transition-all"
-            >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-primary-main/10 dark:bg-primary-main/20 rounded-lg">
-                    <Shield className="w-5 h-5 text-primary-main" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-lg text-foreground">{role.name}</h3>
-                    <p className="text-sm text-muted-foreground">{role.code}</p>
-                  </div>
-                </div>
-                {role.is_system && (
-                  <span className="px-2 py-1 text-xs font-medium bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded">
-                    System
-                  </span>
-                )}
-              </div>
-
-              {role.description && (
-                <p className="text-sm text-muted-foreground mb-4">{role.description}</p>
-              )}
-
-              <div className="space-y-2 text-sm mb-4">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <span className="font-medium">Type:</span>
-                  <span className="capitalize">{role.role_type}</span>
-                </div>
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <span className="font-medium">Permissions:</span>
-                  <span>{role.permission_count ?? 0}</span>
-                </div>
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <span className="font-medium">Status:</span>
-                  <span className={role.is_active ? 'text-green-600' : 'text-red-600'}>
-                    {role.is_active ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 pt-4 border-t">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigate(`/security-access-control/roles/${role.id}`)}
-                  className="flex-1"
-                >
-                  <Edit className="w-4 h-4 mr-2" />
-                  Edit
-                </Button>
-                {!role.is_system && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDelete(role)}
-                    className="text-red-600 hover:text-red-700"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                )}
-              </div>
-            </Card>
-          ))}
-        </div>
-      ) : (
-        <EmptyState
-          icon={Shield}
-          title="No roles found"
-          description="Create your first role to get started with role-based access control."
-          action={{
-            label: 'Create Role',
-            onClick: () => navigate('/security-access-control/roles/create'),
-          }}
-        />
-      )}
-    </div>
-  );
-};
+export function RoleCreatePage() { return <RoleForm/>; }
+export function RoleEditPage() { const { id = "" } = useParams(); const query = useQuery({ queryKey: QUERY_KEYS.role(id), queryFn: () => securityService.roles.get(id), enabled: Boolean(id) }); if (query.isLoading) return <PageSkeleton/>; if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()}/>; return query.data ? <RoleForm key={query.data.data.updated_at} initial={query.data.data}/> : <GovernedError error={new Error("Role not found.")}/>; }
