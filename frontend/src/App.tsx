@@ -219,30 +219,6 @@ const CreateProcessMiningResourcePage = lazy(() =>
   )
 );
 
-const DocumentIntelligenceListPage = lazy(() =>
-  import(
-    "./modules/document_intelligence/pages/DocumentIntelligenceListPage"
-  ).then((m) => ({
-    default: m.DocumentIntelligenceListPage,
-  }))
-);
-
-const DocumentIntelligenceDetailPage = lazy(() =>
-  import(
-    "./modules/document_intelligence/pages/DocumentIntelligenceDetailPage"
-  ).then((m) => ({
-    default: m.DocumentIntelligenceDetailPage,
-  }))
-);
-
-const CreateDocumentIntelligenceResourcePage = lazy(() =>
-  import(
-    "./modules/document_intelligence/pages/CreateDocumentIntelligenceResourcePage"
-  ).then((m) => ({
-    default: m.CreateDocumentIntelligenceResourcePage,
-  }))
-);
-
 const DmsListPage = lazy(() =>
   import("./modules/dms/pages/DmsListPage").then((m) => ({
     default: m.DmsListPage,
@@ -920,6 +896,8 @@ function LoadingFallback() {
   );
 }
 
+// Legacy route inventory is being migrated module-by-module into the typed registry.
+// eslint-disable-next-line max-lines-per-function
 function AnimatedRoutes() {
   const location = useLocation();
 
@@ -1937,38 +1915,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <ProcessMiningDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* DocumentIntelligence routes */}
-          <Route
-            path="/document-intelligence"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <DocumentIntelligenceListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/document-intelligence/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateDocumentIntelligenceResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/document-intelligence/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <DocumentIntelligenceDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

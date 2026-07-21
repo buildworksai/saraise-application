@@ -1,0 +1,38 @@
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, CheckCircle2, RefreshCw, Square } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
+import { Input } from '@/components/ui/Input';
+import { Textarea } from '@/components/ui/Textarea';
+import { ActionDialog } from '../components/ActionDialog';
+import { ApiProblem, PageHeader, PageSkeleton, StaleIndicator, StatusPill } from '../components/ModuleShell';
+import { deterministicKey, formatConfidence, useCanManageDocumentIntelligence } from '../components/module-utils';
+import { documentIntelligenceService } from '../services/document-intelligence-service';
+import type { DocumentClassificationScore } from '../contracts';
+
+function ScoreDistribution({ scores }: { scores: readonly DocumentClassificationScore[] }) {
+  if (scores.length === 0) return <p className="p-5 text-sm text-muted-foreground">Score evidence is not available yet.</p>;
+  return <div className="space-y-4 p-5">{scores.map((score) => <div key={score.id}><div className="mb-1 flex justify-between text-sm"><span>#{score.rank} {score.category}</span><strong>{formatConfidence(score.confidence)}</strong></div><div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary" style={{ width: formatConfidence(score.confidence) }} /></div></div>)}</div>;
+}
+
+// The page orchestrates the explicit immutable/review/retry/cancel state matrix.
+// eslint-disable-next-line complexity
+export function ClassificationDetailPage() {
+  const { id = '' } = useParams();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const canManage = useCanManageDocumentIntelligence();
+  const [action, setAction] = useState<'review' | 'retry' | 'cancel' | null>(null);
+  const [category, setCategory] = useState('');
+  const [note, setNote] = useState('');
+  const detail = useQuery({ queryKey: ['document-intelligence', 'classification', id], queryFn: () => documentIntelligenceService.getClassification(id), enabled: Boolean(id), refetchInterval: (state) => state.state.data && ['queued', 'processing'].includes(state.state.data.status) ? 5_000 : false });
+  const scores = useQuery({ queryKey: ['document-intelligence', 'classification-scores', id], queryFn: () => documentIntelligenceService.listClassificationScores(id), enabled: Boolean(id) });
+  const mutation = useMutation<void, Error, 'review' | 'retry' | 'cancel'>({ mutationFn: async (kind) => { if (kind === 'review') await documentIntelligenceService.reviewClassification(id, { category: category.length > 0 ? category : detail.data?.category ?? '', note }); else if (kind === 'retry') await documentIntelligenceService.retryClassification(id, { idempotency_key: deterministicKey('retry-classification', id, detail.data?.async_job_id ?? '') }); else await documentIntelligenceService.cancelClassification(id, { reason: 'Cancelled by operator' }); }, onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ['document-intelligence', 'classification', id] }); } });
+  if (detail.isLoading || scores.isLoading) return <PageSkeleton cards={2} />;
+  if (detail.error || !detail.data) return <div className="p-4 sm:p-8"><ApiProblem error={detail.error} onRetry={() => { void detail.refetch(); }} /></div>;
+  const active = ['queued', 'processing'].includes(detail.data.status);
+  const confirm = action ? () => mutation.mutateAsync(action).then(() => undefined) : () => Promise.resolve();
+  return <main className="space-y-6 p-4 sm:p-8"><PageHeader title="Classification evidence" description="Original inference is immutable; operator review is recorded separately for audit and future training." actions={<><Button variant="ghost" onClick={() => navigate('/document-intelligence/classifications')}><ArrowLeft className="mr-2 h-4 w-4" />Back</Button>{canManage && detail.data.status === 'completed' && <Button onClick={() => { setCategory(detail.data.category ?? ''); setAction('review'); }}><CheckCircle2 className="mr-2 h-4 w-4" />Review</Button>}{canManage && ['failed', 'timed_out'].includes(detail.data.status) && <Button variant="outline" onClick={() => setAction('retry')}><RefreshCw className="mr-2 h-4 w-4" />Retry</Button>}{canManage && active && <Button variant="danger" onClick={() => setAction('cancel')}><Square className="mr-2 h-4 w-4" />Cancel</Button>}</>} /><div className="flex flex-wrap items-center gap-3"><StatusPill status={detail.data.status} /><StatusPill status={detail.data.review_status} /><StaleIndicator updatedAt={detail.dataUpdatedAt} active={active} /></div>{mutation.error && <ApiProblem error={mutation.error} onRetry={() => mutation.reset()} inline />}<section className="grid gap-4 lg:grid-cols-2"><Card className="p-5"><h2 className="font-semibold">Immutable prediction</h2><p className="mt-5 text-3xl font-bold">{detail.data.category ?? 'Awaiting inference'}</p><p className="mt-2 text-lg text-muted-foreground">{formatConfidence(detail.data.confidence)} confidence</p><dl className="mt-6 space-y-3 text-sm"><div><dt className="text-muted-foreground">Model version UUID</dt><dd className="break-all font-mono text-xs">{detail.data.model_version}</dd></div><div><dt className="text-muted-foreground">Document version</dt><dd className="break-all font-mono text-xs">{detail.data.document_version_id}</dd></div><div><dt className="text-muted-foreground">Secondary prediction</dt><dd>{detail.data.secondary_category || 'None'} {detail.data.secondary_confidence && `· ${formatConfidence(detail.data.secondary_confidence)}`}</dd></div></dl></Card><Card className="overflow-hidden"><h2 className="border-b p-5 font-semibold">Full confidence distribution</h2>{scores.error ? <ApiProblem error={scores.error} onRetry={() => { void scores.refetch(); }} inline /> : <ScoreDistribution scores={scores.data?.items ?? []} />}</Card></section><Card className="p-5"><h2 className="font-semibold">Review evidence</h2>{detail.data.reviewed_at ? <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-3"><div><dt className="text-muted-foreground">Outcome</dt><dd>{detail.data.reviewed_category}</dd></div><div><dt className="text-muted-foreground">Reviewed at</dt><dd>{new Date(detail.data.reviewed_at).toLocaleString()}</dd></div><div><dt className="text-muted-foreground">Reviewer</dt><dd className="font-mono text-xs">{detail.data.reviewed_by}</dd></div><div className="sm:col-span-3"><dt className="text-muted-foreground">Note</dt><dd>{detail.data.review_note || 'No note supplied'}</dd></div></dl> : <p className="mt-3 text-sm text-muted-foreground">No manual review has been recorded. Low-confidence results remain clearly flagged.</p>}</Card><ActionDialog open={action !== null} onOpenChange={(open) => { if (!open) setAction(null); }} title={action === 'review' ? 'Confirm or correct classification' : action === 'cancel' ? 'Cancel classification?' : 'Retry classification?'} description={action === 'review' ? 'The original prediction and scores will remain unchanged.' : 'This action is state-guarded and recorded in durable history.'} confirmLabel={action === 'review' ? 'Save review' : action === 'cancel' ? 'Cancel job' : 'Queue retry'} pending={mutation.isPending} destructive={action === 'cancel'} onConfirm={confirm}>{action === 'review' && <div className="space-y-3"><Input id="review-category" label="Reviewed category slug" required value={category} onChange={(event) => setCategory(event.target.value)} /><Textarea id="review-note" label="Review note" value={note} onChange={(event) => setNote(event.target.value)} /></div>}</ActionDialog></main>;
+}

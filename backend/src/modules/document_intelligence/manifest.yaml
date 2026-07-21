@@ -1,27 +1,55 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
+# SARAISE document-intelligence foundation contract
 name: document-intelligence
-version: 1.0.0
-description: AI-powered document processing, OCR, data extraction, classification
+version: 2.0.0
+description: Tenant-safe OCR, extraction, classification, human review, training, and template management
 type: foundation
-lifecycle: platform
+lifecycle: core
 dependencies:
-  - core-identity >=1.0
-  - ai-agent-management >=1.0
-  - dms >=1.0
+  - core-identity >=1.0.0
+  - ai-agent-management >=1.0.0
+  - dms >=1.0.0
 permissions:
-  - document_intelligence.resource:create
-  - document_intelligence.resource:read
-  - document_intelligence.resource:update
-  - document_intelligence.resource:delete
-  - document_intelligence.resource:activate
-  - document_intelligence.resource:deactivate
-sod_actions:
-  - [document_intelligence.resource:create, document_intelligence.resource:delete]
+  - document_intelligence.extraction:read
+  - document_intelligence.extraction:create
+  - document_intelligence.extraction:cancel
+  - document_intelligence.extraction:retry
+  - document_intelligence.extraction:delete
+  - document_intelligence.classification:read
+  - document_intelligence.classification:create
+  - document_intelligence.classification:review
+  - document_intelligence.classification:cancel
+  - document_intelligence.classification:retry
+  - document_intelligence.classification:delete
+  - document_intelligence.template:read
+  - document_intelligence.template:create
+  - document_intelligence.template:update
+  - document_intelligence.template:delete
+  - document_intelligence.template:activate
+  - document_intelligence.training:read
+  - document_intelligence.training:create
+  - document_intelligence.training:cancel
+  - document_intelligence.training:retry
+  - document_intelligence.model:read
+  - document_intelligence.model:activate
+  - document_intelligence.model:rollback
+  - document_intelligence.health:read
+sod_actions: []
 search_indexes:
-  - document_intelligence_resources
+  - document_intelligence_extractions
+  - document_intelligence_classifications
+  - document_intelligence_extraction_templates
+  - document_intelligence_classifier_training_jobs
+  - document_intelligence_classifier_model_versions
 ai_tools:
-  - create_document_intelligence_resource
-  - update_document_intelligence_resource
-  - delete_document_intelligence_resource
+  - document_intelligence.extract
+  - document_intelligence.classify
+  - document_intelligence.train_classifier
+metadata:
+  api_version: v2
+  extension_surface: registered-adapters-and-category-schemas
+  quota_resources:
+    - document_intelligence.api_reads
+    - document_intelligence.api_writes
+    - document_intelligence.processing_requests
+    - document_intelligence.pages_processed
+    - document_intelligence.training_documents
