@@ -6,7 +6,7 @@
 # =============================================================================
 #
 # This module manages Customization Framework functionality.
-# Status: Scaffold - requires implementation
+# Status: Declarative customization domain - API v2 and registry-owned navigation
 
 # =============================================================================
 # CRITICAL: Read contracts.ts FIRST
