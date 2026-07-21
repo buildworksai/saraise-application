@@ -3,10 +3,15 @@ DRF ViewSets for Regional module.
 Provides REST API endpoints for all models.
 """
 
+from django.conf import settings
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import (
+    AllowAny,
+    BasePermission,
+    IsAuthenticated,
+)
 from rest_framework.response import Response
 
 from src.core.auth_utils import get_user_tenant_id
@@ -34,6 +39,12 @@ class RegionalResourceViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     authentication_classes = [RelaxedCsrfSessionAuthentication]
 
+    def get_permissions(self) -> list[BasePermission]:
+        """Allow an empty anonymous list only in explicit development mode."""
+        if self.action == "list" and settings.SARAISE_MODE == "development":
+            return [AllowAny()]
+        return super().get_permissions()
+
     def get_queryset(self):
         """Filter resources by tenant_id from authenticated user."""
         tenant_id = get_user_tenant_id(self.request.user)
@@ -46,23 +57,27 @@ class RegionalResourceViewSet(viewsets.ModelViewSet):
         tenant_id = get_user_tenant_id(self.request.user)
         if not tenant_id:
             raise PermissionDenied("User must belong to a tenant")
-        serializer.save(
-            tenant_id=tenant_id,
-            created_by=str(self.request.user.id)
-        )
+        created_by = str(self.request.user.id)
+        serializer.save(tenant_id=tenant_id, created_by=created_by)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=["post"])
     def activate(self, request, pk=None):
         """Activate resource."""
         resource = self.get_object()
         service = RegionalService()
-        service.activate_resource(resource.id, get_user_tenant_id(request.user))
+        service.activate_resource(
+            resource.id,
+            get_user_tenant_id(request.user),
+        )
         return Response({"status": "activated"}, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=["post"])
     def deactivate(self, request, pk=None):
         """Deactivate resource."""
         resource = self.get_object()
         service = RegionalService()
-        service.deactivate_resource(resource.id, get_user_tenant_id(request.user))
+        service.deactivate_resource(
+            resource.id,
+            get_user_tenant_id(request.user),
+        )
         return Response({"status": "deactivated"}, status=status.HTTP_200_OK)
