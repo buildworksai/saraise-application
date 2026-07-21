@@ -1,403 +1,584 @@
 /**
- * Security & Access Control Module - Type Contracts & Endpoint Registry
+ * Security & Access Control public frontend contract.
  *
- * === AGENT INSTRUCTION ===
- * Read this file FIRST when working on this module.
- * All types and endpoints for Security & Access Control are defined here.
- *
- * DO NOT:
- * - Define ad-hoc types in page components
- * - Hardcode URL strings in service files
- * - Import directly from @/types/api in pages
- *
- * DO:
- * - Import types from this file
- * - Use ENDPOINTS constant for all API calls
- * - Add new types here when extending the module
- *
- * @module security_access_control/contracts
+ * This file deliberately does not depend on generated v1 OpenAPI types.  The
+ * governed v2 API is validated at runtime at the service boundary so malformed
+ * authorization data can never be mistaken for an empty or successful result.
  */
 
-import type { components } from '@/types/api';
+export type UUID = string;
+export type ISODateTime = string;
+export type RoleType = "system" | "functional" | "custom" | "temporary";
+export type RiskLevel = "low" | "medium" | "high" | "critical";
+export type Visibility = "visible" | "hidden" | "masked" | "redacted";
+export type EditControl = "read_only" | "editable" | "required";
+export type RuleType = "ownership" | "hierarchy" | "attribute" | "criteria";
+export type ProfileType = "standard" | "privileged" | "restricted" | "high_security";
+export type MfaRequired = "always" | "conditional" | "sensitive_actions" | "never";
+export type ActorType = "user" | "system" | "agent";
+export type Decision = "allow" | "deny";
+export type ReasonCode = string;
 
-// =============================================================================
-// EXPORTED TYPES - Import these in your components
-// =============================================================================
+export interface V2PageMeta {
+  readonly count: number;
+  readonly page: number;
+  readonly page_size: number;
+  readonly total_pages: number;
+  readonly has_next: boolean;
+  readonly has_previous: boolean;
+}
 
-/** Role entity */
-export type Role = components['schemas']['Role'];
+export interface V2Meta {
+  readonly correlation_id: string;
+  readonly timestamp: ISODateTime;
+  readonly pagination?: V2PageMeta;
+}
 
-/** Role create request */
-export type RoleCreate = components['schemas']['RoleCreate'];
+export interface V2Envelope<T> {
+  readonly data: T;
+  readonly meta: V2Meta;
+}
 
-/** Role create request (API format) */
-export type RoleCreateRequest = components['schemas']['RoleCreateRequest'];
+export interface V2ErrorEnvelope {
+  readonly error: {
+    readonly code: string;
+    readonly message: string;
+    readonly detail: unknown;
+    readonly correlation_id: string;
+  };
+}
 
-/** Role update request (partial) */
-export type RoleUpdate = components['schemas']['PatchedRoleCreateRequest'];
+export interface PaginatedResult<T> {
+  readonly items: readonly T[];
+  readonly pagination: V2PageMeta;
+  readonly correlationId: string;
+  readonly timestamp: ISODateTime;
+}
 
-/** Role type enum */
-export type RoleType = components['schemas']['RoleTypeEnum'];
+export interface GovernedResult<T> {
+  readonly data: T;
+  readonly correlationId: string;
+  readonly timestamp: ISODateTime;
+}
 
-/** Permission entity (read-only) */
-export type Permission = components['schemas']['Permission'];
+export interface Permission {
+  readonly id: UUID;
+  readonly module: string;
+  readonly resource: string;
+  readonly action: string;
+  readonly code: string;
+  readonly name: string;
+  readonly description: string;
+  readonly risk_level: RiskLevel;
+  readonly created_at: ISODateTime;
+}
 
-/** User role entity */
-export type UserRole = components['schemas']['UserRole'];
+export interface RolePermissionDecision {
+  readonly id: UUID;
+  readonly permission: Permission;
+  readonly is_granted: boolean;
+  readonly source: "direct" | "inherited" | "permission_set";
+  readonly source_name?: string;
+}
 
-/** User role create request */
-export type UserRoleCreate = components['schemas']['UserRoleRequest'];
+export interface RolePermission {
+  readonly id: UUID;
+  readonly tenant_id: UUID;
+  readonly role_id: UUID;
+  readonly permission_id: UUID;
+  readonly is_granted: boolean;
+  readonly created_by: UUID | null;
+  readonly updated_by: UUID | null;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+}
 
-/** Permission set entity */
-export type PermissionSet = components['schemas']['PermissionSet'];
+export interface Role {
+  readonly id: UUID;
+  readonly tenant_id: UUID;
+  readonly name: string;
+  readonly code: string;
+  readonly description: string;
+  readonly role_type: RoleType;
+  readonly parent_role_id: UUID | null;
+  readonly parent_role_name?: string | null;
+  readonly hierarchy_level: number;
+  readonly is_active: boolean;
+  readonly is_system: boolean;
+  readonly is_deleted: boolean;
+  readonly created_by: UUID | null;
+  readonly updated_by: UUID | null;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+  readonly deleted_at: ISODateTime | null;
+  readonly direct_permissions?: readonly RolePermissionDecision[];
+  readonly inherited_permissions?: readonly RolePermissionDecision[];
+  readonly denied_permissions?: readonly RolePermissionDecision[];
+  readonly permission_set_permissions?: readonly RolePermissionDecision[];
+  readonly assignment_count?: number;
+}
 
-/** User permission set entity */
-export type UserPermissionSet = components['schemas']['UserPermissionSet'];
+export interface RoleCreateInput {
+  readonly name: string;
+  readonly code: string;
+  readonly description?: string;
+  readonly role_type: RoleType;
+  readonly parent_role_id?: UUID | null;
+}
+export type RoleUpdateInput = Partial<RoleCreateInput> & { readonly is_active?: boolean };
 
-/** Permission set create request */
-export type PermissionSetCreate = components['schemas']['PermissionSetCreate'];
+export interface SetRolePermissionInput {
+  readonly permission_id: UUID;
+  readonly is_granted: boolean;
+}
 
-/** Permission set create request (API format) */
-export type PermissionSetCreateRequest = components['schemas']['PermissionSetCreateRequest'];
+export interface UserRole {
+  readonly id: UUID;
+  readonly tenant_id: UUID;
+  readonly user_id: UUID;
+  readonly user_display?: string;
+  readonly role_id: UUID;
+  readonly role_name?: string;
+  readonly valid_from: ISODateTime;
+  readonly valid_until: ISODateTime | null;
+  readonly assigned_by: UUID;
+  readonly reason: string;
+  readonly revoked_at: ISODateTime | null;
+  readonly revoked_by: UUID | null;
+  readonly revocation_reason: string;
+  readonly is_active: boolean;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+}
+export interface UserRoleCreateInput {
+  readonly user_id: UUID;
+  readonly role_id: UUID;
+  readonly valid_from?: ISODateTime;
+  readonly valid_until?: ISODateTime | null;
+  readonly reason: string;
+}
+export interface UserRoleUpdateInput {
+  readonly valid_from?: ISODateTime;
+  readonly valid_until?: ISODateTime | null;
+  readonly reason?: string;
+}
 
-/** Permission set update request (partial) */
-export type PermissionSetUpdate = components['schemas']['PatchedPermissionSetCreateRequest'];
+export interface PermissionSet {
+  readonly id: UUID;
+  readonly tenant_id: UUID;
+  readonly name: string;
+  readonly description: string;
+  readonly default_duration_days: number | null;
+  readonly is_active: boolean;
+  readonly is_deleted: boolean;
+  readonly permission_ids: readonly UUID[];
+  readonly permissions?: readonly Permission[];
+  readonly active_grant_count?: number;
+  readonly created_by: UUID | null;
+  readonly updated_by: UUID | null;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+  readonly deleted_at: ISODateTime | null;
+}
+export interface PermissionSetCreateInput {
+  readonly name: string;
+  readonly description?: string;
+  readonly default_duration_days?: number | null;
+  readonly is_active?: boolean;
+  readonly permission_ids?: readonly UUID[];
+}
+export type PermissionSetUpdateInput = Partial<Omit<PermissionSetCreateInput, "permission_ids">>;
+export interface ReplacePermissionSetPermissionsInput { readonly permission_ids: readonly UUID[] }
 
-/** Field security entity */
-export type FieldSecurity = components['schemas']['FieldSecurity'];
+export interface UserPermissionSet {
+  readonly id: UUID;
+  readonly tenant_id: UUID;
+  readonly user_id: UUID;
+  readonly user_display?: string;
+  readonly permission_set_id: UUID;
+  readonly permission_set_name?: string;
+  readonly granted_at: ISODateTime;
+  readonly expires_at: ISODateTime;
+  readonly granted_by: UUID;
+  readonly reason: string;
+  readonly revoked_at: ISODateTime | null;
+  readonly revoked_by: UUID | null;
+  readonly revocation_reason: string;
+  readonly is_active: boolean;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+}
+export interface UserPermissionSetCreateInput {
+  readonly user_id: UUID;
+  readonly permission_set_id: UUID;
+  readonly expires_at?: ISODateTime;
+  readonly duration_days?: number;
+  readonly reason: string;
+}
+export interface UserPermissionSetUpdateInput {
+  readonly expires_at?: ISODateTime;
+  readonly reason?: string;
+}
 
-/** Field security create request */
-export type FieldSecurityCreate = components['schemas']['FieldSecurityCreate'];
+export interface FieldSecurity {
+  readonly id: UUID;
+  readonly tenant_id: UUID;
+  readonly module: string;
+  readonly resource: string;
+  readonly field: string;
+  readonly role_id: UUID;
+  readonly role_name?: string;
+  readonly visibility: Visibility;
+  readonly edit_control: EditControl;
+  readonly mask_pattern: string;
+  readonly is_active: boolean;
+  readonly is_deleted: boolean;
+  readonly created_by: UUID | null;
+  readonly updated_by: UUID | null;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+  readonly deleted_at: ISODateTime | null;
+}
+export interface FieldSecurityInput {
+  readonly module: string;
+  readonly resource: string;
+  readonly field: string;
+  readonly role_id: UUID;
+  readonly visibility: Visibility;
+  readonly edit_control: EditControl;
+  readonly mask_pattern?: string;
+  readonly is_active?: boolean;
+}
+export type FieldSecurityUpdateInput = Partial<FieldSecurityInput>;
 
-/** Field security create request (API format) */
-export type FieldSecurityCreateRequest = components['schemas']['FieldSecurityCreateRequest'];
+export type PredicateValue = string | number | boolean | null;
+export type PredicateOperand =
+  | { readonly source: "field"; readonly name: string }
+  | { readonly source: "subject"; readonly name: string }
+  | { readonly source: "literal"; readonly value: PredicateValue };
+export type RowPredicate =
+  | { readonly op: "and" | "or"; readonly args: readonly RowPredicate[] }
+  | { readonly op: "not"; readonly arg: RowPredicate }
+  | { readonly op: "eq"; readonly left: PredicateOperand; readonly right: PredicateOperand }
+  | { readonly op: "in"; readonly left: PredicateOperand; readonly values: readonly PredicateValue[] }
+  | { readonly op: "is_null"; readonly operand: PredicateOperand }
+  | { readonly op: "owner"; readonly field: string; readonly subject_attribute?: string }
+  | { readonly op: "tenant"; readonly field: string };
 
-/** Field security update request (partial) */
-export type FieldSecurityUpdate = components['schemas']['PatchedFieldSecurityCreateRequest'];
+export interface RowSecurityRule {
+  readonly id: UUID;
+  readonly tenant_id: UUID;
+  readonly module: string;
+  readonly resource: string;
+  readonly role_id: UUID;
+  readonly role_name?: string;
+  readonly rule_type: RuleType;
+  readonly filter_criteria: RowPredicate;
+  readonly priority: number;
+  readonly is_active: boolean;
+  readonly version: number;
+  readonly is_deleted: boolean;
+  readonly created_by: UUID | null;
+  readonly updated_by: UUID | null;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+  readonly deleted_at: ISODateTime | null;
+}
+export interface RowSecurityRuleInput {
+  readonly module: string;
+  readonly resource: string;
+  readonly role_id: UUID;
+  readonly rule_type: RuleType;
+  readonly filter_criteria: RowPredicate;
+  readonly priority?: number;
+  readonly is_active?: boolean;
+}
+export type RowSecurityRuleUpdateInput = Partial<RowSecurityRuleInput>;
 
-/** Row security rule entity */
-export type RowSecurityRule = components['schemas']['RowSecurityRule'];
+export interface TimeWindow { readonly start: string; readonly end: string }
+export interface TimeRestrictions {
+  readonly timezone: string;
+  readonly weekdays: readonly number[];
+  readonly windows: readonly TimeWindow[];
+}
+export interface PasswordPolicy {
+  readonly minimum_length?: number;
+  readonly require_uppercase?: boolean;
+  readonly require_lowercase?: boolean;
+  readonly require_number?: boolean;
+  readonly require_symbol?: boolean;
+  readonly history_count?: number;
+}
 
-/** Row security rule create request */
-export type RowSecurityRuleCreate = components['schemas']['RowSecurityRuleCreate'];
+export interface SecurityProfile {
+  readonly id: UUID;
+  readonly tenant_id: UUID;
+  readonly name: string;
+  readonly description: string;
+  readonly profile_type: ProfileType;
+  readonly ip_whitelist: readonly string[];
+  readonly ip_blacklist: readonly string[];
+  readonly allowed_countries: readonly string[];
+  readonly blocked_countries: readonly string[];
+  readonly time_restrictions: TimeRestrictions;
+  readonly mfa_required: MfaRequired;
+  readonly allowed_mfa_methods: readonly string[];
+  readonly password_policy: PasswordPolicy;
+  readonly session_timeout_minutes: number;
+  readonly absolute_session_timeout_hours: number;
+  readonly max_concurrent_sessions: number;
+  readonly download_allowed: boolean;
+  readonly print_allowed: boolean;
+  readonly copy_paste_allowed: boolean;
+  readonly mobile_access_allowed: boolean;
+  readonly login_notification: boolean;
+  readonly access_notification: boolean;
+  readonly is_active: boolean;
+  readonly is_deleted: boolean;
+  readonly assignment_count?: number;
+  readonly created_by: UUID | null;
+  readonly updated_by: UUID | null;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+  readonly deleted_at: ISODateTime | null;
+}
+export interface SecurityProfileInput {
+  readonly name: string;
+  readonly description?: string;
+  readonly profile_type: ProfileType;
+  readonly ip_whitelist?: readonly string[];
+  readonly ip_blacklist?: readonly string[];
+  readonly allowed_countries?: readonly string[];
+  readonly blocked_countries?: readonly string[];
+  readonly time_restrictions?: TimeRestrictions;
+  readonly mfa_required: MfaRequired;
+  readonly allowed_mfa_methods?: readonly string[];
+  readonly password_policy?: PasswordPolicy;
+  readonly session_timeout_minutes: number;
+  readonly absolute_session_timeout_hours: number;
+  readonly max_concurrent_sessions: number;
+  readonly download_allowed?: boolean;
+  readonly print_allowed?: boolean;
+  readonly copy_paste_allowed?: boolean;
+  readonly mobile_access_allowed?: boolean;
+  readonly login_notification?: boolean;
+  readonly access_notification?: boolean;
+  readonly is_active?: boolean;
+}
+export type SecurityProfileUpdateInput = Partial<SecurityProfileInput>;
 
-/** Row security rule create request (API format) */
-export type RowSecurityRuleCreateRequest = components['schemas']['RowSecurityRuleCreateRequest'];
+export interface SecurityProfileAssignment {
+  readonly id: UUID;
+  readonly tenant_id: UUID;
+  readonly security_profile_id: UUID;
+  readonly security_profile_name?: string;
+  readonly user_id: UUID | null;
+  readonly user_display?: string | null;
+  readonly role_id: UUID | null;
+  readonly role_name?: string | null;
+  readonly precedence: number;
+  readonly valid_from: ISODateTime;
+  readonly valid_until: ISODateTime | null;
+  readonly assigned_by: UUID;
+  readonly reason: string;
+  readonly revoked_at: ISODateTime | null;
+  readonly revoked_by: UUID | null;
+  readonly revocation_reason: string;
+  readonly is_active: boolean;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+}
+export interface SecurityProfileAssignmentCreateInput {
+  readonly security_profile_id: UUID;
+  readonly user_id?: UUID | null;
+  readonly role_id?: UUID | null;
+  readonly precedence?: number;
+  readonly valid_from?: ISODateTime;
+  readonly valid_until?: ISODateTime | null;
+  readonly reason: string;
+}
+export interface SecurityProfileAssignmentUpdateInput {
+  readonly precedence?: number;
+  readonly valid_from?: ISODateTime;
+  readonly valid_until?: ISODateTime | null;
+  readonly reason?: string;
+}
 
-/** Row security rule update request (partial) */
-export type RowSecurityRuleUpdate = components['schemas']['PatchedRowSecurityRuleCreateRequest'];
+export interface SecurityAuditLog {
+  readonly id: UUID;
+  readonly tenant_id: UUID;
+  readonly action: string;
+  readonly actor_type: ActorType;
+  readonly actor_id: UUID;
+  readonly resource_type: string;
+  readonly resource_id: UUID | null;
+  readonly decision: Decision | null;
+  readonly reason_codes: readonly ReasonCode[];
+  readonly timestamp: ISODateTime;
+  readonly details: Readonly<Record<string, unknown>>;
+  readonly ip_address: string | null;
+  readonly user_agent: string;
+  readonly correlation_id: string;
+  readonly outbox_event_id: UUID | null;
+}
 
-/** Security profile entity */
-export type SecurityProfile = components['schemas']['SecurityProfile'];
+export interface FieldAccessDecision {
+  readonly field: string;
+  readonly visibility: Visibility;
+  readonly edit_control: EditControl;
+  readonly mask_pattern?: string;
+  readonly reason_codes: readonly ReasonCode[];
+  readonly applied_policy_ids: readonly UUID[];
+}
+export interface RowAccessExplanation {
+  readonly allowed: boolean;
+  readonly applied_rule_ids: readonly UUID[];
+  readonly reason_codes: readonly ReasonCode[];
+  readonly explanation: string;
+}
+export interface CommercialDecision {
+  readonly required: boolean;
+  readonly allowed: boolean;
+  readonly reason_code?: ReasonCode;
+  readonly remaining?: number | null;
+}
+export interface AccessDecision {
+  readonly subject_id: UUID;
+  readonly permission_code: string;
+  readonly decision: Decision;
+  readonly reason_codes: readonly ReasonCode[];
+  readonly applied_policy_ids: readonly UUID[];
+  readonly entitlement: CommercialDecision;
+  readonly quota: CommercialDecision;
+  readonly field_decisions: readonly FieldAccessDecision[];
+  readonly row_explanation: RowAccessExplanation | null;
+  readonly audit_log_id: UUID | null;
+  readonly correlation_id: string;
+  readonly evaluated_at: ISODateTime;
+}
+export interface AccessSimulationInput {
+  readonly subject_id: UUID;
+  readonly permission_code: string;
+  readonly resource_context: Readonly<Record<string, string | number | boolean | null>>;
+}
 
-/** Security profile create request */
-export type SecurityProfileCreate = components['schemas']['SecurityProfileCreate'];
+export interface HealthStatus {
+  readonly status: "ready" | "not_ready";
+  readonly correlation_id: string;
+  readonly components: Readonly<Record<string, "ready" | "not_ready" | "degraded">>;
+}
 
-/** Security profile create request (API format) */
-export type SecurityProfileCreateRequest = components['schemas']['SecurityProfileCreateRequest'];
+export interface PageFilters { readonly page?: number; readonly page_size?: number; readonly search?: string; readonly ordering?: string }
+export interface RoleFilters extends PageFilters { readonly role_type?: RoleType; readonly is_active?: boolean; readonly parent_role_id?: UUID }
+export interface PermissionFilters extends PageFilters { readonly module?: string; readonly resource?: string; readonly action?: string; readonly risk_level?: RiskLevel }
+export interface AssignmentFilters extends PageFilters { readonly user_id?: UUID; readonly role_id?: UUID; readonly permission_set_id?: UUID; readonly profile_id?: UUID; readonly active_at?: ISODateTime; readonly revoked?: boolean }
+export interface PermissionSetFilters extends PageFilters { readonly is_active?: boolean }
+export interface FieldSecurityFilters extends PageFilters { readonly module?: string; readonly resource?: string; readonly field?: string; readonly role_id?: UUID; readonly visibility?: Visibility; readonly edit_control?: EditControl; readonly is_active?: boolean }
+export interface RowSecurityFilters extends PageFilters { readonly module?: string; readonly resource?: string; readonly role_id?: UUID; readonly rule_type?: RuleType; readonly is_active?: boolean }
+export interface SecurityProfileFilters extends PageFilters { readonly profile_type?: ProfileType; readonly mfa_required?: MfaRequired; readonly is_active?: boolean }
+export interface AuditLogFilters extends PageFilters { readonly from?: ISODateTime; readonly to?: ISODateTime; readonly action?: string; readonly actor_type?: ActorType; readonly actor_id?: UUID; readonly resource_type?: string; readonly resource_id?: UUID; readonly decision?: Decision; readonly correlation_id?: string }
 
-/** Security profile update request (partial) */
-export type SecurityProfileUpdate = components['schemas']['PatchedSecurityProfileCreateRequest'];
-
-/** Security audit log entity (read-only) */
-export type SecurityAuditLog = components['schemas']['SecurityAuditLog'];
-
-/** Visibility enum for field security */
-export type Visibility = components['schemas']['VisibilityEnum'];
-
-/** Edit control enum for field security */
-export type EditControl = components['schemas']['EditControlEnum'];
-
-/** Profile type enum for security profiles */
-export type ProfileType = components['schemas']['ProfileTypeEnum'];
-
-/** MFA required enum */
-export type MfaRequired = components['schemas']['MfaRequiredEnum'];
-
-/** Rule type enum for row security */
-export type RuleType = components['schemas']['RuleTypeEnum'];
-
-/** Decision enum for audit logs */
-export type Decision = components['schemas']['DecisionEnum'];
-
-/** Actor type enum */
-export type ActorType = components['schemas']['ActorTypeEnum'];
-
-// =============================================================================
-// ENDPOINT REGISTRY - Use these for all API calls
-// =============================================================================
-
-/**
- * Security & Access Control API Endpoints
- *
- * Usage:
- * ```typescript
- * import { ENDPOINTS, Role } from './contracts';
- * apiClient.get<Role[]>(ENDPOINTS.ROLES.LIST);
- * apiClient.get<Role>(ENDPOINTS.ROLES.DETAIL('uuid'));
- * ```
- */
+const API_ROOT = "/api/v2/security-access-control" as const;
 export const ENDPOINTS = {
-  /** Roles endpoints */
-  ROLES: {
-    /** GET - List all roles */
-    LIST: '/api/v1/security-access-control/roles/',
-    /** GET - Get role by ID */
-    DETAIL: (id: string) => `/api/v1/security-access-control/roles/${id}/` as const,
-    /** POST - Create new role */
-    CREATE: '/api/v1/security-access-control/roles/',
-    /** PATCH - Update role by ID */
-    UPDATE: (id: string) => `/api/v1/security-access-control/roles/${id}/` as const,
-    /** DELETE - Delete role by ID */
-    DELETE: (id: string) => `/api/v1/security-access-control/roles/${id}/` as const,
-    /** POST - Assign permission to role */
-    ASSIGN_PERMISSION: (roleId: string) => `/api/v1/security-access-control/roles/${roleId}/assign_permission/` as const,
-    /** POST - Revoke permission from role */
-    REVOKE_PERMISSION: (roleId: string) => `/api/v1/security-access-control/roles/${roleId}/revoke_permission/` as const,
-  },
-
-  /** Permissions endpoints */
-  PERMISSIONS: {
-    /** GET - List all permissions */
-    LIST: '/api/v1/security-access-control/permissions/',
-    /** GET - Get permission by ID */
-    DETAIL: (id: string) => `/api/v1/security-access-control/permissions/${id}/` as const,
-  },
-
-  /** User Roles endpoints */
-  USER_ROLES: {
-    /** GET - List user role assignments */
-    LIST: '/api/v1/security-access-control/user-roles/',
-    /** GET - Get user role by ID */
-    DETAIL: (id: string) => `/api/v1/security-access-control/user-roles/${id}/` as const,
-    /** POST - Create user role assignment */
-    CREATE: '/api/v1/security-access-control/user-roles/',
-    /** PATCH - Update user role assignment */
-    UPDATE: (id: string) => `/api/v1/security-access-control/user-roles/${id}/` as const,
-    /** DELETE - Delete user role assignment */
-    DELETE: (id: string) => `/api/v1/security-access-control/user-roles/${id}/` as const,
-  },
-
-  /** Permission Sets endpoints */
-  PERMISSION_SETS: {
-    /** GET - List all permission sets */
-    LIST: '/api/v1/security-access-control/permission-sets/',
-    /** GET - Get permission set by ID */
-    DETAIL: (id: string) => `/api/v1/security-access-control/permission-sets/${id}/` as const,
-    /** POST - Create new permission set */
-    CREATE: '/api/v1/security-access-control/permission-sets/',
-    /** PATCH - Update permission set */
-    UPDATE: (id: string) => `/api/v1/security-access-control/permission-sets/${id}/` as const,
-    /** DELETE - Delete permission set */
-    DELETE: (id: string) => `/api/v1/security-access-control/permission-sets/${id}/` as const,
-    /** POST - Add permission to permission set */
-    ADD_PERMISSION: (id: string) => `/api/v1/security-access-control/permission-sets/${id}/add_permission/` as const,
-    /** POST - Remove permission from permission set */
-    REMOVE_PERMISSION: (id: string) => `/api/v1/security-access-control/permission-sets/${id}/remove_permission/` as const,
-  },
-
-  /** User Permission Sets endpoints */
-  USER_PERMISSION_SETS: {
-    /** GET - List user permission set grants */
-    LIST: '/api/v1/security-access-control/user-permission-sets/',
-    /** GET - Get user permission set by ID */
-    DETAIL: (id: string) => `/api/v1/security-access-control/user-permission-sets/${id}/` as const,
-    /** POST - Grant permission set to user */
-    CREATE: '/api/v1/security-access-control/user-permission-sets/',
-    /** PATCH - Update user permission set */
-    UPDATE: (id: string) => `/api/v1/security-access-control/user-permission-sets/${id}/` as const,
-    /** DELETE - Revoke permission set from user */
-    DELETE: (id: string) => `/api/v1/security-access-control/user-permission-sets/${id}/` as const,
-  },
-
-  /** Field Security endpoints */
-  FIELD_SECURITY: {
-    /** GET - List field security rules */
-    LIST: '/api/v1/security-access-control/field-security/',
-    /** GET - Get field security rule by ID */
-    DETAIL: (id: string) => `/api/v1/security-access-control/field-security/${id}/` as const,
-    /** POST - Create field security rule */
-    CREATE: '/api/v1/security-access-control/field-security/',
-    /** PATCH - Update field security rule */
-    UPDATE: (id: string) => `/api/v1/security-access-control/field-security/${id}/` as const,
-    /** DELETE - Delete field security rule */
-    DELETE: (id: string) => `/api/v1/security-access-control/field-security/${id}/` as const,
-  },
-
-  /** Row Security Rules endpoints */
-  ROW_SECURITY_RULES: {
-    /** GET - List row security rules */
-    LIST: '/api/v1/security-access-control/row-security-rules/',
-    /** GET - Get row security rule by ID */
-    DETAIL: (id: string) => `/api/v1/security-access-control/row-security-rules/${id}/` as const,
-    /** POST - Create row security rule */
-    CREATE: '/api/v1/security-access-control/row-security-rules/',
-    /** PATCH - Update row security rule */
-    UPDATE: (id: string) => `/api/v1/security-access-control/row-security-rules/${id}/` as const,
-    /** DELETE - Delete row security rule */
-    DELETE: (id: string) => `/api/v1/security-access-control/row-security-rules/${id}/` as const,
-  },
-
-  /** Security Profiles endpoints */
-  SECURITY_PROFILES: {
-    /** GET - List security profiles */
-    LIST: '/api/v1/security-access-control/security-profiles/',
-    /** GET - Get security profile by ID */
-    DETAIL: (id: string) => `/api/v1/security-access-control/security-profiles/${id}/` as const,
-    /** POST - Create security profile */
-    CREATE: '/api/v1/security-access-control/security-profiles/',
-    /** PATCH - Update security profile */
-    UPDATE: (id: string) => `/api/v1/security-access-control/security-profiles/${id}/` as const,
-    /** DELETE - Delete security profile */
-    DELETE: (id: string) => `/api/v1/security-access-control/security-profiles/${id}/` as const,
-  },
-
-  /** Audit Logs endpoints */
-  AUDIT_LOGS: {
-    /** GET - List audit logs */
-    LIST: '/api/v1/security-access-control/audit-logs/',
-    /** GET - Get audit log by ID */
-    DETAIL: (id: string) => `/api/v1/security-access-control/audit-logs/${id}/` as const,
-  },
-
-  /** Health check endpoint */
-  HEALTH: '/api/v1/security-access-control/health/',
+  ROLES: { LIST: `${API_ROOT}/roles/`, CREATE: `${API_ROOT}/roles/`, DETAIL: (id: UUID) => `${API_ROOT}/roles/${id}/` as const, UPDATE: (id: UUID) => `${API_ROOT}/roles/${id}/` as const, DELETE: (id: UUID) => `${API_ROOT}/roles/${id}/` as const, PERMISSIONS: (id: UUID) => `${API_ROOT}/roles/${id}/permissions/` as const, PERMISSION: (id: UUID, permissionId: UUID) => `${API_ROOT}/roles/${id}/permissions/${permissionId}/` as const },
+  PERMISSIONS: { LIST: `${API_ROOT}/permissions/`, DETAIL: (id: UUID) => `${API_ROOT}/permissions/${id}/` as const },
+  USER_ROLES: { LIST: `${API_ROOT}/user-roles/`, CREATE: `${API_ROOT}/user-roles/`, DETAIL: (id: UUID) => `${API_ROOT}/user-roles/${id}/` as const, UPDATE: (id: UUID) => `${API_ROOT}/user-roles/${id}/` as const, DELETE: (id: UUID) => `${API_ROOT}/user-roles/${id}/` as const },
+  PERMISSION_SETS: { LIST: `${API_ROOT}/permission-sets/`, CREATE: `${API_ROOT}/permission-sets/`, DETAIL: (id: UUID) => `${API_ROOT}/permission-sets/${id}/` as const, UPDATE: (id: UUID) => `${API_ROOT}/permission-sets/${id}/` as const, DELETE: (id: UUID) => `${API_ROOT}/permission-sets/${id}/` as const, PERMISSIONS: (id: UUID) => `${API_ROOT}/permission-sets/${id}/permissions/` as const },
+  USER_PERMISSION_SETS: { LIST: `${API_ROOT}/user-permission-sets/`, CREATE: `${API_ROOT}/user-permission-sets/`, DETAIL: (id: UUID) => `${API_ROOT}/user-permission-sets/${id}/` as const, UPDATE: (id: UUID) => `${API_ROOT}/user-permission-sets/${id}/` as const, DELETE: (id: UUID) => `${API_ROOT}/user-permission-sets/${id}/` as const },
+  FIELD_SECURITY: { LIST: `${API_ROOT}/field-security/`, CREATE: `${API_ROOT}/field-security/`, DETAIL: (id: UUID) => `${API_ROOT}/field-security/${id}/` as const, UPDATE: (id: UUID) => `${API_ROOT}/field-security/${id}/` as const, DELETE: (id: UUID) => `${API_ROOT}/field-security/${id}/` as const },
+  ROW_SECURITY: { LIST: `${API_ROOT}/row-security-rules/`, CREATE: `${API_ROOT}/row-security-rules/`, DETAIL: (id: UUID) => `${API_ROOT}/row-security-rules/${id}/` as const, UPDATE: (id: UUID) => `${API_ROOT}/row-security-rules/${id}/` as const, DELETE: (id: UUID) => `${API_ROOT}/row-security-rules/${id}/` as const },
+  SECURITY_PROFILES: { LIST: `${API_ROOT}/security-profiles/`, CREATE: `${API_ROOT}/security-profiles/`, DETAIL: (id: UUID) => `${API_ROOT}/security-profiles/${id}/` as const, UPDATE: (id: UUID) => `${API_ROOT}/security-profiles/${id}/` as const, DELETE: (id: UUID) => `${API_ROOT}/security-profiles/${id}/` as const },
+  PROFILE_ASSIGNMENTS: { LIST: `${API_ROOT}/security-profile-assignments/`, CREATE: `${API_ROOT}/security-profile-assignments/`, DETAIL: (id: UUID) => `${API_ROOT}/security-profile-assignments/${id}/` as const, UPDATE: (id: UUID) => `${API_ROOT}/security-profile-assignments/${id}/` as const, DELETE: (id: UUID) => `${API_ROOT}/security-profile-assignments/${id}/` as const },
+  AUDIT_LOGS: { LIST: `${API_ROOT}/audit-logs/`, DETAIL: (id: UUID) => `${API_ROOT}/audit-logs/${id}/` as const },
+  ACCESS_DECISIONS: { SIMULATE: `${API_ROOT}/access-decisions/simulate/` },
+  HEALTH: `${API_ROOT}/health/`,
 } as const;
 
-// =============================================================================
-// TYPE GUARDS - Use for runtime type checking
-// =============================================================================
-
-/** Check if a value is a valid RoleType */
-export function isRoleType(value: unknown): value is RoleType {
-  return (
-    value === 'system' || value === 'functional' || value === 'custom' || value === 'temporary'
-  );
-}
-
-/** Check if a value is a valid Visibility */
-export function isVisibility(value: unknown): value is Visibility {
-  return value === 'visible' || value === 'hidden' || value === 'masked';
-}
-
-/** Check if a value is a valid EditControl */
-export function isEditControl(value: unknown): value is EditControl {
-  return value === 'read_only' || value === 'editable' || value === 'required';
-}
-
-/** Check if a value is a valid ProfileType */
-export function isProfileType(value: unknown): value is ProfileType {
-  return (
-    value === 'standard' ||
-    value === 'privileged' ||
-    value === 'restricted' ||
-    value === 'high_security'
-  );
-}
-
-/** Check if a value is a valid MfaRequired */
-export function isMfaRequired(value: unknown): value is MfaRequired {
-  return (
-    value === 'always' ||
-    value === 'conditional' ||
-    value === 'sensitive_actions' ||
-    value === 'never'
-  );
-}
-
-/** Check if a value is a valid RuleType */
-export function isRuleType(value: unknown): value is RuleType {
-  return (
-    value === 'ownership' ||
-    value === 'hierarchy' ||
-    value === 'attribute' ||
-    value === 'criteria'
-  );
-}
-
-/** Check if a value is a valid Decision */
-export function isDecision(value: unknown): value is Decision {
-  return value === 'allow' || value === 'deny';
-}
-
-/** Check if a value is a valid ActorType */
-export function isActorType(value: unknown): value is ActorType {
-  return value === 'user' || value === 'system' || value === 'agent';
-}
-
-// =============================================================================
-// EXAMPLES - Reference for agents writing new code
-// =============================================================================
-
-/**
- * Example usage patterns for agents:
- *
- * ```typescript
- * // Importing types
- * import {
- *   Role,
- *   RoleCreateRequest,
- *   Permission,
- *   PermissionSet,
- *   ENDPOINTS,
- * } from './contracts';
- *
- * // Listing roles
- * const roles = await apiClient.get<Role[]>(ENDPOINTS.ROLES.LIST);
- *
- * // Creating a role
- * const newRole: RoleCreateRequest = {
- *   name: 'Invoice Manager',
- *   code: 'invoice_manager',
- *   role_type: 'functional',
- * };
- * const created = await apiClient.post<Role>(ENDPOINTS.ROLES.CREATE, newRole);
- *
- * // Using with TanStack Query
- * const { data: roles } = useQuery({
- *   queryKey: ['security', 'roles'],
- *   queryFn: () => apiClient.get<Role[]>(ENDPOINTS.ROLES.LIST),
- * });
- * ```
- */
-
-/**
- * EXAMPLES - Type-safe examples for AI agents
- *
- * These examples use `satisfies` to ensure type correctness at compile time.
- */
-export const EXAMPLES = {
-  createRole: {
-    request: {
-      name: 'Invoice Manager',
-      code: 'invoice_manager',
-      role_type: 'functional',
-      description: 'Manages invoice operations',
-    } satisfies RoleCreateRequest,
-    response: {
-      id: 'role-uuid-123',
-      name: 'Invoice Manager',
-      code: 'invoice_manager',
-      role_type: 'functional',
-      description: 'Manages invoice operations',
-      is_active: true,
-      permission_count: 0,
-      created_at: '2026-01-07T00:00:00Z',
-      updated_at: '2026-01-07T00:00:00Z',
-    } as unknown as Role,
-  },
-  createPermissionSet: {
-    request: {
-      name: 'Invoice Operations',
-      description: 'Permissions for invoice operations',
-    } satisfies PermissionSetCreateRequest,
-    response: {
-      id: 'permset-uuid-456',
-      name: 'Invoice Operations',
-      description: 'Permissions for invoice operations',
-      permission_count: 0,
-      created_at: '2026-01-07T00:00:00Z',
-      updated_at: '2026-01-07T00:00:00Z',
-    } as unknown as PermissionSet,
-  },
+export const ROUTES = {
+  ROLES: "/security-access-control/roles", ROLE_CREATE: "/security-access-control/roles/create", ROLE_DETAIL: (id: UUID) => `/security-access-control/roles/${id}` as const, ROLE_EDIT: (id: UUID) => `/security-access-control/roles/${id}/edit` as const,
+  PERMISSIONS: "/security-access-control/permissions", PERMISSION_DETAIL: (id: UUID) => `/security-access-control/permissions/${id}` as const,
+  ASSIGNMENTS: "/security-access-control/assignments", USER_ROLE_CREATE: "/security-access-control/assignments/create", USER_ROLE_DETAIL: (id: UUID) => `/security-access-control/assignments/${id}` as const, USER_ROLE_EDIT: (id: UUID) => `/security-access-control/assignments/${id}/edit` as const,
+  PERMISSION_SETS: "/security-access-control/permission-sets", PERMISSION_SET_CREATE: "/security-access-control/permission-sets/create", PERMISSION_SET_DETAIL: (id: UUID) => `/security-access-control/permission-sets/${id}` as const, PERMISSION_SET_EDIT: (id: UUID) => `/security-access-control/permission-sets/${id}/edit` as const,
+  USER_PERMISSION_SETS: "/security-access-control/assignments/permission-set-grants", USER_PERMISSION_SET_CREATE: "/security-access-control/assignments/permission-set-grants/create", USER_PERMISSION_SET_DETAIL: (id: UUID) => `/security-access-control/assignments/permission-set-grants/${id}` as const, USER_PERMISSION_SET_EDIT: (id: UUID) => `/security-access-control/assignments/permission-set-grants/${id}/edit` as const,
+  FIELD_SECURITY: "/security-access-control/field-security", FIELD_SECURITY_CREATE: "/security-access-control/field-security/create", FIELD_SECURITY_DETAIL: (id: UUID) => `/security-access-control/field-security/${id}` as const, FIELD_SECURITY_EDIT: (id: UUID) => `/security-access-control/field-security/${id}/edit` as const,
+  ROW_SECURITY: "/security-access-control/row-security", ROW_SECURITY_CREATE: "/security-access-control/row-security/create", ROW_SECURITY_DETAIL: (id: UUID) => `/security-access-control/row-security/${id}` as const, ROW_SECURITY_EDIT: (id: UUID) => `/security-access-control/row-security/${id}/edit` as const,
+  SECURITY_PROFILES: "/security-access-control/security-profiles", SECURITY_PROFILE_CREATE: "/security-access-control/security-profiles/create", SECURITY_PROFILE_DETAIL: (id: UUID) => `/security-access-control/security-profiles/${id}` as const, SECURITY_PROFILE_EDIT: (id: UUID) => `/security-access-control/security-profiles/${id}/edit` as const,
+  PROFILE_ASSIGNMENTS: "/security-access-control/assignments/profile-assignments", PROFILE_ASSIGNMENT_CREATE: "/security-access-control/assignments/profile-assignments/create", PROFILE_ASSIGNMENT_DETAIL: (id: UUID) => `/security-access-control/assignments/profile-assignments/${id}` as const, PROFILE_ASSIGNMENT_EDIT: (id: UUID) => `/security-access-control/assignments/profile-assignments/${id}/edit` as const,
+  AUDIT_LOGS: "/security-access-control/audit-logs", AUDIT_LOG_DETAIL: (id: UUID) => `/security-access-control/audit-logs/${id}` as const,
+  ACCESS_SIMULATOR: "/security-access-control/access-simulator",
 } as const;
+
+function stableFilters(filters: object): readonly (readonly [string, string])[] {
+  return Object.entries(filters).filter((entry) => entry[1] !== undefined && entry[1] !== "").map(([key, value]) => [key, String(value)] as const).sort(([left], [right]) => left.localeCompare(right));
+}
+export const QUERY_KEYS = {
+  root: ["security-access-control"] as const,
+  roles: (filters: RoleFilters = {}) => [...QUERY_KEYS.root, "roles", stableFilters(filters)] as const,
+  role: (id: UUID) => [...QUERY_KEYS.root, "role", id] as const,
+  permissions: (filters: PermissionFilters = {}) => [...QUERY_KEYS.root, "permissions", stableFilters(filters)] as const,
+  permission: (id: UUID) => [...QUERY_KEYS.root, "permission", id] as const,
+  userRoles: (filters: AssignmentFilters = {}) => [...QUERY_KEYS.root, "user-roles", stableFilters(filters)] as const,
+  userRole: (id: UUID) => [...QUERY_KEYS.root, "user-role", id] as const,
+  permissionSets: (filters: PermissionSetFilters = {}) => [...QUERY_KEYS.root, "permission-sets", stableFilters(filters)] as const,
+  permissionSet: (id: UUID) => [...QUERY_KEYS.root, "permission-set", id] as const,
+  userPermissionSets: (filters: AssignmentFilters = {}) => [...QUERY_KEYS.root, "user-permission-sets", stableFilters(filters)] as const,
+  userPermissionSet: (id: UUID) => [...QUERY_KEYS.root, "user-permission-set", id] as const,
+  fieldRules: (filters: FieldSecurityFilters = {}) => [...QUERY_KEYS.root, "field-security", stableFilters(filters)] as const,
+  fieldRule: (id: UUID) => [...QUERY_KEYS.root, "field-security", id] as const,
+  rowRules: (filters: RowSecurityFilters = {}) => [...QUERY_KEYS.root, "row-security", stableFilters(filters)] as const,
+  rowRule: (id: UUID) => [...QUERY_KEYS.root, "row-security", id] as const,
+  profiles: (filters: SecurityProfileFilters = {}) => [...QUERY_KEYS.root, "profiles", stableFilters(filters)] as const,
+  profile: (id: UUID) => [...QUERY_KEYS.root, "profile", id] as const,
+  profileAssignments: (filters: AssignmentFilters = {}) => [...QUERY_KEYS.root, "profile-assignments", stableFilters(filters)] as const,
+  profileAssignment: (id: UUID) => [...QUERY_KEYS.root, "profile-assignment", id] as const,
+  auditLogs: (filters: AuditLogFilters = {}) => [...QUERY_KEYS.root, "audit-logs", stableFilters(filters)] as const,
+  auditLog: (id: UUID) => [...QUERY_KEYS.root, "audit-log", id] as const,
+} as const;
+
+export function isRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
+export function isString(value: unknown): value is string { return typeof value === "string"; }
+function isNumber(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }
+function isBoolean(value: unknown): value is boolean { return typeof value === "boolean"; }
+function isNullableString(value: unknown): value is string | null { return value === null || isString(value); }
+function isStringArray(value: unknown): value is readonly string[] { return Array.isArray(value) && value.every(isString); }
+function hasEntityCore(value: unknown): value is Record<string, unknown> & { id: string } { return isRecord(value) && isString(value.id); }
+function enumGuard<const T extends readonly string[]>(value: unknown, values: T): value is T[number] { return isString(value) && values.includes(value); }
+
+export function isV2PageMeta(value: unknown): value is V2PageMeta { return isRecord(value) && isNumber(value.count) && isNumber(value.page) && isNumber(value.page_size) && isNumber(value.total_pages) && isBoolean(value.has_next) && isBoolean(value.has_previous); }
+export function isV2Meta(value: unknown): value is V2Meta { return isRecord(value) && isString(value.correlation_id) && isString(value.timestamp) && (value.pagination === undefined || isV2PageMeta(value.pagination)); }
+export function isVisibility(value: unknown): value is Visibility { return enumGuard(value, ["visible", "hidden", "masked", "redacted"] as const); }
+export function isEditControl(value: unknown): value is EditControl { return enumGuard(value, ["read_only", "editable", "required"] as const); }
+export function isPermission(value: unknown): value is Permission { return hasEntityCore(value) && isString(value.module) && isString(value.resource) && isString(value.action) && isString(value.name) && enumGuard(value.risk_level, ["low", "medium", "high", "critical"] as const); }
+export function isRole(value: unknown): value is Role { return hasEntityCore(value) && isString(value.name) && isString(value.code) && enumGuard(value.role_type, ["system", "functional", "custom", "temporary"] as const) && isBoolean(value.is_active) && isNumber(value.hierarchy_level); }
+export function isRolePermission(value: unknown): value is RolePermission { return hasEntityCore(value) && isString(value.role_id) && isString(value.permission_id) && isBoolean(value.is_granted); }
+export function isUserRole(value: unknown): value is UserRole { return hasEntityCore(value) && isString(value.user_id) && isString(value.role_id) && isString(value.valid_from) && isNullableString(value.valid_until) && isBoolean(value.is_active); }
+export function isPermissionSet(value: unknown): value is PermissionSet { return hasEntityCore(value) && isString(value.name) && isBoolean(value.is_active) && isStringArray(value.permission_ids); }
+export function isUserPermissionSet(value: unknown): value is UserPermissionSet { return hasEntityCore(value) && isString(value.user_id) && isString(value.permission_set_id) && isString(value.expires_at) && isBoolean(value.is_active); }
+export function isFieldSecurity(value: unknown): value is FieldSecurity { return hasEntityCore(value) && isString(value.module) && isString(value.resource) && isString(value.field) && isString(value.role_id) && isVisibility(value.visibility) && isEditControl(value.edit_control); }
+
+export function isPredicateOperand(value: unknown): value is PredicateOperand {
+  if (!isRecord(value) || !isString(value.source)) return false;
+  if (value.source === "literal") return value.value === null || ["string", "number", "boolean"].includes(typeof value.value);
+  return (value.source === "field" || value.source === "subject") && isString(value.name);
+}
+// Recursive discriminated-union validation necessarily visits every supported node.
+// eslint-disable-next-line complexity
+export function isRowPredicate(value: unknown, depth = 0): value is RowPredicate {
+  if (!isRecord(value) || depth > 12 || !isString(value.op)) return false;
+  if (value.op === "and" || value.op === "or") return Array.isArray(value.args) && value.args.length > 0 && value.args.length <= 20 && value.args.every((item) => isRowPredicate(item, depth + 1));
+  if (value.op === "not") return isRowPredicate(value.arg, depth + 1);
+  if (value.op === "eq") return isPredicateOperand(value.left) && isPredicateOperand(value.right);
+  if (value.op === "in") return isPredicateOperand(value.left) && Array.isArray(value.values) && value.values.length <= 100 && value.values.every((item) => item === null || ["string", "number", "boolean"].includes(typeof item));
+  if (value.op === "is_null") return isPredicateOperand(value.operand);
+  if (value.op === "owner") return isString(value.field) && (value.subject_attribute === undefined || isString(value.subject_attribute));
+  return value.op === "tenant" && isString(value.field);
+}
+export function isRowSecurityRule(value: unknown): value is RowSecurityRule { return hasEntityCore(value) && isString(value.module) && isString(value.resource) && isString(value.role_id) && enumGuard(value.rule_type, ["ownership", "hierarchy", "attribute", "criteria"] as const) && isRowPredicate(value.filter_criteria) && isNumber(value.version); }
+export function isSecurityProfile(value: unknown): value is SecurityProfile { return hasEntityCore(value) && isString(value.name) && enumGuard(value.profile_type, ["standard", "privileged", "restricted", "high_security"] as const) && enumGuard(value.mfa_required, ["always", "conditional", "sensitive_actions", "never"] as const) && isNumber(value.session_timeout_minutes) && isBoolean(value.is_active); }
+export function isProfileAssignment(value: unknown): value is SecurityProfileAssignment { return hasEntityCore(value) && isString(value.security_profile_id) && isNullableString(value.user_id) && isNullableString(value.role_id) && ((value.user_id === null) !== (value.role_id === null)) && isBoolean(value.is_active); }
+export function isSecurityAuditLog(value: unknown): value is SecurityAuditLog { return hasEntityCore(value) && isString(value.action) && enumGuard(value.actor_type, ["user", "system", "agent"] as const) && isString(value.actor_id) && isString(value.resource_type) && isString(value.timestamp) && isStringArray(value.reason_codes) && isString(value.correlation_id) && isRecord(value.details); }
+function isCommercialDecision(value: unknown): value is CommercialDecision { return isRecord(value) && isBoolean(value.required) && isBoolean(value.allowed); }
+function isFieldAccessDecision(value: unknown): value is FieldAccessDecision { return isRecord(value) && isString(value.field) && isVisibility(value.visibility) && isEditControl(value.edit_control) && isStringArray(value.reason_codes) && isStringArray(value.applied_policy_ids); }
+function isRowExplanation(value: unknown): value is RowAccessExplanation { return isRecord(value) && isBoolean(value.allowed) && isStringArray(value.applied_rule_ids) && isStringArray(value.reason_codes) && isString(value.explanation); }
+export function isAccessDecision(value: unknown): value is AccessDecision { return isRecord(value) && isString(value.subject_id) && isString(value.permission_code) && enumGuard(value.decision, ["allow", "deny"] as const) && isStringArray(value.reason_codes) && isStringArray(value.applied_policy_ids) && isCommercialDecision(value.entitlement) && isCommercialDecision(value.quota) && Array.isArray(value.field_decisions) && value.field_decisions.every(isFieldAccessDecision) && (value.row_explanation === null || isRowExplanation(value.row_explanation)) && isString(value.correlation_id) && isString(value.evaluated_at); }
+export function isHealthStatus(value: unknown): value is HealthStatus { return isRecord(value) && enumGuard(value.status, ["ready", "not_ready"] as const) && isString(value.correlation_id) && isRecord(value.components); }

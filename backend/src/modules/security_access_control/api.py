@@ -1,710 +1,977 @@
-"""
-Security & Access Control API ViewSets.
+"""Governed, tenant-safe API v2 for security administration and evidence."""
 
-DRF ViewSets with tenant isolation and Policy Engine authorization.
+from __future__ import annotations
 
-CRITICAL: This module manages RBAC data models.
-Policy Engine evaluates permissions at runtime.
-"""
-
+import re
 import uuid
+from collections.abc import Callable, Mapping
+from dataclasses import asdict
+from datetime import timedelta
+from typing import Any
+from uuid import UUID
 
-from rest_framework import status, viewsets
+from django.conf import settings
+from django.db.models import Q, QuerySet
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+from rest_framework import mixins, viewsets
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import SimpleRateThrottle
 
-from src.core.auth_utils import get_user_tenant_id
+from src.core.api import GovernedAPIViewMixin, OperationFailed
+from src.core.api.envelope import correlation_id_for_request
+from src.core.tenancy import get_current_tenant_id
 
 from .models import (
     FieldSecurity,
     Permission,
     PermissionSet,
     Role,
-    RolePermission,
     RowSecurityRule,
     SecurityAuditLog,
     SecurityProfile,
+    SecurityProfileAssignment,
     UserPermissionSet,
     UserRole,
 )
+from .permissions import requires_access
 from .serializers import (
+    AccessDecisionSerializer,
+    AccessSimulationSerializer,
     FieldSecurityCreateSerializer,
-    FieldSecuritySerializer,
-    PermissionSerializer,
+    FieldSecurityDetailSerializer,
+    FieldSecurityListSerializer,
+    FieldSecurityUpdateSerializer,
+    PermissionDetailSerializer,
+    PermissionListSerializer,
     PermissionSetCreateSerializer,
-    PermissionSetSerializer,
+    PermissionSetDetailSerializer,
+    PermissionSetListSerializer,
+    PermissionSetUpdateSerializer,
+    ReplacePermissionSetPermissionsSerializer,
     RoleCreateSerializer,
-    RolePermissionSerializer,
-    RoleSerializer,
+    RoleDetailSerializer,
+    RoleListSerializer,
+    RoleUpdateSerializer,
     RowSecurityRuleCreateSerializer,
-    RowSecurityRuleSerializer,
-    SecurityAuditLogSerializer,
+    RowSecurityRuleDetailSerializer,
+    RowSecurityRuleListSerializer,
+    RowSecurityRuleUpdateSerializer,
+    SecurityAuditLogDetailSerializer,
+    SecurityAuditLogListSerializer,
+    SecurityProfileAssignmentCreateSerializer,
+    SecurityProfileAssignmentDetailSerializer,
+    SecurityProfileAssignmentListSerializer,
+    SecurityProfileAssignmentUpdateSerializer,
     SecurityProfileCreateSerializer,
-    SecurityProfileSerializer,
-    UserPermissionSetSerializer,
-    UserRoleSerializer,
+    SecurityProfileDetailSerializer,
+    SecurityProfileListSerializer,
+    SecurityProfileUpdateSerializer,
+    SetRolePermissionSerializer,
+    UserPermissionSetCreateSerializer,
+    UserPermissionSetDetailSerializer,
+    UserPermissionSetListSerializer,
+    UserPermissionSetUpdateSerializer,
+    UserRoleCreateSerializer,
+    UserRoleDetailSerializer,
+    UserRoleListSerializer,
+    UserRoleUpdateSerializer,
 )
-from .services import SecurityAccessControlService
+from .services import (
+    AccessEvaluationService,
+    FieldSecurityService,
+    PermissionCatalogService,
+    PermissionSetService,
+    RoleService,
+    RowSecurityService,
+    SecurityConflict,
+    SecurityNotFound,
+    SecurityProfileService,
+    SecurityValidationError,
+)
 
 
-class RoleViewSet(viewsets.ModelViewSet):
-    """
-    API endpoints for roles.
+class RequiredSessionAuthentication(SessionAuthentication):
+    """Ensure missing session credentials are rendered as 401, with CSRF intact."""
 
-    Architecture Compliance:
-    - ✅ Tenant filtering in get_queryset
-    - ✅ tenant_id set on create
-    - ✅ Audit logging on mutations
-    """
+    def authenticate_header(self, request: object) -> str:
+        del request
+        return "Session"
 
-    permission_classes = [IsAuthenticated]
 
-    def get_serializer_class(self):
-        if self.action in ["create", "update", "partial_update"]:
-            return RoleCreateSerializer
-        return RoleSerializer
+class SecurityRateThrottle(SimpleRateThrottle):
+    scope = "security_access_control"
+    rate = "240/min"
 
-    def get_queryset(self):
-        """Filter roles by tenant_id."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        if not tenant_id_str:
-            return Role.objects.none()
+    def get_cache_key(self, request: Any, view: object) -> str | None:
+        if not getattr(request.user, "is_authenticated", False):
+            return self.cache_format % {"scope": self.scope, "ident": self.get_ident(request)}
+        return self.cache_format % {"scope": self.scope, "ident": str(request.user.pk)}
 
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-            queryset = Role.objects.filter(tenant_id=tenant_id)
-        except (ValueError, TypeError):
-            return Role.objects.none()
 
-        # Filter by role_type if provided
-        role_type = self.request.query_params.get("role_type", None)
-        if role_type:
-            queryset = queryset.filter(role_type=role_type)
+def _tenant(request: Any) -> UUID:
+    raw = getattr(request, "tenant_id", None) or get_current_tenant_id()
+    if raw is None:
+        raw = getattr(getattr(getattr(request, "user", None), "profile", None), "tenant_id", None)
+    try:
+        tenant = raw if isinstance(raw, UUID) else UUID(str(raw))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise PermissionDenied("Authenticated tenant context is required.") from exc
+    request.tenant_id = tenant
+    return tenant
 
-        # Filter by is_active if provided
-        is_active = self.request.query_params.get("is_active", None)
-        if is_active is not None:
-            queryset = queryset.filter(is_active=is_active.lower() == "true")
 
-        return queryset.order_by("-created_at")
+def _actor(request: Any) -> UUID:
+    raw = getattr(getattr(request, "user", None), "id", None)
+    try:
+        return raw if isinstance(raw, UUID) else UUID(str(raw))
+    except (TypeError, ValueError, AttributeError):
+        if raw is None:
+            raise PermissionDenied("Authenticated actor context is required.")
+        return uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:user:{raw}")
 
-    def get_object(self):
-        """Override to ensure tenant isolation on detail view."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = None
-        if tenant_id_str:
-            try:
-                tenant_id = uuid.UUID(tenant_id_str)
-            except (ValueError, TypeError):
-                tenant_id = None
 
-        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
-        lookup_value = self.kwargs.get(lookup_url_kwarg)
+def _call(operation: Callable[..., Any], *args: object, **kwargs: object) -> Any:
+    try:
+        return operation(*args, **kwargs)
+    except SecurityNotFound as exc:
+        raise NotFound() from exc
+    except SecurityConflict as exc:
+        raise OperationFailed(error_code="CONFLICT", message=str(exc), http_status=409) from exc
+    except SecurityValidationError as exc:
+        raise ValidationError(exc.detail or {"non_field_errors": [str(exc)]}) from exc
 
-        if not lookup_value:
-            raise NotFound("Not found.")
 
-        try:
-            obj = Role.objects.get(**{self.lookup_field: lookup_value})
-        except Role.DoesNotExist:
-            raise NotFound("Not found.")
-
-        # CRITICAL: Explicit tenant isolation check
-        if obj.tenant_id != tenant_id:
-            raise NotFound("Not found.")
-
-        return obj
-
-    def perform_create(self, serializer):
-        """Set tenant_id and audit on create."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
-
-        if not tenant_id:
-            raise ValidationError({"error": "User must belong to a tenant"})
-
-        # Pass tenant_id to serializer context so create() can use it
-        serializer.context["tenant_id"] = tenant_id
-
-        instance = serializer.save(created_by=self.request.user.id)
-
-        # Audit logging
-        SecurityAccessControlService.log_audit_event(
-            action="security.role.created",
-            actor_id=self.request.user.id,
-            resource_type="Role",
-            resource_id=instance.id,
-            tenant_id=tenant_id,
-            details={"name": instance.name, "code": instance.code},
+def _ensure_local_policy_ownership() -> None:
+    if str(getattr(settings, "SARAISE_MODE", "development")).lower() == "saas":
+        raise OperationFailed(
+            error_code="CONTROL_PLANE_OWNED",
+            message="Policy definitions are managed by the SaaS control plane.",
+            detail={"mode": "saas"},
+            http_status=409,
         )
 
-    def perform_update(self, serializer):
-        """Audit on update."""
-        instance = serializer.save(updated_by=self.request.user.id)
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
 
-        SecurityAccessControlService.log_audit_event(
-            action="security.role.updated",
-            actor_id=self.request.user.id,
-            resource_type="Role",
-            resource_id=instance.id,
-            tenant_id=tenant_id,
-            details={"name": instance.name},
-        )
+def _deletion_reason(request: Any) -> str:
+    reason = str(request.query_params.get("reason", "")).strip()
+    if not reason:
+        raise ValidationError({"reason": ["A revocation or deletion reason is required."]})
+    return reason
 
-    def perform_destroy(self, instance):
-        """Prevent deletion of system roles and audit."""
-        if instance.is_system:
-            raise ValidationError({"error": "System roles cannot be deleted."})
 
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
+def _apply_filters(queryset: QuerySet[Any], params: Mapping[str, str], fields: Mapping[str, str]) -> QuerySet[Any]:
+    for parameter, lookup in fields.items():
+        if parameter in params and params[parameter] != "":
+            value: object = params[parameter]
+            if value in {"true", "false"}:
+                value = value == "true"
+            queryset = queryset.filter(**{lookup: value})
+    return queryset
 
-        SecurityAccessControlService.log_audit_event(
-            action="security.role.deleted",
-            actor_id=self.request.user.id,
-            resource_type="Role",
-            resource_id=instance.id,
-            tenant_id=tenant_id,
-            details={"name": instance.name},
-        )
 
-        super().perform_destroy(instance)
+class GovernedSecurityViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
+    authentication_classes = (RequiredSessionAuthentication,)
+    permission_classes = (IsAuthenticated,)
+    throttle_classes = (SecurityRateThrottle,)
+    permission_map: Mapping[str, str] = {}
+    catalog_objects = False
+    search_fields: tuple[str, ...] = ()
+    ordering_fields: tuple[str, ...] = ()
+    default_ordering: tuple[str, ...] = ("id",)
 
-    @action(detail=True, methods=["post"])
-    def assign_permission(self, request, pk=None):
-        """Assign a permission to this role."""
-        role = self.get_object()
-        permission_id = request.data.get("permission_id")
-        is_granted = request.data.get("is_granted", True)
+    def initial(self, request: Any, *args: object, **kwargs: object) -> None:
+        """Reject locally owned mutations before mode-specific authentication.
 
-        if not permission_id:
-            return Response(
-                {"error": "permission_id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
+        SaaS sessions are normally validated by the platform middleware.  A
+        local policy mutation is unavailable in SaaS regardless of the caller,
+        so surface the stable ownership contract before DRF attempts request
+        authentication.  Runtime simulation remains available in SaaS.
+        """
+        is_unsafe_method = request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        is_local_mutation = is_unsafe_method and self.action != "simulate"
+        if is_local_mutation:
+            _ensure_local_policy_ownership()
+        super().initial(request, *args, **kwargs)
+
+    @property
+    def tenant_id(self) -> UUID:
+        return _tenant(self.request)
+
+    @property
+    def actor_id(self) -> UUID:
+        return _actor(self.request)
+
+    @property
+    def correlation_id(self) -> str:
+        supplied = str(self.request.headers.get("X-Correlation-ID", "")).strip()
+        if supplied and len(supplied) <= 128 and re.fullmatch(r"[A-Za-z0-9._:-]+", supplied):
+            self.request.correlation_id = supplied
+            return supplied
+        return correlation_id_for_request(self.request)
+
+    def get_permissions(self) -> list[object]:
+        if not bool(getattr(self.request.user, "is_authenticated", False)):
+            return [IsAuthenticated()]
+        _tenant(self.request)
+        code = self.permission_map.get(getattr(self, "action", ""))
+        if code is None:
+            return [IsAuthenticated(), requires_access("")]
+        return [IsAuthenticated(), requires_access(code, catalog=self.catalog_objects)]
+
+    def query(self, queryset: QuerySet[Any]) -> QuerySet[Any]:
+        search = self.request.query_params.get("search", "").strip()
+        if search and self.search_fields:
+            criteria = Q()
+            for field in self.search_fields:
+                criteria |= Q(**{f"{field}__icontains": search})
+            queryset = queryset.filter(criteria)
+        ordering = self.request.query_params.get("ordering", "")
+        values = tuple(part.strip() for part in ordering.split(",") if part.strip()) or self.default_ordering
+        if any(value.removeprefix("-") not in self.ordering_fields for value in values):
+            raise ValidationError({"ordering": ["Contains an unsupported ordering field."]})
+        return queryset.order_by(*values)
+
+    def paginated(self, queryset: QuerySet[Any], serializer_class: type) -> Response:
+        page = self.paginate_queryset(queryset)
+        if page is None:
+            raise RuntimeError("Governed pagination is required")
+        return self.get_paginated_response(serializer_class(page, many=True).data)
+
+
+class RoleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSecurityViewSet):
+    permission_map = {
+        "list": "security.roles:read",
+        "retrieve": "security.roles:read",
+        "create": "security.roles:create",
+        "partial_update": "security.roles:update",
+        "destroy": "security.roles:delete",
+        "set_permission": "security.roles:update",
+        "remove_permission": "security.roles:update",
+    }
+    search_fields = ("name", "code", "description")
+    ordering_fields = ("name", "created_at", "updated_at")
+    default_ordering = ("name",)
+
+    def get_queryset(self) -> QuerySet[Role]:
+        queryset = Role.objects.for_tenant(self.tenant_id).filter(is_deleted=False)
+        return self.query(
+            _apply_filters(
+                queryset,
+                self.request.query_params,
+                {"role_type": "role_type", "is_active": "is_active", "parent_role_id": "parent_role_id"},
             )
-
-        try:
-            permission = Permission.objects.get(id=permission_id)
-        except Permission.DoesNotExist:
-            return Response({"error": "Permission not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        role_permission, created = RolePermission.objects.get_or_create(
-            role=role, permission=permission, defaults={"is_granted": is_granted}
         )
 
-        if not created:
-            role_permission.is_granted = is_granted
-            role_permission.save()
+    def get_serializer_class(self) -> type:
+        return {
+            "list": RoleListSerializer,
+            "retrieve": RoleDetailSerializer,
+            "create": RoleCreateSerializer,
+            "partial_update": RoleUpdateSerializer,
+        }.get(self.action, RoleDetailSerializer)
 
-        return Response(RolePermissionSerializer(role_permission).data)
+    def create(self, request: Any) -> Response:
+        _ensure_local_policy_ownership()
+        serializer = RoleCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        item = _call(
+            RoleService.create_role,
+            self.tenant_id,
+            **serializer.validated_data,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(RoleDetailSerializer(item).data, status=201)
 
-    @action(detail=True, methods=["post"])
-    def revoke_permission(self, request, pk=None):
-        """Revoke a permission from this role."""
-        role = self.get_object()
-        permission_id = request.data.get("permission_id")
+    def partial_update(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        serializer = RoleUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        item = _call(
+            RoleService.update_role,
+            self.tenant_id,
+            UUID(str(pk)),
+            changes=serializer.validated_data,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(RoleDetailSerializer(item).data)
 
-        if not permission_id:
-            return Response(
-                {"error": "permission_id is required"},
-                status=status.HTTP_400_BAD_REQUEST,
+    def destroy(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        _call(
+            RoleService.delete_role,
+            self.tenant_id,
+            UUID(str(pk)),
+            actor_id=self.actor_id,
+            reason=_deletion_reason(request),
+            correlation_id=self.correlation_id,
+        )
+        return Response(status=204)
+
+    @action(detail=True, methods=("post",), url_path="permissions")
+    def set_permission(self, request: Any, pk: str | None = None) -> Response:
+        _ensure_local_policy_ownership()
+        serializer = SetRolePermissionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        item = _call(
+            RoleService.set_role_permission,
+            self.tenant_id,
+            UUID(str(pk)),
+            serializer.validated_data["permission_id"],
+            is_granted=serializer.validated_data["is_granted"],
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        from .serializers import RolePermissionSerializer
+
+        return Response(RolePermissionSerializer(item).data, status=200)
+
+    @action(detail=True, methods=("delete",), url_path=r"permissions/(?P<permission_id>[0-9a-f-]+)")
+    def remove_permission(self, request: Any, pk: str | None = None, permission_id: str | None = None) -> Response:
+        del request
+        _ensure_local_policy_ownership()
+        _call(
+            RoleService.remove_role_permission,
+            self.tenant_id,
+            UUID(str(pk)),
+            UUID(str(permission_id)),
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(status=204)
+
+
+class PermissionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSecurityViewSet):
+    permission_map = {"list": "security.permissions:read", "retrieve": "security.permissions:read"}
+    catalog_objects = True
+    search_fields = ("name", "description")
+    ordering_fields = ("module", "resource", "action")
+    default_ordering = ("module", "resource", "action")
+
+    def get_queryset(self) -> QuerySet[Permission]:
+        queryset = PermissionCatalogService.list_permissions(
+            self.tenant_id,
+            module=self.request.query_params.get("module"),
+            resource=self.request.query_params.get("resource"),
+            action=self.request.query_params.get("action"),
+            search=self.request.query_params.get("search"),
+        )
+        if self.request.query_params.get("risk_level"):
+            queryset = queryset.filter(risk_level=self.request.query_params["risk_level"])
+        return self.query(queryset)
+
+    def get_serializer_class(self) -> type:
+        return PermissionListSerializer if self.action == "list" else PermissionDetailSerializer
+
+
+class UserRoleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSecurityViewSet):
+    permission_map = {
+        "list": "security.assignments:read",
+        "retrieve": "security.assignments:read",
+        "create": "security.assignments:create",
+        "partial_update": "security.assignments:update",
+        "destroy": "security.assignments:delete",
+    }
+    ordering_fields = ("valid_from", "created_at")
+    default_ordering = ("-valid_from",)
+
+    def get_queryset(self) -> QuerySet[UserRole]:
+        queryset = UserRole.objects.for_tenant(self.tenant_id).select_related("role")
+        queryset = _apply_filters(queryset, self.request.query_params, {"user_id": "user_id", "role_id": "role_id"})
+        if self.request.query_params.get("revoked") in {"true", "false"}:
+            queryset = queryset.filter(revoked_at__isnull=self.request.query_params["revoked"] == "false")
+        active_at = self.request.query_params.get("active_at")
+        if active_at:
+            moment = parse_datetime(active_at)
+            if moment is None:
+                raise ValidationError({"active_at": ["Must be an ISO datetime."]})
+            queryset = queryset.filter(valid_from__lte=moment, revoked_at__isnull=True).filter(
+                Q(valid_until__isnull=True) | Q(valid_until__gt=moment)
             )
+        return self.query(queryset)
 
-        RolePermission.objects.filter(role=role, permission_id=permission_id).delete()
+    def get_serializer_class(self) -> type:
+        return {
+            "list": UserRoleListSerializer,
+            "retrieve": UserRoleDetailSerializer,
+            "create": UserRoleCreateSerializer,
+            "partial_update": UserRoleUpdateSerializer,
+        }.get(self.action, UserRoleDetailSerializer)
 
-        return Response({"status": "Permission revoked"})
+    def create(self, request: Any) -> Response:
+        _ensure_local_policy_ownership()
+        serializer = UserRoleCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        item = _call(
+            RoleService.assign_role,
+            self.tenant_id,
+            serializer.validated_data.pop("user_id"),
+            serializer.validated_data.pop("role_id"),
+            **serializer.validated_data,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(UserRoleDetailSerializer(item).data, status=201)
+
+    def partial_update(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        serializer = UserRoleUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        values = {"valid_from": None, "valid_until": None, "reason": None, **serializer.validated_data}
+        item = _call(
+            RoleService.update_role_assignment,
+            self.tenant_id,
+            UUID(str(pk)),
+            **values,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(UserRoleDetailSerializer(item).data)
+
+    def destroy(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        _call(
+            RoleService.revoke_role_assignment,
+            self.tenant_id,
+            UUID(str(pk)),
+            reason=_deletion_reason(request),
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(status=204)
 
 
-class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    API endpoints for permissions (read-only).
+class PermissionSetViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSecurityViewSet):
+    permission_map = {
+        "list": "security.permission-sets:read",
+        "retrieve": "security.permission-sets:read",
+        "create": "security.permission-sets:create",
+        "partial_update": "security.permission-sets:update",
+        "destroy": "security.permission-sets:delete",
+        "replace_permissions": "security.permission-sets:update",
+    }
+    search_fields = ("name", "description")
+    ordering_fields = ("name", "created_at")
+    default_ordering = ("name",)
 
-    CRITICAL: Permissions are platform-level (no tenant_id).
-    """
+    def get_queryset(self) -> QuerySet[PermissionSet]:
+        queryset = (
+            PermissionSet.objects.for_tenant(self.tenant_id)
+            .filter(is_deleted=False)
+            .prefetch_related("memberships__permission")
+        )
+        return self.query(_apply_filters(queryset, self.request.query_params, {"is_active": "is_active"}))
 
-    permission_classes = [IsAuthenticated]
-    serializer_class = PermissionSerializer
-    queryset = Permission.objects.all()
+    def get_serializer_class(self) -> type:
+        return {
+            "list": PermissionSetListSerializer,
+            "retrieve": PermissionSetDetailSerializer,
+            "create": PermissionSetCreateSerializer,
+            "partial_update": PermissionSetUpdateSerializer,
+        }.get(self.action, PermissionSetDetailSerializer)
 
-    def get_queryset(self):
-        """Filter permissions by module if provided."""
-        queryset = Permission.objects.all()
+    def create(self, request: Any) -> Response:
+        _ensure_local_policy_ownership()
+        serializer = PermissionSetCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data)
+        permission_ids = values.pop("permission_ids", ())
+        item = _call(
+            PermissionSetService.create_permission_set,
+            self.tenant_id,
+            **values,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        if permission_ids:
+            item = _call(
+                PermissionSetService.set_permissions,
+                self.tenant_id,
+                item.id,
+                permission_ids=permission_ids,
+                actor_id=self.actor_id,
+                correlation_id=self.correlation_id,
+            )
+        return Response(PermissionSetDetailSerializer(item).data, status=201)
 
-        module = self.request.query_params.get("module", None)
-        if module:
-            queryset = queryset.filter(module=module)
+    def partial_update(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        serializer = PermissionSetUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        item = _call(
+            PermissionSetService.update_permission_set,
+            self.tenant_id,
+            UUID(str(pk)),
+            changes=serializer.validated_data,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(PermissionSetDetailSerializer(item).data)
 
-        return queryset.order_by("module", "object", "action")
+    def destroy(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        _call(
+            PermissionSetService.delete_permission_set,
+            self.tenant_id,
+            UUID(str(pk)),
+            actor_id=self.actor_id,
+            reason=_deletion_reason(request),
+            correlation_id=self.correlation_id,
+        )
+        return Response(status=204)
+
+    @action(detail=True, methods=("put",), url_path="permissions")
+    def replace_permissions(self, request: Any, pk: str | None = None) -> Response:
+        _ensure_local_policy_ownership()
+        serializer = ReplacePermissionSetPermissionsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        item = _call(
+            PermissionSetService.set_permissions,
+            self.tenant_id,
+            UUID(str(pk)),
+            permission_ids=serializer.validated_data["permission_ids"],
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(PermissionSetDetailSerializer(item).data)
 
 
-class UserRoleViewSet(viewsets.ModelViewSet):
-    """API endpoints for user-role assignments."""
+class UserPermissionSetViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSecurityViewSet):
+    permission_map = {
+        "list": "security.assignments:read",
+        "retrieve": "security.assignments:read",
+        "create": "security.assignments:create",
+        "partial_update": "security.assignments:update",
+        "destroy": "security.assignments:delete",
+    }
+    ordering_fields = ("granted_at", "expires_at", "created_at")
+    default_ordering = ("-granted_at",)
 
-    permission_classes = [IsAuthenticated]
-    serializer_class = UserRoleSerializer
+    def get_queryset(self) -> QuerySet[UserPermissionSet]:
+        queryset = UserPermissionSet.objects.for_tenant(self.tenant_id).select_related("permission_set")
+        queryset = _apply_filters(
+            queryset, self.request.query_params, {"user_id": "user_id", "permission_set_id": "permission_set_id"}
+        )
+        if self.request.query_params.get("revoked") in {"true", "false"}:
+            queryset = queryset.filter(revoked_at__isnull=self.request.query_params["revoked"] == "false")
+        active_at = self.request.query_params.get("active_at")
+        if active_at:
+            moment = parse_datetime(active_at)
+            if moment is None:
+                raise ValidationError({"active_at": ["Must be an ISO datetime."]})
+            queryset = queryset.filter(granted_at__lte=moment, expires_at__gt=moment, revoked_at__isnull=True)
+        return self.query(queryset)
 
-    def get_queryset(self):
-        """Filter user roles by tenant_id via role."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        if not tenant_id_str:
-            return UserRole.objects.none()
+    def get_serializer_class(self) -> type:
+        return {
+            "list": UserPermissionSetListSerializer,
+            "retrieve": UserPermissionSetDetailSerializer,
+            "create": UserPermissionSetCreateSerializer,
+            "partial_update": UserPermissionSetUpdateSerializer,
+        }.get(self.action, UserPermissionSetDetailSerializer)
 
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-            queryset = UserRole.objects.filter(role__tenant_id=tenant_id)
-        except (ValueError, TypeError):
-            return UserRole.objects.none()
+    def create(self, request: Any) -> Response:
+        _ensure_local_policy_ownership()
+        serializer = UserPermissionSetCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data)
+        item = _call(
+            PermissionSetService.grant_to_user,
+            self.tenant_id,
+            values.pop("permission_set_id"),
+            values.pop("user_id"),
+            expires_at=values.pop("expires_at", None),
+            duration_days=values.pop("duration_days", None),
+            **values,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(UserPermissionSetDetailSerializer(item).data, status=201)
 
-        # Filter by user_id if provided
-        user_id = self.request.query_params.get("user_id", None)
-        if user_id:
-            queryset = queryset.filter(user_id=user_id)
+    def partial_update(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        serializer = UserPermissionSetUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        item = _call(
+            PermissionSetService.update_user_grant,
+            self.tenant_id,
+            UUID(str(pk)),
+            **serializer.validated_data,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(UserPermissionSetDetailSerializer(item).data)
 
-        # Filter by role_id if provided
-        role_id = self.request.query_params.get("role_id", None)
-        if role_id:
-            queryset = queryset.filter(role_id=role_id)
+    def destroy(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        _call(
+            PermissionSetService.revoke_user_grant,
+            self.tenant_id,
+            UUID(str(pk)),
+            reason=_deletion_reason(request),
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(status=204)
 
-        return queryset.order_by("-created_at")
 
-    def perform_create(self, serializer):
-        """Set assigned_by and audit on create."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
+class _RuleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSecurityViewSet):
+    service: Any
+    list_serializer: type
+    detail_serializer: type
+    create_serializer: type
+    update_serializer: type
 
-        instance = serializer.save(assigned_by=self.request.user.id)
+    def get_serializer_class(self) -> type:
+        return {
+            "list": self.list_serializer,
+            "retrieve": self.detail_serializer,
+            "create": self.create_serializer,
+            "partial_update": self.update_serializer,
+        }.get(self.action, self.detail_serializer)
 
-        SecurityAccessControlService.log_audit_event(
-            action="security.user_role.assigned",
-            actor_id=self.request.user.id,
-            resource_type="UserRole",
-            resource_id=instance.id,
-            tenant_id=tenant_id,
-            details={
-                "user_id": str(instance.user.id),
-                "role_id": str(instance.role.id),
-                "role_name": instance.role.name,
+    def create(self, request: Any) -> Response:
+        _ensure_local_policy_ownership()
+        serializer = self.create_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        item = _call(
+            self.service.create_rule,
+            self.tenant_id,
+            **serializer.validated_data,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(self.detail_serializer(item).data, status=201)
+
+    def partial_update(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        serializer = self.update_serializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        item = _call(
+            self.service.update_rule,
+            self.tenant_id,
+            UUID(str(pk)),
+            changes=serializer.validated_data,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(self.detail_serializer(item).data)
+
+    def destroy(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        _call(
+            self.service.delete_rule,
+            self.tenant_id,
+            UUID(str(pk)),
+            actor_id=self.actor_id,
+            reason=_deletion_reason(request),
+            correlation_id=self.correlation_id,
+        )
+        return Response(status=204)
+
+
+class FieldSecurityViewSet(_RuleViewSet):
+    permission_map = {
+        "list": "security.field-security:read",
+        "retrieve": "security.field-security:read",
+        "create": "security.field-security:create",
+        "partial_update": "security.field-security:update",
+        "destroy": "security.field-security:delete",
+    }
+    service = FieldSecurityService
+    list_serializer = FieldSecurityListSerializer
+    detail_serializer = FieldSecurityDetailSerializer
+    create_serializer = FieldSecurityCreateSerializer
+    update_serializer = FieldSecurityUpdateSerializer
+    ordering_fields = ("module", "resource", "field", "created_at")
+    default_ordering = ("module", "resource", "field")
+
+    def get_queryset(self) -> QuerySet[FieldSecurity]:
+        queryset = FieldSecurity.objects.for_tenant(self.tenant_id).filter(is_deleted=False).select_related("role")
+        return self.query(
+            _apply_filters(
+                queryset,
+                self.request.query_params,
+                {
+                    "module": "module",
+                    "resource": "resource",
+                    "field": "field",
+                    "role_id": "role_id",
+                    "visibility": "visibility",
+                    "edit_control": "edit_control",
+                    "is_active": "is_active",
+                },
+            )
+        )
+
+
+class RowSecurityRuleViewSet(_RuleViewSet):
+    permission_map = {
+        "list": "security.row-security:read",
+        "retrieve": "security.row-security:read",
+        "create": "security.row-security:create",
+        "partial_update": "security.row-security:update",
+        "destroy": "security.row-security:delete",
+    }
+    service = RowSecurityService
+    list_serializer = RowSecurityRuleListSerializer
+    detail_serializer = RowSecurityRuleDetailSerializer
+    create_serializer = RowSecurityRuleCreateSerializer
+    update_serializer = RowSecurityRuleUpdateSerializer
+    ordering_fields = ("priority", "module", "resource", "created_at")
+    default_ordering = ("-priority", "module", "resource")
+
+    def get_queryset(self) -> QuerySet[RowSecurityRule]:
+        queryset = RowSecurityRule.objects.for_tenant(self.tenant_id).filter(is_deleted=False).select_related("role")
+        return self.query(
+            _apply_filters(
+                queryset,
+                self.request.query_params,
+                {
+                    "module": "module",
+                    "resource": "resource",
+                    "role_id": "role_id",
+                    "rule_type": "rule_type",
+                    "is_active": "is_active",
+                },
+            )
+        )
+
+
+class SecurityProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSecurityViewSet):
+    permission_map = {
+        "list": "security.security-profiles:read",
+        "retrieve": "security.security-profiles:read",
+        "create": "security.security-profiles:create",
+        "partial_update": "security.security-profiles:update",
+        "destroy": "security.security-profiles:delete",
+    }
+    search_fields = ("name", "description")
+    ordering_fields = ("name", "created_at", "updated_at")
+    default_ordering = ("name",)
+
+    def get_queryset(self) -> QuerySet[SecurityProfile]:
+        queryset = SecurityProfile.objects.for_tenant(self.tenant_id).filter(is_deleted=False)
+        return self.query(
+            _apply_filters(
+                queryset,
+                self.request.query_params,
+                {"profile_type": "profile_type", "mfa_required": "mfa_required", "is_active": "is_active"},
+            )
+        )
+
+    def get_serializer_class(self) -> type:
+        return {
+            "list": SecurityProfileListSerializer,
+            "retrieve": SecurityProfileDetailSerializer,
+            "create": SecurityProfileCreateSerializer,
+            "partial_update": SecurityProfileUpdateSerializer,
+        }.get(self.action, SecurityProfileDetailSerializer)
+
+    def create(self, request: Any) -> Response:
+        _ensure_local_policy_ownership()
+        serializer = SecurityProfileCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        item = _call(
+            SecurityProfileService.create_profile,
+            self.tenant_id,
+            **serializer.validated_data,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(SecurityProfileDetailSerializer(item).data, status=201)
+
+    def partial_update(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        serializer = SecurityProfileUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        item = _call(
+            SecurityProfileService.update_profile,
+            self.tenant_id,
+            UUID(str(pk)),
+            changes=serializer.validated_data,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(SecurityProfileDetailSerializer(item).data)
+
+    def destroy(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        _call(
+            SecurityProfileService.delete_profile,
+            self.tenant_id,
+            UUID(str(pk)),
+            actor_id=self.actor_id,
+            reason=_deletion_reason(request),
+            correlation_id=self.correlation_id,
+        )
+        return Response(status=204)
+
+
+class SecurityProfileAssignmentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSecurityViewSet):
+    permission_map = {
+        "list": "security.assignments:read",
+        "retrieve": "security.assignments:read",
+        "create": "security.assignments:create",
+        "partial_update": "security.assignments:update",
+        "destroy": "security.assignments:delete",
+    }
+    ordering_fields = ("precedence", "valid_from", "created_at")
+    default_ordering = ("-precedence", "-valid_from")
+
+    def get_queryset(self) -> QuerySet[SecurityProfileAssignment]:
+        queryset = SecurityProfileAssignment.objects.for_tenant(self.tenant_id).select_related(
+            "security_profile", "role"
+        )
+        queryset = _apply_filters(
+            queryset,
+            self.request.query_params,
+            {"profile_id": "security_profile_id", "user_id": "user_id", "role_id": "role_id"},
+        )
+        if self.request.query_params.get("revoked") in {"true", "false"}:
+            queryset = queryset.filter(revoked_at__isnull=self.request.query_params["revoked"] == "false")
+        active_at = self.request.query_params.get("active_at")
+        if active_at:
+            moment = parse_datetime(active_at)
+            if moment is None:
+                raise ValidationError({"active_at": ["Must be an ISO datetime."]})
+            queryset = queryset.filter(valid_from__lte=moment, revoked_at__isnull=True).filter(
+                Q(valid_until__isnull=True) | Q(valid_until__gt=moment)
+            )
+        return self.query(queryset)
+
+    def get_serializer_class(self) -> type:
+        return {
+            "list": SecurityProfileAssignmentListSerializer,
+            "retrieve": SecurityProfileAssignmentDetailSerializer,
+            "create": SecurityProfileAssignmentCreateSerializer,
+            "partial_update": SecurityProfileAssignmentUpdateSerializer,
+        }.get(self.action, SecurityProfileAssignmentDetailSerializer)
+
+    def create(self, request: Any) -> Response:
+        _ensure_local_policy_ownership()
+        serializer = SecurityProfileAssignmentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data)
+        item = _call(
+            SecurityProfileService.assign_profile,
+            self.tenant_id,
+            values.pop("security_profile_id"),
+            **values,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(SecurityProfileAssignmentDetailSerializer(item).data, status=201)
+
+    def partial_update(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        serializer = SecurityProfileAssignmentUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        item = _call(
+            SecurityProfileService.update_profile_assignment,
+            self.tenant_id,
+            UUID(str(pk)),
+            changes=serializer.validated_data,
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(SecurityProfileAssignmentDetailSerializer(item).data)
+
+    def destroy(self, request: Any, pk: str | None = None) -> Response:
+        self.get_object()
+        _ensure_local_policy_ownership()
+        _call(
+            SecurityProfileService.revoke_profile_assignment,
+            self.tenant_id,
+            UUID(str(pk)),
+            reason=_deletion_reason(request),
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
+        )
+        return Response(status=204)
+
+
+class SecurityAuditLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSecurityViewSet):
+    permission_map = {"list": "security.audit-logs:read", "retrieve": "security.audit-logs:read"}
+    ordering_fields = ("timestamp", "action", "decision")
+    default_ordering = ("-timestamp",)
+
+    def get_queryset(self) -> QuerySet[SecurityAuditLog]:
+        queryset = SecurityAuditLog.objects.for_tenant(self.tenant_id)
+        queryset = _apply_filters(
+            queryset,
+            self.request.query_params,
+            {
+                "action": "action",
+                "actor_type": "actor_type",
+                "actor_id": "actor_id",
+                "resource_type": "resource_type",
+                "resource_id": "resource_id",
+                "decision": "decision",
+                "correlation_id": "correlation_id",
             },
         )
+        start = parse_datetime(self.request.query_params["from"]) if "from" in self.request.query_params else None
+        end = parse_datetime(self.request.query_params["to"]) if "to" in self.request.query_params else None
+        if "from" in self.request.query_params and start is None or "to" in self.request.query_params and end is None:
+            raise ValidationError({"range": ["from and to must be ISO datetimes."]})
+        end = end or timezone.now()
+        start = start or end - timedelta(days=90)
+        if end < start or end - start > timedelta(days=90):
+            raise ValidationError({"range": ["Audit range cannot exceed 90 days."]})
+        return self.query(queryset.filter(timestamp__gte=start, timestamp__lte=end))
+
+    def get_serializer_class(self) -> type:
+        return SecurityAuditLogListSerializer if self.action == "list" else SecurityAuditLogDetailSerializer
 
 
-class PermissionSetViewSet(viewsets.ModelViewSet):
-    """API endpoints for permission sets."""
+class AccessDecisionViewSet(GovernedSecurityViewSet):
+    permission_map = {"simulate": "security.access:simulate"}
 
-    permission_classes = [IsAuthenticated]
-
-    def get_serializer_class(self):
-        if self.action in ["create", "update", "partial_update"]:
-            return PermissionSetCreateSerializer
-        return PermissionSetSerializer
-
-    def get_queryset(self):
-        """Filter permission sets by tenant_id."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        if not tenant_id_str:
-            return PermissionSet.objects.none()
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-            queryset = PermissionSet.objects.filter(tenant_id=tenant_id)
-        except (ValueError, TypeError):
-            return PermissionSet.objects.none()
-
-        return queryset.order_by("-created_at")
-
-    def get_object(self):
-        """Override to ensure tenant isolation on detail view."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = None
-        if tenant_id_str:
-            try:
-                tenant_id = uuid.UUID(tenant_id_str)
-            except (ValueError, TypeError):
-                tenant_id = None
-
-        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
-        lookup_value = self.kwargs.get(lookup_url_kwarg)
-
-        if not lookup_value:
-            raise NotFound("Not found.")
-
-        try:
-            obj = PermissionSet.objects.get(**{self.lookup_field: lookup_value})
-        except PermissionSet.DoesNotExist:
-            raise NotFound("Not found.")
-
-        if obj.tenant_id != tenant_id:
-            raise NotFound("Not found.")
-
-        return obj
-
-    def perform_create(self, serializer):
-        """Set tenant_id and audit on create."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
-
-        if not tenant_id:
-            raise ValidationError({"error": "User must belong to a tenant"})
-
-        # Pass tenant_id to serializer context so create() can use it
-        serializer.context["tenant_id"] = tenant_id
-
-        instance = serializer.save(created_by=self.request.user.id)
-
-        SecurityAccessControlService.log_audit_event(
-            action="security.permission_set.created",
-            actor_id=self.request.user.id,
-            resource_type="PermissionSet",
-            resource_id=instance.id,
-            tenant_id=tenant_id,
-            details={"name": instance.name},
+    @action(detail=False, methods=("post",), url_path="simulate")
+    def simulate(self, request: Any) -> Response:
+        serializer = AccessSimulationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = _call(
+            AccessEvaluationService.simulate,
+            self.tenant_id,
+            serializer.validated_data["subject_id"],
+            serializer.validated_data["permission_code"],
+            resource_context=serializer.validated_data.get("resource_context", {}),
+            actor_id=self.actor_id,
+            correlation_id=self.correlation_id,
         )
-
-
-class UserPermissionSetViewSet(viewsets.ModelViewSet):
-    """API endpoints for user permission set grants."""
-
-    permission_classes = [IsAuthenticated]
-    serializer_class = UserPermissionSetSerializer
-
-    def get_queryset(self):
-        """Filter user permission sets by tenant_id via permission_set."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        if not tenant_id_str:
-            return UserPermissionSet.objects.none()
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-            queryset = UserPermissionSet.objects.filter(permission_set__tenant_id=tenant_id)
-        except (ValueError, TypeError):
-            return UserPermissionSet.objects.none()
-
-        # Filter by user_id if provided
-        user_id = self.request.query_params.get("user_id", None)
-        if user_id:
-            queryset = queryset.filter(user_id=user_id)
-
-        return queryset.order_by("-granted_at")
-
-    def perform_create(self, serializer):
-        """Set granted_by and audit on create."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
-
-        instance = serializer.save(granted_by=self.request.user.id)
-
-        SecurityAccessControlService.log_audit_event(
-            action="security.user_permission_set.granted",
-            actor_id=self.request.user.id,
-            resource_type="UserPermissionSet",
-            resource_id=instance.id,
-            tenant_id=tenant_id,
-            details={
-                "user_id": str(instance.user.id),
-                "permission_set_id": str(instance.permission_set.id),
-                "expires_at": instance.expires_at.isoformat(),
-            },
-        )
-
-
-class FieldSecurityViewSet(viewsets.ModelViewSet):
-    """API endpoints for field-level security."""
-
-    permission_classes = [IsAuthenticated]
-
-    def get_serializer_class(self):
-        if self.action in ["create", "update", "partial_update"]:
-            return FieldSecurityCreateSerializer
-        return FieldSecuritySerializer
-
-    def get_queryset(self):
-        """Filter field security by tenant_id."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        if not tenant_id_str:
-            return FieldSecurity.objects.none()
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-            queryset = FieldSecurity.objects.filter(tenant_id=tenant_id)
-        except (ValueError, TypeError):
-            return FieldSecurity.objects.none()
-
-        # Filter by module/object if provided
-        module = self.request.query_params.get("module", None)
-        if module:
-            queryset = queryset.filter(module=module)
-
-        object_name = self.request.query_params.get("object", None)
-        if object_name:
-            queryset = queryset.filter(object=object_name)
-
-        return queryset.order_by("module", "object", "field")
-
-    def get_object(self):
-        """Override to ensure tenant isolation on detail view."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = None
-        if tenant_id_str:
-            try:
-                tenant_id = uuid.UUID(tenant_id_str)
-            except (ValueError, TypeError):
-                tenant_id = None
-
-        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
-        lookup_value = self.kwargs.get(lookup_url_kwarg)
-
-        if not lookup_value:
-            raise NotFound("Not found.")
-
-        try:
-            obj = FieldSecurity.objects.get(**{self.lookup_field: lookup_value})
-        except FieldSecurity.DoesNotExist:
-            raise NotFound("Not found.")
-
-        if obj.tenant_id != tenant_id:
-            raise NotFound("Not found.")
-
-        return obj
-
-    def perform_create(self, serializer):
-        """Set tenant_id and audit on create."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
-
-        instance = serializer.save(tenant_id=tenant_id)
-
-        SecurityAccessControlService.log_audit_event(
-            action="security.field_security.created",
-            actor_id=self.request.user.id,
-            resource_type="FieldSecurity",
-            resource_id=instance.id,
-            tenant_id=tenant_id,
-            details={
-                "module": instance.module,
-                "object": instance.object,
-                "field": instance.field,
-            },
-        )
-
-
-class RowSecurityRuleViewSet(viewsets.ModelViewSet):
-    """API endpoints for row-level security rules."""
-
-    permission_classes = [IsAuthenticated]
-
-    def get_serializer_class(self):
-        if self.action in ["create", "update", "partial_update"]:
-            return RowSecurityRuleCreateSerializer
-        return RowSecurityRuleSerializer
-
-    def get_queryset(self):
-        """Filter row security rules by tenant_id."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        if not tenant_id_str:
-            return RowSecurityRule.objects.none()
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-            queryset = RowSecurityRule.objects.filter(tenant_id=tenant_id)
-        except (ValueError, TypeError):
-            return RowSecurityRule.objects.none()
-
-        # Filter by module/object if provided
-        module = self.request.query_params.get("module", None)
-        if module:
-            queryset = queryset.filter(module=module)
-
-        object_name = self.request.query_params.get("object", None)
-        if object_name:
-            queryset = queryset.filter(object=object_name)
-
-        return queryset.order_by("-priority", "module", "object")
-
-    def get_object(self):
-        """Override to ensure tenant isolation on detail view."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = None
-        if tenant_id_str:
-            try:
-                tenant_id = uuid.UUID(tenant_id_str)
-            except (ValueError, TypeError):
-                tenant_id = None
-
-        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
-        lookup_value = self.kwargs.get(lookup_url_kwarg)
-
-        if not lookup_value:
-            raise NotFound("Not found.")
-
-        try:
-            obj = RowSecurityRule.objects.get(**{self.lookup_field: lookup_value})
-        except RowSecurityRule.DoesNotExist:
-            raise NotFound("Not found.")
-
-        if obj.tenant_id != tenant_id:
-            raise NotFound("Not found.")
-
-        return obj
-
-    def perform_create(self, serializer):
-        """Set tenant_id and audit on create."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
-
-        instance = serializer.save(tenant_id=tenant_id)
-
-        SecurityAccessControlService.log_audit_event(
-            action="security.row_security_rule.created",
-            actor_id=self.request.user.id,
-            resource_type="RowSecurityRule",
-            resource_id=instance.id,
-            tenant_id=tenant_id,
-            details={
-                "module": instance.module,
-                "object": instance.object,
-                "rule_type": instance.rule_type,
-            },
-        )
-
-
-class SecurityProfileViewSet(viewsets.ModelViewSet):
-    """API endpoints for security profiles."""
-
-    permission_classes = [IsAuthenticated]
-
-    def get_serializer_class(self):
-        if self.action in ["create", "update", "partial_update"]:
-            return SecurityProfileCreateSerializer
-        return SecurityProfileSerializer
-
-    def get_queryset(self):
-        """Filter security profiles by tenant_id."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        if not tenant_id_str:
-            return SecurityProfile.objects.none()
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-            queryset = SecurityProfile.objects.filter(tenant_id=tenant_id)
-        except (ValueError, TypeError):
-            return SecurityProfile.objects.none()
-
-        # Filter by profile_type if provided
-        profile_type = self.request.query_params.get("profile_type", None)
-        if profile_type:
-            queryset = queryset.filter(profile_type=profile_type)
-
-        return queryset.order_by("-created_at")
-
-    def get_object(self):
-        """Override to ensure tenant isolation on detail view."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = None
-        if tenant_id_str:
-            try:
-                tenant_id = uuid.UUID(tenant_id_str)
-            except (ValueError, TypeError):
-                tenant_id = None
-
-        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
-        lookup_value = self.kwargs.get(lookup_url_kwarg)
-
-        if not lookup_value:
-            raise NotFound("Not found.")
-
-        try:
-            obj = SecurityProfile.objects.get(**{self.lookup_field: lookup_value})
-        except SecurityProfile.DoesNotExist:
-            raise NotFound("Not found.")
-
-        if obj.tenant_id != tenant_id:
-            raise NotFound("Not found.")
-
-        return obj
-
-    def perform_create(self, serializer):
-        """Set tenant_id and audit on create."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = uuid.UUID(tenant_id_str) if tenant_id_str else None
-
-        if not tenant_id:
-            raise ValidationError({"error": "User must belong to a tenant"})
-
-        # Pass tenant_id to serializer context so create() can use it
-        serializer.context["tenant_id"] = tenant_id
-
-        instance = serializer.save(created_by=self.request.user.id)
-
-        SecurityAccessControlService.log_audit_event(
-            action="security.security_profile.created",
-            actor_id=self.request.user.id,
-            resource_type="SecurityProfile",
-            resource_id=instance.id,
-            tenant_id=tenant_id,
-            details={"name": instance.name, "profile_type": instance.profile_type},
-        )
-
-
-class SecurityAuditLogViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    API endpoints for security audit logs (read-only).
-
-    CRITICAL: No create/update/delete allowed.
-    """
-
-    permission_classes = [IsAuthenticated]
-    serializer_class = SecurityAuditLogSerializer
-
-    def get_queryset(self):
-        """Filter audit logs by tenant_id."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        if not tenant_id_str:
-            return SecurityAuditLog.objects.none()
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-            queryset = SecurityAuditLog.objects.filter(tenant_id=tenant_id)
-        except (ValueError, TypeError):
-            return SecurityAuditLog.objects.none()
-
-        # Filter by action if provided
-        action_filter = self.request.query_params.get("action", None)
-        if action_filter:
-            queryset = queryset.filter(action__icontains=action_filter)
-
-        # Filter by decision if provided
-        decision = self.request.query_params.get("decision", None)
-        if decision:
-            queryset = queryset.filter(decision=decision)
-
-        return queryset.order_by("-timestamp")
-
-    def get_object(self):
-        """Override to ensure tenant isolation on detail view."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        tenant_id = None
-        if tenant_id_str:
-            try:
-                tenant_id = uuid.UUID(tenant_id_str)
-            except (ValueError, TypeError):
-                tenant_id = None
-
-        lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
-        lookup_value = self.kwargs.get(lookup_url_kwarg)
-
-        if not lookup_value:
-            raise NotFound("Not found.")
-
-        try:
-            obj = SecurityAuditLog.objects.get(**{self.lookup_field: lookup_value})
-        except SecurityAuditLog.DoesNotExist:
-            raise NotFound("Not found.")
-
-        if obj.tenant_id is not None and obj.tenant_id != tenant_id:
-            raise NotFound("Not found.")
-
-        return obj
+        payload = {
+            **asdict(result),
+            "subject_id": str(serializer.validated_data["subject_id"]),
+            "decision": "allow" if result.allowed else "deny",
+            "entitlement": {"required": False, "allowed": True},
+            "quota": {"required": False, "allowed": True, "remaining": None},
+            "field_decisions": [],
+            "row_explanation": None,
+            "audit_log_id": result.audit_id,
+            "correlation_id": self.correlation_id,
+            "evaluated_at": timezone.now(),
+        }
+        return Response(AccessDecisionSerializer(payload).data)
+
+
+__all__ = [name for name in globals() if name.endswith("ViewSet")]

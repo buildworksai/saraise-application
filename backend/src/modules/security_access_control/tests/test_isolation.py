@@ -1,260 +1,205 @@
-"""
-Security & Access Control Tenant Isolation Tests
+"""Governed-envelope isolation plus nested/action immutability proofs."""
 
-CRITICAL: These tests verify tenant isolation.
-Users can only access roles, permission sets, and security profiles
-belonging to their tenant.
-"""
+from __future__ import annotations
 
 import uuid
-from unittest.mock import patch
+from datetime import timedelta
 
 import pytest
-from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework import status
-from rest_framework.test import APIClient
+from rest_framework.permissions import IsAuthenticated
 
-from src.core.user_models import UserProfile
-from src.modules.tenant_management.models import Tenant
+from src.core.testing.tenant_contract import TenantIsolationContract
+from src.modules.security_access_control.api import GovernedSecurityViewSet
+from src.modules.security_access_control.models import (
+    FieldSecurity,
+    Permission,
+    PermissionSet,
+    PermissionSetPermission,
+    Role,
+    RolePermission,
+    RowSecurityRule,
+    SecurityAuditLog,
+    SecurityProfile,
+    SecurityProfileAssignment,
+    UserPermissionSet,
+    UserRole,
+)
 
-from src.modules.security_access_control.models import PermissionSet, Role, SecurityProfile
+pytest_plugins = ["src.core.testing.factories"]
+pytestmark = pytest.mark.django_db
+BASE = "/api/v2/security-access-control"
 
-User = get_user_model()
+
+@pytest.fixture(autouse=True)
+def authorize_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(GovernedSecurityViewSet, "get_permissions", lambda self: [IsAuthenticated()])
+
+
+class V2IsolationContract(TenantIsolationContract):
+    read_denial_statuses = frozenset({status.HTTP_404_NOT_FOUND})
+
+    def get_list_items(self, response: object) -> list[dict[str, object]]:
+        return response.json()["data"]
+
+    def test_cross_tenant_delete_is_denied_and_unchanged(self) -> None:
+        """Supply required domain reason while proving the foreign row is invisible."""
+
+        _, foreign = self._validated_rows()
+        before = self._row_snapshot(foreign)
+        response = self.get_client().delete(f"{self.get_detail_url(foreign)}?reason=isolation-proof")
+        assert response.status_code == 404, response.content
+        assert self._row_snapshot(foreign) == before
 
 
 @pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
-
-
-@pytest.fixture
-def tenant_a_user(db):
-    """Create a user for Tenant A."""
-    tenant_a = Tenant.objects.create(name="Tenant A", slug="tenant-a")
-    user = User.objects.create_user(
-        username="user_a",
-        email="user_a@example.com",
-        password="testpass123",
+def role_pair(tenant_a, tenant_b) -> tuple[Role, Role]:
+    return (
+        Role.objects.create(tenant_id=tenant_a.id, name="Own role", code="own_role"),
+        Role.objects.create(tenant_id=tenant_b.id, name="Foreign role", code="foreign_role"),
     )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": str(tenant_a.id), "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = str(tenant_a.id)
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    # Force reload user to ensure profile is accessible
-    user = User.objects.select_related("profile").get(pk=user.pk)
-    return user
 
 
 @pytest.fixture
-def tenant_b_user(db):
-    """Create a user for Tenant B."""
-    tenant_b = Tenant.objects.create(name="Tenant B", slug="tenant-b")
-    user = User.objects.create_user(
-        username="user_b",
-        email="user_b@example.com",
-        password="testpass123",
+def set_pair(tenant_a, tenant_b) -> tuple[PermissionSet, PermissionSet]:
+    return (
+        PermissionSet.objects.create(tenant_id=tenant_a.id, name="Own set"),
+        PermissionSet.objects.create(tenant_id=tenant_b.id, name="Foreign set"),
     )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": str(tenant_b.id), "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = str(tenant_b.id)
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    # Force reload user to ensure profile is accessible
-    user = User.objects.select_related("profile").get(pk=user.pk)
-    return user
 
 
 @pytest.fixture
-def client_a(api_client, tenant_a_user):
-    """Authenticated client for User A."""
-    api_client.force_authenticate(user=tenant_a_user)
-    return api_client
+def profile_pair(tenant_a, tenant_b) -> tuple[SecurityProfile, SecurityProfile]:
+    return (
+        SecurityProfile.objects.create(tenant_id=tenant_a.id, name="Own profile"),
+        SecurityProfile.objects.create(tenant_id=tenant_b.id, name="Foreign profile"),
+    )
 
 
-@pytest.fixture
-def client_b(api_client, tenant_b_user):
-    """Authenticated client for User B."""
-    api_client.force_authenticate(user=tenant_b_user)
-    return api_client
+class TestRoleIsolation(V2IsolationContract):
+    model = Role
+    list_url = f"{BASE}/roles/"
+    detail_url_template = f"{BASE}/roles/{{pk}}/"
+    create_payload = {"name": "Spoof role", "code": "spoof_role", "tenant_id": str(uuid.uuid4())}
+    update_payload = {"name": "Cross tenant"}
+
+    @pytest.fixture(autouse=True)
+    def context(self, authenticated_tenant_a_client, role_pair) -> None:
+        self.client = authenticated_tenant_a_client
+        self.tenant_a_row, self.tenant_b_row = role_pair
 
 
-@pytest.mark.django_db
-class TestTenantIsolation:
-    """
-    CRITICAL: Tenant isolation tests.
-    These tests verify that tenants cannot access each other's data.
-    """
+class TestPermissionSetIsolation(V2IsolationContract):
+    model = PermissionSet
+    list_url = f"{BASE}/permission-sets/"
+    detail_url_template = f"{BASE}/permission-sets/{{pk}}/"
+    create_payload = {"name": "Spoof set", "tenant_id": str(uuid.uuid4())}
+    update_payload = {"name": "Cross tenant"}
 
-    def test_user_cannot_list_other_tenant_roles(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's roles in list."""
-        from src.core.auth_utils import get_user_tenant_id
+    @pytest.fixture(autouse=True)
+    def context(self, authenticated_tenant_a_client, set_pair) -> None:
+        self.client = authenticated_tenant_a_client
+        self.tenant_a_row, self.tenant_b_row = set_pair
 
-        tenant_a_id_str = get_user_tenant_id(tenant_a_user)
-        tenant_b_id_str = get_user_tenant_id(tenant_b_user)
-        tenant_a_id = uuid.UUID(tenant_a_id_str) if tenant_a_id_str else None
-        tenant_b_id = uuid.UUID(tenant_b_id_str) if tenant_b_id_str else None
 
-        # Create role for tenant A
-        Role.objects.create(tenant_id=tenant_a_id, name="Tenant A Role", code="tenant_a_role")
+class TestSecurityProfileIsolation(V2IsolationContract):
+    model = SecurityProfile
+    list_url = f"{BASE}/security-profiles/"
+    detail_url_template = f"{BASE}/security-profiles/{{pk}}/"
+    create_payload = {"name": "Spoof profile", "tenant_id": str(uuid.uuid4())}
+    update_payload = {"description": "Cross tenant"}
 
-        # Create role for tenant B
-        other_role = Role.objects.create(tenant_id=tenant_b_id, name="Tenant B Role", code="tenant_b_role")
+    @pytest.fixture(autouse=True)
+    def context(self, authenticated_tenant_a_client, profile_pair) -> None:
+        self.client = authenticated_tenant_a_client
+        self.tenant_a_row, self.tenant_b_row = profile_pair
 
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
 
-        response = api_client.get("/api/v1/security-access-control/roles/")
+def snapshot(row: object) -> tuple[object, ...]:
+    return tuple(getattr(row, field.attname) for field in row._meta.concrete_fields)
 
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        names = [r["name"] for r in data]
-        assert "Tenant A Role" in names
-        assert "Tenant B Role" not in names
-        role_ids = [r["id"] for r in data]
-        assert str(other_role.id) not in role_ids
 
-    def test_user_cannot_access_other_tenant_role(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot GET other tenant's role by ID."""
-        from src.core.auth_utils import get_user_tenant_id
+def assert_foreign_unchanged(client, row, collection: str, update: dict[str, object]) -> None:
+    row.refresh_from_db()
+    before = snapshot(row)
+    path = f"{BASE}/{collection}/{row.id}/"
+    assert client.get(path).status_code == 404
+    assert client.patch(path, update, format="json").status_code == 404
+    assert client.delete(f"{path}?reason=foreign").status_code == 404
+    row.refresh_from_db()
+    assert snapshot(row) == before
 
-        tenant_b_id_str = get_user_tenant_id(tenant_b_user)
 
-        if not tenant_b_id_str:
-            pytest.skip("User must have tenant_id for isolation tests")
+def test_every_tenant_list_and_detail_excludes_foreign_resources(
+    authenticated_tenant_a_client,
+    tenant_a,
+    tenant_b,
+    tenant_a_user,
+    tenant_b_user,
+    role_pair,
+    set_pair,
+    profile_pair,
+) -> None:
+    own_role, foreign_role = role_pair
+    own_set, foreign_set = set_pair
+    own_profile, foreign_profile = profile_pair
+    actor = tenant_a_user.id
+    foreign_actor = tenant_b_user.id
+    pairs = [
+        ("user-roles", UserRole.objects.create(tenant_id=tenant_a.id, user=tenant_a_user, role=own_role, assigned_by=actor, reason="own"), UserRole.objects.create(tenant_id=tenant_b.id, user=tenant_b_user, role=foreign_role, assigned_by=foreign_actor, reason="foreign")),
+        ("user-permission-sets", UserPermissionSet.objects.create(tenant_id=tenant_a.id, user=tenant_a_user, permission_set=own_set, expires_at=timezone.now() + timedelta(days=1), granted_by=actor, reason="own"), UserPermissionSet.objects.create(tenant_id=tenant_b.id, user=tenant_b_user, permission_set=foreign_set, expires_at=timezone.now() + timedelta(days=1), granted_by=foreign_actor, reason="foreign")),
+        ("field-security", FieldSecurity.objects.create(tenant_id=tenant_a.id, module="m", resource="r", field="f", role=own_role), FieldSecurity.objects.create(tenant_id=tenant_b.id, module="m", resource="r", field="f", role=foreign_role)),
+        ("row-security-rules", RowSecurityRule.objects.create(tenant_id=tenant_a.id, module="m", resource="r", role=own_role, filter_criteria={"op": "tenant", "field": "tenant_id"}), RowSecurityRule.objects.create(tenant_id=tenant_b.id, module="m", resource="r", role=foreign_role, filter_criteria={"op": "tenant", "field": "tenant_id"})),
+        ("security-profile-assignments", SecurityProfileAssignment.objects.create(tenant_id=tenant_a.id, security_profile=own_profile, user=tenant_a_user, assigned_by=actor, reason="own"), SecurityProfileAssignment.objects.create(tenant_id=tenant_b.id, security_profile=foreign_profile, user=tenant_b_user, assigned_by=foreign_actor, reason="foreign")),
+        ("audit-logs", SecurityAuditLog.objects.create(tenant_id=tenant_a.id, action="own", actor_id=actor, resource_type="test", correlation_id="own"), SecurityAuditLog.objects.create(tenant_id=tenant_b.id, action="foreign", actor_id=foreign_actor, resource_type="test", correlation_id="foreign")),
+    ]
+    for collection, own, foreign in pairs:
+        response = authenticated_tenant_a_client.get(f"{BASE}/{collection}/")
+        assert response.status_code == 200
+        ids = {row["id"] for row in response.json()["data"]}
+        assert str(own.id) in ids and str(foreign.id) not in ids
+        assert authenticated_tenant_a_client.get(f"{BASE}/{collection}/{foreign.id}/").status_code == 404
 
-        tenant_b_id = uuid.UUID(tenant_b_id_str)
 
-        # Create role for tenant B
-        other_role = Role.objects.create(tenant_id=tenant_b_id, name="Other Role", code="other_role")
+def test_cross_tenant_nested_membership_decision_assignment_simulation_and_mutations_leave_bytes(
+    authenticated_tenant_a_client,
+    tenant_b,
+    tenant_b_user,
+    role_pair,
+    set_pair,
+    profile_pair,
+) -> None:
+    _, foreign_role = role_pair
+    _, foreign_set = set_pair
+    _, foreign_profile = profile_pair
+    permission = Permission.objects.create(module="m", resource="r", action="read", name="Read")
+    role_decision = RolePermission.objects.create(tenant_id=tenant_b.id, role=foreign_role, permission=permission)
+    membership = PermissionSetPermission.objects.create(tenant_id=tenant_b.id, permission_set=foreign_set, permission=permission, added_by=tenant_b_user.id)
+    role_decision.refresh_from_db(); membership.refresh_from_db()
+    before_role, before_set = snapshot(role_decision), snapshot(membership)
+    assert authenticated_tenant_a_client.post(f"{BASE}/roles/{foreign_role.id}/permissions/", {"permission_id": str(permission.id), "is_granted": False}, format="json").status_code == 404
+    assert authenticated_tenant_a_client.delete(f"{BASE}/roles/{foreign_role.id}/permissions/{permission.id}/").status_code == 404
+    assert authenticated_tenant_a_client.put(f"{BASE}/permission-sets/{foreign_set.id}/permissions/", {"permission_ids": []}, format="json").status_code == 404
+    assert authenticated_tenant_a_client.post(f"{BASE}/user-roles/", {"user_id": str(tenant_b_user.id), "role_id": str(foreign_role.id), "reason": "spoof"}, format="json").status_code == 404
+    assert authenticated_tenant_a_client.post(f"{BASE}/user-permission-sets/", {"user_id": str(tenant_b_user.id), "permission_set_id": str(foreign_set.id), "duration_days": 1, "reason": "spoof"}, format="json").status_code == 404
+    assert authenticated_tenant_a_client.post(f"{BASE}/security-profile-assignments/", {"security_profile_id": str(foreign_profile.id), "user_id": str(tenant_b_user.id), "reason": "spoof"}, format="json").status_code == 404
+    assert authenticated_tenant_a_client.post(f"{BASE}/access-decisions/simulate/", {"subject_id": str(tenant_b_user.id), "permission_code": permission.code, "resource_context": {}}, format="json").status_code == 404
+    role_decision.refresh_from_db(); membership.refresh_from_db()
+    assert snapshot(role_decision) == before_role and snapshot(membership) == before_set
 
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
 
-        response = api_client.get(f"/api/v1/security-access-control/roles/{other_role.id}/")
-
-        # MUST return 404 (not 403) to hide existence
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    def test_user_cannot_update_other_tenant_role(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot PATCH other tenant's role."""
-        from src.core.auth_utils import get_user_tenant_id
-
-        tenant_b_id_str = get_user_tenant_id(tenant_b_user)
-
-        if not tenant_b_id_str:
-            pytest.skip("User must have tenant_id for isolation tests")
-
-        tenant_b_id = uuid.UUID(tenant_b_id_str)
-
-        # Create role for tenant B
-        other_role = Role.objects.create(tenant_id=tenant_b_id, name="Other Role", code="other_role")
-        original_name = other_role.name
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        data = {"name": "Updated Name"}
-        response = api_client.patch(
-            f"/api/v1/security-access-control/roles/{other_role.id}/",
-            data,
-            format="json",
-        )
-
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-        # Ensure name was not changed
-        other_role.refresh_from_db()
-        assert other_role.name == original_name
-
-    def test_user_cannot_delete_other_tenant_role(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot DELETE other tenant's role."""
-        from src.core.auth_utils import get_user_tenant_id
-
-        tenant_b_id_str = get_user_tenant_id(tenant_b_user)
-
-        if not tenant_b_id_str:
-            pytest.skip("User must have tenant_id for isolation tests")
-
-        tenant_b_id = uuid.UUID(tenant_b_id_str)
-
-        # Create role for tenant B
-        other_role = Role.objects.create(tenant_id=tenant_b_id, name="Other Role", code="other_role")
-        initial_count = Role.objects.count()
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        response = api_client.delete(f"/api/v1/security-access-control/roles/{other_role.id}/")
-
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-        # Ensure role was not deleted
-        assert Role.objects.count() == initial_count
-
-    def test_permission_set_tenant_isolation(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User A should not see permission sets belonging to Tenant B."""
-        from src.core.auth_utils import get_user_tenant_id
-
-        tenant_a_id_str = get_user_tenant_id(tenant_a_user)
-        tenant_b_id_str = get_user_tenant_id(tenant_b_user)
-
-        if not tenant_a_id_str or not tenant_b_id_str:
-            pytest.skip("Users must have tenant_id for isolation tests")
-
-        tenant_a_id = uuid.UUID(tenant_a_id_str)
-        tenant_b_id = uuid.UUID(tenant_b_id_str)
-
-        PermissionSet.objects.create(tenant_id=tenant_a_id, name="Tenant A Set", permission_ids=[])
-        other_set = PermissionSet.objects.create(tenant_id=tenant_b_id, name="Tenant B Set", permission_ids=[])
-
-        api_client.force_authenticate(user=tenant_a_user)
-
-        response = api_client.get("/api/v1/security-access-control/permission-sets/")
-        assert response.status_code == status.HTTP_200_OK
-        names = [s["name"] for s in response.data]
-        assert "Tenant A Set" in names
-        assert "Tenant B Set" not in names
-        set_ids = [s["id"] for s in response.data]
-        assert str(other_set.id) not in set_ids
-
-    def test_security_profile_tenant_isolation(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User A should not see security profiles belonging to Tenant B."""
-        from src.core.auth_utils import get_user_tenant_id
-
-        tenant_a_id_str = get_user_tenant_id(tenant_a_user)
-        tenant_b_id_str = get_user_tenant_id(tenant_b_user)
-
-        if not tenant_a_id_str or not tenant_b_id_str:
-            pytest.skip("Users must have tenant_id for isolation tests")
-
-        tenant_a_id = uuid.UUID(tenant_a_id_str)
-        tenant_b_id = uuid.UUID(tenant_b_id_str)
-
-        SecurityProfile.objects.create(
-            tenant_id=tenant_a_id,
-            name="Tenant A Profile",
-            profile_type=SecurityProfile.ProfileType.STANDARD,
-        )
-        other_profile = SecurityProfile.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Profile",
-            profile_type=SecurityProfile.ProfileType.STANDARD,
-        )
-
-        api_client.force_authenticate(user=tenant_a_user)
-
-        response = api_client.get("/api/v1/security-access-control/security-profiles/")
-        assert response.status_code == status.HTTP_200_OK
-        names = [p["name"] for p in response.data]
-        assert "Tenant A Profile" in names
-        assert "Tenant B Profile" not in names
-        profile_ids = [p["id"] for p in response.data]
-        assert str(other_profile.id) not in profile_ids
+def test_foreign_update_delete_for_assignment_rule_and_profile_are_404(
+    authenticated_tenant_a_client, tenant_b, tenant_b_user, role_pair, set_pair, profile_pair
+) -> None:
+    _, role = role_pair; _, permission_set = set_pair; _, profile = profile_pair
+    actor = tenant_b_user.id
+    rows = [
+        (UserRole.objects.create(tenant_id=tenant_b.id, user=tenant_b_user, role=role, assigned_by=actor, reason="foreign"), "user-roles", {"reason": "changed"}),
+        (UserPermissionSet.objects.create(tenant_id=tenant_b.id, user=tenant_b_user, permission_set=permission_set, expires_at=timezone.now() + timedelta(days=1), granted_by=actor, reason="foreign"), "user-permission-sets", {"expires_at": (timezone.now() + timedelta(days=2)).isoformat()}),
+        (FieldSecurity.objects.create(tenant_id=tenant_b.id, module="m", resource="r", field="f2", role=role), "field-security", {"visibility": "hidden"}),
+        (RowSecurityRule.objects.create(tenant_id=tenant_b.id, module="m", resource="r2", role=role, filter_criteria={"op": "tenant", "field": "tenant_id"}), "row-security-rules", {"priority": 10}),
+        (SecurityProfileAssignment.objects.create(tenant_id=tenant_b.id, security_profile=profile, user=tenant_b_user, assigned_by=actor, reason="foreign"), "security-profile-assignments", {"precedence": 10}),
+    ]
+    for row, collection, update in rows:
+        assert_foreign_unchanged(authenticated_tenant_a_client, row, collection, update)

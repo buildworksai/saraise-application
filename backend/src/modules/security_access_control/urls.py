@@ -6,12 +6,14 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .api import (
+    AccessDecisionViewSet,
     FieldSecurityViewSet,
     PermissionSetViewSet,
     PermissionViewSet,
     RoleViewSet,
     RowSecurityRuleViewSet,
     SecurityAuditLogViewSet,
+    SecurityProfileAssignmentViewSet,
     SecurityProfileViewSet,
     UserPermissionSetViewSet,
     UserRoleViewSet,
@@ -35,7 +37,13 @@ router.register(
     basename="security-row-security-rules",
 )
 router.register(r"security-profiles", SecurityProfileViewSet, basename="security-profiles")
+router.register(
+    r"security-profile-assignments",
+    SecurityProfileAssignmentViewSet,
+    basename="security-profile-assignments",
+)
 router.register(r"audit-logs", SecurityAuditLogViewSet, basename="security-audit-logs")
+router.register(r"access-decisions", AccessDecisionViewSet, basename="security-access-decisions")
 
 urlpatterns = [
     path("", include(router.urls)),

@@ -1,8 +1,8 @@
-"""
-Security & Access Control Serializers.
+"""Operation-specific serializers for the governed security API v2."""
 
-DRF serializers for Security & Access Control models.
-"""
+from __future__ import annotations
+
+from typing import Any
 
 from rest_framework import serializers
 
@@ -15,65 +15,58 @@ from .models import (
     RowSecurityRule,
     SecurityAuditLog,
     SecurityProfile,
+    SecurityProfileAssignment,
     UserPermissionSet,
     UserRole,
 )
+from .predicates import validate_predicate
+from .validators import redact_sensitive
+
+UUID = serializers.UUIDField
 
 
-class PermissionSerializer(serializers.ModelSerializer):
-    """Serializer for permissions (read-only)."""
-
-    permission_string = serializers.SerializerMethodField()
+class PermissionSerializer(serializers.ModelSerializer[Permission]):
+    code = serializers.CharField(read_only=True)
 
     class Meta:
         model = Permission
-        fields = [
-            "id",
-            "module",
-            "object",
-            "action",
-            "name",
-            "description",
-            "permission_string",
-            "created_at",
-        ]
+        fields = ("id", "module", "resource", "action", "code", "name", "description", "risk_level", "created_at")
         read_only_fields = fields
 
-    def get_permission_string(self, obj):
-        """Return permission in module:object:action format."""
-        return f"{obj.module}:{obj.object}:{obj.action}"
+
+PermissionListSerializer = PermissionSerializer
+PermissionDetailSerializer = PermissionSerializer
 
 
-class RolePermissionSerializer(serializers.ModelSerializer):
-    """Serializer for role-permission relationships."""
-
+class RolePermissionSerializer(serializers.ModelSerializer[RolePermission]):
     permission = PermissionSerializer(read_only=True)
-    permission_id = serializers.UUIDField(write_only=True, required=False)
+    role_id = serializers.UUIDField(read_only=True)
+    permission_id = serializers.UUIDField(read_only=True)
 
     class Meta:
         model = RolePermission
-        fields = [
+        fields = (
             "id",
-            "role",
-            "permission",
+            "tenant_id",
+            "role_id",
             "permission_id",
+            "permission",
             "is_granted",
             "created_at",
-        ]
-        read_only_fields = ["id", "created_at"]
+            "updated_at",
+            "created_by",
+            "updated_by",
+        )
+        read_only_fields = fields
 
 
-class RoleSerializer(serializers.ModelSerializer):
-    """Serializer for roles."""
-
-    permissions = PermissionSerializer(many=True, read_only=True, source="role_permissions.permission")
-    permission_count = serializers.SerializerMethodField()
+class RoleListSerializer(serializers.ModelSerializer[Role]):
+    parent_role_id = serializers.UUIDField(read_only=True, allow_null=True)
 
     class Meta:
         model = Role
-        fields = [
+        fields = (
             "id",
-            "tenant_id",
             "name",
             "code",
             "description",
@@ -82,334 +75,510 @@ class RoleSerializer(serializers.ModelSerializer):
             "hierarchy_level",
             "is_active",
             "is_system",
-            "permissions",
-            "permission_count",
+            "is_deleted",
             "created_at",
             "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
-
-    def get_permission_count(self, obj):
-        """Get count of permissions assigned to this role."""
-        return obj.role_permissions.filter(is_granted=True).count()
-
-    def validate_code(self, value):
-        """Validate role code format."""
-        if not value or len(value) < 2:
-            raise serializers.ValidationError("Code must be at least 2 characters")
-        # Convert to snake_case
-        return value.lower().replace(" ", "_").replace("-", "_")
+            "created_by",
+            "updated_by",
+            "deleted_at",
+        )
+        read_only_fields = fields
 
 
-class RoleCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating roles."""
+class RoleDetailSerializer(RoleListSerializer):
+    permissions = RolePermissionSerializer(source="role_permissions", many=True, read_only=True)
 
-    tenant_id = serializers.UUIDField(read_only=True)  # Include in response
-
-    class Meta:
-        model = Role
-        fields = [
-            "id",
-            "tenant_id",
-            "name",
-            "code",
-            "description",
-            "role_type",
-            "parent_role_id",
-            "hierarchy_level",
-            "is_active",
-            "is_system",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
-
-    def validate_code(self, value):
-        """Validate role code format."""
-        if not value or len(value) < 2:
-            raise serializers.ValidationError("Code must be at least 2 characters")
-        return value.lower().replace(" ", "_").replace("-", "_")
-
-    def create(self, validated_data):
-        """Create role with tenant_id from view context."""
-        # Get tenant_id from view context (set in perform_create)
-        tenant_id = self.context.get("tenant_id")
-        if not tenant_id:
-            raise serializers.ValidationError("tenant_id is required")
-        validated_data["tenant_id"] = tenant_id
-        return super().create(validated_data)
+    class Meta(RoleListSerializer.Meta):
+        fields = RoleListSerializer.Meta.fields + ("permissions",)
 
 
-class UserRoleSerializer(serializers.ModelSerializer):
-    """Serializer for user-role assignments."""
+class RoleCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    name = serializers.CharField(max_length=255)
+    code = serializers.RegexField(r"^[a-z][a-z0-9_]{0,99}$")
+    description = serializers.CharField(required=False, allow_blank=True, max_length=4000)
+    role_type = serializers.ChoiceField(choices=Role.RoleType.choices, default=Role.RoleType.CUSTOM)
+    parent_role_id = serializers.UUIDField(required=False, allow_null=True)
 
-    role = RoleSerializer(read_only=True)
-    role_id = serializers.UUIDField(write_only=True)
-    is_active = serializers.SerializerMethodField()
+
+class RoleUpdateSerializer(serializers.Serializer[dict[str, Any]]):
+    name = serializers.CharField(max_length=255, required=False)
+    code = serializers.RegexField(r"^[a-z][a-z0-9_]{0,99}$", required=False)
+    description = serializers.CharField(required=False, allow_blank=True, max_length=4000)
+    role_type = serializers.ChoiceField(choices=Role.RoleType.choices, required=False)
+    parent_role_id = serializers.UUIDField(required=False, allow_null=True)
+    is_active = serializers.BooleanField(required=False)
+
+
+class SetRolePermissionSerializer(serializers.Serializer[dict[str, Any]]):
+    permission_id = serializers.UUIDField()
+    is_granted = serializers.BooleanField()
+
+
+class UserRoleListSerializer(serializers.ModelSerializer[UserRole]):
+    is_active = serializers.BooleanField(read_only=True)
+    role = RoleListSerializer(read_only=True)
+    role_id = serializers.UUIDField(read_only=True)
+    user_id = serializers.CharField(read_only=True)
 
     class Meta:
         model = UserRole
-        fields = [
+        fields = (
             "id",
-            "user",
-            "role",
+            "tenant_id",
+            "user_id",
             "role_id",
+            "role",
             "valid_from",
             "valid_until",
-            "assigned_by",
             "reason",
+            "revoked_at",
+            "revocation_reason",
+            "assigned_by",
+            "revoked_by",
             "is_active",
             "created_at",
-        ]
-        read_only_fields = ["id", "created_at"]
-
-    def get_is_active(self, obj):
-        """Check if role assignment is currently active."""
-        return obj.is_active
+            "updated_at",
+        )
+        read_only_fields = fields
 
 
-class PermissionSetSerializer(serializers.ModelSerializer):
-    """Serializer for permission sets."""
+class UserRoleDetailSerializer(UserRoleListSerializer):
+    pass
 
+
+class UserRoleCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    user_id = serializers.CharField(max_length=128)
+    role_id = serializers.UUIDField()
+    valid_from = serializers.DateTimeField(required=False)
+    valid_until = serializers.DateTimeField(required=False, allow_null=True)
+    reason = serializers.CharField(max_length=2000, allow_blank=False)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if attrs.get("valid_until") and attrs.get("valid_from") and attrs["valid_until"] <= attrs["valid_from"]:
+            raise serializers.ValidationError({"valid_until": "Must be later than valid_from."})
+        return attrs
+
+
+class UserRoleUpdateSerializer(serializers.Serializer[dict[str, Any]]):
+    valid_from = serializers.DateTimeField(required=False)
+    valid_until = serializers.DateTimeField(required=False, allow_null=True)
+    reason = serializers.CharField(required=False, max_length=2000, allow_blank=False)
+
+
+class PermissionSetListSerializer(serializers.ModelSerializer[PermissionSet]):
     permission_count = serializers.SerializerMethodField()
+    permission_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = PermissionSet
-        fields = [
+        fields = (
             "id",
             "tenant_id",
             "name",
             "description",
-            "permission_ids",
+            "default_duration_days",
+            "is_active",
             "permission_count",
-            "default_duration_days",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
-
-    def get_permission_count(self, obj):
-        """Get count of permissions in this set."""
-        return len(obj.permission_ids) if obj.permission_ids else 0
-
-
-class PermissionSetCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating permission sets."""
-
-    tenant_id = serializers.UUIDField(read_only=True)  # Include in response
-
-    class Meta:
-        model = PermissionSet
-        fields = [
-            "id",
-            "tenant_id",
-            "name",
-            "description",
             "permission_ids",
-            "default_duration_days",
+            "is_deleted",
             "created_at",
             "updated_at",
+            "created_by",
+            "updated_by",
+            "deleted_at",
+        )
+        read_only_fields = fields
+
+    def get_permission_count(self, obj: PermissionSet) -> int:
+        return obj.memberships.filter(removed_at__isnull=True).count()
+
+    def get_permission_ids(self, obj: PermissionSet) -> list[str]:
+        return [
+            str(value)
+            for value in obj.memberships.filter(removed_at__isnull=True).values_list("permission_id", flat=True)
         ]
-        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
-
-    def create(self, validated_data):
-        """Create permission set with tenant_id from view context."""
-        tenant_id = self.context.get("tenant_id")
-        if not tenant_id:
-            raise serializers.ValidationError("tenant_id is required")
-        validated_data["tenant_id"] = tenant_id
-        return super().create(validated_data)
 
 
-class UserPermissionSetSerializer(serializers.ModelSerializer):
-    """Serializer for user permission set grants."""
+class PermissionSetDetailSerializer(PermissionSetListSerializer):
+    permissions = serializers.SerializerMethodField()
 
-    permission_set = PermissionSetSerializer(read_only=True)
-    permission_set_id = serializers.UUIDField(write_only=True)
-    is_active = serializers.SerializerMethodField()
+    class Meta(PermissionSetListSerializer.Meta):
+        fields = PermissionSetListSerializer.Meta.fields + ("permissions",)
+
+    def get_permissions(self, obj: PermissionSet) -> list[dict[str, Any]]:
+        rows = [
+            membership.permission
+            for membership in obj.memberships.filter(removed_at__isnull=True).select_related("permission")
+        ]
+        return PermissionSerializer(rows, many=True).data
+
+
+class PermissionSetCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    name = serializers.CharField(max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True, max_length=4000)
+    default_duration_days = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=365)
+    is_active = serializers.BooleanField(required=False, default=True)
+    permission_ids = serializers.ListField(
+        child=serializers.UUIDField(), required=False, allow_empty=True, max_length=1000
+    )
+
+
+class PermissionSetUpdateSerializer(serializers.Serializer[dict[str, Any]]):
+    name = serializers.CharField(max_length=255, required=False)
+    description = serializers.CharField(required=False, allow_blank=True, max_length=4000)
+    default_duration_days = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=365)
+    is_active = serializers.BooleanField(required=False)
+
+
+class ReplacePermissionSetPermissionsSerializer(serializers.Serializer[dict[str, Any]]):
+    permission_ids = serializers.ListField(child=serializers.UUIDField(), allow_empty=True, max_length=1000)
+
+
+class UserPermissionSetListSerializer(serializers.ModelSerializer[UserPermissionSet]):
+    is_active = serializers.BooleanField(read_only=True)
+    permission_set = PermissionSetListSerializer(read_only=True)
+    permission_set_id = serializers.UUIDField(read_only=True)
+    user_id = serializers.CharField(read_only=True)
 
     class Meta:
         model = UserPermissionSet
-        fields = [
+        fields = (
             "id",
-            "user",
-            "permission_set",
+            "tenant_id",
+            "user_id",
             "permission_set_id",
+            "permission_set",
             "granted_at",
             "expires_at",
-            "granted_by",
             "reason",
+            "revoked_at",
+            "revocation_reason",
+            "granted_by",
+            "revoked_by",
             "is_active",
-        ]
-        read_only_fields = ["id", "granted_at"]
-
-    def get_is_active(self, obj):
-        """Check if permission set grant is currently active."""
-        return obj.is_active
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
 
 
-class FieldSecuritySerializer(serializers.ModelSerializer):
-    """Serializer for field-level security."""
+class UserPermissionSetDetailSerializer(UserPermissionSetListSerializer):
+    pass
 
-    role = RoleSerializer(read_only=True)
-    role_id = serializers.UUIDField(write_only=True)
+
+class UserPermissionSetCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    user_id = serializers.CharField(max_length=128)
+    permission_set_id = serializers.UUIDField()
+    expires_at = serializers.DateTimeField(required=False)
+    duration_days = serializers.IntegerField(required=False, min_value=1, max_value=365)
+    reason = serializers.CharField(max_length=2000, allow_blank=False)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if "expires_at" in attrs and "duration_days" in attrs:
+            raise serializers.ValidationError("Provide expires_at or duration_days, not both.")
+        return attrs
+
+
+class UserPermissionSetUpdateSerializer(serializers.Serializer[dict[str, Any]]):
+    expires_at = serializers.DateTimeField()
+    reason = serializers.CharField(required=False, max_length=2000, allow_blank=False)
+
+
+class FieldSecurityListSerializer(serializers.ModelSerializer[FieldSecurity]):
+    role = RoleListSerializer(read_only=True)
+    role_id = serializers.UUIDField(read_only=True)
 
     class Meta:
         model = FieldSecurity
-        fields = [
+        fields = (
             "id",
             "tenant_id",
             "module",
-            "object",
+            "resource",
             "field",
             "role",
             "role_id",
             "visibility",
             "edit_control",
             "mask_pattern",
+            "is_active",
+            "is_deleted",
             "created_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "created_at"]
+            "updated_at",
+            "created_by",
+            "updated_by",
+            "deleted_at",
+        )
+        read_only_fields = fields
 
 
-class FieldSecurityCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating field security rules."""
-
-    class Meta:
-        model = FieldSecurity
-        fields = [
-            "module",
-            "object",
-            "field",
-            "role",
-            "visibility",
-            "edit_control",
-            "mask_pattern",
-        ]
+class FieldSecurityDetailSerializer(FieldSecurityListSerializer):
+    pass
 
 
-class RowSecurityRuleSerializer(serializers.ModelSerializer):
-    """Serializer for row-level security rules."""
+class FieldSecurityCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    module = serializers.RegexField(r"^[a-z][a-z0-9_-]{0,99}$")
+    resource = serializers.RegexField(r"^[a-z][a-z0-9_-]{0,99}$")
+    field = serializers.RegexField(r"^[a-z][a-z0-9_]{0,99}$")
+    role_id = serializers.UUIDField()
+    visibility = serializers.ChoiceField(choices=FieldSecurity.Visibility.choices)
+    edit_control = serializers.ChoiceField(choices=FieldSecurity.EditControl.choices)
+    mask_pattern = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    is_active = serializers.BooleanField(required=False, default=True)
 
-    role = RoleSerializer(read_only=True)
-    role_id = serializers.UUIDField(write_only=True)
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if attrs.get("visibility") == "masked" and not attrs.get("mask_pattern"):
+            raise serializers.ValidationError({"mask_pattern": "Required for masked visibility."})
+        if attrs.get("visibility") != "masked" and attrs.get("mask_pattern"):
+            raise serializers.ValidationError({"mask_pattern": "Only valid for masked visibility."})
+        return attrs
+
+
+class FieldSecurityUpdateSerializer(serializers.Serializer[dict[str, Any]]):
+    visibility = serializers.ChoiceField(choices=FieldSecurity.Visibility.choices, required=False)
+    edit_control = serializers.ChoiceField(choices=FieldSecurity.EditControl.choices, required=False)
+    mask_pattern = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    is_active = serializers.BooleanField(required=False)
+
+
+class PredicateSerializer(serializers.DictField):
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        value = super().to_internal_value(data)
+        try:
+            validate_predicate(value)
+        except Exception as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        return value
+
+
+class RowSecurityRuleListSerializer(serializers.ModelSerializer[RowSecurityRule]):
+    role = RoleListSerializer(read_only=True)
+    role_id = serializers.UUIDField(read_only=True)
 
     class Meta:
         model = RowSecurityRule
-        fields = [
+        fields = (
             "id",
             "tenant_id",
             "module",
-            "object",
+            "resource",
             "role",
             "role_id",
             "rule_type",
             "filter_criteria",
             "priority",
+            "is_active",
+            "version",
+            "is_deleted",
             "created_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "created_at"]
+            "updated_at",
+            "created_by",
+            "updated_by",
+            "deleted_at",
+        )
+        read_only_fields = fields
 
 
-class RowSecurityRuleCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating row security rules."""
+class RowSecurityRuleDetailSerializer(RowSecurityRuleListSerializer):
+    pass
+
+
+class RowSecurityRuleCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    module = serializers.RegexField(r"^[a-z][a-z0-9_-]{0,99}$")
+    resource = serializers.RegexField(r"^[a-z][a-z0-9_-]{0,99}$")
+    role_id = serializers.UUIDField()
+    rule_type = serializers.ChoiceField(choices=RowSecurityRule.RuleType.choices)
+    filter_criteria = PredicateSerializer()
+    priority = serializers.IntegerField(required=False, default=0, min_value=-32768, max_value=32767)
+    is_active = serializers.BooleanField(required=False, default=True)
+
+
+class RowSecurityRuleUpdateSerializer(serializers.Serializer[dict[str, Any]]):
+    rule_type = serializers.ChoiceField(choices=RowSecurityRule.RuleType.choices, required=False)
+    filter_criteria = PredicateSerializer(required=False)
+    priority = serializers.IntegerField(required=False, min_value=-32768, max_value=32767)
+    is_active = serializers.BooleanField(required=False)
+
+
+class TimeWindowSerializer(serializers.Serializer[dict[str, Any]]):
+    start = serializers.TimeField()
+    end = serializers.TimeField()
+
+
+class TimeRestrictionsSerializer(serializers.Serializer[dict[str, Any]]):
+    timezone = serializers.CharField(max_length=64)
+    weekdays = serializers.ListField(child=serializers.IntegerField(min_value=1, max_value=7), max_length=7)
+    windows = TimeWindowSerializer(many=True)
+
+
+class SecurityProfileListSerializer(serializers.ModelSerializer[SecurityProfile]):
+    class Meta:
+        model = SecurityProfile
+        fields = (
+            "id",
+            "tenant_id",
+            "name",
+            "description",
+            "profile_type",
+            "mfa_required",
+            "session_timeout_minutes",
+            "is_active",
+            "is_deleted",
+            "created_at",
+            "updated_at",
+            "created_by",
+            "updated_by",
+            "deleted_at",
+        )
+        read_only_fields = fields
+
+
+_PROFILE_FIELDS = (
+    "name",
+    "description",
+    "profile_type",
+    "ip_whitelist",
+    "ip_blacklist",
+    "allowed_countries",
+    "blocked_countries",
+    "time_restrictions",
+    "mfa_required",
+    "allowed_mfa_methods",
+    "password_policy",
+    "session_timeout_minutes",
+    "absolute_session_timeout_hours",
+    "max_concurrent_sessions",
+    "download_allowed",
+    "print_allowed",
+    "copy_paste_allowed",
+    "mobile_access_allowed",
+    "login_notification",
+    "access_notification",
+    "is_active",
+)
+
+
+class SecurityProfileDetailSerializer(serializers.ModelSerializer[SecurityProfile]):
+    class Meta:
+        model = SecurityProfile
+        fields = (
+            ("id", "tenant_id")
+            + _PROFILE_FIELDS
+            + (
+                "is_deleted",
+                "created_at",
+                "updated_at",
+                "created_by",
+                "updated_by",
+                "deleted_at",
+            )
+        )
+        read_only_fields = fields
+
+
+class SecurityProfileWriteSerializer(serializers.Serializer[dict[str, Any]]):
+    name = serializers.CharField(max_length=255, required=False)
+    description = serializers.CharField(max_length=4000, required=False, allow_blank=True)
+    profile_type = serializers.ChoiceField(choices=SecurityProfile.ProfileType.choices, required=False)
+    ip_whitelist = serializers.ListField(child=serializers.CharField(max_length=64), required=False, max_length=100)
+    ip_blacklist = serializers.ListField(child=serializers.CharField(max_length=64), required=False, max_length=100)
+    allowed_countries = serializers.ListField(
+        child=serializers.RegexField(r"^[A-Za-z]{2}$"), required=False, max_length=249
+    )
+    blocked_countries = serializers.ListField(
+        child=serializers.RegexField(r"^[A-Za-z]{2}$"), required=False, max_length=249
+    )
+    time_restrictions = TimeRestrictionsSerializer(required=False)
+    mfa_required = serializers.ChoiceField(choices=SecurityProfile.MFARequired.choices, required=False)
+    allowed_mfa_methods = serializers.ListField(
+        child=serializers.CharField(max_length=32), required=False, max_length=20
+    )
+    password_policy = serializers.DictField(required=False)
+    session_timeout_minutes = serializers.IntegerField(required=False, min_value=5, max_value=1440)
+    absolute_session_timeout_hours = serializers.IntegerField(required=False, min_value=1, max_value=168)
+    max_concurrent_sessions = serializers.IntegerField(required=False, min_value=1, max_value=100)
+    download_allowed = serializers.BooleanField(required=False)
+    print_allowed = serializers.BooleanField(required=False)
+    copy_paste_allowed = serializers.BooleanField(required=False)
+    mobile_access_allowed = serializers.BooleanField(required=False)
+    login_notification = serializers.BooleanField(required=False)
+    access_notification = serializers.BooleanField(required=False)
+    is_active = serializers.BooleanField(required=False)
+
+
+class SecurityProfileCreateSerializer(SecurityProfileWriteSerializer):
+    name = serializers.CharField(max_length=255)
+
+
+class SecurityProfileUpdateSerializer(SecurityProfileWriteSerializer):
+    pass
+
+
+class SecurityProfileAssignmentListSerializer(serializers.ModelSerializer[SecurityProfileAssignment]):
+    is_active = serializers.BooleanField(read_only=True)
+    security_profile = SecurityProfileListSerializer(read_only=True)
+    role = RoleListSerializer(read_only=True)
+    security_profile_id = serializers.UUIDField(read_only=True)
+    role_id = serializers.UUIDField(read_only=True, allow_null=True)
+    user_id = serializers.CharField(read_only=True, allow_null=True)
 
     class Meta:
-        model = RowSecurityRule
-        fields = [
-            "module",
-            "object",
+        model = SecurityProfileAssignment
+        fields = (
+            "id",
+            "tenant_id",
+            "security_profile_id",
+            "security_profile",
+            "user_id",
+            "role_id",
             "role",
-            "rule_type",
-            "filter_criteria",
-            "priority",
-        ]
-
-
-class SecurityProfileSerializer(serializers.ModelSerializer):
-    """Serializer for security profiles."""
-
-    class Meta:
-        model = SecurityProfile
-        fields = [
-            "id",
-            "tenant_id",
-            "name",
-            "description",
-            "profile_type",
-            "ip_whitelist",
-            "ip_blacklist",
-            "allowed_countries",
-            "blocked_countries",
-            "time_restrictions",
-            "mfa_required",
-            "allowed_mfa_methods",
-            "password_policy",
-            "session_timeout_minutes",
-            "absolute_session_timeout_hours",
-            "max_concurrent_sessions",
-            "download_allowed",
-            "print_allowed",
-            "copy_paste_allowed",
-            "mobile_access_allowed",
-            "login_notification",
-            "access_notification",
+            "precedence",
+            "valid_from",
+            "valid_until",
+            "reason",
+            "revoked_at",
+            "revocation_reason",
+            "assigned_by",
+            "revoked_by",
+            "is_active",
             "created_at",
             "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
+        )
+        read_only_fields = fields
 
 
-class SecurityProfileCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating security profiles."""
-
-    tenant_id = serializers.UUIDField(read_only=True)  # Include in response
-
-    class Meta:
-        model = SecurityProfile
-        fields = [
-            "id",
-            "tenant_id",
-            "name",
-            "description",
-            "profile_type",
-            "ip_whitelist",
-            "ip_blacklist",
-            "allowed_countries",
-            "blocked_countries",
-            "time_restrictions",
-            "mfa_required",
-            "allowed_mfa_methods",
-            "password_policy",
-            "session_timeout_minutes",
-            "absolute_session_timeout_hours",
-            "max_concurrent_sessions",
-            "download_allowed",
-            "print_allowed",
-            "copy_paste_allowed",
-            "mobile_access_allowed",
-            "login_notification",
-            "access_notification",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
-
-    def create(self, validated_data):
-        """Create security profile with tenant_id from view context."""
-        tenant_id = self.context.get("tenant_id")
-        if not tenant_id:
-            raise serializers.ValidationError("tenant_id is required")
-        validated_data["tenant_id"] = tenant_id
-        return super().create(validated_data)
+class SecurityProfileAssignmentDetailSerializer(SecurityProfileAssignmentListSerializer):
+    pass
 
 
-class SecurityAuditLogSerializer(serializers.ModelSerializer):
-    """Serializer for security audit logs (read-only)."""
+class SecurityProfileAssignmentCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    security_profile_id = serializers.UUIDField()
+    user_id = serializers.CharField(required=False, allow_null=True, max_length=128)
+    role_id = serializers.UUIDField(required=False, allow_null=True)
+    precedence = serializers.IntegerField(required=False, default=0, min_value=-32768, max_value=32767)
+    valid_from = serializers.DateTimeField(required=False)
+    valid_until = serializers.DateTimeField(required=False, allow_null=True)
+    reason = serializers.CharField(max_length=2000, allow_blank=False)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if bool(attrs.get("user_id")) == bool(attrs.get("role_id")):
+            raise serializers.ValidationError("Exactly one of user_id or role_id is required.")
+        return attrs
+
+
+class SecurityProfileAssignmentUpdateSerializer(serializers.Serializer[dict[str, Any]]):
+    precedence = serializers.IntegerField(required=False, min_value=-32768, max_value=32767)
+    valid_from = serializers.DateTimeField(required=False)
+    valid_until = serializers.DateTimeField(required=False, allow_null=True)
+    reason = serializers.CharField(required=False, max_length=2000, allow_blank=False)
+
+
+class SecurityAuditLogSerializer(serializers.ModelSerializer[SecurityAuditLog]):
+    details = serializers.SerializerMethodField()
 
     class Meta:
         model = SecurityAuditLog
-        fields = [
+        fields = (
             "id",
             "tenant_id",
             "action",
@@ -423,5 +592,39 @@ class SecurityAuditLogSerializer(serializers.ModelSerializer):
             "details",
             "ip_address",
             "user_agent",
-        ]
-        read_only_fields = fields  # All fields are read-only
+            "correlation_id",
+            "outbox_event_id",
+        )
+        read_only_fields = fields
+
+    def get_details(self, obj: SecurityAuditLog) -> object:
+        return redact_sensitive(obj.details)
+
+
+SecurityAuditLogListSerializer = SecurityAuditLogSerializer
+SecurityAuditLogDetailSerializer = SecurityAuditLogSerializer
+
+
+class AccessSimulationSerializer(serializers.Serializer[dict[str, Any]]):
+    subject_id = serializers.CharField(max_length=128)
+    permission_code = serializers.RegexField(r"^[a-z][a-z0-9_-]{0,99}\.[a-z][a-z0-9_-]{0,99}:[a-z][a-z0-9_-]{0,49}$")
+    resource_context = serializers.DictField(required=False, default=dict)
+
+
+class AccessDecisionSerializer(serializers.Serializer[dict[str, Any]]):
+    allowed = serializers.BooleanField(read_only=True)
+    subject_id = serializers.CharField(read_only=True)
+    permission_code = serializers.CharField(read_only=True)
+    decision = serializers.ChoiceField(choices=("allow", "deny"), read_only=True)
+    reason_codes = serializers.ListField(child=serializers.CharField(), read_only=True)
+    applied_policy_ids = serializers.ListField(child=serializers.CharField(), read_only=True)
+    entitlement = serializers.DictField(read_only=True)
+    quota = serializers.DictField(read_only=True)
+    field_decisions = serializers.ListField(read_only=True)
+    row_explanation = serializers.DictField(read_only=True, allow_null=True)
+    audit_log_id = serializers.CharField(read_only=True, allow_null=True)
+    correlation_id = serializers.CharField(read_only=True)
+    evaluated_at = serializers.DateTimeField(read_only=True)
+
+
+__all__ = [name for name in globals() if name.endswith("Serializer")]
