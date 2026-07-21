@@ -1,27 +1,38 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: automation-orchestration
-version: 1.0.0
-description: Advanced orchestration for multi-agent workflows and workstreams
+version: 2.0.0
+description: Tenant-safe durable technical DAG scheduling, execution, retry, and history
 type: foundation
-lifecycle: platform
+lifecycle: core
 dependencies:
-  - core-identity >=1.0
-  - ai-agent-management >=1.0
-  - workflow-automation >=1.0
+  - core-identity >=1.0.0
+  - workflow-automation >=1.0.0
 permissions:
-  - automation_orchestration.resource:create
-  - automation_orchestration.resource:read
-  - automation_orchestration.resource:update
-  - automation_orchestration.resource:delete
-  - automation_orchestration.resource:activate
-  - automation_orchestration.resource:deactivate
+  - automation_orchestration.definition:view
+  - automation_orchestration.definition:manage
+  - automation_orchestration.definition:publish
+  - automation_orchestration.schedule:view
+  - automation_orchestration.schedule:manage
+  - automation_orchestration.run:view
+  - automation_orchestration.run:execute
+  - automation_orchestration.run:control
+  - automation_orchestration.run:retry
+  - automation_orchestration.catalog:view
 sod_actions:
-  - [automation_orchestration.resource:create, automation_orchestration.resource:delete]
-search_indexes:
-  - automation_orchestration_resources
-ai_tools:
-  - create_automation_orchestration_resource
-  - update_automation_orchestration_resource
-  - delete_automation_orchestration_resource
+  - automation_orchestration.definition:publish
+search_indexes: []
+ai_tools: []
+metadata:
+  api_version: v2
+  durable_job_commands:
+    - automation_orchestration.execute_run
+    - automation_orchestration.execute_task
+    - automation_orchestration.scan_schedules
+  extension_points:
+    - name: automation_orchestration.node_registry
+      spi_version: "1.0"
+      registration: app_ready
+  service_dependencies:
+    - name: workflow_automation.execution
+      version: "1.0"
+      tenant_first: true
+  health_probe: automation_orchestration.readiness

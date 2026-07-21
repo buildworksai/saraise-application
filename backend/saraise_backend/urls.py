@@ -38,7 +38,7 @@ urlpatterns = [
     path("api/v1/integration-platform/", include("src.modules.integration_platform.urls")),
     path("api/v1/customization-framework/", include("src.modules.customization_framework.urls")),
     path("api/v1/ai-provider-configuration/", include("src.modules.ai_provider_configuration.urls")),
-    path("api/v1/automation-orchestration/", include("src.modules.automation_orchestration.urls")),
+    path("api/v2/automation-orchestration/", include("src.modules.automation_orchestration.urls")),
     path("api/v1/process-mining/", include("src.modules.process_mining.urls")),
     path("api/v1/document-intelligence/", include("src.modules.document_intelligence.urls")),
     path("api/v1/dms/", include("src.modules.dms.urls")),

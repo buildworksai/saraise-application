@@ -8,10 +8,24 @@ import {
 } from "./tenant-route-registry";
 
 describe("tenant route registry parity", () => {
-  it("discovers the CRM and sales-management module descriptors", () => {
+  it("discovers every module-owned tenant route descriptor", () => {
     expect(new Set(tenantRoutes.map((route) => route.module))).toEqual(
-      new Set(["crm", "sales_management"]),
+      new Set(["automation_orchestration", "crm", "sales_management"]),
     );
+  });
+
+  it("resolves the orchestration sidebar and contextual routes", () => {
+    const orchestrationRoutes = tenantRoutes.filter(
+      (route) => route.module === "automation_orchestration",
+    );
+    expect(orchestrationRoutes).toHaveLength(9);
+    expect(
+      orchestrationRoutes.filter((route) => route.navigation.type === "sidebar").map((route) => route.path),
+    ).toEqual([
+      "/automation-orchestration",
+      "/automation-orchestration/schedules",
+      "/automation-orchestration/runs",
+    ]);
   });
 
   it("contains unique route ids and normalized paths", () => {
