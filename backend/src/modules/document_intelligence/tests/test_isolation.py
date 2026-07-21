@@ -1,190 +1,236 @@
-"""
-Tenant Isolation Tests for DocumentIntelligence module.
+"""Two-tenant isolation evidence for every document-intelligence entity."""
 
-CRITICAL: These tests verify that tenants cannot access each other's data.
-This is the PRIMARY security mechanism for multi-tenant isolation.
+from __future__ import annotations
 
-Reference: saraise-documentation/rules/compliance-enforcement.md
-Rule: ALL tenant-scoped queries MUST filter by tenant_id
-"""
 import uuid
+from dataclasses import dataclass
+
 import pytest
-from django.contrib.auth import get_user_model
-from rest_framework import status
-from rest_framework.test import APIClient
+from django.core.exceptions import ValidationError
 
-from src.modules.document_intelligence.models import TenantBaseModel
-from src.core.auth_utils import get_user_tenant_id
+from src.modules.document_intelligence.models import (
+    ClassifierModelVersion,
+    ClassifierTrainingJob,
+    DocumentClassification,
+    DocumentClassificationScore,
+    DocumentExtraction,
+    DocumentExtractionPage,
+    ExtractionTemplate,
+    ExtractionTemplateZone,
+)
+from src.modules.document_intelligence.serializers import DocumentExtractionCreateSerializer
+from src.modules.document_intelligence.services import (
+    DocumentClassificationService,
+    DocumentExtractionService,
+    DocumentIntelligenceError,
+    TemplateMatchingService,
+)
 
-User = get_user_model()
+from .factories import (
+    ClassifierModelVersionFactory,
+    ClassifierTrainingJobFactory,
+    CompletedDocumentExtractionFactory,
+    DocumentClassificationFactory,
+    DocumentClassificationScoreFactory,
+    DocumentExtractionPageFactory,
+    ExtractionTemplateFactory,
+    ExtractionTemplateZoneFactory,
+)
+
+pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
-    settings.SARAISE_MODE = "development"
+@dataclass(frozen=True)
+class TenantGraph:
+    tenant_id: uuid.UUID
+    actor_id: uuid.UUID
+    extraction: DocumentExtraction
+    page: DocumentExtractionPage
+    training: ClassifierTrainingJob
+    model: ClassifierModelVersion
+    classification: DocumentClassification
+    score: DocumentClassificationScore
+    template: ExtractionTemplate
+    zone: ExtractionTemplateZone
 
 
-@pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
-
-
-@pytest.fixture
-def tenant_a_user(db):
-    """Create user for tenant A."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_a",
-        email="usera@example.com",
-        password="testpass123",
+def _graph(tenant_id: uuid.UUID) -> TenantGraph:
+    actor_id = uuid.uuid4()
+    template = ExtractionTemplateFactory(tenant_id=tenant_id, created_by=actor_id)
+    zone = ExtractionTemplateZoneFactory(
+        tenant_id=tenant_id,
+        created_by=actor_id,
+        template=template,
     )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+    extraction = CompletedDocumentExtractionFactory(
+        tenant_id=tenant_id,
+        created_by=actor_id,
+        template=template,
+    )
+    page = DocumentExtractionPageFactory(
+        tenant_id=tenant_id,
+        created_by=actor_id,
+        extraction=extraction,
+    )
+    training = ClassifierTrainingJobFactory(tenant_id=tenant_id, created_by=actor_id)
+    model = ClassifierModelVersionFactory(
+        tenant_id=tenant_id,
+        created_by=actor_id,
+        training_job=training,
+    )
+    classification = DocumentClassificationFactory(
+        tenant_id=tenant_id,
+        created_by=actor_id,
+        model_version=model,
+    )
+    score = DocumentClassificationScoreFactory(
+        tenant_id=tenant_id,
+        created_by=actor_id,
+        classification=classification,
+    )
+    return TenantGraph(
+        tenant_id,
+        actor_id,
+        extraction,
+        page,
+        training,
+        model,
+        classification,
+        score,
+        template,
+        zone,
+    )
 
 
 @pytest.fixture
-def tenant_b_user(db):
-    """Create user for tenant B."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
+def tenant_graphs() -> tuple[TenantGraph, TenantGraph]:
+    return _graph(uuid.uuid4()), _graph(uuid.uuid4())
 
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_b",
-        email="userb@example.com",
-        password="testpass123",
+
+@pytest.mark.parametrize(
+    ("model", "attribute"),
+    [
+        (DocumentExtraction, "extraction"),
+        (DocumentExtractionPage, "page"),
+        (DocumentClassification, "classification"),
+        (DocumentClassificationScore, "score"),
+        (ClassifierTrainingJob, "training"),
+        (ClassifierModelVersion, "model"),
+        (ExtractionTemplate, "template"),
+        (ExtractionTemplateZone, "zone"),
+    ],
+)
+def test_for_tenant_list_never_contains_other_tenant_entity(
+    model: type,
+    attribute: str,
+    tenant_graphs: tuple[TenantGraph, TenantGraph],
+) -> None:
+    own, foreign = tenant_graphs
+    identities = set(model.objects.for_tenant(own.tenant_id).values_list("id", flat=True))
+    assert getattr(own, attribute).id in identities
+    assert getattr(foreign, attribute).id not in identities
+
+
+def test_service_details_return_exact_404_for_foreign_ids(
+    tenant_graphs: tuple[TenantGraph, TenantGraph],
+) -> None:
+    own, foreign = tenant_graphs
+    checks = [
+        (DocumentExtractionService(), foreign.extraction.id, "get_extraction"),
+        (DocumentClassificationService(), foreign.classification.id, "get_classification"),
+        (DocumentClassificationService(), foreign.training.id, "get_training_job"),
+        (DocumentClassificationService(), foreign.model.id, "get_model_version"),
+        (TemplateMatchingService(), foreign.template.id, "get_template"),
+    ]
+    for service, identifier, method_name in checks:
+        with pytest.raises(DocumentIntelligenceError) as caught:
+            getattr(service, method_name)(own.tenant_id, identifier)
+        assert caught.value.status_code == 404
+        assert caught.value.error_code == "resource_not_found"
+
+
+def test_spoofed_tenant_create_is_rejected_before_service_dispatch(
+    tenant_graphs: tuple[TenantGraph, TenantGraph],
+) -> None:
+    own, foreign = tenant_graphs
+    serializer = DocumentExtractionCreateSerializer(
+        data={
+            "tenant_id": str(foreign.tenant_id),
+            "document_id": str(uuid.uuid4()),
+            "document_version_id": str(uuid.uuid4()),
+            "engine": "tesseract",
+            "extraction_type": "text",
+            "idempotency_key": "spoofed",
+        }
     )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+    before = DocumentExtraction.objects.for_tenant(foreign.tenant_id).count()
+    assert serializer.is_valid() is False
+    assert "tenant_id" in serializer.errors
+    assert DocumentExtraction.objects.for_tenant(foreign.tenant_id).count() == before
+    assert DocumentExtraction.objects.for_tenant(own.tenant_id).count() == 1
 
 
-@pytest.mark.django_db
-class TestDocumentIntelligenceTenantIsolation:
-    """
-    CRITICAL: Tenant isolation tests for TenantBaseModel model.
-    These tests verify that tenants cannot access each other's resources.
-    """
+@pytest.mark.parametrize(
+    ("service", "method", "attribute", "args"),
+    [
+        (DocumentExtractionService, "archive_extraction", "extraction", ()),
+        (DocumentExtractionService, "cancel_extraction", "extraction", ()),
+        (DocumentClassificationService, "archive_classification", "classification", ()),
+        (DocumentClassificationService, "cancel_classification", "classification", ()),
+        (DocumentClassificationService, "cancel_training", "training", ()),
+        (TemplateMatchingService, "archive_template", "template", ()),
+        (TemplateMatchingService, "archive_zone", "zone", ()),
+    ],
+)
+def test_cross_tenant_mutations_return_not_found_and_leave_target_unchanged(
+    service: type,
+    method: str,
+    attribute: str,
+    args: tuple[object, ...],
+    tenant_graphs: tuple[TenantGraph, TenantGraph],
+) -> None:
+    own, foreign = tenant_graphs
+    target = getattr(foreign, attribute)
+    before = tuple((field.attname, getattr(target, field.attname)) for field in target._meta.concrete_fields)
+    with pytest.raises(DocumentIntelligenceError) as caught:
+        getattr(service(), method)(own.tenant_id, target.id, own.actor_id, *args)
+    assert caught.value.status_code == 404
+    target.refresh_from_db()
+    after = tuple((field.attname, getattr(target, field.attname)) for field in target._meta.concrete_fields)
+    assert after == before
 
-    def test_user_cannot_list_other_tenant_resources(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's resources in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
 
-        # Create resource for tenant A
-        resource_a = TenantBaseModel.objects.create(
-            tenant_id=tenant_a_id,
-            name="Tenant A Resource",
-            description="Resource for tenant A",
-            created_by=str(tenant_a_user.id),
-        )
+def test_cross_tenant_parent_references_fail_model_validation(
+    tenant_graphs: tuple[TenantGraph, TenantGraph],
+) -> None:
+    own, foreign = tenant_graphs
+    page = DocumentExtractionPage(
+        tenant_id=own.tenant_id,
+        created_by=own.actor_id,
+        extraction=foreign.extraction,
+        page_number=2,
+        width=100,
+        height=100,
+        confidence="0.9000",
+        structured_data={},
+        table_data=[],
+    )
+    with pytest.raises(ValidationError, match="does not belong"):
+        page.full_clean()
 
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        response = api_client.get(f"/api/v1/document-intelligence/resources/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        resource_ids = [r["id"] for r in data]
-
-        # User A should see tenant A's resource, but NOT tenant B's resource
-        assert resource_a.id in resource_ids
-        assert resource_b.id not in resource_ids
-
-    def test_user_cannot_get_other_tenant_resource_by_id(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot GET other tenant's resource by ID (returns 404)."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to access tenant B's resource
-        response = api_client.get(f"/api/v1/document-intelligence/resources/{resource_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    def test_user_cannot_update_other_tenant_resource(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot UPDATE other tenant's resource (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to update tenant B's resource
-        data = {"name": "Hacked Name"}
-        response = api_client.put(
-            f"/api/v1/document-intelligence/resources/{resource_b.id}/",
-            data,
-            format="json"
-        )
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-        # Verify resource was not modified
-        resource_b.refresh_from_db()
-        assert resource_b.name == "Tenant B Resource"
-
-    def test_user_cannot_delete_other_tenant_resource(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot DELETE other tenant's resource (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to delete tenant B's resource
-        response = api_client.delete(f"/api/v1/document-intelligence/resources/{resource_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-        # Verify resource still exists
-        assert TenantBaseModel.objects.filter(id=resource_b.id).exists()
+    zone = ExtractionTemplateZone(
+        tenant_id=own.tenant_id,
+        created_by=own.actor_id,
+        template=foreign.template,
+        zone_name="Foreign",
+        extraction_key="foreign",
+        zone_type="text",
+        x="0.1",
+        y="0.1",
+        width="0.1",
+        height="0.1",
+        page_number=1,
+        expected_data_type="string",
+    )
+    with pytest.raises(ValidationError, match="does not belong"):
+        zone.full_clean()

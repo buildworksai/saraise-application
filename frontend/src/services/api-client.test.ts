@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
-import { ApiClient } from './api-client';
+import { ApiClient, ApiError } from './api-client';
 
 describe('ApiClient', () => {
   afterEach(() => {
@@ -61,5 +61,16 @@ describe('ApiClient', () => {
         expect((error as { status: number }).status).toBe(403);
       }
     }
+  });
+
+  it('parses governed v2 nested errors without changing legacy behavior', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(JSON.stringify({ error: { code: 'quota_exhausted', message: 'Quota exhausted', detail: {}, correlation_id: 'corr-v2' } }), { status: 429, headers: { 'Content-Type': 'application/json' } }))));
+    const client = new ApiClient({ baseUrl: 'https://example.test' });
+    const failure = await client.get('/api/v2/example').catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ApiError);
+    if (!(failure instanceof ApiError)) throw new Error('Expected ApiError');
+    expect(failure.message).toBe('Quota exhausted');
+    expect(failure.code).toBe('quota_exhausted');
+    expect(failure.correlationId).toBe('corr-v2');
   });
 });

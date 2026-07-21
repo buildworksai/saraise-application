@@ -8,9 +8,9 @@ import {
 } from "./tenant-route-registry";
 
 describe("tenant route registry parity", () => {
-  it("discovers the CRM and sales-management module descriptors", () => {
-    expect(new Set(tenantRoutes.map((route) => route.module))).toEqual(
-      new Set(["crm", "sales_management"]),
+  it("discovers migrated module descriptors", () => {
+    expect(tenantRoutes.map((route) => route.module)).toEqual(
+      expect.arrayContaining(["crm", "sales_management", "document_intelligence"]),
     );
   });
 

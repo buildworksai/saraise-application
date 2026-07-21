@@ -1,61 +1,221 @@
-"""
-DocumentIntelligence Health Checks
+"""Sanitized module liveness/readiness probes."""
 
-Rule: SARAISE-17007 (Health checks required for all modules)
-"""
-from django.core.cache import cache
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Mapping
+
 from django.db import connection
-from django.http import JsonResponse
-from django.views.decorators.http import require_http_methods
-from .models import DocumentIntelligenceResource
+from django.utils import timezone
+
+from src.core.health import HealthCheckResult, health_registry
+
+from .adapters import DependencyHealth, RegisteredProviderResolver, get_dms_gateway, get_provider_resolver
+
+STALE_AFTER = timedelta(seconds=30)
+DOMAIN_TABLES = (
+    "document_intelligence_extractions",
+    "document_intelligence_extraction_pages",
+    "document_intelligence_classifications",
+    "document_intelligence_classification_scores",
+    "document_intelligence_classifier_training_jobs",
+    "document_intelligence_classifier_model_versions",
+    "document_intelligence_extraction_templates",
+    "document_intelligence_extraction_template_zones",
+)
+ASYNC_TABLES = ("async_jobs", "async_job_outbox_events", "async_job_transitions")
 
 
-@require_http_methods(["GET"])
-def health_check(request):
-    """
-    Health check endpoint for DocumentIntelligence module.
+@dataclass(frozen=True, slots=True)
+class ModuleHealthReport:
+    status: str
+    payload: Mapping[str, object]
 
-    Returns:
-    - 200 OK if healthy
-    - 503 Service Unavailable if unhealthy
-    """
-    health_status = {
-        'status': 'healthy',
-        'module': 'document-intelligence',
-        'checks': {}
+    @property
+    def status_code(self) -> int:
+        return 503 if self.status == "unavailable" else 200
+
+
+def database_readiness_probe() -> HealthCheckResult:
+    """Check all domain tables and PostgreSQL RLS policy presence without row data."""
+    now = timezone.now()
+    try:
+        tables = set(connection.introspection.table_names())
+        missing = [table for table in DOMAIN_TABLES if table not in tables]
+        if missing:
+            return HealthCheckResult(False, "domain_schema_unavailable", now, {"code": "schema_missing"})
+        if connection.vendor == "postgresql":
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT tablename FROM pg_policies WHERE schemaname = current_schema() AND tablename = ANY(%s)",
+                    [list(DOMAIN_TABLES)],
+                )
+                policy_tables = {row[0] for row in cursor.fetchall()}
+            if policy_tables != set(DOMAIN_TABLES):
+                return HealthCheckResult(False, "rls_policy_unavailable", now, {"code": "rls_missing"})
+        return HealthCheckResult(True, "ready", now, {"code": "ready"})
+    except Exception:
+        return HealthCheckResult(False, "database_unavailable", now, {"code": "dependency_unavailable"})
+
+
+def async_readiness_probe() -> HealthCheckResult:
+    now = timezone.now()
+    try:
+        tables = set(connection.introspection.table_names())
+        ready = set(ASYNC_TABLES).issubset(tables)
+        return HealthCheckResult(
+            ready,
+            "ready" if ready else "async_schema_unavailable",
+            now,
+            {"code": "ready" if ready else "schema_missing"},
+        )
+    except Exception:
+        return HealthCheckResult(False, "async_dependency_unavailable", now, {"code": "dependency_unavailable"})
+
+
+def dms_readiness_probe() -> HealthCheckResult:
+    try:
+        return _dependency_result(get_dms_gateway().health(), required=True)
+    except Exception:
+        return HealthCheckResult(
+            False,
+            "dependency_unavailable",
+            timezone.now(),
+            {"code": "dependency_unavailable", "required": True, "circuit_state": "unknown"},
+        )
+
+
+def provider_readiness_probe() -> HealthCheckResult:
+    """Require one usable OCR adapter; report partial provider failure as degraded."""
+    now = timezone.now()
+    resolver = get_provider_resolver()
+    if not isinstance(resolver, RegisteredProviderResolver):
+        probe = getattr(resolver, "health", None)
+        if not callable(probe):
+            return HealthCheckResult(
+                False,
+                "provider_probe_unavailable",
+                now,
+                {"code": "probe_missing", "status": "unavailable"},
+            )
+        try:
+            return _dependency_result(probe(), required=True)
+        except Exception:
+            return HealthCheckResult(
+                False,
+                "provider_unavailable",
+                now,
+                {"code": "dependency_unavailable", "status": "unavailable"},
+            )
+    adapters = {**resolver.configured_ocr(), **resolver.configured_classifiers()}
+    if not adapters:
+        return HealthCheckResult(
+            False, "provider_unavailable", now, {"code": "not_configured", "status": "unavailable"}
+        )
+    results: list[DependencyHealth] = []
+    for adapter in adapters.values():
+        try:
+            results.append(adapter.health())
+        except Exception:
+            continue
+    available = sum(1 for result in results if result.available and not _stale(result))
+    if available == 0:
+        circuit_open = any(result.circuit_state == "open" for result in results)
+        return HealthCheckResult(
+            False,
+            "provider_unavailable",
+            now,
+            {"code": "circuit_open" if circuit_open else "runtime_unavailable", "status": "unavailable"},
+        )
+    degraded = available < len(adapters)
+    return HealthCheckResult(
+        True,
+        "degraded" if degraded else "ready",
+        now,
+        {"code": "partial_provider_failure" if degraded else "ready", "status": "degraded" if degraded else "healthy"},
+    )
+
+
+def _stale(result: DependencyHealth) -> bool:
+    checked_at = result.checked_at
+    if not hasattr(checked_at, "tzinfo"):
+        return True
+    try:
+        return timezone.now() - checked_at > STALE_AFTER
+    except (TypeError, ValueError):
+        return True
+
+
+def _dependency_result(result: DependencyHealth, *, required: bool) -> HealthCheckResult:
+    now = timezone.now()
+    stale = _stale(result)
+    healthy = bool(result.available) and not stale
+    code = "stale" if stale else result.code
+    return HealthCheckResult(
+        healthy,
+        "ready" if healthy else "dependency_unavailable",
+        now,
+        {"code": code, "required": required, "circuit_state": result.circuit_state},
+    )
+
+
+def get_module_health() -> ModuleHealthReport:
+    """Return a non-sensitive readiness report for the authenticated endpoint."""
+    probes = {
+        "database": database_readiness_probe(),
+        "async_execution": async_readiness_probe(),
+        "dms": dms_readiness_probe(),
+        "providers": provider_readiness_probe(),
     }
-
-    # Check database connectivity
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT 1")
-        health_status['checks']['database'] = 'ok'
-    except Exception as e:
-        health_status['status'] = 'unhealthy'
-        health_status['checks']['database'] = f'error: {str(e)}'
-
-    # Check cache (Redis) connectivity
-    try:
-        cache.set("health_check_document_intelligence", "ok", 10)
-        result = cache.get("health_check_document_intelligence")
-        if result == "ok":
-            health_status['checks']['cache'] = 'ok'
-        else:
-            health_status['status'] = 'degraded'
-            health_status['checks']['cache'] = 'not responding correctly'
-    except Exception as e:
-        health_status['status'] = 'unhealthy'
-        health_status['checks']['cache'] = f'error: {str(e)}'
-
-    # Check module-specific model accessibility
-    try:
-        # Verify we can query the primary model
-        count = DocumentIntelligenceResource.objects.count()
-        health_status['checks']['module_model'] = {'status': 'ok', 'total_count': count}
-    except Exception as e:
-        health_status['status'] = 'unhealthy'
-        health_status['checks']['module_model'] = f'error: {str(e)}'
+    critical = ("database", "async_execution", "dms", "providers")
+    unavailable = any(not probes[name].healthy for name in critical)
+    degraded = not unavailable and probes["providers"].details.get("status") == "degraded"
+    status = "unavailable" if unavailable else "degraded" if degraded else "healthy"
+    dependencies = [
+        {
+            "name": name,
+            "status": "healthy" if result.healthy else "unavailable",
+            "code": str(result.details.get("code", "unknown")),
+            "checked_at": result.checked_at.isoformat(),
+            **({"circuit_state": result.details["circuit_state"]} if "circuit_state" in result.details else {}),
+        }
+        for name, result in probes.items()
+    ]
+    if degraded:
+        dependencies = [
+            {**item, "status": "degraded"} if item["name"] == "providers" else item for item in dependencies
+        ]
+    return ModuleHealthReport(
+        status,
+        {
+            "status": status,
+            "live": True,
+            "ready": not unavailable,
+            "checked_at": timezone.now().isoformat(),
+            "dependencies": dependencies,
+        },
+    )
 
 
-    status_code = 200 if health_status['status'] == 'healthy' else 503
-    return JsonResponse(health_status, status=status_code)
+def register_health_probes() -> None:
+    """Register composite critical probes with global application readiness."""
+    health_registry.register(
+        "document_intelligence.database_rls", database_readiness_probe, critical=True, replace=True
+    )
+    health_registry.register(
+        "document_intelligence.async_execution", async_readiness_probe, critical=True, replace=True
+    )
+    health_registry.register("document_intelligence.dms", dms_readiness_probe, critical=True, replace=True)
+    health_registry.register("document_intelligence.providers", provider_readiness_probe, critical=True, replace=True)
+
+
+__all__ = [
+    "ModuleHealthReport",
+    "async_readiness_probe",
+    "database_readiness_probe",
+    "dms_readiness_probe",
+    "get_module_health",
+    "provider_readiness_probe",
+    "register_health_probes",
+]

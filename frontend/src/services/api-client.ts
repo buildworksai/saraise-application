@@ -8,11 +8,50 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
-    public details?: unknown
+    public details?: unknown,
+    public code?: string,
+    public correlationId?: string,
   ) {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+interface ParsedApiError {
+  message?: string;
+  code?: string;
+  correlationId?: string;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Parse both legacy top-level errors and the governed v2 nested error envelope. */
+function parseApiError(value: unknown): ParsedApiError {
+  if (!isObject(value)) return {};
+
+  const nested = isObject(value.error) ? value.error : undefined;
+  if (nested) {
+    return {
+      message: typeof nested.message === 'string' ? nested.message : undefined,
+      code: typeof nested.code === 'string' ? nested.code : undefined,
+      correlationId:
+        typeof nested.correlation_id === 'string' ? nested.correlation_id : undefined,
+    };
+  }
+
+  return {
+    message:
+      typeof value.message === 'string'
+        ? value.message
+        : typeof value.error === 'string'
+          ? value.error
+          : undefined,
+    code: typeof value.code === 'string' ? value.code : undefined,
+    correlationId:
+      typeof value.correlation_id === 'string' ? value.correlation_id : undefined,
+  };
 }
 
 export class ApiClient {
@@ -36,7 +75,7 @@ export class ApiClient {
     const value = `; ${document.cookie}`;
     const parts = value.split(`; ${name}=`);
     if (parts.length === 2) {
-      return parts.pop()?.split(';').shift() || null;
+      return parts.pop()?.split(';').shift() ?? null;
     }
     return null;
   }
@@ -78,12 +117,8 @@ export class ApiClient {
 
       try {
         const errorData: unknown = await response.json();
-        if (errorData && typeof errorData === 'object') {
-          const data = errorData as Record<string, unknown>;
-          const message = typeof data.message === 'string' ? data.message : undefined;
-          const error = typeof data.error === 'string' ? data.error : undefined;
-          errorMessage = message ?? error ?? errorMessage;
-        }
+        const parsedError = parseApiError(errorData);
+        errorMessage = parsedError.message ?? errorMessage;
         errorDetails = errorData;
       } catch {
         // If response is not JSON, use status text
@@ -103,7 +138,14 @@ export class ApiClient {
         }
       }
 
-      throw new ApiError(errorMessage, response.status, errorDetails);
+      const parsedError = parseApiError(errorDetails);
+      throw new ApiError(
+        errorMessage,
+        response.status,
+        errorDetails,
+        parsedError.code,
+        parsedError.correlationId,
+      );
     }
 
     // Handle 204 No Content
