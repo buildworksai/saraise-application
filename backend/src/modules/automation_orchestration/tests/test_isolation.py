@@ -1,190 +1,103 @@
-"""
-Tenant Isolation Tests for AutomationOrchestration module.
+"""Tenant isolation at the v2 HTTP and worker boundaries."""
 
-CRITICAL: These tests verify that tenants cannot access each other's data.
-This is the PRIMARY security mechanism for multi-tenant isolation.
+from __future__ import annotations
 
-Reference: saraise-documentation/rules/compliance-enforcement.md
-Rule: ALL tenant-scoped queries MUST filter by tenant_id
-"""
 import uuid
+
 import pytest
-from django.contrib.auth import get_user_model
 from rest_framework import status
-from rest_framework.test import APIClient
 
-from src.modules.automation_orchestration.models import TenantBaseModel
-from src.core.auth_utils import get_user_tenant_id
+from src.core.access.decision import AccessDecision, AccessReasonCode
+from src.core.testing.tenant_contract import TenantIsolationContract
 
-User = get_user_model()
+from ..models import OrchestrationDefinition
+
+pytest_plugins = ["src.core.testing.factories"]
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
-    settings.SARAISE_MODE = "development"
+def allow_access_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    def allow(self, tenant_id, identity, required_permission, **kwargs):
+        del self, identity, required_permission, kwargs
+        return AccessDecision(
+            allowed=True,
+            reason_code=AccessReasonCode.ALLOW,
+            reason="allowed for isolation contract",
+            tenant_id=uuid.UUID(str(tenant_id)),
+        )
+
+    monkeypatch.setattr("src.core.access.decision.AccessDecisionPipeline.decide", allow)
 
 
-@pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
+class TestDefinitionIsolation(TenantIsolationContract):
+    model = OrchestrationDefinition
+    list_url = "/api/v2/automation-orchestration/definitions/"
+    detail_url_template = "/api/v2/automation-orchestration/definitions/{pk}/"
+    create_payload = {"key": "spoof-attempt", "name": "Spoof attempt"}
+    update_payload = {"name": "Cross-tenant mutation"}
+    read_denial_statuses = frozenset({status.HTTP_404_NOT_FOUND})
+
+    @pytest.fixture(autouse=True)
+    def isolation_context(self, tenant_a_client, tenant_a, tenant_b):
+        actor = uuid.uuid4()
+        self.client = tenant_a_client
+        self.tenant_a_row = OrchestrationDefinition.objects.create(
+            tenant_id=tenant_a.id, key="tenant-a", version=1, name="Tenant A", created_by=actor, updated_by=actor
+        )
+        self.tenant_b_row = OrchestrationDefinition.objects.create(
+            tenant_id=tenant_b.id, key="tenant-b", version=1, name="Tenant B", created_by=actor, updated_by=actor
+        )
+
+    def get_list_items(self, response):
+        return response.json()["data"]
 
 
-@pytest.fixture
-def tenant_a_user(db):
-    """Create user for tenant A."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_a",
-        email="usera@example.com",
-        password="testpass123",
+def test_cross_tenant_lifecycle_actions_are_404_and_unchanged(tenant_a_client, tenant_b) -> None:
+    actor = uuid.uuid4()
+    target = OrchestrationDefinition.objects.create(
+        tenant_id=tenant_b.id,
+        key="tenant-b-action",
+        version=1,
+        name="Tenant B action",
+        created_by=actor,
+        updated_by=actor,
     )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
+    before = (target.status, target.version, target.is_deleted, target.updated_at)
+    for suffix, payload in (
+        ("validate", {}),
+        ("publish", {"transition_key": "publish"}),
+        ("clone", {}),
+        ("retire", {"transition_key": "retire"}),
+    ):
+        response = tenant_a_client.post(
+            f"/api/v2/automation-orchestration/definitions/{target.id}/{suffix}/", payload, format="json"
         )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+    target.refresh_from_db()
+    assert (target.status, target.version, target.is_deleted, target.updated_at) == before
 
 
-@pytest.fixture
-def tenant_b_user(db):
-    """Create user for tenant B."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_b",
-        email="userb@example.com",
-        password="testpass123",
+def test_cross_tenant_run_initiation_does_not_create_history(tenant_a_client, tenant_b) -> None:
+    definition = OrchestrationDefinition.objects.create(
+        tenant_id=tenant_b.id,
+        key="tenant-b-run",
+        version=1,
+        name="Tenant B run",
+        status="published",
+        is_current=True,
+        created_by=uuid.uuid4(),
+        updated_by=uuid.uuid4(),
     )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
-
-
-@pytest.mark.django_db
-class TestAutomationOrchestrationTenantIsolation:
-    """
-    CRITICAL: Tenant isolation tests for TenantBaseModel model.
-    These tests verify that tenants cannot access each other's resources.
-    """
-
-    def test_user_cannot_list_other_tenant_resources(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's resources in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant A
-        resource_a = TenantBaseModel.objects.create(
-            tenant_id=tenant_a_id,
-            name="Tenant A Resource",
-            description="Resource for tenant A",
-            created_by=str(tenant_a_user.id),
-        )
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        response = api_client.get(f"/api/v1/automation-orchestration/resources/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        resource_ids = [r["id"] for r in data]
-
-        # User A should see tenant A's resource, but NOT tenant B's resource
-        assert resource_a.id in resource_ids
-        assert resource_b.id not in resource_ids
-
-    def test_user_cannot_get_other_tenant_resource_by_id(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot GET other tenant's resource by ID (returns 404)."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to access tenant B's resource
-        response = api_client.get(f"/api/v1/automation-orchestration/resources/{resource_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    def test_user_cannot_update_other_tenant_resource(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot UPDATE other tenant's resource (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to update tenant B's resource
-        data = {"name": "Hacked Name"}
-        response = api_client.put(
-            f"/api/v1/automation-orchestration/resources/{resource_b.id}/",
-            data,
-            format="json"
-        )
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-        # Verify resource was not modified
-        resource_b.refresh_from_db()
-        assert resource_b.name == "Tenant B Resource"
-
-    def test_user_cannot_delete_other_tenant_resource(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot DELETE other tenant's resource (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to delete tenant B's resource
-        response = api_client.delete(f"/api/v1/automation-orchestration/resources/{resource_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-        # Verify resource still exists
-        assert TenantBaseModel.objects.filter(id=resource_b.id).exists()
+    response = tenant_a_client.post(
+        "/api/v2/automation-orchestration/runs/",
+        {
+            "definition_id": str(definition.id),
+            "input": {},
+            "idempotency_key": "cross-tenant-run",
+            "trigger_type": "manual",
+        },
+        format="json",
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert definition.runs.count() == 0

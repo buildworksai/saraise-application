@@ -8,10 +8,32 @@ import {
 } from "./tenant-route-registry";
 
 describe("tenant route registry parity", () => {
+  // Extensible by design: each migrated module appends its own descriptors, so this asserts
+  // containment rather than an exact set — an exact set would force every new module to edit
+  // this test and would conflict on every parallel module merge.
   it("discovers migrated module descriptors", () => {
     expect(tenantRoutes.map((route) => route.module)).toEqual(
-      expect.arrayContaining(["crm", "sales_management", "document_intelligence"]),
+      expect.arrayContaining([
+        "crm",
+        "sales_management",
+        "document_intelligence",
+        "automation_orchestration",
+      ]),
     );
+  });
+
+  it("resolves the orchestration sidebar and contextual routes", () => {
+    const orchestrationRoutes = tenantRoutes.filter(
+      (route) => route.module === "automation_orchestration",
+    );
+    expect(orchestrationRoutes).toHaveLength(9);
+    expect(
+      orchestrationRoutes.filter((route) => route.navigation.type === "sidebar").map((route) => route.path),
+    ).toEqual([
+      "/automation-orchestration",
+      "/automation-orchestration/schedules",
+      "/automation-orchestration/runs",
+    ]);
   });
 
   it("contains unique route ids and normalized paths", () => {

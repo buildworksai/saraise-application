@@ -173,30 +173,6 @@ const NotificationCenterPage = lazy(() =>
   }))
 );
 
-const AutomationOrchestrationListPage = lazy(() =>
-  import(
-    "./modules/automation_orchestration/pages/AutomationOrchestrationListPage"
-  ).then((m) => ({
-    default: m.AutomationOrchestrationListPage,
-  }))
-);
-
-const AutomationOrchestrationDetailPage = lazy(() =>
-  import(
-    "./modules/automation_orchestration/pages/AutomationOrchestrationDetailPage"
-  ).then((m) => ({
-    default: m.AutomationOrchestrationDetailPage,
-  }))
-);
-
-const CreateAutomationOrchestrationResourcePage = lazy(() =>
-  import(
-    "./modules/automation_orchestration/pages/CreateAutomationOrchestrationResourcePage"
-  ).then((m) => ({
-    default: m.CreateAutomationOrchestrationResourcePage,
-  }))
-);
-
 const ProcessMiningListPage = lazy(() =>
   import("./modules/process_mining/pages/ProcessMiningListPage").then((m) => ({
     default: m.ProcessMiningListPage,
@@ -1851,38 +1827,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <NotificationCenterPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* AutomationOrchestration routes */}
-          <Route
-            path="/automation-orchestration"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <AutomationOrchestrationListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/automation-orchestration/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateAutomationOrchestrationResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/automation-orchestration/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <AutomationOrchestrationDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

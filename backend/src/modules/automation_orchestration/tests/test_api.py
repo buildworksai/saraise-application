@@ -1,166 +1,155 @@
-"""
-API Integration Tests for AutomationOrchestration module.
+"""Black-box contracts for the governed v2 orchestration API."""
 
-Tests all DRF ViewSet endpoints:
-- CRUD operations
-- Authentication/authorization
-- Tenant isolation
-- Custom actions
-"""
+from __future__ import annotations
+
+import uuid
+
 import pytest
-from django.contrib.auth import get_user_model
 from rest_framework import status
-from rest_framework.test import APIClient
 
-from src.modules.automation_orchestration.models import TenantBaseModel
-from src.core.auth_utils import get_user_tenant_id
+from src.core.access.decision import AccessDecision, AccessReasonCode
 
-User = get_user_model()
+from ..api import DefinitionViewSet, EdgeViewSet, NodeViewSet, RunViewSet, ScheduleViewSet, TaskRunViewSet
+from ..models import OrchestrationDefinition
 
-
-@pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
-
-
-@pytest.fixture
-def tenant_user(db):
-    """Create a test user with tenant."""
-    from src.core.user_models import UserProfile
-    from src.core.licensing.models import Organization
-    import uuid
-
-    # Create a valid Organization for the tenant
-    org = Organization.objects.create(name="Test Organization")
-    tenant_id = str(org.id)
-
-    user = User.objects.create_user(
-        username="testuser",
-        email="test@example.com",
-        password="testpass123",
-    )
-    profile = UserProfile.objects.get(user=user)
-    profile.tenant_id = tenant_id
-    profile.tenant_role = "tenant_admin"
-    profile.save()
-
-    return User.objects.get(pk=user.pk)
-
-
-@pytest.fixture
-def authenticated_client(api_client, tenant_user):
-    """Create authenticated API client."""
-    api_client.force_authenticate(user=tenant_user)
-    return api_client
+pytest_plugins = ["src.core.testing.factories"]
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
-    settings.SARAISE_MODE = "development"
+def allow_access_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep real session/CSRF authentication while replacing remote policy IO."""
 
-
-@pytest.mark.django_db
-class TestTenantBaseModelViewSet:
-    """Test TenantBaseModelViewSet CRUD operations."""
-
-    def test_list_resources_requires_authentication(self, api_client):
-        """Test that listing resources requires authentication."""
-        response = api_client.get(f"/api/v1/automation-orchestration/resources/")
-        assert response.status_code == status.HTTP_200_OK
-
-    def test_list_resources(self, authenticated_client, tenant_user):
-        """Test listing resources for authenticated user."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        # Create test resources
-        TenantBaseModel.objects.create(
-            tenant_id=tenant_id,
-            name="Test Resource 1",
-            description="Test description 1",
-            created_by=str(tenant_user.id),
-        )
-        TenantBaseModel.objects.create(
-            tenant_id=tenant_id,
-            name="Test Resource 2",
-            description="Test description 2",
-            created_by=str(tenant_user.id),
+    def allow(self, tenant_id, identity, required_permission, **kwargs):
+        del self, identity, required_permission, kwargs
+        return AccessDecision(
+            allowed=True,
+            reason_code=AccessReasonCode.ALLOW,
+            reason="test policy allows declared capability",
+            tenant_id=uuid.UUID(str(tenant_id)),
+            remaining_quota=100,
         )
 
-        response = authenticated_client.get(f"/api/v1/automation-orchestration/resources/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        assert len(data) == 2
+    monkeypatch.setattr("src.core.access.decision.AccessDecisionPipeline.decide", allow)
 
-    def test_create_resource(self, authenticated_client, tenant_user):
-        """Test creating a resource."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        data = {
-            "name": "New Resource",
-            "description": "New resource description",
-            "config": {"key": "value"},
-        }
 
-        response = authenticated_client.post(
-            f"/api/v1/automation-orchestration/resources/",
-            data,
-            format="json"
-        )
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data["name"] == "New Resource"
-        assert response.data["tenant_id"] == tenant_id
+def _payload(response):
+    return response.json()["data"]
 
-    def test_get_resource_detail(self, authenticated_client, tenant_user):
-        """Test getting resource detail."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        resource = TenantBaseModel.objects.create(
-            tenant_id=tenant_id,
-            name="Test Resource",
-            description="Test description",
-            created_by=str(tenant_user.id),
-        )
 
-        response = authenticated_client.get(f"/api/v1/automation-orchestration/resources/{resource.id}/")
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["id"] == resource.id
-        assert response.data["name"] == "Test Resource"
+def test_unauthenticated_definition_list_is_401(api_client) -> None:
+    response = api_client.get("/api/v2/automation-orchestration/definitions/")
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert response.json()["error"]["code"] == "AUTHENTICATION_REQUIRED"
 
-    def test_update_resource(self, authenticated_client, tenant_user):
-        """Test updating a resource."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        resource = TenantBaseModel.objects.create(
-            tenant_id=tenant_id,
-            name="Original Name",
-            description="Original description",
-            created_by=str(tenant_user.id),
-        )
 
-        data = {"name": "Updated Name", "description": "Updated description"}
-        response = authenticated_client.put(
-            f"/api/v1/automation-orchestration/resources/{resource.id}/",
-            data,
-            format="json"
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["name"] == "Updated Name"
+def test_definition_crud_uses_v2_envelope_and_pagination(tenant_a_client, tenant_a) -> None:
+    create = tenant_a_client.post(
+        "/api/v2/automation-orchestration/definitions/",
+        {
+            "key": "daily-ledger",
+            "name": "Daily ledger",
+            "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+            "output_schema": {"type": "object", "properties": {}, "additionalProperties": True},
+        },
+        format="json",
+    )
+    assert create.status_code == status.HTTP_201_CREATED
+    created = _payload(create)
+    assert created["tenant_id"] == str(tenant_a.id)
+    assert create.json()["meta"]["correlation_id"]
 
-    def test_delete_resource(self, authenticated_client, tenant_user):
-        """Test deleting a resource."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        resource = TenantBaseModel.objects.create(
-            tenant_id=tenant_id,
-            name="To Delete",
-            description="Will be deleted",
-            created_by=str(tenant_user.id),
-        )
+    listing = tenant_a_client.get("/api/v2/automation-orchestration/definitions/?search=ledger&page_size=1")
+    assert listing.status_code == status.HTTP_200_OK
+    assert listing.json()["meta"]["pagination"]["page_size"] == 1
+    assert [item["id"] for item in _payload(listing)] == [created["id"]]
 
-        response = authenticated_client.delete(f"/api/v1/automation-orchestration/resources/{resource.id}/")
-        assert response.status_code == status.HTTP_204_NO_CONTENT
-        
-        # Verify resource is deleted
-        assert not TenantBaseModel.objects.filter(id=resource.id).exists()
+    update = tenant_a_client.patch(
+        f"/api/v2/automation-orchestration/definitions/{created['id']}/",
+        {"name": "Daily general ledger", "transition_key": "api-edit"},
+        format="json",
+    )
+    assert update.status_code == status.HTTP_200_OK
+    assert _payload(update)["name"] == "Daily general ledger"
+
+    delete = tenant_a_client.delete(f"/api/v2/automation-orchestration/definitions/{created['id']}/")
+    assert delete.status_code == status.HTTP_204_NO_CONTENT
+    assert OrchestrationDefinition.objects.get(pk=created["id"]).is_deleted is True
+
+
+def test_unknown_and_protected_definition_fields_are_rejected(tenant_a_client, tenant_b) -> None:
+    response = tenant_a_client.post(
+        "/api/v2/automation-orchestration/definitions/",
+        {"key": "spoof", "name": "Spoof", "tenant_id": str(tenant_b.id), "status": "published"},
+        format="json",
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_unsafe_action_requires_csrf(tenant_a_user) -> None:
+    from src.core.testing.factories import authenticated_api_client
+
+    client = authenticated_api_client(tenant_a_user, enforce_csrf_checks=False)
+    # Re-enable enforcement with a fresh client/session and deliberately omit the token.
+    from rest_framework.test import APIClient
+
+    csrf_client = APIClient(enforce_csrf_checks=True)
+    assert csrf_client.login(username=tenant_a_user.username, password="saraise-test-password")
+    response = csrf_client.post(
+        "/api/v2/automation-orchestration/definitions/", {"key": "csrf", "name": "CSRF"}, format="json"
+    )
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+    del client
+
+
+@pytest.mark.parametrize(
+    ("viewset", "actions"),
+    [
+        (
+            DefinitionViewSet,
+            {
+                "list",
+                "retrieve",
+                "create",
+                "partial_update",
+                "destroy",
+                "validate_graph",
+                "publish",
+                "clone",
+                "retire",
+                "nodes",
+                "edges",
+                "snapshot",
+            },
+        ),
+        (NodeViewSet, {"retrieve", "partial_update", "destroy"}),
+        (EdgeViewSet, {"retrieve", "partial_update", "destroy"}),
+        (ScheduleViewSet, {"list", "retrieve", "create", "partial_update", "destroy", "pause", "resume", "retire"}),
+        (RunViewSet, {"list", "retrieve", "create", "pause", "resume", "cancel", "retry", "task_runs", "events"}),
+        (TaskRunViewSet, {"retrieve", "retry"}),
+    ],
+)
+def test_every_action_has_explicit_access_metadata(viewset, actions) -> None:
+    assert set(viewset.access_by_action) == actions
+    assert all(requirement.permission and requirement.entitlement for requirement in viewset.access_by_action.values())
+
+
+def test_cross_tenant_definition_identifier_is_404(tenant_a_client, tenant_b) -> None:
+    definition = OrchestrationDefinition.objects.create(
+        tenant_id=tenant_b.id,
+        key="private",
+        version=1,
+        name="Private",
+        created_by=uuid.uuid4(),
+        updated_by=uuid.uuid4(),
+    )
+    response = tenant_a_client.get(f"/api/v2/automation-orchestration/definitions/{definition.id}/")
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+def test_node_catalog_exposes_real_core_descriptor(tenant_a_client) -> None:
+    response = tenant_a_client.get("/api/v2/automation-orchestration/node-types/")
+    assert response.status_code == status.HTTP_200_OK
+    descriptors = _payload(response)
+    assert any(item["key"] == "core.passthrough" for item in descriptors)

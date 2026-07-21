@@ -1,53 +1,35 @@
-# Automation Orchestration Module - Cursor Rules
-# These rules are automatically applied when editing files in this directory
+# Automation Orchestration — Technical DAG UI
 
-# =============================================================================
-# MODULE OVERVIEW
-# =============================================================================
-#
-# This module manages Automation Orchestration functionality.
-# Status: Scaffold - requires implementation
+This module authors and observes immutable-versioned technical DAGs. Human
+approvals and business state machines belong to workflow_automation.
 
-# =============================================================================
-# CRITICAL: Read contracts.ts FIRST
-# =============================================================================
-#
-# Before modifying any file in this module, you MUST read:
-#   frontend/src/modules/automation_orchestration/contracts.ts
-#
-# This file contains:
-# - All TypeScript types for this module
-# - All API endpoint URLs
-# - Type guards for runtime checking
-# - Usage examples
+## Contract first
 
-# =============================================================================
-# TYPE IMPORTS
-# =============================================================================
-#
-# ✅ CORRECT: Import types from contracts.ts
-#   import { Entity, EntityCreate, ENDPOINTS } from './contracts';
-#
-# ❌ FORBIDDEN: Import directly from @/types/api in pages/components
-#   import type { components } from '@/types/api';
-#
-# ❌ FORBIDDEN: Define ad-hoc types in page files
+- Read `contracts.ts` before editing any page, component, hook, or service.
+- Import every DTO, request, filter, envelope, state union, and `ENDPOINTS`
+  member from `contracts.ts`; never redefine an API shape in a component.
+- Use recursive `JSONValue` for schema-driven data. `any`, `unknown`, and
+  `Record<string, unknown>` casts are forbidden in this module.
+- Never hardcode `/api/` paths. The sole prefix is
+  `/api/v2/automation-orchestration` and all paths come from `ENDPOINTS`.
 
-# =============================================================================
-# ENDPOINT USAGE
-# =============================================================================
-#
-# ✅ CORRECT: Use ENDPOINTS constant
-#   apiClient.get<Entity[]>(ENDPOINTS.ENTITIES.LIST);
-#
-# ❌ FORBIDDEN: Hardcode URL strings
-#   apiClient.get('/api/v1/automation_orchestration/entities/');
+## Server and editor state
 
-# =============================================================================
-# VALIDATION CHECKPOINTS
-# =============================================================================
-#
-# After editing any TypeScript file in this module:
-# 1. Run: npx tsc --noEmit src/modules/automation_orchestration/{file}.tsx
-# 2. Run: npx eslint src/modules/automation_orchestration/{file}.tsx --max-warnings 0
-# 3. Fix ALL errors before proceeding
+- TanStack Query owns server state, pagination, bounded polling, and retry.
+- Draft graph edits remain local until an explicit save; preserve revision/ETag
+  and surface conflicts rather than overwriting another editor.
+- Published definitions and terminal execution evidence are always read-only.
+- Node configuration is driven by the accessible registry descriptor schema.
+  Missing or unentitled capabilities must render unavailable, never successful.
+
+## Experience and accessibility
+
+- Every page renders explicit skeleton, empty/filtered-empty, retryable error,
+  permission-denied, submitting, and success states as applicable.
+- All graph operations must have a keyboard-accessible alternative.
+- Keep controls labelled, focus-visible, responsive, and WCAG 2.1 AA.
+
+## Required checks
+
+Run TypeScript, ESLint with zero warnings, module tests, accessibility tests,
+and the production build after every coherent edit.
