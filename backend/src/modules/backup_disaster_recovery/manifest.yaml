@@ -1,25 +1,100 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
+# SPDX-License-Identifier: Apache-2.0
 name: backup-disaster-recovery
-version: 1.0.0
-description: Automated backups, point-in-time recovery, disaster recovery orchestration
+version: 2.0.0
+description: Verified recovery points, governed restores, DR runbooks, exercises, and measured RPO/RTO
 type: foundation
+classification: open-source
 lifecycle: platform
+
 dependencies:
   - core-identity >=1.0
+
+required_capabilities:
+  - core.tenancy
+  - core.api.v2
+  - core.access
+  - core.async-jobs
+  - core.observability
+  - core.resilience
+  - core.state-machine
+  - core.navigation
+  - port.backup-catalog:default
+
+capabilities:
+  - core.tenancy
+  - core.api.v2
+  - core.access
+  - core.async-jobs
+  - core.observability
+  - core.resilience
+  - core.state-machine
+  - core.navigation
+
+provided_capabilities:
+  - backup-disaster-recovery.recovery-points
+  - backup-disaster-recovery.restores
+  - backup-disaster-recovery.runbooks
+  - backup-disaster-recovery.exercises
+  - backup-disaster-recovery.objectives
+  - adapter.storage-recovery:local-filesystem
+
 permissions:
-  - backup_disaster_recovery.resource:create
-  - backup_disaster_recovery.resource:read
-  - backup_disaster_recovery.resource:update
-  - backup_disaster_recovery.resource:delete
-  - backup_disaster_recovery.resource:activate
-  - backup_disaster_recovery.resource:deactivate
+  - backup_disaster_recovery.*:read
+  - backup_disaster_recovery.backup:read
+  - backup_disaster_recovery.backup:execute
+  - backup_disaster_recovery.recovery_point:verify
+  - backup_disaster_recovery.restore:create
+  - backup_disaster_recovery.restore:execute
+  - backup_disaster_recovery.runbook:create
+  - backup_disaster_recovery.runbook:update
+  - backup_disaster_recovery.runbook:delete
+  - backup_disaster_recovery.runbook:publish
+  - backup_disaster_recovery.exercise:create
+  - backup_disaster_recovery.exercise:update
+  - backup_disaster_recovery.exercise:execute
+  - backup_disaster_recovery.report:read
+
+ports:
+  required:
+    - name: backup-catalog
+      registration_key: default
+  provided:
+    - name: storage-recovery-adapter
+      registration_key: local-filesystem
+
 sod_actions:
-  - [backup_disaster_recovery.resource:create, backup_disaster_recovery.resource:delete]
+  - action: backup_disaster_recovery.restore:execute
+    conflicts_with:
+      - backup_disaster_recovery.restore:create
+  - action: backup_disaster_recovery.runbook:publish
+    conflicts_with:
+      - backup_disaster_recovery.runbook:update
+
+async_commands:
+  - backup_disaster_recovery.backup.request
+  - backup_disaster_recovery.recovery_point.verify
+  - backup_disaster_recovery.restore.validate
+  - backup_disaster_recovery.restore.execute
+  - backup_disaster_recovery.exercise.execute
+
+extension_registries:
+  - backup-catalog
+  - storage-recovery-adapter
+  - runbook-extension-action
+  - evidence-enricher
+  - compliance-report-exporter
+  - readiness-rule
+  - provider-health-probe
+  - metrics-collector
+
 search_indexes:
-  - backup_disaster_recovery_resources
-ai_tools:
-  - create_backup_disaster_recovery_resource
-  - update_backup_disaster_recovery_resource
-  - delete_backup_disaster_recovery_resource
+  - entity: recovery_point
+    fields: [backup_job_id, scope_ref]
+  - entity: dr_runbook
+    fields: [name, slug, description]
+  - entity: restore_run
+    fields: [target_ref, idempotency_key]
+  - entity: dr_exercise
+    fields: [name, summary]
+
+ai_tools: []

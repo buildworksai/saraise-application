@@ -5,8 +5,9 @@
 # MODULE OVERVIEW
 # =============================================================================
 #
-# This module manages Backup Disaster Recovery functionality.
-# Status: Scaffold - requires implementation
+# This module manages governed recovery points, restores, versioned runbooks,
+# exercises, step evidence, readiness, and RPO/RTO reporting.
+# Status: Production domain implementation (API v2)
 
 # =============================================================================
 # CRITICAL: Read contracts.ts FIRST
@@ -18,30 +19,30 @@
 # This file contains:
 # - All TypeScript types for this module
 # - All API endpoint URLs
-# - Type guards for runtime checking
-# - Usage examples
+# - Governed v2 envelopes, pagination, and error contracts
+# - Provider-neutral discriminated parameter and evidence types
 
 # =============================================================================
 # TYPE IMPORTS
 # =============================================================================
 #
 # ✅ CORRECT: Import types from contracts.ts
-#   import { Entity, EntityCreate, ENDPOINTS } from './contracts';
+#   import { RecoveryPoint, ENDPOINTS } from './contracts';
 #
 # ❌ FORBIDDEN: Import directly from @/types/api in pages/components
 #   import type { components } from '@/types/api';
 #
-# ❌ FORBIDDEN: Define ad-hoc types in page files
+# Page-local view-state interfaces are permitted; API DTOs are not.
 
 # =============================================================================
 # ENDPOINT USAGE
 # =============================================================================
 #
 # ✅ CORRECT: Use ENDPOINTS constant
-#   apiClient.get<Entity[]>(ENDPOINTS.ENTITIES.LIST);
+#   apiClient.get<ApiV2Page<RecoveryPoint>>(ENDPOINTS.RECOVERY_POINTS.LIST);
 #
 # ❌ FORBIDDEN: Hardcode URL strings
-#   apiClient.get('/api/v1/backup_disaster_recovery/entities/');
+#   apiClient.get('/api/v2/backup-disaster-recovery/recovery-points/');
 
 # =============================================================================
 # VALIDATION CHECKPOINTS
