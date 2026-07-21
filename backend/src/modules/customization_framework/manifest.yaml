@@ -1,26 +1,60 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
+# SARAISE customization-framework foundation contract
 name: customization-framework
-version: 1.0.0
-description: No-code/low-code customization engine, custom scripts, client scripts, server scripts
+version: 2.0.0
+description: Tenant-safe custom fields, versioned forms, declarative rules, and execution evidence
 type: foundation
-lifecycle: platform
+lifecycle: core
 dependencies:
   - core-identity >=1.0
   - metadata-modeling >=1.0
+  - security-access-control >=1.0
 permissions:
-  - customization_framework.resource:create
-  - customization_framework.resource:read
-  - customization_framework.resource:update
-  - customization_framework.resource:delete
-  - customization_framework.resource:activate
-  - customization_framework.resource:deactivate
+  - customization_framework.field_definition:read
+  - customization_framework.field_definition:create
+  - customization_framework.field_definition:update
+  - customization_framework.field_definition:delete
+  - customization_framework.field_definition:publish
+  - customization_framework.field_value:read
+  - customization_framework.field_value:write
+  - customization_framework.field_value:delete
+  - customization_framework.field_value:validate
+  - customization_framework.form:read
+  - customization_framework.form:create
+  - customization_framework.form:update
+  - customization_framework.form:delete
+  - customization_framework.form:publish
+  - customization_framework.form:archive
+  - customization_framework.rule:read
+  - customization_framework.rule:create
+  - customization_framework.rule:update
+  - customization_framework.rule:delete
+  - customization_framework.rule:publish
+  - customization_framework.rule:evaluate
+  - customization_framework.execution:read
+  - customization_framework.impact:read
+  - customization_framework.health:read
 sod_actions:
-  - [customization_framework.resource:create, customization_framework.resource:delete]
+  - ["customization_framework.field_definition:create", "customization_framework.field_definition:publish"]
+  - ["customization_framework.form:create", "customization_framework.form:publish"]
+  - ["customization_framework.rule:create", "customization_framework.rule:publish"]
 search_indexes:
-  - customization_framework_resources
-ai_tools:
-  - create_customization_framework_resource
-  - update_customization_framework_resource
-  - delete_customization_framework_resource
+  - customization_field_definitions
+  - customization_form_definitions
+  - customization_business_rules
+ai_tools: []
+metadata:
+  api_version: v2
+  extension_surface: customization-registry-v1
+  entitlement_keys:
+    - customization_framework.fields
+    - customization_framework.forms
+    - customization_framework.rules
+    - customization_framework.execution_evidence
+  quota_resources:
+    - customization_framework.api_reads
+    - customization_framework.api_writes
+    - customization_framework.rule_evaluations
+  sod_command_conflicts:
+    - [field_definition.update, field_definition.retire]
+    - [form.update, form.archive]
+    - [rule.update, rule.retire]

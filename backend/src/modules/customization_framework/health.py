@@ -1,61 +1,127 @@
-"""
-CustomizationFramework Health Checks
+"""Sanitized readiness checks for the customization domain."""
 
-Rule: SARAISE-17007 (Health checks required for all modules)
-"""
-from django.core.cache import cache
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Mapping
+
+from django.conf import settings
 from django.db import connection
-from django.http import JsonResponse
-from django.views.decorators.http import require_http_methods
-from .models import CustomizationFrameworkResource
+from django.utils import timezone
+
+from src.core.state_machine import registry as state_machine_registry
+
+DOMAIN_TABLES = (
+    "customization_field_definitions",
+    "customization_field_values",
+    "customization_form_definitions",
+    "customization_form_layout_versions",
+    "customization_business_rules",
+    "customization_business_rule_versions",
+    "customization_rule_executions",
+)
+STATE_MACHINES = (
+    "customization_framework.field_definition",
+    "customization_framework.form",
+    "customization_framework.rule",
+)
+ASYNC_TABLES = ("async_jobs", "async_job_outbox_events", "async_job_transitions")
 
 
-@require_http_methods(["GET"])
-def health_check(request):
-    """
-    Health check endpoint for CustomizationFramework module.
+@dataclass(frozen=True, slots=True)
+class ModuleHealthReport:
+    status: str
+    payload: Mapping[str, object]
 
-    Returns:
-    - 200 OK if healthy
-    - 503 Service Unavailable if unhealthy
-    """
-    health_status = {
-        'status': 'healthy',
-        'module': 'customization-framework',
-        'checks': {}
-    }
+    @property
+    def status_code(self) -> int:
+        return 503 if self.status == "unavailable" else 200
 
-    # Check database connectivity
+
+def _database_check() -> tuple[bool, str]:
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
-        health_status['checks']['database'] = 'ok'
-    except Exception as e:
-        health_status['status'] = 'unhealthy'
-        health_status['checks']['database'] = f'error: {str(e)}'
+        return True, "ready"
+    except Exception:
+        return False, "dependency_unavailable"
 
-    # Check cache (Redis) connectivity
+
+def _schema_check() -> tuple[bool, str]:
     try:
-        cache.set("health_check_customization_framework", "ok", 10)
-        result = cache.get("health_check_customization_framework")
-        if result == "ok":
-            health_status['checks']['cache'] = 'ok'
-        else:
-            health_status['status'] = 'degraded'
-            health_status['checks']['cache'] = 'not responding correctly'
-    except Exception as e:
-        health_status['status'] = 'unhealthy'
-        health_status['checks']['cache'] = f'error: {str(e)}'
+        tables = set(connection.introspection.table_names())
+        return (True, "ready") if set(DOMAIN_TABLES).issubset(tables) else (False, "schema_missing")
+    except Exception:
+        return False, "dependency_unavailable"
 
-    # Check module-specific model accessibility
+
+def _rls_check() -> tuple[bool, str]:
+    if connection.vendor != "postgresql":
+        # SQLite is test/development-only and has no RLS catalog. Production
+        # readiness still fails closed on PostgreSQL checks below.
+        return True, "not_applicable"
     try:
-        # Verify we can query the primary model
-        count = CustomizationFrameworkResource.objects.count()
-        health_status['checks']['module_model'] = {'status': 'ok', 'total_count': count}
-    except Exception as e:
-        health_status['status'] = 'unhealthy'
-        health_status['checks']['module_model'] = f'error: {str(e)}'
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
+                   FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                   WHERE n.nspname=current_schema() AND c.relname = ANY(%s)""",
+                [list(DOMAIN_TABLES)],
+            )
+            flags = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
+            cursor.execute(
+                """SELECT tablename, qual, with_check FROM pg_policies
+                   WHERE schemaname=current_schema() AND tablename = ANY(%s)""",
+                [list(DOMAIN_TABLES)],
+            )
+            policies = {row[0] for row in cursor.fetchall() if row[1] and row[2]}
+        ready = (
+            set(flags) == set(DOMAIN_TABLES)
+            and all(enabled and forced for enabled, forced in flags.values())
+            and policies == set(DOMAIN_TABLES)
+        )
+        return (True, "ready") if ready else (False, "rls_missing")
+    except Exception:
+        return False, "dependency_unavailable"
 
 
-    status_code = 200 if health_status['status'] == 'healthy' else 503
-    return JsonResponse(health_status, status=status_code)
+def _state_machine_check() -> tuple[bool, str]:
+    ready = set(STATE_MACHINES).issubset(state_machine_registry.names())
+    return (True, "ready") if ready else (False, "registration_missing")
+
+
+def _async_check() -> tuple[bool, str]:
+    if not getattr(settings, "CUSTOMIZATION_ASYNC_IMPACT_ENABLED", False):
+        return True, "disabled"
+    try:
+        ready = set(ASYNC_TABLES).issubset(set(connection.introspection.table_names()))
+        return (True, "ready") if ready else (False, "schema_missing")
+    except Exception:
+        return False, "dependency_unavailable"
+
+
+def get_module_health() -> ModuleHealthReport:
+    """Return readiness without counts, SQL, hostnames, or exception text."""
+    checks = {
+        "database": _database_check(),
+        "domain_schema": _schema_check(),
+        "row_level_security": _rls_check(),
+        "state_machines": _state_machine_check(),
+        "async_outbox": _async_check(),
+    }
+    ready = all(value[0] for value in checks.values())
+    status = "healthy" if ready else "unavailable"
+    payload = {
+        "status": status,
+        "live": True,
+        "ready": ready,
+        "checked_at": timezone.now(),
+        "checks": {
+            name: {"status": "healthy" if value[0] else "unavailable", "code": value[1]}
+            for name, value in checks.items()
+        },
+    }
+    return ModuleHealthReport(status, payload)
+
+
+__all__ = ["DOMAIN_TABLES", "ModuleHealthReport", "get_module_health"]

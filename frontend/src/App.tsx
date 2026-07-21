@@ -111,30 +111,6 @@ const CreateIntegrationPlatformResourcePage = lazy(() =>
   }))
 );
 
-const CustomizationFrameworkListPage = lazy(() =>
-  import(
-    "./modules/customization_framework/pages/CustomizationFrameworkListPage"
-  ).then((m) => ({
-    default: m.CustomizationFrameworkListPage,
-  }))
-);
-
-const CustomizationFrameworkDetailPage = lazy(() =>
-  import(
-    "./modules/customization_framework/pages/CustomizationFrameworkDetailPage"
-  ).then((m) => ({
-    default: m.CustomizationFrameworkDetailPage,
-  }))
-);
-
-const CreateCustomizationFrameworkResourcePage = lazy(() =>
-  import(
-    "./modules/customization_framework/pages/CreateCustomizationFrameworkResourcePage"
-  ).then((m) => ({
-    default: m.CreateCustomizationFrameworkResourcePage,
-  }))
-);
-
 const AiProviderConfigurationListPage = lazy(() =>
   import(
     "./modules/ai_provider_configuration/pages/AiProviderConfigurationListPage"
@@ -1719,38 +1695,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <IntegrationPlatformDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* CustomizationFramework routes */}
-          <Route
-            path="/customization-framework"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CustomizationFrameworkListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/customization-framework/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateCustomizationFrameworkResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/customization-framework/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CustomizationFrameworkDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
