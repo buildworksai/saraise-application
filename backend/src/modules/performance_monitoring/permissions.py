@@ -1,23 +1,23 @@
-"""
-PerformanceMonitoring Permissions.
+"""Deny-default permission contract for performance monitoring."""
 
-Defines permissions for the PerformanceMonitoring module.
-"""
-
-from typing import List
-
-# Permission declarations
-PERMISSIONS: List[str] = [
-    "performance_monitoring.resource:create",
-    "performance_monitoring.resource:read",
-    "performance_monitoring.resource:update",
-    "performance_monitoring.resource:delete",
-    "performance_monitoring.resource:activate",
-    "performance_monitoring.resource:deactivate",
+PERMISSIONS = [
+    "performance_monitoring.telemetry:read",
+    "performance_monitoring.telemetry:ingest",
+    "performance_monitoring.telemetry:configure",
+    "performance_monitoring.alert:read",
+    "performance_monitoring.alert:manage",
+    "performance_monitoring.alert:respond",
+    "performance_monitoring.sla:read",
+    "performance_monitoring.sla:manage",
+    "performance_monitoring.report:generate",
+    "performance_monitoring.extension:read",
+    "performance_monitoring.health:read",
 ]
 
-# SoD (Segregation of Duties) actions
-SOD_ACTIONS: List[str] = [
-    "performance_monitoring.resource:create",
-    "performance_monitoring.resource:delete",
+SOD_ACTIONS = [
+    "performance_monitoring.telemetry:configure",
+    "performance_monitoring.alert:manage",
+    "performance_monitoring.sla:manage",
 ]
+
+__all__ = ["PERMISSIONS", "SOD_ACTIONS"]

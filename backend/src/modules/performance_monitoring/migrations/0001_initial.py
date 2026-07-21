@@ -14,14 +14,14 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="PerformanceMonitoringResource",
             fields=[
-                ("tenant_id", models.CharField(db_index=True, max_length=36)),
+                ("tenant_id", models.UUIDField(db_index=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),
                 (
                     "id",
-                    models.CharField(
+                    models.UUIDField(
                         default=src.modules.performance_monitoring.models.generate_uuid,
-                        max_length=36,
+                        editable=False,
                         primary_key=True,
                         serialize=False,
                     ),
@@ -30,7 +30,7 @@ class Migration(migrations.Migration):
                 ("description", models.TextField(blank=True)),
                 ("is_active", models.BooleanField(db_index=True, default=True)),
                 ("config", models.JSONField(default=dict, help_text="Module-specific configuration")),
-                ("created_by", models.CharField(db_index=True, max_length=36)),
+                ("created_by", models.UUIDField(db_index=True)),
             ],
             options={
                 "db_table": "performance_monitoring_resources",

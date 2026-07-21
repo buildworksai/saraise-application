@@ -1,136 +1,104 @@
-"""
-Service Unit Tests for PerformanceMonitoring module.
+import uuid
+from datetime import timedelta
 
-Tests business logic in services layer.
-"""
 import pytest
+from django.utils import timezone
 
-from src.modules.performance_monitoring.models import TenantBaseModel
-from src.modules.performance_monitoring.services import PerformanceMonitoringService
+from src.modules.performance_monitoring.models import AlertState, MetricDataPoint, MetricType
+from src.modules.performance_monitoring.services import (
+    AlertingService,
+    InvalidMetricValueError,
+    MetricsCollectionService,
+    SLAMonitoringService,
+)
 
 
 @pytest.mark.django_db
-class TestPerformanceMonitoringService:
-    """Test PerformanceMonitoringService business logic."""
-
-    def test_create_resource(self, db):
-        """Test creating a resource via service."""
-        service = PerformanceMonitoringService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            description="Test description",
-            created_by="user-123",
+def test_metric_ingestion_idempotency_counter_and_query():
+    tenant = uuid.uuid4()
+    service = MetricsCollectionService()
+    first = service.record_metric(
+        tenant,
+        "orders.processed.count",
+        1,
+        metric_type=MetricType.COUNTER,
+        session_id="worker-1",
+        idempotency_key="one",
+    )
+    assert (
+        service.record_metric(
+            tenant,
+            "ORDERS.PROCESSED.COUNT",
+            1,
+            metric_type=MetricType.COUNTER,
+            session_id="worker-1",
+            idempotency_key="one",
+        ).id
+        == first.id
+    )
+    with pytest.raises(InvalidMetricValueError):
+        service.record_metric(
+            tenant, "orders.processed.count", 0, metric_type=MetricType.COUNTER, session_id="worker-1"
         )
-        assert resource.id is not None
-        assert resource.name == "Test Resource"
-        assert resource.tenant_id == "tenant-123"
+    result = service.query_metrics(
+        tenant,
+        "orders.processed.count",
+        start=timezone.now() - timedelta(minutes=1),
+        end=timezone.now() + timedelta(minutes=1),
+    )
+    assert result.data and result.data[0].value == 1
 
-    def test_get_resource(self, db):
-        """Test getting a resource by ID."""
-        service = PerformanceMonitoringService()
-        created = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
 
-        retrieved = service.get_resource(created.id, "tenant-123")
-        assert retrieved is not None
-        assert retrieved.id == created.id
-        assert retrieved.name == "Test Resource"
+@pytest.mark.django_db
+def test_batch_partial_failure_is_explicit():
+    result = MetricsCollectionService().record_metrics_batch(
+        uuid.uuid4(),
+        [
+            {"metric_name": "api.latency", "value": 1},
+            {"metric_name": "bad name", "value": 1},
+        ],
+        atomic=False,
+    )
+    assert (result.accepted, result.rejected, result.errors[0]["code"]) == (1, 1, "INVALID_METRIC_NAME")
 
-    def test_get_resource_wrong_tenant(self, db):
-        """Test that getting resource from wrong tenant returns None."""
-        service = PerformanceMonitoringService()
-        created = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
 
-        retrieved = service.get_resource(created.id, "tenant-456")
-        assert retrieved is None
+@pytest.mark.django_db
+def test_alert_state_machine_and_tenant_boundary():
+    tenant = uuid.uuid4()
+    metrics = MetricsCollectionService()
+    metrics.record_metric(tenant, "api.latency", 800)
+    alerts = AlertingService(notification_sender=lambda tenant_id, alert, delivery: "receipt-1")
+    rule = alerts.create_alert_rule(
+        tenant,
+        "api.latency",
+        "above_threshold",
+        500,
+        {"channels": ["in_app"], "recipients": [str(uuid.uuid4())]},
+        name="Latency",
+    )
+    alert = alerts.evaluate_alert_rule(tenant, rule.id)
+    assert alert and alert.status == AlertState.FIRING
+    acknowledged = alerts.acknowledge_alert(tenant, alert.id, uuid.uuid4())
+    assert acknowledged.status == AlertState.ACKNOWLEDGED and acknowledged.acknowledged_by
+    assert alerts.resolve_alert(tenant, alert.id, resolved_by=uuid.uuid4()).status == AlertState.RESOLVED
+    with pytest.raises(Exception):
+        alerts.acknowledge_alert(uuid.uuid4(), alert.id, uuid.uuid4())
 
-    def test_list_resources(self, db):
-        """Test listing resources for tenant."""
-        service = PerformanceMonitoringService()
-        service.create_resource(
-            tenant_id="tenant-123",
-            name="Resource 1",
-            created_by="user-123",
-        )
-        service.create_resource(
-            tenant_id="tenant-123",
-            name="Resource 2",
-            created_by="user-123",
-        )
-        service.create_resource(
-            tenant_id="tenant-456",
-            name="Resource 3",
-            created_by="user-456",
-        )
 
-        resources = service.list_resources("tenant-123")
-        assert len(resources) == 2
-        assert all(r.tenant_id == "tenant-123" for r in resources)
-
-    def test_update_resource(self, db):
-        """Test updating a resource."""
-        service = PerformanceMonitoringService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Original Name",
-            created_by="user-123",
-        )
-
-        updated = service.update_resource(
-            resource.id,
-            "tenant-123",
-            name="Updated Name",
-            description="Updated description",
-        )
-        assert updated is not None
-        assert updated.name == "Updated Name"
-        assert updated.description == "Updated description"
-
-    def test_delete_resource(self, db):
-        """Test deleting a resource."""
-        service = PerformanceMonitoringService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="To Delete",
-            created_by="user-123",
-        )
-
-        result = service.delete_resource(resource.id, "tenant-123")
-        assert result is True
-        assert not TenantBaseModel.objects.filter(id=resource.id).exists()
-
-    def test_activate_resource(self, db):
-        """Test activating a resource."""
-        service = PerformanceMonitoringService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
-        resource.is_active = False
-        resource.save()
-
-        activated = service.activate_resource(resource.id, "tenant-123")
-        assert activated is not None
-        assert activated.is_active is True
-
-    def test_deactivate_resource(self, db):
-        """Test deactivating a resource."""
-        service = PerformanceMonitoringService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
-
-        deactivated = service.deactivate_resource(resource.id, "tenant-123")
-        assert deactivated is not None
-        assert deactivated.is_active is False
+@pytest.mark.django_db
+def test_sla_versioning_and_density_compliance():
+    tenant = uuid.uuid4()
+    metric = MetricsCollectionService().define_metric(tenant, "service.availability", MetricType.GAUGE)
+    sla_service = SLAMonitoringService()
+    sla = sla_service.define_sla(tenant, "Orders", metric.metric_name, 99, "rolling_1h", comparison="gte")
+    now = timezone.now()
+    MetricDataPoint.objects.bulk_create(
+        [
+            MetricDataPoint(tenant_id=tenant, metric=metric, value=100, timestamp=now - timedelta(minutes=index))
+            for index in range(49)
+        ]
+    )
+    record = sla_service.check_sla_compliance(tenant, sla.id)
+    assert record.is_compliant and record.compliance_percentage < 100
+    replacement = sla_service.update_sla(tenant, sla.id, target=99.5)
+    assert replacement.version == 2 and replacement.previous_version_id == sla.id

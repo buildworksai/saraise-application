@@ -6,7 +6,9 @@
 # =============================================================================
 #
 # This module manages Performance Monitoring functionality.
-# Status: Scaffold - requires implementation
+# Status: Production implementation - domain contracts, services, routes, and
+# operational workspaces are implemented. Keep this file aligned with
+# contracts.ts whenever the public module surface evolves.
 
 # =============================================================================
 # CRITICAL: Read contracts.ts FIRST

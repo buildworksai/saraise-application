@@ -49,6 +49,7 @@ urlpatterns = [
     path("api/v2/backup-disaster-recovery/", include("src.modules.backup_disaster_recovery.urls")),
     path("api/v1/backup-recovery/", include("src.modules.backup_recovery.urls")),
     path("api/v1/performance-monitoring/", include("src.modules.performance_monitoring.urls")),
+    path("api/v2/performance-monitoring/", include("src.modules.performance_monitoring.v2_urls")),
     path("api/v1/localization/", include("src.modules.localization.urls")),
     path("api/v1/regional/", include("src.modules.regional.urls")),
     # CRM Module
