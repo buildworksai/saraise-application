@@ -1,18 +1,19 @@
-"""
-URL routing for ProcessMining module.
-"""
-from django.urls import path, include
+"""Governed v2 process-mining routes; the generic v1 surface is removed."""
+
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .api import ProcessMiningResourceViewSet
-from .health import health_check
+from .api import BottleneckViewSet, ConformanceViewSet, DiscoveryViewSet, EventExportViewSet, ModuleHealthAPIView, ProcessEventViewSet, ProcessModelVersionViewSet, ProcessModelViewSet, ProcessOverviewViewSet
 
-# Create router and register ViewSets
+app_name = "process_mining"
 router = DefaultRouter()
-router.register(r'resources', ProcessMiningResourceViewSet, basename='resource')
+router.register("processes", ProcessOverviewViewSet, basename="process")
+router.register("events", ProcessEventViewSet, basename="event")
+router.register("exports", EventExportViewSet, basename="export")
+router.register("discoveries", DiscoveryViewSet, basename="discovery")
+router.register("models", ProcessModelViewSet, basename="model")
+router.register("model-versions", ProcessModelVersionViewSet, basename="model-version")
+router.register("conformance-checks", ConformanceViewSet, basename="conformance-check")
+router.register("bottleneck-analyses", BottleneckViewSet, basename="bottleneck-analysis")
 
-# URL patterns
-urlpatterns = [
-    path('', include(router.urls)),
-    path('health/', health_check, name='health_check'),
-]
+urlpatterns = [path("", include(router.urls)), path("health/", ModuleHealthAPIView.as_view(), name="health")]

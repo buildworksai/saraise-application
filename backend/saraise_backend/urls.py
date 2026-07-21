@@ -39,7 +39,7 @@ urlpatterns = [
     path("api/v2/customization-framework/", include("src.modules.customization_framework.urls")),
     path("api/v1/ai-provider-configuration/", include("src.modules.ai_provider_configuration.urls")),
     path("api/v2/automation-orchestration/", include("src.modules.automation_orchestration.urls")),
-    path("api/v1/process-mining/", include("src.modules.process_mining.urls")),
+    path("api/v2/process-mining/", include("src.modules.process_mining.urls")),
     path("api/v2/document-intelligence/", include("src.modules.document_intelligence.urls")),
     path("api/v1/dms/", include("src.modules.dms.urls")),
     path("api/v1/data-migration/", include("src.modules.data_migration.urls")),

@@ -149,28 +149,6 @@ const NotificationCenterPage = lazy(() =>
   }))
 );
 
-const ProcessMiningListPage = lazy(() =>
-  import("./modules/process_mining/pages/ProcessMiningListPage").then((m) => ({
-    default: m.ProcessMiningListPage,
-  }))
-);
-
-const ProcessMiningDetailPage = lazy(() =>
-  import("./modules/process_mining/pages/ProcessMiningDetailPage").then(
-    (m) => ({
-      default: m.ProcessMiningDetailPage,
-    })
-  )
-);
-
-const CreateProcessMiningResourcePage = lazy(() =>
-  import("./modules/process_mining/pages/CreateProcessMiningResourcePage").then(
-    (m) => ({
-      default: m.CreateProcessMiningResourcePage,
-    })
-  )
-);
-
 const DmsListPage = lazy(() =>
   import("./modules/dms/pages/DmsListPage").then((m) => ({
     default: m.DmsListPage,
@@ -1723,38 +1701,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <NotificationCenterPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* ProcessMining routes */}
-          <Route
-            path="/process-mining"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <ProcessMiningListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/process-mining/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateProcessMiningResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/process-mining/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <ProcessMiningDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

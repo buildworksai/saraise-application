@@ -1,190 +1,63 @@
-"""
-Tenant Isolation Tests for ProcessMining module.
+"""Cross-tenant list, detail, mutation, action, worker, and evidence isolation."""
+from datetime import timedelta
 
-CRITICAL: These tests verify that tenants cannot access each other's data.
-This is the PRIMARY security mechanism for multi-tenant isolation.
-
-Reference: saraise-documentation/rules/compliance-enforcement.md
-Rule: ALL tenant-scoped queries MUST filter by tenant_id
-"""
-import uuid
 import pytest
-from django.contrib.auth import get_user_model
-from rest_framework import status
-from rest_framework.test import APIClient
+from django.utils import timezone
+from rest_framework.permissions import IsAuthenticated
 
-from src.modules.process_mining.models import TenantBaseModel
-from src.core.auth_utils import get_user_tenant_id
+from .. import api
+from ..models import ProcessModel
+from ..tasks import discover_process_task
+from .factories import AnalysisFactory, ConformanceFactory, DiscoveryFactory, EventFactory, ExportFactory, ModelFactory, graph
 
-User = get_user_model()
+pytest_plugins = ["src.core.testing"]
+pytestmark = pytest.mark.django_db
+BASE = "/api/v2/process-mining"
 
 
 @pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
-    settings.SARAISE_MODE = "development"
+def authenticated_policy_boundary(monkeypatch):
+    monkeypatch.setattr(api.ActionAccessMixin, "get_permissions", lambda self: [IsAuthenticated()])
 
 
-@pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
+@pytest.mark.parametrize("factory,path", [(ExportFactory, "exports"), (DiscoveryFactory, "discoveries"), (ModelFactory, "models"), (ConformanceFactory, "conformance-checks"), (AnalysisFactory, "bottleneck-analyses")])
+def test_list_and_detail_hide_other_tenant(authenticated_tenant_a_client, tenant_a, tenant_b, factory, path):
+    own = factory(tenant_id=tenant_a.id)
+    other = factory(tenant_id=tenant_b.id)
+    listed = authenticated_tenant_a_client.get(f"{BASE}/{path}/").json()["data"]
+    assert {row["id"] for row in listed} == {str(own.id)}
+    assert authenticated_tenant_a_client.get(f"{BASE}/{path}/{other.id}/").status_code == 404
 
 
-@pytest.fixture
-def tenant_a_user(db):
-    """Create user for tenant A."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_a",
-        email="usera@example.com",
-        password="testpass123",
-    )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+def test_event_list_and_detail_hide_other_tenant(authenticated_tenant_a_client, tenant_a, tenant_b):
+    start, end = timezone.now() - timedelta(days=1), timezone.now() + timedelta(minutes=1)
+    own = EventFactory(tenant_id=tenant_a.id, process_name="orders", occurred_at=timezone.now())
+    other = EventFactory(tenant_id=tenant_b.id, process_name="orders", occurred_at=timezone.now())
+    response = authenticated_tenant_a_client.get(f"{BASE}/events/", {"process_name": "orders", "start": start.isoformat(), "end": end.isoformat()})
+    assert {row["id"] for row in response.json()["data"]} == {str(own.id)}
+    assert authenticated_tenant_a_client.get(f"{BASE}/events/{other.id}/").status_code == 404
 
 
-@pytest.fixture
-def tenant_b_user(db):
-    """Create user for tenant B."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_b",
-        email="userb@example.com",
-        password="testpass123",
-    )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+def test_create_payload_cannot_spoof_tenant(authenticated_tenant_a_client, tenant_a, tenant_b):
+    response = authenticated_tenant_a_client.post(f"{BASE}/models/", {"tenant_id": str(tenant_b.id), "name": "Reference", "process_name": "orders", "description": "", "model_data": graph()}, format="json")
+    assert response.status_code == 400
+    assert not ProcessModel.objects.for_tenant(tenant_b.id).filter(name="Reference").exists()
+    response = authenticated_tenant_a_client.post(f"{BASE}/models/", {"name": "Reference", "process_name": "orders", "description": "", "model_data": graph()}, format="json")
+    assert response.status_code == 201
+    assert ProcessModel.objects.for_tenant(tenant_a.id).filter(pk=response.json()["data"]["id"]).exists()
 
 
-@pytest.mark.django_db
-class TestProcessMiningTenantIsolation:
-    """
-    CRITICAL: Tenant isolation tests for TenantBaseModel model.
-    These tests verify that tenants cannot access each other's resources.
-    """
+def test_cross_tenant_update_delete_and_actions_are_404(authenticated_tenant_a_client, tenant_b):
+    model = ModelFactory(tenant_id=tenant_b.id)
+    export = ExportFactory(tenant_id=tenant_b.id)
+    assert authenticated_tenant_a_client.patch(f"{BASE}/models/{model.id}/", {"name": "stolen"}, format="json").status_code == 404
+    assert authenticated_tenant_a_client.delete(f"{BASE}/models/{model.id}/").status_code == 404
+    assert authenticated_tenant_a_client.post(f"{BASE}/models/{model.id}/set-reference/", {"version_id": model.id, "transition_key": "x"}, format="json").status_code == 404
+    assert authenticated_tenant_a_client.post(f"{BASE}/exports/{export.id}/cancel/", {"transition_key": "x"}, format="json").status_code == 404
+    model.refresh_from_db(); export.refresh_from_db()
+    assert model.name != "stolen" and not model.is_deleted and not export.is_deleted
 
-    def test_user_cannot_list_other_tenant_resources(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's resources in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
 
-        # Create resource for tenant A
-        resource_a = TenantBaseModel.objects.create(
-            tenant_id=tenant_a_id,
-            name="Tenant A Resource",
-            description="Resource for tenant A",
-            created_by=str(tenant_a_user.id),
-        )
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        response = api_client.get("/api/v1/process-mining/resources/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        resource_ids = [r["id"] for r in data]
-
-        # User A should see tenant A's resource, but NOT tenant B's resource
-        assert resource_a.id in resource_ids
-        assert resource_b.id not in resource_ids
-
-    def test_user_cannot_get_other_tenant_resource_by_id(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot GET other tenant's resource by ID (returns 404)."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)  # noqa: F841
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to access tenant B's resource
-        response = api_client.get(f"/api/v1/process-mining/resources/{resource_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    def test_user_cannot_update_other_tenant_resource(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot UPDATE other tenant's resource (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to update tenant B's resource
-        data = {"name": "Hacked Name"}
-        response = api_client.put(
-            f"/api/v1/process-mining/resources/{resource_b.id}/",
-            data,
-            format="json"
-        )
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-        # Verify resource was not modified
-        resource_b.refresh_from_db()
-        assert resource_b.name == "Tenant B Resource"
-
-    def test_user_cannot_delete_other_tenant_resource(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot DELETE other tenant's resource (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to delete tenant B's resource
-        response = api_client.delete(f"/api/v1/process-mining/resources/{resource_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-        # Verify resource still exists
-        assert TenantBaseModel.objects.filter(id=resource_b.id).exists()
+def test_worker_without_tenant_fails_closed():
+    with pytest.raises(Exception, match="requires tenant_id"):
+        discover_process_task(discovery_id=DiscoveryFactory().id, async_job_id=DiscoveryFactory().id)

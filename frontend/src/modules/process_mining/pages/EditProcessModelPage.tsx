@@ -1,0 +1,12 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'; import { useEffect, useState } from 'react'; import { useNavigate, useParams } from 'react-router-dom';
+import { Button } from '@/components/ui/Button'; import { Card } from '@/components/ui/Card'; import { Input } from '@/components/ui/Input'; import { Textarea } from '@/components/ui/Textarea';
+import { ApiProblem, PageHeader, PageSkeleton } from '../components/ModuleShell'; import { processMiningService } from '../services/process_mining-service';
+
+export function EditProcessModelPage() {
+  const { id = '' } = useParams(); const navigate = useNavigate(); const client = useQueryClient(); const [name, setName] = useState(''); const [description, setDescription] = useState('');
+  const query = useQuery({ queryKey: ['process-mining', 'model', id], queryFn: () => processMiningService.getModel(id), enabled: Boolean(id) });
+  useEffect(() => { if (query.data) { setName(query.data.name); setDescription(query.data.description); } }, [query.data]);
+  const mutation = useMutation({ mutationFn: () => processMiningService.updateModel(id, { name: name.trim(), description: description.trim() }), onSuccess: async () => { await client.invalidateQueries({ queryKey: ['process-mining', 'model', id] }); navigate(`/process-mining/models/${id}/map`); } });
+  if (query.isLoading) return <PageSkeleton table={false}/>; if (query.error || !query.data) return <main className="p-4 sm:p-8"><ApiProblem error={query.error} onRetry={() => void query.refetch()}/></main>;
+  return <main className="space-y-6 p-4 sm:p-8"><PageHeader title="Edit model metadata" description="Only the logical model name and description are mutable. Published graph versions remain immutable."/>{mutation.error && <ApiProblem error={mutation.error} onRetry={() => mutation.reset()}/>}<Card className="mx-auto max-w-2xl p-6"><form className="space-y-5" onSubmit={(event) => { event.preventDefault(); mutation.mutate(); }}><Input id="name" label="Model name" value={name} onChange={(event) => setName(event.target.value)} required/><Textarea id="description" label="Description" value={description} onChange={(event) => setDescription(event.target.value)} rows={6}/><div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => navigate(`/process-mining/models/${id}/map`)}>Cancel</Button><Button type="submit" disabled={mutation.isPending || !name.trim()}>{mutation.isPending ? 'Saving…' : 'Save metadata'}</Button></div></form></Card></main>;
+}

@@ -1,157 +1,851 @@
-"""
-ProcessMining Services.
+"""Transactional business services for process mining.
 
-High-level service layer for ProcessMining business logic.
+Controllers only validate transport data and delegate here.  Every public
+method accepts the authoritative tenant UUID first and every lookup uses the
+canonical ``for_tenant`` queryset boundary.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
-from typing import Any, Dict, Optional
+import tempfile
+import uuid
+from collections import defaultdict
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone as datetime_timezone
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+from uuid import UUID
 
-from django.db import transaction
+from django.core.files import File
+from django.core.files.storage import default_storage
+from django.db import IntegrityError, transaction
+from django.db.models import Avg, Count, Max, Q, QuerySet
+from django.utils import timezone
+from rest_framework.exceptions import NotFound, ValidationError
 
-from .models import ProcessMiningResource
+from src.core.api.results import CapabilityUnavailable, OperationFailed
+from src.core.async_jobs.models import AsyncJob, OutboxEvent
+from src.core.async_jobs.services import enqueue
+from src.core.middleware.correlation import get_correlation_id
 
-logger = logging.getLogger(__name__)
+from .adapters import (
+    BottleneckAlgorithm,
+    CanonicalEvent,
+    ConformanceAlgorithm,
+    ExportFormatter,
+    MiningAlgorithm,
+    canonical_events,
+    registry,
+)
+from .models import (
+    AnalysisStatus,
+    BottleneckAnalysis,
+    BottleneckFinding,
+    ConformanceCaseMetric,
+    ConformanceCheck,
+    ConformanceDeviation,
+    EventExportJob,
+    ExportFormat,
+    ExportStatus,
+    MiningAlgorithmName,
+    ModelSourceKind,
+    ProcessDiscoveryJob,
+    ProcessEvent,
+    ProcessModel,
+    ProcessModelVersion,
+    ProcessVariant,
+    validate_graph,
+)
+from .state_machines import (
+    BOTTLENECK_STATE_MACHINE,
+    CONFORMANCE_STATE_MACHINE,
+    DISCOVERY_STATE_MACHINE,
+    EXPORT_STATE_MACHINE,
+)
+
+logger = logging.getLogger("saraise.process_mining")
+MAX_BATCH_EVENTS = 10_000
+MAX_EXPORT_EVENTS = 1_000_000
+MAX_EXPORT_BYTES = 500 * 1024 * 1024
+MAX_CONFORMANCE_EVENTS = 100_000
 
 
-class ProcessMiningService:
-    """Service for managing ProcessMining resources."""
+@dataclass(frozen=True, slots=True)
+class IngestRowEvidence:
+    index: int
+    status: str
+    event_id: UUID | None = None
+    code: str = ""
+    message: str = ""
 
-    def create_resource(
+
+@dataclass(frozen=True, slots=True)
+class IngestResult:
+    accepted: int
+    rejected: int
+    duplicates: int
+    rows: tuple[IngestRowEvidence, ...]
+
+
+def _tenant(value: UUID | str) -> UUID:
+    try:
+        return value if isinstance(value, UUID) else UUID(str(value))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValidationError({"tenant_id": "A valid tenant UUID is required."}) from exc
+
+
+def _actor(value: UUID | str) -> UUID:
+    try:
+        return value if isinstance(value, UUID) else UUID(str(value))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValidationError({"actor_id": "A valid actor UUID is required."}) from exc
+
+
+def _required_text(value: object, field: str, limit: int = 255) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError({field: "This field is required."})
+    normalized = value.strip()
+    if len(normalized) > limit:
+        raise ValidationError({field: f"Must not exceed {limit} characters."})
+    return normalized
+
+
+def _aware_datetime(value: object, field: str) -> datetime:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValidationError({field: "A valid ISO-8601 datetime is required."}) from exc
+    if not isinstance(value, datetime) or timezone.is_naive(value):
+        raise ValidationError({field: "A timezone-aware datetime is required."})
+    return value
+
+
+def _audit(actor_id: UUID, reason: str) -> dict[str, str]:
+    return {
+        "actor_id": str(actor_id),
+        "reason": reason,
+        "correlation_id": get_correlation_id() or str(uuid.uuid4()),
+    }
+
+
+def _publish(tenant_id: UUID, aggregate_type: str, aggregate_id: UUID, event_type: str, payload: Mapping[str, object]) -> OutboxEvent:
+    safe_payload = dict(payload)
+    safe_payload.setdefault("correlation_id", get_correlation_id() or str(uuid.uuid4()))
+    return OutboxEvent.objects.create(
+        tenant_id=tenant_id,
+        aggregate_type=aggregate_type,
+        aggregate_id=aggregate_id,
+        event_type=event_type,
+        payload=safe_payload,
+    )
+
+
+def _enqueue_or_unavailable(
+    tenant_id: UUID,
+    actor_id: UUID,
+    command: str,
+    payload: dict[str, object],
+    idempotency_key: str,
+) -> AsyncJob:
+    try:
+        return enqueue(tenant_id, actor_id, command, payload, idempotency_key)
+    except Exception as exc:
+        logger.exception("process_mining.queue_unavailable", extra={"event_name": "process_mining.queue_unavailable", "tenant_id": str(tenant_id), "command": command})
+        raise CapabilityUnavailable(capability="durable_job_dispatch", message="Durable processing is temporarily unavailable.") from exc
+
+
+def _get(model: type[Any], tenant_id: UUID, identifier: UUID | str, *, active: bool = False) -> Any:
+    filters: dict[str, object] = {"pk": identifier}
+    if active and any(field.name == "is_deleted" for field in model._meta.fields):
+        filters["is_deleted"] = False
+    value = model.objects.for_tenant(tenant_id).filter(**filters).first()
+    if value is None:
+        raise NotFound()
+    return value
+
+
+def _canonical_hash(
+    tenant_id: UUID,
+    process_name: str,
+    case_id: str,
+    activity: str,
+    occurred_at: datetime,
+    source_module: str,
+    source_event_id: str,
+) -> str:
+    parts = (
+        str(tenant_id),
+        process_name,
+        case_id,
+        activity,
+        occurred_at.astimezone(datetime_timezone.utc).isoformat(timespec="microseconds"),
+        source_module,
+        source_event_id,
+    )
+    return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
+
+
+def _safe_attributes(value: object) -> dict[str, object]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValidationError({"attributes": "Attributes must be an object."})
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    if len(encoded.encode("utf-8")) > 64 * 1024:
+        raise ValidationError({"attributes": "Attributes must not exceed 64 KiB."})
+    forbidden = {"password", "secret", "token", "authorization", "api_key", "credential"}
+    if any(str(key).lower() in forbidden for key in value):
+        raise ValidationError({"attributes": "Credential-like attribute keys are forbidden."})
+    return value
+
+
+class EventLogService:
+    def ingest_events(
         self,
-        tenant_id: str,
-        name: str,
-        description: str = "",
-        config: Optional[Dict[str, Any]] = None,
-        created_by: str = "",
-    ) -> ProcessMiningResource:
-        """Create a new resource.
-
-        Args:
-            tenant_id: Tenant ID.
-            name: Resource name.
-            description: Resource description.
-            config: Resource configuration.
-            created_by: User ID who created the resource.
-
-        Returns:
-            Created ProcessMiningResource instance.
-
-        Raises:
-            ValueError: If validation fails.
-        """
+        tenant_id: UUID,
+        actor_id: UUID,
+        source_module: str,
+        process_name: str,
+        events: Sequence[Mapping[str, object]],
+    ) -> IngestResult:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        source_module = _required_text(source_module, "source_module", 100)
+        process_name = _required_text(process_name, "process_name")
+        if not isinstance(events, Sequence) or isinstance(events, (str, bytes)) or not events:
+            raise ValidationError({"events": "A nonempty event array is required."})
+        if len(events) > MAX_BATCH_EVENTS:
+            raise ValidationError({"events": f"A batch may contain at most {MAX_BATCH_EVENTS} events."})
+        source = registry.get("process_mining.canonical")
+        if not source.validate_source(source_module):
+            raise ValidationError({"source_module": "The source is not registered."})
+        now = timezone.now()
+        cutoff = now - timedelta(days=730)
+        valid: list[tuple[int, ProcessEvent]] = []
+        evidence: list[IngestRowEvidence] = []
+        seen_hashes: set[str] = set()
+        seen_sources: set[str] = set()
+        for index, raw in enumerate(events):
+            try:
+                mapped = source.map_event(raw)
+                case_id = _required_text(mapped.get("case_id"), "case_id")
+                activity = _required_text(mapped.get("activity"), "activity")
+                occurred_at = _aware_datetime(mapped.get("occurred_at"), "occurred_at")
+                if occurred_at < cutoff:
+                    raise ValidationError({"occurred_at": "Events older than two years are rejected."})
+                if occurred_at > now:
+                    raise ValidationError({"occurred_at": "Future events are rejected."})
+                source_event_id = str(mapped.get("source_event_id") or "").strip()
+                resource = str(mapped.get("resource") or "").strip()
+                event_hash = _canonical_hash(tenant_id, process_name, case_id, activity, occurred_at, source_module, source_event_id)
+                if event_hash in seen_hashes or (source_event_id and source_event_id in seen_sources):
+                    evidence.append(IngestRowEvidence(index, "duplicate", code="DUPLICATE_IN_BATCH", message="Duplicate event identity in this batch."))
+                    continue
+                seen_hashes.add(event_hash)
+                if source_event_id:
+                    seen_sources.add(source_event_id)
+                valid.append(
+                    (
+                        index,
+                        ProcessEvent(
+                            tenant_id=tenant_id,
+                            created_by=actor_id,
+                            process_name=process_name,
+                            source_module=source_module,
+                            source_event_id=source_event_id or None,
+                            case_id=case_id,
+                            activity=activity,
+                            occurred_at=occurred_at,
+                            resource=resource or None,
+                            attributes=_safe_attributes(mapped.get("attributes")),
+                            event_hash=event_hash,
+                        ),
+                    )
+                )
+            except (ValidationError, ValueError, TypeError) as exc:
+                evidence.append(IngestRowEvidence(index, "rejected", code="INVALID_EVENT", message=str(exc)))
+        hashes = [event.event_hash for _, event in valid]
+        existing_hashes = set(
+            ProcessEvent.objects.for_tenant(tenant_id).filter(event_hash__in=hashes).values_list("event_hash", flat=True)
+        )
+        source_ids = [event.source_event_id for _, event in valid if event.source_event_id]
+        existing_sources = set(
+            ProcessEvent.objects.for_tenant(tenant_id)
+            .filter(source_module=source_module, source_event_id__in=source_ids)
+            .values_list("source_event_id", flat=True)
+        )
+        inserts: list[ProcessEvent] = []
+        for index, event in valid:
+            if event.event_hash in existing_hashes or (event.source_event_id and event.source_event_id in existing_sources):
+                evidence.append(IngestRowEvidence(index, "duplicate", code="ALREADY_INGESTED", message="Event identity already exists."))
+            else:
+                inserts.append(event)
         with transaction.atomic():
-            resource = ProcessMiningResource.objects.create(
-                tenant_id=tenant_id,
-                name=name,
-                description=description,
-                config=config or {},
-                created_by=created_by,
-            )
+            ProcessEvent.objects.bulk_create(inserts, ignore_conflicts=True, batch_size=1000)
+            for event in inserts:
+                persisted = ProcessEvent.objects.for_tenant(tenant_id).filter(event_hash=event.event_hash).only("id").first()
+                evidence.append(IngestRowEvidence(next(index for index, candidate in valid if candidate is event), "accepted", persisted.id if persisted else None))
+            aggregate_id = inserts[0].id if inserts else uuid.uuid5(uuid.NAMESPACE_URL, f"process-events:{tenant_id}:{process_name}")
+            _publish(tenant_id, "process_event_batch", aggregate_id, "process.events.ingested", {"process_name": process_name, "source_module": source_module, "accepted": len(inserts), "rejected": sum(item.status == "rejected" for item in evidence), "duplicates": sum(item.status == "duplicate" for item in evidence)})
+        ordered = tuple(sorted(evidence, key=lambda item: item.index))
+        result = IngestResult(sum(item.status == "accepted" for item in ordered), sum(item.status == "rejected" for item in ordered), sum(item.status == "duplicate" for item in ordered), ordered)
+        logger.info("process.events.ingested", extra={"event_name": "process.events.ingested", "tenant_id": str(tenant_id), "actor_id": str(actor_id), "accepted": result.accepted, "rejected": result.rejected, "duplicates": result.duplicates})
+        return result
 
-            logger.info(f"Created process_mining resource {resource.id} for tenant {tenant_id}")
-            return resource
+    def query_events(self, tenant_id: UUID, filters: Mapping[str, object]) -> QuerySet[ProcessEvent]:
+        tenant_id = _tenant(tenant_id)
+        process_name = _required_text(filters.get("process_name"), "process_name")
+        start = _aware_datetime(filters.get("start"), "start")
+        end = _aware_datetime(filters.get("end"), "end")
+        if end <= start:
+            raise ValidationError({"end": "End must follow start."})
+        if end - start > timedelta(days=366):
+            raise ValidationError({"end": "Event queries are bounded to 366 days."})
+        queryset = ProcessEvent.objects.for_tenant(tenant_id).filter(process_name=process_name, occurred_at__gte=start, occurred_at__lte=end)
+        for field in ("case_id", "activity", "resource", "source_module"):
+            if filters.get(field):
+                queryset = queryset.filter(**{field: filters[field]})
+        ordering = str(filters.get("ordering") or "occurred_at")
+        if ordering not in {"occurred_at", "-occurred_at"}:
+            raise ValidationError({"ordering": "Only occurred_at ordering is supported."})
+        return queryset.order_by(ordering, "id")
 
-    def get_resource(self, resource_id: str, tenant_id: str) -> Optional[ProcessMiningResource]:
-        """Get resource by ID.
+    def get_event(self, tenant_id: UUID, event_id: UUID) -> ProcessEvent:
+        return _get(ProcessEvent, _tenant(tenant_id), event_id)
 
-        Args:
-            resource_id: Resource ID.
-            tenant_id: Tenant ID.
-
-        Returns:
-            ProcessMiningResource instance or None if not found.
-        """
-        return ProcessMiningResource.objects.filter(
-            id=resource_id,
-            tenant_id=tenant_id
-        ).first()
-
-    def list_resources(self, tenant_id: str, is_active: Optional[bool] = None) -> list[ProcessMiningResource]:
-        """List all resources for tenant.
-
-        Args:
-            tenant_id: Tenant ID.
-            is_active: Optional filter by active status.
-
-        Returns:
-            List of ProcessMiningResource instances.
-        """
-        queryset = ProcessMiningResource.objects.filter(tenant_id=tenant_id)
-        if is_active is not None:
-            queryset = queryset.filter(is_active=is_active)
-        return list(queryset)
-
-    def update_resource(
-        self,
-        resource_id: str,
-        tenant_id: str,
-        **updates: Any
-    ) -> Optional[ProcessMiningResource]:
-        """Update resource.
-
-        Args:
-            resource_id: Resource ID.
-            tenant_id: Tenant ID.
-            **updates: Fields to update.
-
-        Returns:
-            Updated ProcessMiningResource instance or None if not found.
-        """
-        resource = self.get_resource(resource_id, tenant_id)
-        if not resource:
-            return None
-
+    def purge_expired_events(self, tenant_id: UUID, retention_days: int = 365, actor_id: UUID | None = None) -> int:
+        tenant_id = _tenant(tenant_id)
+        actor_id = _actor(actor_id or uuid.UUID(int=0))
+        if retention_days < 30:
+            raise ValidationError({"retention_days": "Retention must be at least 30 days."})
+        cutoff = timezone.now() - timedelta(days=retention_days)
         with transaction.atomic():
-            for key, value in updates.items():
-                if hasattr(resource, key):
-                    setattr(resource, key, value)
-            resource.save()
+            queryset = ProcessEvent.objects.for_tenant(tenant_id).filter(occurred_at__lt=cutoff)
+            count = queryset.count()
+            queryset.delete()
+            _publish(tenant_id, "process_event_retention", uuid.uuid4(), "process.events.purged", {"count": count, "cutoff": cutoff.isoformat(), "actor_id": str(actor_id)})
+        return count
 
-            logger.info(f"Updated process_mining resource {resource_id}")
-            return resource
 
-    def delete_resource(self, resource_id: str, tenant_id: str) -> bool:
-        """Delete resource.
+def _filter_events(tenant_id: UUID, process_name: str, event_filter: Mapping[str, object]) -> QuerySet[ProcessEvent]:
+    queryset = ProcessEvent.objects.for_tenant(tenant_id).filter(process_name=process_name)
+    if event_filter.get("start"):
+        queryset = queryset.filter(occurred_at__gte=_aware_datetime(event_filter["start"], "start"))
+    if event_filter.get("end"):
+        queryset = queryset.filter(occurred_at__lte=_aware_datetime(event_filter["end"], "end"))
+    for field in ("case_id", "activity", "resource", "source_module"):
+        if event_filter.get(field):
+            queryset = queryset.filter(**{field: event_filter[field]})
+    return queryset.order_by("case_id", "occurred_at", "source_event_id", "activity", "id")
 
-        Args:
-            resource_id: Resource ID.
-            tenant_id: Tenant ID.
 
-        Returns:
-            True if deleted, False if not found.
-        """
-        resource = self.get_resource(resource_id, tenant_id)
-        if not resource:
-            return False
-
+class ExportService:
+    def request_export(self, tenant_id: UUID, actor_id: UUID, process_name: str, format: str, event_filter: Mapping[str, object], idempotency_key: str) -> EventExportJob:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        process_name, idempotency_key = _required_text(process_name, "process_name"), _required_text(idempotency_key, "idempotency_key")
+        if format not in ExportFormat.values:
+            raise ValidationError({"format": "Supported formats are xes, csv, and json."})
+        existing = EventExportJob.objects.for_tenant(tenant_id).filter(idempotency_key=idempotency_key).first()
+        if existing:
+            return existing
+        count = _filter_events(tenant_id, process_name, event_filter).count()
+        projected = count * 512
+        if count > MAX_EXPORT_EVENTS or projected > MAX_EXPORT_BYTES:
+            raise OperationFailed(error_code="EXPORT_TOO_LARGE", message="The requested export exceeds the safe limit.", detail={"projected_rows": count, "projected_bytes": projected}, http_status=413)
         with transaction.atomic():
-            resource.delete()
-            logger.info(f"Deleted process_mining resource {resource_id}")
-            return True
+            record = EventExportJob.objects.create(tenant_id=tenant_id, created_by=actor_id, process_name=process_name, format=format, event_filter=dict(event_filter), idempotency_key=idempotency_key)
+            job = _enqueue_or_unavailable(tenant_id, actor_id, "process_mining.export_event_log", {"export_id": str(record.id)}, f"process_mining.export:{idempotency_key}")
+            record.async_job_id = job.id
+            record.save(update_fields=["async_job_id", "updated_at"])
+            _publish(tenant_id, "event_export", record.id, "process.export.requested", {"export_id": str(record.id), "format": format, "projected_rows": count})
+        return record
 
-    def activate_resource(self, resource_id: str, tenant_id: str) -> Optional[ProcessMiningResource]:
-        """Activate resource.
+    def run_export(self, tenant_id: UUID, export_id: UUID, async_job_id: UUID) -> EventExportJob:
+        tenant_id = _tenant(tenant_id)
+        record = _get(EventExportJob, tenant_id, export_id, active=True)
+        if record.status == ExportStatus.COMPLETED:
+            return record
+        if record.async_job_id != async_job_id:
+            raise NotFound()
+        actor_id = record.created_by
+        record = EXPORT_STATE_MACHINE.apply(record, "start", tenant_id=tenant_id, transition_key=f"worker:{async_job_id}:start", metadata=_audit(actor_id, "Export worker started"))
+        formatter = registry.get(record.format)
+        if not isinstance(formatter, ExportFormatter):
+            raise CapabilityUnavailable(capability=f"export:{record.format}")
+        events = _filter_events(tenant_id, record.process_name, record.event_filter).iterator(chunk_size=1000)
+        key = f"process_mining/{tenant_id}/{record.id}.{formatter.extension}"
+        try:
+            with tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8", newline="", suffix=f".{formatter.extension}") as temporary:
+                count = formatter.write(canonical_events(events), temporary)
+                temporary.flush()
+                size = Path(temporary.name).stat().st_size
+                digest = hashlib.sha256()
+                with open(temporary.name, "rb") as source:
+                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                temporary.seek(0)
+                stored_key = default_storage.save(key, File(temporary, name=Path(key).name))
+            with default_storage.open(stored_key, "rb") as stored:
+                verified = hashlib.sha256()
+                for chunk in iter(lambda: stored.read(1024 * 1024), b""):
+                    verified.update(chunk)
+            if verified.hexdigest() != digest.hexdigest():
+                default_storage.delete(stored_key)
+                raise IOError("stored export checksum mismatch")
+            now = timezone.now()
+            EventExportJob.objects.for_tenant(tenant_id).filter(pk=record.id).update(artifact_key=stored_key, content_type=formatter.content_type, row_count=count, byte_size=size, sha256=digest.hexdigest(), expires_at=now + timedelta(days=7), completed_at=now, error_code="", error_message="")
+            record = EventExportJob.objects.for_tenant(tenant_id).get(pk=record.id)
+            record = EXPORT_STATE_MACHINE.apply(record, "complete", tenant_id=tenant_id, transition_key=f"worker:{async_job_id}:complete", metadata=_audit(actor_id, "Export artifact verified"))
+            _publish(tenant_id, "event_export", record.id, "process.export.completed", {"export_id": str(record.id), "format": record.format, "row_count": count, "byte_size": size, "sha256": digest.hexdigest()})
+            return record
+        except Exception as exc:
+            EventExportJob.objects.for_tenant(tenant_id).filter(pk=record.id).update(error_code="EXPORT_STORAGE_FAILED", error_message="Export storage is unavailable.")
+            fresh = EventExportJob.objects.for_tenant(tenant_id).get(pk=record.id)
+            if fresh.status == ExportStatus.RUNNING:
+                EXPORT_STATE_MACHINE.apply(fresh, "fail", tenant_id=tenant_id, transition_key=f"worker:{async_job_id}:fail", metadata=_audit(actor_id, "Export failed"))
+            _publish(tenant_id, "event_export", record.id, "process.export.failed", {"export_id": str(record.id), "error_code": "EXPORT_STORAGE_FAILED"})
+            raise CapabilityUnavailable(capability="export_storage", message="The export could not be stored.") from exc
 
-        Args:
-            resource_id: Resource ID.
-            tenant_id: Tenant ID.
+    def open_download(self, tenant_id: UUID, export_id: UUID) -> tuple[EventExportJob, Any]:
+        record = _get(EventExportJob, _tenant(tenant_id), export_id, active=True)
+        if record.status != ExportStatus.COMPLETED or not record.artifact_key or not default_storage.exists(record.artifact_key):
+            raise CapabilityUnavailable(capability="export_artifact", message="The export artifact is not available.")
+        stream = default_storage.open(record.artifact_key, "rb")
+        digest = hashlib.sha256()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+        if digest.hexdigest() != record.sha256:
+            stream.close()
+            raise OperationFailed(error_code="ARTIFACT_INTEGRITY_FAILED", message="Export verification failed.", http_status=503)
+        stream.seek(0)
+        return record, stream
 
-        Returns:
-            Updated ProcessMiningResource instance or None if not found.
-        """
-        return self.update_resource(resource_id, tenant_id, is_active=True)
+    def _transition(self, tenant_id: UUID, export_id: UUID, actor_id: UUID, command: str, transition_key: str, reason: str = "") -> EventExportJob:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        record = _get(EventExportJob, tenant_id, export_id, active=True)
+        updated = EXPORT_STATE_MACHINE.apply(record, command, tenant_id=tenant_id, transition_key=_required_text(transition_key, "transition_key"), metadata=_audit(actor_id, reason or f"Export {command}"))
+        _publish(tenant_id, "event_export", updated.id, f"process.export.{updated.status}", {"export_id": str(updated.id)})
+        return updated
 
-    def deactivate_resource(self, resource_id: str, tenant_id: str) -> Optional[ProcessMiningResource]:
-        """Deactivate resource.
+    def cancel_export(self, tenant_id: UUID, export_id: UUID, actor_id: UUID, transition_key: str, reason: str = "") -> EventExportJob:
+        return self._transition(tenant_id, export_id, actor_id, "cancel", transition_key, reason)
 
-        Args:
-            resource_id: Resource ID.
-            tenant_id: Tenant ID.
+    def retry_export(self, tenant_id: UUID, export_id: UUID, actor_id: UUID, transition_key: str, idempotency_key: str) -> EventExportJob:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        record = self._transition(tenant_id, export_id, actor_id, "retry", transition_key)
+        with transaction.atomic():
+            job = _enqueue_or_unavailable(tenant_id, actor_id, "process_mining.export_event_log", {"export_id": str(record.id)}, _required_text(idempotency_key, "idempotency_key"))
+            record.async_job_id = job.id
+            record.save(update_fields=["async_job_id", "updated_at"])
+        return record
 
-        Returns:
-            Updated ProcessMiningResource instance or None if not found.
-        """
-        return self.update_resource(resource_id, tenant_id, is_active=False)
+    def expire_export(self, tenant_id: UUID, export_id: UUID, actor_id: UUID, transition_key: str) -> EventExportJob:
+        record = self._transition(tenant_id, export_id, actor_id, "expire", transition_key)
+        if record.artifact_key:
+            default_storage.delete(record.artifact_key)
+        return record
+
+    def delete_export(self, tenant_id: UUID, export_id: UUID, actor_id: UUID) -> None:
+        tenant_id, _actor_id = _tenant(tenant_id), _actor(actor_id)
+        record = _get(EventExportJob, tenant_id, export_id, active=True)
+        if record.status not in {ExportStatus.COMPLETED, ExportStatus.CANCELLED, ExportStatus.EXPIRED, ExportStatus.FAILED, ExportStatus.TIMED_OUT}:
+            raise ValidationError({"status": "Only terminal export metadata can be deleted."})
+        if record.artifact_key:
+            default_storage.delete(record.artifact_key)
+        EventExportJob.objects.for_tenant(tenant_id).filter(pk=record.id).update(is_deleted=True, deleted_at=timezone.now(), artifact_key="")
+
+
+class ProcessModelService:
+    def create_imported_model(self, tenant_id: UUID, actor_id: UUID, name: str, process_name: str, description: str, model_data: Mapping[str, object]) -> ProcessModel:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        validate_graph(model_data)
+        with transaction.atomic():
+            model = ProcessModel.objects.create(tenant_id=tenant_id, created_by=actor_id, name=_required_text(name, "name"), process_name=_required_text(process_name, "process_name"), description=str(description or "").strip(), source_kind=ModelSourceKind.IMPORTED)
+            self.create_version(tenant_id, model.id, actor_id, model_data, algorithm=None, parameters={}, discovery_job=None)
+        return model
+
+    def create_version(self, tenant_id: UUID, model_id: UUID, actor_id: UUID, model_data: Mapping[str, object], *, algorithm: str | None, parameters: Mapping[str, object], discovery_job: ProcessDiscoveryJob | None, event_count: int = 0, case_count: int = 0, activity_count: int = 0, avg_case_duration_seconds: Decimal | None = None) -> ProcessModelVersion:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        validate_graph(model_data)
+        with transaction.atomic():
+            model = ProcessModel.objects.for_tenant(tenant_id).select_for_update().filter(pk=model_id, is_deleted=False).first()
+            if model is None:
+                raise NotFound()
+            if discovery_job and discovery_job.tenant_id != tenant_id:
+                raise NotFound()
+            version_number = model.versions.filter(tenant_id=tenant_id).aggregate(value=Max("version"))["value"] or 0
+            version = ProcessModelVersion.objects.create(tenant_id=tenant_id, created_by=actor_id, process_model=model, version=version_number + 1, discovery_job=discovery_job, algorithm=algorithm, parameters=dict(parameters), model_data=dict(model_data), event_count=event_count, case_count=case_count, activity_count=activity_count, avg_case_duration_seconds=avg_case_duration_seconds, published_at=timezone.now())
+            model.current_version_number = version.version
+            model.save(update_fields=["current_version_number", "updated_at"])
+        return version
+
+    def update_model_metadata(self, tenant_id: UUID, model_id: UUID, actor_id: UUID, name: str, description: str) -> ProcessModel:
+        tenant_id, _actor_id = _tenant(tenant_id), _actor(actor_id)
+        model = _get(ProcessModel, tenant_id, model_id, active=True)
+        model.name = _required_text(name, "name")
+        model.description = str(description or "").strip()
+        model.save(update_fields=["name", "description", "updated_at"])
+        return model
+
+    def soft_delete_model(self, tenant_id: UUID, model_id: UUID, actor_id: UUID) -> None:
+        tenant_id, _actor_id = _tenant(tenant_id), _actor(actor_id)
+        model = _get(ProcessModel, tenant_id, model_id, active=True)
+        if ConformanceCheck.objects.for_tenant(tenant_id).filter(process_model_version__process_model=model, status__in=[AnalysisStatus.QUEUED, AnalysisStatus.RUNNING], is_deleted=False).exists():
+            raise ValidationError({"model": "Active analyses still reference this model."})
+        ProcessModel.objects.for_tenant(tenant_id).filter(pk=model.id).update(is_deleted=True, deleted_at=timezone.now())
+
+    def set_reference_version(self, tenant_id: UUID, model_id: UUID, version_id: UUID, actor_id: UUID, transition_key: str) -> ProcessModelVersion:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        _required_text(transition_key, "transition_key")
+        with transaction.atomic():
+            model = ProcessModel.objects.for_tenant(tenant_id).select_for_update().filter(pk=model_id, is_deleted=False).first()
+            version = ProcessModelVersion.objects.for_tenant(tenant_id).filter(pk=version_id, process_model_id=model_id).first()
+            if model is None or version is None:
+                raise NotFound()
+            ProcessModelVersion.objects.for_tenant(tenant_id).filter(process_model=model, is_reference=True).update(is_reference=False)
+            ProcessModelVersion.objects.for_tenant(tenant_id).filter(pk=version.id).update(is_reference=True)
+            model.reference_version_number = version.version
+            model.save(update_fields=["reference_version_number", "updated_at"])
+            _publish(tenant_id, "process_model", model.id, "process.model.reference_changed", {"model_id": str(model.id), "version_id": str(version.id), "transition_key": transition_key, "actor_id": str(actor_id)})
+        version.refresh_from_db()
+        return version
+
+    def get_process_overview(self, tenant_id: UUID, filters: Mapping[str, object]) -> list[dict[str, object]]:
+        tenant_id = _tenant(tenant_id)
+        events = ProcessEvent.objects.for_tenant(tenant_id)
+        if filters.get("process_name"):
+            events = events.filter(process_name=filters["process_name"])
+        if filters.get("source_module"):
+            events = events.filter(source_module=filters["source_module"])
+        search = str(filters.get("search") or "").strip()
+        if search:
+            events = events.filter(process_name__icontains=search)
+        rows = list(events.values("process_name").annotate(event_count=Count("id"), case_count=Count("case_id", distinct=True), last_activity=Max("occurred_at")).order_by("process_name"))
+        for row in rows:
+            model = ProcessModel.objects.for_tenant(tenant_id).filter(process_name=row["process_name"], is_deleted=False).order_by("-created_at").first()
+            discovery = ProcessDiscoveryJob.objects.for_tenant(tenant_id).filter(process_name=row["process_name"], is_deleted=False).order_by("-created_at").first()
+            row.update({"has_reference": bool(model and model.reference_version_number), "model_id": model.id if model else None, "last_discovery": discovery.created_at if discovery else None})
+        if filters.get("has_reference") is not None:
+            expected = str(filters["has_reference"]).lower() in {"true", "1"}
+            rows = [row for row in rows if row["has_reference"] is expected]
+        order = str(filters.get("ordering") or "process_name")
+        mappings = {"cases": "case_count", "events": "event_count", "last_activity": "last_activity", "last_discovery": "last_discovery", "process_name": "process_name"}
+        descending = order.startswith("-")
+        key = mappings.get(order.lstrip("-"))
+        if key is None:
+            raise ValidationError({"ordering": "Unsupported process ordering."})
+        rows.sort(key=lambda row: (row.get(key) is not None, row.get(key)), reverse=descending)
+        return rows
+
+
+class ProcessDiscoveryService:
+    def request_discovery(self, tenant_id: UUID, actor_id: UUID, process_name: str, algorithm: str, parameters: Mapping[str, object], idempotency_key: str) -> ProcessDiscoveryJob:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        process_name, idempotency_key = _required_text(process_name, "process_name"), _required_text(idempotency_key, "idempotency_key")
+        existing = ProcessDiscoveryJob.objects.for_tenant(tenant_id).filter(idempotency_key=idempotency_key).first()
+        if existing:
+            return existing
+        if algorithm not in MiningAlgorithmName.values:
+            raise ValidationError({"algorithm": "Unsupported mining algorithm."})
+        adapter = registry.get(algorithm)
+        if not isinstance(adapter, MiningAlgorithm):
+            raise CapabilityUnavailable(capability=f"discovery:{algorithm}")
+        queryset = ProcessEvent.objects.for_tenant(tenant_id).filter(process_name=process_name)
+        counts = queryset.aggregate(events=Count("id"), cases=Count("case_id", distinct=True), activities=Count("activity", distinct=True))
+        if counts["events"] < 100 or counts["cases"] < 10:
+            raise ValidationError({"process_name": "Discovery requires at least 100 events across 10 cases."})
+        if algorithm == MiningAlgorithmName.ALPHA and counts["activities"] > 50:
+            raise ValidationError({"algorithm": "Alpha miner supports at most 50 activities."})
+        normalized = dict(parameters)
+        threshold_name, default = ("dependency_threshold", 0.8) if algorithm == MiningAlgorithmName.HEURISTIC else ("noise_threshold", 0.2)
+        if algorithm in {MiningAlgorithmName.HEURISTIC, MiningAlgorithmName.INDUCTIVE}:
+            threshold = float(normalized.get(threshold_name, default))
+            if not 0 <= threshold <= 1:
+                raise ValidationError({threshold_name: "Must be between 0 and 1."})
+            normalized[threshold_name] = threshold
+        with transaction.atomic():
+            record = ProcessDiscoveryJob.objects.create(tenant_id=tenant_id, created_by=actor_id, process_name=process_name, algorithm=algorithm, parameters=normalized, idempotency_key=idempotency_key, event_count=counts["events"], case_count=counts["cases"], activity_count=counts["activities"])
+            job = _enqueue_or_unavailable(tenant_id, actor_id, "process_mining.discover_process", {"discovery_id": str(record.id)}, f"process_mining.discovery:{idempotency_key}")
+            record.async_job_id = job.id
+            record.save(update_fields=["async_job_id", "updated_at"])
+            _publish(tenant_id, "process_discovery", record.id, "process.discovery.requested", {"discovery_id": str(record.id), "algorithm": algorithm})
+        return record
+
+    def run_discovery(self, tenant_id: UUID, discovery_id: UUID, async_job_id: UUID) -> ProcessDiscoveryJob:
+        tenant_id = _tenant(tenant_id)
+        record = _get(ProcessDiscoveryJob, tenant_id, discovery_id, active=True)
+        if record.status == AnalysisStatus.COMPLETED:
+            return record
+        if record.async_job_id != async_job_id:
+            raise NotFound()
+        record = DISCOVERY_STATE_MACHINE.apply(record, "start", tenant_id=tenant_id, transition_key=f"worker:{async_job_id}:start", metadata=_audit(record.created_by, "Discovery worker started"))
+        _publish(tenant_id, "process_discovery", record.id, "process.discovery.started", {"discovery_id": str(record.id), "algorithm": record.algorithm})
+        try:
+            rows = list(ProcessEvent.objects.for_tenant(tenant_id).filter(process_name=record.process_name).order_by("case_id", "occurred_at", "source_event_id", "activity", "id"))
+            algorithm = registry.get(record.algorithm)
+            if not isinstance(algorithm, MiningAlgorithm):
+                raise CapabilityUnavailable(capability=f"discovery:{record.algorithm}")
+            graph = algorithm.discover(canonical_events(rows), record.parameters)
+            model_service = ProcessModelService()
+            with transaction.atomic():
+                model = ProcessModel.objects.for_tenant(tenant_id).filter(process_name=record.process_name, source_kind=ModelSourceKind.DISCOVERED, is_deleted=False).order_by("created_at").first()
+                if model is None:
+                    model = ProcessModel.objects.create(tenant_id=tenant_id, created_by=record.created_by, name=record.process_name, process_name=record.process_name, source_kind=ModelSourceKind.DISCOVERED)
+                durations = []
+                traces: dict[str, list[ProcessEvent]] = defaultdict(list)
+                for row in rows:
+                    traces[row.case_id].append(row)
+                for trace in traces.values():
+                    durations.append(max(0, (trace[-1].occurred_at - trace[0].occurred_at).total_seconds()))
+                model_service.create_version(tenant_id, model.id, record.created_by, graph, algorithm=record.algorithm, parameters=record.parameters, discovery_job=record, event_count=len(rows), case_count=len(traces), activity_count=len({row.activity for row in rows}), avg_case_duration_seconds=Decimal(str(round(sum(durations) / len(durations), 2))) if durations else None)
+                ProcessDiscoveryJob.objects.for_tenant(tenant_id).filter(pk=record.id).update(event_count=len(rows), case_count=len(traces), activity_count=len({row.activity for row in rows}), completed_at=timezone.now(), error_code="", error_message="")
+                record = ProcessDiscoveryJob.objects.for_tenant(tenant_id).get(pk=record.id)
+                record = DISCOVERY_STATE_MACHINE.apply(record, "complete", tenant_id=tenant_id, transition_key=f"worker:{async_job_id}:complete", metadata=_audit(record.created_by, "Discovery model published"))
+                _publish(tenant_id, "process_discovery", record.id, "process.discovery.completed", {"discovery_id": str(record.id), "algorithm": record.algorithm, "event_count": record.event_count, "case_count": record.case_count})
+            return record
+        except Exception as exc:
+            ProcessDiscoveryJob.objects.for_tenant(tenant_id).filter(pk=record.id).update(error_code="DISCOVERY_FAILED", error_message="The discovery algorithm could not complete.", completed_at=timezone.now())
+            fresh = ProcessDiscoveryJob.objects.for_tenant(tenant_id).get(pk=record.id)
+            if fresh.status == AnalysisStatus.RUNNING:
+                DISCOVERY_STATE_MACHINE.apply(fresh, "fail", tenant_id=tenant_id, transition_key=f"worker:{async_job_id}:fail", metadata=_audit(fresh.created_by, "Discovery failed"))
+            _publish(tenant_id, "process_discovery", record.id, "process.discovery.failed", {"discovery_id": str(record.id), "error_code": "DISCOVERY_FAILED"})
+            raise OperationFailed(error_code="DISCOVERY_FAILED", message="Process discovery failed.") from exc
+
+    def get_discovered_model(self, tenant_id: UUID, discovery_id: UUID) -> ProcessModelVersion:
+        record = _get(ProcessDiscoveryJob, _tenant(tenant_id), discovery_id, active=True)
+        if record.status != AnalysisStatus.COMPLETED:
+            raise ValidationError({"status": "The discovery has not completed."})
+        version = ProcessModelVersion.objects.for_tenant(record.tenant_id).filter(discovery_job=record).first()
+        if version is None:
+            raise NotFound()
+        return version
+
+    def _transition(self, tenant_id: UUID, discovery_id: UUID, actor_id: UUID, command: str, transition_key: str, reason: str = "") -> ProcessDiscoveryJob:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        record = _get(ProcessDiscoveryJob, tenant_id, discovery_id, active=True)
+        return DISCOVERY_STATE_MACHINE.apply(record, command, tenant_id=tenant_id, transition_key=_required_text(transition_key, "transition_key"), metadata=_audit(actor_id, reason or f"Discovery {command}"))
+
+    def cancel_discovery(self, tenant_id: UUID, discovery_id: UUID, actor_id: UUID, transition_key: str, reason: str = "") -> ProcessDiscoveryJob:
+        return self._transition(tenant_id, discovery_id, actor_id, "cancel", transition_key, reason)
+
+    def retry_discovery(self, tenant_id: UUID, discovery_id: UUID, actor_id: UUID, transition_key: str, idempotency_key: str) -> ProcessDiscoveryJob:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        record = self._transition(tenant_id, discovery_id, actor_id, "retry", transition_key)
+        job = _enqueue_or_unavailable(tenant_id, actor_id, "process_mining.discover_process", {"discovery_id": str(record.id)}, _required_text(idempotency_key, "idempotency_key"))
+        record.async_job_id = job.id
+        record.save(update_fields=["async_job_id", "updated_at"])
+        return record
+
+    def delete_discovery(self, tenant_id: UUID, discovery_id: UUID, actor_id: UUID) -> None:
+        tenant_id, _actor_id = _tenant(tenant_id), _actor(actor_id)
+        record = _get(ProcessDiscoveryJob, tenant_id, discovery_id, active=True)
+        if record.status not in {AnalysisStatus.COMPLETED, AnalysisStatus.FAILED, AnalysisStatus.TIMED_OUT, AnalysisStatus.CANCELLED}:
+            raise ValidationError({"status": "Only terminal discovery jobs can be deleted."})
+        ProcessDiscoveryJob.objects.for_tenant(tenant_id).filter(pk=record.id).update(is_deleted=True, deleted_at=timezone.now())
+
+
+def _traces(rows: Iterable[ProcessEvent]) -> dict[str, list[CanonicalEvent]]:
+    grouped: dict[str, list[CanonicalEvent]] = defaultdict(list)
+    for event in canonical_events(rows):
+        grouped[event.case_id].append(event)
+    return grouped
+
+
+class ConformanceService:
+    def request_check(self, tenant_id: UUID, actor_id: UUID, model_version_id: UUID, event_filter: Mapping[str, object], idempotency_key: str) -> ConformanceCheck:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        idempotency_key = _required_text(idempotency_key, "idempotency_key")
+        existing = ConformanceCheck.objects.for_tenant(tenant_id).filter(idempotency_key=idempotency_key).first()
+        if existing:
+            return existing
+        version = _get(ProcessModelVersion, tenant_id, model_version_id)
+        count = _filter_events(tenant_id, version.process_model.process_name, event_filter).count()
+        if count > MAX_CONFORMANCE_EVENTS:
+            raise ValidationError({"event_filter": f"Conformance is limited to {MAX_CONFORMANCE_EVENTS} events."})
+        if count == 0:
+            raise ValidationError({"event_filter": "No events match this filter."})
+        with transaction.atomic():
+            record = ConformanceCheck.objects.create(tenant_id=tenant_id, created_by=actor_id, process_model_version=version, event_filter=dict(event_filter), idempotency_key=idempotency_key)
+            job = _enqueue_or_unavailable(tenant_id, actor_id, "process_mining.check_conformance", {"check_id": str(record.id)}, f"process_mining.conformance:{idempotency_key}")
+            record.async_job_id = job.id
+            record.save(update_fields=["async_job_id", "updated_at"])
+        return record
+
+    def run_check(self, tenant_id: UUID, check_id: UUID, async_job_id: UUID) -> ConformanceCheck:
+        tenant_id = _tenant(tenant_id)
+        record = _get(ConformanceCheck, tenant_id, check_id, active=True)
+        if record.status == AnalysisStatus.COMPLETED:
+            return record
+        if record.async_job_id != async_job_id:
+            raise NotFound()
+        record = CONFORMANCE_STATE_MACHINE.apply(record, "start", tenant_id=tenant_id, transition_key=f"worker:{async_job_id}:start", metadata=_audit(record.created_by, "Conformance worker started"))
+        try:
+            version = record.process_model_version
+            rows = _filter_events(tenant_id, version.process_model.process_name, record.event_filter)
+            algorithm = registry.get("process_mining.token_replay")
+            if not isinstance(algorithm, ConformanceAlgorithm):
+                raise CapabilityUnavailable(capability="conformance:token_replay")
+            result = algorithm.evaluate(version.model_data, _traces(rows))
+            conformant = sum(item.is_conformant for item in result.cases)
+            with transaction.atomic():
+                ConformanceCaseMetric.objects.bulk_create([ConformanceCaseMetric(tenant_id=tenant_id, created_by=record.created_by, conformance_check=record, case_id=item.case_id, fitness=item.fitness, is_conformant=item.is_conformant, deviation_count=item.deviation_count, trace_length=item.trace_length) for item in result.cases], ignore_conflicts=True)
+                ConformanceDeviation.objects.bulk_create([ConformanceDeviation(tenant_id=tenant_id, created_by=record.created_by, conformance_check=record, case_id=item.case_id, deviation_type=item.deviation_type, expected=item.expected, actual=item.actual, position=item.position, description=item.description) for item in result.deviations], ignore_conflicts=True)
+                ConformanceCheck.objects.for_tenant(tenant_id).filter(pk=record.id).update(fitness=result.fitness, precision=result.precision, generalization=result.generalization, total_cases=len(result.cases), conformant_cases=conformant, deviating_cases=len(result.cases) - conformant, completed_at=timezone.now(), error_code="", error_message="")
+                record = ConformanceCheck.objects.for_tenant(tenant_id).get(pk=record.id)
+                record = CONFORMANCE_STATE_MACHINE.apply(record, "complete", tenant_id=tenant_id, transition_key=f"worker:{async_job_id}:complete", metadata=_audit(record.created_by, "Conformance evidence persisted"))
+                _publish(tenant_id, "conformance_check", record.id, "process.conformance.completed", {"check_id": str(record.id), "fitness": str(record.fitness), "total_cases": record.total_cases})
+                if record.fitness is not None and record.fitness < Decimal("0.5"):
+                    _publish(tenant_id, "conformance_check", record.id, "process.conformance.low_fitness", {"check_id": str(record.id), "fitness": str(record.fitness), "notification_contract": "notification.requested.v1"})
+            return record
+        except Exception as exc:
+            ConformanceCheck.objects.for_tenant(tenant_id).filter(pk=record.id).update(error_code="CONFORMANCE_FAILED", error_message="Conformance evaluation could not complete.", completed_at=timezone.now())
+            fresh = ConformanceCheck.objects.for_tenant(tenant_id).get(pk=record.id)
+            if fresh.status == AnalysisStatus.RUNNING:
+                CONFORMANCE_STATE_MACHINE.apply(fresh, "fail", tenant_id=tenant_id, transition_key=f"worker:{async_job_id}:fail", metadata=_audit(fresh.created_by, "Conformance failed"))
+            raise OperationFailed(error_code="CONFORMANCE_FAILED", message="Conformance evaluation failed.") from exc
+
+    def list_deviations(self, tenant_id: UUID, check_id: UUID, filters: Mapping[str, object]) -> QuerySet[ConformanceDeviation]:
+        check = _get(ConformanceCheck, _tenant(tenant_id), check_id, active=True)
+        queryset = ConformanceDeviation.objects.for_tenant(check.tenant_id).filter(conformance_check=check)
+        for field in ("deviation_type", "case_id", "position"):
+            if filters.get(field) not in (None, ""):
+                queryset = queryset.filter(**{field: filters[field]})
+        return queryset.order_by("case_id", "position", "id")
+
+    def get_fitness(self, tenant_id: UUID, check_id: UUID) -> tuple[ConformanceCheck, QuerySet[ConformanceCaseMetric]]:
+        check = _get(ConformanceCheck, _tenant(tenant_id), check_id, active=True)
+        return check, ConformanceCaseMetric.objects.for_tenant(check.tenant_id).filter(conformance_check=check).order_by("fitness", "case_id")
+
+    def _transition(self, tenant_id: UUID, check_id: UUID, actor_id: UUID, command: str, transition_key: str, reason: str = "") -> ConformanceCheck:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        record = _get(ConformanceCheck, tenant_id, check_id, active=True)
+        return CONFORMANCE_STATE_MACHINE.apply(record, command, tenant_id=tenant_id, transition_key=_required_text(transition_key, "transition_key"), metadata=_audit(actor_id, reason or f"Conformance {command}"))
+
+    def cancel_check(self, tenant_id: UUID, check_id: UUID, actor_id: UUID, transition_key: str, reason: str = "") -> ConformanceCheck:
+        return self._transition(tenant_id, check_id, actor_id, "cancel", transition_key, reason)
+
+    def retry_check(self, tenant_id: UUID, check_id: UUID, actor_id: UUID, transition_key: str, idempotency_key: str) -> ConformanceCheck:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        record = self._transition(tenant_id, check_id, actor_id, "retry", transition_key)
+        job = _enqueue_or_unavailable(tenant_id, actor_id, "process_mining.check_conformance", {"check_id": str(record.id)}, _required_text(idempotency_key, "idempotency_key"))
+        record.async_job_id = job.id
+        record.save(update_fields=["async_job_id", "updated_at"])
+        return record
+
+    def delete_check(self, tenant_id: UUID, check_id: UUID, actor_id: UUID) -> None:
+        tenant_id, _actor_id = _tenant(tenant_id), _actor(actor_id)
+        record = _get(ConformanceCheck, tenant_id, check_id, active=True)
+        if record.status not in {AnalysisStatus.COMPLETED, AnalysisStatus.FAILED, AnalysisStatus.TIMED_OUT, AnalysisStatus.CANCELLED}:
+            raise ValidationError({"status": "Only terminal checks can be deleted."})
+        ConformanceCheck.objects.for_tenant(tenant_id).filter(pk=record.id).update(is_deleted=True, deleted_at=timezone.now())
+
+
+class BottleneckService:
+    def request_analysis(self, tenant_id: UUID, actor_id: UUID, process_name: str, time_range: tuple[datetime, datetime], idempotency_key: str) -> BottleneckAnalysis:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        process_name, idempotency_key = _required_text(process_name, "process_name"), _required_text(idempotency_key, "idempotency_key")
+        start, end = (_aware_datetime(time_range[0], "time_range_start"), _aware_datetime(time_range[1], "time_range_end"))
+        if end <= start:
+            raise ValidationError({"time_range_end": "End must follow start."})
+        exact = BottleneckAnalysis.objects.for_tenant(tenant_id).filter(process_name=process_name, time_range_start=start, time_range_end=end, status=AnalysisStatus.COMPLETED, completed_at__gte=timezone.now() - timedelta(hours=1), is_deleted=False).order_by("-completed_at").first()
+        if exact:
+            return exact
+        existing = BottleneckAnalysis.objects.for_tenant(tenant_id).filter(idempotency_key=idempotency_key).first()
+        if existing:
+            return existing
+        events = ProcessEvent.objects.for_tenant(tenant_id).filter(process_name=process_name, occurred_at__gte=start, occurred_at__lte=end)
+        if events.values("case_id").distinct().count() < 50:
+            raise ValidationError({"process_name": "Bottleneck analysis requires at least 50 cases."})
+        with transaction.atomic():
+            record = BottleneckAnalysis.objects.create(tenant_id=tenant_id, created_by=actor_id, process_name=process_name, time_range_start=start, time_range_end=end, idempotency_key=idempotency_key)
+            job = _enqueue_or_unavailable(tenant_id, actor_id, "process_mining.analyze_bottlenecks", {"analysis_id": str(record.id)}, f"process_mining.bottleneck:{idempotency_key}")
+            record.async_job_id = job.id
+            record.save(update_fields=["async_job_id", "updated_at"])
+        return record
+
+    def run_analysis(self, tenant_id: UUID, analysis_id: UUID, async_job_id: UUID) -> BottleneckAnalysis:
+        tenant_id = _tenant(tenant_id)
+        record = _get(BottleneckAnalysis, tenant_id, analysis_id, active=True)
+        if record.status == AnalysisStatus.COMPLETED:
+            return record
+        if record.async_job_id != async_job_id:
+            raise NotFound()
+        record = BOTTLENECK_STATE_MACHINE.apply(record, "start", tenant_id=tenant_id, transition_key=f"worker:{async_job_id}:start", metadata=_audit(record.created_by, "Bottleneck worker started"))
+        try:
+            rows = ProcessEvent.objects.for_tenant(tenant_id).filter(process_name=record.process_name, occurred_at__gte=record.time_range_start, occurred_at__lte=record.time_range_end).order_by("case_id", "occurred_at", "source_event_id", "activity", "id")
+            algorithm = registry.get("process_mining.transition_duration")
+            if not isinstance(algorithm, BottleneckAlgorithm):
+                raise CapabilityUnavailable(capability="bottleneck:transition_duration")
+            result = algorithm.analyze(_traces(rows), (record.time_range_start, record.time_range_end))
+            with transaction.atomic():
+                BottleneckFinding.objects.bulk_create([BottleneckFinding(tenant_id=tenant_id, created_by=record.created_by, analysis=record, **dict(item)) for item in result.findings], ignore_conflicts=True)
+                ProcessVariant.objects.bulk_create([ProcessVariant(tenant_id=tenant_id, created_by=record.created_by, analysis=record, **dict(item)) for item in result.variants], ignore_conflicts=True)
+                BottleneckAnalysis.objects.for_tenant(tenant_id).filter(pk=record.id).update(total_cases=result.total_cases, total_variants=len(result.variants), avg_case_duration_seconds=result.average_case_duration_seconds, completed_at=timezone.now(), error_code="", error_message="")
+                record = BottleneckAnalysis.objects.for_tenant(tenant_id).get(pk=record.id)
+                record = BOTTLENECK_STATE_MACHINE.apply(record, "complete", tenant_id=tenant_id, transition_key=f"worker:{async_job_id}:complete", metadata=_audit(record.created_by, "Bottleneck evidence persisted"))
+                critical = sum(item.get("severity") == "critical" for item in result.findings)
+                if result.findings:
+                    _publish(tenant_id, "bottleneck_analysis", record.id, "process.bottleneck.detected", {"analysis_id": str(record.id), "finding_count": len(result.findings), "critical_count": critical})
+                _publish(tenant_id, "bottleneck_analysis", record.id, "process.variant.analysis_completed", {"analysis_id": str(record.id), "variant_count": len(result.variants)})
+            return record
+        except Exception as exc:
+            BottleneckAnalysis.objects.for_tenant(tenant_id).filter(pk=record.id).update(error_code="BOTTLENECK_FAILED", error_message="Bottleneck analysis could not complete.", completed_at=timezone.now())
+            fresh = BottleneckAnalysis.objects.for_tenant(tenant_id).get(pk=record.id)
+            if fresh.status == AnalysisStatus.RUNNING:
+                BOTTLENECK_STATE_MACHINE.apply(fresh, "fail", tenant_id=tenant_id, transition_key=f"worker:{async_job_id}:fail", metadata=_audit(fresh.created_by, "Bottleneck analysis failed"))
+            raise OperationFailed(error_code="BOTTLENECK_FAILED", message="Bottleneck analysis failed.") from exc
+
+    def get_variants(self, tenant_id: UUID, analysis_id: UUID, filters: Mapping[str, object]) -> QuerySet[ProcessVariant]:
+        analysis = _get(BottleneckAnalysis, _tenant(tenant_id), analysis_id, active=True)
+        queryset = ProcessVariant.objects.for_tenant(analysis.tenant_id).filter(analysis=analysis)
+        if filters.get("is_happy_path") is not None:
+            queryset = queryset.filter(is_happy_path=str(filters["is_happy_path"]).lower() in {"1", "true"})
+        if filters.get("is_grouped_other") is not None:
+            queryset = queryset.filter(is_grouped_other=str(filters["is_grouped_other"]).lower() in {"1", "true"})
+        ordering = str(filters.get("ordering") or "-case_count")
+        if ordering.lstrip("-") not in {"case_count", "percentage", "avg_duration_seconds"}:
+            raise ValidationError({"ordering": "Unsupported variant ordering."})
+        return queryset.order_by(ordering, "id")
+
+    def get_findings(self, tenant_id: UUID, analysis_id: UUID, filters: Mapping[str, object]) -> QuerySet[BottleneckFinding]:
+        analysis = _get(BottleneckAnalysis, _tenant(tenant_id), analysis_id, active=True)
+        queryset = BottleneckFinding.objects.for_tenant(analysis.tenant_id).filter(analysis=analysis)
+        if filters.get("severity"):
+            queryset = queryset.filter(severity=filters["severity"])
+        if filters.get("resource"):
+            queryset = queryset.filter(resource_bottleneck=filters["resource"])
+        ordering = str(filters.get("ordering") or "rank")
+        if ordering.lstrip("-") not in {"rank"}:
+            raise ValidationError({"ordering": "Only rank ordering is supported."})
+        return queryset.order_by(ordering, "id")
+
+    def _transition(self, tenant_id: UUID, analysis_id: UUID, actor_id: UUID, command: str, transition_key: str, reason: str = "") -> BottleneckAnalysis:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        record = _get(BottleneckAnalysis, tenant_id, analysis_id, active=True)
+        return BOTTLENECK_STATE_MACHINE.apply(record, command, tenant_id=tenant_id, transition_key=_required_text(transition_key, "transition_key"), metadata=_audit(actor_id, reason or f"Bottleneck {command}"))
+
+    def cancel_analysis(self, tenant_id: UUID, analysis_id: UUID, actor_id: UUID, transition_key: str, reason: str = "") -> BottleneckAnalysis:
+        return self._transition(tenant_id, analysis_id, actor_id, "cancel", transition_key, reason)
+
+    def retry_analysis(self, tenant_id: UUID, analysis_id: UUID, actor_id: UUID, transition_key: str, idempotency_key: str) -> BottleneckAnalysis:
+        tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
+        record = self._transition(tenant_id, analysis_id, actor_id, "retry", transition_key)
+        job = _enqueue_or_unavailable(tenant_id, actor_id, "process_mining.analyze_bottlenecks", {"analysis_id": str(record.id)}, _required_text(idempotency_key, "idempotency_key"))
+        record.async_job_id = job.id
+        record.save(update_fields=["async_job_id", "updated_at"])
+        return record
+
+    def delete_analysis(self, tenant_id: UUID, analysis_id: UUID, actor_id: UUID) -> None:
+        tenant_id, _actor_id = _tenant(tenant_id), _actor(actor_id)
+        record = _get(BottleneckAnalysis, tenant_id, analysis_id, active=True)
+        if record.status not in {AnalysisStatus.COMPLETED, AnalysisStatus.FAILED, AnalysisStatus.TIMED_OUT, AnalysisStatus.CANCELLED}:
+            raise ValidationError({"status": "Only terminal analyses can be deleted."})
+        BottleneckAnalysis.objects.for_tenant(tenant_id).filter(pk=record.id).update(is_deleted=True, deleted_at=timezone.now())
+
+
+__all__ = ["BottleneckService", "ConformanceService", "EventLogService", "ExportService", "IngestResult", "IngestRowEvidence", "ProcessDiscoveryService", "ProcessModelService"]
