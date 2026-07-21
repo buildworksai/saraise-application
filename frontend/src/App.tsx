@@ -259,30 +259,6 @@ const CreateMetadataModelingResourcePage = lazy(() =>
   }))
 );
 
-const BlockchainTraceabilityListPage = lazy(() =>
-  import(
-    "./modules/blockchain_traceability/pages/BlockchainTraceabilityListPage"
-  ).then((m) => ({
-    default: m.BlockchainTraceabilityListPage,
-  }))
-);
-
-const BlockchainTraceabilityDetailPage = lazy(() =>
-  import(
-    "./modules/blockchain_traceability/pages/BlockchainTraceabilityDetailPage"
-  ).then((m) => ({
-    default: m.BlockchainTraceabilityDetailPage,
-  }))
-);
-
-const CreateBlockchainTraceabilityResourcePage = lazy(() =>
-  import(
-    "./modules/blockchain_traceability/pages/CreateBlockchainTraceabilityResourcePage"
-  ).then((m) => ({
-    default: m.CreateBlockchainTraceabilityResourcePage,
-  }))
-);
-
 const BillingSubscriptionsListPage = lazy(() =>
   import(
     "./modules/billing_subscriptions/pages/BillingSubscriptionsListPage"
@@ -1975,38 +1951,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <MetadataModelingDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* BlockchainTraceability routes */}
-          <Route
-            path="/blockchain-traceability"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <BlockchainTraceabilityListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/blockchain-traceability/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateBlockchainTraceabilityResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/blockchain-traceability/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <BlockchainTraceabilityDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
