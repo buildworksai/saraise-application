@@ -1,26 +1,48 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: process-mining
-version: 1.0.0
-description: Discover and optimize business processes using AI, process analytics, bottleneck detection
+version: 2.0.0
+description: Tenant-safe event ingestion, process discovery, conformance, bottlenecks, variants, and audit exports
 type: foundation
-lifecycle: platform
+lifecycle: core
 dependencies:
-  - core-identity >=1.0
-  - ai-agent-management >=1.0
+  - core-identity >=1.0.0
 permissions:
-  - process_mining.resource:create
-  - process_mining.resource:read
-  - process_mining.resource:update
-  - process_mining.resource:delete
-  - process_mining.resource:activate
-  - process_mining.resource:deactivate
-sod_actions:
-  - [process_mining.resource:create, process_mining.resource:delete]
-search_indexes:
-  - process_mining_resources
-ai_tools:
-  - create_process_mining_resource
-  - update_process_mining_resource
-  - delete_process_mining_resource
+  - process_mining.event:read
+  - process_mining.event:ingest
+  - process_mining.export:read
+  - process_mining.export:create
+  - process_mining.export:download
+  - process_mining.export:cancel
+  - process_mining.export:delete
+  - process_mining.discovery:read
+  - process_mining.discovery:create
+  - process_mining.discovery:cancel
+  - process_mining.discovery:retry
+  - process_mining.discovery:delete
+  - process_mining.model:read
+  - process_mining.model:create
+  - process_mining.model:update
+  - process_mining.model:delete
+  - process_mining.model:set_reference
+  - process_mining.conformance:read
+  - process_mining.conformance:create
+  - process_mining.conformance:cancel
+  - process_mining.conformance:retry
+  - process_mining.conformance:delete
+  - process_mining.bottleneck:read
+  - process_mining.bottleneck:create
+  - process_mining.bottleneck:cancel
+  - process_mining.bottleneck:retry
+  - process_mining.bottleneck:delete
+  - process_mining.health:read
+sod_actions: []
+search_indexes: []
+ai_tools: []
+metadata:
+  api_version: v2
+  entitlement: process_mining.core
+  extension_surface: process-mining-spi-v1
+  quota_resources:
+    - process_mining.api_reads
+    - process_mining.events_ingested
+    - process_mining.analysis_compute
+    - process_mining.export_bytes

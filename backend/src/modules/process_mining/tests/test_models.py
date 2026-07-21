@@ -1,56 +1,49 @@
-"""
-Model Unit Tests for ProcessMining module.
+"""Persistence invariants for all eleven domain entities."""
+import uuid
 
-Tests model creation, validation, and relationships.
-"""
 import pytest
+from django.core.exceptions import ValidationError
+from src.core.tenancy import TenantScopedModel
 
-from src.modules.process_mining.models import TenantBaseModel
+from ..models import BottleneckAnalysis, BottleneckFinding, ConformanceCaseMetric, ConformanceCheck, ConformanceDeviation, EventExportJob, ProcessDiscoveryJob, ProcessEvent, ProcessModel, ProcessModelVersion, ProcessVariant, validate_graph
+from .factories import AnalysisFactory, DeviationFactory, EventFactory, FindingFactory, ModelFactory, VariantFactory, VersionFactory, graph
+
+pytestmark = pytest.mark.django_db
 
 
-@pytest.mark.django_db
-class TestTenantBaseModelModel:
-    """Test TenantBaseModel model."""
+@pytest.mark.parametrize("model", [ProcessEvent, EventExportJob, ProcessDiscoveryJob, ProcessModel, ProcessModelVersion, ConformanceCheck, ConformanceDeviation, ConformanceCaseMetric, BottleneckAnalysis, BottleneckFinding, ProcessVariant])
+def test_all_domain_models_use_indexed_uuid_tenant(model):
+    assert issubclass(model, TenantScopedModel)
+    field = model._meta.get_field("tenant_id")
+    assert field.get_internal_type() == "UUIDField" and field.db_index
 
-    def test_create_resource(self, db):
-        """Test creating a resource."""
-        resource = TenantBaseModel.objects.create(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            description="Test description",
-            created_by="user-123",
-        )
-        assert resource.id is not None
-        assert resource.name == "Test Resource"
-        assert resource.tenant_id == "tenant-123"
-        assert resource.is_active is True
 
-    def test_resource_str_representation(self, db):
-        """Test resource string representation."""
-        resource = TenantBaseModel.objects.create(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
-        assert str(resource) == f"Test Resource ({resource.id})"
+def test_uuid_identity_and_defaults():
+    event = EventFactory()
+    model = ModelFactory(tenant_id=event.tenant_id)
+    assert isinstance(event.id, uuid.UUID)
+    assert model.is_deleted is False and model.reference_version_number is None
 
-    def test_resource_has_tenant_id(self, db):
-        """Test that resource requires tenant_id."""
-        resource = TenantBaseModel(
-            name="Test Resource",
-            created_by="user-123",
-        )
-        # Should raise error if tenant_id is missing
-        with pytest.raises(Exception):
-            resource.save()
 
-    def test_resource_config_field(self, db):
-        """Test resource config JSON field."""
-        config = {"key1": "value1", "key2": 123}
-        resource = TenantBaseModel.objects.create(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            config=config,
-            created_by="user-123",
-        )
-        assert resource.config == config
+@pytest.mark.parametrize("factory", [EventFactory, DeviationFactory, FindingFactory, VariantFactory])
+def test_completed_evidence_is_append_only(factory):
+    value = factory()
+    with pytest.raises(ValidationError, match="immutable"):
+        value.save()
+    with pytest.raises(ValidationError, match="cannot be deleted"):
+        value.delete()
+
+
+def test_relationships_fail_closed_across_tenants():
+    model = ModelFactory()
+    version = VersionFactory.build(process_model=model, tenant_id=uuid.uuid4(), model_data=graph())
+    with pytest.raises(ValidationError, match="not found"):
+        version.full_clean()
+
+
+def test_graph_and_variant_validation():
+    with pytest.raises(ValidationError, match="at least one node"):
+        validate_graph({"schema_version": "1.0", "nodes": [], "edges": []})
+    variant = VariantFactory.build(analysis=AnalysisFactory(), activities=[])
+    with pytest.raises(ValidationError, match="nonempty"):
+        variant.full_clean()
