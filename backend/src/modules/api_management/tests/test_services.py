@@ -3,6 +3,7 @@ Service Unit Tests for ApiManagement module.
 
 Tests business logic in services layer.
 """
+
 import pytest
 
 from src.modules.api_management.models import TenantBaseModel
@@ -34,7 +35,7 @@ class TestApiManagementService:
             name="Test Resource",
             created_by="user-123",
         )
-        
+
         retrieved = service.get_resource(created.id, "tenant-123")
         assert retrieved is not None
         assert retrieved.id == created.id
@@ -48,7 +49,7 @@ class TestApiManagementService:
             name="Test Resource",
             created_by="user-123",
         )
-        
+
         retrieved = service.get_resource(created.id, "tenant-456")
         assert retrieved is None
 
@@ -70,8 +71,8 @@ class TestApiManagementService:
             name="Resource 3",
             created_by="user-456",
         )
-        
-        resources = service.list_resources("tenant-123")
+
+        resources = service.list_resources("tenant-123", is_active=True)
         assert len(resources) == 2
         assert all(r.tenant_id == "tenant-123" for r in resources)
 
@@ -83,7 +84,7 @@ class TestApiManagementService:
             name="Original Name",
             created_by="user-123",
         )
-        
+
         updated = service.update_resource(
             resource.id,
             "tenant-123",
@@ -102,10 +103,22 @@ class TestApiManagementService:
             name="To Delete",
             created_by="user-123",
         )
-        
+
         result = service.delete_resource(resource.id, "tenant-123")
         assert result is True
         assert not TenantBaseModel.objects.filter(id=resource.id).exists()
+
+    def test_update_missing_resource(self, db):
+        """Test updating a missing tenant resource returns no result."""
+        service = ApiManagementService()
+
+        assert service.update_resource("missing-resource", "tenant-123", name="Updated") is None
+
+    def test_delete_missing_resource(self, db):
+        """Test deleting a missing tenant resource reports no deletion."""
+        service = ApiManagementService()
+
+        assert service.delete_resource("missing-resource", "tenant-123") is False
 
     def test_activate_resource(self, db):
         """Test activating a resource."""
@@ -117,7 +130,7 @@ class TestApiManagementService:
         )
         resource.is_active = False
         resource.save()
-        
+
         activated = service.activate_resource(resource.id, "tenant-123")
         assert activated is not None
         assert activated.is_active is True
@@ -130,7 +143,7 @@ class TestApiManagementService:
             name="Test Resource",
             created_by="user-123",
         )
-        
+
         deactivated = service.deactivate_resource(resource.id, "tenant-123")
         assert deactivated is not None
         assert deactivated.is_active is False
