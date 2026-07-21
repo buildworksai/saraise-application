@@ -121,6 +121,7 @@ _TENANT_SCOPED_MODELS = (
     "api_management.ApiManagementResource",
     "asset_management.Asset",
     "asset_management.DepreciationEntry",
+    "automation_orchestration.AutomationOrchestrationResource",
     "automation_orchestration.OrchestrationDefinition",
     "automation_orchestration.OrchestrationNode",
     "automation_orchestration.OrchestrationEdge",
