@@ -1,56 +1,33 @@
-"""
-Model Unit Tests for PerformanceMonitoring module.
+import uuid
 
-Tests model creation, validation, and relationships.
-"""
 import pytest
+from django.core.exceptions import ValidationError
 
-from src.modules.performance_monitoring.models import TenantBaseModel
+from src.core.tenancy import TenantScopedModel
+from src.modules.performance_monitoring.models import Metric, MetricType, TelemetrySource
 
 
 @pytest.mark.django_db
-class TestTenantBaseModelModel:
-    """Test TenantBaseModel model."""
+def test_domain_models_use_uuid_tenant_and_soft_delete():
+    tenant = uuid.uuid4()
+    source = TelemetrySource.objects.create(tenant_id=tenant, name="OTLP", source_type="otlp")
+    assert isinstance(source, TenantScopedModel)
+    assert source._meta.get_field("tenant_id").get_internal_type() == "UUIDField"
+    source.delete()
+    source.refresh_from_db()
+    assert source.is_deleted and source.deleted_at is not None
 
-    def test_create_resource(self, db):
-        """Test creating a resource."""
-        resource = TenantBaseModel.objects.create(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            description="Test description",
-            created_by="user-123",
-        )
-        assert resource.id is not None
-        assert resource.name == "Test Resource"
-        assert resource.tenant_id == "tenant-123"
-        assert resource.is_active is True
 
-    def test_resource_str_representation(self, db):
-        """Test resource string representation."""
-        resource = TenantBaseModel.objects.create(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
-        assert str(resource) == f"Test Resource ({resource.id})"
-
-    def test_resource_has_tenant_id(self, db):
-        """Test that resource requires tenant_id."""
-        resource = TenantBaseModel(
-            name="Test Resource",
-            created_by="user-123",
-        )
-        # Should raise error if tenant_id is missing
-        with pytest.raises(Exception):
-            resource.save()
-
-    def test_resource_config_field(self, db):
-        """Test resource config JSON field."""
-        config = {"key1": "value1", "key2": 123}
-        resource = TenantBaseModel.objects.create(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            config=config,
-            created_by="user-123",
-        )
-        assert resource.config == config
+@pytest.mark.django_db
+def test_metric_validates_dot_notation_and_immutable_tenant():
+    tenant = uuid.uuid4()
+    metric = Metric.objects.create(
+        tenant_id=tenant,
+        metric_name="api.duration_ms",
+        metric_type=MetricType.HISTOGRAM,
+    )
+    metric.tenant_id = uuid.uuid4()
+    with pytest.raises(ValidationError):
+        metric.save()
+    with pytest.raises(ValidationError):
+        Metric.objects.create(tenant_id=tenant, metric_name="invalid name", metric_type=MetricType.GAUGE)

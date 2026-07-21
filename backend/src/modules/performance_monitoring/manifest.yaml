@@ -1,25 +1,53 @@
 # Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: performance-monitoring
 version: 1.0.0
-description: APM, distributed tracing, logging, metrics, alerting, SLA monitoring
+description: Tenant-safe APM, OTLP tracing/logging, metrics, alerts, SLOs, and SLA evidence
 type: foundation
 lifecycle: platform
 dependencies:
   - core-identity >=1.0
+  - notifications >=1.0
 permissions:
-  - performance_monitoring.resource:create
-  - performance_monitoring.resource:read
-  - performance_monitoring.resource:update
-  - performance_monitoring.resource:delete
-  - performance_monitoring.resource:activate
-  - performance_monitoring.resource:deactivate
+  - performance_monitoring.telemetry:read
+  - performance_monitoring.telemetry:ingest
+  - performance_monitoring.telemetry:configure
+  - performance_monitoring.alert:read
+  - performance_monitoring.alert:manage
+  - performance_monitoring.alert:respond
+  - performance_monitoring.sla:read
+  - performance_monitoring.sla:manage
+  - performance_monitoring.report:generate
+  - performance_monitoring.extension:read
+  - performance_monitoring.health:read
 sod_actions:
-  - [performance_monitoring.resource:create, performance_monitoring.resource:delete]
+  - [performance_monitoring.telemetry:configure, performance_monitoring.alert:manage]
+  - [performance_monitoring.sla:manage, performance_monitoring.report:generate]
 search_indexes:
-  - performance_monitoring_resources
-ai_tools:
-  - create_performance_monitoring_resource
-  - update_performance_monitoring_resource
-  - delete_performance_monitoring_resource
+  - performance_metrics
+  - performance_logs
+  - performance_traces
+  - performance_alerts
+  - performance_slas
+events:
+  publishes:
+    - metric.recorded
+    - alert.fired
+    - alert.acknowledged
+    - alert.resolved
+    - sla.breach
+    - sla.compliance_checked
+    - sla.report_generated
+  consumes:
+    - "*.request.completed"
+    - "*.error.occurred"
+    - "*.job.completed"
+extension_contract:
+  schema_version: "1.0"
+  contributions:
+    - metric_namespaces
+    - semantic_attributes
+    - dashboard_templates
+    - slo_packs
+    - alert_rule_templates
+    - drill_down_links
+    - event_consumers

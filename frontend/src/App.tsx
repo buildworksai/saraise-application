@@ -265,30 +265,6 @@ const QuotaManagementPage = lazy(() =>
   }))
 );
 
-const PerformanceMonitoringListPage = lazy(() =>
-  import(
-    "./modules/performance_monitoring/pages/PerformanceMonitoringListPage"
-  ).then((m) => ({
-    default: m.PerformanceMonitoringListPage,
-  }))
-);
-
-const PerformanceMonitoringDetailPage = lazy(() =>
-  import(
-    "./modules/performance_monitoring/pages/PerformanceMonitoringDetailPage"
-  ).then((m) => ({
-    default: m.PerformanceMonitoringDetailPage,
-  }))
-);
-
-const CreatePerformanceMonitoringResourcePage = lazy(() =>
-  import(
-    "./modules/performance_monitoring/pages/CreatePerformanceMonitoringResourcePage"
-  ).then((m) => ({
-    default: m.CreatePerformanceMonitoringResourcePage,
-  }))
-);
-
 const LocalizationListPage = lazy(() =>
   import("./modules/localization/pages/LocalizationListPage").then((m) => ({
     default: m.LocalizationListPage,
@@ -1913,38 +1889,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <QuotaManagementPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* PerformanceMonitoring routes */}
-          <Route
-            path="/performance-monitoring"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <PerformanceMonitoringListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/performance-monitoring/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreatePerformanceMonitoringResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/performance-monitoring/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <PerformanceMonitoringDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
