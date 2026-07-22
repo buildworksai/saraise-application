@@ -13,7 +13,7 @@ from .base import (
     ProviderStatus,
     TokenUsage,
 )
-from .circuit_breaker import CircuitBreaker, CircuitBreakerError, CircuitState
+from src.core.resilience import CircuitBreaker, CircuitBreakerError, CircuitOpenError, CircuitState
 from .exceptions import (
     ProviderAuthError,
     ProviderError,
@@ -21,8 +21,8 @@ from .exceptions import (
     ProviderRateLimitError,
     ProviderTimeoutError,
 )
-from .factory import ProviderFactory, get_provider, get_provider_factory
-from .registry import ProviderRegistry, get_registry
+from .factory import ProviderFactory, configure_provider_factory, get_provider, get_provider_factory
+from .registry import ProviderRegistrationError, ProviderRegistry, get_registry
 
 __all__ = [
     # Base classes and data structures
@@ -36,6 +36,7 @@ __all__ = [
     "CircuitBreaker",
     "CircuitBreakerError",
     "CircuitState",
+    "CircuitOpenError",
     # Exceptions
     "ProviderError",
     "ProviderTimeoutError",
@@ -45,6 +46,8 @@ __all__ = [
     # Factory and registry
     "ProviderFactory",
     "ProviderRegistry",
+    "ProviderRegistrationError",
+    "configure_provider_factory",
     "get_provider",
     "get_provider_factory",
     "get_registry",

@@ -1,211 +1,330 @@
-"""AI Agent Management Models.
+"""Tenant-safe persistence for governed AI agents and executions.
 
-Defines data models for agent lifecycle, execution, and scheduling.
-All models include tenant_id for Row-Level Multitenancy.
+The string-returning ``generate_uuid`` function is intentionally retained: the
+immutable 0001 migration imports it. Runtime models use native UUID columns.
 """
 
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import F, Q
+from django.utils import timezone
+
+from src.core.tenancy import TenantScopedModel, TimestampedModel
+from src.core.tenancy.registry import TENANT_SCOPED, tenancy_scope
 
 
-def generate_uuid():
-    """Generate UUID for model primary keys."""
+def generate_uuid() -> str:
+    """Preserve the callable referenced by the historical migration."""
+
     return str(uuid.uuid4())
 
 
+def _json_type(value: object, expected: type, field: str) -> None:
+    if not isinstance(value, expected):
+        raise ValidationError({field: f"Must be a JSON {expected.__name__}."})
+
+
+def validate_same_tenant(instance: models.Model, *relations: str) -> None:
+    """Reject ORM-level cross-tenant references before database triggers run."""
+
+    tenant_id = getattr(instance, "tenant_id", None)
+    if tenant_id is None:
+        return
+    for relation in relations:
+        related_id = getattr(instance, f"{relation}_id", None)
+        if related_id is None:
+            continue
+        field = instance._meta.get_field(relation)
+        related_model = field.remote_field.model
+        if not related_model._base_manager.filter(pk=related_id, tenant_id=tenant_id).exists():
+            raise ValidationError(
+                {relation: "The referenced record was not found in this tenant."},
+                code="cross_tenant_reference",
+            )
+
+
+class AITenantModel(TenantScopedModel, TimestampedModel):
+    """Canonical identity and timestamps for mutable module aggregates."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class AppendOnlyQuerySet(models.QuerySet[models.Model]):
+    """Prevent bulk APIs from bypassing evidence immutability."""
+
+    def update(self, **kwargs: Any) -> int:
+        del kwargs
+        raise ValidationError("Evidence records are append-only.", code="append_only")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Evidence records are append-only.", code="append_only")
+
+
+class AppendOnlyManager(models.Manager.from_queryset(AppendOnlyQuerySet)):  # type: ignore[misc]
+    pass
+
+
+class AppendOnlyTenantModel(TenantScopedModel):
+    """Canonical base for immutable evidence records."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    objects = AppendOnlyManager()
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("Evidence records are append-only.", code="append_only")
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Evidence records are append-only.", code="append_only")
+
+
+class AgentIdentityType(models.TextChoices):
+    USER_BOUND = "user_bound", "User-bound"
+    SYSTEM_BOUND = "system_bound", "System-bound"
+
+
+class AgentStatus(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    ACTIVE = "active", "Active"
+    DISABLED = "disabled", "Disabled"
+    RETIRED = "retired", "Retired"
+
+
 class AgentLifecycleState(models.TextChoices):
-    """Agent lifecycle states as defined in AI Agent Execution & Safety Spec."""
+    """Compatibility name for the execution state enumeration."""
 
     CREATED = "created", "Created"
     VALIDATED = "validated", "Validated"
+    QUEUED = "queued", "Queued"
     RUNNING = "running", "Running"
     PAUSED = "paused", "Paused"
     COMPLETED = "completed", "Completed"
     FAILED = "failed", "Failed"
     TERMINATED = "terminated", "Terminated"
+    TIMED_OUT = "timed_out", "Timed out"
 
 
-class AgentIdentityType(models.TextChoices):
-    """Agent identity types."""
-
-    USER_BOUND = "user_bound", "User-Bound Agent"
-    SYSTEM_BOUND = "system_bound", "System-Bound Agent"
+ExecutionState = AgentLifecycleState
 
 
-class TenantBaseModel(models.Model):
-    """Base model for tenant-scoped models with Row-Level Multitenancy.
-
-    CRITICAL: All tenant-scoped models MUST inherit from this base class
-    and include tenant_id. All queries MUST filter explicitly by tenant_id.
-    """
-
-    tenant_id = models.UUIDField(db_index=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
-        indexes = [
-            models.Index(fields=["tenant_id"]),
-            models.Index(fields=["tenant_id", "created_at"]),
-        ]
+class ScheduleStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    QUEUED = "queued", "Queued"
+    RUNNING = "running", "Running"
+    COMPLETED = "completed", "Completed"
+    FAILED = "failed", "Failed"
+    CANCELLED = "cancelled", "Cancelled"
 
 
-class Agent(TenantBaseModel):
-    """Agent definition model.
+@tenancy_scope(TENANT_SCOPED)
+class Agent(AITenantModel):
+    """A tenant-owned versioned agent definition."""
 
-    Represents an AI agent that can be executed. Agents are either user-bound
-    (created from an active user session) or system-bound (execute under
-    system identities).
-    """
-
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    name = models.CharField(max_length=255, db_index=True)
-    description = models.TextField(blank=True)
-    identity_type = models.CharField(
-        max_length=20,
-        choices=AgentIdentityType.choices,
-        db_index=True,
-        help_text="User-bound or system-bound agent",
-    )
-    subject_id = models.CharField(
-        max_length=36,
-        db_index=True,
-        help_text="User ID (for user-bound) or system role ID (for system-bound)",
-    )
-    session_id = models.CharField(
-        max_length=36,
-        null=True,
-        blank=True,
-        db_index=True,
-        help_text="Session ID for user-bound agents (null for system-bound)",
-    )
-    framework = models.CharField(
-        max_length=50,
-        db_index=True,
-        help_text="Agent framework (langgraph, crewai, autogen, etc.)",
-    )
-    config = models.JSONField(
-        default=dict,
-        help_text="Agent configuration (framework-specific)",
-    )
-    is_active = models.BooleanField(default=True, db_index=True)
-    created_by = models.CharField(max_length=36, db_index=True)
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    identity_type = models.CharField(max_length=20, choices=AgentIdentityType.choices)
+    subject_id = models.UUIDField()
+    session_id = models.UUIDField(null=True, blank=True)
+    runner_key = models.CharField(max_length=100)
+    provider_config_id = models.UUIDField(null=True, blank=True)
+    config = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=AgentStatus.choices, default=AgentStatus.DRAFT)
+    transition_history = models.JSONField(default=list, blank=True, editable=False)
+    created_by = models.UUIDField()
+    deleted_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     class Meta:
         db_table = "ai_agents"
-        indexes = [
-            models.Index(fields=["tenant_id", "identity_type"]),
-            models.Index(fields=["tenant_id", "subject_id"]),
-            models.Index(fields=["tenant_id", "session_id"]),
-            models.Index(fields=["tenant_id", "is_active"]),
-            models.Index(fields=["tenant_id", "framework"]),
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "name"),
+                condition=~Q(status=AgentStatus.RETIRED),
+                name="ai_agent_live_name_uniq",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(identity_type=AgentIdentityType.USER_BOUND, session_id__isnull=False)
+                    | Q(identity_type=AgentIdentityType.SYSTEM_BOUND, session_id__isnull=True)
+                ),
+                name="ai_agent_identity_session_ck",
+            ),
+            models.CheckConstraint(
+                condition=~Q(status=AgentStatus.ACTIVE) | ~Q(runner_key=""),
+                name="ai_agent_active_runner_ck",
+            ),
+            models.CheckConstraint(
+                condition=(Q(status=AgentStatus.RETIRED, deleted_at__isnull=False) | ~Q(status=AgentStatus.RETIRED)),
+                name="ai_agent_retired_deleted_ck",
+            ),
         ]
+        indexes = [
+            models.Index(fields=("tenant_id", "status", "name"), name="ai_agent_t_status_name_idx"),
+            models.Index(fields=("tenant_id", "identity_type", "subject_id"), name="ai_agent_t_identity_idx"),
+            models.Index(fields=("tenant_id", "runner_key"), name="ai_agent_t_runner_idx"),
+            models.Index(fields=("tenant_id", "created_at"), name="ai_agent_t_created_idx"),
+        ]
+        ordering = ("name", "id")
+
+    def clean(self) -> None:
+        _json_type(self.config, dict, "config")
+        _json_type(self.transition_history, list, "transition_history")
+        if self.identity_type == AgentIdentityType.USER_BOUND and self.session_id is None:
+            raise ValidationError({"session_id": "A user-bound agent requires a session."})
+        if self.identity_type == AgentIdentityType.SYSTEM_BOUND and self.session_id is not None:
+            raise ValidationError({"session_id": "A system-bound agent cannot retain a user session."})
+        if self.status == AgentStatus.RETIRED and self.deleted_at is None:
+            raise ValidationError({"deleted_at": "A retired agent requires a retirement timestamp."})
+        if self.status != AgentStatus.RETIRED and self.deleted_at is not None:
+            raise ValidationError({"deleted_at": "Only retired agents may have deleted_at set."})
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        if self.status != AgentStatus.RETIRED:
+            now = timezone.now()
+            self.status = AgentStatus.RETIRED
+            self.deleted_at = now
+            self.transition_history = [
+                *self.transition_history,
+                {"transition": "retire", "at": now.isoformat(), "source": "model_delete"},
+            ]
+            self.save(update_fields=["status", "deleted_at", "transition_history", "updated_at"])
+        return 1, {self._meta.label: 1}
 
     def __str__(self) -> str:
         return f"{self.name} ({self.id})"
 
 
-class AgentExecution(TenantBaseModel):
-    """Agent execution instance model.
+@tenancy_scope(TENANT_SCOPED)
+class AgentExecution(AITenantModel):
+    """Immutable-at-terminal evidence for one governed execution."""
 
-    Tracks individual agent execution runs. Each execution has a lifecycle
-    state and is bound to a session (for user-bound agents).
-    """
-
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    agent = models.ForeignKey(
-        Agent,
-        on_delete=models.CASCADE,
-        related_name="executions",
-        db_index=True,
-    )
-    state = models.CharField(
-        max_length=20,
-        choices=AgentLifecycleState.choices,
-        default=AgentLifecycleState.CREATED,
-        db_index=True,
-    )
-    session_id = models.CharField(
-        max_length=36,
-        null=True,
-        blank=True,
-        db_index=True,
-        help_text="Session ID for user-bound agents",
-    )
-    task_definition = models.JSONField(help_text="Task/goal definition for this execution")
+    agent = models.ForeignKey(Agent, on_delete=models.PROTECT, related_name="executions")
+    async_job_id = models.UUIDField(unique=True)
+    state = models.CharField(max_length=20, choices=ExecutionState.choices, default=ExecutionState.CREATED)
+    transition_history = models.JSONField(default=list, blank=True, editable=False)
+    initiating_actor_id = models.UUIDField()
+    session_id = models.UUIDField(null=True, blank=True)
+    task_definition = models.JSONField(default=dict)
+    input_metadata = models.JSONField(default=dict, blank=True)
+    result = models.JSONField(null=True, blank=True)
+    error_code = models.CharField(max_length=100, blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
-    error_message = models.TextField(blank=True)
-    result = models.JSONField(default=dict, null=True, blank=True)
-    metadata = models.JSONField(default=dict, help_text="Execution metadata")
+    idempotency_key = models.CharField(max_length=255)
+    provider_config_id = models.UUIDField(null=True, blank=True)
 
     class Meta:
         db_table = "ai_agent_executions"
-        indexes = [
-            models.Index(fields=["tenant_id", "agent_id"]),
-            models.Index(fields=["tenant_id", "state"]),
-            models.Index(fields=["tenant_id", "session_id"]),
-            models.Index(fields=["tenant_id", "started_at"]),
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="ai_exec_t_idem_uniq"),
+            models.CheckConstraint(
+                condition=(
+                    Q(state__in=(ExecutionState.COMPLETED, ExecutionState.FAILED, ExecutionState.TERMINATED, ExecutionState.TIMED_OUT), completed_at__isnull=False)
+                    | (~Q(state__in=(ExecutionState.COMPLETED, ExecutionState.FAILED, ExecutionState.TERMINATED, ExecutionState.TIMED_OUT)) & Q(completed_at__isnull=True))
+                ),
+                name="ai_exec_terminal_time_ck",
+            ),
+            models.CheckConstraint(
+                condition=~Q(state=ExecutionState.COMPLETED) | Q(result__isnull=False),
+                name="ai_exec_success_result_ck",
+            ),
+            models.CheckConstraint(
+                condition=~Q(state__in=(ExecutionState.FAILED, ExecutionState.TIMED_OUT)) | ~Q(error_code=""),
+                name="ai_exec_failure_code_ck",
+            ),
+            models.CheckConstraint(
+                condition=Q(started_at__isnull=True) | Q(completed_at__isnull=True) | Q(completed_at__gte=F("started_at")),
+                name="ai_exec_time_order_ck",
+            ),
         ]
+        indexes = [
+            models.Index(fields=("tenant_id", "agent", "state", "created_at"), name="ai_exec_t_agent_state_idx"),
+            models.Index(fields=("tenant_id", "state", "created_at"), name="ai_exec_t_state_created_idx"),
+            models.Index(fields=("tenant_id", "async_job_id"), name="ai_exec_t_job_idx"),
+            models.Index(fields=("tenant_id", "session_id"), name="ai_exec_t_session_idx"),
+        ]
+        ordering = ("-created_at", "id")
+
+    def clean(self) -> None:
+        validate_same_tenant(self, "agent")
+        _json_type(self.task_definition, dict, "task_definition")
+        _json_type(self.input_metadata, dict, "input_metadata")
+        _json_type(self.transition_history, list, "transition_history")
 
     def __str__(self) -> str:
         return f"Execution {self.id} ({self.state})"
 
 
-class AgentSchedulerTask(TenantBaseModel):
-    """Agent scheduler task model.
+@tenancy_scope(TENANT_SCOPED)
+class AgentSchedulerTask(AITenantModel):
+    """Scheduling projection linked to the canonical async-job authority."""
 
-    Represents a scheduled task for agent execution. Used by the scheduler
-    to manage task queue, priority, and retry logic.
-    """
-
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    agent = models.ForeignKey(
-        Agent,
-        on_delete=models.CASCADE,
-        related_name="scheduled_tasks",
-        db_index=True,
-    )
+    agent = models.ForeignKey(Agent, on_delete=models.PROTECT, related_name="scheduled_tasks")
     execution = models.ForeignKey(
         AgentExecution,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="scheduler_tasks",
         null=True,
         blank=True,
-        db_index=True,
     )
-    priority = models.IntegerField(default=0, db_index=True, help_text="Higher priority = execute first")
-    scheduled_at = models.DateTimeField(db_index=True)
+    async_job_id = models.UUIDField(unique=True, null=True, blank=True)
+    scheduled_at = models.DateTimeField()
+    priority = models.SmallIntegerField(default=0)
+    max_retries = models.PositiveSmallIntegerField(default=3)
+    retry_count = models.PositiveSmallIntegerField(default=0)
+    status = models.CharField(max_length=20, choices=ScheduleStatus.choices, default=ScheduleStatus.PENDING)
+    transition_history = models.JSONField(default=list, blank=True, editable=False)
+    task_data = models.JSONField(default=dict)
+    error_code = models.CharField(max_length=100, blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
-    retry_count = models.IntegerField(default=0)
-    max_retries = models.IntegerField(default=3)
-    status = models.CharField(
-        max_length=20,
-        choices=[
-            ("pending", "Pending"),
-            ("running", "Running"),
-            ("completed", "Completed"),
-            ("failed", "Failed"),
-            ("cancelled", "Cancelled"),
-        ],
-        default="pending",
-        db_index=True,
-    )
-    error_message = models.TextField(blank=True)
-    task_data = models.JSONField(default=dict)
+    created_by = models.UUIDField()
+    idempotency_key = models.CharField(max_length=255)
 
     class Meta:
         db_table = "ai_agent_scheduler_tasks"
-        indexes = [
-            models.Index(fields=["tenant_id", "status"]),
-            models.Index(fields=["tenant_id", "scheduled_at"]),
-            models.Index(fields=["tenant_id", "priority", "scheduled_at"]),
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="ai_sched_t_idem_uniq"),
+            models.CheckConstraint(condition=Q(priority__gte=-100, priority__lte=100), name="ai_sched_priority_ck"),
+            models.CheckConstraint(condition=Q(retry_count__lte=F("max_retries")), name="ai_sched_retry_ck"),
+            models.CheckConstraint(
+                condition=Q(started_at__isnull=True) | Q(completed_at__isnull=True) | Q(completed_at__gte=F("started_at")),
+                name="ai_sched_time_order_ck",
+            ),
         ]
+        indexes = [
+            models.Index(fields=("tenant_id", "status", "scheduled_at", "priority"), name="ai_sched_t_due_idx"),
+            models.Index(fields=("tenant_id", "agent", "created_at"), name="ai_sched_t_agent_idx"),
+        ]
+        ordering = ("scheduled_at", "-priority", "id")
+
+    def clean(self) -> None:
+        validate_same_tenant(self, "agent", "execution")
+        if self.execution_id and self.execution.agent_id != self.agent_id:
+            raise ValidationError({"execution": "The execution must belong to the scheduled agent."})
+        _json_type(self.task_data, dict, "task_data")
+        _json_type(self.transition_history, list, "transition_history")
 
     def __str__(self) -> str:
-        return f"Task {self.id} ({self.status})"
+        return f"Schedule {self.id} ({self.status})"
+

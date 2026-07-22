@@ -24,22 +24,32 @@ class ProviderStatus(Enum):
 
 @dataclass(frozen=True)
 class ProviderConfig:
-    """Immutable provider configuration."""
+    """Immutable runtime projection supplied by provider configuration.
+
+    ``credential_reference`` is opaque.  Adapters resolve it inside their
+    execution boundary; the agent module never owns or serializes plaintext
+    credentials.
+    """
 
     provider_name: str
-    api_key: str
     model: str
-    base_url: Optional[str] = None
+    credential_reference: str
+    dependency_key: str
     max_tokens: int = 4096
     temperature: float = 0.7
     timeout_seconds: int = 30
     max_retries: int = 3
-    # Cost tracking (per 1K tokens)
-    cost_per_1k_input_tokens: float = 0.0
-    cost_per_1k_output_tokens: float = 0.0
-    # Circuit breaker settings
-    circuit_breaker_threshold: int = 5
-    circuit_breaker_reset_seconds: int = 60
+    pricing_version: str | None = None
+    cost_per_1k_input_tokens: float | None = None
+    cost_per_1k_output_tokens: float | None = None
+
+    @classmethod
+    def from_published(cls, value: dict[str, Any]) -> "ProviderConfig":
+        required = ("provider_name", "model", "credential_reference", "dependency_key")
+        missing = [key for key in required if not str(value.get(key, "")).strip()]
+        if missing:
+            raise ValueError(f"Published provider configuration is missing: {', '.join(missing)}")
+        return cls(**{key: value[key] for key in cls.__dataclass_fields__ if key in value})
 
 
 @dataclass
@@ -184,6 +194,8 @@ class LLMProvider(ABC):
 
     def get_cost(self, usage: TokenUsage) -> float:
         """Calculate cost in USD for token usage."""
+        if self.config.cost_per_1k_input_tokens is None or self.config.cost_per_1k_output_tokens is None:
+            raise RuntimeError("Versioned provider pricing is unavailable")
         input_cost = (usage.input_tokens / 1000) * self.config.cost_per_1k_input_tokens
         output_cost = (usage.output_tokens / 1000) * self.config.cost_per_1k_output_tokens
         return round(input_cost + output_cost, 6)

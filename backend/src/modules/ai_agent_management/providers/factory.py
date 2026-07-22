@@ -1,147 +1,111 @@
-"""
-Provider factory with automatic failover and circuit breakers.
+"""Tenant-bound provider resolution without implicit failover.
 
-The factory manages provider instances, handles failover between
-primary and fallback providers, and maintains per-provider circuit
-breakers for fault isolation.
+Returning another model's output as if it came from the configured provider is
+forbidden.  Resolution therefore produces an explicit unavailable outcome when
+configuration, credentials, or an adapter cannot be obtained.
 """
 
 from __future__ import annotations
 
-import logging
-from typing import Optional
+from collections.abc import Callable, Mapping
+from typing import Any
+from uuid import UUID
 
-from .base import LLMProvider, LLMResponse, ProviderStatus
-from .circuit_breaker import CircuitBreaker, CircuitBreakerError
+from src.core.api import OperationResult
 
-logger = logging.getLogger("saraise.ai.provider_factory")
+from .base import LLMProvider, ProviderConfig
+from .registry import ProviderRegistry, get_registry
+
+ProviderConfigurationResolver = Callable[[UUID, UUID], Mapping[str, Any]]
 
 
 class ProviderFactory:
-    """
-    Factory for creating and managing LLM provider instances.
+    """Resolve one tenant-owned published provider configuration."""
 
-    Supports:
-    - Primary + fallback provider configuration
-    - Per-provider circuit breakers
-    - Automatic failover on provider failure
-    - Provider health monitoring
-    """
-
-    def __init__(self) -> None:
-        self._providers: dict[str, LLMProvider] = {}
-        self._circuit_breakers: dict[str, CircuitBreaker] = {}
-        self._fallback_chain: list[str] = []
-
-    def register(
+    def __init__(
         self,
-        provider: LLMProvider,
+        resolver: ProviderConfigurationResolver | None = None,
         *,
-        is_fallback: bool = False,
+        registry: ProviderRegistry | None = None,
     ) -> None:
-        """Register a provider instance."""
-        name = provider.name
-        self._providers[name] = provider
-        self._circuit_breakers[name] = CircuitBreaker(
-            provider_name=name,
-            threshold=provider.config.circuit_breaker_threshold,
-            reset_seconds=provider.config.circuit_breaker_reset_seconds,
+        self._resolver = resolver
+        self._registry = registry or get_registry()
+
+    def resolve(self, tenant_id: UUID, provider_config_id: UUID) -> OperationResult[LLMProvider]:
+        if self._resolver is None:
+            return OperationResult.unavailable(
+                capability="provider_configuration",
+                message="The provider configuration service is not installed.",
+            )
+        try:
+            published = dict(self._resolver(tenant_id, provider_config_id))
+        except Exception:
+            return OperationResult.unavailable(
+                capability="provider_configuration",
+                message="The provider configuration service could not resolve this configuration.",
+            )
+        if str(published.get("tenant_id", tenant_id)) != str(tenant_id):
+            return OperationResult.failed(
+                code="PROVIDER_TENANT_MISMATCH",
+                message="The provider configuration is not available.",
+                http_status=404,
+            )
+        adapter_key = str(published.get("adapter_key", "")).strip()
+        adapter = self._registry.get(adapter_key) if adapter_key else None
+        if adapter is None:
+            return OperationResult.unavailable(
+                capability=f"provider_adapter:{adapter_key or 'unspecified'}",
+                message="The configured provider adapter is unavailable.",
+            )
+        try:
+            configuration = ProviderConfig.from_published(published)
+            provider = adapter(configuration)
+        except Exception:
+            return OperationResult.unavailable(
+                capability=f"provider_adapter:{adapter_key}",
+                message="The provider adapter rejected the published configuration.",
+            )
+        return OperationResult.succeeded(
+            provider,
+            provider=adapter_key,
+            evidence={"provider_config_id": str(provider_config_id), "adapter_key": adapter_key},
         )
 
-        if is_fallback:
-            self._fallback_chain.append(name)
-        else:
-            # Primary provider goes to front of chain
-            self._fallback_chain.insert(0, name)
+    # Compatibility API: only explicitly registered, already constructed
+    # instances may be returned.  There is intentionally no fallback chain.
+    def register(self, provider: LLMProvider, **_: Any) -> None:
+        self._registry.register(provider.name, type(provider))
 
-        logger.info(
-            "Registered provider '%s' (fallback=%s, chain=%s)",
-            name,
-            is_fallback,
-            self._fallback_chain,
-        )
+    def get(self, name: str) -> LLMProvider | None:
+        del name
+        return None
 
-    def get(self, name: str) -> Optional[LLMProvider]:
-        """Get a provider by name."""
-        return self._providers.get(name)
-
-    def call_with_failover(
-        self,
-        messages: list[dict[str, str]],
-        *,
-        preferred_provider: Optional[str] = None,
-        **kwargs,
-    ) -> LLMResponse:
-        """
-        Call LLM with automatic failover through provider chain.
-
-        Tries providers in order:
-        1. preferred_provider (if specified and available)
-        2. Primary provider
-        3. Fallback providers in registration order
-
-        Raises ProviderError if ALL providers fail.
-        """
-        chain = list(self._fallback_chain)
-        if preferred_provider and preferred_provider in self._providers:
-            chain.remove(preferred_provider) if preferred_provider in chain else None
-            chain.insert(0, preferred_provider)
-
-        last_error: Optional[Exception] = None
-
-        for provider_name in chain:
-            provider = self._providers.get(provider_name)
-            if not provider:
-                continue
-
-            breaker = self._circuit_breakers.get(provider_name)
-            if not breaker:
-                continue
-
-            try:
-                response = breaker.call(provider.call, messages, **kwargs)
-                # Track cost
-                response.cost_usd = provider.get_cost(response.usage)
-                return response
-            except CircuitBreakerError as exc:
-                logger.warning("Skipping %s: %s", provider_name, exc)
-                last_error = exc
-                continue
-            except Exception as exc:
-                logger.error(
-                    "Provider %s failed: %s — trying next in chain",
-                    provider_name,
-                    exc,
-                )
-                last_error = exc
-                continue
-
-        raise RuntimeError(f"All providers failed. Chain: {chain}. Last error: {last_error}")
-
-    def health_check_all(self) -> dict[str, ProviderStatus]:
-        """Run health checks on all registered providers."""
-        results = {}
-        for name, provider in self._providers.items():
-            try:
-                results[name] = provider.health_check()
-            except Exception as exc:
-                logger.error("Health check failed for %s: %s", name, exc)
-                results[name] = ProviderStatus.UNAVAILABLE
-        return results
+    def call_with_failover(self, *_: Any, **__: Any) -> Any:
+        raise RuntimeError("Implicit provider failover is forbidden; resolve a tenant configuration")
 
 
-# Module-level singleton
-_factory: Optional[ProviderFactory] = None
+_factory = ProviderFactory()
 
 
 def get_provider_factory() -> ProviderFactory:
-    """Get or create the global provider factory."""
-    global _factory
-    if _factory is None:
-        _factory = ProviderFactory()
     return _factory
 
 
-def get_provider(name: str) -> Optional[LLMProvider]:
-    """Convenience: get a provider from the global factory."""
-    return get_provider_factory().get(name)
+def configure_provider_factory(resolver: ProviderConfigurationResolver) -> ProviderFactory:
+    global _factory
+    _factory = ProviderFactory(resolver)
+    return _factory
+
+
+def get_provider(name: str) -> None:
+    del name
+    return None
+
+
+__all__ = [
+    "ProviderConfigurationResolver",
+    "ProviderFactory",
+    "configure_provider_factory",
+    "get_provider",
+    "get_provider_factory",
+]
