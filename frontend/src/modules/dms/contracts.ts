@@ -1,182 +1,305 @@
-/**
- * Dms Module Contracts
- *
- * Rule: SARAISE-27001 (contracts.ts required for all frontend modules)
- *
- * === AGENT INSTRUCTION ===
- * Read this file FIRST when working on this module.
- * All types and endpoints for Dms are defined here.
- */
+/** Governed v2 contracts for the document-management foundation. */
 
-// import type { components } from '@/types/api'; // Commented out until schema types are available
+export type UUID = string;
+export type ISODateTime = string;
+export type JsonPrimitive = string | number | boolean | null;
+export type DocumentMetadata = Readonly<Record<string, JsonPrimitive>>;
 
-// =============================================================================
-// EXPORTED TYPES - Import these in your components
-// =============================================================================
+export type DmsAllowedAction =
+  | 'read'
+  | 'write'
+  | 'manage'
+  | 'create'
+  | 'update'
+  | 'move'
+  | 'download'
+  | 'delete'
+  | 'create_version'
+  | 'restore_version'
+  | 'manage_permissions'
+  | 'share';
 
-/** Folder entity */
-export type Folder = {
-  id: string;
-  tenant_id: string;
-  name: string;
-  parent?: string;
-  parent_id?: string;
-  path: string;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-};
+export interface Folder {
+  readonly id: UUID;
+  readonly name: string;
+  readonly description: string;
+  readonly parent_id: UUID | null;
+  readonly path: string;
+  readonly depth: number;
+  readonly sort_order: number;
+  readonly created_by: UUID;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+  readonly allowed_actions: readonly DmsAllowedAction[];
+}
 
-/** Folder create request */
-export type FolderCreate = {
-  name: string;
-  parent?: string;
-};
+export interface FolderCreate {
+  readonly name: string;
+  readonly description?: string;
+  readonly parent_id?: UUID | null;
+}
 
-/** Folder update request (partial) */
-export type FolderUpdate = Partial<FolderCreate>;
+export interface FolderUpdate {
+  readonly name?: string;
+  readonly description?: string;
+  readonly sort_order?: number;
+}
 
-/** Document entity */
-export type Document = {
-  id: string;
-  tenant_id: string;
-  name: string;
-  folder?: string;
-  folder_id?: string;
-  file_path: string;
-  mime_type: string;
-  size: number;
-  checksum: string;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-};
+export interface FolderMove { readonly parent_id: UUID | null }
 
-/** Document create request */
-export type DocumentCreate = {
-  name: string;
-  folder?: string;
-  file_path: string;
-  mime_type: string;
-  size: number;
-  checksum: string;
-};
+export interface DocumentVersionSummary {
+  readonly id: UUID;
+  readonly version_number: number;
+  readonly original_filename: string;
+  readonly mime_type: string;
+  readonly size_bytes: number;
+  readonly checksum_sha256: string;
+  readonly created_by: UUID;
+  readonly created_at: ISODateTime;
+}
 
-/** Document update request (partial) */
-export type DocumentUpdate = Partial<DocumentCreate>;
+export interface DocumentSummary {
+  readonly id: UUID;
+  readonly name: string;
+  readonly description: string;
+  readonly folder_id: UUID | null;
+  readonly folder_name: string | null;
+  readonly tags: readonly string[];
+  readonly current_version: DocumentVersionSummary | null;
+  readonly version_count: number;
+  readonly created_by: UUID;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+  readonly allowed_actions: readonly DmsAllowedAction[];
+}
 
-/** DocumentVersion entity */
-export type DocumentVersion = {
-  id: string;
-  document: string;
-  document_id?: string;
-  version_number: number;
-  file_path: string;
-  created_at: string;
-  created_by: string;
-};
+export interface Document extends DocumentSummary {
+  readonly metadata: DocumentMetadata;
+}
 
-/** DocumentPermission entity */
-export type DocumentPermission = {
-  id: string;
-  tenant_id: string;
-  document: string;
-  document_id?: string;
-  principal_type: 'user' | 'role' | 'group';
-  principal_id: string;
-  permission: 'read' | 'write' | 'delete' | 'share';
-  created_at: string;
-  updated_at: string;
-};
+export interface DocumentUpload {
+  readonly file: File;
+  readonly name: string;
+  readonly folder_id?: UUID | null;
+  readonly description?: string;
+  readonly tags?: readonly string[];
+  readonly metadata?: DocumentMetadata;
+}
 
-/** DocumentPermission create request */
-export type DocumentPermissionCreate = {
-  document: string;
-  principal_type: 'user' | 'role' | 'group';
-  principal_id: string;
-  permission: 'read' | 'write' | 'delete' | 'share';
-};
+export interface DocumentUpdate {
+  readonly name?: string;
+  readonly description?: string;
+  readonly tags?: readonly string[];
+  readonly metadata?: DocumentMetadata;
+  /** Optimistic concurrency precondition, not a user-editable audit value. */
+  readonly expected_updated_at: ISODateTime;
+}
 
-/** DocumentPermission update request (partial) */
-export type DocumentPermissionUpdate = Partial<DocumentPermissionCreate>;
+export interface DocumentMove { readonly folder_id: UUID | null; readonly expected_updated_at?: ISODateTime }
 
-/** DocumentShare entity */
-export type DocumentShare = {
-  id: string;
-  tenant_id: string;
-  document: string;
-  document_id?: string;
-  share_token: string;
-  expires_at?: string;
-  access_count: number;
-  max_access_count?: number;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-};
+export interface DocumentVersion extends DocumentVersionSummary {
+  readonly document_id: UUID;
+  readonly change_note: string;
+  readonly source_version_id: UUID | null;
+}
 
-/** DocumentShare create request */
-export type DocumentShareCreate = {
-  document: string;
-  expires_at?: string;
-  max_access_count?: number;
-};
+export interface DocumentVersionCreate {
+  readonly document_id: UUID;
+  readonly file: File;
+  readonly change_note?: string;
+}
 
-/** DocumentShare update request (partial) */
-export type DocumentShareUpdate = Partial<DocumentShareCreate>;
+export interface DocumentVersionRestore { readonly change_note?: string }
 
-// =============================================================================
-// ENDPOINT REGISTRY - Use these for all API calls
-// =============================================================================
+export type PrincipalType = 'user' | 'role' | 'group';
+export type DocumentPermissionLevel = 'read' | 'write' | 'delete' | 'share' | 'manage';
 
-/**
- * Dms API Endpoints
- *
- * All endpoints should be prefixed with /api/v1/dms/
- *
- * Usage:
- * ```typescript
- * import { ENDPOINTS } from './contracts';
- * apiClient.get(ENDPOINTS.FOLDERS.LIST);
- * apiClient.get(ENDPOINTS.DOCUMENTS.DETAIL(id));
- * ```
- */
-export const MODULE_API_PREFIX = '/api/v1/dms';
+export interface PrincipalSummary {
+  readonly id: UUID;
+  readonly type: PrincipalType;
+  readonly display_name: string;
+  readonly secondary_text: string;
+}
+
+export interface DocumentPermission {
+  readonly id: UUID;
+  readonly document_id: UUID;
+  readonly principal_type: PrincipalType;
+  readonly principal_id: UUID;
+  readonly principal_display?: string;
+  readonly permission: DocumentPermissionLevel;
+  readonly created_by: UUID;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+}
+
+export interface DocumentPermissionCreate {
+  readonly document_id: UUID;
+  readonly principal_type: PrincipalType;
+  readonly principal_id: UUID;
+  readonly permission: DocumentPermissionLevel;
+}
+
+export interface DocumentPermissionUpdate { readonly permission: DocumentPermissionLevel }
+
+export interface DocumentShare {
+  readonly id: UUID;
+  readonly document_id: UUID;
+  readonly version_id: UUID;
+  readonly token_prefix: string;
+  readonly expires_at: ISODateTime;
+  readonly max_access_count: number | null;
+  readonly access_count: number;
+  readonly last_accessed_at: ISODateTime | null;
+  readonly revoked_at: ISODateTime | null;
+  readonly created_by: UUID;
+  readonly created_at: ISODateTime;
+  readonly state: 'active' | 'expired' | 'exhausted' | 'revoked';
+}
+
+export interface DocumentShareCreate {
+  readonly document_id: UUID;
+  readonly version_id?: UUID | null;
+  readonly expires_at: ISODateTime;
+  readonly max_access_count?: number | null;
+}
+
+export interface ShareCreated {
+  readonly share: DocumentShare;
+  readonly share_url: string;
+}
+
+export interface FolderContents {
+  readonly folder: Folder | null;
+  readonly breadcrumbs: readonly Folder[];
+  readonly folders: readonly Folder[];
+  readonly documents: readonly DocumentSummary[];
+  readonly allowed_actions: readonly DmsAllowedAction[];
+}
+
+export type DocumentOrdering = 'name' | '-name' | 'updated_at' | '-updated_at' | 'created_at' | '-created_at';
+export type FolderOrdering = 'name' | '-name' | 'sort_order' | '-sort_order' | 'updated_at' | '-updated_at';
+
+export interface DmsListQuery {
+  /** UUID or the explicit `root` sentinel accepted by the governed filter. */
+  readonly folder?: string | null;
+  readonly parent_id?: UUID | null;
+  readonly document_id?: UUID;
+  readonly mime_type?: string;
+  readonly creator?: UUID;
+  readonly tags?: readonly string[];
+  readonly modified_after?: ISODateTime;
+  readonly modified_before?: ISODateTime;
+  readonly search?: string;
+  readonly ordering?: DocumentOrdering | FolderOrdering;
+  readonly page?: number;
+  readonly page_size?: number;
+}
+
+export interface PaginationMeta {
+  readonly count: number;
+  readonly page: number;
+  readonly page_size: number;
+  readonly total_pages: number;
+  readonly has_next: boolean;
+  readonly has_previous: boolean;
+}
+
+export interface ApiEnvelope<T> {
+  readonly data: T;
+  readonly meta: {
+    readonly correlation_id: string;
+    readonly timestamp: ISODateTime;
+    readonly pagination?: PaginationMeta;
+  };
+}
+
+export interface DmsPage<T> {
+  readonly items: readonly T[];
+  readonly pagination: PaginationMeta;
+  readonly correlation_id: string;
+}
+
+export interface FieldError {
+  readonly field: string;
+  readonly code: string;
+  readonly message: string;
+}
+
+export interface ApiErrorEnvelope {
+  readonly error: {
+    readonly code: string;
+    readonly message: string;
+    readonly detail?: { readonly field_errors?: readonly FieldError[]; readonly retry_after_seconds?: number };
+    readonly correlation_id: string;
+  };
+}
+
+export type DmsFrontendError =
+  | { readonly kind: 'denied'; readonly status: 401 | 403; readonly message: string; readonly correlation_id: string | null }
+  | { readonly kind: 'not_found'; readonly status: 404; readonly message: string; readonly correlation_id: string | null }
+  | { readonly kind: 'conflict'; readonly status: 409; readonly message: string; readonly correlation_id: string | null }
+  | { readonly kind: 'validation'; readonly status: 400 | 422; readonly message: string; readonly field_errors: readonly FieldError[]; readonly correlation_id: string | null }
+  | { readonly kind: 'rate_limited'; readonly status: 429; readonly message: string; readonly retry_after_seconds: number | null; readonly correlation_id: string | null }
+  | { readonly kind: 'unavailable'; readonly status: 503; readonly message: string; readonly correlation_id: string | null }
+  | { readonly kind: 'unexpected'; readonly status: number; readonly message: string; readonly correlation_id: string | null };
+
+export interface DownloadResult { readonly blob: Blob; readonly filename: string; readonly mime_type: string }
+export interface UploadProgress { readonly loaded: number; readonly total: number; readonly percent: number }
+export interface UploadOptions { readonly signal?: AbortSignal; readonly onProgress?: (progress: UploadProgress) => void }
+export interface DmsHealth { readonly status: 'healthy' | 'degraded' | 'unhealthy'; readonly checks: Readonly<Record<string, Readonly<Record<string, JsonPrimitive>>>> }
+
+export const MODULE_API_PREFIX = '/api/v2/dms';
 
 export const ENDPOINTS = {
   FOLDERS: {
     LIST: `${MODULE_API_PREFIX}/folders/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/folders/${id}/` as const,
     CREATE: `${MODULE_API_PREFIX}/folders/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/folders/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/folders/${id}/` as const,
-    MOVE: (id: string) => `${MODULE_API_PREFIX}/folders/${id}/move/` as const,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/folders/${encodeURIComponent(id)}/` as const,
+    UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/folders/${encodeURIComponent(id)}/` as const,
+    DELETE: (id: UUID) => `${MODULE_API_PREFIX}/folders/${encodeURIComponent(id)}/` as const,
+    MOVE: (id: UUID) => `${MODULE_API_PREFIX}/folders/${encodeURIComponent(id)}/move/` as const,
+    CONTENTS: (id: UUID) => `${MODULE_API_PREFIX}/folders/${encodeURIComponent(id)}/contents/` as const,
   },
   DOCUMENTS: {
     LIST: `${MODULE_API_PREFIX}/documents/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/documents/${id}/` as const,
-    CREATE: `${MODULE_API_PREFIX}/documents/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/documents/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/documents/${id}/` as const,
-    UPLOAD: (id: string) => `${MODULE_API_PREFIX}/documents/${id}/upload/` as const,
-    DOWNLOAD: (id: string) => `${MODULE_API_PREFIX}/documents/${id}/download/` as const,
+    UPLOAD: `${MODULE_API_PREFIX}/documents/`,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/documents/${encodeURIComponent(id)}/` as const,
+    UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/documents/${encodeURIComponent(id)}/` as const,
+    DELETE: (id: UUID) => `${MODULE_API_PREFIX}/documents/${encodeURIComponent(id)}/` as const,
+    MOVE: (id: UUID) => `${MODULE_API_PREFIX}/documents/${encodeURIComponent(id)}/move/` as const,
+    DOWNLOAD: (id: UUID) => `${MODULE_API_PREFIX}/documents/${encodeURIComponent(id)}/download/` as const,
   },
-  DOCUMENT_VERSIONS: {
+  VERSIONS: {
     LIST: `${MODULE_API_PREFIX}/document-versions/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/document-versions/${id}/` as const,
+    CREATE: `${MODULE_API_PREFIX}/document-versions/`,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/document-versions/${encodeURIComponent(id)}/` as const,
+    RESTORE: (id: UUID) => `${MODULE_API_PREFIX}/document-versions/${encodeURIComponent(id)}/restore/` as const,
   },
-  DOCUMENT_PERMISSIONS: {
+  PERMISSIONS: {
     LIST: `${MODULE_API_PREFIX}/document-permissions/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/document-permissions/${id}/` as const,
     CREATE: `${MODULE_API_PREFIX}/document-permissions/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/document-permissions/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/document-permissions/${id}/` as const,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/document-permissions/${encodeURIComponent(id)}/` as const,
+    UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/document-permissions/${encodeURIComponent(id)}/` as const,
+    DELETE: (id: UUID) => `${MODULE_API_PREFIX}/document-permissions/${encodeURIComponent(id)}/` as const,
   },
-  DOCUMENT_SHARES: {
+  SHARES: {
     LIST: `${MODULE_API_PREFIX}/document-shares/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/document-shares/${id}/` as const,
     CREATE: `${MODULE_API_PREFIX}/document-shares/`,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/document-shares/${id}/` as const,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/document-shares/${encodeURIComponent(id)}/` as const,
+    REVOKE: (id: UUID) => `${MODULE_API_PREFIX}/document-shares/${encodeURIComponent(id)}/revoke/` as const,
   },
+  PRINCIPALS: `${MODULE_API_PREFIX}/principals/`,
+  PUBLIC_SHARE_DOWNLOAD: (token: string) => `${MODULE_API_PREFIX}/public/shares/${encodeURIComponent(token)}/download/` as const,
   HEALTH: `${MODULE_API_PREFIX}/health/`,
+} as const;
+
+export const ROUTES = {
+  DOCUMENTS: '/dms/documents',
+  DOCUMENT_CREATE: '/dms/documents/new',
+  DOCUMENT_DETAIL: (id: UUID) => `/dms/documents/${encodeURIComponent(id)}` as const,
+  DOCUMENT_EDIT: (id: UUID) => `/dms/documents/${encodeURIComponent(id)}/edit` as const,
+  FOLDER_CREATE: '/dms/folders/new',
+  FOLDER_DETAIL: (id: UUID) => `/dms/folders/${encodeURIComponent(id)}` as const,
+  FOLDER_EDIT: (id: UUID) => `/dms/folders/${encodeURIComponent(id)}/edit` as const,
 } as const;

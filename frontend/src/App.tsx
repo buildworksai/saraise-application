@@ -149,24 +149,6 @@ const NotificationCenterPage = lazy(() =>
   }))
 );
 
-const DmsListPage = lazy(() =>
-  import("./modules/dms/pages/DmsListPage").then((m) => ({
-    default: m.DmsListPage,
-  }))
-);
-
-const DmsDetailPage = lazy(() =>
-  import("./modules/dms/pages/DmsDetailPage").then((m) => ({
-    default: m.DmsDetailPage,
-  }))
-);
-
-const CreateDmsResourcePage = lazy(() =>
-  import("./modules/dms/pages/CreateDmsResourcePage").then((m) => ({
-    default: m.CreateDmsResourcePage,
-  }))
-);
-
 const DataMigrationListPage = lazy(() =>
   import("./modules/data_migration/pages/DataMigrationListPage").then((m) => ({
     default: m.DataMigrationListPage,
@@ -1606,38 +1588,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <NotificationCenterPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Dms routes */}
-          <Route
-            path="/dms"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <DmsListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/dms/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateDmsResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/dms/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <DmsDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

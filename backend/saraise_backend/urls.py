@@ -41,7 +41,7 @@ urlpatterns = [
     path("api/v2/automation-orchestration/", include("src.modules.automation_orchestration.urls")),
     path("api/v2/process-mining/", include("src.modules.process_mining.urls")),
     path("api/v2/document-intelligence/", include("src.modules.document_intelligence.urls")),
-    path("api/v1/dms/", include("src.modules.dms.urls")),
+    path("api/v2/dms/", include("src.modules.dms.urls")),
     path("api/v1/data-migration/", include("src.modules.data_migration.urls")),
     path("api/v1/metadata-modeling/", include("src.modules.metadata_modeling.urls")),
     path("api/v2/blockchain-traceability/", include("src.modules.blockchain_traceability.urls")),
