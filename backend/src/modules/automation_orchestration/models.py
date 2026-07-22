@@ -142,10 +142,10 @@ class DurableHistoryQuerySet(TenantQuerySet):
     """Keep bulk ORM operations from bypassing durable history guarantees."""
 
     def update(self, **kwargs: Any) -> int:
-        terminal_statuses = getattr(self.model, "TERMINAL_STATUSES", frozenset())
-        if terminal_statuses and self.filter(status__in=terminal_statuses).exists():
-            raise ValidationError(f"Terminal {self.model.__name__} records are immutable.")
-        return super().update(**kwargs)
+        del kwargs
+        raise ValidationError(
+            f"{self.model.__name__} evidence is immutable and cannot be bulk updated; use the service transition command."
+        )
 
     def delete(self) -> tuple[int, dict[str, int]]:
         raise ValidationError(f"{self.model.__name__} history cannot be deleted.")
@@ -705,21 +705,222 @@ class OrchestrationEvent(TenantScopedModel):
         raise ValidationError("Orchestration events are append-only and cannot be deleted.")
 
 
+class ImmutableTenantQuerySet(TenantQuerySet):
+    """Reject mutation of tenant audit/version evidence at queryset level."""
+
+    def update(self, **kwargs: Any) -> int:
+        del kwargs
+        raise ValidationError(f"{self.model.__name__} records are immutable.")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ValidationError(f"{self.model.__name__} records are immutable.")
+
+
+class ConfigurationEnvironment(models.TextChoices):
+    DEVELOPMENT = "development", "Development"
+    SELF_HOSTED = "self-hosted", "Self-hosted"
+    SAAS = "saas", "SaaS"
+
+
+class OrchestrationConfiguration(TenantScopedModel, TimestampedModel):
+    """Current tenant policy projection; immutable versions are the source of truth."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    environment = models.CharField(max_length=24, choices=ConfigurationEnvironment.choices)
+    cohort = models.CharField(max_length=64, default="all")
+    version = models.PositiveIntegerField(default=1)
+    document = models.JSONField(default=dict)
+    enabled = models.BooleanField(default=True)
+    rollout_percentage = models.PositiveSmallIntegerField(default=100)
+    allowed_roles = models.JSONField(default=list, blank=True)
+    updated_by = models.UUIDField()
+    correlation_id = models.CharField(max_length=64)
+
+    class Meta:
+        db_table = "automation_orchestration_configurations"
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "environment", "cohort"), name="ao_config_tenant_scope_uniq"),
+            models.CheckConstraint(
+                condition=models.Q(rollout_percentage__gte=0, rollout_percentage__lte=100),
+                name="ao_config_rollout_0_100",
+            ),
+            models.CheckConstraint(condition=models.Q(version__gte=1), name="ao_config_version_gte_1"),
+        ]
+        indexes = [
+            models.Index(fields=("tenant_id", "environment", "cohort"), name="ao_config_tenant_scope_idx"),
+            models.Index(fields=("tenant_id", "updated_at"), name="ao_config_tenant_updated_idx"),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if not isinstance(self.document, dict):
+            raise ValidationError({"document": "Configuration document must be an object."})
+        if not isinstance(self.allowed_roles, list) or not all(isinstance(role, str) for role in self.allowed_roles):
+            raise ValidationError({"allowed_roles": "Allowed roles must be a list of strings."})
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Configuration projections cannot be deleted.")
+
+
+class OrchestrationConfigurationVersion(TenantScopedModel):
+    """Append-only configuration snapshot supporting arbitrary rollback ancestry."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    configuration = models.ForeignKey(OrchestrationConfiguration, models.PROTECT, related_name="versions")
+    version = models.PositiveIntegerField()
+    document = models.JSONField()
+    enabled = models.BooleanField()
+    rollout_percentage = models.PositiveSmallIntegerField()
+    allowed_roles = models.JSONField(default=list, blank=True)
+    actor_id = models.UUIDField()
+    correlation_id = models.CharField(max_length=64)
+    parent_version = models.ForeignKey("self", models.PROTECT, null=True, blank=True, related_name="children")
+    rollback_of = models.ForeignKey("self", models.PROTECT, null=True, blank=True, related_name="rollbacks")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ImmutableTenantQuerySet.as_manager()
+
+    class Meta:
+        db_table = "automation_orchestration_configuration_versions"
+        ordering = ("-version",)
+        constraints = [
+            models.UniqueConstraint(fields=("configuration", "version"), name="ao_config_version_uniq"),
+            models.CheckConstraint(condition=models.Q(version__gte=1), name="ao_config_ver_version_gte_1"),
+        ]
+        indexes = [
+            models.Index(fields=("tenant_id", "configuration", "version"), name="ao_cfgver_tenant_config_idx"),
+            models.Index(fields=("tenant_id", "created_at"), name="ao_cfgver_tenant_created_idx"),
+        ]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("Configuration versions are immutable.")
+        _validate_related_tenant(self, "configuration")
+        if self.parent_version_id:
+            _validate_related_tenant(self, "parent_version")
+        if self.rollback_of_id:
+            _validate_related_tenant(self, "rollback_of")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Configuration versions are immutable.")
+
+
+class OrchestrationConfigurationAudit(TenantScopedModel):
+    """Immutable who/what/when evidence for every configuration mutation."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    configuration = models.ForeignKey(OrchestrationConfiguration, models.PROTECT, related_name="audits")
+    version = models.PositiveIntegerField()
+    action = models.CharField(max_length=24)
+    actor_id = models.UUIDField()
+    correlation_id = models.CharField(max_length=64)
+    before = models.JSONField(null=True, blank=True)
+    after = models.JSONField()
+    changed_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ImmutableTenantQuerySet.as_manager()
+
+    class Meta:
+        db_table = "automation_orchestration_configuration_audits"
+        ordering = ("-changed_at", "-version")
+        indexes = [
+            models.Index(fields=("tenant_id", "configuration", "version"), name="ao_cfgaudit_tenant_cfg_idx"),
+            models.Index(fields=("tenant_id", "correlation_id"), name="ao_cfgaudit_tenant_corr_idx"),
+        ]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("Configuration audits are immutable.")
+        _validate_related_tenant(self, "configuration")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Configuration audits are immutable.")
+
+
+class OrchestrationCommand(TenantScopedModel):
+    """Tenant-scoped idempotency ledger for state-mutating orchestration commands."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    operation = models.CharField(max_length=64)
+    idempotency_key = models.CharField(max_length=255)
+    request_fingerprint = models.CharField(max_length=64)
+    result_type = models.CharField(max_length=64, blank=True, default="")
+    result_id = models.UUIDField(null=True, blank=True)
+    correlation_id = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "automation_orchestration_commands"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "operation", "idempotency_key"), name="ao_command_tenant_op_key_uniq"
+            )
+        ]
+        indexes = [models.Index(fields=("tenant_id", "created_at"), name="ao_command_tenant_created_idx")]
+
+
+class ReconciliationStatus(models.TextChoices):
+    REQUIRED = "required", "Required"
+    RECONCILING = "reconciling", "Reconciling"
+    COMPENSATED = "compensated", "Compensated"
+    CONFIRMED = "confirmed", "Confirmed"
+
+
+class OrchestrationReconciliation(TenantScopedModel, TimestampedModel):
+    """Durable external-outcome reconciliation/compensation workflow."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    attempt = models.OneToOneField(RetryAttempt, models.PROTECT, related_name="reconciliation")
+    provider_key = models.CharField(max_length=150)
+    status = models.CharField(
+        max_length=20, choices=ReconciliationStatus.choices, default=ReconciliationStatus.REQUIRED
+    )
+    evidence = models.JSONField(default=dict)
+    resolution = models.JSONField(null=True, blank=True)
+    requested_by = models.UUIDField(null=True, blank=True)
+    resolved_by = models.UUIDField(null=True, blank=True)
+    correlation_id = models.CharField(max_length=64)
+
+    class Meta:
+        db_table = "automation_orchestration_reconciliations"
+        indexes = [models.Index(fields=("tenant_id", "status", "created_at"), name="ao_recon_tenant_status_idx")]
+
+    def clean(self) -> None:
+        super().clean()
+        _validate_related_tenant(self, "attempt")
+
+
 __all__ = [
     "AttemptStatus",
     "ConcurrencyPolicy",
+    "ConfigurationEnvironment",
     "DefinitionStatus",
     "EdgeCondition",
     "MisfirePolicy",
     "NodeType",
     "OrchestrationDefinition",
+    "OrchestrationCommand",
+    "OrchestrationConfiguration",
+    "OrchestrationConfigurationAudit",
+    "OrchestrationConfigurationVersion",
     "OrchestrationEdge",
     "OrchestrationEvent",
     "OrchestrationNode",
     "OrchestrationRun",
+    "OrchestrationReconciliation",
     "OrchestrationSchedule",
     "OrchestrationTaskRun",
     "RetryAttempt",
+    "ReconciliationStatus",
     "RunStatus",
     "RunTriggerType",
     "ScheduleStatus",

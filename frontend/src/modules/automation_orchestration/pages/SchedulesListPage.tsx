@@ -5,25 +5,29 @@ import { CalendarClock, Pause, Play, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import type { ScheduleStatus } from "../contracts";
-import { useSchedules, orchestrationKeys } from "../hooks/use-orchestration";
+import { useRuntimeConfiguration, useSchedules, orchestrationKeys } from "../hooks/use-orchestration";
 import { automationOrchestrationService as service } from "../services/automation-orchestration-service";
 import { EmptyPanel, LoadError, PageHeader, PageSkeleton, Pagination, StatusPill, formatDate } from "../components/OrchestrationUI";
 
+// Configuration, filtering, lifecycle, and empty-state branches remain explicit.
+// eslint-disable-next-line complexity
 export function SchedulesListPage() {
   const navigate = useNavigate();
+  const configurationQuery = useRuntimeConfiguration();
+  const configuration = configurationQuery.data?.document;
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<ScheduleStatus | "">("");
   const [page, setPage] = useState(1);
-  const filters = { search: search || undefined, status: status || undefined, page, page_size: 25, ordering: "next_run_at" as const };
+  const filters = { search: search || undefined, status: status || undefined, page, page_size: configuration?.ui.schedule_page_size, ordering: "next_run_at" as const };
   const query = useSchedules(filters);
   const lifecycle = useMutation({
     mutationFn: ({ id, action }: { id: string; action: "pause" | "resume" }) => action === "pause" ? service.pauseSchedule(id, crypto.randomUUID()) : service.resumeSchedule(id, crypto.randomUUID()),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: orchestrationKeys.schedules(filters) }),
   });
 
-  if (query.isLoading) return <PageSkeleton rows={7} />;
-  if (query.error) return <LoadError error={query.error} retry={() => void query.refetch()} />;
+  if (configurationQuery.isLoading || query.isLoading) return <PageSkeleton rows={configuration?.ui.skeleton_rows} />;
+  if (configurationQuery.error || query.error || !configuration) return <LoadError error={configurationQuery.error ?? query.error ?? new Error("Runtime configuration is unavailable.")} retry={() => { void configurationQuery.refetch(); void query.refetch(); }} />;
   const result = query.data;
   if (!result) return <LoadError error={new Error("No schedule response was received.")} retry={() => void query.refetch()} />;
   const hasFilters = Boolean(search || status);

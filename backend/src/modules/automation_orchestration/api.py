@@ -10,8 +10,8 @@ import uuid
 from collections.abc import Callable
 from typing import Any, TypeVar
 
-from django.core.exceptions import ObjectDoesNotExist, ValidationError as DjangoValidationError
-from django.db.models import Case, Count, ExpressionWrapper, F, FloatField, Max, Q, Value, When
+from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.dateparse import parse_datetime
 from rest_framework import status, viewsets
 from rest_framework.authentication import SessionAuthentication
@@ -25,9 +25,13 @@ from rest_framework.views import APIView
 from src.core.access.permissions import RequiresAccess
 from src.core.api.profile import GovernedAPIViewMixin
 from src.core.api.results import CapabilityUnavailable, OperationFailed
+from src.core.middleware.correlation import get_correlation_id
 
 from .health import sanitized_health_payload
 from .models import (
+    OrchestrationConfiguration,
+    OrchestrationConfigurationAudit,
+    OrchestrationConfigurationVersion,
     OrchestrationDefinition,
     OrchestrationEdge,
     OrchestrationEvent,
@@ -39,9 +43,12 @@ from .models import (
 from .node_registry import list_node_catalog
 from .permissions import (
     CATALOG_VIEW,
+    CONFIGURATION_MANAGE,
+    CONFIGURATION_VIEW,
     DEFINITION_MANAGE,
     DEFINITION_PUBLISH,
     DEFINITION_VIEW,
+    HEALTH_VIEW,
     RUN_CONTROL,
     RUN_EXECUTE,
     RUN_RETRY,
@@ -53,6 +60,10 @@ from .permissions import (
     write_access,
 )
 from .serializers import (
+    ConfigurationAuditSerializer,
+    ConfigurationRollbackSerializer,
+    ConfigurationVersionSerializer,
+    ConfigurationWriteSerializer,
     DefinitionCreateSerializer,
     DefinitionDetailSerializer,
     DefinitionListSerializer,
@@ -67,6 +78,7 @@ from .serializers import (
     NodeListSerializer,
     NodeUpdateSerializer,
     OrchestrationEventSerializer,
+    ReconciliationCommandSerializer,
     RunControlSerializer,
     RunDetailSerializer,
     RunListSerializer,
@@ -81,6 +93,8 @@ from .serializers import (
     TaskRunListSerializer,
 )
 from .services import (
+    ConfigurationService,
+    DefinitionQueryService,
     DefinitionService,
     ExecutionService,
     IdempotencyConflictError,
@@ -189,6 +203,15 @@ class GovernedTenantViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet[Any]):
     def actor_id(self) -> uuid.UUID:
         return _actor_id(self.request)
 
+    def tenant_id_or_none(self) -> uuid.UUID | None:
+        request = getattr(self, "request", None)
+        if request is None:
+            return None
+        try:
+            return _tenant_from_request(request)
+        except (PermissionDenied, ValidationError):
+            return None
+
     @staticmethod
     def _ordered(queryset: Any, request: Request, allowed: dict[str, str], default: str) -> Any:
         requested = request.query_params.get("ordering", default)
@@ -199,10 +222,13 @@ class GovernedTenantViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet[Any]):
 
     def _paginate(self, queryset: Any, serializer_class: type, *, context: dict[str, object] | None = None) -> Response:
         page = self.paginate_queryset(queryset)
-        serializer = serializer_class(page if page is not None else queryset, many=True, context=context or {})
-        if page is not None:
-            return self.get_paginated_response(serializer.data)
-        return Response(serializer.data)
+        if page is None:
+            raise CapabilityUnavailable(
+                capability="automation_orchestration.pagination",
+                message="Mandatory pagination is unavailable.",
+            )
+        serializer = serializer_class(page, many=True, context=context or {})
+        return self.get_paginated_response(serializer.data)
 
 
 class DefinitionViewSet(GovernedTenantViewSet):
@@ -228,41 +254,13 @@ class DefinitionViewSet(GovernedTenantViewSet):
         return super().get_access_requirement()
 
     def get_queryset(self):
-        queryset = OrchestrationDefinition.objects.for_tenant(self.tenant_id).filter(is_deleted=False)
-        if self.action == "list":
-            queryset = queryset.annotate(
-                node_count=Count("nodes", filter=Q(nodes__is_deleted=False), distinct=True),
-                schedule_count=Count("schedules", filter=Q(schedules__is_deleted=False), distinct=True),
-                last_run_at=Max("runs__created_at"),
-                terminal_run_count=Count(
-                    "runs", filter=Q(runs__status__in=("succeeded", "failed", "cancelled")), distinct=True
-                ),
-                succeeded_run_count=Count("runs", filter=Q(runs__status="succeeded"), distinct=True),
-            ).annotate(
-                success_rate=Case(
-                    When(terminal_run_count=0, then=Value(None)),
-                    default=ExpressionWrapper(
-                        100.0 * F("succeeded_run_count") / F("terminal_run_count"), output_field=FloatField()
-                    ),
-                    output_field=FloatField(),
-                )
-            )
-        return queryset
+        tenant_id = self.tenant_id_or_none()
+        if tenant_id is None:
+            return OrchestrationDefinition.objects.none()
+        return OrchestrationDefinition.objects.for_tenant(tenant_id).filter(is_deleted=False)
 
     def list(self, request: Request) -> Response:
-        queryset = self.get_queryset()
-        if status_value := request.query_params.get("status"):
-            queryset = queryset.filter(status=status_value)
-        if key := request.query_params.get("key"):
-            queryset = queryset.filter(key=key)
-        if (current := request.query_params.get("is_current")) is not None:
-            if current.lower() not in {"true", "false"}:
-                raise ValidationError({"is_current": ["Use true or false"]})
-            queryset = queryset.filter(is_current=current.lower() == "true")
-        if search := request.query_params.get("search"):
-            queryset = queryset.filter(
-                Q(name__icontains=search) | Q(key__icontains=search) | Q(description__icontains=search)
-            )
+        queryset = _service_call(lambda: DefinitionQueryService.list_queryset(self.tenant_id, request.query_params))
         queryset = self._ordered(
             queryset,
             request,
@@ -284,22 +282,20 @@ class DefinitionViewSet(GovernedTenantViewSet):
         return Response(DefinitionDetailSerializer(definition).data, status=status.HTTP_201_CREATED)
 
     def partial_update(self, request: Request, pk: str | None = None) -> Response:
-        current = self.get_object()
+        self.get_object()
         serializer = DefinitionUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         changes = dict(serializer.validated_data)
         transition_key = str(changes.pop("transition_key", "update_draft"))
         expected_revision = changes.pop("expected_revision", None)
-        if expected_revision is not None and expected_revision != current.graph_revision:
-            raise OperationFailed(
-                error_code="GRAPH_REVISION_CONFLICT",
-                message="The graph changed after it was loaded. Refresh and reconcile your edits.",
-                detail={"current_revision": current.graph_revision},
-                http_status=status.HTTP_409_CONFLICT,
-            )
         definition = _service_call(
             lambda: self.service.update_draft(
-                self.tenant_id, _as_uuid(pk, "id"), self.actor_id, changes, transition_key
+                self.tenant_id,
+                _as_uuid(pk, "id"),
+                self.actor_id,
+                changes,
+                transition_key,
+                expected_revision,
             )
         )
         return Response(DefinitionDetailSerializer(definition).data)
@@ -398,7 +394,10 @@ class NodeViewSet(GovernedTenantViewSet):
     }
 
     def get_queryset(self):
-        return OrchestrationNode.objects.for_tenant(self.tenant_id).filter(is_deleted=False)
+        tenant_id = self.tenant_id_or_none()
+        if tenant_id is None:
+            return OrchestrationNode.objects.none()
+        return OrchestrationNode.objects.for_tenant(tenant_id).filter(is_deleted=False)
 
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
         return Response(NodeDetailSerializer(self.get_object()).data)
@@ -429,7 +428,10 @@ class EdgeViewSet(GovernedTenantViewSet):
     }
 
     def get_queryset(self):
-        return OrchestrationEdge.objects.for_tenant(self.tenant_id).filter(is_deleted=False)
+        tenant_id = self.tenant_id_or_none()
+        if tenant_id is None:
+            return OrchestrationEdge.objects.none()
+        return OrchestrationEdge.objects.for_tenant(tenant_id).filter(is_deleted=False)
 
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
         return Response(EdgeSerializer(self.get_object()).data)
@@ -465,11 +467,10 @@ class ScheduleViewSet(GovernedTenantViewSet):
     }
 
     def get_queryset(self):
-        return (
-            OrchestrationSchedule.objects.for_tenant(self.tenant_id)
-            .filter(is_deleted=False)
-            .select_related("definition")
-        )
+        tenant_id = self.tenant_id_or_none()
+        if tenant_id is None:
+            return OrchestrationSchedule.objects.none()
+        return OrchestrationSchedule.objects.for_tenant(tenant_id).filter(is_deleted=False).select_related("definition")
 
     def list(self, request: Request) -> Response:
         queryset = self.get_queryset()
@@ -555,9 +556,10 @@ class RunViewSet(GovernedTenantViewSet):
     }
 
     def get_queryset(self):
-        return OrchestrationRun.objects.for_tenant(self.tenant_id).select_related(
-            "definition", "schedule", "parent_run"
-        )
+        tenant_id = self.tenant_id_or_none()
+        if tenant_id is None:
+            return OrchestrationRun.objects.none()
+        return OrchestrationRun.objects.for_tenant(tenant_id).select_related("definition", "schedule", "parent_run")
 
     def list(self, request: Request) -> Response:
         queryset = self.get_queryset()
@@ -672,9 +674,17 @@ class TaskRunViewSet(GovernedTenantViewSet):
         "retry": write_access(RUN_RETRY, cost=1),
     }
 
+    def get_access_requirement(self) -> AccessRequirement | None:
+        if getattr(self, "action", "") == "reconcile":
+            return write_access(RUN_CONTROL)
+        return super().get_access_requirement()
+
     def get_queryset(self):
+        tenant_id = self.tenant_id_or_none()
+        if tenant_id is None:
+            return OrchestrationTaskRun.objects.none()
         return (
-            OrchestrationTaskRun.objects.for_tenant(self.tenant_id)
+            OrchestrationTaskRun.objects.for_tenant(tenant_id)
             .select_related("run", "node")
             .prefetch_related("attempts")
         )
@@ -694,6 +704,22 @@ class TaskRunViewSet(GovernedTenantViewSet):
         )
         return Response(TaskRunDetailSerializer(task_run).data, status=status.HTTP_202_ACCEPTED)
 
+    @action(detail=True, methods=("post",))
+    def reconcile(self, request: Request, pk: str | None = None) -> Response:
+        self.get_object()
+        serializer = ReconciliationCommandSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        task_run = _service_call(
+            lambda: self.service.reconcile_task(
+                self.tenant_id,
+                _as_uuid(pk, "id"),
+                self.actor_id,
+                serializer.validated_data["action"],
+                serializer.validated_data["evidence"],
+            )
+        )
+        return Response(TaskRunDetailSerializer(task_run).data)
+
 
 class NodeTypeViewSet(GovernedTenantViewSet):
     access_by_action = {"list": read_access(CATALOG_VIEW)}
@@ -706,13 +732,151 @@ class NodeTypeViewSet(GovernedTenantViewSet):
         return self._paginate(descriptors, NodeDescriptorSerializer)
 
 
+class ConfigurationViewSet(GovernedTenantViewSet):
+    """Governed configuration-as-code surface used by the tenant settings UI."""
+
+    access_by_action = {
+        "list": read_access(CONFIGURATION_VIEW),
+        "create": write_access(CONFIGURATION_MANAGE),
+        "preview": write_access(CONFIGURATION_MANAGE),
+        "versions": read_access(CONFIGURATION_VIEW),
+        "audits": read_access(CONFIGURATION_VIEW),
+        "rollback": write_access(CONFIGURATION_MANAGE),
+        "import_document": write_access(CONFIGURATION_MANAGE),
+        "export_document": read_access(CONFIGURATION_VIEW),
+    }
+
+    def get_queryset(self):
+        tenant_id = self.tenant_id_or_none()
+        if tenant_id is None:
+            return OrchestrationConfiguration.objects.none()
+        return OrchestrationConfiguration.objects.for_tenant(tenant_id)
+
+    @staticmethod
+    def _scope(request: Request) -> tuple[str, str]:
+        return request.query_params.get("environment", "development"), request.query_params.get("cohort", "all")
+
+    @staticmethod
+    def _correlation(request: Request) -> str:
+        return str(getattr(request, "correlation_id", "") or get_correlation_id() or "")
+
+    def list(self, request: Request) -> Response:
+        environment, cohort = self._scope(request)
+        return Response(
+            _service_call(
+                lambda: ConfigurationService.export_configuration(
+                    self.tenant_id, environment=environment, cohort=cohort
+                )
+            )
+        )
+
+    def create(self, request: Request) -> Response:
+        serializer = ConfigurationWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        environment = str(data.pop("environment"))
+        cohort = str(data.pop("cohort"))
+        configuration = _service_call(
+            lambda: ConfigurationService.update(
+                self.tenant_id,
+                self.actor_id,
+                self._correlation(request),
+                data,
+                environment=environment,
+                cohort=cohort,
+            )
+        )
+        return Response(
+            ConfigurationService.export_configuration(
+                self.tenant_id, environment=configuration.environment, cohort=configuration.cohort
+            ),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=("post",))
+    def preview(self, request: Request) -> Response:
+        serializer = ConfigurationWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        environment = str(data.pop("environment"))
+        cohort = str(data.pop("cohort"))
+        return Response(
+            _service_call(
+                lambda: ConfigurationService.preview(self.tenant_id, data, environment=environment, cohort=cohort)
+            )
+        )
+
+    @action(detail=False, methods=("get",))
+    def versions(self, request: Request) -> Response:
+        environment, cohort = self._scope(request)
+        configuration = self.get_queryset().filter(environment=environment, cohort=cohort).first()
+        queryset = (
+            OrchestrationConfigurationVersion.objects.none()
+            if configuration is None
+            else OrchestrationConfigurationVersion.objects.for_tenant(self.tenant_id).filter(
+                configuration=configuration
+            )
+        )
+        return self._paginate(queryset, ConfigurationVersionSerializer)
+
+    @action(detail=False, methods=("get",))
+    def audits(self, request: Request) -> Response:
+        environment, cohort = self._scope(request)
+        configuration = self.get_queryset().filter(environment=environment, cohort=cohort).first()
+        queryset = (
+            OrchestrationConfigurationAudit.objects.none()
+            if configuration is None
+            else OrchestrationConfigurationAudit.objects.for_tenant(self.tenant_id).filter(configuration=configuration)
+        )
+        return self._paginate(queryset, ConfigurationAuditSerializer)
+
+    @action(detail=False, methods=("post",))
+    def rollback(self, request: Request) -> Response:
+        serializer = ConfigurationRollbackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        configuration = _service_call(
+            lambda: ConfigurationService.rollback(
+                self.tenant_id,
+                self.actor_id,
+                self._correlation(request),
+                data["version"],
+                environment=data["environment"],
+                cohort=data["cohort"],
+            )
+        )
+        return Response(
+            ConfigurationService.export_configuration(
+                self.tenant_id, environment=configuration.environment, cohort=configuration.cohort
+            )
+        )
+
+    @action(detail=False, methods=("post",), url_path="import")
+    def import_document(self, request: Request) -> Response:
+        return self.create(request)
+
+    @action(detail=False, methods=("get",), url_path="export")
+    def export_document(self, request: Request) -> Response:
+        return self.list(request)
+
+
 class OrchestrationHealthView(GovernedAPIViewMixin, APIView):
     authentication_classes = (RequiredSessionAuthentication,)
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, RequiresAccess)
+    required_permission = HEALTH_VIEW
+    required_entitlement = HEALTH_VIEW
+    quota_resource = f"{HEALTH_VIEW}:read"
+    quota_cost = 1
+
+    def get_permissions(self) -> list[object]:
+        try:
+            self.request.tenant_id = _tenant_from_request(self.request)
+        except PermissionDenied:
+            pass
+        return super().get_permissions()
 
     def get(self, request: Request) -> Response:
-        del request
-        payload, status_code = sanitized_health_payload()
+        payload, status_code = sanitized_health_payload(tenant_id=_tenant_from_request(request))
         if status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
             raise CapabilityUnavailable(
                 capability="automation_orchestration.runtime",
@@ -724,6 +888,7 @@ class OrchestrationHealthView(GovernedAPIViewMixin, APIView):
 
 __all__ = [
     "DefinitionViewSet",
+    "ConfigurationViewSet",
     "EdgeViewSet",
     "NodeTypeViewSet",
     "NodeViewSet",

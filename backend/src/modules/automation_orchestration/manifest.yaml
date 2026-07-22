@@ -18,7 +18,69 @@ permissions:
   - automation_orchestration.run:retry
   - automation_orchestration.catalog:view
 sod_actions:
-  - automation_orchestration.definition:publish
+  - - automation_orchestration.definition:manage
+    - automation_orchestration.definition:publish
+entities:
+  - {name: OrchestrationConfiguration, table: automation_orchestration_configurations, tenant_scoped: true}
+  - {name: OrchestrationConfigurationVersion, table: automation_orchestration_configuration_versions, tenant_scoped: true, immutable: true}
+  - {name: OrchestrationConfigurationAudit, table: automation_orchestration_configuration_audits, tenant_scoped: true, immutable: true}
+  - {name: OrchestrationCommand, table: automation_orchestration_commands, tenant_scoped: true}
+  - {name: OrchestrationDefinition, table: automation_orchestration_definitions, tenant_scoped: true}
+  - {name: OrchestrationNode, table: automation_orchestration_nodes, tenant_scoped: true}
+  - {name: OrchestrationEdge, table: automation_orchestration_edges, tenant_scoped: true}
+  - {name: OrchestrationSchedule, table: automation_orchestration_schedules, tenant_scoped: true}
+  - {name: OrchestrationRun, table: automation_orchestration_runs, tenant_scoped: true}
+  - {name: OrchestrationTaskRun, table: automation_orchestration_task_runs, tenant_scoped: true}
+  - {name: RetryAttempt, table: automation_orchestration_retry_attempts, tenant_scoped: true}
+  - {name: OrchestrationReconciliation, table: automation_orchestration_reconciliations, tenant_scoped: true}
+  - {name: OrchestrationEvent, table: automation_orchestration_events, tenant_scoped: true, immutable: true}
+endpoints:
+  - {methods: [GET, POST], path: /api/v2/automation-orchestration/configuration/, permission: automation_orchestration.definition:manage}
+  - {methods: [POST], path: /api/v2/automation-orchestration/configuration/preview/, permission: automation_orchestration.definition:manage}
+  - {methods: [GET], path: /api/v2/automation-orchestration/configuration/versions/, permission: automation_orchestration.definition:view}
+  - {methods: [GET], path: /api/v2/automation-orchestration/configuration/audits/, permission: automation_orchestration.definition:view}
+  - {methods: [POST], path: /api/v2/automation-orchestration/configuration/rollback/, permission: automation_orchestration.definition:manage}
+  - {methods: [POST], path: /api/v2/automation-orchestration/configuration/import/, permission: automation_orchestration.definition:manage}
+  - {methods: [GET], path: /api/v2/automation-orchestration/configuration/export/, permission: automation_orchestration.definition:view}
+  - {methods: [GET, POST], path: /api/v2/automation-orchestration/definitions/, permission: automation_orchestration.definition:view}
+  - {methods: [GET, PATCH, DELETE], path: "/api/v2/automation-orchestration/definitions/{id}/", permission: automation_orchestration.definition:manage}
+  - {methods: [POST], path: "/api/v2/automation-orchestration/definitions/{id}/validate/", permission: automation_orchestration.definition:manage}
+  - {methods: [POST], path: "/api/v2/automation-orchestration/definitions/{id}/publish/", permission: automation_orchestration.definition:publish}
+  - {methods: [POST], path: "/api/v2/automation-orchestration/definitions/{id}/clone/", permission: automation_orchestration.definition:manage}
+  - {methods: [POST], path: "/api/v2/automation-orchestration/definitions/{id}/retire/", permission: automation_orchestration.definition:publish}
+  - {methods: [GET, POST], path: "/api/v2/automation-orchestration/definitions/{id}/nodes/", permission: automation_orchestration.definition:view}
+  - {methods: [GET, POST], path: "/api/v2/automation-orchestration/definitions/{id}/edges/", permission: automation_orchestration.definition:view}
+  - {methods: [GET], path: "/api/v2/automation-orchestration/definitions/{id}/snapshot/", permission: automation_orchestration.definition:view}
+  - {methods: [GET, PATCH, DELETE], path: "/api/v2/automation-orchestration/nodes/{id}/", permission: automation_orchestration.definition:manage}
+  - {methods: [GET, PATCH, DELETE], path: "/api/v2/automation-orchestration/edges/{id}/", permission: automation_orchestration.definition:manage}
+  - {methods: [GET, POST], path: /api/v2/automation-orchestration/schedules/, permission: automation_orchestration.schedule:view}
+  - {methods: [GET, PATCH, DELETE], path: "/api/v2/automation-orchestration/schedules/{id}/", permission: automation_orchestration.schedule:manage}
+  - {methods: [POST], path: "/api/v2/automation-orchestration/schedules/{id}/{pause|resume|retire}/", permission: automation_orchestration.schedule:manage}
+  - {methods: [GET, POST], path: /api/v2/automation-orchestration/runs/, permission: automation_orchestration.run:view}
+  - {methods: [GET], path: "/api/v2/automation-orchestration/runs/{id}/", permission: automation_orchestration.run:view}
+  - {methods: [POST], path: "/api/v2/automation-orchestration/runs/{id}/{pause|resume|cancel}/", permission: automation_orchestration.run:control}
+  - {methods: [POST], path: "/api/v2/automation-orchestration/runs/{id}/retry/", permission: automation_orchestration.run:retry}
+  - {methods: [GET], path: "/api/v2/automation-orchestration/runs/{id}/{task-runs|events}/", permission: automation_orchestration.run:view}
+  - {methods: [GET], path: "/api/v2/automation-orchestration/task-runs/{id}/", permission: automation_orchestration.run:view}
+  - {methods: [POST], path: "/api/v2/automation-orchestration/task-runs/{id}/retry/", permission: automation_orchestration.run:retry}
+  - {methods: [POST], path: "/api/v2/automation-orchestration/task-runs/{id}/reconcile/", permission: automation_orchestration.run:control}
+  - {methods: [GET], path: /api/v2/automation-orchestration/node-types/, permission: automation_orchestration.catalog:view}
+  - {methods: [GET], path: /api/v2/automation-orchestration/health/, permission: automation_orchestration.catalog:view}
+worker_commands:
+  - automation_orchestration.execute_run
+  - automation_orchestration.execute_task
+  - automation_orchestration.scan_schedules
+frontend_routes:
+  - /automation-orchestration
+  - /automation-orchestration/configuration
+  - /automation-orchestration/definitions/new
+  - /automation-orchestration/definitions/{id}
+  - /automation-orchestration/definitions/{id}/edit
+  - /automation-orchestration/schedules
+  - /automation-orchestration/schedules/new
+  - /automation-orchestration/schedules/{id}/edit
+  - /automation-orchestration/runs
+  - /automation-orchestration/runs/{id}
 search_indexes: []
 ai_tools: []
 metadata:

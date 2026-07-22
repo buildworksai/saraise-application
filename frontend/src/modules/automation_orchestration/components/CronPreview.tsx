@@ -18,7 +18,12 @@ function matchesPart(part: string, value: number, min: number, max: number): boo
 
 // Utility is intentionally colocated with the preview to keep cron semantics identical.
 // eslint-disable-next-line react-refresh/only-export-components
-export function nextCronRuns(expression: string, timezone: string, count = 5): readonly Date[] {
+export function nextCronRuns(
+  expression: string,
+  timezone: string,
+  count = 5,
+  searchHorizonDays = 366,
+): readonly Date[] {
   const fields = expression.trim().split(/\s+/);
   if (fields.length !== 5) return [];
   const [minute = "", hour = "", day = "", month = "", weekday = ""] = fields;
@@ -28,7 +33,8 @@ export function nextCronRuns(expression: string, timezone: string, count = 5): r
   const candidate = new Date();
   candidate.setSeconds(0, 0);
   candidate.setMinutes(candidate.getMinutes() + 1);
-  for (let checked = 0; checked < 527_040 && runs.length < count; checked += 1) {
+  const searchHorizonMinutes = searchHorizonDays * 24 * 60;
+  for (let checked = 0; checked < searchHorizonMinutes && runs.length < count; checked += 1) {
     const parts = formatter.formatToParts(candidate);
     const find = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
     const dow = weekdayNumber[find("weekday")];
@@ -38,10 +44,20 @@ export function nextCronRuns(expression: string, timezone: string, count = 5): r
   return runs;
 }
 
-export function CronPreview({ expression, timezone }: { expression: string; timezone: string }) {
+export function CronPreview({
+  expression,
+  timezone,
+  count,
+  searchHorizonDays,
+}: {
+  expression: string;
+  timezone: string;
+  count: number;
+  searchHorizonDays: number;
+}) {
   const preview = useMemo(() => {
-    try { return nextCronRuns(expression, timezone); } catch { return []; }
-  }, [expression, timezone]);
+    try { return nextCronRuns(expression, timezone, count, searchHorizonDays); } catch { return []; }
+  }, [count, expression, searchHorizonDays, timezone]);
   return (
     <div className="rounded-lg border bg-muted/30 p-4">
       <p className="text-sm font-medium">Upcoming scheduled times</p>

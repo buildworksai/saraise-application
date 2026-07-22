@@ -5,19 +5,25 @@ from __future__ import annotations
 import json
 import logging
 import math
+import random
+import threading
 import time
 import uuid
 from collections import defaultdict, deque
 from collections.abc import Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone as datetime_timezone
+from datetime import datetime, timedelta
+from datetime import timezone as datetime_timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import IntegrityError, connection, transaction
-from django.db.models import F
+from django.db.models import Case, Count, ExpressionWrapper, F, FloatField, Max, Q, Value, When
 from django.utils import timezone
 from django.utils.module_loading import import_string
 from django.utils.text import slugify
@@ -26,26 +32,34 @@ from src.core.async_jobs.models import JobStatus, OutboxEvent
 from src.core.async_jobs.services import InvalidJobTransition, enqueue, transition
 from src.core.middleware.correlation import get_correlation_id
 
-from .models import (
-    OrchestrationDefinition,
-    OrchestrationEdge,
-    OrchestrationEvent,
-    OrchestrationNode,
-    OrchestrationRun,
-    OrchestrationSchedule,
-    OrchestrationTaskRun,
-    RetryAttempt,
-)
 from .metrics import (
     ACTIVE_RUNS,
     NODE_EXECUTIONS,
     RETRIES,
-    RUNS,
     RUN_DURATION,
+    RUNS,
     SCHEDULE_LAG,
-    TASKS,
     TASK_DURATION,
     TASK_QUEUE_WAIT,
+    TASKS,
+)
+from .models import (
+    ConfigurationEnvironment,
+    OrchestrationCommand,
+    OrchestrationConfiguration,
+    OrchestrationConfigurationAudit,
+    OrchestrationConfigurationVersion,
+    OrchestrationDefinition,
+    OrchestrationEdge,
+    OrchestrationEvent,
+    OrchestrationNode,
+    OrchestrationReconciliation,
+    OrchestrationRun,
+    OrchestrationSchedule,
+    OrchestrationTaskRun,
+    ReconciliationStatus,
+    RetryAttempt,
+    RunStatus,
 )
 from .node_registry import (
     CORE_CAPABILITY,
@@ -55,7 +69,6 @@ from .node_registry import (
     NodeExecutionResult,
     NodeNotRegistered,
     NodeResultStatus,
-    RetrySafety,
     execute_registered_node,
     get_node_descriptor,
     request_fingerprint,
@@ -73,6 +86,141 @@ RUN_TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
 TASK_TERMINAL = frozenset({"succeeded", "failed", "skipped", "cancelled"})
 ATTEMPT_TERMINAL = frozenset({"succeeded", "failed", "timed_out", "cancelled"})
 SECRET_FRAGMENTS = ("password", "secret", "token", "api_key", "private_key", "credential")
+_EXECUTION_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="orchestration-node")
+_CIRCUIT_LOCK = threading.Lock()
+_CIRCUITS: dict[str, tuple[int, float]] = {}
+_CANCELLATION_LOCK = threading.Lock()
+_CANCELLATION_EVENTS: dict[uuid.UUID, threading.Event] = {}
+
+
+def _cancellation_event(run_id: uuid.UUID) -> threading.Event:
+    with _CANCELLATION_LOCK:
+        return _CANCELLATION_EVENTS.setdefault(run_id, threading.Event())
+
+
+# These are bootstrap values, not fixed behavior: every field is exposed by the
+# tenant configuration API and UI.  The immutable ceilings are platform safety
+# invariants; tenant limits may only narrow them.
+PLATFORM_CEILINGS = {
+    "json_bytes": 262_144,
+    "json_depth": 20,
+    "parallel_tasks": 100,
+    "timeout_seconds": 86_400,
+    "attempts": 20,
+    "retry_multiplier": 10.0,
+    "page_size": 200,
+    "idempotency_key_length": 255,
+    "event_metadata_bytes": 65_536,
+    "schedule_scan_batch": 1_000,
+}
+
+DEFAULT_CONFIGURATION: dict[str, Any] = {
+    "limits": {
+        "json_bytes": 262_144,
+        "json_depth": 20,
+        "parallel_tasks_min": 1,
+        "parallel_tasks_max": 100,
+        "timeout_seconds_min": 1,
+        "timeout_seconds_max": 86_400,
+        "attempts_min": 1,
+        "attempts_max": 20,
+        "retry_multiplier_min": 1.0,
+        "retry_multiplier_max": 10.0,
+        "page_size_default": 25,
+        "page_size_max": 200,
+        "idempotency_key_length": 255,
+        "event_metadata_bytes": 16_384,
+        "schedule_scan_batch": 100,
+        "definition_name_min": 3,
+        "definition_name_max": 255,
+        "description_max": 2_000,
+        "schedule_name_min": 3,
+        "schedule_name_max": 255,
+    },
+    "defaults": {
+        "max_parallel_tasks": 10,
+        "timeout_seconds": 300,
+        "max_attempts": 3,
+        "retry_initial_delay_seconds": 5,
+        "retry_backoff_multiplier": 2.0,
+        "retry_max_delay_seconds": 300,
+        "retry_jitter_ratio": 0.2,
+        "edge_condition": "on_success",
+        "edge_priority": 0,
+        "timezone": "UTC",
+        "schedule_status": "active",
+        "misfire_policy": "skip",
+        "concurrency_policy": "forbid",
+        "cron_expression": "0 8 * * 1-5",
+        "input_schema": {"type": "object", "additionalProperties": True},
+        "output_schema": {"type": "object", "additionalProperties": True},
+    },
+    "workflow": {
+        "definition_transitions": {
+            "draft": ["draft", "published"],
+            "published": ["published", "retired"],
+            "retired": ["retired"],
+        },
+        "deletable_definition_statuses": ["draft", "retired"],
+        "active_schedule_blocks_definition_delete": True,
+        "editable_definition_statuses": ["draft"],
+        "schedule_transitions": {
+            "active": ["paused", "retired"],
+            "paused": ["active", "retired"],
+            "retired": [],
+        },
+        "run_terminal_statuses": ["succeeded", "failed", "cancelled"],
+        "task_terminal_statuses": ["succeeded", "failed", "skipped", "cancelled"],
+        "attempt_terminal_statuses": ["succeeded", "failed", "timed_out", "cancelled"],
+        "enqueue_task_statuses": ["ready", "retry_wait"],
+        "active_task_statuses": ["queued", "running"],
+        "manual_retry_statuses": ["failed", "cancelled"],
+        "reconciliation_error_codes": ["AMBIGUOUS_COMMIT", "RECONCILIATION_REQUIRED"],
+        "forbid_overlap_run_statuses": ["queued", "running", "paused", "cancelling"],
+        "allow_self_edges": False,
+        "require_node": True,
+        "require_root_node": True,
+        "allow_cycles": False,
+        "allow_unreachable_nodes": False,
+    },
+    "integrations": {
+        "allowed_source_modules": ["workflow_automation"],
+        "worker_authorized_capabilities": [CORE_CAPABILITY],
+        "execution_timeout_seconds": 300,
+        "circuit_failure_threshold": 5,
+        "circuit_recovery_seconds": 60,
+    },
+    "scheduler": {
+        "cron_fields": 5,
+        "search_horizon_days": 1_826,
+        "active_status": "active",
+        "enqueue_misfire_policies": ["run_once"],
+        "forbid_overlap_policy": "forbid",
+    },
+    "health": {
+        "scanner_heartbeat_ttl_seconds": 180,
+        "pending_outbox_freshness_seconds": 300,
+        "scanner_freshness_seconds": 120,
+        "registry_staleness_seconds": 30,
+    },
+    "ui": {
+        "definition_detail_page_size": 5,
+        "definition_page_size": 25,
+        "schedule_page_size": 25,
+        "task_run_page_size": 100,
+        "published_definition_page_size": 100,
+        "run_poll_interval_ms": 5_000,
+        "run_detail_poll_interval_ms": 3_000,
+        "event_poll_interval_ms": 5_000,
+        "cron_preview_count": 5,
+        "skeleton_rows": 5,
+        "duration_seconds_threshold_ms": 60_000,
+        "zoom_default": 100,
+        "zoom_min": 60,
+        "zoom_max": 160,
+        "zoom_step": 10,
+    },
+}
 
 
 class OrchestrationServiceError(RuntimeError):
@@ -162,8 +310,9 @@ def _event(
 ) -> OrchestrationEvent:
     safe_payload = _redact_payload(payload or {})
     encoded = json.dumps(safe_payload, default=str, separators=(",", ":"))
-    if len(encoded.encode()) > 16_384:
-        raise ServiceValidationError("Event metadata exceeds 16 KiB", code="EVENT_TOO_LARGE")
+    maximum = ConfigurationService.effective_document(tenant_id)["limits"]["event_metadata_bytes"]
+    if len(encoded.encode()) > maximum:
+        raise ServiceValidationError("Event metadata exceeds the tenant policy limit", code="EVENT_TOO_LARGE")
     return OrchestrationEvent.objects.create(
         tenant_id=tenant_id,
         aggregate_type=aggregate_type,
@@ -253,6 +402,472 @@ def _definition_input(definition: OrchestrationDefinition, value: Mapping[str, A
     return dict(value)
 
 
+def _execute_node_bounded(
+    context: NodeExecutionContext, timeout_seconds: int, resilience: Mapping[str, Any]
+) -> NodeExecutionResult:
+    """Enforce a real caller deadline and per-provider circuit breaker."""
+
+    provider = context.handler_key
+    threshold = int(resilience["circuit_failure_threshold"])
+    recovery_seconds = int(resilience["circuit_recovery_seconds"])
+    now = time.monotonic()
+    with _CIRCUIT_LOCK:
+        failures, opened_at = _CIRCUITS.get(provider, (0, 0.0))
+        if failures >= threshold and now - opened_at < recovery_seconds:
+            return NodeExecutionResult.unavailable(
+                "DEPENDENCY_CIRCUIT_OPEN",
+                "The integration circuit is open after repeated failures",
+                evidence={"provider": provider, "retry_after_seconds": recovery_seconds},
+            )
+        if failures >= threshold:
+            _CIRCUITS[provider] = (0, 0.0)
+    future = _EXECUTION_POOL.submit(execute_registered_node, context)
+    try:
+        result = future.result(timeout=timeout_seconds)
+    except FutureTimeoutError:
+        future.cancel()
+        with _CIRCUIT_LOCK:
+            failures, _opened_at = _CIRCUITS.get(provider, (0, 0.0))
+            _CIRCUITS[provider] = (failures + 1, time.monotonic())
+        return NodeExecutionResult.unavailable(
+            "DEPENDENCY_TIMEOUT",
+            "The integration did not respond before its configured deadline",
+            evidence={"provider": provider, "deadline_seconds": timeout_seconds, "cancel_requested": True},
+        )
+    with _CIRCUIT_LOCK:
+        if result.status == NodeResultStatus.SUCCEEDED:
+            _CIRCUITS.pop(provider, None)
+        else:
+            failures, _opened_at = _CIRCUITS.get(provider, (0, 0.0))
+            _CIRCUITS[provider] = (failures + 1, time.monotonic())
+    return result
+
+
+def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+    merged = deepcopy(dict(base))
+    for key, value in override.items():
+        if key not in base:
+            raise ServiceValidationError(f"Unknown configuration field: {key}", code="CONFIG_UNKNOWN_FIELD")
+        if isinstance(base[key], Mapping):
+            if not isinstance(value, Mapping):
+                raise ServiceValidationError(f"Configuration field {key} must be an object", code="CONFIG_TYPE")
+            merged[key] = _deep_merge(base[key], value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+class ConfigurationService:
+    """Own tenant runtime-policy validation, versioning, audit, and rollback."""
+
+    @staticmethod
+    def _scope(environment: str, cohort: str) -> tuple[str, str]:
+        environments = {choice for choice, _label in ConfigurationEnvironment.choices}
+        if environment not in environments:
+            raise ServiceValidationError("Unsupported configuration environment", code="CONFIG_ENVIRONMENT")
+        cohort = cohort.strip()
+        if not cohort or len(cohort) > 64:
+            raise ServiceValidationError("cohort must contain 1 to 64 characters", code="CONFIG_COHORT")
+        return environment, cohort
+
+    @classmethod
+    def validate_document(cls, value: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(value, Mapping):
+            raise ServiceValidationError("Configuration document must be an object", code="CONFIG_TYPE")
+        document = _deep_merge(DEFAULT_CONFIGURATION, value)
+        limits = document["limits"]
+        defaults = document["defaults"]
+        workflow = document["workflow"]
+        integrations = document["integrations"]
+        scheduler = document["scheduler"]
+        health = document["health"]
+        ui = document["ui"]
+
+        integer_bounds = {
+            "json_bytes": (1, PLATFORM_CEILINGS["json_bytes"]),
+            "json_depth": (1, PLATFORM_CEILINGS["json_depth"]),
+            "parallel_tasks_min": (1, PLATFORM_CEILINGS["parallel_tasks"]),
+            "parallel_tasks_max": (1, PLATFORM_CEILINGS["parallel_tasks"]),
+            "timeout_seconds_min": (1, PLATFORM_CEILINGS["timeout_seconds"]),
+            "timeout_seconds_max": (1, PLATFORM_CEILINGS["timeout_seconds"]),
+            "attempts_min": (1, PLATFORM_CEILINGS["attempts"]),
+            "attempts_max": (1, PLATFORM_CEILINGS["attempts"]),
+            "page_size_default": (1, PLATFORM_CEILINGS["page_size"]),
+            "page_size_max": (1, PLATFORM_CEILINGS["page_size"]),
+            "idempotency_key_length": (1, PLATFORM_CEILINGS["idempotency_key_length"]),
+            "event_metadata_bytes": (1, PLATFORM_CEILINGS["event_metadata_bytes"]),
+            "schedule_scan_batch": (1, PLATFORM_CEILINGS["schedule_scan_batch"]),
+            "definition_name_min": (1, 255),
+            "definition_name_max": (1, 255),
+            "description_max": (1, 100_000),
+            "schedule_name_min": (1, 255),
+            "schedule_name_max": (1, 255),
+        }
+        for name, (minimum, maximum) in integer_bounds.items():
+            value_at_name = limits[name]
+            if (
+                isinstance(value_at_name, bool)
+                or not isinstance(value_at_name, int)
+                or not minimum <= value_at_name <= maximum
+            ):
+                raise ServiceValidationError(
+                    f"limits.{name} must be between {minimum} and {maximum}", code="CONFIG_LIMIT"
+                )
+        for low, high in (
+            ("parallel_tasks_min", "parallel_tasks_max"),
+            ("timeout_seconds_min", "timeout_seconds_max"),
+            ("attempts_min", "attempts_max"),
+            ("retry_multiplier_min", "retry_multiplier_max"),
+            ("page_size_default", "page_size_max"),
+            ("definition_name_min", "definition_name_max"),
+            ("schedule_name_min", "schedule_name_max"),
+        ):
+            if limits[low] > limits[high]:
+                raise ServiceValidationError(f"limits.{low} cannot exceed limits.{high}", code="CONFIG_DEPENDENCY")
+        if (
+            not 1.0
+            <= float(limits["retry_multiplier_min"])
+            <= float(limits["retry_multiplier_max"])
+            <= PLATFORM_CEILINGS["retry_multiplier"]
+        ):
+            raise ServiceValidationError(
+                "Retry multiplier limits are outside the platform-safe range", code="CONFIG_LIMIT"
+            )
+
+        bounded_defaults = (
+            ("max_parallel_tasks", "parallel_tasks_min", "parallel_tasks_max"),
+            ("timeout_seconds", "timeout_seconds_min", "timeout_seconds_max"),
+            ("max_attempts", "attempts_min", "attempts_max"),
+        )
+        for name, low, high in bounded_defaults:
+            if (
+                isinstance(defaults[name], bool)
+                or not isinstance(defaults[name], int)
+                or not limits[low] <= defaults[name] <= limits[high]
+            ):
+                raise ServiceValidationError(f"defaults.{name} is outside configured limits", code="CONFIG_DEFAULT")
+        if (
+            not limits["retry_multiplier_min"]
+            <= float(defaults["retry_backoff_multiplier"])
+            <= limits["retry_multiplier_max"]
+        ):
+            raise ServiceValidationError("Default retry multiplier is outside configured limits", code="CONFIG_DEFAULT")
+        if not 0 <= float(defaults["retry_jitter_ratio"]) <= 1:
+            raise ServiceValidationError("Retry jitter ratio must be between 0 and 1", code="CONFIG_DEFAULT")
+        if defaults["retry_initial_delay_seconds"] > defaults["retry_max_delay_seconds"]:
+            raise ServiceValidationError(
+                "Retry maximum delay must be at least the initial delay", code="CONFIG_DEPENDENCY"
+            )
+        allowlists = {
+            "edge_condition": {"on_success", "on_failure", "always"},
+            "schedule_status": {"active", "paused", "retired"},
+            "misfire_policy": {"skip", "run_once"},
+            "concurrency_policy": {"allow", "forbid"},
+        }
+        for field, allowed in allowlists.items():
+            if defaults[field] not in allowed:
+                raise ServiceValidationError(f"defaults.{field} is not allowed", code="CONFIG_ALLOWLIST")
+        for schema_name in ("input_schema", "output_schema"):
+            try:
+                validate_json_schema(defaults[schema_name], f"defaults.{schema_name}")
+            except NodeContractError as exc:
+                raise ServiceValidationError(str(exc), code="CONFIG_SCHEMA") from exc
+        if not isinstance(integrations["allowed_source_modules"], list) or not integrations["allowed_source_modules"]:
+            raise ServiceValidationError("At least one integration source module is required", code="CONFIG_ALLOWLIST")
+        if not isinstance(integrations["worker_authorized_capabilities"], list):
+            raise ServiceValidationError("Worker capabilities must be an allow-list", code="CONFIG_ALLOWLIST")
+        if not 1 <= integrations["execution_timeout_seconds"] <= limits["timeout_seconds_max"]:
+            raise ServiceValidationError("Integration timeout is outside configured limits", code="CONFIG_LIMIT")
+        if not 1 <= integrations["circuit_failure_threshold"] <= 100:
+            raise ServiceValidationError("Circuit failure threshold must be between 1 and 100", code="CONFIG_LIMIT")
+        if not 1 <= integrations["circuit_recovery_seconds"] <= limits["timeout_seconds_max"]:
+            raise ServiceValidationError("Circuit recovery is outside configured limits", code="CONFIG_LIMIT")
+        if scheduler["cron_fields"] != 5:
+            raise ServiceValidationError(
+                "Only the declared five-field cron protocol is supported", code="CONFIG_PROTOCOL"
+            )
+        if not 1 <= scheduler["search_horizon_days"] <= 3_653:
+            raise ServiceValidationError(
+                "Scheduler search horizon must be between 1 and 3653 days", code="CONFIG_LIMIT"
+            )
+        if scheduler["active_status"] not in {"active", "paused", "retired"}:
+            raise ServiceValidationError("Scheduler active status is not allowed", code="CONFIG_ALLOWLIST")
+        if not isinstance(scheduler["enqueue_misfire_policies"], list) or any(
+            value not in {"skip", "run_once"} for value in scheduler["enqueue_misfire_policies"]
+        ):
+            raise ServiceValidationError("Scheduler misfire policies are invalid", code="CONFIG_ALLOWLIST")
+        if scheduler["forbid_overlap_policy"] not in {"allow", "forbid"}:
+            raise ServiceValidationError("Scheduler overlap policy is invalid", code="CONFIG_ALLOWLIST")
+        for key, value_at_key in health.items():
+            if (
+                isinstance(value_at_key, bool)
+                or not isinstance(value_at_key, int)
+                or not 1 <= value_at_key <= limits["timeout_seconds_max"]
+            ):
+                raise ServiceValidationError(f"health.{key} is outside configured limits", code="CONFIG_LIMIT")
+        for key, value_at_key in ui.items():
+            if isinstance(value_at_key, bool) or not isinstance(value_at_key, int) or value_at_key <= 0:
+                raise ServiceValidationError(f"ui.{key} must be a positive integer", code="CONFIG_LIMIT")
+        if not ui["zoom_min"] <= ui["zoom_default"] <= ui["zoom_max"]:
+            raise ServiceValidationError("UI zoom default must be within its bounds", code="CONFIG_DEPENDENCY")
+        for key in ("definition_transitions", "schedule_transitions"):
+            if not isinstance(workflow[key], Mapping):
+                raise ServiceValidationError(f"workflow.{key} must be an object", code="CONFIG_TYPE")
+        return document
+
+    @classmethod
+    def effective_document(
+        cls, tenant_id: uuid.UUID, *, environment: str | None = None, cohort: str = "all"
+    ) -> dict[str, Any]:
+        tenant = _uuid(tenant_id, "tenant_id")
+        environment, cohort = cls._scope(environment or getattr(settings, "SARAISE_MODE", "development"), cohort)
+        configuration = (
+            OrchestrationConfiguration.objects.for_tenant(tenant).filter(environment=environment, cohort=cohort).first()
+        )
+        if configuration is None:
+            return deepcopy(DEFAULT_CONFIGURATION)
+        if not configuration.enabled:
+            raise StateConflictError("Orchestration is disabled for this tenant scope", code="CONFIG_DISABLED")
+        return cls.validate_document(configuration.document)
+
+    @classmethod
+    def export_configuration(cls, tenant_id: uuid.UUID, *, environment: str, cohort: str = "all") -> dict[str, Any]:
+        tenant = _uuid(tenant_id, "tenant_id")
+        environment, cohort = cls._scope(environment, cohort)
+        configuration = (
+            OrchestrationConfiguration.objects.for_tenant(tenant).filter(environment=environment, cohort=cohort).first()
+        )
+        if configuration is None:
+            return {
+                "environment": environment,
+                "cohort": cohort,
+                "version": 0,
+                "document": deepcopy(DEFAULT_CONFIGURATION),
+                "enabled": True,
+                "rollout_percentage": 100,
+                "allowed_roles": [],
+            }
+        return {
+            "id": str(configuration.id),
+            "environment": configuration.environment,
+            "cohort": configuration.cohort,
+            "version": configuration.version,
+            "document": deepcopy(configuration.document),
+            "enabled": configuration.enabled,
+            "rollout_percentage": configuration.rollout_percentage,
+            "allowed_roles": list(configuration.allowed_roles),
+            "updated_by": str(configuration.updated_by),
+            "correlation_id": configuration.correlation_id,
+            "updated_at": configuration.updated_at.isoformat(),
+        }
+
+    @classmethod
+    def preview(
+        cls, tenant_id: uuid.UUID, payload: Mapping[str, Any], *, environment: str, cohort: str = "all"
+    ) -> dict[str, Any]:
+        current = cls.export_configuration(tenant_id, environment=environment, cohort=cohort)
+        proposed = cls.validate_document(payload.get("document", payload))
+        changed = sorted(
+            section for section in DEFAULT_CONFIGURATION if current["document"].get(section) != proposed.get(section)
+        )
+        return {"valid": True, "changed_sections": changed, "before": current["document"], "after": proposed}
+
+    @classmethod
+    def update(
+        cls,
+        tenant_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        correlation_id: str,
+        payload: Mapping[str, Any],
+        *,
+        environment: str,
+        cohort: str = "all",
+        action: str = "update",
+        rollback_of: OrchestrationConfigurationVersion | None = None,
+    ) -> OrchestrationConfiguration:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        environment, cohort = cls._scope(environment, cohort)
+        if not correlation_id or len(correlation_id) > 64:
+            raise ServiceValidationError("A correlation_id of at most 64 characters is required", code="CORRELATION_ID")
+        document = cls.validate_document(payload.get("document", payload))
+        enabled = payload.get("enabled", True)
+        rollout = payload.get("rollout_percentage", 100)
+        roles = payload.get("allowed_roles", [])
+        if not isinstance(enabled, bool):
+            raise ServiceValidationError("enabled must be a boolean", code="CONFIG_TYPE")
+        if isinstance(rollout, bool) or not isinstance(rollout, int) or not 0 <= rollout <= 100:
+            raise ServiceValidationError("rollout_percentage must be between 0 and 100", code="CONFIG_LIMIT")
+        if not isinstance(roles, list) or any(not isinstance(role, str) or not role for role in roles):
+            raise ServiceValidationError("allowed_roles must be a list of non-empty strings", code="CONFIG_ALLOWLIST")
+        with transaction.atomic():
+            configuration = (
+                OrchestrationConfiguration.objects.select_for_update()
+                .for_tenant(tenant)
+                .filter(environment=environment, cohort=cohort)
+                .first()
+            )
+            before = None
+            parent = None
+            if configuration is None:
+                configuration = OrchestrationConfiguration(
+                    tenant_id=tenant,
+                    environment=environment,
+                    cohort=cohort,
+                    version=1,
+                    document=document,
+                    enabled=enabled,
+                    rollout_percentage=rollout,
+                    allowed_roles=roles,
+                    updated_by=actor,
+                    correlation_id=correlation_id,
+                )
+            else:
+                before = cls.export_configuration(tenant, environment=environment, cohort=cohort)
+                parent = configuration.versions.order_by("-version").first()
+                configuration.version += 1
+                configuration.document = document
+                configuration.enabled = enabled
+                configuration.rollout_percentage = rollout
+                configuration.allowed_roles = roles
+                configuration.updated_by = actor
+                configuration.correlation_id = correlation_id
+            configuration.save()
+            version = OrchestrationConfigurationVersion.objects.create(
+                tenant_id=tenant,
+                configuration=configuration,
+                version=configuration.version,
+                document=document,
+                enabled=enabled,
+                rollout_percentage=rollout,
+                allowed_roles=roles,
+                actor_id=actor,
+                correlation_id=correlation_id,
+                parent_version=parent,
+                rollback_of=rollback_of,
+            )
+            after = cls.export_configuration(tenant, environment=environment, cohort=cohort)
+            OrchestrationConfigurationAudit.objects.create(
+                tenant_id=tenant,
+                configuration=configuration,
+                version=version.version,
+                action=action,
+                actor_id=actor,
+                correlation_id=correlation_id,
+                before=before,
+                after=after,
+            )
+            _event(
+                tenant,
+                "configuration",
+                configuration.id,
+                f"configuration.{action}",
+                actor_id=actor,
+                correlation_id=correlation_id,
+                payload={"version": configuration.version, "environment": environment, "cohort": cohort},
+            )
+        return configuration
+
+    @classmethod
+    def rollback(
+        cls,
+        tenant_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        correlation_id: str,
+        version_number: int,
+        *,
+        environment: str,
+        cohort: str = "all",
+    ) -> OrchestrationConfiguration:
+        tenant = _uuid(tenant_id, "tenant_id")
+        environment, cohort = cls._scope(environment, cohort)
+        configuration = OrchestrationConfiguration.objects.for_tenant(tenant).get(
+            environment=environment, cohort=cohort
+        )
+        target = OrchestrationConfigurationVersion.objects.for_tenant(tenant).get(
+            configuration=configuration, version=version_number
+        )
+        return cls.update(
+            tenant,
+            actor_id,
+            correlation_id,
+            {
+                "document": target.document,
+                "enabled": target.enabled,
+                "rollout_percentage": target.rollout_percentage,
+                "allowed_roles": target.allowed_roles,
+            },
+            environment=environment,
+            cohort=cohort,
+            action="rollback",
+            rollback_of=target,
+        )
+
+
+class DefinitionQueryService:
+    """Tenant-scoped definition listing policy and business aggregation."""
+
+    @classmethod
+    def list_queryset(cls, tenant_id: uuid.UUID, parameters: Mapping[str, Any]):
+        tenant = _uuid(tenant_id, "tenant_id")
+        terminal = ConfigurationService.effective_document(tenant)["workflow"]["run_terminal_statuses"]
+        queryset = OrchestrationDefinition.objects.for_tenant(tenant).filter(is_deleted=False)
+        for parameter, field in (("status", "status"), ("key", "key")):
+            if value := parameters.get(parameter):
+                queryset = queryset.filter(**{field: value})
+        if value := parameters.get("is_current"):
+            queryset = queryset.filter(is_current=str(value).lower() == "true")
+        if value := parameters.get("version"):
+            queryset = queryset.filter(version=int(value))
+        if value := parameters.get("search"):
+            queryset = queryset.filter(Q(name__icontains=value) | Q(description__icontains=value))
+        return queryset.annotate(
+            node_count=Count("nodes", filter=Q(nodes__is_deleted=False), distinct=True),
+            schedule_count=Count("schedules", filter=Q(schedules__is_deleted=False), distinct=True),
+            last_run_at=Max("runs__created_at"),
+            terminal_run_count=Count("runs", filter=Q(runs__status__in=terminal), distinct=True),
+            successful_run_count=Count("runs", filter=Q(runs__status=RunStatus.SUCCEEDED), distinct=True),
+            success_rate=Case(
+                When(terminal_run_count=0, then=Value(None)),
+                default=ExpressionWrapper(
+                    100.0 * F("successful_run_count") / F("terminal_run_count"), output_field=FloatField()
+                ),
+                output_field=FloatField(),
+            ),
+        )
+
+
+def _validate_definition_policy(values: Mapping[str, Any], policy: Mapping[str, Any]) -> None:
+    limits = policy["limits"]
+    checks = (
+        ("max_parallel_tasks", "parallel_tasks_min", "parallel_tasks_max"),
+        ("default_timeout_seconds", "timeout_seconds_min", "timeout_seconds_max"),
+        ("default_max_attempts", "attempts_min", "attempts_max"),
+    )
+    for field, minimum, maximum in checks:
+        if field in values and not limits[minimum] <= int(values[field]) <= limits[maximum]:
+            raise ServiceValidationError(f"{field} is outside tenant configuration limits", code="POLICY_LIMIT")
+
+
+def _validate_node_policy(values: Mapping[str, Any], policy: Mapping[str, Any]) -> None:
+    limits = policy["limits"]
+    for field, minimum, maximum in (
+        ("timeout_seconds", "timeout_seconds_min", "timeout_seconds_max"),
+        ("max_attempts", "attempts_min", "attempts_max"),
+    ):
+        if (
+            field in values
+            and values[field] is not None
+            and not limits[minimum] <= int(values[field]) <= limits[maximum]
+        ):
+            raise ServiceValidationError(f"{field} is outside tenant configuration limits", code="POLICY_LIMIT")
+    if "retry_backoff_multiplier" in values and not (
+        float(limits["retry_multiplier_min"])
+        <= float(values["retry_backoff_multiplier"])
+        <= float(limits["retry_multiplier_max"])
+    ):
+        raise ServiceValidationError("retry_backoff_multiplier is outside tenant limits", code="POLICY_LIMIT")
+
+
 class DefinitionService:
     """Owns draft editing, graph correctness and immutable version lifecycle."""
 
@@ -306,10 +921,14 @@ class DefinitionService:
             raise ServiceValidationError(f"Unknown definition fields: {', '.join(sorted(unknown))}")
         values = {field: data[field] for field in cls.EDITABLE_DEFINITION_FIELDS if field in data}
         values.update(key=key, name=name)
-        if "input_schema" not in values:
-            values["input_schema"] = {"type": "object", "additionalProperties": True}
-        if "output_schema" not in values:
-            values["output_schema"] = {"type": "object", "additionalProperties": True}
+        policy = ConfigurationService.effective_document(tenant)
+        defaults = policy["defaults"]
+        values.setdefault("max_parallel_tasks", defaults["max_parallel_tasks"])
+        values.setdefault("default_timeout_seconds", defaults["timeout_seconds"])
+        values.setdefault("default_max_attempts", defaults["max_attempts"])
+        values.setdefault("input_schema", deepcopy(defaults["input_schema"]))
+        values.setdefault("output_schema", deepcopy(defaults["output_schema"]))
+        _validate_definition_policy(values, policy)
         try:
             validate_json_schema(values["input_schema"], "input_schema")
             validate_json_schema(values["output_schema"], "output_schema")
@@ -341,12 +960,19 @@ class DefinitionService:
         actor_id: uuid.UUID,
         changes: Mapping[str, Any],
         transition_key: str,
+        expected_revision: int | None = None,
     ) -> OrchestrationDefinition:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
         with transaction.atomic():
             definition = _tenant_get(OrchestrationDefinition, tenant, _uuid(definition_id, "definition_id"), lock=True)
             cls._require_draft(definition)
+            if expected_revision is not None and definition.graph_revision != expected_revision:
+                raise StateConflictError(
+                    f"Definition revision is {definition.graph_revision}; expected {expected_revision}",
+                    code="REVISION_CONFLICT",
+                )
             cls._apply_changes(definition, changes, cls.EDITABLE_DEFINITION_FIELDS)
+            _validate_definition_policy(changes, ConfigurationService.effective_document(tenant))
             try:
                 validate_json_schema(definition.input_schema, "input_schema")
                 validate_json_schema(definition.output_schema, "output_schema")
@@ -388,12 +1014,18 @@ class DefinitionService:
                 raise ServiceValidationError("key, name and handler_key are required")
             cls._validate_node_contract(handler_key, data.get("config", {}))
             _validate_mapping(data.get("input_mapping", {}))
+            defaults = ConfigurationService.effective_document(tenant)["defaults"]
+            node_values = dict(data)
+            node_values.setdefault("retry_initial_delay_seconds", defaults["retry_initial_delay_seconds"])
+            node_values.setdefault("retry_backoff_multiplier", defaults["retry_backoff_multiplier"])
+            node_values.setdefault("retry_max_delay_seconds", defaults["retry_max_delay_seconds"])
+            _validate_node_policy(node_values, ConfigurationService.effective_document(tenant))
             node = OrchestrationNode(
                 tenant_id=tenant,
                 definition=definition,
                 created_by=actor,
                 updated_by=actor,
-                **dict(data),
+                **node_values,
             )
             _clean_and_save(node)
             cls._bump_graph_revision(tenant, definition.id, actor)
@@ -413,6 +1045,7 @@ class DefinitionService:
             node = _tenant_get(OrchestrationNode, tenant, _uuid(node_id, "node_id"), lock=True)
             cls._require_draft(node.definition)
             cls._apply_changes(node, changes, cls.EDITABLE_NODE_FIELDS)
+            _validate_node_policy(changes, ConfigurationService.effective_document(tenant))
             cls._validate_node_contract(node.handler_key, node.config)
             _validate_mapping(node.input_mapping)
             node.updated_by = actor
@@ -481,8 +1114,12 @@ class DefinitionService:
                 definition=definition,
                 upstream_node=upstream,
                 downstream_node=downstream,
-                condition=data.get("condition", "on_success"),
-                priority=data.get("priority", 0),
+                condition=data.get(
+                    "condition", ConfigurationService.effective_document(tenant)["defaults"]["edge_condition"]
+                ),
+                priority=data.get(
+                    "priority", ConfigurationService.effective_document(tenant)["defaults"]["edge_priority"]
+                ),
                 created_by=actor,
                 updated_by=actor,
             )
@@ -687,11 +1324,12 @@ class DefinitionService:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
         with transaction.atomic():
             definition = _tenant_get(OrchestrationDefinition, tenant, _uuid(definition_id, "definition_id"), lock=True)
-            if definition.status not in {"draft", "retired"}:
+            workflow = ConfigurationService.effective_document(tenant)["workflow"]
+            if definition.status not in workflow["deletable_definition_statuses"]:
                 raise StateConflictError(
                     "Only draft or retired definitions may be deleted", code="INVALID_DEFINITION_STATE"
                 )
-            if (
+            if workflow["active_schedule_blocks_definition_delete"] and (
                 OrchestrationSchedule.objects.for_tenant(tenant)
                 .filter(definition=definition, status="active", is_deleted=False)
                 .exists()
@@ -712,6 +1350,7 @@ class DefinitionService:
         publication: bool,
     ) -> GraphValidationReport:
         nodes = list(OrchestrationNode.objects.for_tenant(tenant_id).filter(definition=definition, is_deleted=False))
+        workflow = ConfigurationService.effective_document(tenant_id)["workflow"]
         edges = list(
             OrchestrationEdge.objects.for_tenant(tenant_id)
             .filter(definition=definition, is_deleted=False)
@@ -765,7 +1404,7 @@ class DefinitionService:
                 continue
             incoming[edge.downstream_node_id].add(edge.upstream_node_id)
             outgoing[edge.upstream_node_id].add(edge.downstream_node_id)
-        if not nodes:
+        if workflow["require_node"] and not nodes:
             issues.append(
                 _issue(
                     "GRAPH_EMPTY",
@@ -777,7 +1416,7 @@ class DefinitionService:
                 )
             )
         roots = [node.id for node in nodes if not incoming[node.id]]
-        if nodes and not roots:
+        if workflow["require_root_node"] and nodes and not roots:
             issues.append(
                 _issue(
                     "NO_ROOT",
@@ -800,7 +1439,7 @@ class DefinitionService:
                 indegree[downstream] -= 1
                 if indegree[downstream] == 0:
                     queue.append(downstream)
-        if len(visited) != len(nodes):
+        if (not workflow["allow_cycles"] or not workflow["allow_unreachable_nodes"]) and len(visited) != len(nodes):
             cyclic = node_ids - visited
             for node_id in cyclic:
                 issues.append(
@@ -838,7 +1477,10 @@ class DefinitionService:
                             "Install or enable the required module capability.",
                         )
                     )
-                if node.node_type == "workflow" and descriptor.source_module != "workflow_automation":
+                allowed_sources = ConfigurationService.effective_document(tenant_id)["integrations"][
+                    "allowed_source_modules"
+                ]
+                if node.node_type == "workflow" and descriptor.source_module not in allowed_sources:
                     issues.append(
                         _issue(
                             "WORKFLOW_CONTRACT_INVALID",
@@ -964,7 +1606,10 @@ class ScheduleService:
             raise StateConflictError(
                 "Schedules require an exact published definition version", code="DEFINITION_NOT_PUBLISHED"
             )
-        expression, zone_name = str(data.get("cron_expression", "")), str(data.get("timezone", "UTC"))
+        policy = ConfigurationService.effective_document(tenant)
+        defaults = policy["defaults"]
+        expression = str(data.get("cron_expression", defaults["cron_expression"]))
+        zone_name = str(data.get("timezone", defaults["timezone"]))
         cron = CronExpression(expression)
         zone = _zone(zone_name)
         input_value = _definition_input(definition, data.get("input", {}))
@@ -975,11 +1620,11 @@ class ScheduleService:
                 name=data.get("name", ""),
                 cron_expression=expression,
                 timezone=zone_name,
-                status="active",
-                misfire_policy=data.get("misfire_policy", "skip"),
-                concurrency_policy=data.get("concurrency_policy", "forbid"),
+                status=defaults["schedule_status"],
+                misfire_policy=data.get("misfire_policy", defaults["misfire_policy"]),
+                concurrency_policy=data.get("concurrency_policy", defaults["concurrency_policy"]),
                 input=input_value,
-                next_run_at=cron.next_after(timezone.now(), zone),
+                next_run_at=cron.next_after(timezone.now(), zone, policy["scheduler"]["search_horizon_days"]),
                 created_by=actor,
                 updated_by=actor,
             )
@@ -1027,7 +1672,8 @@ class ScheduleService:
             cron = CronExpression(schedule.cron_expression)
             zone = _zone(schedule.timezone)
             if "cron_expression" in changes or "timezone" in changes:
-                schedule.next_run_at = cron.next_after(timezone.now(), zone)
+                horizon = ConfigurationService.effective_document(tenant)["scheduler"]["search_horizon_days"]
+                schedule.next_run_at = cron.next_after(timezone.now(), zone, horizon)
             schedule.updated_by = actor
             _clean_and_save(schedule)
             _event(
@@ -1052,8 +1698,11 @@ class ScheduleService:
         )
         with transaction.atomic():
             locked = _tenant_get(OrchestrationSchedule, _uuid(tenant_id, "tenant_id"), schedule.id, lock=True)
+            horizon = ConfigurationService.effective_document(_uuid(tenant_id, "tenant_id"))["scheduler"][
+                "search_horizon_days"
+            ]
             locked.next_run_at = CronExpression(locked.cron_expression).next_after(
-                timezone.now(), _zone(locked.timezone)
+                timezone.now(), _zone(locked.timezone), horizon
             )
             locked.save(update_fields=["next_run_at", "updated_at"])
             return locked
@@ -1085,13 +1734,17 @@ class ScheduleService:
         tenant = _uuid(tenant_id, "tenant_id")
         if timezone.is_naive(now):
             raise ServiceValidationError("now must be timezone-aware")
-        if not 1 <= batch_size <= 1000:
-            raise ServiceValidationError("batch_size must be between 1 and 1000")
+        policy = ConfigurationService.effective_document(tenant)
+        configured_batch = policy["limits"]["schedule_scan_batch"]
+        if not 1 <= batch_size <= configured_batch:
+            raise ServiceValidationError(f"batch_size must be between 1 and {configured_batch}")
+        scheduler_policy = policy["scheduler"]
+        horizon = scheduler_policy["search_horizon_days"]
         claims: list[DueScheduleClaim] = []
         with transaction.atomic():
             queryset = (
                 OrchestrationSchedule.objects.for_tenant(tenant)
-                .filter(status="active", is_deleted=False, next_run_at__lte=now)
+                .filter(status=scheduler_policy["active_status"], is_deleted=False, next_run_at__lte=now)
                 .order_by("next_run_at", "id")
             )
             if connection.features.has_select_for_update_skip_locked:
@@ -1103,10 +1756,12 @@ class ScheduleService:
                 SCHEDULE_LAG.observe(max(0.0, (now - scheduled_for).total_seconds()))
                 cron = CronExpression(schedule.cron_expression)
                 zone = _zone(schedule.timezone)
-                following = cron.next_after(scheduled_for, zone)
+                following = cron.next_after(scheduled_for, zone, horizon)
                 missed_more_than_one = following <= now
-                should_enqueue = schedule.misfire_policy == "run_once" or not missed_more_than_one
-                schedule.next_run_at = cron.next_after(now if missed_more_than_one else scheduled_for, zone)
+                should_enqueue = (
+                    schedule.misfire_policy in scheduler_policy["enqueue_misfire_policies"] or not missed_more_than_one
+                )
+                schedule.next_run_at = cron.next_after(now if missed_more_than_one else scheduled_for, zone, horizon)
                 schedule.save(update_fields=["next_run_at", "updated_at"])
                 claims.append(DueScheduleClaim(schedule.id, scheduled_for, should_enqueue))
         return claims
@@ -1116,20 +1771,22 @@ class ScheduleService:
         cls, tenant_id: uuid.UUID, schedule_id: uuid.UUID, scheduled_for: datetime
     ) -> OrchestrationRun | None:
         tenant = _uuid(tenant_id, "tenant_id")
+        policy = ConfigurationService.effective_document(tenant)
+        scheduler_policy = policy["scheduler"]
         if timezone.is_naive(scheduled_for):
             raise ServiceValidationError("scheduled_for must be timezone-aware")
         with transaction.atomic():
             schedule = _tenant_get(OrchestrationSchedule, tenant, _uuid(schedule_id, "schedule_id"), lock=True)
-            if schedule.status != "active" or schedule.is_deleted:
+            if schedule.status != scheduler_policy["active_status"] or schedule.is_deleted:
                 raise StateConflictError("Schedule is not active", code="SCHEDULE_NOT_ACTIVE")
             key = f"schedule:{schedule.id}:{scheduled_for.astimezone(datetime_timezone.utc).isoformat()}"
             existing = OrchestrationRun.objects.for_tenant(tenant).filter(idempotency_key=key).first()
             if existing:
                 return existing
             if (
-                schedule.concurrency_policy == "forbid"
+                schedule.concurrency_policy == scheduler_policy["forbid_overlap_policy"]
                 and OrchestrationRun.objects.for_tenant(tenant)
-                .filter(schedule=schedule, status__in=["queued", "running", "paused", "cancelling"])
+                .filter(schedule=schedule, status__in=policy["workflow"]["forbid_overlap_run_statuses"])
                 .exists()
             ):
                 _event(
@@ -1212,8 +1869,13 @@ class ExecutionService:
         parent_run: OrchestrationRun | None = None,
     ) -> OrchestrationRun:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
-        if not isinstance(idempotency_key, str) or not idempotency_key.strip() or len(idempotency_key) > 255:
-            raise ServiceValidationError("idempotency_key is required and limited to 255 characters")
+        idempotency_limit = ConfigurationService.effective_document(tenant)["limits"]["idempotency_key_length"]
+        if (
+            not isinstance(idempotency_key, str)
+            or not idempotency_key.strip()
+            or len(idempotency_key) > idempotency_limit
+        ):
+            raise ServiceValidationError(f"idempotency_key is required and limited to {idempotency_limit} characters")
         if not isinstance(input, Mapping):
             raise ServiceValidationError("input must be an object", code="INVALID_INPUT")
         definition_uuid = _uuid(definition_id, "definition_id")
@@ -1433,7 +2095,8 @@ class ExecutionService:
                 _event(tenant, "task_run", task.id, f"task.{target}", actor_id=None, correlation_id=run.correlation_id)
                 if target == "ready":
                     ready.append(task)
-            active = sum(task.status in {"queued", "running"} for task in tasks)
+            active_statuses = ConfigurationService.effective_document(tenant)["workflow"]["active_task_statuses"]
+            active = sum(task.status in active_statuses for task in tasks)
             available_slots = max(0, run.definition.max_parallel_tasks - active)
             ready.sort(key=lambda item: (-item.node.priority, str(item.id)))
             return ready[:available_slots]
@@ -1449,20 +2112,27 @@ class ExecutionService:
                 existing = task.attempts.filter(status="queued").order_by("-attempt_number").first()
                 if existing:
                     return existing
-            if task.status not in {"ready", "retry_wait"}:
+            enqueue_statuses = ConfigurationService.effective_document(tenant)["workflow"]["enqueue_task_statuses"]
+            if task.status not in enqueue_statuses:
                 raise StateConflictError(f"Task cannot be enqueued from {task.status}", code="INVALID_TASK_STATE")
             attempt_number = task.current_attempt + 1
             if attempt_number > task.max_attempts:
                 raise StateConflictError("Task retry limit is exhausted", code="RETRY_EXHAUSTED")
             available_at = timezone.now()
+            computed_delay = 0.0
+            jitter_seconds = 0.0
             if task.status == "retry_wait":
                 node = task.node
-                delay = min(
+                policy = ConfigurationService.effective_document(tenant)
+                base_delay = min(
                     node.retry_initial_delay_seconds
                     * math.pow(float(node.retry_backoff_multiplier), max(0, attempt_number - 2)),
                     node.retry_max_delay_seconds,
                 )
-                available_at += timedelta(seconds=delay)
+                jitter_ratio = float(policy["defaults"]["retry_jitter_ratio"])
+                jitter_seconds = random.uniform(0.0, base_delay * jitter_ratio)
+                computed_delay = min(base_delay + jitter_seconds, node.retry_max_delay_seconds)
+                available_at += timedelta(seconds=computed_delay)
             attempt_id = uuid.uuid4()
             idem = f"orchestration:task:{task.id}:attempt:{attempt_number}"
             job = enqueue(
@@ -1502,7 +2172,12 @@ class ExecutionService:
                 "attempt.queued",
                 actor_id=None,
                 correlation_id=task.run.correlation_id,
-                payload={"async_job_id": job.id, "available_at": available_at},
+                payload={
+                    "async_job_id": job.id,
+                    "available_at": available_at,
+                    "computed_delay_seconds": computed_delay,
+                    "jitter_seconds": jitter_seconds,
+                },
             )
             TASKS.labels(transition="queued").inc()
             if attempt_number > 1:
@@ -1515,7 +2190,6 @@ class ExecutionService:
         result: NodeExecutionResult | None = None
         context: NodeExecutionContext | None = None
         timeout_seconds = 0
-        retry_safety = RetrySafety.UNSAFE
         with transaction.atomic():
             attempt = _tenant_get(RetryAttempt, tenant, _uuid(attempt_id, "attempt_id"), lock=True)
             if attempt.status in ATTEMPT_TERMINAL:
@@ -1584,9 +2258,7 @@ class ExecutionService:
                     correlation_id=run.correlation_id,
                     input=mapped_input,
                     validated_config=task.node.config,
-                    cancellation_probe=lambda: OrchestrationRun.objects.for_tenant(tenant)
-                    .filter(id=run.id, status__in=["cancelling", "cancelled"])
-                    .exists(),
+                    cancellation_probe=_cancellation_event(run.id).is_set,
                     operation_token=str(task.operation_token),
                     delivery_token=str(attempt.delivery_token),
                     handler_key=task.node.handler_key,
@@ -1594,20 +2266,10 @@ class ExecutionService:
                     request_fingerprint=fingerprint,
                 )
                 timeout_seconds = task.node.timeout_seconds or run.definition.default_timeout_seconds
-                retry_safety = descriptor.retry_safety
         if result is None and context is not None:
-            started = time.monotonic()
-            result = execute_registered_node(context)
-            duration = time.monotonic() - started
-            if duration > timeout_seconds:
-                result = NodeExecutionResult.failure(
-                    "NODE_TIMEOUT",
-                    "The node exceeded its configured execution deadline",
-                    transient=True,
-                    commit_state=CommitState.UNKNOWN,
-                    manual_retry_safe=retry_safety != RetrySafety.UNSAFE,
-                    evidence={"deadline_seconds": timeout_seconds},
-                )
+            resilience = ConfigurationService.effective_document(tenant)["integrations"]
+            deadline = min(timeout_seconds, int(resilience["execution_timeout_seconds"]))
+            result = _execute_node_bounded(context, deadline, resilience)
         if result is None:
             result = NodeExecutionResult.failure(
                 "EXECUTION_STATE_INVALID", "The node execution could not be initialized"
@@ -1634,6 +2296,7 @@ class ExecutionService:
         cls, tenant_id: uuid.UUID, run_id: uuid.UUID, actor_id: uuid.UUID, transition_key: str
     ) -> OrchestrationRun:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        _cancellation_event(_uuid(run_id, "run_id")).set()
         with transaction.atomic():
             run = _tenant_get(OrchestrationRun, tenant, _uuid(run_id, "run_id"), lock=True)
             if run.status in RUN_TERMINAL:
@@ -1720,6 +2383,100 @@ class ExecutionService:
             raise StateConflictError("The task requires reconciliation before retry", code="RECONCILIATION_REQUIRED")
         new_run = cls.retry_run(tenant, source_task.run_id, actor_id, idempotency_key)
         return OrchestrationTaskRun.objects.for_tenant(tenant).get(run=new_run, node__key=source_task.node.key)
+
+    @classmethod
+    def reconcile_task(
+        cls,
+        tenant_id: uuid.UUID,
+        task_run_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        action: str,
+        evidence: Mapping[str, Any],
+    ) -> OrchestrationTaskRun:
+        """Invoke the configured provider reconciler before resolving ambiguous state."""
+
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        if action not in {"reconcile", "compensate"}:
+            raise ServiceValidationError("Unsupported reconciliation action", code="RECONCILIATION_ACTION")
+        dotted = getattr(settings, "AUTOMATION_ORCHESTRATION_RECONCILER", "")
+        if not dotted:
+            raise OrchestrationServiceError(
+                "No provider reconciliation adapter is configured", code="RECONCILER_UNAVAILABLE"
+            )
+        with transaction.atomic():
+            task = _tenant_get(OrchestrationTaskRun, tenant, _uuid(task_run_id, "task_run_id"), lock=True)
+            latest = task.attempts.order_by("-attempt_number").first()
+            if latest is None:
+                raise StateConflictError("The task has no attempt to reconcile", code="RECONCILIATION_NOT_FOUND")
+            reconciliation = (
+                OrchestrationReconciliation.objects.select_for_update()
+                .for_tenant(tenant)
+                .get(attempt=latest, status=ReconciliationStatus.REQUIRED)
+            )
+            reconciliation.status = ReconciliationStatus.RECONCILING
+            reconciliation.requested_by = actor
+            reconciliation.save(update_fields=["status", "requested_by", "updated_at"])
+        adapter = import_string(dotted)
+        timeout = int(ConfigurationService.effective_document(tenant)["integrations"]["execution_timeout_seconds"])
+        future = _EXECUTION_POOL.submit(
+            adapter,
+            provider_key=reconciliation.provider_key,
+            action=action,
+            operation_token=str(task.operation_token),
+            evidence=dict(evidence),
+        )
+        try:
+            resolution = future.result(timeout=timeout)
+        except FutureTimeoutError as exc:
+            future.cancel()
+            reconciliation.status = ReconciliationStatus.REQUIRED
+            reconciliation.save(update_fields=["status", "updated_at"])
+            raise OrchestrationServiceError("Provider reconciliation timed out", code="RECONCILER_UNAVAILABLE") from exc
+        if not isinstance(resolution, Mapping) or resolution.get("resolved") is not True:
+            reconciliation.status = ReconciliationStatus.REQUIRED
+            reconciliation.save(update_fields=["status", "updated_at"])
+            raise StateConflictError("Provider outcome remains unresolved", code="RECONCILIATION_REQUIRED")
+        with transaction.atomic():
+            reconciliation = (
+                OrchestrationReconciliation.objects.select_for_update().for_tenant(tenant).get(id=reconciliation.id)
+            )
+            task = _tenant_get(OrchestrationTaskRun, tenant, task.id, lock=True)
+            reconciliation.status = (
+                ReconciliationStatus.COMPENSATED if action == "compensate" else ReconciliationStatus.CONFIRMED
+            )
+            reconciliation.resolution = dict(resolution)
+            reconciliation.resolved_by = actor
+            reconciliation.save(update_fields=["status", "resolution", "resolved_by", "updated_at"])
+            source = task.status
+            task.status = "failed"
+            task.completed_at = timezone.now()
+            task.error_code = "EXTERNAL_COMMIT_CONFIRMED" if action == "reconcile" else "EXTERNAL_COMMIT_COMPENSATED"
+            task.error_message = "The provider outcome was reconciled by an authorized operator"
+            task.transition_history = [
+                *task.transition_history,
+                {"from": source, "to": "failed", "actor_id": str(actor), "occurred_at": timezone.now().isoformat()},
+            ]
+            task.save(
+                update_fields=[
+                    "status",
+                    "completed_at",
+                    "error_code",
+                    "error_message",
+                    "transition_history",
+                    "updated_at",
+                ]
+            )
+            _event(
+                tenant,
+                "reconciliation",
+                reconciliation.id,
+                f"reconciliation.{reconciliation.status}",
+                actor_id=actor,
+                correlation_id=reconciliation.correlation_id,
+                payload={"task_run_id": task.id, "provider_key": reconciliation.provider_key},
+            )
+        cls.finalize_run(tenant, task.run_id)
+        return task
 
     @classmethod
     def finalize_run(cls, tenant_id: uuid.UUID, run_id: uuid.UUID) -> OrchestrationRun:
@@ -1857,7 +2614,22 @@ class ExecutionService:
                 )
                 if result.commit_state == CommitState.UNKNOWN and not result.manual_retry_safe:
                     attempt.error_code = "AMBIGUOUS_COMMIT"
-                if can_retry:
+                    task.status = "retry_wait"
+                    task.error_code, task.error_message = attempt.error_code, attempt.error_message
+                    OrchestrationReconciliation.objects.get_or_create(
+                        tenant_id=tenant,
+                        attempt=attempt,
+                        defaults={
+                            "provider_key": task.node.handler_key,
+                            "status": ReconciliationStatus.REQUIRED,
+                            "evidence": {
+                                "commit_state": result.commit_state.value,
+                                "error_code": result.error_code,
+                            },
+                            "correlation_id": run.correlation_id,
+                        },
+                    )
+                elif can_retry:
                     task.status = "retry_wait"
                     task.error_code, task.error_message = attempt.error_code, attempt.error_message
                 else:
@@ -1936,9 +2708,14 @@ class ExecutionService:
                 outcome=attempt.status,
                 duration_ms=attempt.duration_ms,
             )
-        if task.status == "retry_wait":
+        reconciliation_required = (
+            OrchestrationReconciliation.objects.for_tenant(tenant)
+            .filter(attempt_id=attempt_id, status=ReconciliationStatus.REQUIRED)
+            .exists()
+        )
+        if task.status == "retry_wait" and not reconciliation_required:
             cls.enqueue_task(tenant, task.id)
-        else:
+        elif not reconciliation_required:
             for ready in cls.resolve_ready_tasks(tenant, run.id):
                 cls.enqueue_task(tenant, ready.id)
             cls.finalize_run(tenant, run.id)
@@ -1995,7 +2772,11 @@ def _published_contract_version(definition: OrchestrationDefinition, node_key: s
 
 
 def _worker_authorized(tenant_id: uuid.UUID, actor_id: uuid.UUID, descriptor: Any) -> bool:
-    if descriptor.capability == CORE_CAPABILITY and descriptor.source_module == "automation_orchestration":
+    policy = ConfigurationService.effective_document(tenant_id)["integrations"]
+    if (
+        descriptor.capability in policy["worker_authorized_capabilities"]
+        and descriptor.source_module == "automation_orchestration"
+    ):
         return True
     dotted = getattr(settings, "AUTOMATION_ORCHESTRATION_WORKER_AUTHORIZER", "")
     if not dotted:
@@ -2169,18 +2950,22 @@ class CronExpression:
             and calendar_match
         )
 
-    def next_after(self, value: datetime, zone: ZoneInfo) -> datetime:
+    def next_after(self, value: datetime, zone: ZoneInfo, search_horizon_days: int = 1_830) -> datetime:
         if timezone.is_naive(value):
             raise ServiceValidationError("cron base time must be timezone-aware", code="INVALID_TIME")
         # Advance on the UTC timeline so DST gaps never fabricate a local time
         # and DST folds retain their two real instants.
         candidate = value.astimezone(datetime_timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
-        limit = candidate + timedelta(days=366 * 5)
+        if search_horizon_days < 1:
+            raise ServiceValidationError("cron search horizon must be positive", code="INVALID_CRON")
+        limit = candidate + timedelta(days=search_horizon_days)
         while candidate < limit:
             if self.matches(candidate.astimezone(zone)):
                 return candidate
             candidate += timedelta(minutes=1)
-        raise ServiceValidationError("cron expression has no occurrence within five years", code="INVALID_CRON")
+        raise ServiceValidationError(
+            "cron expression has no occurrence within the configured search horizon", code="INVALID_CRON"
+        )
 
 
 __all__ = [

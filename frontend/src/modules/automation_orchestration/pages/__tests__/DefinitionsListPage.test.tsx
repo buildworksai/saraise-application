@@ -3,9 +3,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/services/api-client";
-import type { DefinitionListDTO, PageResult } from "../../contracts";
+import type { DefinitionListDTO, OrchestrationConfigurationDTO, PageResult } from "../../contracts";
 import { automationOrchestrationService as service } from "../../services/automation-orchestration-service";
 import { DefinitionsListPage } from "../DefinitionsListPage";
 
@@ -53,6 +53,17 @@ function renderPage() {
 }
 
 describe("DefinitionsListPage states", () => {
+  beforeEach(() => {
+    vi.spyOn(service, "getConfiguration").mockResolvedValue({
+      environment: "development",
+      cohort: "all",
+      version: 1,
+      enabled: true,
+      rollout_percentage: 100,
+      allowed_roles: [],
+      document: { ui: { definition_page_size: 25, skeleton_rows: 7 } },
+    } as unknown as OrchestrationConfigurationDTO);
+  });
   afterEach(() => vi.restoreAllMocks());
 
   it("renders an accessible skeleton while loading", () => {
