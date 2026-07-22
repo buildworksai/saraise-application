@@ -74,9 +74,12 @@ class RelaxedCsrfSessionAuthentication(SessionAuthentication):
         except RecursionError:
             # If recursion occurs, we're in a loop - return None to break it
             return None
-        except Exception:
-            # If authentication fails for any reason, fall through to check Django middleware
-            pass
+        # SECURITY: do NOT swallow other exceptions here. DRF's SessionAuthentication calls
+        # enforce_csrf() inside authenticate(), and raises PermissionDenied when an unsafe
+        # method arrives without a valid CSRF token. A blanket `except Exception: pass` turned
+        # that denial into a fallthrough, and the middleware-user fallback below then accepted
+        # the request — so any POST/PUT/PATCH/DELETE carrying only a session cookie bypassed
+        # CSRF entirely. Security controls fail CLOSED: let the denial propagate.
 
         # FALLBACK: Check if Django's AuthenticationMiddleware has already authenticated the user
         # This handles cases where DRF's SessionAuthentication.authenticate() returns None
@@ -91,8 +94,11 @@ class RelaxedCsrfSessionAuthentication(SessionAuthentication):
         # CRITICAL: Access user via getattr to avoid triggering property accessors
         django_user = getattr(django_request, "user", None)
         if django_user and not isinstance(django_user, AnonymousUser):
-            # User is already authenticated by Django middleware
-            # Return (user, None) to indicate successful authentication
+            # User is already authenticated by Django middleware.
+            # SECURITY: this fallback must meet the SAME CSRF bar as the primary path. Returning
+            # the user without enforcing CSRF would reintroduce the bypass through the back door
+            # for every unsafe method. enforce_csrf() is a no-op on safe methods.
+            self.enforce_csrf(request)
             return (django_user, None)
 
         # No authentication found

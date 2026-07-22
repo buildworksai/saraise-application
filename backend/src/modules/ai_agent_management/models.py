@@ -61,6 +61,13 @@ class AITenantModel(TenantScopedModel, TimestampedModel):
         super().save(*args, **kwargs)
 
 
+# Canonical name used by the module's other model files (approval_models, quota_models,
+# token_models, egress_models, ...). They import `TenantBaseModel` from here, but only
+# `AITenantModel` was ever defined — so the module failed to import and, because it sits in
+# INSTALLED_APPS, took down Django app loading for the ENTIRE test suite on impl/base.
+TenantBaseModel = AITenantModel
+
+
 class AppendOnlyQuerySet(models.QuerySet[models.Model]):
     """Prevent bulk APIs from bypassing evidence immutability."""
 
