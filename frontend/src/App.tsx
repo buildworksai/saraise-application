@@ -411,23 +411,6 @@ const CreateBudgetPage = lazy(() =>
   }))
 );
 
-// Asset Management
-const AssetListPage = lazy(() =>
-  import("./modules/asset_management/pages/AssetListPage").then((m) => ({
-    default: m.AssetListPage,
-  }))
-);
-const AssetDetailPage = lazy(() =>
-  import("./modules/asset_management/pages/AssetDetailPage").then((m) => ({
-    default: m.AssetDetailPage,
-  }))
-);
-const CreateAssetPage = lazy(() =>
-  import("./modules/asset_management/pages/CreateAssetPage").then((m) => ({
-    default: m.CreateAssetPage,
-  }))
-);
-
 // Compliance Management
 const CompliancePolicyListPage = lazy(() =>
   import("./modules/compliance_management/pages/CompliancePolicyListPage").then((m) => ({
@@ -1133,38 +1116,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <BudgetDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Asset Management */}
-          <Route
-            path="/asset-management/assets"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <AssetListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/asset-management/assets/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateAssetPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/asset-management/assets/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <AssetDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
