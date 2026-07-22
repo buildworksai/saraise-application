@@ -1,13 +1,15 @@
-"""
-DRF Serializers for CRM module.
+"""Strict API v2 serializers for CRM resources and commands."""
 
-Provides request/response validation for all models.
-"""
+from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
+from typing import Any
 
 from django.utils import timezone
 from rest_framework import serializers
+
+from src.core.async_jobs.models import AsyncJob
 
 from .models import (
     Account,
@@ -15,26 +17,70 @@ from .models import (
     Activity,
     ActivityType,
     Contact,
+    ISO_3166_ALPHA_2,
+    ISO_4217_CODES,
     Lead,
     LeadStatus,
     Opportunity,
     OpportunityStage,
-    OpportunityStatus,
     RelatedToType,
+    validate_metadata,
+    validate_non_empty_string_array,
+    validate_uuid_string_array,
 )
 
 
-# ===== Lead Serializers =====
+class StrictInputMixin:
+    """Reject rather than silently discard fields outside the declared DTO."""
+
+    def to_internal_value(self, data: Any) -> Any:
+        if not isinstance(data, dict):
+            raise serializers.ValidationError({"non_field_errors": ["Expected a JSON object."]})
+        unknown = set(data) - set(self.fields)
+        if unknown:
+            raise serializers.ValidationError({field: ["Unknown field."] for field in sorted(unknown)})
+        return super().to_internal_value(data)
 
 
-class LeadSerializer(serializers.ModelSerializer):
-    """Lead serializer for read operations."""
+class StrictModelSerializer(StrictInputMixin, serializers.ModelSerializer):
+    pass
 
+
+class StrictSerializer(StrictInputMixin, serializers.Serializer):
+    pass
+
+
+COMMON_READ_FIELDS = [
+    "id",
+    "tenant_id",
+    "created_at",
+    "updated_at",
+    "created_by",
+    "updated_by",
+    "version",
+    "is_deleted",
+    "deleted_at",
+    "metadata",
+]
+
+
+class ExpectedVersionMixin:
+    version = serializers.IntegerField(min_value=1, required=False, write_only=True)
+
+
+def _metadata(value: object) -> object:
+    try:
+        validate_metadata(value)
+    except Exception as exc:
+        raise serializers.ValidationError("Metadata must be a JSON object of supported primitive values.") from exc
+    return value
+
+
+class LeadReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Lead
         fields = [
-            "id",
-            "tenant_id",
+            *COMMON_READ_FIELDS,
             "first_name",
             "last_name",
             "email",
@@ -43,559 +89,297 @@ class LeadSerializer(serializers.ModelSerializer):
             "title",
             "score",
             "grade",
+            "score_source",
+            "score_explanation",
             "source",
             "campaign_id",
             "owner_id",
             "status",
             "converted_at",
             "converted_to_opportunity_id",
-            "metadata",
-            "created_at",
-            "updated_at",
-            "created_by",
-        ]
-        read_only_fields = [
-            "id",
-            "tenant_id",
-            "score",
-            "grade",
-            "converted_at",
-            "converted_to_opportunity_id",
-            "created_at",
-            "updated_at",
-            "created_by",
+            "transition_history",
         ]
 
 
-class LeadCreateSerializer(serializers.ModelSerializer):
-    """Lead serializer for create operations."""
-
+class LeadCreateSerializer(StrictModelSerializer):
     class Meta:
         model = Lead
-        fields = [
-            "first_name",
-            "last_name",
-            "email",
-            "phone",
-            "company",
-            "title",
-            "source",
-            "campaign_id",
-            "owner_id",
-            "status",
-            "metadata",
-        ]
-
-    def validate_email(self, value):
-        """Validate email format."""
-        if value and "@" not in value:
-            raise serializers.ValidationError("Invalid email format")
-        return value
+        fields = ["first_name", "last_name", "email", "phone", "company", "title", "source", "campaign_id", "owner_id", "metadata"]
+        extra_kwargs = {"metadata": {"validators": [_metadata]}}
 
 
-class LeadUpdateSerializer(serializers.ModelSerializer):
-    """Lead serializer for update operations."""
-
-    class Meta:
-        model = Lead
-        fields = [
-            "first_name",
-            "last_name",
-            "email",
-            "phone",
-            "company",
-            "title",
-            "source",
-            "campaign_id",
-            "owner_id",
-            "status",
-            "metadata",
-        ]
+class LeadUpdateSerializer(ExpectedVersionMixin, LeadCreateSerializer):
+    class Meta(LeadCreateSerializer.Meta):
+        fields = [*LeadCreateSerializer.Meta.fields, "version"]
+        extra_kwargs = {field: {"required": False} for field in LeadCreateSerializer.Meta.fields}
 
 
-class LeadScoringResponseSerializer(serializers.Serializer):
-    """Response serializer for lead scoring."""
-
-    score = serializers.IntegerField(min_value=0, max_value=100)
-    grade = serializers.CharField(max_length=2)
-    bant_qualification = serializers.DictField(required=False)
-
-
-# ===== Account Serializers =====
+class LeadTransitionSerializer(StrictSerializer):
+    command = serializers.ChoiceField(choices=("contact", "qualify", "disqualify"))
+    transition_key = serializers.CharField(min_length=1, max_length=255, trim_whitespace=True)
+    expected_version = serializers.IntegerField(min_value=1)
+    context = serializers.DictField(required=False, default=dict)
 
 
-class AccountSerializer(serializers.ModelSerializer):
-    """Account serializer for read operations."""
+class LeadScoreRequestSerializer(StrictSerializer):
+    async_execution = serializers.BooleanField(required=False, default=False)
+    idempotency_key = serializers.CharField(min_length=1, max_length=180, required=False)
 
+    def validate(self, attrs: dict[str, object]) -> dict[str, object]:
+        if attrs.get("async_execution") and not attrs.get("idempotency_key"):
+            raise serializers.ValidationError({"idempotency_key": "Required for durable asynchronous scoring."})
+        return attrs
+
+
+class LeadConvertSerializer(StrictSerializer):
+    amount = serializers.DecimalField(max_digits=15, decimal_places=2, min_value=Decimal("0.01"))
+    currency = serializers.ChoiceField(choices=sorted(ISO_4217_CODES), default="USD")
+    close_date = serializers.DateField()
+    name = serializers.CharField(max_length=255, required=False, allow_blank=False)
+    account_id = serializers.UUIDField(required=False)
+    create_new_account = serializers.BooleanField(required=False, default=False)
+    expected_version = serializers.IntegerField(min_value=1)
+    transition_key = serializers.CharField(min_length=1, max_length=255)
+
+    def validate(self, attrs: dict[str, object]) -> dict[str, object]:
+        if attrs["close_date"] < timezone.localdate():
+            raise serializers.ValidationError({"close_date": "Close date cannot be in the past."})
+        if bool(attrs.get("account_id")) == bool(attrs.get("create_new_account")):
+            raise serializers.ValidationError("Choose exactly one existing or new account decision.")
+        attrs["currency"] = str(attrs["currency"]).upper()
+        return attrs
+
+
+class AccountReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Account
-        fields = [
-            "id",
-            "tenant_id",
-            "name",
-            "website",
-            "industry",
-            "employees",
-            "annual_revenue",
-            "parent_account_id",
-            "billing_street",
-            "billing_city",
-            "billing_state",
-            "billing_postal_code",
-            "billing_country",
-            "owner_id",
-            "account_type",
-            "metadata",
-            "created_at",
-            "updated_at",
-            "created_by",
-        ]
-        read_only_fields = [
-            "id",
-            "tenant_id",
-            "created_at",
-            "updated_at",
-            "created_by",
-        ]
+        fields = [*COMMON_READ_FIELDS, "name", "website", "industry", "employees", "annual_revenue", "parent_account_id", "billing_street", "billing_city", "billing_state", "billing_postal_code", "billing_country", "owner_id", "account_type"]
 
 
-class AccountCreateSerializer(serializers.ModelSerializer):
-    """Account serializer for create operations."""
-
+class AccountCreateSerializer(StrictModelSerializer):
     class Meta:
         model = Account
-        fields = [
-            "name",
-            "website",
-            "industry",
-            "employees",
-            "annual_revenue",
-            "parent_account_id",
-            "billing_street",
-            "billing_city",
-            "billing_state",
-            "billing_postal_code",
-            "billing_country",
-            "owner_id",
-            "account_type",
-            "metadata",
-        ]
+        fields = ["name", "website", "industry", "employees", "annual_revenue", "parent_account_id", "billing_street", "billing_city", "billing_state", "billing_postal_code", "billing_country", "owner_id", "account_type", "metadata"]
 
-    def validate(self, data):
-        """Validate account data."""
-        # Account name is required
-        if not data.get("name"):
-            raise serializers.ValidationError({"name": "Account name is required"})
-        return data
+    def validate_billing_country(self, value: str) -> str:
+        normalized = value.upper()
+        if normalized and normalized not in ISO_3166_ALPHA_2:
+            raise serializers.ValidationError("Use an ISO 3166-1 alpha-2 country code.")
+        return normalized
 
 
-class AccountUpdateSerializer(serializers.ModelSerializer):
-    """Account serializer for update operations."""
-
-    class Meta:
-        model = Account
-        fields = [
-            "name",
-            "website",
-            "industry",
-            "employees",
-            "annual_revenue",
-            "parent_account_id",
-            "billing_street",
-            "billing_city",
-            "billing_state",
-            "billing_postal_code",
-            "billing_country",
-            "owner_id",
-            "account_type",
-            "metadata",
-        ]
+class AccountUpdateSerializer(ExpectedVersionMixin, AccountCreateSerializer):
+    class Meta(AccountCreateSerializer.Meta):
+        fields = [*AccountCreateSerializer.Meta.fields, "version"]
+        extra_kwargs = {field: {"required": False} for field in AccountCreateSerializer.Meta.fields}
 
 
 class AccountHierarchySerializer(serializers.Serializer):
-    """Serializer for account hierarchy tree."""
-
     id = serializers.UUIDField()
     name = serializers.CharField()
-    account_type = serializers.CharField()
-    children = serializers.ListField(child=serializers.DictField(), required=False)
+    account_type = serializers.ChoiceField(choices=AccountType.choices)
+    children = serializers.ListField(child=serializers.DictField(), default=list)
 
 
-# ===== Contact Serializers =====
+class DuplicateAccountQuerySerializer(StrictSerializer):
+    name = serializers.CharField(min_length=1, max_length=255)
+    website = serializers.URLField(max_length=255, required=False, allow_blank=True)
 
 
-class ContactSerializer(serializers.ModelSerializer):
-    """Contact serializer for read operations."""
+class ContactReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Contact
+        fields = [*COMMON_READ_FIELDS, "account_id", "first_name", "last_name", "email", "phone", "mobile", "title", "department", "linkedin", "twitter", "last_contacted_at", "engagement_score", "owner_id"]
+
+
+class ContactCreateSerializer(StrictModelSerializer):
+    domain_override_reason = serializers.CharField(
+        required=False, allow_blank=False, max_length=1000, write_only=True
+    )
 
     class Meta:
         model = Contact
-        fields = [
-            "id",
-            "tenant_id",
-            "account_id",
-            "first_name",
-            "last_name",
-            "email",
-            "phone",
-            "mobile",
-            "title",
-            "department",
-            "linkedin",
-            "twitter",
-            "last_contacted_at",
-            "engagement_score",
-            "owner_id",
-            "metadata",
-            "created_at",
-            "updated_at",
-            "created_by",
-        ]
-        read_only_fields = [
-            "id",
-            "tenant_id",
-            "last_contacted_at",
-            "engagement_score",
-            "created_at",
-            "updated_at",
-            "created_by",
-        ]
+        fields = ["account_id", "first_name", "last_name", "email", "phone", "mobile", "title", "department", "linkedin", "twitter", "owner_id", "metadata", "domain_override_reason"]
 
 
-class ContactCreateSerializer(serializers.ModelSerializer):
-    """Contact serializer for create operations."""
+class ContactUpdateSerializer(ExpectedVersionMixin, StrictModelSerializer):
+    domain_override_reason = serializers.CharField(
+        required=False, allow_blank=False, max_length=1000, write_only=True
+    )
 
     class Meta:
         model = Contact
-        fields = [
-            "account_id",
-            "first_name",
-            "last_name",
-            "email",
-            "phone",
-            "mobile",
-            "title",
-            "department",
-            "linkedin",
-            "twitter",
-            "owner_id",
-            "metadata",
-        ]
-
-    def validate(self, data):
-        """Validate contact data."""
-        # Account ID is required
-        if not data.get("account_id"):
-            raise serializers.ValidationError({"account_id": "Contact must have account_id"})
-
-        # Last name is required
-        if not data.get("last_name"):
-            raise serializers.ValidationError({"last_name": "Last name is required"})
-
-        return data
+        fields = ["account_id", "first_name", "last_name", "email", "phone", "mobile", "title", "department", "linkedin", "twitter", "owner_id", "metadata", "domain_override_reason", "version"]
+        extra_kwargs = {field: {"required": False} for field in fields if field not in {"version", "domain_override_reason"}}
 
 
-class ContactUpdateSerializer(serializers.ModelSerializer):
-    """Contact serializer for update operations."""
-
+class OpportunityReadSerializer(serializers.ModelSerializer):
     class Meta:
-        model = Contact
-        fields = [
-            "first_name",
-            "last_name",
-            "email",
-            "phone",
-            "mobile",
-            "title",
-            "department",
-            "linkedin",
-            "twitter",
-            "owner_id",
-            "metadata",
-        ]
+        model = Opportunity
+        fields = [*COMMON_READ_FIELDS, "account_id", "primary_contact_id", "name", "description", "amount", "currency", "probability", "stage", "close_date", "product_ids", "competitors", "owner_id", "status", "closed_at", "loss_reason", "converted_to_order_id", "last_activity_at", "transition_history"]
 
 
-# ===== Opportunity Serializers =====
-
-
-class OpportunitySerializer(serializers.ModelSerializer):
-    """Opportunity serializer for read operations."""
+class OpportunityCreateSerializer(StrictModelSerializer):
+    stage = serializers.ChoiceField(choices=tuple((value, label) for value, label in OpportunityStage.choices if value not in {OpportunityStage.CLOSED_WON, OpportunityStage.CLOSED_LOST}), default=OpportunityStage.PROSPECTING)
 
     class Meta:
         model = Opportunity
-        fields = [
-            "id",
-            "tenant_id",
-            "account_id",
-            "primary_contact_id",
-            "name",
-            "description",
-            "amount",
-            "currency",
-            "probability",
-            "stage",
-            "close_date",
-            "product_ids",
-            "competitors",
-            "owner_id",
-            "status",
-            "closed_at",
-            "loss_reason",
-            "converted_to_order_id",
-            "metadata",
-            "created_at",
-            "updated_at",
-            "created_by",
-            "last_activity_at",
-        ]
-        read_only_fields = [
-            "id",
-            "tenant_id",
-            "status",
-            "closed_at",
-            "converted_to_order_id",
-            "created_at",
-            "updated_at",
-            "created_by",
-            "last_activity_at",
-        ]
+        fields = ["account_id", "primary_contact_id", "name", "description", "amount", "currency", "probability", "stage", "close_date", "product_ids", "competitors", "owner_id", "metadata"]
+
+    def validate_currency(self, value: str) -> str:
+        normalized = value.upper()
+        if normalized not in ISO_4217_CODES:
+            raise serializers.ValidationError("Use an ISO 4217 currency code.")
+        return normalized
+
+    def validate_close_date(self, value: date) -> date:
+        if value < timezone.localdate():
+            raise serializers.ValidationError("Close date cannot be in the past.")
+        return value
+
+    def validate_product_ids(self, value: object) -> object:
+        try:
+            validate_uuid_string_array(value)
+        except Exception as exc:
+            raise serializers.ValidationError("Every product ID must be a UUID string.") from exc
+        return value
+
+    def validate_competitors(self, value: object) -> object:
+        try:
+            validate_non_empty_string_array(value)
+        except Exception as exc:
+            raise serializers.ValidationError("Competitors must be non-empty strings.") from exc
+        return value
 
 
-class OpportunityCreateSerializer(serializers.ModelSerializer):
-    """Opportunity serializer for create operations."""
-
+class OpportunityUpdateSerializer(ExpectedVersionMixin, StrictModelSerializer):
     class Meta:
         model = Opportunity
-        fields = [
-            "account_id",
-            "primary_contact_id",
-            "name",
-            "description",
-            "amount",
-            "currency",
-            "probability",
-            "stage",
-            "close_date",
-            "product_ids",
-            "competitors",
-            "owner_id",
-            "metadata",
-        ]
-
-    def validate(self, data):
-        """Validate opportunity data."""
-        # Account ID is required
-        if not data.get("account_id"):
-            raise serializers.ValidationError({"account_id": "Opportunity must have account_id"})
-
-        # Amount must be positive
-        amount = data.get("amount")
-        if amount and amount <= 0:
-            raise serializers.ValidationError({"amount": "Opportunity amount must be positive"})
-
-        # Probability must be 0-100
-        probability = data.get("probability", 0)
-        if probability < 0 or probability > 100:
-            raise serializers.ValidationError({"probability": "Probability must be between 0 and 100"})
-
-        # Close date must be future or today
-        close_date = data.get("close_date")
-        if close_date and close_date < date.today():
-            raise serializers.ValidationError({"close_date": "Close date must be today or in the future"})
-
-        return data
+        fields = ["account_id", "primary_contact_id", "name", "description", "amount", "currency", "close_date", "product_ids", "competitors", "owner_id", "metadata", "version"]
+        extra_kwargs = {field: {"required": False} for field in fields if field != "version"}
 
 
-class OpportunityUpdateSerializer(serializers.ModelSerializer):
-    """Opportunity serializer for update operations."""
-
-    class Meta:
-        model = Opportunity
-        fields = [
-            "name",
-            "description",
-            "amount",
-            "currency",
-            "probability",
-            "stage",
-            "close_date",
-            "product_ids",
-            "competitors",
-            "owner_id",
-            "metadata",
-        ]
-
-    def validate(self, data):
-        """Validate opportunity update data."""
-        # Amount must be positive
-        amount = data.get("amount")
-        if amount is not None and amount <= 0:
-            raise serializers.ValidationError({"amount": "Opportunity amount must be positive"})
-
-        # Probability must be 0-100
-        probability = data.get("probability")
-        if probability is not None and (probability < 0 or probability > 100):
-            raise serializers.ValidationError({"probability": "Probability must be between 0 and 100"})
-
-        return data
+class OpportunityStageTransitionSerializer(StrictSerializer):
+    command = serializers.ChoiceField(choices=("advance_to_qualification", "advance_to_needs_analysis", "advance_to_proposal", "advance_to_negotiation", "reopen_to_prospecting", "reopen_to_qualification", "reopen_to_needs_analysis", "reopen_to_proposal"))
+    transition_key = serializers.CharField(min_length=1, max_length=255)
+    expected_version = serializers.IntegerField(min_value=1)
+    reason = serializers.CharField(max_length=2000, required=False, allow_blank=False)
 
 
-class CloseWonRequestSerializer(serializers.Serializer):
-    """Request serializer for closing opportunity as won."""
+class CloseWonSerializer(StrictSerializer):
+    transition_key = serializers.CharField(min_length=1, max_length=255)
+    expected_version = serializers.IntegerField(min_value=1)
+    confirmed = serializers.BooleanField()
 
-    pass  # No additional fields needed
-
-
-class CloseLostRequestSerializer(serializers.Serializer):
-    """Request serializer for closing opportunity as lost."""
-
-    loss_reason = serializers.CharField(required=True, allow_blank=False)
-
-
-# ===== Activity Serializers =====
+    def validate_confirmed(self, value: bool) -> bool:
+        if value is not True:
+            raise serializers.ValidationError("Explicit confirmation is required.")
+        return value
 
 
-class ActivitySerializer(serializers.ModelSerializer):
-    """Activity serializer for read operations."""
+class CloseLostSerializer(StrictSerializer):
+    loss_reason = serializers.CharField(min_length=1, max_length=4000, trim_whitespace=True)
+    transition_key = serializers.CharField(min_length=1, max_length=255)
+    expected_version = serializers.IntegerField(min_value=1)
 
+
+class ActivityReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Activity
-        fields = [
-            "id",
-            "tenant_id",
-            "activity_type",
-            "related_to_type",
-            "related_to_id",
-            "subject",
-            "description",
-            "outcome",
-            "due_date",
-            "completed",
-            "completed_at",
-            "owner_id",
-            "external_id",
-            "metadata",
-            "created_at",
-            "updated_at",
-            "created_by",
-        ]
-        read_only_fields = [
-            "id",
-            "tenant_id",
-            "completed_at",
-            "created_at",
-            "updated_at",
-            "created_by",
-        ]
+        fields = [*COMMON_READ_FIELDS, "activity_type", "related_to_type", "related_to_id", "subject", "description", "outcome", "due_date", "completed", "completed_at", "owner_id", "external_id"]
 
 
-class ActivityCreateSerializer(serializers.ModelSerializer):
-    """Activity serializer for create operations."""
-
+class ActivityCreateSerializer(StrictModelSerializer):
     class Meta:
         model = Activity
-        fields = [
-            "activity_type",
-            "related_to_type",
-            "related_to_id",
-            "subject",
-            "description",
-            "outcome",
-            "due_date",
-            "owner_id",
-            "external_id",
-            "metadata",
-        ]
+        fields = ["activity_type", "related_to_type", "related_to_id", "subject", "description", "outcome", "due_date", "owner_id", "external_id", "metadata"]
 
-    def validate(self, data):
-        """Validate activity data."""
-        # Related entity is required
-        if not data.get("related_to_type") or not data.get("related_to_id"):
-            raise serializers.ValidationError(
-                {"related_to": "Activity must have related_to_type and related_to_id"}
-            )
-
-        # Subject is required
-        if not data.get("subject"):
-            raise serializers.ValidationError({"subject": "Activity subject is required"})
-
-        # Due date must be future for tasks
-        due_date = data.get("due_date")
-        activity_type = data.get("activity_type")
-        if activity_type == ActivityType.TASK and due_date:
-            if due_date <= timezone.now():
-                raise serializers.ValidationError({"due_date": "Task due date must be in the future"})
-
-        return data
+    def validate(self, attrs: dict[str, object]) -> dict[str, object]:
+        due = attrs.get("due_date")
+        if attrs.get("activity_type") == ActivityType.TASK and due and due <= timezone.now():
+            raise serializers.ValidationError({"due_date": "Task due date must be in the future."})
+        return attrs
 
 
-class ActivityUpdateSerializer(serializers.ModelSerializer):
-    """Activity serializer for update operations."""
-
+class ActivityUpdateSerializer(ExpectedVersionMixin, StrictModelSerializer):
     class Meta:
         model = Activity
-        fields = [
-            "subject",
-            "description",
-            "outcome",
-            "due_date",
-            "owner_id",
-            "metadata",
-        ]
+        fields = ["activity_type", "subject", "description", "outcome", "due_date", "owner_id", "external_id", "metadata", "version"]
+        extra_kwargs = {field: {"required": False} for field in fields if field != "version"}
 
 
-# ===== Forecasting Serializers =====
+class ActivityCompleteSerializer(StrictSerializer):
+    transition_key = serializers.CharField(min_length=1, max_length=255)
+    expected_version = serializers.IntegerField(min_value=1)
+
+
+class CurrencyForecastSerializer(serializers.Serializer):
+    currency = serializers.CharField(min_length=3, max_length=3)
+    total_pipeline_value = serializers.DecimalField(max_digits=19, decimal_places=4)
+    weighted_pipeline_value = serializers.DecimalField(max_digits=19, decimal_places=4)
+    opportunity_count = serializers.IntegerField(min_value=0)
 
 
 class ForecastSerializer(serializers.Serializer):
-    """Serializer for pipeline forecast response."""
-
-    total_pipeline_value = serializers.FloatField()
-    weighted_pipeline_value = serializers.FloatField()
-    opportunity_count = serializers.IntegerField()
-    period_days = serializers.IntegerField()
+    currencies = CurrencyForecastSerializer(many=True)
+    period_days = serializers.IntegerField(min_value=1, max_value=365)
 
 
 class WinRateSerializer(serializers.Serializer):
-    """Serializer for win rate response."""
-
-    win_rate = serializers.FloatField()
-    won_count = serializers.IntegerField()
-    lost_count = serializers.IntegerField()
-    total_closed = serializers.IntegerField()
-    period_days = serializers.IntegerField()
+    win_rate = serializers.DecimalField(max_digits=5, decimal_places=2)
+    won_count = serializers.IntegerField(min_value=0)
+    lost_count = serializers.IntegerField(min_value=0)
+    total_closed = serializers.IntegerField(min_value=0)
+    period_days = serializers.IntegerField(min_value=1, max_value=365)
 
 
-class AIPredictionSerializer(serializers.Serializer):
-    """Serializer for AI prediction response."""
-
-    predicted_revenue = serializers.FloatField()
-    confidence = serializers.FloatField()
-    factors = serializers.ListField(child=serializers.CharField())
-    period_days = serializers.IntegerField()
-
-
-# ===== Lead Conversion Serializers =====
+class StageForecastSerializer(serializers.Serializer):
+    stage = serializers.ChoiceField(choices=OpportunityStage.choices)
+    currency = serializers.CharField(min_length=3, max_length=3)
+    total_value = serializers.DecimalField(max_digits=19, decimal_places=4)
+    weighted_value = serializers.DecimalField(max_digits=19, decimal_places=4)
+    opportunity_count = serializers.IntegerField(min_value=0)
 
 
-class OpportunityCreateFromLeadSerializer(serializers.Serializer):
-    """Serializer for creating opportunity from lead conversion."""
+class RevenuePredictionSerializer(serializers.Serializer):
+    provider = serializers.CharField()
+    model = serializers.CharField()
+    amount = serializers.DecimalField(max_digits=19, decimal_places=4)
+    currency = serializers.CharField(min_length=3, max_length=3)
+    confidence = serializers.DecimalField(max_digits=6, decimal_places=5, allow_null=True)
+    factors = serializers.DictField()
+    as_of = serializers.CharField()
+    period_days = serializers.IntegerField(min_value=1, max_value=365)
 
-    name = serializers.CharField(required=False)
-    amount = serializers.DecimalField(max_digits=15, decimal_places=2, required=True)
-    close_date = serializers.DateField(required=False)
-    stage = serializers.CharField(required=False)
-    probability = serializers.IntegerField(required=False, min_value=0, max_value=100)
-    account_id = serializers.UUIDField(required=False)  # Optional: use existing account
-    create_new_account = serializers.BooleanField(default=True)
 
-    def validate_amount(self, value):
-        """Validate amount is positive."""
-        if value <= 0:
-            raise serializers.ValidationError("Amount must be positive")
-        return value
+class ForecastQuerySerializer(StrictSerializer):
+    owner_id = serializers.UUIDField(required=False)
+    period = serializers.IntegerField(min_value=1, max_value=365, default=90)
 
-    def validate_close_date(self, value):
-        """Validate close date is future or today."""
-        if value < date.today():
-            raise serializers.ValidationError("Close date must be today or in the future")
-        return value
+
+class RevenuePredictionRequestSerializer(StrictSerializer):
+    period = serializers.IntegerField(min_value=1, max_value=365)
+
+
+class AsyncOperationSerializer(serializers.ModelSerializer):
+    job_id = serializers.UUIDField(source="id")
+
+    class Meta:
+        model = AsyncJob
+        fields = ["job_id", "status", "command", "created_at", "correlation_id"]
+
+
+# Compatibility aliases for existing open-source imports.
+LeadSerializer = LeadReadSerializer
+AccountSerializer = AccountReadSerializer
+ContactSerializer = ContactReadSerializer
+OpportunitySerializer = OpportunityReadSerializer
+ActivitySerializer = ActivityReadSerializer
+LeadScoringResponseSerializer = LeadReadSerializer
+OpportunityCreateFromLeadSerializer = LeadConvertSerializer
+CloseWonRequestSerializer = CloseWonSerializer
+CloseLostRequestSerializer = CloseLostSerializer
+AIPredictionSerializer = RevenuePredictionSerializer
+
+
+__all__ = [name for name in globals() if name.endswith("Serializer")]

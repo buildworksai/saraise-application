@@ -43,7 +43,7 @@ const TreeNode = ({ node, level = 0 }: { node: AccountHierarchyNode; level?: num
       </div>
       {hasChildren && isExpanded && (
         <div>
-          {node.children!.map((child) => (
+          {node.children.map((child) => (
             <TreeNode key={child.id} node={child} level={level + 1} />
           ))}
         </div>

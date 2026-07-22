@@ -54,6 +54,7 @@ urlpatterns = [
     path("api/v1/regional/", include("src.modules.regional.urls")),
     # CRM Module
     path("api/v1/crm/", include("src.modules.crm.urls")),
+    path("api/v2/crm/", include("src.modules.crm.urls")),
     # ===== Core Business Modules =====
     path("api/v1/accounting-finance/", include("src.modules.accounting_finance.urls")),
     path("api/v1/inventory-management/", include("src.modules.inventory_management.urls")),

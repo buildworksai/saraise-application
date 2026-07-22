@@ -1,120 +1,31 @@
-import { lazy } from "react";
-import { Briefcase, Building2, LayoutDashboard, TrendingUp, Users } from "lucide-react";
-import type { TenantRoute } from "@/navigation/tenant-route-types";
+import { lazy } from 'react';
+import { Briefcase, Building2, CalendarCheck, LayoutDashboard, TrendingUp, Users } from 'lucide-react';
+import type { TenantRoute } from '@/navigation/tenant-route-types';
+
+const pages = {
+  SalesDashboardPage: lazy(() => import('./pages/SalesDashboardPage').then(module => ({ default: module.SalesDashboardPage }))),
+  LeadListPage: lazy(() => import('./pages/LeadListPage').then(module => ({ default: module.LeadListPage }))), LeadCreatePage: lazy(() => import('./pages/LeadCreatePage').then(module => ({ default: module.LeadCreatePage }))), LeadDetailPage: lazy(() => import('./pages/LeadDetailPage').then(module => ({ default: module.LeadDetailPage }))), LeadEditPage: lazy(() => import('./pages/LeadEditPage').then(module => ({ default: module.LeadEditPage }))),
+  AccountListPage: lazy(() => import('./pages/AccountListPage').then(module => ({ default: module.AccountListPage }))), AccountCreatePage: lazy(() => import('./pages/AccountCreatePage').then(module => ({ default: module.AccountCreatePage }))), AccountDetailPage: lazy(() => import('./pages/AccountDetailPage').then(module => ({ default: module.AccountDetailPage }))), AccountEditPage: lazy(() => import('./pages/AccountEditPage').then(module => ({ default: module.AccountEditPage }))),
+  ContactListPage: lazy(() => import('./pages/ContactListPage').then(module => ({ default: module.ContactListPage }))), ContactCreatePage: lazy(() => import('./pages/ContactCreatePage').then(module => ({ default: module.ContactCreatePage }))), ContactDetailPage: lazy(() => import('./pages/ContactDetailPage').then(module => ({ default: module.ContactDetailPage }))), ContactEditPage: lazy(() => import('./pages/ContactEditPage').then(module => ({ default: module.ContactEditPage }))),
+  OpportunityListPage: lazy(() => import('./pages/OpportunityListPage').then(module => ({ default: module.OpportunityListPage }))), OpportunityCreatePage: lazy(() => import('./pages/OpportunityCreatePage').then(module => ({ default: module.OpportunityCreatePage }))), OpportunityDetailPage: lazy(() => import('./pages/OpportunityDetailPage').then(module => ({ default: module.OpportunityDetailPage }))), OpportunityEditPage: lazy(() => import('./pages/OpportunityEditPage').then(module => ({ default: module.OpportunityEditPage }))), OpportunityKanbanPage: lazy(() => import('./pages/OpportunityKanbanPage').then(module => ({ default: module.OpportunityKanbanPage }))),
+  ActivityListPage: lazy(() => import('./pages/ActivityListPage').then(module => ({ default: module.ActivityListPage }))), ActivityCreatePage: lazy(() => import('./pages/ActivityCreatePage').then(module => ({ default: module.ActivityCreatePage }))), ActivityDetailPage: lazy(() => import('./pages/ActivityDetailPage').then(module => ({ default: module.ActivityDetailPage }))), ActivityEditPage: lazy(() => import('./pages/ActivityEditPage').then(module => ({ default: module.ActivityEditPage }))),
+} as const;
+type PageName = keyof typeof pages;
+const contextual = (id: string, path: string, name: PageName, parentRouteId: string): TenantRoute => ({ id, module: 'crm', path, sourceFile: `modules/crm/pages/${name}.tsx`, Page: pages[name], navigation: { type: 'contextual', parentRouteId } });
 
 export const tenantRoutes = [
-  {
-    id: "crm.dashboard",
-    module: "crm",
-    path: "/crm/dashboard",
-    sourceFile: "modules/crm/pages/SalesDashboardPage.tsx",
-    Page: lazy(() =>
-      import("./pages/SalesDashboardPage").then(({ SalesDashboardPage }) => ({
-        default: SalesDashboardPage,
-      })),
-    ),
-    navigation: { type: "sidebar", label: "Dashboard", icon: LayoutDashboard, order: 100 },
-  },
-  {
-    id: "crm.leads.list",
-    module: "crm",
-    path: "/crm/leads",
-    sourceFile: "modules/crm/pages/LeadListPage.tsx",
-    Page: lazy(() =>
-      import("./pages/LeadListPage").then(({ LeadListPage }) => ({ default: LeadListPage })),
-    ),
-    navigation: { type: "sidebar", label: "Leads", icon: TrendingUp, order: 110 },
-  },
-  {
-    id: "crm.leads.detail",
-    module: "crm",
-    path: "/crm/leads/:id",
-    sourceFile: "modules/crm/pages/LeadDetailPage.tsx",
-    Page: lazy(() =>
-      import("./pages/LeadDetailPage").then(({ LeadDetailPage }) => ({ default: LeadDetailPage })),
-    ),
-    navigation: { type: "contextual", parentRouteId: "crm.leads.list" },
-  },
-  {
-    id: "crm.contacts.list",
-    module: "crm",
-    path: "/crm/contacts",
-    sourceFile: "modules/crm/pages/ContactListPage.tsx",
-    Page: lazy(() =>
-      import("./pages/ContactListPage").then(({ ContactListPage }) => ({ default: ContactListPage })),
-    ),
-    navigation: { type: "sidebar", label: "Contacts", icon: Users, order: 120 },
-  },
-  {
-    id: "crm.contacts.detail",
-    module: "crm",
-    path: "/crm/contacts/:id",
-    sourceFile: "modules/crm/pages/ContactDetailPage.tsx",
-    Page: lazy(() =>
-      import("./pages/ContactDetailPage").then(({ ContactDetailPage }) => ({
-        default: ContactDetailPage,
-      })),
-    ),
-    navigation: { type: "contextual", parentRouteId: "crm.contacts.list" },
-  },
-  {
-    id: "crm.accounts.list",
-    module: "crm",
-    path: "/crm/accounts",
-    sourceFile: "modules/crm/pages/AccountListPage.tsx",
-    Page: lazy(() =>
-      import("./pages/AccountListPage").then(({ AccountListPage }) => ({ default: AccountListPage })),
-    ),
-    navigation: { type: "sidebar", label: "Accounts", icon: Building2, order: 130 },
-  },
-  {
-    id: "crm.accounts.detail",
-    module: "crm",
-    path: "/crm/accounts/:id",
-    sourceFile: "modules/crm/pages/AccountDetailPage.tsx",
-    Page: lazy(() =>
-      import("./pages/AccountDetailPage").then(({ AccountDetailPage }) => ({
-        default: AccountDetailPage,
-      })),
-    ),
-    navigation: { type: "contextual", parentRouteId: "crm.accounts.list" },
-  },
-  {
-    id: "crm.opportunities.list",
-    module: "crm",
-    path: "/crm/opportunities",
-    sourceFile: "modules/crm/pages/OpportunityListPage.tsx",
-    Page: lazy(() =>
-      import("./pages/OpportunityListPage").then(({ OpportunityListPage }) => ({
-        default: OpportunityListPage,
-      })),
-    ),
-    navigation: { type: "sidebar", label: "Opportunities", icon: Briefcase, order: 140 },
-  },
-  {
-    id: "crm.opportunities.pipeline",
-    module: "crm",
-    path: "/crm/opportunities/pipeline",
-    sourceFile: "modules/crm/pages/OpportunityKanbanPage.tsx",
-    Page: lazy(() =>
-      import("./pages/OpportunityKanbanPage").then(({ OpportunityKanbanPage }) => ({
-        default: OpportunityKanbanPage,
-      })),
-    ),
-    navigation: { type: "sidebar", label: "Pipeline", icon: Briefcase, order: 141 },
-  },
-  {
-    id: "crm.opportunities.detail",
-    module: "crm",
-    path: "/crm/opportunities/:id",
-    sourceFile: "modules/crm/pages/OpportunityDetailPage.tsx",
-    Page: lazy(() =>
-      import("./pages/OpportunityDetailPage").then(({ OpportunityDetailPage }) => ({
-        default: OpportunityDetailPage,
-      })),
-    ),
-    navigation: { type: "contextual", parentRouteId: "crm.opportunities.list" },
-  },
+  { id:'crm.dashboard', module:'crm', path:'/crm/dashboard', sourceFile:'modules/crm/pages/SalesDashboardPage.tsx', Page:pages.SalesDashboardPage, navigation:{type:'sidebar',label:'Dashboard',icon:LayoutDashboard,order:100} },
+  { id:'crm.leads.list', module:'crm', path:'/crm/leads', sourceFile:'modules/crm/pages/LeadListPage.tsx', Page:pages.LeadListPage, navigation:{type:'sidebar',label:'Leads',icon:TrendingUp,order:110} },
+  contextual('crm.leads.create','/crm/leads/new','LeadCreatePage','crm.leads.list'), contextual('crm.leads.detail','/crm/leads/:id','LeadDetailPage','crm.leads.list'), contextual('crm.leads.edit','/crm/leads/:id/edit','LeadEditPage','crm.leads.list'),
+  { id:'crm.accounts.list', module:'crm', path:'/crm/accounts', sourceFile:'modules/crm/pages/AccountListPage.tsx', Page:pages.AccountListPage, navigation:{type:'sidebar',label:'Accounts',icon:Building2,order:120} },
+  contextual('crm.accounts.create','/crm/accounts/new','AccountCreatePage','crm.accounts.list'), contextual('crm.accounts.detail','/crm/accounts/:id','AccountDetailPage','crm.accounts.list'), contextual('crm.accounts.edit','/crm/accounts/:id/edit','AccountEditPage','crm.accounts.list'),
+  { id:'crm.contacts.list', module:'crm', path:'/crm/contacts', sourceFile:'modules/crm/pages/ContactListPage.tsx', Page:pages.ContactListPage, navigation:{type:'sidebar',label:'Contacts',icon:Users,order:130} },
+  contextual('crm.contacts.create','/crm/contacts/new','ContactCreatePage','crm.contacts.list'), contextual('crm.contacts.detail','/crm/contacts/:id','ContactDetailPage','crm.contacts.list'), contextual('crm.contacts.edit','/crm/contacts/:id/edit','ContactEditPage','crm.contacts.list'),
+  { id:'crm.opportunities.list', module:'crm', path:'/crm/opportunities', sourceFile:'modules/crm/pages/OpportunityListPage.tsx', Page:pages.OpportunityListPage, navigation:{type:'sidebar',label:'Opportunities',icon:Briefcase,order:140} },
+  { id:'crm.opportunities.pipeline', module:'crm', path:'/crm/opportunities/pipeline', sourceFile:'modules/crm/pages/OpportunityKanbanPage.tsx', Page:pages.OpportunityKanbanPage, navigation:{type:'sidebar',label:'Pipeline',icon:TrendingUp,order:141} },
+  contextual('crm.opportunities.create','/crm/opportunities/new','OpportunityCreatePage','crm.opportunities.list'), contextual('crm.opportunities.detail','/crm/opportunities/:id','OpportunityDetailPage','crm.opportunities.list'), contextual('crm.opportunities.edit','/crm/opportunities/:id/edit','OpportunityEditPage','crm.opportunities.list'),
+  { id:'crm.activities.list', module:'crm', path:'/crm/activities', sourceFile:'modules/crm/pages/ActivityListPage.tsx', Page:pages.ActivityListPage, navigation:{type:'sidebar',label:'Activities',icon:CalendarCheck,order:150} },
+  contextual('crm.activities.create','/crm/activities/new','ActivityCreatePage','crm.activities.list'), contextual('crm.activities.detail','/crm/activities/:id','ActivityDetailPage','crm.activities.list'), contextual('crm.activities.edit','/crm/activities/:id/edit','ActivityEditPage','crm.activities.list'),
 ] satisfies readonly TenantRoute[];
 
 export default tenantRoutes;

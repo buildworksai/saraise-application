@@ -8,6 +8,7 @@ from rest_framework.routers import DefaultRouter
 from .api import (
     AccountViewSet,
     ActivityViewSet,
+    AsyncJobViewSet,
     ContactViewSet,
     ForecastingViewSet,
     LeadViewSet,
@@ -23,6 +24,7 @@ router.register(r"contacts", ContactViewSet, basename="contact")
 router.register(r"opportunities", OpportunityViewSet, basename="opportunity")
 router.register(r"activities", ActivityViewSet, basename="activity")
 router.register(r"forecasting", ForecastingViewSet, basename="forecasting")
+router.register(r"jobs", AsyncJobViewSet, basename="job")
 
 # URL patterns
 urlpatterns = [
