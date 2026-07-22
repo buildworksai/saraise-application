@@ -452,23 +452,6 @@ const CreateAssetPage = lazy(() =>
   }))
 );
 
-// Fixed Assets
-const FixedAssetListPage = lazy(() =>
-  import("./modules/fixed_assets/pages/FixedAssetListPage").then((m) => ({
-    default: m.FixedAssetListPage,
-  }))
-);
-const FixedAssetDetailPage = lazy(() =>
-  import("./modules/fixed_assets/pages/FixedAssetDetailPage").then((m) => ({
-    default: m.FixedAssetDetailPage,
-  }))
-);
-const CreateFixedAssetPage = lazy(() =>
-  import("./modules/fixed_assets/pages/CreateFixedAssetPage").then((m) => ({
-    default: m.CreateFixedAssetPage,
-  }))
-);
-
 // Compliance Management
 const CompliancePolicyListPage = lazy(() =>
   import("./modules/compliance_management/pages/CompliancePolicyListPage").then((m) => ({
@@ -1225,38 +1208,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <AssetDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Fixed Assets */}
-          <Route
-            path="/fixed-assets/assets"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <FixedAssetListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/fixed-assets/assets/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateFixedAssetPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/fixed-assets/assets/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <FixedAssetDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

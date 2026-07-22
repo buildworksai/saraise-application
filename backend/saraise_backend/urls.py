@@ -73,6 +73,7 @@ urlpatterns = [
     path("api/v1/compliance-risk-management/", include("src.modules.compliance_risk_management.urls")),
     path("api/v1/email-marketing/", include("src.modules.email_marketing.urls")),
     path("api/v1/fixed-assets/", include("src.modules.fixed_assets.urls")),
+    path("api/v2/fixed-assets/", include("src.modules.fixed_assets.v2_urls")),
     # ===== Foundation Modules =====
     path("api/v1/communication-hub/", include("src.modules.communication_hub.urls")),
     # Note: notifications is already registered in Core Services section above
