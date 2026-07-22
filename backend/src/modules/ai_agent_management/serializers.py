@@ -1,580 +1,436 @@
+"""Closed, tenant-safe API v2 serializers for AI Agent Management.
+
+Request serializers deliberately expose identifiers instead of writable model
+relations.  Tenant ownership, actor identity, lifecycle state, and evidence
+fields are assigned by tenant-first services only.
 """
-DRF Serializers for AI Agent Management module.
-Provides request/response validation for all models.
-"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
 
 from rest_framework import serializers
 
-from .approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy, SoDViolation
-from .audit_models import AuditEvent, AuditEventType, AuditTrail
+from src.core.access.entitlements import Quota
+from src.core.async_jobs.models import AsyncJob
+
+from .approval_models import ApprovalRequest, SoDPolicy, SoDViolation
+from .audit_models import AuditEvent, AuditTrail
 from .egress_models import EgressRequest, EgressRule, Secret, SecretAccess
-from .models import Agent, AgentExecution, AgentIdentityType, AgentLifecycleState, AgentSchedulerTask
-from .quota_models import KillSwitch, QuotaPeriod, QuotaType, QuotaUsage, ShardSaturation, TenantQuota
+from .models import Agent, AgentExecution, AgentSchedulerTask
+from .quota_models import KillSwitch, QuotaUsage, ShardSaturation
 from .token_models import CostRecord, CostSummary, TokenUsage
 from .tool_models import Tool, ToolInvocation
 
-# ===== Core Agent Serializers =====
+
+class ClosedSerializer(serializers.Serializer[dict[str, Any]]):
+    """Reject unknown request keys instead of silently dropping them."""
+
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        if not isinstance(data, Mapping):
+            raise serializers.ValidationError("Expected a JSON object.")
+        unknown = sorted(set(data) - set(self.fields))
+        if unknown:
+            raise serializers.ValidationError({key: "Unknown field." for key in unknown})
+        return super().to_internal_value(data)
 
 
-class AgentSerializer(serializers.ModelSerializer):
-    """Agent serializer for create/update/read operations."""
+class StrictJSONField(serializers.JSONField):
+    def __init__(self, *, expected_type: type[dict] | type[list] = dict, **kwargs: Any) -> None:
+        self.expected_type = expected_type
+        super().__init__(**kwargs)
+
+    def to_internal_value(self, data: Any) -> Any:
+        value = super().to_internal_value(data)
+        if not isinstance(value, self.expected_type):
+            label = "object" if self.expected_type is dict else "array"
+            raise serializers.ValidationError(f"Must be a JSON {label}.")
+        return value
+
+
+def _public_transitions(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize internal state-machine keys into the stable public evidence DTO."""
+
+    return [
+        {
+            "transition": item.get("command", item.get("transition", "unknown")),
+            "from": item.get("from_state", item.get("from", "unknown")),
+            "to": item.get("to_state", item.get("to", "unknown")),
+            "occurred_at": item.get("occurred_at"),
+            "reason": (item.get("metadata") or {}).get("reason_code"),
+        }
+        for item in history
+    ]
+
+
+class AgentListSerializer(serializers.ModelSerializer[Agent]):
+    allowed_actions = serializers.SerializerMethodField()
 
     class Meta:
         model = Agent
-        fields = [
-            "id",
-            "tenant_id",
-            "name",
-            "description",
-            "identity_type",
-            "subject_id",
-            "session_id",
-            "framework",
-            "config",
-            "is_active",
-            "created_by",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "created_by", "created_at", "updated_at"]
+        fields = (
+            "id", "name", "description", "identity_type", "runner_key",
+            "provider_config_id", "status", "created_at", "updated_at",
+            "allowed_actions",
+        )
 
-    def validate(self, data):
-        """Validate agent data."""
-        # User-bound agents must have session_id
-        if data.get("identity_type") == AgentIdentityType.USER_BOUND:
-            if not data.get("session_id"):
-                raise serializers.ValidationError("User-bound agents must have session_id")
-
-        # System-bound agents should not have session_id
-        if data.get("identity_type") == AgentIdentityType.SYSTEM_BOUND:
-            if data.get("session_id"):
-                raise serializers.ValidationError("System-bound agents must not have session_id")
-
-        return data
+    def get_allowed_actions(self, obj: Agent) -> tuple[str, ...]:
+        return {
+            "draft": ("update", "activate", "retire"),
+            "active": ("update", "disable", "retire", "execute"),
+            "disabled": ("update", "activate", "retire"),
+            "retired": (),
+        }[obj.status]
 
 
-class AgentExecutionSerializer(serializers.ModelSerializer):
-    """Agent execution serializer."""
+class AgentDetailSerializer(serializers.ModelSerializer[Agent]):
+    config = serializers.SerializerMethodField()
+    allowed_actions = serializers.SerializerMethodField()
+    runner_status = serializers.SerializerMethodField()
+    transition_history = serializers.SerializerMethodField()
 
-    agent_name = serializers.CharField(source="agent.name", read_only=True)
-    agent_id = serializers.CharField(source="agent.id", read_only=True)
+    class Meta:
+        model = Agent
+        fields = (
+            "id", "name", "description", "identity_type", "subject_id", "session_id",
+            "runner_key", "provider_config_id", "config", "status",
+            "transition_history", "created_at", "updated_at", "deleted_at",
+            "created_by", "allowed_actions", "runner_status",
+        )
+        read_only_fields = fields
+
+    def get_config(self, obj: Agent) -> dict[str, Any]:
+        allowed = {
+            "schema_version", "budget", "cost_ceiling", "approval", "require_approval", "tools",
+            "model", "temperature", "max_tokens", "version",
+        }
+        return {key: value for key, value in obj.config.items() if key in allowed}
+
+    def get_allowed_actions(self, obj: Agent) -> tuple[str, ...]:
+        return AgentListSerializer().get_allowed_actions(obj)
+
+    def get_runner_status(self, obj: Agent) -> str:
+        from .registries import runner_registry
+
+        return "available" if runner_registry.get(obj.runner_key) is not None else "unavailable"
+
+    def get_transition_history(self, obj: Agent) -> list[dict[str, Any]]:
+        return _public_transitions(obj.transition_history)
+
+
+class AgentCreateSerializer(ClosedSerializer):
+    name = serializers.CharField(max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+    identity_type = serializers.ChoiceField(choices=("user_bound", "system_bound"))
+    subject_id = serializers.UUIDField()
+    session_id = serializers.UUIDField(required=False, allow_null=True)
+    runner_key = serializers.CharField(max_length=100)
+    provider_config_id = serializers.UUIDField(required=False, allow_null=True)
+    config = StrictJSONField(required=False, default=dict)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if attrs["identity_type"] == "user_bound" and not attrs.get("session_id"):
+            raise serializers.ValidationError({"session_id": "User-bound agents require a session."})
+        if attrs["identity_type"] == "system_bound" and attrs.get("session_id"):
+            raise serializers.ValidationError({"session_id": "System-bound agents cannot carry a session."})
+        return attrs
+
+
+class AgentUpdateSerializer(ClosedSerializer):
+    name = serializers.CharField(max_length=255, required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+    identity_type = serializers.ChoiceField(choices=("user_bound", "system_bound"), required=False)
+    subject_id = serializers.UUIDField(required=False)
+    session_id = serializers.UUIDField(required=False, allow_null=True)
+    runner_key = serializers.CharField(max_length=100, required=False)
+    provider_config_id = serializers.UUIDField(required=False, allow_null=True)
+    config = StrictJSONField(required=False)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        instance = self.context.get("agent")
+        identity = attrs.get("identity_type", getattr(instance, "identity_type", None))
+        session = attrs.get("session_id", getattr(instance, "session_id", None))
+        if identity == "user_bound" and not session:
+            raise serializers.ValidationError({"session_id": "User-bound agents require a session."})
+        if identity == "system_bound" and session:
+            raise serializers.ValidationError({"session_id": "System-bound agents cannot carry a session."})
+        return attrs
+
+
+class TransitionKeySerializer(ClosedSerializer):
+    transition_key = serializers.CharField(max_length=255)
+    reason = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+
+
+class ExecuteAgentSerializer(ClosedSerializer):
+    task = StrictJSONField()
+    input_metadata = StrictJSONField(required=False, default=dict)
+    idempotency_key = serializers.CharField(max_length=255)
+    schedule_at = serializers.DateTimeField(required=False, allow_null=True)
+
+
+class EvaluationStartSerializer(ClosedSerializer):
+    suite_key = serializers.CharField(max_length=255)
+    idempotency_key = serializers.CharField(max_length=255)
+    red_team = serializers.BooleanField(required=False, default=False)
+
+
+class AgentExecutionListSerializer(serializers.ModelSerializer[AgentExecution]):
+    allowed_actions = serializers.SerializerMethodField()
 
     class Meta:
         model = AgentExecution
-        fields = [
-            "id",
-            "agent",
-            "agent_id",
-            "agent_name",
-            "state",
-            "session_id",
-            "task_definition",
-            "started_at",
-            "completed_at",
-            "error_message",
-            "result",
-            "metadata",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "started_at", "completed_at", "created_at", "updated_at"]
+        fields = (
+            "id", "agent_id", "async_job_id", "state", "started_at",
+            "completed_at", "error_code", "created_at", "updated_at",
+            "allowed_actions",
+        )
+
+    def get_allowed_actions(self, obj: AgentExecution) -> tuple[str, ...]:
+        return {
+            "running": ("pause", "terminate"),
+            "paused": ("resume", "terminate"),
+            "created": ("terminate",),
+            "validated": ("terminate",),
+            "queued": ("terminate",),
+        }.get(obj.state, ())
 
 
-class AgentSchedulerTaskSerializer(serializers.ModelSerializer):
-    """Agent scheduler task serializer."""
+class AgentExecutionDetailSerializer(serializers.ModelSerializer[AgentExecution]):
+    allowed_actions = serializers.SerializerMethodField()
+    transition_history = serializers.SerializerMethodField()
 
-    agent_name = serializers.CharField(source="agent.name", read_only=True)
+    class Meta:
+        model = AgentExecution
+        fields = (
+            "id", "agent_id", "async_job_id", "state", "transition_history",
+            "initiating_actor_id", "started_at", "completed_at", "error_code",
+            "error_message", "provider_config_id", "created_at", "updated_at",
+            "allowed_actions",
+        )
+        read_only_fields = fields
+
+    def get_allowed_actions(self, obj: AgentExecution) -> tuple[str, ...]:
+        return AgentExecutionListSerializer().get_allowed_actions(obj)
+
+    def get_transition_history(self, obj: AgentExecution) -> list[dict[str, Any]]:
+        return _public_transitions(obj.transition_history)
+
+
+class TransitionExecutionSerializer(TransitionKeySerializer):
+    agent_id = serializers.UUIDField(required=False)
+
+
+class ScheduleCreateSerializer(ClosedSerializer):
+    agent_id = serializers.UUIDField()
+    scheduled_at = serializers.DateTimeField()
+    priority = serializers.IntegerField(min_value=-100, max_value=100, required=False, default=0)
+    max_retries = serializers.IntegerField(min_value=0, max_value=65535, required=False, default=3)
+    task_data = StrictJSONField()
+    idempotency_key = serializers.CharField(max_length=255)
+
+
+class ScheduleSerializer(serializers.ModelSerializer[AgentSchedulerTask]):
+    transition_history = serializers.SerializerMethodField()
 
     class Meta:
         model = AgentSchedulerTask
-        fields = [
-            "id",
-            "agent",
-            "agent_name",
-            "execution",
-            "priority",
-            "scheduled_at",
-            "started_at",
-            "completed_at",
-            "retry_count",
-            "max_retries",
-            "status",
-            "error_message",
-            "task_data",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "started_at", "completed_at", "created_at", "updated_at"]
+        exclude = ("tenant_id", "created_by")
+        read_only_fields = tuple(field.name for field in AgentSchedulerTask._meta.fields)
+
+    def get_transition_history(self, obj: AgentSchedulerTask) -> list[dict[str, Any]]:
+        return _public_transitions(obj.transition_history)
 
 
-# ===== Approval Serializers =====
+class ApprovalCreateSerializer(ClosedSerializer):
+    execution_id = serializers.UUIDField()
+    invocation_id = serializers.UUIDField(required=False, allow_null=True)
+    tool_id = serializers.UUIDField()
+    requested_for = serializers.UUIDField()
+    tool_input = StrictJSONField()
+    justification = serializers.CharField(required=False, allow_blank=True, default="")
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
+    metadata = StrictJSONField(required=False, default=dict)
 
 
-class ApprovalRequestSerializer(serializers.ModelSerializer):
-    """Approval request serializer."""
+class ApprovalDecisionSerializer(ClosedSerializer):
+    transition_key = serializers.CharField(max_length=255)
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
 
-    tool_name = serializers.CharField(source="tool.name", read_only=True)
-    agent_execution_id = serializers.CharField(source="agent_execution.id", read_only=True)
+
+class ApprovalRequestSerializer(serializers.ModelSerializer[ApprovalRequest]):
+    allowed_actions = serializers.SerializerMethodField()
+    transition_history = serializers.SerializerMethodField()
 
     class Meta:
         model = ApprovalRequest
-        fields = [
-            "id",
-            "tool",
-            "tool_name",
-            "agent_execution",
-            "agent_execution_id",
-            "tool_invocation",
-            "requested_by",
-            "requested_for",
-            "approver_id",
-            "status",
-            "tool_input",
-            "justification",
-            "rejection_reason",
-            "requested_at",
-            "expires_at",
-            "decided_at",
-            "metadata",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "approver_id", "decided_at", "created_at", "updated_at"]
+        fields = (
+            "id", "tool_id", "agent_execution_id", "tool_invocation_id",
+            "requested_by", "requested_for", "approver_id", "status",
+            "transition_history", "justification", "rejection_reason",
+            "requested_at", "expires_at", "decided_at", "created_at", "updated_at",
+            "allowed_actions",
+        )
+        read_only_fields = fields
+
+    def get_allowed_actions(self, obj: ApprovalRequest) -> tuple[str, ...]:
+        return ("approve", "reject", "cancel") if obj.status == "pending" else ()
+
+    def get_transition_history(self, obj: ApprovalRequest) -> list[dict[str, Any]]:
+        return _public_transitions(obj.transition_history)
 
 
-class SoDPolicySerializer(serializers.ModelSerializer):
-    """SoD policy serializer."""
-
-    class Meta:
-        model = SoDPolicy
-        fields = [
-            "id",
-            "tenant_id",
-            "name",
-            "description",
-            "action_1",
-            "action_2",
-            "is_active",
-            "created_by",
-            "created_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "created_at"]
+class SoDPolicyWriteSerializer(ClosedSerializer):
+    name = serializers.CharField(max_length=255, required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+    action_1 = serializers.CharField(max_length=255, required=False)
+    action_2 = serializers.CharField(max_length=255, required=False)
+    is_active = serializers.BooleanField(required=False)
 
 
-class SoDViolationSerializer(serializers.ModelSerializer):
-    """SoD violation serializer."""
-
-    policy_name = serializers.CharField(source="policy.name", read_only=True)
-
-    class Meta:
-        model = SoDViolation
-        fields = [
-            "id",
-            "policy",
-            "policy_name",
-            "agent_execution",
-            "tool_invocation",
-            "action_1_user",
-            "action_2_user",
-            "action_1_timestamp",
-            "action_2_timestamp",
-            "blocked",
-            "violation_at",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "violation_at", "created_at", "updated_at"]
+class ToolWriteSerializer(ClosedSerializer):
+    name = serializers.CharField(max_length=255, required=False)
+    owning_module = serializers.CharField(max_length=100, required=False)
+    version = serializers.CharField(max_length=50, required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+    required_permissions = StrictJSONField(expected_type=list, required=False)
+    input_schema = StrictJSONField(required=False)
+    output_schema = StrictJSONField(required=False)
+    side_effect_class = serializers.ChoiceField(choices=("read_only", "workflow_transition", "data_mutation", "external_integration"), required=False)
+    is_active = serializers.BooleanField(required=False)
+    metadata = StrictJSONField(required=False)
 
 
-# ===== Quota Serializers =====
+class ToolValidationSerializer(ClosedSerializer):
+    direction = serializers.ChoiceField(choices=("input", "output"))
+    value = StrictJSONField()
 
 
-class TenantQuotaSerializer(serializers.ModelSerializer):
-    """Tenant quota serializer."""
-
-    class Meta:
-        model = TenantQuota
-        fields = [
-            "id",
-            "tenant_id",
-            "quota_type",
-            "period",
-            "limit_value",
-            "current_usage",
-            "reset_at",
-            "is_active",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "current_usage", "created_at", "updated_at"]
+class EgressRuleWriteSerializer(ClosedSerializer):
+    name = serializers.CharField(max_length=255, required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+    destination_type = serializers.ChoiceField(choices=("domain", "ip", "cidr", "url_pattern"), required=False)
+    destination = serializers.CharField(max_length=500, required=False)
+    port = serializers.IntegerField(min_value=1, max_value=65535, required=False, allow_null=True)
+    protocol = serializers.ChoiceField(choices=("http", "https", "tcp", "udp"), required=False)
+    is_active = serializers.BooleanField(required=False)
 
 
-class QuotaUsageSerializer(serializers.ModelSerializer):
-    """Quota usage serializer."""
-
-    quota_type = serializers.CharField(source="quota.quota_type", read_only=True)
-
-    class Meta:
-        model = QuotaUsage
-        fields = [
-            "id",
-            "tenant_id",
-            "quota",
-            "quota_type",
-            "agent_execution",
-            "usage_value",
-            "usage_timestamp",
-            "metadata",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "usage_timestamp", "created_at", "updated_at"]
+class SecretCreateSerializer(ClosedSerializer):
+    name = serializers.CharField(max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+    secret_type = serializers.ChoiceField(choices=("api_key", "password", "token", "certificate", "other"))
+    plaintext = serializers.CharField(trim_whitespace=False, write_only=True)
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
+    rotation_interval_days = serializers.IntegerField(min_value=1, required=False, allow_null=True)
 
 
-class ShardSaturationSerializer(serializers.ModelSerializer):
-    """Shard saturation serializer."""
-
-    class Meta:
-        model = ShardSaturation
-        fields = [
-            "id",
-            "tenant_id",
-            "shard_id",
-            "saturation_level",
-            "active_agents",
-            "active_executions",
-            "cpu_usage_percent",
-            "memory_usage_percent",
-            "measured_at",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "measured_at", "created_at", "updated_at"]
+class SecretRotateSerializer(ClosedSerializer):
+    plaintext = serializers.CharField(trim_whitespace=False, write_only=True)
 
 
-class KillSwitchSerializer(serializers.ModelSerializer):
-    """Kill switch serializer."""
-
-    class Meta:
-        model = KillSwitch
-        fields = [
-            "id",
-            "tenant_id",
-            "name",
-            "description",
-            "scope",
-            "scope_id",
-            "is_active",
-            "reason",
-            "activated_by",
-            "activated_at",
-            "deactivated_at",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "activated_at", "created_at", "updated_at"]
-
-
-# ===== Tool Serializers =====
-
-
-class ToolSerializer(serializers.ModelSerializer):
-    """Tool serializer."""
-
-    class Meta:
-        model = Tool
-        fields = [
-            "id",
-            "tenant_id",
-            "name",
-            "owning_module",
-            "version",
-            "description",
-            "required_permissions",
-            "input_schema",
-            "output_schema",
-            "side_effect_class",
-            "is_active",
-            "metadata",
-            "registered_by",
-            "registered_at",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "registered_at", "created_at", "updated_at"]
-
-
-class ToolInvocationSerializer(serializers.ModelSerializer):
-    """Tool invocation serializer."""
-
-    tool_name = serializers.CharField(source="tool.name", read_only=True)
-    agent_execution_id = serializers.CharField(source="agent_execution.id", read_only=True, allow_null=True)
-
-    class Meta:
-        model = ToolInvocation
-        fields = [
-            "id",
-            "tenant_id",
-            "tool",
-            "tool_name",
-            "agent_execution",
-            "agent_execution_id",
-            "input_data",
-            "output_data",
-            "success",
-            "error_message",
-            "invoked_at",
-            "completed_at",
-            "duration_ms",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "invoked_at", "completed_at", "created_at", "updated_at"]
-
-
-# ===== Egress Serializers =====
-
-
-class EgressRuleSerializer(serializers.ModelSerializer):
-    """Egress rule serializer."""
-
-    class Meta:
-        model = EgressRule
-        fields = [
-            "id",
-            "tenant_id",
-            "name",
-            "description",
-            "destination_type",
-            "destination",
-            "port",
-            "protocol",
-            "is_active",
-            "created_by",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
-
-
-class EgressRequestSerializer(serializers.ModelSerializer):
-    """Egress request serializer."""
-
-    agent_execution_id = serializers.CharField(source="agent_execution.id", read_only=True)
-    matched_rule_name = serializers.CharField(source="matched_rule.name", read_only=True, allow_null=True)
-
-    class Meta:
-        model = EgressRequest
-        fields = [
-            "id",
-            "tenant_id",
-            "agent_execution",
-            "agent_execution_id",
-            "destination",
-            "port",
-            "protocol",
-            "allowed",
-            "matched_rule",
-            "matched_rule_name",
-            "requested_at",
-            "metadata",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "requested_at", "created_at", "updated_at"]
-
-
-class SecretSerializer(serializers.ModelSerializer):
-    """Secret serializer."""
-
+class SecretMetadataSerializer(serializers.ModelSerializer[Secret]):
     class Meta:
         model = Secret
-        fields = [
-            "id",
-            "tenant_id",
-            "name",
-            "description",
-            "secret_type",
-            "encrypted_value",
-            "encryption_key_id",
-            "is_active",
-            "expires_at",
-            "last_rotated_at",
-            "rotation_interval_days",
-            "created_by",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
-
-    def validate(self, data):
-        """Validate secret data."""
-        # Don't expose encrypted_value in responses
-        if self.instance and "encrypted_value" not in data:
-            # If updating and encrypted_value not provided, keep existing
-            pass
-        return data
+        fields = ("id", "name", "description", "secret_type", "is_active", "expires_at", "last_rotated_at", "rotation_interval_days", "created_at", "updated_at")
+        read_only_fields = fields
 
 
-class SecretAccessSerializer(serializers.ModelSerializer):
-    """Secret access serializer."""
+class KillSwitchActivateSerializer(ClosedSerializer):
+    name = serializers.CharField(max_length=255, required=False, default="Emergency control")
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+    scope = serializers.ChoiceField(choices=("tenant", "shard", "agent"))
+    scope_id = serializers.UUIDField(required=False, allow_null=True)
+    reason = serializers.CharField(max_length=2000)
+    transition_key = serializers.CharField(max_length=255)
 
-    secret_name = serializers.CharField(source="secret.name", read_only=True)
 
+class KillSwitchDeactivateSerializer(ClosedSerializer):
+    reason = serializers.CharField(max_length=2000)
+    transition_key = serializers.CharField(max_length=255)
+
+
+class CostRecalculationSerializer(ClosedSerializer):
+    period_start = serializers.DateTimeField()
+    period_end = serializers.DateTimeField()
+    period_type = serializers.ChoiceField(choices=("hourly", "daily", "weekly", "monthly"))
+    currency = serializers.RegexField(r"^[A-Z]{3}$")
+    idempotency_key = serializers.CharField(max_length=255)
+
+
+def evidence_serializer(name: str, model: type, *, exclude: tuple[str, ...] = ("tenant_id",)) -> type[serializers.ModelSerializer]:
+    meta = type("Meta", (), {"model": model, "exclude": exclude, "read_only_fields": tuple(field.name for field in model._meta.fields)})
+    return type(name, (serializers.ModelSerializer,), {"Meta": meta, "__module__": __name__})
+
+
+SoDPolicySerializer = evidence_serializer("SoDPolicySerializer", SoDPolicy)
+SoDViolationSerializer = evidence_serializer("SoDViolationSerializer", SoDViolation)
+ToolSerializer = evidence_serializer("ToolSerializer", Tool)
+class ToolInvocationSerializer(serializers.ModelSerializer[ToolInvocation]):
     class Meta:
-        model = SecretAccess
-        fields = [
-            "id",
-            "tenant_id",
-            "secret",
-            "secret_name",
-            "agent_execution",
-            "accessed_by",
-            "accessed_at",
-            "metadata",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "accessed_at", "created_at", "updated_at"]
-
-
-# ===== Audit Serializers =====
-
-
-class AuditEventSerializer(serializers.ModelSerializer):
-    """Audit event serializer."""
-
-    agent_execution_id = serializers.CharField(source="agent_execution.id", read_only=True, allow_null=True)
-    tool_invocation_id = serializers.CharField(source="tool_invocation.id", read_only=True, allow_null=True)
-    approval_request_id = serializers.CharField(source="approval_request.id", read_only=True, allow_null=True)
-
-    class Meta:
-        model = AuditEvent
-        fields = [
-            "id",
-            "tenant_id",
-            "event_type",
-            "agent_execution",
-            "agent_execution_id",
-            "tool_invocation",
-            "tool_invocation_id",
-            "approval_request",
-            "approval_request_id",
-            "initiating_principal",
-            "subject_id",
-            "session_id",
-            "request_id",
-            "event_timestamp",
-            "outcome",
-            "outcome_details",
-            "policy_decisions",
-            "workflow_transitions",
-            "affected_resources",
-            "metadata",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "event_timestamp", "created_at", "updated_at"]
-
-
-class AuditTrailSerializer(serializers.ModelSerializer):
-    """Audit trail serializer."""
-
-    agent_execution_id = serializers.CharField(source="agent_execution.id", read_only=True)
-
-    class Meta:
-        model = AuditTrail
-        fields = [
-            "id",
-            "tenant_id",
-            "request_id",
-            "agent_execution",
-            "agent_execution_id",
-            "initiating_principal",
-            "request_timestamp",
-            "completed_timestamp",
-            "final_outcome",
-            "summary",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "request_timestamp", "created_at", "updated_at"]
-
-
-# ===== Token Serializers =====
-
-
-class TokenUsageSerializer(serializers.ModelSerializer):
-    """Token usage serializer."""
-
-    agent_execution_id = serializers.CharField(source="agent_execution.id", read_only=True)
-
-    class Meta:
-        model = TokenUsage
-        fields = [
-            "id",
-            "tenant_id",
-            "agent_execution",
-            "agent_execution_id",
-            "provider",
-            "model",
-            "input_tokens",
-            "output_tokens",
-            "total_tokens",
-            "usage_timestamp",
-            "metadata",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "usage_timestamp", "created_at", "updated_at"]
-
-
-class CostRecordSerializer(serializers.ModelSerializer):
-    """Cost record serializer."""
-
-    agent_execution_id = serializers.CharField(source="agent_execution.id", read_only=True, allow_null=True)
-    tool_invocation_id = serializers.CharField(source="tool_invocation.id", read_only=True, allow_null=True)
+        model = ToolInvocation
+        fields = (
+            "id", "tool_id", "agent_execution_id", "approval_request_id", "status",
+            "transition_history", "error_code", "error_message", "invoked_at",
+            "completed_at", "duration_ms", "created_at", "updated_at",
+        )
+        read_only_fields = fields
+EgressRuleSerializer = evidence_serializer("EgressRuleSerializer", EgressRule)
+EgressRequestSerializer = evidence_serializer("EgressRequestSerializer", EgressRequest)
+SecretAccessSerializer = evidence_serializer("SecretAccessSerializer", SecretAccess)
+QuotaSerializer = evidence_serializer("QuotaSerializer", Quota)
+QuotaUsageSerializer = evidence_serializer("QuotaUsageSerializer", QuotaUsage)
+ShardSaturationSerializer = evidence_serializer("ShardSaturationSerializer", ShardSaturation)
+KillSwitchSerializer = evidence_serializer("KillSwitchSerializer", KillSwitch)
+TokenUsageSerializer = evidence_serializer("TokenUsageSerializer", TokenUsage)
+class CostRecordSerializer(serializers.ModelSerializer[CostRecord]):
+    pricing_available = serializers.SerializerMethodField()
 
     class Meta:
         model = CostRecord
-        fields = [
-            "id",
-            "tenant_id",
-            "agent_execution",
-            "agent_execution_id",
-            "tool_invocation",
-            "tool_invocation_id",
-            "module_name",
-            "cost_type",
-            "provider",
-            "amount",
-            "currency",
-            "cost_timestamp",
-            "metadata",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "cost_timestamp", "created_at", "updated_at"]
+        exclude = ("tenant_id", "metadata")
+        read_only_fields = tuple(field.name for field in CostRecord._meta.fields)
 
-
-class CostSummarySerializer(serializers.ModelSerializer):
-    """Cost summary serializer."""
+    def get_pricing_available(self, obj: CostRecord) -> bool:
+        # A record is only persisted after versioned pricing resolves; unknown
+        # pricing returns 503/unavailable and creates no cost record.
+        return bool(obj.pricing_version)
+CostSummarySerializer = evidence_serializer("CostSummarySerializer", CostSummary)
+AuditEventSerializer = evidence_serializer("AuditEventSerializer", AuditEvent)
+class AuditTrailSerializer(serializers.ModelSerializer[AuditTrail]):
+    events = serializers.SerializerMethodField()
 
     class Meta:
-        model = CostSummary
-        fields = [
-            "id",
-            "tenant_id",
-            "period_start",
-            "period_end",
-            "period_type",
-            "total_cost",
-            "currency",
-            "cost_by_type",
-            "cost_by_module",
-            "cost_by_provider",
-            "total_tokens",
-            "total_executions",
-            "created_at",
+        model = AuditTrail
+        fields = (
+            "id", "request_id", "correlation_id", "agent_execution_id",
+            "initiating_principal", "request_timestamp", "completed_timestamp",
+            "final_outcome", "summary", "events", "created_at", "updated_at",
+        )
+        read_only_fields = fields
+
+    def get_events(self, obj: AuditTrail) -> list[dict[str, Any]]:
+        events = [
+            link.audit_event
+            for link in obj.ordered_events.select_related("audit_event").order_by("position", "id")
         ]
-        read_only_fields = ["id", "tenant_id", "created_at"]
+        return AuditEventSerializer(events, many=True).data
+
+
+class AsyncJobSerializer(serializers.ModelSerializer[AsyncJob]):
+    """Sanitized durable-job projection; command payload and actor stay private."""
+
+    class Meta:
+        model = AsyncJob
+        fields = (
+            "id", "command", "status", "result", "error_message", "attempts",
+            "correlation_id", "started_at", "completed_at", "created_at", "updated_at",
+        )
+        read_only_fields = fields
+
+# Compatibility aliases for legacy imports while v1 is phased out.
+AgentSerializer = AgentDetailSerializer
+AgentExecutionSerializer = AgentExecutionDetailSerializer
+AgentSchedulerTaskSerializer = ScheduleSerializer
+TenantQuotaSerializer = QuotaSerializer

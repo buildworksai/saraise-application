@@ -62,8 +62,8 @@ class TokenUsage:
 
     @property
     def cost(self) -> float:
-        """Placeholder — actual cost computed by provider with its rates."""
-        return 0.0
+        """Reject unversioned pricing rather than inventing a zero cost."""
+        raise RuntimeError("Cost is unavailable without a versioned provider pricing record")
 
 
 @dataclass

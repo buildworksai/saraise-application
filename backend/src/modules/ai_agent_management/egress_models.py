@@ -1,204 +1,230 @@
-"""Egress Allowlisting Models.
-
-Database models for egress allowlisting and secret isolation.
-Task: 402.1 - Egress Allowlisting & Secret Isolation
-"""
+"""Egress policy, decision evidence, and envelope-encrypted secret metadata."""
 
 from __future__ import annotations
 
+import ipaddress
 import uuid
 
+from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models import Q
+from django.utils import timezone
 
-from .models import TenantBaseModel
+from src.core.tenancy.registry import TENANT_SCOPED, tenancy_scope
+
+from .models import AITenantModel, AppendOnlyTenantModel, validate_same_tenant
 
 
-def generate_uuid():
-    """Generate UUID for model primary keys."""
+def generate_uuid() -> str:
+    """Preserve the callable referenced by migration 0001."""
+
     return str(uuid.uuid4())
 
 
-class EgressRule(TenantBaseModel):
-    """Egress allowlist rule model.
+class EgressDestinationType(models.TextChoices):
+    DOMAIN = "domain", "Domain"
+    IP = "ip", "IP address"
+    CIDR = "cidr", "CIDR"
+    URL_PATTERN = "url_pattern", "URL pattern"
 
-    Defines allowed egress destinations for AI agents.
-    """
 
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    name = models.CharField(max_length=255, db_index=True)
-    description = models.TextField(blank=True)
-    destination_type = models.CharField(
-        max_length=50,
-        choices=[
-            ("domain", "Domain"),
-            ("ip", "IP Address"),
-            ("cidr", "CIDR Block"),
-            ("url_pattern", "URL Pattern"),
-        ],
-        db_index=True,
-        help_text="Type of destination",
-    )
-    destination = models.CharField(
-        max_length=500,
-        db_index=True,
-        help_text="Destination (domain, IP, CIDR, or URL pattern)",
-    )
-    port = models.IntegerField(
+class EgressProtocol(models.TextChoices):
+    HTTP = "http", "HTTP"
+    HTTPS = "https", "HTTPS"
+    TCP = "tcp", "TCP"
+    UDP = "udp", "UDP"
+
+
+class SecretType(models.TextChoices):
+    API_KEY = "api_key", "API key"
+    PASSWORD = "password", "Password"
+    TOKEN = "token", "Token"
+    CERTIFICATE = "certificate", "Certificate"
+    OTHER = "other", "Other"
+
+
+@tenancy_scope(TENANT_SCOPED)
+class EgressRule(AITenantModel):
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    destination_type = models.CharField(max_length=20, choices=EgressDestinationType.choices)
+    destination = models.CharField(max_length=500)
+    port = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="Port number (null for all ports)",
+        validators=(MinValueValidator(1), MaxValueValidator(65535)),
     )
-    protocol = models.CharField(
-        max_length=10,
-        choices=[
-            ("http", "HTTP"),
-            ("https", "HTTPS"),
-            ("tcp", "TCP"),
-            ("udp", "UDP"),
-            ("all", "All"),
-        ],
-        default="https",
-        db_index=True,
-    )
-    is_active = models.BooleanField(default=True, db_index=True)
-    created_by = models.CharField(max_length=36, db_index=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    protocol = models.CharField(max_length=10, choices=EgressProtocol.choices, default=EgressProtocol.HTTPS)
+    is_active = models.BooleanField(default=True)
+    created_by = models.UUIDField()
 
     class Meta:
         db_table = "ai_egress_rules"
-        indexes = [
-            models.Index(fields=["tenant_id", "destination_type"]),
-            models.Index(fields=["tenant_id", "is_active"]),
-            models.Index(fields=["tenant_id", "destination"]),
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "destination_type", "destination", "port", "protocol"),
+                name="ai_egress_t_target_uniq",
+                nulls_distinct=False,
+            ),
+            models.CheckConstraint(
+                condition=Q(port__isnull=True) | Q(port__gte=1, port__lte=65535),
+                name="ai_egress_port_ck",
+            ),
         ]
+        indexes = [
+            models.Index(fields=("tenant_id", "is_active", "destination_type"), name="ai_egress_t_active_idx"),
+            models.Index(fields=("tenant_id", "destination"), name="ai_egress_t_dest_idx"),
+        ]
+        ordering = ("name", "id")
+
+    def clean(self) -> None:
+        destination = self.destination.strip().lower().rstrip(".")
+        if not destination or "*" in destination:
+            raise ValidationError({"destination": "Wildcards and blank destinations are forbidden."})
+        if self.destination_type in (EgressDestinationType.IP, EgressDestinationType.CIDR):
+            try:
+                address = (
+                    ipaddress.ip_address(destination)
+                    if self.destination_type == EgressDestinationType.IP
+                    else ipaddress.ip_network(destination, strict=True)
+                )
+            except ValueError as exc:
+                raise ValidationError({"destination": "Enter a canonical IP address or CIDR."}) from exc
+            if not address.is_global:
+                raise ValidationError({"destination": "Internal, reserved, and metadata destinations are forbidden."})
+            destination = str(address)
+        elif self.destination_type == EgressDestinationType.DOMAIN:
+            if "://" in destination or "/" in destination or destination == "localhost" or "." not in destination:
+                raise ValidationError({"destination": "Enter a canonical public DNS name."})
+        elif self.destination_type == EgressDestinationType.URL_PATTERN:
+            if not destination.startswith(("https://", "http://")) or any(
+                token in destination for token in ("*", "[", "]", "(")
+            ):
+                raise ValidationError(
+                    {"destination": "URL patterns must be exact public HTTP(S) prefixes without wildcards."}
+                )
+        self.destination = destination
 
     def __str__(self) -> str:
         return f"Egress Rule: {self.destination} ({self.destination_type})"
 
 
-class EgressRequest(TenantBaseModel):
-    """Egress request tracking model.
-
-    Tracks egress requests for audit and monitoring.
-    """
-
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
+@tenancy_scope(TENANT_SCOPED)
+class EgressRequest(AppendOnlyTenantModel):
     agent_execution = models.ForeignKey(
         "AgentExecution",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="egress_requests",
-        db_index=True,
     )
-    destination = models.CharField(max_length=500, db_index=True, help_text="Requested destination")
-    port = models.IntegerField(null=True, blank=True)
-    protocol = models.CharField(max_length=10, db_index=True)
-    allowed = models.BooleanField(db_index=True, help_text="Whether request was allowed")
+    destination = models.CharField(max_length=500)
+    resolved_address = models.GenericIPAddressField(null=True, blank=True, unpack_ipv4=True)
+    port = models.PositiveIntegerField(validators=(MinValueValidator(1), MaxValueValidator(65535)))
+    protocol = models.CharField(max_length=10, choices=EgressProtocol.choices)
+    allowed = models.BooleanField()
     matched_rule = models.ForeignKey(
         EgressRule,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
+        related_name="matched_requests",
         null=True,
         blank=True,
-        related_name="matched_requests",
-        db_index=True,
     )
-    requested_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    metadata = models.JSONField(default=dict, help_text="Request metadata")
+    requested_at = models.DateTimeField(auto_now_add=True)
+    reason_code = models.CharField(max_length=100)
+    metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
         db_table = "ai_egress_requests"
-        indexes = [
-            models.Index(fields=["tenant_id", "agent_execution_id"]),
-            models.Index(fields=["tenant_id", "allowed"]),
-            models.Index(fields=["tenant_id", "requested_at"]),
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(allowed=False) | Q(matched_rule__isnull=False),
+                name="ai_egress_allowed_rule_ck",
+            ),
+            models.CheckConstraint(condition=Q(port__gte=1, port__lte=65535), name="ai_egress_request_port_ck"),
         ]
+        indexes = [
+            models.Index(fields=("tenant_id", "agent_execution", "requested_at"), name="ai_egress_req_t_exec_idx"),
+            models.Index(fields=("tenant_id", "allowed", "requested_at"), name="ai_egress_req_t_allow_idx"),
+        ]
+        ordering = ("-requested_at", "id")
+
+    def clean(self) -> None:
+        validate_same_tenant(self, "agent_execution", "matched_rule")
+        if self.allowed and self.matched_rule_id and not self.matched_rule.is_active:
+            raise ValidationError({"matched_rule": "An allowed request requires an active rule."})
+        if not isinstance(self.metadata, dict):
+            raise ValidationError({"metadata": "Must be a JSON object."})
 
     def __str__(self) -> str:
-        return f"Egress Request {self.id} to {self.destination} ({'allowed' if self.allowed else 'blocked'})"
+        return f"Egress Request {self.id} ({'allowed' if self.allowed else 'blocked'})"
 
 
-class Secret(TenantBaseModel):
-    """Secret storage model.
-
-    Stores secrets for AI agents with per-tenant isolation.
-    """
-
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    name = models.CharField(max_length=255, db_index=True)
-    description = models.TextField(blank=True)
-    secret_type = models.CharField(
-        max_length=50,
-        choices=[
-            ("api_key", "API Key"),
-            ("password", "Password"),
-            ("token", "Token"),
-            ("certificate", "Certificate"),
-            ("other", "Other"),
-        ],
-        db_index=True,
-    )
-    encrypted_value = models.TextField(help_text="Encrypted secret value (base64 encoded)")
-    encryption_key_id = models.CharField(
-        max_length=100,
-        help_text="Key ID used for encryption",
-    )
-    is_active = models.BooleanField(default=True, db_index=True)
-    expires_at = models.DateTimeField(null=True, blank=True, db_index=True, help_text="Secret expiration time")
-    last_rotated_at = models.DateTimeField(null=True, blank=True, help_text="When secret was last rotated")
-    rotation_interval_days = models.IntegerField(
-        null=True,
-        blank=True,
-        help_text="Rotation interval in days",
-    )
-    created_by = models.CharField(max_length=36, db_index=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+@tenancy_scope(TENANT_SCOPED)
+class Secret(AITenantModel):
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    secret_type = models.CharField(max_length=20, choices=SecretType.choices)
+    ciphertext = models.TextField(editable=False)
+    wrapped_data_key = models.TextField(editable=False)
+    key_id = models.CharField(max_length=255, editable=False)
+    is_active = models.BooleanField(default=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    last_rotated_at = models.DateTimeField(default=timezone.now)
+    rotation_interval_days = models.PositiveIntegerField(null=True, blank=True)
+    created_by = models.UUIDField()
 
     class Meta:
         db_table = "ai_secrets"
-        indexes = [
-            models.Index(fields=["tenant_id", "name"]),
-            models.Index(fields=["tenant_id", "secret_type"]),
-            models.Index(fields=["tenant_id", "is_active"]),
-            models.Index(fields=["tenant_id", "expires_at"]),
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "name"), name="ai_secret_t_name_uniq"),
+            models.CheckConstraint(
+                condition=Q(rotation_interval_days__isnull=True) | Q(rotation_interval_days__gt=0),
+                name="ai_secret_rotation_ck",
+            ),
+            models.CheckConstraint(
+                condition=Q(expires_at__isnull=True) | Q(expires_at__gt=models.F("created_at")),
+                name="ai_secret_expiry_ck",
+            ),
         ]
-        unique_together = [["tenant_id", "name"]]
+        indexes = [
+            models.Index(fields=("tenant_id", "name"), name="ai_secret_t_name_idx"),
+            models.Index(fields=("tenant_id", "is_active", "expires_at"), name="ai_secret_t_active_idx"),
+        ]
+        ordering = ("name", "id")
 
     def __str__(self) -> str:
         return f"Secret {self.name} ({self.secret_type})"
 
 
-class SecretAccess(TenantBaseModel):
-    """Secret access tracking model.
-
-    Tracks secret access for audit and monitoring.
-    """
-
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    secret = models.ForeignKey(
-        Secret,
-        on_delete=models.CASCADE,
-        related_name="access_logs",
-        db_index=True,
-    )
+@tenancy_scope(TENANT_SCOPED)
+class SecretAccess(AppendOnlyTenantModel):
+    secret = models.ForeignKey(Secret, on_delete=models.PROTECT, related_name="access_logs")
     agent_execution = models.ForeignKey(
         "AgentExecution",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="secret_accesses",
         null=True,
         blank=True,
-        db_index=True,
     )
-    accessed_by = models.CharField(max_length=36, db_index=True, help_text="User/agent who accessed secret")
-    accessed_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    metadata = models.JSONField(default=dict, help_text="Access metadata")
+    accessed_by = models.UUIDField()
+    accessed_at = models.DateTimeField(auto_now_add=True)
+    purpose = models.CharField(max_length=255)
+    metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
         db_table = "ai_secret_accesses"
         indexes = [
-            models.Index(fields=["tenant_id", "secret_id"]),
-            models.Index(fields=["tenant_id", "agent_execution_id"]),
-            models.Index(fields=["tenant_id", "accessed_by"]),
-            models.Index(fields=["tenant_id", "accessed_at"]),
+            models.Index(fields=("tenant_id", "secret", "accessed_at"), name="ai_secret_acc_t_secret_idx"),
+            models.Index(fields=("tenant_id", "agent_execution", "accessed_at"), name="ai_secret_acc_t_exec_idx"),
         ]
+        ordering = ("-accessed_at", "id")
+
+    def clean(self) -> None:
+        validate_same_tenant(self, "secret", "agent_execution")
+        if not self.purpose.strip():
+            raise ValidationError({"purpose": "A nonblank access purpose is required."})
+        if not isinstance(self.metadata, dict):
+            raise ValidationError({"metadata": "Must be a JSON object."})
 
     def __str__(self) -> str:
-        return f"Secret Access {self.id} for {self.secret.name}"
+        return f"Secret Access {self.id}"

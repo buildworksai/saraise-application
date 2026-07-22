@@ -5,7 +5,7 @@ import {
   type AgentUpdateRequest, type ApprovalCreateRequest, type ApprovalDecisionRequest, type ApprovalDetail,
   type ApprovalFilters, type ApprovalListItem, type AsyncJob, type AuditEvent, type AuditFilters, type AuditTrail,
   type CostRecord, type CostRecalculationRequest, type CostSummary, type EgressRequest, type EgressRule,
-  type EgressRuleRequest, type EvaluationResult, type EvaluationStartRequest, type EvidenceFilters,
+  type EgressRuleRequest, type EvaluationStartRequest, type EvidenceFilters,
   type ExecuteAgentRequest, type AgentExecutionDetail, type AgentExecutionListItem, type ExecutionFilters,
   type KillSwitch, type KillSwitchActivateRequest, type LifecycleRequest, type ModuleHealth, type PageRequest,
   type PageResult, type Quota, type QuotaUsage, type ScheduleCreateRequest, type ScheduleDetail, type ScheduleFilters,
@@ -36,7 +36,7 @@ export const aiAgentService = {
   activateAgent: (id: string, body: LifecycleRequest) => post<AgentDetail>(ENDPOINTS.AGENTS.ACTIVATE(id), body),
   disableAgent: (id: string, body: LifecycleRequest) => post<AgentDetail>(ENDPOINTS.AGENTS.DISABLE(id), body),
   executeAgent: (id: string, body: ExecuteAgentRequest) => post<AgentExecutionDetail>(ENDPOINTS.AGENTS.EXECUTE(id), body),
-  evaluateAgent: (id: string, body: EvaluationStartRequest) => post<EvaluationResult>(ENDPOINTS.AGENTS.EVALUATE(id), body),
+  evaluateAgent: (id: string, body: EvaluationStartRequest) => post<AsyncJob>(ENDPOINTS.AGENTS.EVALUATE(id), body),
 
   listExecutions: (filters: ExecutionFilters = {}) => getPage<AgentExecutionListItem>(withQuery(ENDPOINTS.EXECUTIONS.LIST, filters)),
   getExecution: (id: string) => get<AgentExecutionDetail>(ENDPOINTS.EXECUTIONS.DETAIL(id)),

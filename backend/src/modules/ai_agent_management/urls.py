@@ -1,39 +1,40 @@
-"""
-URL routing for AI Agent Management module.
-"""
+"""Normative API v2 routes (also mounted under the compatibility v1 path)."""
 
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .api import (
-    AgentExecutionViewSet,
-    AgentSchedulerTaskViewSet,
-    AgentViewSet,
-    ApprovalRequestViewSet,
-    QuotaUsageViewSet,
-    SoDPolicyViewSet,
-    SoDViolationViewSet,
-    TenantQuotaViewSet,
-    ToolInvocationViewSet,
-    ToolViewSet,
+    AgentExecutionViewSet, AgentViewSet, ApprovalRequestViewSet, AsyncJobViewSet,
+    AuditEventViewSet, AuditTrailViewSet, CostRecordViewSet, CostSummaryViewSet,
+    EgressRequestViewSet, EgressRuleViewSet, KillSwitchViewSet, QuotaUsageViewSet,
+    QuotaViewSet, ScheduleViewSet, SecretAccessViewSet, SecretViewSet,
+    ShardSaturationViewSet, SoDPolicyViewSet, SoDViolationViewSet,
+    TokenUsageViewSet, ToolInvocationViewSet, ToolViewSet,
 )
-from .health import health_check
+from .health import ModuleHealthView
 
-# Create router and register ViewSets
 router = DefaultRouter()
-router.register(r"agents", AgentViewSet, basename="agent")
-router.register(r"executions", AgentExecutionViewSet, basename="execution")
-router.register(r"scheduler-tasks", AgentSchedulerTaskViewSet, basename="scheduler-task")
-router.register(r"approvals", ApprovalRequestViewSet, basename="approval")
-router.register(r"sod-policies", SoDPolicyViewSet, basename="sod-policy")
-router.register(r"sod-violations", SoDViolationViewSet, basename="sod-violation")
-router.register(r"quotas", TenantQuotaViewSet, basename="quota")
-router.register(r"quota-usage", QuotaUsageViewSet, basename="quota-usage")
-router.register(r"tools", ToolViewSet, basename="tool")
-router.register(r"tool-invocations", ToolInvocationViewSet, basename="tool-invocation")
+router.register("agents", AgentViewSet, basename="agent")
+router.register("executions", AgentExecutionViewSet, basename="execution")
+router.register("schedules", ScheduleViewSet, basename="schedule")
+router.register("approvals", ApprovalRequestViewSet, basename="approval")
+router.register("sod-policies", SoDPolicyViewSet, basename="sod-policy")
+router.register("sod-violations", SoDViolationViewSet, basename="sod-violation")
+router.register("tools", ToolViewSet, basename="tool")
+router.register("tool-invocations", ToolInvocationViewSet, basename="tool-invocation")
+router.register("egress-rules", EgressRuleViewSet, basename="egress-rule")
+router.register("egress-requests", EgressRequestViewSet, basename="egress-request")
+router.register("secrets", SecretViewSet, basename="secret")
+router.register("secret-accesses", SecretAccessViewSet, basename="secret-access")
+router.register("quotas", QuotaViewSet, basename="quota")
+router.register("quota-usage", QuotaUsageViewSet, basename="quota-usage")
+router.register("saturation", ShardSaturationViewSet, basename="saturation")
+router.register("kill-switches", KillSwitchViewSet, basename="kill-switch")
+router.register("token-usage", TokenUsageViewSet, basename="token-usage")
+router.register("cost-records", CostRecordViewSet, basename="cost-record")
+router.register("cost-summaries", CostSummaryViewSet, basename="cost-summary")
+router.register("audit-events", AuditEventViewSet, basename="audit-event")
+router.register("audit-trails", AuditTrailViewSet, basename="audit-trail")
+router.register("jobs", AsyncJobViewSet, basename="job")
 
-# URL patterns
-urlpatterns = [
-    path("", include(router.urls)),
-    path("health/", health_check, name="health_check"),
-]
+urlpatterns = [path("", include(router.urls)), path("health/", ModuleHealthView.as_view(), name="health")]

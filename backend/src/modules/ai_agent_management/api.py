@@ -1,581 +1,459 @@
-"""
-DRF ViewSets for AI Agent Management module.
-Provides REST API endpoints for all models.
-"""
+"""Governed API v2 boundary for the tenant-owned AI agent runtime."""
 
-from django.utils import timezone
-from rest_framework import status, viewsets
+from __future__ import annotations
+
+from collections.abc import Mapping
+from uuid import NAMESPACE_URL, UUID, uuid5
+
+from django.core.exceptions import ObjectDoesNotExist, ValidationError as DjangoValidationError
+from django.db import IntegrityError
+from django.db.models import QuerySet
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotAuthenticated, PermissionDenied
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.exceptions import NotAuthenticated, NotFound, PermissionDenied, ValidationError
+from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from src.core.access.entitlements import Quota
+from src.core.access.permissions import RequiresAccess
+from src.core.api import GovernedAPIViewMixin, OperationFailed
+from src.core.async_jobs.models import AsyncJob
 from src.core.auth_utils import get_user_tenant_id
 
-from .approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy, SoDViolation
+from .authentication import GovernedSessionAuthentication
+from .approval_models import ApprovalRequest, SoDPolicy, SoDViolation
+from .audit_models import AuditEvent, AuditTrail
+from .egress_models import EgressRequest, EgressRule, Secret, SecretAccess
 from .models import Agent, AgentExecution, AgentSchedulerTask
-from .quota_models import QuotaUsage, TenantQuota
+from .quota_models import KillSwitch, QuotaUsage, ShardSaturation
 from .serializers import (
-    AgentExecutionSerializer,
-    AgentSchedulerTaskSerializer,
-    AgentSerializer,
+    AgentCreateSerializer,
+    AgentDetailSerializer,
+    AgentExecutionDetailSerializer,
+    AgentExecutionListSerializer,
+    AgentListSerializer,
+    AgentUpdateSerializer,
+    ApprovalCreateSerializer,
+    ApprovalDecisionSerializer,
     ApprovalRequestSerializer,
+    AsyncJobSerializer,
+    AuditEventSerializer,
+    AuditTrailSerializer,
+    CostRecalculationSerializer,
+    CostRecordSerializer,
+    CostSummarySerializer,
+    EgressRequestSerializer,
+    EgressRuleSerializer,
+    EgressRuleWriteSerializer,
+    EvaluationStartSerializer,
+    ExecuteAgentSerializer,
+    KillSwitchActivateSerializer,
+    KillSwitchDeactivateSerializer,
+    KillSwitchSerializer,
+    QuotaSerializer,
     QuotaUsageSerializer,
+    ScheduleCreateSerializer,
+    ScheduleSerializer,
+    SecretAccessSerializer,
+    SecretCreateSerializer,
+    SecretMetadataSerializer,
+    SecretRotateSerializer,
+    ShardSaturationSerializer,
     SoDPolicySerializer,
+    SoDPolicyWriteSerializer,
     SoDViolationSerializer,
-    TenantQuotaSerializer,
+    TokenUsageSerializer,
     ToolInvocationSerializer,
     ToolSerializer,
+    ToolValidationSerializer,
+    ToolWriteSerializer,
+    TransitionExecutionSerializer,
+    TransitionKeySerializer,
 )
-from .services import AgentService
+from .services import (
+    AGGREGATE_COST_COMMAND,
+    AgentService,
+    ApprovalService,
+    EgressService,
+    EvaluationService,
+    ExecutionService,
+    KillSwitchService,
+    ScheduleService,
+    SecretService,
+    SoDService,
+    ToolService,
+    AgentServiceError,
+)
+from src.core.state_machine import IdempotencyConflictError, IllegalTransitionError
+from .token_models import CostRecord, CostSummary, TokenUsage
 from .tool_models import Tool, ToolInvocation
 
 
-class AgentViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for Agent CRUD operations.
+def _principal_id(user: object) -> UUID:
+    """Return a stable UUID for the authenticated principal.
 
-    Endpoints:
-    - GET /api/v1/ai-agents/agents/ - List all agents
-    - POST /api/v1/ai-agents/agents/ - Create agent
-    - GET /api/v1/ai-agents/agents/{id}/ - Get agent detail
-    - PUT /api/v1/ai-agents/agents/{id}/ - Update agent
-    - PATCH /api/v1/ai-agents/agents/{id}/ - Partial update agent
-    - DELETE /api/v1/ai-agents/agents/{id}/ - Delete agent
-    - POST /api/v1/ai-agents/agents/{id}/execute/ - Execute agent
-    - POST /api/v1/ai-agents/agents/{id}/pause/ - Pause agent
-    - POST /api/v1/ai-agents/agents/{id}/resume/ - Resume agent
-    - POST /api/v1/ai-agents/agents/{id}/terminate/ - Terminate agent
+    Deployments with UUID user keys preserve that key.  Legacy Django integer
+    users receive a deterministic namespace UUID, never a caller supplied ID.
     """
 
-    serializer_class = AgentSerializer
-    permission_classes = [IsAuthenticated]
+    raw = str(getattr(user, "pk", ""))
+    try:
+        return UUID(raw)
+    except (ValueError, TypeError, AttributeError):
+        if not raw:
+            raise NotAuthenticated("An authenticated principal is required.")
+        return uuid5(NAMESPACE_URL, f"saraise:user:{raw}")
 
-    def get_permissions(self):
-        """
-        Override to allow unauthenticated list requests.
 
-        CRITICAL: For list action, allow unauthenticated access to return empty list
-        instead of 403 to prevent retry loops and improve perceived performance.
-        """
-        # Check if this is a list action
-        # self.action is set by DRF router in dispatch() before get_permissions() is called
-        action = getattr(self, "action", None)
+class GovernedTenantViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
+    """Common deny-by-default access and tenant boundary."""
 
-        # Fallback: determine action from request path if action not set
-        # This is needed because self.action might not be set in all cases
-        if action is None and hasattr(self, "request") and self.request:
-            if self.request.method == "GET":
-                path = self.request.path
-                # Simple check: if path ends with /agents/ or /agents, it's likely a list action
-                # (detail views would have an ID in the path)
-                if path.endswith("/agents/") or path.endswith("/agents"):
-                    # Additional check: make sure it's not a detail view
-                    # Detail views have pattern like /agents/{uuid}/ or /agents/{uuid}
-                    import re
+    authentication_classes = (GovernedSessionAuthentication,)
+    permission_classes = (IsAuthenticated, RequiresAccess)
+    required_permission = ""
+    required_entitlement = "ai_agent_management"
+    quota_resource = "ai_agent_management.api"
+    quota_cost = 1
+    filter_backends = (SearchFilter, OrderingFilter)
+    ordering = ("-created_at", "id")
+    ordering_fields: tuple[str, ...] = ()
+    search_fields: tuple[str, ...] = ()
+    permission_map: Mapping[str, str] = {}
 
-                    # If path doesn't match detail pattern, it's a list action
-                    if not re.search(r"/agents/[a-f0-9-]{36}", path):
-                        action = "list"
+    def tenant_id(self) -> UUID:
+        tenant = get_user_tenant_id(self.request.user)
+        if not tenant:
+            raise PermissionDenied("A tenant-scoped identity is required.")
+        try:
+            return UUID(str(tenant))
+        except (ValueError, TypeError) as exc:
+            raise PermissionDenied("The tenant identity is invalid.") from exc
 
-        # For list action, allow unauthenticated access
-        if action == "list":
-            return [AllowAny()]
+    def actor_id(self) -> UUID:
+        return _principal_id(self.request.user)
 
-        # For all other actions, require authentication
-        return [IsAuthenticated()]
+    def check_permissions(self, request: object) -> None:
+        if not getattr(getattr(request, "user", None), "is_authenticated", False):
+            raise NotAuthenticated("Authentication credentials were not provided.")
+        setattr(request, "tenant_id", self.tenant_id())
+        self.required_permission = self.permission_map.get(getattr(self, "action", ""), self.required_permission)
+        self.required_entitlement = self.required_permission
+        self.quota_resource = self.required_permission
+        super().check_permissions(request)
 
-    def get_queryset(self):
-        """Filter agents by tenant_id from authenticated user."""
-        # For unauthenticated users (list action only), return empty queryset
-        if not self.request.user or not self.request.user.is_authenticated:
-            return Agent.objects.none()
+    def handle_exception(self, exc: Exception) -> Response:
+        # Tenant-filtered lookups deliberately collapse absent and foreign
+        # identifiers to the same response so object existence cannot leak.
+        if isinstance(exc, ObjectDoesNotExist):
+            exc = NotFound("The requested resource was not found.")
+        elif isinstance(exc, DjangoValidationError):
+            detail = getattr(exc, "message_dict", None) or getattr(exc, "messages", None) or str(exc)
+            exc = ValidationError(detail)
+        elif isinstance(exc, (IllegalTransitionError, IdempotencyConflictError, IntegrityError)):
+            exc = OperationFailed(
+                error_code="STATE_CONFLICT",
+                message="The requested change conflicts with the current resource state.",
+                http_status=status.HTTP_409_CONFLICT,
+            )
+        elif isinstance(exc, AgentServiceError):
+            unavailable = "UNAVAILABLE" in exc.code or exc.code.endswith("_REQUIRED")
+            exc = OperationFailed(
+                error_code=exc.code,
+                message=str(exc),
+                http_status=status.HTTP_503_SERVICE_UNAVAILABLE if unavailable else status.HTTP_409_CONFLICT,
+            )
+        return super().handle_exception(exc)
 
-        tenant_id = get_user_tenant_id(self.request.user)
-        if not tenant_id:
-            # This should never happen for authenticated tenant users,
-            # but handle gracefully to prevent data leakage
-            return Agent.objects.none()
-        return Agent.objects.filter(tenant_id=tenant_id).order_by("-created_at")
 
-    def check_object_permissions(self, request, obj):
-        """Override to skip object permission check for list action."""
-        # For list action, we don't have an object, so skip this check
-        if self.action == "list":
-            return
-        super().check_object_permissions(request, obj)
+class AgentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTenantViewSet):
+    queryset = Agent.objects.none()
+    serializer_class = AgentDetailSerializer
+    search_fields = ("name", "description")
+    ordering_fields = ("name", "created_at", "updated_at")
+    permission_map = {
+        "list": "ai.agent:view", "retrieve": "ai.agent:view", "create": "ai.agent:create",
+        "update": "ai.agent:update", "partial_update": "ai.agent:update", "destroy": "ai.agent:delete",
+        "activate": "ai.agent:update", "disable": "ai.agent:update", "retire": "ai.agent:delete",
+        "execute": "ai.agent:execute", "evaluate": "ai.evaluation:run",
+    }
 
-    def list(self, request, *args, **kwargs):
-        """
-        Override list to always return 200 OK, even if queryset is empty or user not authenticated.
+    def get_queryset(self) -> QuerySet[Agent]:
+        filters = {key: self.request.query_params.get(key) for key in ("status", "identity_type", "runner_key", "subject_id")}
+        filters["search"] = self.request.query_params.get("search")
+        filters["ordering"] = self.request.query_params.get("ordering", "name")
+        return AgentService.list_agents(self.tenant_id(), filters)
 
-        CRITICAL: Per architectural guidelines, DRF ViewSets should return 200 OK
-        with empty list instead of errors when queryset is empty. This ensures
-        consistent API behavior and prevents frontend retry loops.
-        """
-        # If authentication failed (caught in initial()), return empty list
-        if hasattr(request, "_auth_exception"):
-            return Response([])
+    def get_serializer_class(self):
+        return AgentListSerializer if self.action == "list" else AgentDetailSerializer
 
-        queryset = self.filter_queryset(self.get_queryset())
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
+    def create(self, request, *args, **kwargs):
+        serializer = AgentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        agent = AgentService.create_agent(self.tenant_id(), self.actor_id(), serializer.validated_data)
+        return Response(AgentDetailSerializer(agent).data, status=status.HTTP_201_CREATED)
 
-    def perform_create(self, serializer):
-        """Set tenant_id and created_by from authenticated user."""
-        tenant_id = get_user_tenant_id(self.request.user)
-        if not tenant_id:
-            raise PermissionDenied("Tenant ID required. Platform users cannot create agents.")
-        serializer.save(tenant_id=tenant_id, created_by=str(self.request.user.id))
+    def update(self, request, *args, **kwargs):
+        agent = self.get_object()
+        serializer = AgentUpdateSerializer(data=request.data, partial=kwargs.get("partial", False), context={"agent": agent})
+        serializer.is_valid(raise_exception=True)
+        updated = AgentService.update_agent(self.tenant_id(), self.actor_id(), agent.id, serializer.validated_data)
+        return Response(AgentDetailSerializer(updated).data)
 
-    @action(detail=True, methods=["post"])
+    def partial_update(self, request, *args, **kwargs):
+        kwargs["partial"] = True
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        agent = self.get_object()
+        retired = AgentService.retire_agent(self.tenant_id(), self.actor_id(), agent.id, "api_delete", f"retire:{agent.id}")
+        return Response(AgentDetailSerializer(retired).data)
+
+    def _transition(self, request, command: str) -> Response:
+        agent = self.get_object()
+        serializer = TransitionKeySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        if command == "activate":
+            value = AgentService.activate_agent(self.tenant_id(), self.actor_id(), agent.id, values["transition_key"])
+        elif command == "disable":
+            value = AgentService.disable_agent(self.tenant_id(), self.actor_id(), agent.id, values["reason"], values["transition_key"])
+        else:
+            value = AgentService.retire_agent(self.tenant_id(), self.actor_id(), agent.id, values["reason"], values["transition_key"])
+        return Response(AgentDetailSerializer(value).data)
+
+    @action(detail=True, methods=("post",))
+    def activate(self, request, pk=None): return self._transition(request, "activate")
+
+    @action(detail=True, methods=("post",))
+    def disable(self, request, pk=None): return self._transition(request, "disable")
+
+    @action(detail=True, methods=("post",))
+    def retire(self, request, pk=None): return self._transition(request, "retire")
+
+    @action(detail=True, methods=("post",))
     def execute(self, request, pk=None):
-        """Execute agent."""
         agent = self.get_object()
-        service = AgentService()
+        serializer = ExecuteAgentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        result = ExecutionService.execute(self.tenant_id(), self.actor_id(), agent.id, values["task"], values["idempotency_key"], values.get("schedule_at"))
+        execution = result.unwrap()
+        return Response(AgentExecutionDetailSerializer(execution).data, status=status.HTTP_202_ACCEPTED)
 
-        task_definition = request.data.get("task_definition", {})
-        metadata = request.data.get("metadata", {})
-        schedule = request.data.get("schedule", False)
-        priority = request.data.get("priority", 0)
-
-        try:
-            execution = service.create_execution(
-                agent_id=agent.id,
-                tenant_id=agent.tenant_id,
-                task_definition=task_definition,
-                metadata=metadata,
-                schedule=schedule,
-                priority=priority,
-            )
-            serializer = AgentExecutionSerializer(execution)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
-        except ValueError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-    @action(detail=True, methods=["post"])
-    def pause(self, request, pk=None):
-        """Pause agent execution."""
+    @action(detail=True, methods=("post",))
+    def evaluate(self, request, pk=None):
         agent = self.get_object()
-        execution_id = request.data.get("execution_id")
-
-        if not execution_id:
-            return Response({"error": "execution_id is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            service = AgentService()
-            execution = service.pause_execution(execution_id, agent.tenant_id)
-            serializer = AgentExecutionSerializer(execution)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except ValueError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-    @action(detail=True, methods=["post"])
-    def resume(self, request, pk=None):
-        """Resume agent execution."""
-        agent = self.get_object()
-        execution_id = request.data.get("execution_id")
-
-        if not execution_id:
-            return Response({"error": "execution_id is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            service = AgentService()
-            execution = service.resume_execution(execution_id, agent.tenant_id)
-            serializer = AgentExecutionSerializer(execution)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except ValueError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-    @action(detail=True, methods=["post"])
-    def terminate(self, request, pk=None):
-        """Terminate agent execution."""
-        agent = self.get_object()
-        execution_id = request.data.get("execution_id")
-
-        if not execution_id:
-            return Response({"error": "execution_id is required"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            service = AgentService()
-            execution = service.terminate_execution(execution_id, agent.tenant_id)
-            serializer = AgentExecutionSerializer(execution)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except ValueError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        serializer = EvaluationStartSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        method = EvaluationService.start_red_team if values["red_team"] else EvaluationService.start_evaluation
+        job = method(self.tenant_id(), self.actor_id(), agent.id, values["suite_key"], values["idempotency_key"]).unwrap()
+        return Response(AsyncJobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 
-class AgentExecutionViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    ViewSet for AgentExecution (read-only).
-
-    Endpoints:
-    - GET /api/v1/ai-agents/executions/ - List executions
-    - GET /api/v1/ai-agents/executions/{id}/ - Get execution detail
-    """
-
-    serializer_class = AgentExecutionSerializer
-    permission_classes = [IsAuthenticated]
+class AgentExecutionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTenantViewSet):
+    queryset = AgentExecution.objects.none()
+    serializer_class = AgentExecutionDetailSerializer
+    ordering_fields = ("created_at", "started_at", "completed_at")
+    permission_map = {"list": "ai.execution:view", "retrieve": "ai.execution:view", "pause": "ai.agent:pause", "resume": "ai.agent:resume", "terminate": "ai.agent:terminate"}
 
     def get_queryset(self):
-        """Filter executions by tenant_id."""
-        tenant_id = get_user_tenant_id(self.request.user)
-        if not tenant_id:
-            return AgentExecution.objects.none()
-        queryset = AgentExecution.objects.filter(tenant_id=tenant_id).select_related("agent")
+        return ExecutionService.list_executions(self.tenant_id(), self.request.query_params)
 
-        # Optional filtering
-        agent_id = self.request.query_params.get("agent_id")
-        if agent_id:
-            queryset = queryset.filter(agent_id=agent_id)
+    def get_serializer_class(self):
+        return AgentExecutionListSerializer if self.action == "list" else AgentExecutionDetailSerializer
 
-        state = self.request.query_params.get("state")
-        if state:
-            queryset = queryset.filter(state=state)
+    def _transition(self, request, command: str):
+        execution = self.get_object()
+        serializer = TransitionExecutionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        method = {"pause": ExecutionService.pause, "resume": ExecutionService.resume, "terminate": ExecutionService.terminate}[command]
+        supplied_agent_id = values.get("agent_id")
+        if supplied_agent_id is not None and supplied_agent_id != execution.agent_id:
+            raise NotFound("The requested execution was not found for that agent.")
+        args = (self.tenant_id(), self.actor_id(), execution.agent_id, execution.id)
+        value = method(*args, values.get("reason", ""), values["transition_key"]) if command == "terminate" else method(*args, values["transition_key"])
+        return Response(AgentExecutionDetailSerializer(value).data)
 
-        return queryset
+    @action(detail=True, methods=("post",))
+    def pause(self, request, pk=None): return self._transition(request, "pause")
+
+    @action(detail=True, methods=("post",))
+    def resume(self, request, pk=None): return self._transition(request, "resume")
+
+    @action(detail=True, methods=("post",))
+    def terminate(self, request, pk=None): return self._transition(request, "terminate")
 
 
-class AgentSchedulerTaskViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    ViewSet for AgentSchedulerTask (read-only).
+class ScheduleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTenantViewSet):
+    serializer_class = ScheduleSerializer
+    queryset = AgentSchedulerTask.objects.none()
+    ordering_fields = ("priority", "scheduled_at")
+    permission_map = {"list": "ai.execution:view", "retrieve": "ai.execution:view", "create": "ai.schedule:manage", "cancel": "ai.schedule:manage"}
 
-    Endpoints:
-    - GET /api/v1/ai-agents/scheduler-tasks/ - List scheduler tasks
-    - GET /api/v1/ai-agents/scheduler-tasks/{id}/ - Get scheduler task detail
-    """
+    def get_queryset(self): return ScheduleService.list_schedules(self.tenant_id(), self.request.query_params)
 
-    serializer_class = AgentSchedulerTaskSerializer
-    permission_classes = [IsAuthenticated]
+    def create(self, request, *args, **kwargs):
+        serializer = ScheduleCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data); agent_id = values.pop("agent_id")
+        value = ScheduleService.create_schedule(self.tenant_id(), self.actor_id(), agent_id, values)
+        return Response(ScheduleSerializer(value).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=("post",))
+    def cancel(self, request, pk=None):
+        schedule = self.get_object(); serializer = TransitionKeySerializer(data=request.data); serializer.is_valid(raise_exception=True)
+        value = ScheduleService.cancel_schedule(self.tenant_id(), self.actor_id(), schedule.id, serializer.validated_data["transition_key"])
+        return Response(ScheduleSerializer(value).data)
+
+
+class ApprovalRequestViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTenantViewSet):
+    serializer_class = ApprovalRequestSerializer; queryset = ApprovalRequest.objects.none()
+    permission_map = {"list": "ai.approval:view", "retrieve": "ai.approval:view", "create": "ai.approval:request", "approve": "ai.approval:decide", "reject": "ai.approval:decide", "cancel": "ai.approval:request"}
+    def get_queryset(self): return ApprovalService.list_requests(self.tenant_id(), self.request.query_params)
+    def create(self, request, *args, **kwargs):
+        serializer = ApprovalCreateSerializer(data=request.data); serializer.is_valid(raise_exception=True); values = dict(serializer.validated_data)
+        execution_id, invocation_id = values.pop("execution_id"), values.pop("invocation_id", None)
+        value = ApprovalService.create_request(self.tenant_id(), self.actor_id(), execution_id, invocation_id, values)
+        return Response(ApprovalRequestSerializer(value).data, status=status.HTTP_201_CREATED)
+    def _decision(self, request, command):
+        approval = self.get_object(); serializer = ApprovalDecisionSerializer(data=request.data); serializer.is_valid(raise_exception=True); values = serializer.validated_data
+        if command == "approve": value = ApprovalService.approve(self.tenant_id(), self.actor_id(), approval.id, values["transition_key"])
+        elif command == "reject": value = ApprovalService.reject(self.tenant_id(), self.actor_id(), approval.id, values["reason"], values["transition_key"])
+        else: value = ApprovalService.cancel(self.tenant_id(), self.actor_id(), approval.id, values["transition_key"])
+        return Response(ApprovalRequestSerializer(value).data)
+    @action(detail=True, methods=("post",))
+    def approve(self, request, pk=None): return self._decision(request, "approve")
+    @action(detail=True, methods=("post",))
+    def reject(self, request, pk=None): return self._decision(request, "reject")
+    @action(detail=True, methods=("post",))
+    def cancel(self, request, pk=None): return self._decision(request, "cancel")
+
+
+class ServiceCrudViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTenantViewSet):
+    """CRUD adapter whose concrete methods always delegate to a service."""
+    service = None; write_serializer_class = None
+    def create(self, request, *args, **kwargs): return self._write(request, False)
+    def update(self, request, *args, **kwargs): return self._write(request, True)
+    def partial_update(self, request, *args, **kwargs): return self._write(request, True, partial=True)
+    def _write(self, request, updating, partial=False): raise NotImplementedError
+
+
+class SoDPolicyViewSet(ServiceCrudViewSet):
+    queryset = SoDPolicy.objects.none(); serializer_class = SoDPolicySerializer; write_serializer_class = SoDPolicyWriteSerializer
+    permission_map = {"list": "ai.governance:view", "retrieve": "ai.governance:view", "create": "ai.governance:manage", "update": "ai.governance:manage", "partial_update": "ai.governance:manage", "destroy": "ai.governance:manage"}
+    def get_queryset(self): return SoDService.list_policies(self.tenant_id(), self.request.query_params)
+    def _write(self, request, updating, partial=False):
+        obj = self.get_object() if updating else None; serializer = SoDPolicyWriteSerializer(data=request.data, partial=partial); serializer.is_valid(raise_exception=True)
+        value = SoDService.update_policy(self.tenant_id(), self.actor_id(), obj.id, serializer.validated_data) if obj else SoDService.create_policy(self.tenant_id(), self.actor_id(), serializer.validated_data)
+        return Response(SoDPolicySerializer(value).data, status=status.HTTP_200_OK if obj else status.HTTP_201_CREATED)
+    def destroy(self, request, *args, **kwargs): return Response(SoDPolicySerializer(SoDService.deactivate_policy(self.tenant_id(), self.actor_id(), self.get_object().id)).data)
+
+
+class ToolViewSet(ServiceCrudViewSet):
+    queryset = Tool.objects.none(); serializer_class = ToolSerializer; search_fields = ("name", "description"); ordering_fields = ("name", "registered_at")
+    permission_map = {"list": "ai.tool:view", "retrieve": "ai.tool:view", "create": "ai.tool:register", "update": "ai.tool:update", "partial_update": "ai.tool:update", "destroy": "ai.tool:delete", "validate": "ai.tool:invoke"}
+    def get_queryset(self): return ToolService.list_tools(self.tenant_id(), self.request.query_params)
+    def _write(self, request, updating, partial=False):
+        obj = self.get_object() if updating else None; serializer = ToolWriteSerializer(data=request.data, partial=partial); serializer.is_valid(raise_exception=True)
+        value = ToolService.update_tool(self.tenant_id(), self.actor_id(), obj.id, serializer.validated_data) if obj else ToolService.register_tool(self.tenant_id(), self.actor_id(), serializer.validated_data)
+        return Response(ToolSerializer(value).data, status=status.HTTP_200_OK if obj else status.HTTP_201_CREATED)
+    def destroy(self, request, *args, **kwargs): return Response(ToolSerializer(ToolService.deactivate_tool(self.tenant_id(), self.actor_id(), self.get_object().id)).data)
+    @action(detail=True, methods=("post",))
+    def validate(self, request, pk=None):
+        tool = self.get_object(); serializer = ToolValidationSerializer(data=request.data); serializer.is_valid(raise_exception=True); values = serializer.validated_data
+        method = ToolService.validate_input if values["direction"] == "input" else ToolService.validate_output; method(self.tenant_id(), tool.id, values["value"])
+        return Response({"valid": True, "direction": values["direction"], "issues": []})
+
+
+class EgressRuleViewSet(ServiceCrudViewSet):
+    queryset = EgressRule.objects.none(); serializer_class = EgressRuleSerializer
+    permission_map = {"list": "ai.governance:view", "retrieve": "ai.governance:view", "create": "ai.governance:manage", "update": "ai.governance:manage", "partial_update": "ai.governance:manage", "destroy": "ai.governance:manage"}
+    def get_queryset(self): return EgressService.list_rules(self.tenant_id(), self.request.query_params)
+    def _write(self, request, updating, partial=False):
+        obj = self.get_object() if updating else None; serializer = EgressRuleWriteSerializer(data=request.data, partial=partial); serializer.is_valid(raise_exception=True)
+        value = EgressService.update_rule(self.tenant_id(), self.actor_id(), obj.id, serializer.validated_data) if obj else EgressService.create_rule(self.tenant_id(), self.actor_id(), serializer.validated_data)
+        return Response(EgressRuleSerializer(value).data, status=status.HTTP_200_OK if obj else status.HTTP_201_CREATED)
+    def destroy(self, request, *args, **kwargs): return Response(EgressRuleSerializer(EgressService.deactivate_rule(self.tenant_id(), self.actor_id(), self.get_object().id)).data)
+
+
+class SecretViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTenantViewSet):
+    queryset = Secret.objects.none(); serializer_class = SecretMetadataSerializer
+    permission_map = {"list": "ai.secret:view", "retrieve": "ai.secret:view", "create": "ai.secret:manage", "rotate": "ai.secret:manage", "deactivate": "ai.secret:manage"}
+    def get_queryset(self): return SecretService.list_metadata(self.tenant_id(), self.request.query_params)
+    def create(self, request, *args, **kwargs):
+        serializer = SecretCreateSerializer(data=request.data); serializer.is_valid(raise_exception=True); value = SecretService.create_secret(self.tenant_id(), self.actor_id(), serializer.validated_data)
+        return Response(SecretMetadataSerializer(value).data, status=status.HTTP_201_CREATED)
+    @action(detail=True, methods=("post",))
+    def rotate(self, request, pk=None):
+        secret = self.get_object(); serializer = SecretRotateSerializer(data=request.data); serializer.is_valid(raise_exception=True); value = SecretService.rotate_secret(self.tenant_id(), self.actor_id(), secret.id, serializer.validated_data["plaintext"]); return Response(SecretMetadataSerializer(value).data)
+    @action(detail=True, methods=("post",))
+    def deactivate(self, request, pk=None): return Response(SecretMetadataSerializer(SecretService.deactivate_secret(self.tenant_id(), self.actor_id(), self.get_object().id)).data)
+
+
+class KillSwitchViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTenantViewSet):
+    queryset = KillSwitch.objects.none(); serializer_class = KillSwitchSerializer
+    permission_map = {"list": "ai.governance:view", "retrieve": "ai.governance:view", "create": "ai.governance:manage", "deactivate": "ai.governance:manage"}
+    def get_queryset(self): return KillSwitch.objects.filter(tenant_id=self.tenant_id()).order_by("-created_at", "id")
+    def create(self, request, *args, **kwargs):
+        serializer = KillSwitchActivateSerializer(data=request.data); serializer.is_valid(raise_exception=True); values = serializer.validated_data
+        value = KillSwitchService.activate(self.tenant_id(), self.actor_id(), values["scope"], values.get("scope_id"), values["reason"], values["transition_key"]); return Response(KillSwitchSerializer(value).data, status=status.HTTP_201_CREATED)
+    @action(detail=True, methods=("post",))
+    def deactivate(self, request, pk=None):
+        switch = self.get_object(); serializer = KillSwitchDeactivateSerializer(data=request.data); serializer.is_valid(raise_exception=True); values = serializer.validated_data
+        value = KillSwitchService.deactivate(self.tenant_id(), self.actor_id(), switch.id, values["reason"], values["transition_key"]); return Response(KillSwitchSerializer(value).data)
+
+
+class TenantReadOnlyViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTenantViewSet):
+    # Each evidence model has its own canonical event timestamp.  Preserve the
+    # explicit queryset ordering below instead of applying the mutable-model
+    # default (``created_at``), which append-only projections need not have.
+    ordering = ()
+    permission_map = {"list": "ai.governance:view", "retrieve": "ai.governance:view"}
     def get_queryset(self):
-        """Filter scheduler tasks by tenant_id."""
-        tenant_id = get_user_tenant_id(self.request.user)
-        if not tenant_id:
-            return AgentSchedulerTask.objects.none()
-        return AgentSchedulerTask.objects.filter(tenant_id=tenant_id).select_related("agent", "execution")
-
-
-class ApprovalRequestViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for ApprovalRequest.
-
-    Endpoints:
-    - GET /api/v1/ai-agents/approvals/ - List approval requests
-    - GET /api/v1/ai-agents/approvals/{id}/ - Get approval detail
-    - POST /api/v1/ai-agents/approvals/ - Create approval request
-    - POST /api/v1/ai-agents/approvals/{id}/approve/ - Approve request
-    - POST /api/v1/ai-agents/approvals/{id}/reject/ - Reject request
-    """
-
-    # CRITICAL: Don't override authentication_classes - use default from settings
-    # This ensures consistent authentication behavior across all ViewSets
-    # The default RelaxedCsrfSessionAuthentication from settings handles session auth correctly
-    serializer_class = ApprovalRequestSerializer
-    permission_classes = [IsAuthenticated]
-
-    def check_object_permissions(self, request, obj):
-        """Override to skip object permission check for list action."""
-        # For list action, we don't have an object, so skip this check
-        if self.action == "list":
-            return
-        super().check_object_permissions(request, obj)
-
-    def get_queryset(self):
-        """Filter approval requests by tenant_id.
-
-        CRITICAL: ApprovalRequest inherits from TenantBaseModel, so it has tenant_id directly.
-        Filter directly on tenant_id instead of through agent_execution__tenant_id to avoid
-        unnecessary JOINs and improve query performance.
-        """
-        tenant_id = get_user_tenant_id(self.request.user)
-        if not tenant_id:
-            return ApprovalRequest.objects.none()
-
-        # CRITICAL: Filter directly on tenant_id (from TenantBaseModel) instead of
-        # agent_execution__tenant_id to avoid unnecessary JOIN and improve performance
-        queryset = ApprovalRequest.objects.filter(tenant_id=tenant_id).select_related(
-            "tool", "agent_execution", "tool_invocation"
+        model = self.queryset.model
+        names = {field.name for field in model._meta.fields}
+        timestamp = next(
+            (name for name in ("created_at", "requested_at", "invoked_at", "event_timestamp", "cost_timestamp", "usage_timestamp", "measured_at", "accessed_at", "violation_at") if name in names),
+            None,
         )
-
-        # Optional filtering
-        status_filter = self.request.query_params.get("status")
-        if status_filter:
-            queryset = queryset.filter(status=status_filter)
-
-        # Add ordering for consistent results and better performance
-        queryset = queryset.order_by("-requested_at")
-
-        return queryset
-
-    def initial(self, request, *args, **kwargs):
-        """
-        Override initial to catch authentication errors for list action.
-
-        CRITICAL: DRF's initial() raises 403 if authentication fails.
-        For list action, we catch this and allow list() to return empty list instead.
-        """
-        # Set action early
-        self.action = kwargs.get("action", self.action)
-        try:
-            # Call parent to handle authentication and permissions
-            super().initial(request, *args, **kwargs)
-        except (NotAuthenticated, PermissionDenied) as e:
-            # Store the exception so list() can handle it gracefully
-            # Only store for list action - other actions should raise normally
-            if self.action == "list":
-                request._auth_exception = e
-            else:
-                # For non-list actions, re-raise the exception
-                raise
-
-    def list(self, request, *args, **kwargs):
-        """
-        Override list to always return 200 OK, even if queryset is empty or user not authenticated.
-
-        CRITICAL: Per architectural guidelines (see PlatformSettingViewSet pattern),
-        DRF ViewSets should return 200 OK with empty list instead of 403 Forbidden
-        when queryset is empty. This prevents unnecessary retries and improves UX.
-
-        PERFORMANCE: Limit queryset to 100 items max to prevent large payloads.
-
-        AUTHENTICATION FIX: If authentication failed in initial(), return empty list
-        instead of 403 to prevent retry loops and improve perceived performance.
-        """
-        # If authentication failed in initial(), return empty list
-        if hasattr(request, "_auth_exception"):
-            return Response([])
-
-        queryset = self.filter_queryset(self.get_queryset())
-
-        # PERFORMANCE: Limit results to prevent large payloads
-        # Use [:100] slice instead of pagination for better performance on small datasets
-        queryset = queryset[:100]
-
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
-
-    def perform_create(self, serializer):
-        """Set tenant_id from agent_execution."""
-        _approval = serializer.save()  # noqa: F841
-        # tenant_id is inherited from agent_execution via TenantBaseModel
-
-    @action(detail=True, methods=["post"])
-    def approve(self, request, pk=None):
-        """Approve approval request."""
-        approval = self.get_object()
-
-        if approval.status != ApprovalStatus.PENDING:
-            return Response(
-                {"error": f"Approval request is {approval.status}, cannot approve"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        approval.status = ApprovalStatus.APPROVED
-        approval.approver_id = request.user.id
-        approval.decided_at = timezone.now()
-        approval.save()
-
-        serializer = self.get_serializer(approval)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
-    @action(detail=True, methods=["post"])
-    def reject(self, request, pk=None):
-        """Reject approval request."""
-        approval = self.get_object()
-
-        if approval.status != ApprovalStatus.PENDING:
-            return Response(
-                {"error": f"Approval request is {approval.status}, cannot reject"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        approval.status = ApprovalStatus.REJECTED
-        approval.approver_id = request.user.id
-        approval.rejection_reason = request.data.get("reason", "")
-        approval.decided_at = timezone.now()
-        approval.save()
-
-        serializer = self.get_serializer(approval)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        ordering = (f"-{timestamp}", "id") if timestamp else ("id",)
+        return model.objects.filter(tenant_id=self.tenant_id()).order_by(*ordering)
 
 
-class SoDPolicyViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for SoDPolicy.
-
-    Endpoints:
-    - GET /api/v1/ai-agents/sod-policies/ - List SoD policies
-    - POST /api/v1/ai-agents/sod-policies/ - Create SoD policy
-    - GET /api/v1/ai-agents/sod-policies/{id}/ - Get SoD policy detail
-    - PUT /api/v1/ai-agents/sod-policies/{id}/ - Update SoD policy
-    - DELETE /api/v1/ai-agents/sod-policies/{id}/ - Delete SoD policy
-    """
-
-    serializer_class = SoDPolicySerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        """Filter SoD policies by tenant_id."""
-        tenant_id = get_user_tenant_id(self.request.user)
-        if not tenant_id:
-            return SoDPolicy.objects.none()
-        return SoDPolicy.objects.filter(tenant_id=tenant_id)
-
-    def perform_create(self, serializer):
-        """Set tenant_id from authenticated user."""
-        tenant_id = get_user_tenant_id(self.request.user)
-        if not tenant_id:
-            raise PermissionDenied("Tenant ID required. Platform users cannot create SoD policies.")
-        serializer.save(tenant_id=tenant_id, created_by=str(self.request.user.id))
+class SoDViolationViewSet(TenantReadOnlyViewSet): queryset = SoDViolation.objects.none(); serializer_class = SoDViolationSerializer
+class ToolInvocationViewSet(TenantReadOnlyViewSet): queryset = ToolInvocation.objects.none(); serializer_class = ToolInvocationSerializer
+class EgressRequestViewSet(TenantReadOnlyViewSet): queryset = EgressRequest.objects.none(); serializer_class = EgressRequestSerializer
+class SecretAccessViewSet(TenantReadOnlyViewSet): queryset = SecretAccess.objects.none(); serializer_class = SecretAccessSerializer
+class QuotaUsageViewSet(TenantReadOnlyViewSet): queryset = QuotaUsage.objects.none(); serializer_class = QuotaUsageSerializer; permission_map = {"list": "ai.usage:view", "retrieve": "ai.usage:view"}
+class ShardSaturationViewSet(TenantReadOnlyViewSet): queryset = ShardSaturation.objects.none(); serializer_class = ShardSaturationSerializer; permission_map = {"list": "ai.usage:view", "retrieve": "ai.usage:view"}
+class TokenUsageViewSet(TenantReadOnlyViewSet): queryset = TokenUsage.objects.none(); serializer_class = TokenUsageSerializer; permission_map = {"list": "ai.usage:view", "retrieve": "ai.usage:view"}
+class CostRecordViewSet(TenantReadOnlyViewSet): queryset = CostRecord.objects.none(); serializer_class = CostRecordSerializer; permission_map = {"list": "ai.usage:view", "retrieve": "ai.usage:view"}
+class AuditEventViewSet(TenantReadOnlyViewSet): queryset = AuditEvent.objects.none(); serializer_class = AuditEventSerializer; permission_map = {"list": "ai.audit:view", "retrieve": "ai.audit:view"}
+class AuditTrailViewSet(TenantReadOnlyViewSet): queryset = AuditTrail.objects.none(); serializer_class = AuditTrailSerializer; permission_map = {"list": "ai.audit:view", "retrieve": "ai.audit:view"}
 
 
-class SoDViolationViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    ViewSet for SoDViolation (read-only).
-
-    Endpoints:
-    - GET /api/v1/ai-agents/sod-violations/ - List SoD violations
-    - GET /api/v1/ai-agents/sod-violations/{id}/ - Get SoD violation detail
-    """
-
-    serializer_class = SoDViolationSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        """Filter SoD violations by tenant_id."""
-        tenant_id = get_user_tenant_id(self.request.user)
-        if not tenant_id:
-            return SoDViolation.objects.none()
-        return SoDViolation.objects.filter(tenant_id=tenant_id).select_related(
-            "policy", "agent_execution", "tool_invocation"
-        )
+class QuotaViewSet(TenantReadOnlyViewSet):
+    queryset = Quota.objects.none(); serializer_class = QuotaSerializer; permission_map = {"list": "ai.usage:view", "retrieve": "ai.usage:view"}
 
 
-class TenantQuotaViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    ViewSet for TenantQuota (read-only).
-
-    Endpoints:
-    - GET /api/v1/ai-agents/quotas/ - List quotas
-    - GET /api/v1/ai-agents/quotas/{id}/ - Get quota detail
-    """
-
-    serializer_class = TenantQuotaSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        """Filter quotas by tenant_id."""
-        tenant_id = get_user_tenant_id(self.request.user)
-        if not tenant_id:
-            return TenantQuota.objects.none()
-        queryset = TenantQuota.objects.filter(tenant_id=tenant_id)
-
-        # Optional filtering
-        quota_type = self.request.query_params.get("quota_type")
-        if quota_type:
-            queryset = queryset.filter(quota_type=quota_type)
-
-        is_active = self.request.query_params.get("is_active")
-        if is_active is not None:
-            queryset = queryset.filter(is_active=is_active.lower() == "true")
-
-        return queryset
+class CostSummaryViewSet(TenantReadOnlyViewSet):
+    queryset = CostSummary.objects.none(); serializer_class = CostSummarySerializer; permission_map = {"list": "ai.usage:view", "retrieve": "ai.usage:view", "recalculate": "ai.usage:view"}
+    @action(detail=False, methods=("post",))
+    def recalculate(self, request):
+        serializer = CostRecalculationSerializer(data=request.data); serializer.is_valid(raise_exception=True); values = serializer.validated_data
+        from src.core.async_jobs.services import enqueue
+        job = enqueue(self.tenant_id(), self.actor_id(), AGGREGATE_COST_COMMAND, {key: value.isoformat() if hasattr(value, "isoformat") else value for key, value in values.items() if key != "idempotency_key"}, values["idempotency_key"])
+        return Response(AsyncJobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 
-class QuotaUsageViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    ViewSet for QuotaUsage (read-only).
-
-    Endpoints:
-    - GET /api/v1/ai-agents/quota-usage/ - List quota usage records
-    - GET /api/v1/ai-agents/quota-usage/{id}/ - Get quota usage detail
-    """
-
-    serializer_class = QuotaUsageSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        """Filter quota usage by tenant_id."""
-        tenant_id = get_user_tenant_id(self.request.user)
-        if not tenant_id:
-            return QuotaUsage.objects.none()
-        return QuotaUsage.objects.filter(tenant_id=tenant_id).select_related("quota", "agent_execution")
+class AsyncJobViewSet(TenantReadOnlyViewSet):
+    queryset = AsyncJob.objects.none(); serializer_class = AsyncJobSerializer; permission_map = {"list": "ai.execution:view", "retrieve": "ai.execution:view"}
+    def get_queryset(self): return AsyncJob.objects.filter(tenant_id=self.tenant_id(), command__startswith="ai_agent_management.").order_by("-created_at", "id")
 
 
-class ToolViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for Tool.
-
-    Endpoints:
-    - GET /api/v1/ai-agents/tools/ - List tools
-    - POST /api/v1/ai-agents/tools/ - Create tool
-    - GET /api/v1/ai-agents/tools/{id}/ - Get tool detail
-    - PUT /api/v1/ai-agents/tools/{id}/ - Update tool
-    - DELETE /api/v1/ai-agents/tools/{id}/ - Delete tool
-    """
-
-    serializer_class = ToolSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        """Filter tools by tenant_id."""
-        tenant_id = get_user_tenant_id(self.request.user)
-        if not tenant_id:
-            return Tool.objects.none()
-        queryset = Tool.objects.filter(tenant_id=tenant_id)
-
-        # Optional filtering
-        owning_module = self.request.query_params.get("owning_module")
-        if owning_module:
-            queryset = queryset.filter(owning_module=owning_module)
-
-        is_active = self.request.query_params.get("is_active")
-        if is_active is not None:
-            queryset = queryset.filter(is_active=is_active.lower() == "true")
-
-        return queryset
-
-    def perform_create(self, serializer):
-        """Set tenant_id from authenticated user."""
-        tenant_id = get_user_tenant_id(self.request.user)
-        if not tenant_id:
-            raise PermissionDenied("Tenant ID required. Platform users cannot create tools.")
-        serializer.save(tenant_id=tenant_id, registered_by=str(self.request.user.id))
-
-
-class ToolInvocationViewSet(viewsets.ReadOnlyModelViewSet):
-    """
-    ViewSet for ToolInvocation (read-only).
-
-    Endpoints:
-    - GET /api/v1/ai-agents/tool-invocations/ - List tool invocations
-    - GET /api/v1/ai-agents/tool-invocations/{id}/ - Get tool invocation detail
-    """
-
-    serializer_class = ToolInvocationSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        """Filter tool invocations by tenant_id."""
-        tenant_id = get_user_tenant_id(self.request.user)
-        if not tenant_id:
-            return ToolInvocation.objects.none()
-        queryset = ToolInvocation.objects.filter(tenant_id=tenant_id).select_related("tool", "agent_execution")
-
-        # Optional filtering
-        tool_id = self.request.query_params.get("tool_id")
-        if tool_id:
-            queryset = queryset.filter(tool_id=tool_id)
-
-        agent_execution_id = self.request.query_params.get("agent_execution_id")
-        if agent_execution_id:
-            queryset = queryset.filter(agent_execution_id=agent_execution_id)
-
-        success = self.request.query_params.get("success")
-        if success is not None:
-            queryset = queryset.filter(success=success.lower() == "true")
-
-        return queryset
+# Compatibility names kept importable; both now project core access quotas.
+AgentSchedulerTaskViewSet = ScheduleViewSet
+TenantQuotaViewSet = QuotaViewSet

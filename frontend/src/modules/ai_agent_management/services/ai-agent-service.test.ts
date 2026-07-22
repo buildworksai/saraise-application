@@ -1,97 +1,39 @@
-/**
- * AI Agent Service Tests
- */
+/* eslint-disable @typescript-eslint/unbound-method -- mocked API client functions have no receiver state. */
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { apiClient } from "@/services/api-client";
+import { ENDPOINTS, withQuery, type APIEnvelope, type AgentDetail } from "../contracts";
+import { aiAgentService } from "./ai-agent-service";
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { aiAgentService } from './ai-agent-service';
-import { apiClient } from '@/services/api-client';
-import { ENDPOINTS } from '../contracts';
+vi.mock("@/services/api-client", () => ({ apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() } }));
 
-// Mock apiClient
-vi.mock('@/services/api-client', () => ({
-  apiClient: {
-    get: vi.fn(),
-    post: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-  },
-}));
+const meta = { correlation_id: "correlation-1", timestamp: "2026-07-23T00:00:00Z" };
+const agent: AgentDetail = { id: "agent-1", name: "Reconciler", description: "", identity_type: "system_bound", subject_id: "subject-1", session_id: null, runner_key: "reference_runner", provider_config_id: null, config: {}, status: "draft", transition_history: [], created_by: "actor-1", deleted_at: null, created_at: meta.timestamp, updated_at: meta.timestamp };
 
-describe('aiAgentService', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+describe("aiAgentService", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("unwraps governed pagination and builds encoded queries", async () => {
+    const envelope: APIEnvelope<readonly AgentDetail[]> = { data: [agent], meta: { ...meta, pagination: { count: 1, page: 2, page_size: 25, total_pages: 2, has_next: false, has_previous: true } } };
+    vi.mocked(apiClient.get).mockResolvedValueOnce(envelope);
+    await expect(aiAgentService.listAgents({ search: "close books", page: 2 })).resolves.toMatchObject({ items: [agent], correlationId: "correlation-1" });
+    expect(apiClient.get).toHaveBeenCalledWith(withQuery(ENDPOINTS.AGENTS.LIST, { search: "close books", page: 2 }));
   });
 
-  describe('listAgents', () => {
-    it('should fetch list of agents', async () => {
-      const mockAgents = [
-        { id: '1', name: 'Agent 1', identity_type: 'user_bound' as const, subject_id: 'user-1', framework: 'langgraph', is_active: true },
-        { id: '2', name: 'Agent 2', identity_type: 'system_bound' as const, subject_id: 'role-1', framework: 'crewai', is_active: false },
-      ];
-
-      vi.mocked(apiClient.get).mockResolvedValueOnce(mockAgents);
-
-      const result = await aiAgentService.listAgents();
-
-      expect(result).toEqual(mockAgents);
-      expect(apiClient.get).toHaveBeenCalledWith(ENDPOINTS.AGENTS.LIST);
-    });
+  it("rejects a malformed list envelope without pagination", async () => {
+    vi.mocked(apiClient.get).mockResolvedValueOnce({ data: [], meta });
+    await expect(aiAgentService.listAgents()).rejects.toThrow("omitted pagination");
   });
 
-  describe('getAgent', () => {
-    it('should fetch single agent', async () => {
-      const mockAgent = { id: '1', name: 'Agent 1', identity_type: 'user_bound' as const, subject_id: 'user-1', framework: 'langgraph', is_active: true };
-
-      vi.mocked(apiClient.get).mockResolvedValueOnce(mockAgent);
-
-      const result = await aiAgentService.getAgent('1');
-
-      expect(result).toEqual(mockAgent);
-      expect(apiClient.get).toHaveBeenCalledWith(ENDPOINTS.AGENTS.DETAIL('1'));
-    });
+  it("uses PATCH for partial updates and unwraps the response", async () => {
+    vi.mocked(apiClient.patch).mockResolvedValueOnce({ data: agent, meta });
+    await expect(aiAgentService.updateAgent(agent.id, { description: "Updated" })).resolves.toEqual(agent);
+    expect(apiClient.patch).toHaveBeenCalledWith(ENDPOINTS.AGENTS.UPDATE(agent.id), { description: "Updated" });
   });
 
-  describe('createAgent', () => {
-    it('should create new agent', async () => {
-      const agentData = {
-        name: 'New Agent',
-        description: 'Test agent',
-        identity_type: 'user_bound' as const,
-        subject_id: 'user-123',
-        framework: 'langgraph',
-      };
-      const mockAgent = { id: '1', ...agentData, is_active: true };
-
-      vi.mocked(apiClient.post).mockResolvedValueOnce(mockAgent);
-
-      const result = await aiAgentService.createAgent(agentData);
-
-      expect(result).toEqual(mockAgent);
-      expect(apiClient.post).toHaveBeenCalledWith(ENDPOINTS.AGENTS.CREATE, agentData);
-    });
-  });
-
-  describe('updateAgent', () => {
-    it('should update agent', async () => {
-      const updateData = { name: 'Updated Agent' };
-      const mockAgent = { id: '1', name: 'Updated Agent', identity_type: 'user_bound' as const, subject_id: 'user-1', framework: 'langgraph', is_active: true };
-
-      vi.mocked(apiClient.put).mockResolvedValueOnce(mockAgent);
-
-      const result = await aiAgentService.updateAgent('1', updateData);
-
-      expect(result).toEqual(mockAgent);
-      expect(apiClient.put).toHaveBeenCalledWith(ENDPOINTS.AGENTS.UPDATE('1'), updateData);
-    });
-  });
-
-  describe('deleteAgent', () => {
-    it('should delete agent', async () => {
-      vi.mocked(apiClient.delete).mockResolvedValueOnce(undefined);
-
-      await aiAgentService.deleteAgent('1');
-
-      expect(apiClient.delete).toHaveBeenCalledWith(ENDPOINTS.AGENTS.DELETE('1'));
-    });
+  it("posts lifecycle commands to their declared action endpoint", async () => {
+    vi.mocked(apiClient.post).mockResolvedValueOnce({ data: agent, meta });
+    const command = { transition_key: "activate-1" };
+    await aiAgentService.activateAgent(agent.id, command);
+    expect(apiClient.post).toHaveBeenCalledWith(ENDPOINTS.AGENTS.ACTIVATE(agent.id), command);
   });
 });

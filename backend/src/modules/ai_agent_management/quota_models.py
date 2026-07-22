@@ -1,206 +1,198 @@
-"""AI Quota Models.
-
-Database models for quota tracking and kill switches.
-Task: 402.2 - AI Quota Enforcement
-"""
+"""Quota attribution, saturation samples, and tenant emergency controls."""
 
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
+from django.utils import timezone
 
-from .models import TenantBaseModel
+from src.core.access.entitlements import Quota as TenantQuota
+from src.core.tenancy.registry import TENANT_SCOPED, tenancy_scope
+
+from .models import AppendOnlyTenantModel, StatefulTenantModel, validate_same_tenant
 
 
-def generate_uuid():
-    """Generate UUID for model primary keys."""
+def generate_uuid() -> str:
+    """Preserve the callable referenced by migration 0001."""
+
     return str(uuid.uuid4())
 
 
 class QuotaType(models.TextChoices):
-    """Quota type enumeration."""
-
-    TOKEN_COUNT = "token_count", "Token Count"
-    REQUEST_COUNT = "request_count", "Request Count"
-    EXECUTION_TIME = "execution_time", "Execution Time (seconds)"
-    TOOL_CALLS = "tool_calls", "Tool Calls"
-    EXTERNAL_API_CALLS = "external_api_calls", "External API Calls"
-    DATA_VOLUME = "data_volume", "Data Volume (bytes)"
+    TOKEN_COUNT = "token_count", "Token count"
+    REQUEST_COUNT = "request_count", "Request count"
+    EXECUTION_TIME = "execution_time", "Execution time"
+    TOOL_CALLS = "tool_calls", "Tool calls"
+    EXTERNAL_API_CALLS = "external_api_calls", "External API calls"
+    DATA_VOLUME = "data_volume", "Data volume"
 
 
 class QuotaPeriod(models.TextChoices):
-    """Quota period enumeration."""
-
     HOURLY = "hourly", "Hourly"
     DAILY = "daily", "Daily"
     WEEKLY = "weekly", "Weekly"
     MONTHLY = "monthly", "Monthly"
 
 
-class TenantQuota(TenantBaseModel):
-    """Tenant-level quota definition model."""
-
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    quota_type = models.CharField(
-        max_length=50,
-        choices=QuotaType.choices,
-        db_index=True,
-        help_text="Type of quota",
-    )
-    period = models.CharField(
-        max_length=20,
-        choices=QuotaPeriod.choices,
-        db_index=True,
-        help_text="Quota period",
-    )
-    limit_value = models.BigIntegerField(help_text="Quota limit value")
-    current_usage = models.BigIntegerField(
-        default=0,
-        help_text="Current usage in this period",
-    )
-    reset_at = models.DateTimeField(
-        db_index=True,
-        help_text="When quota resets",
-    )
-    is_active = models.BooleanField(default=True, db_index=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = "ai_tenant_quotas"
-        indexes = [
-            models.Index(fields=["tenant_id", "quota_type"]),
-            models.Index(fields=["tenant_id", "period"]),
-            models.Index(fields=["tenant_id", "is_active"]),
-            models.Index(fields=["tenant_id", "reset_at"]),
-        ]
-        unique_together = [["tenant_id", "quota_type", "period"]]
-
-    def __str__(self) -> str:
-        return f"Quota {self.quota_type} ({self.period}): {self.current_usage}/{self.limit_value}"
+class KillSwitchScope(models.TextChoices):
+    TENANT = "tenant", "Tenant"
+    SHARD = "shard", "Shard"
+    AGENT = "agent", "Agent"
 
 
-class QuotaUsage(TenantBaseModel):
-    """Quota usage tracking model."""
+class KillSwitchStatus(models.TextChoices):
+    ACTIVE = "active", "Active"
+    INACTIVE = "inactive", "Inactive"
 
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    quota = models.ForeignKey(
-        TenantQuota,
-        on_delete=models.CASCADE,
-        related_name="usage_records",
-        db_index=True,
-    )
+
+@tenancy_scope(TENANT_SCOPED)
+class QuotaUsage(AppendOnlyTenantModel):
+    resource = models.CharField(max_length=255)
     agent_execution = models.ForeignKey(
         "AgentExecution",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="quota_usages",
         null=True,
         blank=True,
-        db_index=True,
     )
-    usage_value = models.BigIntegerField(help_text="Amount of quota used")
-    usage_timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
-    metadata = models.JSONField(default=dict, help_text="Usage metadata")
+    usage_value = models.PositiveBigIntegerField()
+    remaining_after = models.PositiveBigIntegerField()
+    usage_timestamp = models.DateTimeField(auto_now_add=True)
+    metadata = models.JSONField(default=dict, blank=True)
 
     class Meta:
         db_table = "ai_quota_usage"
-        indexes = [
-            models.Index(fields=["tenant_id", "quota_id"]),
-            models.Index(fields=["tenant_id", "agent_execution_id"]),
-            models.Index(fields=["tenant_id", "usage_timestamp"]),
+        constraints = [
+            models.CheckConstraint(condition=Q(usage_value__gt=0), name="ai_quota_usage_positive_ck"),
         ]
+        indexes = [
+            models.Index(fields=("tenant_id", "resource", "usage_timestamp"), name="ai_quota_use_t_res_idx"),
+            models.Index(fields=("tenant_id", "agent_execution", "usage_timestamp"), name="ai_quota_use_t_exec_idx"),
+        ]
+        ordering = ("-usage_timestamp", "id")
+
+    def clean(self) -> None:
+        validate_same_tenant(self, "agent_execution")
+        if not self.resource.strip():
+            raise ValidationError({"resource": "A quota resource is required."})
+        if not isinstance(self.metadata, dict):
+            raise ValidationError({"metadata": "Must be a JSON object."})
 
     def __str__(self) -> str:
-        return f"Quota Usage {self.id}: {self.usage_value}"
+        return f"Quota Usage {self.id}: {self.usage_value} {self.resource}"
 
 
-class ShardSaturation(TenantBaseModel):
-    """Shard-level saturation monitoring model."""
-
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    shard_id = models.CharField(
-        max_length=100,
-        db_index=True,
-        help_text="Shard identifier",
-    )
-    saturation_level = models.FloatField(
-        db_index=True,
-        help_text="Saturation level (0.0 to 1.0)",
-    )
-    active_agents = models.IntegerField(
-        default=0,
-        help_text="Number of active agents",
-    )
-    active_executions = models.IntegerField(
-        default=0,
-        help_text="Number of active executions",
-    )
-    cpu_usage_percent = models.FloatField(
-        null=True,
-        blank=True,
-        help_text="CPU usage percentage",
-    )
-    memory_usage_percent = models.FloatField(
-        null=True,
-        blank=True,
-        help_text="Memory usage percentage",
-    )
-    measured_at = models.DateTimeField(auto_now_add=True, db_index=True)
+@tenancy_scope(TENANT_SCOPED)
+class ShardSaturation(AppendOnlyTenantModel):
+    shard_id = models.CharField(max_length=100)
+    saturation_level = models.DecimalField(max_digits=5, decimal_places=4)
+    active_agents = models.PositiveIntegerField(default=0)
+    active_executions = models.PositiveIntegerField(default=0)
+    cpu_usage_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    memory_usage_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    measured_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "ai_shard_saturation"
-        indexes = [
-            models.Index(fields=["tenant_id", "shard_id"]),
-            models.Index(fields=["tenant_id", "saturation_level"]),
-            models.Index(fields=["tenant_id", "measured_at"]),
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(saturation_level__gte=Decimal("0"), saturation_level__lte=Decimal("1")),
+                name="ai_shard_saturation_ck",
+            ),
+            models.CheckConstraint(
+                condition=Q(cpu_usage_percent__isnull=True) | Q(cpu_usage_percent__gte=0, cpu_usage_percent__lte=100),
+                name="ai_shard_cpu_ck",
+            ),
+            models.CheckConstraint(
+                condition=Q(memory_usage_percent__isnull=True)
+                | Q(memory_usage_percent__gte=0, memory_usage_percent__lte=100),
+                name="ai_shard_memory_ck",
+            ),
         ]
+        indexes = [
+            models.Index(fields=("tenant_id", "shard_id", "measured_at"), name="ai_shard_t_shard_idx"),
+            models.Index(fields=("tenant_id", "saturation_level", "measured_at"), name="ai_shard_t_level_idx"),
+        ]
+        ordering = ("-measured_at", "id")
 
     def __str__(self) -> str:
         return f"Shard {self.shard_id} saturation: {self.saturation_level:.2%}"
 
 
-class KillSwitch(TenantBaseModel):
-    """Kill switch model.
+@tenancy_scope(TENANT_SCOPED)
+class KillSwitch(StatefulTenantModel):
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, default="")
+    scope = models.CharField(max_length=20, choices=KillSwitchScope.choices)
+    scope_id = models.UUIDField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=KillSwitchStatus.choices, default=KillSwitchStatus.ACTIVE)
+    transition_history = models.JSONField(default=list, blank=True, editable=False)
+    reason = models.TextField()
+    activated_by = models.UUIDField()
+    activated_at = models.DateTimeField(default=timezone.now)
+    deactivated_by = models.UUIDField(null=True, blank=True)
+    deactivated_at = models.DateTimeField(null=True, blank=True)
 
-    Global or tenant-specific kill switches for AI agent execution.
-    """
-
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    name = models.CharField(max_length=255, db_index=True, help_text="Kill switch name")
-    description = models.TextField(blank=True, help_text="Kill switch description")
-    scope = models.CharField(
-        max_length=50,
-        choices=[
-            ("global", "Global"),
-            ("tenant", "Tenant"),
-            ("shard", "Shard"),
-            ("agent", "Agent"),
-        ],
-        db_index=True,
-        help_text="Kill switch scope",
-    )
-    scope_id = models.CharField(
-        max_length=100,
-        null=True,
-        blank=True,
-        db_index=True,
-        help_text="Scope identifier (tenant_id, shard_id, agent_id)",
-    )
-    is_active = models.BooleanField(default=True, db_index=True, help_text="Whether kill switch is active")
-    reason = models.TextField(blank=True, help_text="Reason for kill switch activation")
-    activated_by = models.CharField(max_length=36, db_index=True, help_text="User who activated kill switch")
-    activated_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    deactivated_at = models.DateTimeField(null=True, blank=True, help_text="When kill switch was deactivated")
+    state_field = "status"
+    terminal_states = frozenset((KillSwitchStatus.INACTIVE,))
 
     class Meta:
         db_table = "ai_kill_switches"
-        indexes = [
-            models.Index(fields=["tenant_id", "scope"]),
-            models.Index(fields=["tenant_id", "scope_id"]),
-            models.Index(fields=["tenant_id", "is_active"]),
-            models.Index(fields=["scope", "is_active"]),
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(scope=KillSwitchScope.TENANT, scope_id__isnull=True)
+                    | Q(scope__in=(KillSwitchScope.SHARD, KillSwitchScope.AGENT), scope_id__isnull=False)
+                ),
+                name="ai_kill_scope_id_ck",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(status=KillSwitchStatus.ACTIVE, deactivated_by__isnull=True, deactivated_at__isnull=True)
+                    | Q(status=KillSwitchStatus.INACTIVE, deactivated_by__isnull=False, deactivated_at__isnull=False)
+                ),
+                name="ai_kill_deactivate_ck",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant_id", "scope", "scope_id"),
+                condition=Q(status=KillSwitchStatus.ACTIVE),
+                name="ai_kill_t_active_scope_uniq",
+                nulls_distinct=False,
+            ),
         ]
+        indexes = [
+            models.Index(fields=("tenant_id", "status", "scope"), name="ai_kill_t_status_idx"),
+            models.Index(fields=("tenant_id", "scope", "scope_id"), name="ai_kill_t_scope_idx"),
+        ]
+        ordering = ("-activated_at", "id")
+
+    @property
+    def is_active(self) -> bool:
+        """Compatibility projection for callers migrating from the v1 boolean."""
+
+        return self.status == KillSwitchStatus.ACTIVE
+
+    def clean(self) -> None:
+        if not isinstance(self.transition_history, list):
+            raise ValidationError({"transition_history": "Must be a JSON list."})
+        if not self.reason.strip():
+            raise ValidationError({"reason": "An activation reason is required."})
 
     def __str__(self) -> str:
-        return f"Kill Switch {self.name} ({self.scope})"
+        return f"Kill Switch {self.name} ({self.scope}/{self.status})"
+
+
+__all__ = [
+    "KillSwitch",
+    "KillSwitchScope",
+    "KillSwitchStatus",
+    "QuotaPeriod",
+    "QuotaType",
+    "QuotaUsage",
+    "ShardSaturation",
+    "TenantQuota",
+]
