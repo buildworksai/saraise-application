@@ -1,0 +1,1 @@
+export {ProjectManagementSettingsPage} from './ModulePages';

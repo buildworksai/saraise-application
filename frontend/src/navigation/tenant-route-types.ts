@@ -45,6 +45,9 @@ export interface TenantRoute {
   sourceFile: string;
   Page: LazyExoticComponent<ComponentType>;
   modes?: readonly TenantApplicationMode[];
+  /** Server-enforced access metadata used by access-aware route consumers. */
+  permission?: string;
+  entitlement?: string;
   navigation: TenantRouteNavigation;
 }
 

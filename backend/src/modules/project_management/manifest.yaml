@@ -1,38 +1,78 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: project_management
-version: 1.0.0
+version: 2.0.0
+type: business
 category: core_business
+lifecycle: stable
 display_name: Project Management
-description: |
-  Comprehensive project planning, task management, resource allocation, and time tracking.
-
-# Dependencies
+description: Tenant-safe projects, tasks, teams, milestones, configuration, audit, and time tracking.
 dependencies:
   - name: human_resources
     version: ">=1.0.0"
     required: false
-    purpose: Employee resource allocation
-
-# Permissions
+    purpose: Optional employee validation and labels
 permissions:
-  - project.project:create
-  - project.project:read
-  - project.project:update
-  - project.task:create
-  - project.task:read
-  - project.task:update
-  - project.time_entry:create
-  - project.time_entry:read
-  - project.report:read
-
-# SoD (Segregation of Duties) actions
-sod_actions:
-  - [project.task:create, project.time_entry:create]
-
-# Health Checks
+  - project_management.project:create
+  - project_management.project:read
+  - project_management.project:update
+  - project_management.project:transition
+  - project_management.project:archive
+  - project_management.project:restore
+  - project_management.project:duplicate
+  - project_management.task:create
+  - project_management.task:read
+  - project_management.task:update
+  - project_management.task:transition
+  - project_management.task:archive
+  - project_management.task:restore
+  - project_management.task:reorder
+  - project_management.member:create
+  - project_management.member:read
+  - project_management.member:update
+  - project_management.member:archive
+  - project_management.member:restore
+  - project_management.time_entry:create
+  - project_management.time_entry:read
+  - project_management.time_entry:update
+  - project_management.time_entry:archive
+  - project_management.time_entry:restore
+  - project_management.milestone:create
+  - project_management.milestone:read
+  - project_management.milestone:update
+  - project_management.milestone:transition
+  - project_management.milestone:archive
+  - project_management.milestone:restore
+  - project_management.activity:read
+  - project_management.configuration:read
+  - project_management.configuration:write
+  - project_management.configuration:simulate
+  - project_management.configuration:publish
+  - project_management.configuration:rollback
+  - project_management.configuration:import
+  - project_management.configuration:export
+  - project_management.health:read
+sod_actions: []
 health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
+  - name: project_management_dependencies
+    endpoint: /api/v2/project-management/health/
     interval: 60
+metadata:
+  entitlement: project_management.core
+  api_prefix: /api/v2/project-management/
+  emitted_events:
+    - project_management.project.created
+    - project_management.project.transitioned
+    - project_management.project.archived
+    - project_management.task.created
+    - project_management.task.transitioned
+    - project_management.member.changed
+    - project_management.time_entry.changed
+    - project_management.milestone.changed
+    - project_management.configuration.published
+  extension_interfaces:
+    - ProjectValidator
+    - TaskSchedulingProvider
+    - ProjectCostProvider
+    - ResourceAvailabilityProvider
+    - ProjectInsightProvider
+    - ProjectLifecycleSubscriber
+    - ProjectDetailPanel

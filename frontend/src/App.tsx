@@ -282,23 +282,6 @@ const CreatePurchaseSupplierPage = lazy(() =>
   }))
 );
 
-// Project Management
-const ProjectListPage = lazy(() =>
-  import("./modules/project_management/pages/ProjectListPage").then((m) => ({
-    default: m.ProjectListPage,
-  }))
-);
-const ProjectDetailPage = lazy(() =>
-  import("./modules/project_management/pages/ProjectDetailPage").then((m) => ({
-    default: m.ProjectDetailPage,
-  }))
-);
-const CreateProjectPage = lazy(() =>
-  import("./modules/project_management/pages/CreateProjectPage").then((m) => ({
-    default: m.CreateProjectPage,
-  }))
-);
-
 // Bank Reconciliation
 const BankAccountListPage = lazy(() =>
   import("./modules/bank_reconciliation/pages/BankAccountListPage").then((m) => ({
@@ -794,38 +777,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <PurchaseSupplierDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Project Management */}
-          <Route
-            path="/project-management/projects"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <ProjectListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/project-management/projects/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateProjectPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/project-management/projects/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <ProjectDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
