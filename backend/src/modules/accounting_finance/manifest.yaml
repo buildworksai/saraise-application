@@ -1,51 +1,135 @@
 # Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
 
 name: accounting_finance
-version: 1.0.0
+version: 2.0.0
+type: domain
+lifecycle: core
 category: core_business
 display_name: Accounting & Finance
-description: |
-  Comprehensive financial management including Chart of Accounts, Journal Entries,
-  Accounts Payable, Accounts Receivable, and Financial Reporting.
+description: >-
+  Tenant-isolated double-entry accounting with chart of accounts, governed
+  posting periods, journal posting, AP/AR lifecycles, payments, financial
+  projections, durable jobs, and a versioned extension boundary.
 
-# Dependencies
 dependencies:
   - name: master_data_management
+    version: ">=2.0.0"
+    required: true
+    purpose: Tenant-valid supplier and customer identity and credit decisions
+  - name: core_async_jobs
     version: ">=1.0.0"
-    required: false
-    purpose: Supplier and customer master data
+    required: true
+    purpose: Durable imports, report generation, scheduled transitions, and transactional outbox delivery
 
-# Permissions
 permissions:
   - accounting.account:create
   - accounting.account:read
   - accounting.account:update
   - accounting.account:delete
+  - accounting.posting_period:create
+  - accounting.posting_period:read
+  - accounting.posting_period:update
+  - accounting.posting_period:close
+  - accounting.posting_period:lock
   - accounting.journal_entry:create
   - accounting.journal_entry:read
   - accounting.journal_entry:update
+  - accounting.journal_entry:delete
   - accounting.journal_entry:post
+  - accounting.journal_entry:reverse
+  - accounting.journal_entry:import
   - accounting.ap_invoice:create
   - accounting.ap_invoice:read
   - accounting.ap_invoice:update
   - accounting.ap_invoice:delete
+  - accounting.ap_invoice:approve
+  - accounting.ap_invoice:post
   - accounting.ar_invoice:create
   - accounting.ar_invoice:read
   - accounting.ar_invoice:update
   - accounting.ar_invoice:delete
+  - accounting.ar_invoice:post
   - accounting.payment:create
   - accounting.payment:read
   - accounting.payment:update
+  - accounting.payment:void
   - accounting.report:read
 
-# SoD (Segregation of Duties) actions
+# The current manifest parser accepts flat action identifiers.  Pairing and
+# conditional actor separation are declared below as structured policy metadata.
 sod_actions:
-  - [accounting.journal_entry:create, accounting.journal_entry:post]
-  - [accounting.ap_invoice:create, accounting.payment:create]
+  - accounting.journal_entry:create
+  - accounting.journal_entry:post
+  - accounting.ap_invoice:create
+  - accounting.ap_invoice:approve
+  - accounting.ap_invoice:post
+  - accounting.payment:create
 
-# Health Checks
 health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
+  - name: accounting_finance_readiness
+    endpoint: /api/v2/accounting-finance/health/
     interval: 60
+
+metadata:
+  api_versions:
+    - v1
+    - v2
+  governed_api_prefix: /api/v2/accounting-finance/
+  health_path: /api/v2/accounting-finance/health/
+  entitlement: accounting_finance
+  tenant_scope: tenant_owned
+  rls: forced_typed_uuid
+  extension_surface: accounting-spi-v1
+  durable_job_commands:
+    - accounting.journal_entries.import
+    - accounting.reports.generate
+    - accounting.ar.mark_overdue
+  domain_events:
+    - accounting.journal_entry.posted.v1
+    - accounting.journal_entry.reversed.v1
+    - accounting.ap_invoice.created.v1
+    - accounting.ap_invoice.approved.v1
+    - accounting.ap_invoice.posted.v1
+    - accounting.ar_invoice.posted.v1
+    - accounting.payment.recorded.v1
+    - accounting.payment.voided.v1
+    - accounting.period.closed.v1
+  extension_points:
+    - name: accounting.posting
+      spi_version: "1.0"
+      registration: app_ready
+    - name: accounting.party_directory
+      spi_version: "1.0"
+      registration: app_ready
+      required: true
+    - name: accounting.dimension_provider
+      spi_version: "1.0"
+      registration: app_ready
+    - name: accounting.tax_calculation
+      spi_version: "1.0"
+      registration: app_ready
+    - name: accounting.period_close_evidence
+      spi_version: "1.0"
+      registration: app_ready
+  sod_rules:
+    - rule_id: journal_creator_cannot_post
+      subject_action: accounting.journal_entry:create
+      conflicting_action: accounting.journal_entry:post
+      same_aggregate: true
+    - rule_id: ap_creator_cannot_approve
+      subject_action: accounting.ap_invoice:create
+      conflicting_action: accounting.ap_invoice:approve
+      same_aggregate: true
+    - rule_id: ap_creator_cannot_post
+      subject_action: accounting.ap_invoice:create
+      conflicting_action: accounting.ap_invoice:post
+      same_aggregate: true
+    - rule_id: ap_creator_cannot_pay
+      subject_action: accounting.ap_invoice:create
+      conflicting_action: accounting.payment:create
+      same_aggregate: true
+    - rule_id: ap_approver_cannot_post
+      subject_action: accounting.ap_invoice:approve
+      conflicting_action: accounting.ap_invoice:post
+      same_aggregate: true
+      policy_configurable: true

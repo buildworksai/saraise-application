@@ -25,6 +25,12 @@ from .serializers import (
 )
 
 
+def _actor_id(request):
+    """Return the authenticated audit identity for a legacy API write."""
+
+    return str(request.user.pk)
+
+
 class AccountViewSet(viewsets.ModelViewSet):
     """ViewSet for Account CRUD operations."""
 
@@ -57,7 +63,8 @@ class AccountViewSet(viewsets.ModelViewSet):
         except (ValueError, TypeError):
             raise PermissionDenied("Invalid tenant_id format")
 
-        serializer.save(tenant_id=tenant_id)
+        actor_id = _actor_id(self.request)
+        serializer.save(tenant_id=tenant_id, created_by=actor_id, updated_by=actor_id)
 
 
 class PostingPeriodViewSet(viewsets.ModelViewSet):
@@ -92,7 +99,8 @@ class PostingPeriodViewSet(viewsets.ModelViewSet):
         except (ValueError, TypeError):
             raise PermissionDenied("Invalid tenant_id format")
 
-        serializer.save(tenant_id=tenant_id)
+        actor_id = _actor_id(self.request)
+        serializer.save(tenant_id=tenant_id, created_by=actor_id, updated_by=actor_id)
 
 
 class JournalEntryViewSet(viewsets.ModelViewSet):
@@ -127,7 +135,8 @@ class JournalEntryViewSet(viewsets.ModelViewSet):
         except (ValueError, TypeError):
             raise PermissionDenied("Invalid tenant_id format")
 
-        serializer.save(tenant_id=tenant_id)
+        actor_id = _actor_id(self.request)
+        serializer.save(tenant_id=tenant_id, created_by=actor_id, updated_by=actor_id)
 
 
 class APInvoiceViewSet(viewsets.ModelViewSet):
@@ -162,7 +171,8 @@ class APInvoiceViewSet(viewsets.ModelViewSet):
         except (ValueError, TypeError):
             raise PermissionDenied("Invalid tenant_id format")
 
-        serializer.save(tenant_id=tenant_id)
+        actor_id = _actor_id(self.request)
+        serializer.save(tenant_id=tenant_id, created_by=actor_id, updated_by=actor_id)
 
 
 class ARInvoiceViewSet(viewsets.ModelViewSet):
@@ -197,7 +207,8 @@ class ARInvoiceViewSet(viewsets.ModelViewSet):
         except (ValueError, TypeError):
             raise PermissionDenied("Invalid tenant_id format")
 
-        serializer.save(tenant_id=tenant_id)
+        actor_id = _actor_id(self.request)
+        serializer.save(tenant_id=tenant_id, created_by=actor_id, updated_by=actor_id)
 
 
 class PaymentViewSet(viewsets.ModelViewSet):
@@ -232,4 +243,4 @@ class PaymentViewSet(viewsets.ModelViewSet):
         except (ValueError, TypeError):
             raise PermissionDenied("Invalid tenant_id format")
 
-        serializer.save(tenant_id=tenant_id)
+        serializer.save(tenant_id=tenant_id, created_by=_actor_id(self.request))
