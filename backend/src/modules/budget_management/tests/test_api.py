@@ -9,6 +9,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from src.core.access.permissions import RequiresAccess
 from src.modules.budget_management.models import Budget
 
 User = get_user_model()
@@ -24,6 +25,13 @@ def override_saraise_mode(settings):
 def api_client():
     """Create API client for testing."""
     return APIClient()
+
+
+@pytest.fixture(autouse=True)
+def allow_declared_access(monkeypatch):
+    """Isolate module transport tests from the separately-tested policy engine."""
+    monkeypatch.setattr(RequiresAccess, "has_permission", lambda self, request, view: True)
+    monkeypatch.setattr(RequiresAccess, "has_object_permission", lambda self, request, view, obj: True)
 
 
 @pytest.fixture
@@ -60,6 +68,8 @@ class TestBudgetAPI:
 
         Budget.objects.create(
             tenant_id=tenant_id,
+            created_by=uuid.uuid4(),
+            updated_by=uuid.uuid4(),
             budget_code="BUD-001",
             budget_name="Test Budget",
             fiscal_year=2024,
@@ -67,15 +77,15 @@ class TestBudgetAPI:
             end_date=date(2024, 12, 31),
         )
 
-        api_client.force_authenticate(user=authenticated_user)
-        response = api_client.get("/api/v1/budget-management/budgets/")
+        api_client.force_login(user=authenticated_user)
+        response = api_client.get("/api/v2/budget-management/budgets/")
 
         assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) > 0
+        assert response.json()["data"][0]["budget_code"] == "BUD-001"
 
     def test_create_budget(self, api_client, authenticated_user):
         """Test creating a budget."""
-        api_client.force_authenticate(user=authenticated_user)
+        api_client.force_login(user=authenticated_user)
 
         data = {
             "budget_code": "BUD-002",
@@ -83,8 +93,24 @@ class TestBudgetAPI:
             "fiscal_year": 2024,
             "start_date": "2024-01-01",
             "end_date": "2024-12-31",
+            "budget_type": "operating",
+            "currency": "USD",
         }
 
-        response = api_client.post("/api/v1/budget-management/budgets/", data, format="json")
+        response = api_client.post("/api/v2/budget-management/budgets/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
-        assert response.data["budget_code"] == "BUD-002"
+        assert response.json()["data"]["budget_code"] == "BUD-002"
+
+    def test_session_mutation_enforces_csrf(self, authenticated_user):
+        client = APIClient(enforce_csrf_checks=True)
+        client.force_login(user=authenticated_user)
+        response = client.post(
+            "/api/v2/budget-management/budgets/",
+            {
+                "budget_code": "CSRF-1", "budget_name": "CSRF proof", "fiscal_year": 2024,
+                "start_date": "2024-01-01", "end_date": "2024-12-31",
+                "budget_type": "operating", "currency": "USD",
+            },
+            format="json",
+        )
+        assert response.status_code == status.HTTP_403_FORBIDDEN
