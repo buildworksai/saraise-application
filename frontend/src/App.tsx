@@ -521,21 +521,6 @@ const CreateEmailCampaignPage = lazy(() =>
 );
 
 // Master Data Management
-const MasterDataEntityListPage = lazy(() =>
-  import("./modules/master_data_management/pages/MasterDataEntityListPage").then((m) => ({
-    default: m.MasterDataEntityListPage,
-  }))
-);
-const MasterDataEntityDetailPage = lazy(() =>
-  import("./modules/master_data_management/pages/MasterDataEntityDetailPage").then((m) => ({
-    default: m.MasterDataEntityDetailPage,
-  }))
-);
-const CreateMasterDataEntityPage = lazy(() =>
-  import("./modules/master_data_management/pages/CreateMasterDataEntityPage").then((m) => ({
-    default: m.CreateMasterDataEntityPage,
-  }))
-);
 
 // Multi-Company
 const MultiCompanyListPage = lazy(() =>
@@ -1368,38 +1353,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <EmailCampaignDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Master Data Management */}
-          <Route
-            path="/master-data/entities"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <MasterDataEntityListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/master-data/entities/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateMasterDataEntityPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/master-data/entities/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <MasterDataEntityDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

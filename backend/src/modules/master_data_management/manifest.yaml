@@ -1,26 +1,72 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: master_data_management
-version: 1.0.0
+version: 2.0.0
 category: core_business
 display_name: Master Data Management
-description: |
-  Centralized management of master data entities like customers, suppliers, products, and employees.
+description: >-
+  Tenant-owned authoritative master-data hub with declarative entity types,
+  deterministic quality and matching, governed merges, immutable provenance,
+  durable jobs, and versioned paid-module extension points.
 
-# Dependencies
-dependencies: []
+dependencies:
+  - core >=1.0.0
+  - customization_framework >=1.0.0
 
-# Permissions
 permissions:
-  - mdm.entity:create
+  - mdm.entity_type:read
+  - mdm.entity_type:manage
   - mdm.entity:read
+  - mdm.entity:create
   - mdm.entity:update
-  - mdm.entity:delete
-  - mdm.data_quality:read
+  - mdm.entity:archive
+  - mdm.entity:restore
+  - mdm.entity:rollback
+  - mdm.quality_rule:read
+  - mdm.quality_rule:manage
+  - mdm.quality_issue:read
+  - mdm.quality_issue:resolve
+  - mdm.matching_rule:read
+  - mdm.matching_rule:manage
+  - mdm.match:read
+  - mdm.match:review
+  - mdm.match:run
+  - mdm.merge:read
+  - mdm.merge:execute
+  - mdm.merge:reverse
+  - mdm.dashboard:read
 
-# Health Checks
 health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
+  - name: liveness
+    endpoint: /api/v2/master-data-management/health/live/
     interval: 60
+  - name: readiness
+    endpoint: /api/v2/master-data-management/health/ready/
+    interval: 60
+
+metadata:
+  api_version: v2
+  logger: saraise.master_data_management
+  tenant_scope: tenant_owned
+  rls: forced_typed_uuid
+  durable_job_commands:
+    - master_data_management.quality_scan
+    - master_data_management.deduplication_scan
+  extension_points:
+    - name: master_data_management.entity_type_contributor
+      spi_version: "1.0"
+      registration: app_ready
+    - name: master_data_management.entity_validator
+      spi_version: "1.0"
+      registration: app_ready
+    - name: master_data_management.matching_strategy
+      spi_version: "1.0"
+      registration: app_ready
+    - name: master_data_management.survivorship_strategy
+      spi_version: "1.0"
+      registration: app_ready
+    - name: master_data_management.entity_projection_consumer
+      spi_version: "1.0"
+      registration: app_ready
+  customization_contract:
+    module: master_data_management
+    resource: entity
+    version: "2.0"
