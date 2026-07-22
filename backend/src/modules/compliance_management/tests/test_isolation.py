@@ -1,135 +1,134 @@
-"""
-Tenant Isolation Tests for Compliance Management module.
-"""
+"""Mandatory black-box tenant isolation contracts for compliance API v2."""
 
-import uuid
+from __future__ import annotations
+
 import pytest
-from datetime import date
-from django.contrib.auth import get_user_model
 from rest_framework import status
-from rest_framework.test import APIClient
 
-from src.core.auth_utils import get_user_tenant_id
-from src.modules.compliance_management.models import CompliancePolicy
+from src.core.access.permissions import RequiresAccess
+from src.core.testing.tenant_contract import TenantIsolationContract
 
-User = get_user_model()
+from ..models import (
+    ComplianceConfigurationRevision, ComplianceEvidence, ComplianceFramework,
+    CompliancePolicy, ComplianceRequirement, RequirementPolicyMapping,
+)
+from .factories import (
+    ComplianceConfigurationRevisionFactory, ComplianceEvidenceFactory,
+    ComplianceFrameworkFactory, CompliancePolicyFactory,
+    ComplianceRequirementFactory, RequirementPolicyMappingFactory,
+)
+
+pytest_plugins = ["src.core.testing"]
+pytestmark = pytest.mark.django_db
+BASE = "/api/v2/compliance-management"
 
 
 @pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
-    settings.SARAISE_MODE = "development"
+def allow_manifest_access(monkeypatch):
+    """Grant declared access so this suite isolates the tenant boundary itself."""
+    monkeypatch.setattr(RequiresAccess, "has_permission", lambda self, request, view: True)
+    monkeypatch.setattr(RequiresAccess, "has_object_permission", lambda self, request, view, obj: True)
 
 
-@pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
+class GovernedIsolationContract(TenantIsolationContract):
+    read_denial_statuses = frozenset({status.HTTP_404_NOT_FOUND})
+
+    def get_list_items(self, response):
+        body = response.json()
+        assert set(body) == {"data", "meta"}
+        assert body["meta"]["correlation_id"]
+        return body["data"]
 
 
-@pytest.fixture
-def tenant_a_user(db):
-    """Create user for tenant A."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
+class TestFrameworkIsolation(GovernedIsolationContract):
+    model = ComplianceFramework
+    list_url = f"{BASE}/frameworks/"
+    detail_url_template = f"{BASE}/frameworks/{{pk}}/"
+    create_payload = {"code": "NEW", "name": "New", "version": "1", "category": "General", "source_kind": "custom"}
+    update_payload = {"name": "Cross-tenant change"}
 
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_a",
-        email="usera@example.com",
-        password="testpass123",
-    )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+    @pytest.fixture(autouse=True)
+    def context(self, authenticated_tenant_a_client, tenant_a, tenant_b):
+        self.client = authenticated_tenant_a_client
+        self.tenant_a_row = ComplianceFrameworkFactory(tenant_id=tenant_a.id)
+        self.tenant_b_row = ComplianceFrameworkFactory(tenant_id=tenant_b.id)
 
 
-@pytest.fixture
-def tenant_b_user(db):
-    """Create user for tenant B."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
+class TestRequirementIsolation(GovernedIsolationContract):
+    model = ComplianceRequirement
+    list_url = f"{BASE}/requirements/"
+    detail_url_template = f"{BASE}/requirements/{{pk}}/"
+    update_payload = {"title": "Cross-tenant change"}
 
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_b",
-        email="userb@example.com",
-        password="testpass123",
-    )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+    def get_create_payload(self):
+        return {"framework_id": str(self.tenant_a_row.framework_id), "code": "NEW", "title": "New", "description": "Normative text"}
+
+    @pytest.fixture(autouse=True)
+    def context(self, authenticated_tenant_a_client, tenant_a, tenant_b):
+        self.client = authenticated_tenant_a_client
+        self.tenant_a_row = ComplianceRequirementFactory(tenant_id=tenant_a.id)
+        self.tenant_b_row = ComplianceRequirementFactory(tenant_id=tenant_b.id)
 
 
-@pytest.mark.django_db
-class TestCompliancePolicyTenantIsolation:
-    """CRITICAL: Tenant isolation tests for CompliancePolicy model."""
+class TestPolicyIsolation(GovernedIsolationContract):
+    model = CompliancePolicy
+    list_url = f"{BASE}/policies/"
+    detail_url_template = f"{BASE}/policies/{{pk}}/"
+    create_payload = {"code": "NEW", "title": "New policy", "category": "General"}
+    update_payload = {"title": "Cross-tenant change"}
 
-    def test_user_cannot_list_other_tenant_policies(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's policies in list."""
-        tenant_a_id = uuid.UUID(get_user_tenant_id(tenant_a_user))
-        tenant_b_id = uuid.UUID(get_user_tenant_id(tenant_b_user))
+    @pytest.fixture(autouse=True)
+    def context(self, authenticated_tenant_a_client, tenant_a, tenant_b):
+        self.client = authenticated_tenant_a_client
+        self.tenant_a_row = CompliancePolicyFactory(tenant_id=tenant_a.id)
+        self.tenant_b_row = CompliancePolicyFactory(tenant_id=tenant_b.id)
 
-        # Create policy for tenant A
-        policy_a = CompliancePolicy.objects.create(
-            tenant_id=tenant_a_id,
-            policy_code="POL-A",
-            policy_name="Policy A",
-            regulation_type="GDPR",
-            effective_date=date(2024, 1, 1),
-        )
 
-        # Create policy for tenant B
-        policy_b = CompliancePolicy.objects.create(
-            tenant_id=tenant_b_id,
-            policy_code="POL-B",
-            policy_name="Policy B",
-            regulation_type="SOX",
-            effective_date=date(2024, 1, 1),
-        )
+class TestMappingIsolation(GovernedIsolationContract):
+    model = RequirementPolicyMapping
+    list_url = f"{BASE}/mappings/"
+    detail_url_template = f"{BASE}/mappings/{{pk}}/"
+    update_payload = {"coverage": "partial", "rationale": "Partial coverage remains."}
 
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
+    def get_create_payload(self):
+        return {"requirement_id": str(self.tenant_a_row.requirement_id), "policy_id": str(self.tenant_a_row.policy_id), "coverage": "full", "rationale": "Covered"}
 
-        response = api_client.get("/api/v1/compliance-management/policies/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        policy_ids = [p["id"] for p in data]
+    @pytest.fixture(autouse=True)
+    def context(self, authenticated_tenant_a_client, tenant_a, tenant_b):
+        self.client = authenticated_tenant_a_client
+        self.tenant_a_row = RequirementPolicyMappingFactory(tenant_id=tenant_a.id)
+        self.tenant_b_row = RequirementPolicyMappingFactory(tenant_id=tenant_b.id)
 
-        # User A should see tenant A's policy, but NOT tenant B's policy
-        assert str(policy_a.id) in policy_ids
-        assert str(policy_b.id) not in policy_ids
 
-    def test_user_cannot_get_other_tenant_policy_by_id(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot GET other tenant's policy by ID (returns 404)."""
-        tenant_b_id = uuid.UUID(get_user_tenant_id(tenant_b_user))
+class TestEvidenceIsolation(GovernedIsolationContract):
+    model = ComplianceEvidence
+    list_url = f"{BASE}/evidence/"
+    detail_url_template = f"{BASE}/evidence/{{pk}}/"
+    create_payload = {"name": "New evidence", "evidence_type": "attestation", "reference_kind": "text_reference", "text_reference": "Reference", "classification": "internal"}
+    update_payload = {"name": "Cross-tenant change"}
 
-        # Create policy for tenant B
-        policy_b = CompliancePolicy.objects.create(
-            tenant_id=tenant_b_id,
-            policy_code="POL-B",
-            policy_name="Policy B",
-            regulation_type="SOX",
-            effective_date=date(2024, 1, 1),
-        )
+    @pytest.fixture(autouse=True)
+    def context(self, authenticated_tenant_a_client, tenant_a, tenant_b):
+        self.client = authenticated_tenant_a_client
+        self.tenant_a_row = ComplianceEvidenceFactory(tenant_id=tenant_a.id)
+        self.tenant_b_row = ComplianceEvidenceFactory(tenant_id=tenant_b.id)
 
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
 
-        # Try to access tenant B's policy
-        response = api_client.get(f"/api/v1/compliance-management/policies/{policy_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+class TestConfigurationIsolation(GovernedIsolationContract):
+    model = ComplianceConfigurationRevision
+    list_url = f"{BASE}/configuration/?environment=development"
+    detail_url_template = f"{BASE}/configuration/{{pk}}/"
+    create_payload = {"environment": "development", "expiry_warning_days": 45}
+    update_payload = {"expiry_warning_days": 60}
+
+    @pytest.fixture(autouse=True)
+    def context(self, authenticated_tenant_a_client, tenant_a, tenant_b):
+        self.client = authenticated_tenant_a_client
+        self.tenant_a_row = ComplianceConfigurationRevisionFactory(tenant_id=tenant_a.id)
+        self.tenant_b_row = ComplianceConfigurationRevisionFactory(tenant_id=tenant_b.id)
+
+    def test_cross_tenant_delete_is_denied_and_unchanged(self):
+        before = self._row_snapshot(self.tenant_b_row)
+        response = self.client.delete(self.get_detail_url(self.tenant_b_row))
+        assert response.status_code in {status.HTTP_404_NOT_FOUND, status.HTTP_405_METHOD_NOT_ALLOWED}
+        assert self._row_snapshot(self.tenant_b_row) == before

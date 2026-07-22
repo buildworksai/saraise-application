@@ -1,26 +1,128 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: compliance_management
-version: 1.0.0
-category: core_business
-display_name: Compliance Management
-description: |
-  Regulatory compliance tracking, audit trails, and policy management.
-
-# Dependencies
-dependencies: []
-
-# Permissions
+version: 2.0.0
+description: Tenant-safe manual compliance frameworks, policies, evidence, assessments, configuration, and audit history
+type: domain
+lifecycle: core
+dependencies:
+  - core-identity >=1.0.0
 permissions:
-  - compliance.policy:create
-  - compliance.policy:read
-  - compliance.policy:update
-  - compliance.audit:read
+  - compliance.framework:read
+  - compliance.framework:create
+  - compliance.framework:update
+  - compliance.framework:archive
+  - compliance.framework:activate
+  - compliance.framework:import
+  - compliance.framework:export
   - compliance.requirement:read
-
-# Health Checks
-health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
-    interval: 60
+  - compliance.requirement:create
+  - compliance.requirement:update
+  - compliance.requirement:archive
+  - compliance.requirement:import
+  - compliance.policy:read
+  - compliance.policy:create
+  - compliance.policy:update
+  - compliance.policy:archive
+  - compliance.policy:version
+  - compliance.policy:submit
+  - compliance.policy:approve
+  - compliance.policy:publish
+  - compliance.mapping:read
+  - compliance.mapping:manage
+  - compliance.assessment:read
+  - compliance.assessment:create
+  - compliance.evidence:read
+  - compliance.evidence:create
+  - compliance.evidence:update
+  - compliance.evidence:archive
+  - compliance.evidence:validate
+  - compliance.evidence:link
+  - compliance.configuration:read
+  - compliance.configuration:manage
+  - compliance.configuration:activate
+  - compliance.configuration:rollback
+  - compliance.configuration:export
+  - compliance.audit:read
+  - compliance.dashboard:read
+  - compliance.job:read
+sod_actions:
+  - compliance.policy:approve
+  - compliance.policy:publish
+search_indexes:
+  - compliance_frameworks
+  - compliance_requirements
+  - compliance_policies
+  - compliance_evidence
+ai_tools: []
+metadata:
+  api_version: v2
+  api_prefix: /api/v2/compliance-management/
+  health_probe: compliance_management.storage
+  durable_job_commands:
+    - compliance_management.import_framework
+    - compliance_management.import_requirements
+    - compliance_management.export_workspace
+    - compliance_management.collect_evidence
+  extension_contract:
+    version: 1.0.0
+    registration: app_ready
+    identifiers: namespaced
+    protocols:
+      - FrameworkPackProvider
+      - EvidenceCollector
+      - ApplicabilityRule
+      - ScoringRule
+      - ComplianceReportRenderer
+  installation_projections:
+    entitlement:
+      module: compliance_management
+      edition: open_source
+      enabled: true
+      required: true
+      capabilities:
+        - compliance.framework:read
+        - compliance.framework:create
+        - compliance.framework:update
+        - compliance.framework:archive
+        - compliance.framework:activate
+        - compliance.framework:import
+        - compliance.framework:export
+        - compliance.requirement:read
+        - compliance.requirement:create
+        - compliance.requirement:update
+        - compliance.requirement:archive
+        - compliance.requirement:import
+        - compliance.policy:read
+        - compliance.policy:create
+        - compliance.policy:update
+        - compliance.policy:archive
+        - compliance.policy:version
+        - compliance.policy:submit
+        - compliance.policy:approve
+        - compliance.policy:publish
+        - compliance.mapping:read
+        - compliance.mapping:manage
+        - compliance.assessment:read
+        - compliance.assessment:create
+        - compliance.evidence:read
+        - compliance.evidence:create
+        - compliance.evidence:update
+        - compliance.evidence:archive
+        - compliance.evidence:validate
+        - compliance.evidence:link
+        - compliance.configuration:read
+        - compliance.configuration:manage
+        - compliance.configuration:activate
+        - compliance.configuration:rollback
+        - compliance.configuration:export
+        - compliance.audit:read
+        - compliance.dashboard:read
+        - compliance.job:read
+    quotas:
+      - resource: compliance_management.api_reads
+        required: true
+        limit: 100000
+        period: month
+      - resource: compliance_management.api_writes
+        required: true
+        limit: 20000
+        period: month
