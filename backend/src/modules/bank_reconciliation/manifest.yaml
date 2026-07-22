@@ -1,32 +1,96 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
+# SARAISE open-source bank reconciliation contract
 name: bank_reconciliation
-version: 1.0.0
-category: core_business
-display_name: Bank Reconciliation
-description: |
-  Bank statement import, reconciliation, and bank account management.
-
-# Dependencies
+version: 2.0.0
+description: Tenant-safe bank account administration, durable statement ingestion, transparent matching, and reconciliation certification
+type: domain
+lifecycle: core
 dependencies:
   - name: accounting_finance
     version: ">=1.0.0"
     required: false
-    purpose: Journal entry creation
-
-# Permissions
+    purpose: Tenant-validated ledger balance and unreconciled-entry service contracts
 permissions:
-  - bank.bank_account:create
-  - bank.bank_account:read
-  - bank.bank_account:update
-  - bank.statement:create
-  - bank.statement:read
-  - bank.reconciliation:create
-  - bank.reconciliation:read
-
-# Health Checks
-health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
-    interval: 60
+  - bank_reconciliation.account:read
+  - bank_reconciliation.account:create
+  - bank_reconciliation.account:update
+  - bank_reconciliation.account:archive
+  - bank_reconciliation.account:reveal
+  - bank_reconciliation.statement:read
+  - bank_reconciliation.statement:create
+  - bank_reconciliation.statement:void
+  - bank_reconciliation.transaction:read
+  - bank_reconciliation.transaction:create
+  - bank_reconciliation.transaction:update
+  - bank_reconciliation.import:read
+  - bank_reconciliation.import:create
+  - bank_reconciliation.import:retry
+  - bank_reconciliation.import:cancel
+  - bank_reconciliation.rule:read
+  - bank_reconciliation.rule:create
+  - bank_reconciliation.rule:update
+  - bank_reconciliation.rule:delete
+  - bank_reconciliation.reconciliation:read
+  - bank_reconciliation.reconciliation:create
+  - bank_reconciliation.reconciliation:update
+  - bank_reconciliation.reconciliation:review
+  - bank_reconciliation.reconciliation:finalize
+  - bank_reconciliation.reconciliation:void
+  - bank_reconciliation.reconciliation:export
+  - bank_reconciliation.match:read
+  - bank_reconciliation.match:create
+  - bank_reconciliation.match:confirm
+  - bank_reconciliation.match:reverse
+  - bank_reconciliation.health:read
+sod_actions:
+  - bank_reconciliation.reconciliation:finalize
+  - bank_reconciliation.match:reverse
+search_indexes:
+  - bank_accounts
+  - bank_statements
+  - bank_transactions
+  - bank_reconciliation_sessions
+ai_tools: []
+metadata:
+  api_version: v2
+  public_api_prefix: /api/v2/bank-reconciliation/
+  health_endpoint: /api/v2/bank-reconciliation/health/
+  entitlement_namespace: bank_reconciliation
+  durable_job_commands:
+    - bank_reconciliation.import_statement
+    - bank_reconciliation.generate_candidates
+  state_machines:
+    - bank_reconciliation.statement_import
+    - bank_reconciliation.reconciliation
+  extension_points:
+    - name: bank_reconciliation.statement_parser
+      spi_version: "1.0"
+      registration: app_ready
+    - name: bank_reconciliation.candidate_provider
+      spi_version: "1.0"
+      registration: app_ready
+    - name: bank_reconciliation.ledger_gateway
+      spi_version: "1.0"
+      registration: app_ready
+    - name: bank_reconciliation.adjustment_publisher
+      spi_version: "1.0"
+      registration: app_ready
+  quota_resources:
+    - name: bank_reconciliation.api_reads
+      default_projection: request
+      cost: 1
+    - name: bank_reconciliation.api_writes
+      default_projection: request
+      cost: 1
+    - name: bank_reconciliation.imports
+      default_projection: import
+      cost: 1
+    - name: bank_reconciliation.import_bytes
+      default_projection: byte
+      cost: variable
+    - name: bank_reconciliation.candidate_runs
+      default_projection: run
+      cost: 1
+  uninstall:
+    preserve_financial_evidence: true
+    unregister_extensions: true
+    unregister_commands: true

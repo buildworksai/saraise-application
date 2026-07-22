@@ -1,85 +1,59 @@
-"""
-API tests for Bank Reconciliation module.
-"""
+from __future__ import annotations
 
-import uuid
+from unittest.mock import patch
+
 import pytest
-from django.contrib.auth import get_user_model
-from rest_framework import status
-from rest_framework.test import APIClient
+from rest_framework.permissions import IsAuthenticated
 
-from src.modules.bank_reconciliation.models import BankAccount
+from .. import api
+from .factories import BankAccountFactory
 
-User = get_user_model()
+pytest_plugins = ["src.core.testing.factories"]
+pytestmark = pytest.mark.django_db
+BASE = "/api/v2/bank-reconciliation"
 
 
 @pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
-    settings.SARAISE_MODE = "development"
+def isolate_access_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(api.ActionAccessMixin, "get_permissions", lambda self: [IsAuthenticated()])
 
 
-@pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
+def test_accounts_are_paginated_enveloped_and_masked(
+    tenant_a: object, tenant_a_user: object, tenant_a_client: object
+) -> None:
+    account = BankAccountFactory(tenant_id=tenant_a.id, account_number="SENSITIVE-1234")
+    response = tenant_a_client.get(f"{BASE}/accounts/")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["meta"]["pagination"]["count"] == 1
+    assert body["data"][0]["masked_account_number"].endswith("1234")
+    assert "SENSITIVE" not in response.content.decode()
+    assert body["data"][0]["id"] == str(account.id)
 
 
-@pytest.fixture
-def authenticated_user(db):
-    """Create authenticated user with tenant."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="testuser",
-        email="test@example.com",
-        password="testpass123",
-    )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+def test_account_mutations_delegate_to_services(tenant_a_client: object) -> None:
+    payload = {
+        "account_number": "ACC-1000",
+        "bank_name": "Bank",
+        "account_name": "Operating",
+        "account_type": "checking",
+        "currency": "USD",
+        "opening_balance": "0.0000",
+    }
+    with patch.object(api.BankAccountService, "create", wraps=api.BankAccountService.create) as service:
+        response = tenant_a_client.post(f"{BASE}/accounts/", payload, format="json")
+    assert response.status_code == 201
+    service.assert_called_once()
 
 
-@pytest.mark.django_db
-class TestBankAccountAPI:
-    """Test BankAccount API endpoints."""
+def test_put_and_unauthenticated_requests_fail_closed(
+    api_client: object, tenant_a_client: object, tenant_a: object
+) -> None:
+    account = BankAccountFactory(tenant_id=tenant_a.id)
+    assert api_client.get(f"{BASE}/accounts/").status_code == 401
+    assert tenant_a_client.put(f"{BASE}/accounts/{account.id}/", {}, format="json").status_code == 405
 
-    def test_list_bank_accounts(self, api_client, authenticated_user):
-        """Test listing bank accounts."""
-        tenant_id = uuid.UUID(authenticated_user.profile.tenant_id)
 
-        BankAccount.objects.create(
-            tenant_id=tenant_id,
-            account_number="ACC-001",
-            bank_name="Test Bank",
-            account_name="Test Account",
-        )
-
-        api_client.force_authenticate(user=authenticated_user)
-        response = api_client.get("/api/v1/bank-reconciliation/accounts/")
-
-        assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) > 0
-
-    def test_create_bank_account(self, api_client, authenticated_user):
-        """Test creating a bank account."""
-        api_client.force_authenticate(user=authenticated_user)
-
-        data = {
-            "account_number": "ACC-002",
-            "bank_name": "Another Bank",
-            "account_name": "Another Account",
-        }
-
-        response = api_client.post("/api/v1/bank-reconciliation/accounts/", data, format="json")
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data["account_number"] == "ACC-002"
+def test_cross_tenant_detail_is_not_found(tenant_a_client: object, tenant_b: object) -> None:
+    foreign = BankAccountFactory(tenant_id=tenant_b.id)
+    assert tenant_a_client.get(f"{BASE}/accounts/{foreign.id}/").status_code == 404
