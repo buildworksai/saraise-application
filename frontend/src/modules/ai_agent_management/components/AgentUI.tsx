@@ -1,0 +1,36 @@
+import type { ReactNode } from "react";
+import { AlertTriangle, Bot, LockKeyhole, RotateCcw } from "lucide-react";
+import { ApiError } from "@/services/api-client";
+import { Button } from "@/components/ui/Button";
+import { Card, CardContent } from "@/components/ui/Card";
+import { Skeleton } from "@/components/ui/Skeleton";
+import type { JSONValue, PaginationMeta } from "../contracts";
+
+export function PageHeader({ title, description, actions }: { readonly title: string; readonly description: string; readonly actions?: ReactNode }) {
+  return <header className="flex flex-col gap-4 border-b pb-6 sm:flex-row sm:items-end sm:justify-between"><div className="max-w-3xl"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">AI agent governance</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">{title}</h1><p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p></div>{actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}</header>;
+}
+
+export function PageSkeleton({ rows = 6 }: { readonly rows?: number }) { return <main aria-busy="true" aria-label="Loading AI agent data" className="space-y-4"><Skeleton className="h-11 w-72"/><Skeleton className="h-20 w-full"/>{Array.from({ length: rows }, (_, index) => <Skeleton key={index} className="h-16 w-full"/>)}</main>; }
+
+function errorPresentation(error: Error): { title: string; message: string; correlation?: string } {
+  if (!(error instanceof ApiError)) return { title: "AI agent data is unavailable", message: error.message };
+  if (error.status === 403) return { title: "Permission required", message: "Your role does not include the governed permission for this operation.", correlation: error.correlationId };
+  if (error.status === 404) return { title: "Record not found", message: "This record does not exist or is outside your tenant boundary.", correlation: error.correlationId };
+  if (error.status === 409) return { title: "The record changed", message: "Reload the latest state before retrying this transition.", correlation: error.correlationId };
+  if (error.status === 503) return { title: "Capability unavailable", message: "A required runner, provider, or governance dependency is unavailable. No success was recorded.", correlation: error.correlationId };
+  return { title: "AI agent data is unavailable", message: error.message, correlation: error.correlationId };
+}
+
+export function GovernedError({ error, retry }: { readonly error: Error; readonly retry?: () => void }) { const value = errorPresentation(error); return <Card role="alert" className="border-destructive/40"><CardContent className="flex min-h-64 flex-col items-center justify-center text-center"><AlertTriangle className="mb-4 h-10 w-10 text-destructive" aria-hidden="true"/><h2 className="text-xl font-semibold">{value.title}</h2><p className="mt-2 max-w-xl text-sm text-muted-foreground">{value.message}</p>{value.correlation ? <p className="mt-2 font-mono text-xs text-muted-foreground">Correlation: {value.correlation}</p> : null}{retry ? <Button className="mt-5" variant="outline" onClick={retry}><RotateCcw className="mr-2 h-4 w-4"/>Try again</Button> : null}</CardContent></Card>; }
+export function MutationError({ error }: { readonly error: Error }) { const value = errorPresentation(error); return <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm"><p className="font-semibold">{value.title}</p><p className="mt-1 text-muted-foreground">{value.message}</p>{value.correlation ? <p className="mt-2 font-mono text-xs">Correlation: {value.correlation}</p> : null}</div>; }
+
+export function EmptyState({ title, description, action }: { readonly title: string; readonly description: string; readonly action?: ReactNode }) { return <Card><CardContent className="flex min-h-64 flex-col items-center justify-center text-center"><span className="mb-4 rounded-2xl bg-primary/10 p-3 text-primary"><Bot aria-hidden="true"/></span><h2 className="text-xl font-semibold">{title}</h2><p className="mt-2 max-w-lg text-sm text-muted-foreground">{description}</p>{action ? <div className="mt-5">{action}</div> : null}</CardContent></Card>; }
+export function Unavailable({ title, detail }: { readonly title: string; readonly detail: string }) { return <div role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-5"><div className="flex gap-3"><LockKeyhole className="mt-0.5 h-5 w-5 text-amber-600"/><div><h3 className="font-semibold">{title}</h3><p className="mt-1 text-sm text-muted-foreground">{detail}</p></div></div></div>; }
+
+const colors: { readonly [key: string]: string } = { active: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200", completed: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200", approved: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200", running: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200", queued: "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200", pending: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200", paused: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200", failed: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200", rejected: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200", blocked: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200", disabled: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200", retired: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200" };
+export function StatusPill({ status }: { readonly status: string }) { return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${colors[status] ?? "bg-muted text-muted-foreground"}`}>{status.replaceAll("_", " ")}</span>; }
+export function formatDate(value: string | null | undefined): string { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date); }
+export function JsonEvidence({ value, label }: { readonly value: JSONValue; readonly label: string }) { return <pre aria-label={label} tabIndex={0} className="max-h-80 overflow-auto rounded-lg border bg-muted/30 p-4 text-xs leading-5">{JSON.stringify(value, null, 2)}</pre>; }
+export function can(actions: readonly string[] | undefined, action: string): boolean { return Boolean(actions?.includes(action)); }
+export function Pagination({ value, onPage }: { readonly value: PaginationMeta; readonly onPage: (page: number) => void }) { return <nav aria-label="Pagination" className="flex items-center justify-end gap-3 border-t p-4"><span className="text-sm text-muted-foreground">Page {value.page} of {Math.max(value.total_pages, 1)} · {value.count} records</span><Button size="sm" variant="outline" disabled={!value.has_previous} onClick={() => onPage(value.page - 1)}>Previous</Button><Button size="sm" variant="outline" disabled={!value.has_next} onClick={() => onPage(value.page + 1)}>Next</Button></nav>; }
+export function newTransitionKey(prefix: string): string { return `${prefix}-${crypto.randomUUID()}`; }

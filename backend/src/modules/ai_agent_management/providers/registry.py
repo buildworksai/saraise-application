@@ -1,60 +1,93 @@
-"""
-Provider registry for discovering and configuring available LLM providers.
+"""Deterministic provider-adapter registry.
 
-Maps provider names to their implementation classes. New providers are
-registered here and automatically available to the factory.
+Provider configuration and credentials remain owned by
+``ai_provider_configuration``.  This registry contains executable adapters
+only and rejects import-order dependent replacement.
 """
 
 from __future__ import annotations
 
-import logging
-from typing import Type
+import threading
+from collections.abc import Callable
+from typing import TypeVar
 
 from .base import LLMProvider
 
-logger = logging.getLogger("saraise.ai.provider_registry")
+ProviderT = TypeVar("ProviderT", bound=type[LLMProvider])
+
+
+class ProviderRegistrationError(RuntimeError):
+    """Raised when an adapter name is invalid or already registered."""
 
 
 class ProviderRegistry:
-    """
-    Registry of available LLM provider implementations.
-
-    Usage:
-        registry = ProviderRegistry()
-        registry.register("openai", OpenAIProvider)
-        registry.register("anthropic", AnthropicProvider)
-
-        provider_cls = registry.get("openai")
-        provider = provider_cls(config)
-    """
+    """Thread-safe registry of signed/installed provider adapter classes."""
 
     def __init__(self) -> None:
-        self._registry: dict[str, Type[LLMProvider]] = {}
+        self._registry: dict[str, type[LLMProvider]] = {}
+        self._lock = threading.RLock()
 
-    def register(self, name: str, provider_class: Type[LLMProvider]) -> None:
-        """Register a provider implementation class."""
-        if name in self._registry:
-            logger.warning("Overwriting provider registration for '%s'", name)
-        self._registry[name] = provider_class
-        logger.info("Registered provider class '%s' -> %s", name, provider_class.__name__)
+    @staticmethod
+    def _key(name: str) -> str:
+        if not isinstance(name, str) or not name.strip():
+            raise ProviderRegistrationError("Provider adapter name is required")
+        key = name.strip().lower()
+        if len(key) > 100:
+            raise ProviderRegistrationError("Provider adapter name is too long")
+        return key
 
-    def get(self, name: str) -> Type[LLMProvider] | None:
-        """Get a provider class by name."""
-        return self._registry.get(name)
+    def register(
+        self,
+        name: str,
+        provider_class: ProviderT | None = None,
+        *,
+        replace: bool = False,
+    ) -> ProviderT | Callable[[ProviderT], ProviderT]:
+        """Register directly or as a decorator; replacement is explicit."""
+
+        key = self._key(name)
+
+        def decorator(candidate: ProviderT) -> ProviderT:
+            if not isinstance(candidate, type) or not issubclass(candidate, LLMProvider):
+                raise ProviderRegistrationError("Provider adapter must implement LLMProvider")
+            with self._lock:
+                existing = self._registry.get(key)
+                if existing is not None and existing is not candidate and not replace:
+                    raise ProviderRegistrationError(f"Provider adapter {key!r} is already registered")
+                self._registry[key] = candidate
+            return candidate
+
+        if provider_class is None:
+            return decorator
+        return decorator(provider_class)
+
+    def get(self, name: str) -> type[LLMProvider] | None:
+        with self._lock:
+            return self._registry.get(self._key(name))
+
+    def require(self, name: str) -> type[LLMProvider]:
+        candidate = self.get(name)
+        if candidate is None:
+            raise ProviderRegistrationError(f"Provider adapter {name!r} is unavailable")
+        return candidate
+
+    def unregister(self, name: str) -> type[LLMProvider] | None:
+        with self._lock:
+            return self._registry.pop(self._key(name), None)
 
     def list_providers(self) -> list[str]:
-        """List all registered provider names."""
-        return list(self._registry.keys())
+        with self._lock:
+            return sorted(self._registry)
 
     def is_registered(self, name: str) -> bool:
-        """Check if a provider is registered."""
-        return name in self._registry
+        return self.get(name) is not None
 
 
-# Global registry singleton
 _registry = ProviderRegistry()
 
 
 def get_registry() -> ProviderRegistry:
-    """Get the global provider registry."""
     return _registry
+
+
+__all__ = ["ProviderRegistrationError", "ProviderRegistry", "get_registry"]
