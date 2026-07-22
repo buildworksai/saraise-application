@@ -18,6 +18,7 @@ describe("tenant route registry parity", () => {
         "sales_management",
         "document_intelligence",
         "automation_orchestration",
+        "fixed_assets",
       ]),
     );
   });

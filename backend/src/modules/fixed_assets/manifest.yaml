@@ -1,30 +1,50 @@
 # Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
 
 name: fixed_assets
-version: 1.0.0
+version: 2.0.0
 category: core_business
 display_name: Fixed Assets
-description: |
-  Fixed asset lifecycle management, depreciation, and asset tracking.
+description: Tenant-isolated financial fixed-asset lifecycle, depreciation, posting, and immutable history.
 
-# Dependencies
 dependencies:
   - name: accounting_finance
     version: ">=1.0.0"
     required: false
-    purpose: Depreciation journal entries
+    purpose: Account validation and balanced depreciation journals through the published service contract
+  - name: core_async_jobs
+    version: ">=1.0.0"
+    required: true
+    purpose: Durable depreciation posting jobs and transactional outbox delivery
 
-# Permissions
 permissions:
-  - fixed_asset.asset:create
+  - fixed_asset.category:read
+  - fixed_asset.category:create
+  - fixed_asset.category:update
+  - fixed_asset.category:delete
   - fixed_asset.asset:read
+  - fixed_asset.asset:create
   - fixed_asset.asset:update
   - fixed_asset.asset:delete
+  - fixed_asset.asset:capitalize
+  - fixed_asset.asset:transfer
+  - fixed_asset.asset:impair
+  - fixed_asset.asset:dispose
   - fixed_asset.depreciation:read
+  - fixed_asset.depreciation:calculate
+  - fixed_asset.depreciation:post
+  - fixed_asset.transaction:read
 
-# Health Checks
 health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
+  - name: fixed_assets_readiness
+    endpoint: /api/v2/fixed-assets/health/
     interval: 60
+
+metadata:
+  api_versions:
+    - v1
+    - v2
+  governed_api_prefix: /api/v2/fixed-assets/
+  entitlement: fixed_assets.core
+  extension_surface: fixed-assets-spi-v1
+  quota_resources:
+    - fixed_assets.depreciation_postings

@@ -1,0 +1,15 @@
+import { useQuery } from '@tanstack/react-query';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Card } from '@/components/ui/Card';
+import { useAuthStore } from '@/stores/auth-store';
+import { formatDateOnly, formatMoney, PageHeader, PageSkeleton, ProblemState, StatusPill, titleCase } from '../components/FixedAssetsUI';
+import { fixedAssetQueryKeys, fixedAssetsService } from '../services/fixed-assets-service';
+
+export const AssetTransactionDetailPage = () => {
+  const { id = '' } = useParams(); const navigate = useNavigate(); const tenantId = useAuthStore((state) => state.user?.tenant_id ?? null);
+  const query = useQuery({ queryKey: fixedAssetQueryKeys.transaction(tenantId, id), queryFn: () => fixedAssetsService.getTransaction(id), enabled: Boolean(id) });
+  if (query.isLoading) return <PageSkeleton/>; if (query.error || !query.data) return <main className="p-4 sm:p-8"><ProblemState error={query.error ?? new Error('Transaction unavailable')} onRetry={() => void query.refetch()}/></main>;
+  const item = query.data;
+  return <main className="space-y-6 p-4 sm:p-8"><PageHeader title={titleCase(item.transaction_type)} description={`Immutable transaction · ${formatDateOnly(item.effective_date)}`} backLabel="Asset history" onBack={() => navigate(`/fixed-assets/assets/${item.asset.id}`)} actions={<StatusPill value="completed"/>}/><section className="grid gap-4 sm:grid-cols-3"><Card className="p-5"><p className="text-xs text-muted-foreground">Amount</p><p className="mt-2 font-semibold">{formatMoney(item.amount, item.currency)}</p></Card><Card className="p-5"><p className="text-xs text-muted-foreground">Opening book value</p><p className="mt-2 font-semibold">{formatMoney(item.opening_net_book_value, item.currency)}</p></Card><Card className="p-5"><p className="text-xs text-muted-foreground">Closing book value</p><p className="mt-2 font-semibold">{formatMoney(item.closing_net_book_value, item.currency)}</p></Card></section><Card className="grid gap-4 p-6 sm:grid-cols-2"><Field label="Asset" value={`${item.asset.asset_code} · ${item.asset.asset_name}`}/><Field label="Actor" value={item.actor_id}/><Field label="Source" value={`${item.source_type}${item.source_id ? ` · ${item.source_id}` : ''}`}/><Field label="Journal entry" value={item.journal_entry_id ?? 'No journal reference'}/><Field label="Location change" value={`${item.from_location || '—'} → ${item.to_location || '—'}`}/><Field label="Cost center change" value={`${item.from_cost_center || '—'} → ${item.to_cost_center || '—'}`}/><Field label="Created" value={new Date(item.created_at).toLocaleString()}/><Field label="Correlation ID" value={item.correlation_id}/></Card><p className="text-sm text-muted-foreground">This ledger row is append-only. Corrections are represented by explicit later financial transactions, never by editing history.</p></main>;
+};
+const Field = ({ label, value }: { label: string; value: string }) => <div><p className="text-xs uppercase text-muted-foreground">{label}</p><p className="mt-1 break-all text-sm">{value}</p></div>;

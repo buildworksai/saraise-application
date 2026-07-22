@@ -1,143 +1,34 @@
-/**
- * Fixed Asset Detail Page - Fixed Assets
- */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Edit, Trash2 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, Edit, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { fixedAssetsService } from '../services/fixed-assets-service';
+import { Card } from '@/components/ui/Card';
+import { Dialog } from '@/components/ui/Dialog';
+import { Input } from '@/components/ui/Input';
+import { useAuthStore } from '@/stores/auth-store';
+import type { AllowedCommand } from '../contracts';
+import { AssetLifecycleDialog } from '../components/AssetLifecycleDialog';
+import { CommandButton, commandAffordance, EmptyPanel, formatDateOnly, formatMoney, PageHeader, PageSkeleton, ProblemState, StatusPill, titleCase } from '../components/FixedAssetsUI';
+import { fixedAssetQueryKeys, fixedAssetsService } from '../services/fixed-assets-service';
 
-const MODULE_PATH = '/fixed-assets/assets';
+type Tab = 'overview' | 'depreciation' | 'transactions' | 'audit';
+type LifecycleCommand = Extract<AllowedCommand, 'capitalize' | 'transfer' | 'impair' | 'dispose'>;
 
+// eslint-disable-next-line complexity
 export const FixedAssetDetailPage = () => {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-
-  const { data: asset, isLoading, error } = useQuery({
-    queryKey: ['fixed-asset', id],
-    queryFn: () =>
-      id ? fixedAssetsService.getFixedAsset(id) : Promise.reject(new Error('No ID')),
-    enabled: !!id,
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (assetId: string) => fixedAssetsService.deleteFixedAsset(assetId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['fixed-assets'] });
-      toast.success('Fixed asset deleted successfully');
-      navigate(MODULE_PATH);
-    },
-    onError: () => {
-      toast.error('Failed to delete fixed asset. Please try again.');
-    },
-  });
-
-  const handleDelete = () => {
-    if (id && window.confirm('Are you sure you want to delete this fixed asset?')) {
-      void deleteMutation.mutateAsync(id);
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="p-8">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-muted rounded w-1/4" />
-          <div className="h-64 bg-muted rounded" />
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !asset) {
-    return (
-      <div className="p-8">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-foreground mb-4">Fixed asset not found</h2>
-          <Button onClick={() => navigate(MODULE_PATH)}>Back to Fixed Assets</Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => navigate(MODULE_PATH)}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-          <h1 className="text-3xl font-bold text-foreground">
-            {asset.asset_code} - {asset.asset_name}
-          </h1>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate(`${MODULE_PATH}/${asset.id}/edit`)}>
-            <Edit className="w-4 h-4 mr-2" />
-            Edit
-          </Button>
-          <Button variant="danger" onClick={handleDelete}>
-            <Trash2 className="w-4 h-4 mr-2" />
-            Delete
-          </Button>
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Fixed Asset Information</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Code</label>
-              <p className="text-sm font-medium">{asset.asset_code}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Name</label>
-              <p className="text-sm font-medium">{asset.asset_name}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Category</label>
-              <p className="text-sm">{asset.asset_category}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Purchase Date</label>
-              <p className="text-sm">{new Date(asset.purchase_date).toLocaleDateString()}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Purchase Cost</label>
-              <p className="text-sm">{asset.purchase_cost}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Current Value</label>
-              <p className="text-sm">{asset.current_value}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Depreciation Method</label>
-              <p className="text-sm">{asset.depreciation_method}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Status</label>
-              <p className="text-sm">{asset.is_active ? 'Active' : 'Inactive'}</p>
-            </div>
-            {asset.location && (
-              <div>
-                <label className="text-sm font-medium text-muted-foreground">Location</label>
-                <p className="text-sm">{asset.location}</p>
-              </div>
-            )}
-          </div>
-          <div className="pt-4 border-t border-border text-sm text-muted-foreground">
-            <span>Created: {new Date(asset.created_at).toLocaleDateString()}</span>
-            <span className="ml-4">Updated: {new Date(asset.updated_at).toLocaleDateString()}</span>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
+  const { id = '' } = useParams(); const navigate = useNavigate(); const client = useQueryClient(); const tenantId = useAuthStore((state) => state.user?.tenant_id ?? null);
+  const [tab, setTab] = useState<Tab>('overview'); const [command, setCommand] = useState<LifecycleCommand | null>(null); const [deleteOpen, setDeleteOpen] = useState(false); const [confirmation, setConfirmation] = useState('');
+  const assetQuery = useQuery({ queryKey: fixedAssetQueryKeys.asset(tenantId, id), queryFn: () => fixedAssetsService.getAsset(id), enabled: Boolean(id) });
+  const schedules = useQuery({ queryKey: fixedAssetQueryKeys.schedules(tenantId, { asset_id: id }), queryFn: () => fixedAssetsService.listSchedules({ asset_id: id }), enabled: tab === 'depreciation' && Boolean(id) });
+  const transactions = useQuery({ queryKey: [...fixedAssetQueryKeys.asset(tenantId, id), 'transactions'], queryFn: () => fixedAssetsService.assetTransactions(id), enabled: tab === 'transactions' && Boolean(id) });
+  const remove = useMutation({ mutationFn: () => fixedAssetsService.deleteAsset(id), onSuccess: () => { void client.invalidateQueries({ queryKey: fixedAssetQueryKeys.root(tenantId) }); toast.success('Draft asset deleted'); navigate('/fixed-assets/assets'); } });
+  if (assetQuery.isLoading) return <PageSkeleton/>;
+  if (assetQuery.error || !assetQuery.data) return <main className="p-4 sm:p-8"><ProblemState error={assetQuery.error ?? new Error('Asset unavailable')} onRetry={() => void assetQuery.refetch()}/></main>;
+  const asset = assetQuery.data; const edit = commandAffordance(asset.allowed_commands, 'edit', asset.denial_reasons); const del = commandAffordance(asset.allowed_commands, 'delete', asset.denial_reasons);
+  const cards = [['Purchase cost', asset.purchase_cost], ['Accumulated depreciation', asset.accumulated_depreciation], ['Accumulated impairment', asset.accumulated_impairment], ['Net book value', asset.net_book_value]] as const;
+  return <main className="space-y-6 p-4 sm:p-8"><PageHeader title={`${asset.asset_code} · ${asset.asset_name}`} description={`${asset.category.name} · As of ${formatDateOnly(asset.as_of)}`} backLabel="Asset register" onBack={() => navigate('/fixed-assets/assets')} actions={<><StatusPill value={asset.status}/><CommandButton affordance={edit} onClick={() => navigate(`/fixed-assets/assets/${id}/edit`)}><Edit className="mr-2 h-4 w-4"/>Edit</CommandButton><CommandButton affordance={del} variant="danger" onClick={() => setDeleteOpen(true)}><Trash2 className="mr-2 h-4 w-4"/>Delete draft</CommandButton></>}/><section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Balance summary">{cards.map(([label, value]) => <Card key={label} className="p-5"><p className="text-sm text-muted-foreground">{label}</p><p className="mt-2 text-xl font-semibold">{formatMoney(value, asset.currency)}</p></Card>)}</section><Card className={`p-5 ${asset.balance_reconciliation.reconciled ? 'border-green-500/30' : 'border-destructive/40'}`}><h2 className="font-semibold">Balance reconciliation</h2><p className="mt-2 text-sm">{formatMoney(asset.purchase_cost, asset.currency)} − {formatMoney(asset.accumulated_depreciation, asset.currency)} − {formatMoney(asset.accumulated_impairment, asset.currency)} = <strong>{formatMoney(asset.balance_reconciliation.calculated_net_book_value, asset.currency)}</strong></p><p className="mt-1 text-xs text-muted-foreground">{asset.balance_reconciliation.reconciled ? 'Reconciled to the stored book value.' : 'Balance mismatch detected. Financial actions remain blocked until corrected.'}</p></Card><div className="flex flex-wrap gap-2" aria-label="Lifecycle actions">{(['capitalize','transfer','impair','dispose'] as const).map((value) => <CommandButton key={value} affordance={commandAffordance(asset.allowed_commands, value, asset.denial_reasons)} variant={value === 'dispose' ? 'danger' : 'secondary'} onClick={() => setCommand(value)}>{titleCase(value)}</CommandButton>)}</div><div className="border-b" role="tablist">{(['overview','depreciation','transactions','audit'] as const).map((value) => <button key={value} role="tab" aria-selected={tab === value} className={`px-4 py-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${tab === value ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'}`} onClick={() => setTab(value)}>{titleCase(value)}</button>)}</div>{tab === 'overview' && <Card className="grid gap-4 p-6 sm:grid-cols-2"><Field label="Purchase date" value={formatDateOnly(asset.purchase_date)}/><Field label="Depreciation start" value={formatDateOnly(asset.depreciation_start_date)}/><Field label="Method" value={titleCase(asset.depreciation_method)}/><Field label="Useful life" value={`${asset.useful_life_months} months`}/><Field label="Location" value={asset.location || '—'}/><Field label="Cost center" value={asset.cost_center || '—'}/><div className="sm:col-span-2"><Field label="Description" value={asset.description || 'No description'}/></div></Card>}{tab === 'depreciation' && (schedules.isLoading ? <PageSkeleton table/> : schedules.error ? <ProblemState error={schedules.error} onRetry={() => void schedules.refetch()}/> : !schedules.data?.items.length ? <EmptyPanel title="No schedule yet" description="Create a draft schedule, preview every period, then activate it." action={{ label: 'Create schedule', onClick: () => navigate(`/fixed-assets/depreciation-schedules/new?asset_id=${id}`) }}/> : <Card className="divide-y">{schedules.data.items.map((schedule) => <button key={schedule.id} className="flex w-full items-center justify-between p-4 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring" onClick={() => navigate(`/fixed-assets/depreciation-schedules/${schedule.id}`)}><span><strong>{schedule.schedule_number}</strong><span className="ml-2 text-sm text-muted-foreground">Revision {schedule.revision}</span></span><StatusPill value={schedule.status}/></button>)}</Card>)}{tab === 'transactions' && (transactions.isLoading ? <PageSkeleton table/> : transactions.error ? <ProblemState error={transactions.error} onRetry={() => void transactions.refetch()}/> : !transactions.data?.items.length ? <EmptyPanel title="No transactions recorded" description="Immutable financial history begins when this draft asset is capitalized."/> : <Card className="divide-y">{transactions.data.items.map((transaction) => <button key={transaction.id} className="grid w-full gap-2 p-4 text-left hover:bg-muted sm:grid-cols-4" onClick={() => navigate(`/fixed-assets/transactions/${transaction.id}`)}><span>{formatDateOnly(transaction.effective_date)}</span><span>{titleCase(transaction.transaction_type)}</span><span>{formatMoney(transaction.amount, transaction.currency)}</span><span>{formatMoney(transaction.closing_net_book_value, transaction.currency)}</span></button>)}</Card>)}{tab === 'audit' && <Card className="grid gap-4 p-6 sm:grid-cols-2"><Field label="Created by" value={asset.created_by}/><Field label="Updated by" value={asset.updated_by}/><Field label="Created" value={new Date(asset.created_at).toLocaleString()}/><Field label="Updated" value={new Date(asset.updated_at).toLocaleString()}/><Field label="Optimistic version" value={String(asset.version)}/></Card>}{command && <AssetLifecycleDialog asset={asset} command={command} open onOpenChange={(open) => { if (!open) setCommand(null); }} onComplete={() => { void client.invalidateQueries({ queryKey: fixedAssetQueryKeys.root(tenantId) }); toast.success(`${titleCase(command)} completed`); }}/>}<Dialog open={deleteOpen} onOpenChange={setDeleteOpen} title="Delete draft asset" description="This permanently removes the uncapitalized draft. Posted financial history is never deletable."><Input id="delete-confirmation" label={`Type ${asset.asset_code} to confirm`} value={confirmation} onChange={(event) => setConfirmation(event.target.value)}/>{remove.error && <ProblemState error={remove.error}/>}<div className="mt-5 flex justify-end gap-2"><Button variant="secondary" onClick={() => setDeleteOpen(false)}>Cancel</Button><Button variant="danger" disabled={confirmation !== asset.asset_code || remove.isPending} onClick={() => remove.mutate()}>{remove.isPending ? 'Deleting…' : 'Delete draft permanently'}</Button></div></Dialog></main>;
 };
+
+const Field = ({ label, value }: { label: string; value: string }) => <div><dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</dt><dd className="mt-1 text-sm">{value}</dd></div>;
