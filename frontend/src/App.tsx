@@ -563,23 +563,6 @@ const CreateComplianceRiskPage = lazy(() =>
   }))
 );
 
-// Email Marketing
-const EmailCampaignListPage = lazy(() =>
-  import("./modules/email_marketing/pages/EmailCampaignListPage").then((m) => ({
-    default: m.EmailCampaignListPage,
-  }))
-);
-const EmailCampaignDetailPage = lazy(() =>
-  import("./modules/email_marketing/pages/EmailCampaignDetailPage").then((m) => ({
-    default: m.EmailCampaignDetailPage,
-  }))
-);
-const CreateEmailCampaignPage = lazy(() =>
-  import("./modules/email_marketing/pages/CreateEmailCampaignPage").then((m) => ({
-    default: m.CreateEmailCampaignPage,
-  }))
-);
-
 // Master Data Management
 const MasterDataEntityListPage = lazy(() =>
   import("./modules/master_data_management/pages/MasterDataEntityListPage").then((m) => ({
@@ -1359,38 +1342,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <ComplianceRiskDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Email Marketing */}
-          <Route
-            path="/email-marketing/campaigns"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <EmailCampaignListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/email-marketing/campaigns/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateEmailCampaignPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/email-marketing/campaigns/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <EmailCampaignDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

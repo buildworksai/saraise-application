@@ -1,31 +1,170 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: email_marketing
-version: 1.0.0
-category: core_business
-display_name: Email Marketing
-description: |
-  Email campaign management, templates, and analytics.
+version: 2.0.0
+description: >-
+  Tenant-isolated, consent-aware email campaign authoring, durable delivery,
+  suppression management, provider event processing, and analytics.
+type: domain
+lifecycle: managed
+dependencies: []
 
-# Dependencies
-dependencies:
-  - name: crm
-    version: ">=1.0.0"
-    required: false
-    purpose: Contact list integration
-
-# Permissions
 permissions:
-  - email.campaign:create
-  - email.campaign:read
-  - email.campaign:update
-  - email.template:create
-  - email.template:read
-  - email.template:update
+  - email_marketing.campaign:read
+  - email_marketing.campaign:create
+  - email_marketing.campaign:update
+  - email_marketing.campaign:delete
+  - email_marketing.campaign:resolve_audience
+  - email_marketing.campaign:schedule
+  - email_marketing.campaign:send
+  - email_marketing.campaign:pause
+  - email_marketing.campaign:cancel
+  - email_marketing.analytics:read
+  - email_marketing.template:read
+  - email_marketing.template:create
+  - email_marketing.template:update
+  - email_marketing.template:delete
+  - email_marketing.template:activate
+  - email_marketing.recipient:read
+  - email_marketing.recipient:retry
+  - email_marketing.delivery:read
+  - email_marketing.suppression:read
+  - email_marketing.suppression:manage
+  - email_marketing.consent:read
+  - email_marketing.consent:record
+  - email_marketing.consent:revoke
+  - email_marketing.health:read
+  - email_marketing.provider_event:ingest
 
-# Health Checks
-health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
-    interval: 60
+sod_actions:
+  - email_marketing.campaign:send
+  - email_marketing.suppression:manage
+
+search_indexes:
+  - email_campaigns
+  - email_templates
+  - email_campaign_recipients
+  - email_suppression_entries
+
+ai_tools: []
+
+metadata:
+  display_name: Email Marketing
+  category: core_business
+  entitlement: email_marketing
+  api:
+    canonical_prefix: /api/v2/email-marketing/
+    health_endpoint: /api/v2/email-marketing/health/
+    default_page_size: 25
+    maximum_page_size: 100
+  quota_resources:
+    - name: email_marketing.api_reads
+      cost: 1
+      open_source_monthly_default: 100000
+    - name: email_marketing.api_writes
+      cost: 1
+      open_source_monthly_default: 10000
+    - name: email_marketing.audience_resolutions
+      cost: 1
+      open_source_monthly_default: 1000
+    - name: email_marketing.monthly_recipients
+      cost_projection: eligible_recipient
+      open_source_monthly_default: 10000
+  state_machines:
+    email_marketing.campaign:
+      state_field: status
+      history_field: transition_history
+      terminal_states: [sent, cancelled]
+    email_marketing.template:
+      state_field: status
+      terminal_states: [archived]
+    email_marketing.recipient:
+      state_field: status
+      history_field: transition_history
+      non_regressing_states: [delivered, bounced, complained, unsubscribed]
+  durable_jobs:
+    - command: email_marketing.resolve_audience
+      handler: email_marketing.jobs.resolve_audience_handler
+      initiating_permission: email_marketing.campaign:resolve_audience
+    - command: email_marketing.send_campaign
+      handler: email_marketing.jobs.send_campaign_handler
+      initiating_permission: email_marketing.campaign:send
+    - command: email_marketing.send_recipient
+      handler: email_marketing.jobs.send_recipient_handler
+      initiating_permission: email_marketing.campaign:send
+    - command: email_marketing.reconcile_delivery
+      handler: email_marketing.jobs.reconcile_delivery_handler
+      initiating_permission: email_marketing.recipient:retry
+    - command: email_marketing.process_provider_event
+      handler: email_marketing.jobs.process_provider_event_handler
+      initiating_permission: email_marketing.provider_event:ingest
+  health_checks:
+    - {name: database, critical: true}
+    - {name: domain_schema, critical: true}
+    - {name: required_migrations, critical: true}
+    - {name: row_level_security, critical: true}
+    - {name: state_machines, critical: true}
+    - {name: async_handlers, critical: true}
+    - {name: outbox_freshness, critical: true}
+    - {name: renderer, critical: true}
+    - {name: delivery_gateway, critical: true}
+    - {name: audience_resolver, critical: false}
+  extension_contract:
+    spi_version: "1.0"
+    compatibility: major_version_exact
+    registration: app_ready
+    replacement_policy: forbidden
+    arbitration: explicit_key_only
+    metadata_namespace: industry.<module>.<field>
+    capabilities:
+      - audience_resolvers
+      - template_variables
+      - content_blocks
+      - delivery_gateways
+      - provider_event_verifiers
+      - preflight_guards
+      - analytics_enrichments
+    core_guards_non_replaceable: [tenant, consent, suppression, access, lifecycle]
+  event_contract:
+    schema_version: 1
+    encoding:
+      uuid: canonical_string
+      datetime: rfc3339
+    compatibility: additive_within_schema_version
+    envelope_fields:
+      - event_id
+      - schema_id
+      - schema_version
+      - event_version
+      - event_type
+      - module
+      - tenant_id
+      - aggregate_type
+      - aggregate_id
+      - actor_id
+      - correlation_id
+      - causation_id
+      - job_id
+      - occurred_at
+      - payload
+    publishes:
+      - email_marketing.campaign.created.v1
+      - email_marketing.campaign.scheduled.v1
+      - email_marketing.campaign.send_queued.v1
+      - email_marketing.campaign.sent.v1
+      - email_marketing.campaign.failed.v1
+      - email_marketing.email.sent.v1
+      - email_marketing.email.delivered.v1
+      - email_marketing.email.opened.v1
+      - email_marketing.email.clicked.v1
+      - email_marketing.email.bounced.v1
+      - email_marketing.email.unsubscribed.v1
+      - email_marketing.consent.changed.v1
+      - email_marketing.suppression.changed.v1
+    provider_event_trust:
+      tenant_source: trusted_provider_account_binding
+      payload_tenant_ids: forbidden
+      signature_required: true
+      replay_window_required: true
+  uninstall:
+    preserve_delivery_and_compliance_evidence: true
+    unregister_adapters: true
+    unregister_commands: true
