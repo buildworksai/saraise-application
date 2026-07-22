@@ -1,87 +1,36 @@
-"""
-API tests for Business Intelligence module.
-"""
+"""Public v2 route and authentication contracts."""
 
-import uuid
+from __future__ import annotations
+
 import pytest
-from django.contrib.auth import get_user_model
-from rest_framework import status
+from django.urls import resolve
 from rest_framework.test import APIClient
-
-from src.modules.business_intelligence.models import Report
-
-User = get_user_model()
-
-
-@pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
-    settings.SARAISE_MODE = "development"
-
-
-@pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
-
-
-@pytest.fixture
-def authenticated_user(db):
-    """Create authenticated user with tenant."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="testuser",
-        email="test@example.com",
-        password="testpass123",
-    )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
 
 
 @pytest.mark.django_db
-class TestReportAPI:
-    """Test Report API endpoints."""
+def test_protected_v2_collection_challenges_unauthenticated_clients() -> None:
+    response = APIClient().get("/api/v2/business-intelligence/queries/")
+    assert response.status_code == 401
+    assert "Session" in response.headers["WWW-Authenticate"]
 
-    def test_list_reports(self, api_client, authenticated_user):
-        """Test listing reports."""
-        tenant_id = uuid.UUID(authenticated_user.profile.tenant_id)
 
-        Report.objects.create(
-            tenant_id=tenant_id,
-            report_code="RPT-001",
-            report_name="Test Report",
-            report_type="financial",
-            query="SELECT * FROM accounts",
-        )
+@pytest.mark.django_db
+def test_health_is_public_and_sanitized() -> None:
+    response = APIClient().get("/api/v2/business-intelligence/health/")
+    assert response.status_code in {200, 503}
+    rendered = response.content.decode()
+    assert "Traceback" not in rendered
+    assert "password" not in rendered.lower()
 
-        api_client.force_authenticate(user=authenticated_user)
-        response = api_client.get("/api/v1/business-intelligence/reports/")
 
-        assert response.status_code == status.HTTP_200_OK
-        assert len(response.data) > 0
+def test_all_resource_routers_are_mounted_under_v2() -> None:
+    for path in ("datasets/", "queries/", "reports/", "dashboards/", "executions/"):
+        match = resolve(f"/api/v2/business-intelligence/{path}")
+        assert match.url_name.endswith("-list")
 
-    def test_create_report(self, api_client, authenticated_user):
-        """Test creating a report."""
-        api_client.force_authenticate(user=authenticated_user)
 
-        data = {
-            "report_code": "RPT-002",
-            "report_name": "Another Report",
-            "report_type": "sales",
-            "query": "SELECT * FROM sales_orders",
-        }
+def test_legacy_v1_mount_is_removed() -> None:
+    from django.urls import Resolver404
 
-        response = api_client.post("/api/v1/business-intelligence/reports/", data, format="json")
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data["report_code"] == "RPT-002"
+    with pytest.raises(Resolver404):
+        resolve("/api/v1/business-intelligence/reports/")

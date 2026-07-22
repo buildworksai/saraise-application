@@ -71,7 +71,7 @@ urlpatterns = [
     path("api/v2/bank-reconciliation/", include("src.modules.bank_reconciliation.urls")),
     path("api/v1/budget-management/", include("src.modules.budget_management.urls")),
     path("api/v2/budget-management/", include("src.modules.budget_management.urls")),
-    path("api/v1/business-intelligence/", include("src.modules.business_intelligence.urls")),
+    path("api/v2/business-intelligence/", include("src.modules.business_intelligence.urls")),
     path("api/v1/compliance-management/", include("src.modules.compliance_management.urls")),
     path("api/v1/compliance-risk-management/", include("src.modules.compliance_risk_management.urls")),
     path("api/v2/email-marketing/", include("src.modules.email_marketing.urls")),
