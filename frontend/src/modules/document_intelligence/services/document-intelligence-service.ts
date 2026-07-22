@@ -8,6 +8,14 @@ import {
   type ApiV2ErrorBody,
   type ApiV2PaginatedEnvelope,
   type CancelRequest,
+  type ConfigurationAuditRecord,
+  type ConfigurationExportDocument,
+  type ConfigurationImportRequest,
+  type ConfigurationRollbackRequest,
+  type ConfigurationSimulation,
+  type ConfigurationSimulationRequest,
+  type ConfigurationVersion,
+  type ConfigurationWriteRequest,
   type ClassificationFilters,
   type ClassificationReviewRequest,
   type ClassifierModelVersion,
@@ -23,6 +31,7 @@ import {
   type DocumentExtractionListItem,
   type DocumentExtractionCreateRequest,
   type DocumentExtractionPage,
+  type DocumentIntelligenceConfiguration,
   type ExtractionFilters,
   type ExtractionTemplate,
   type ExtractionTemplateListItem,
@@ -244,8 +253,8 @@ export const documentIntelligenceService = {
     getData(() => apiClient.post<ApiV2Envelope<ExtractionTemplate>>(ENDPOINTS.TEMPLATES.CLONE(id), request)),
   matchTemplate: (id: UUID, request: TemplateMatchRequest) =>
     getData(() => apiClient.post<ApiV2Envelope<TemplateMatchResult>>(ENDPOINTS.TEMPLATES.MATCH(id), request)),
-  listTemplateZones: (templateId: UUID) => {
-    const params = new URLSearchParams({ template_id: templateId, page_size: '100' });
+  listTemplateZones: (templateId: UUID, pageSize: number) => {
+    const params = new URLSearchParams({ template_id: templateId, page_size: String(pageSize) });
     return getPage(() => apiClient.get<ApiV2PaginatedEnvelope<ExtractionTemplateZone>>(withQuery(ENDPOINTS.TEMPLATE_ZONES.LIST, params)));
   },
   createTemplateZone: (request: ExtractionTemplateZoneCreateRequest) =>
@@ -275,5 +284,22 @@ export const documentIntelligenceService = {
     getData(() => apiClient.post<ApiV2Envelope<ClassifierModelVersion>>(ENDPOINTS.MODEL_VERSIONS.ACTIVATE(id), request)),
   rollbackModelVersion: (id: UUID, request: TransitionRequest) =>
     getData(() => apiClient.post<ApiV2Envelope<ClassifierModelVersion>>(ENDPOINTS.MODEL_VERSIONS.ROLLBACK(id), request)),
+
+  getConfiguration: () =>
+    getData(() => apiClient.get<ApiV2Envelope<DocumentIntelligenceConfiguration>>(ENDPOINTS.CONFIGURATION.CURRENT)),
+  updateConfiguration: (request: ConfigurationWriteRequest) =>
+    getData(() => apiClient.put<ApiV2Envelope<DocumentIntelligenceConfiguration>>(ENDPOINTS.CONFIGURATION.CURRENT, request)),
+  listConfigurationVersions: () =>
+    getData(() => apiClient.get<ApiV2Envelope<readonly ConfigurationVersion[]>>(ENDPOINTS.CONFIGURATION.VERSIONS)),
+  listConfigurationAudit: () =>
+    getData(() => apiClient.get<ApiV2Envelope<readonly ConfigurationAuditRecord[]>>(ENDPOINTS.CONFIGURATION.AUDIT)),
+  simulateConfiguration: (request: ConfigurationSimulationRequest) =>
+    getData(() => apiClient.post<ApiV2Envelope<ConfigurationSimulation>>(ENDPOINTS.CONFIGURATION.SIMULATE, request)),
+  rollbackConfiguration: (request: ConfigurationRollbackRequest) =>
+    getData(() => apiClient.post<ApiV2Envelope<DocumentIntelligenceConfiguration>>(ENDPOINTS.CONFIGURATION.ROLLBACK, request)),
+  importConfiguration: (request: ConfigurationImportRequest) =>
+    getData(() => apiClient.post<ApiV2Envelope<DocumentIntelligenceConfiguration>>(ENDPOINTS.CONFIGURATION.IMPORT, request)),
+  exportConfiguration: () =>
+    getData(() => apiClient.get<ApiV2Envelope<ConfigurationExportDocument>>(ENDPOINTS.CONFIGURATION.EXPORT)),
   getHealth: () => getData(() => apiClient.get<ApiV2Envelope<ModuleHealth>>(ENDPOINTS.HEALTH)),
 };

@@ -10,6 +10,7 @@ from .api import (
     DocumentClassificationViewSet,
     DocumentExtractionPageViewSet,
     DocumentExtractionViewSet,
+    DocumentIntelligenceConfigurationViewSet,
     ExtractionTemplateViewSet,
     ExtractionTemplateZoneViewSet,
     ModuleHealthAPIView,
@@ -26,6 +27,11 @@ router.register("templates", ExtractionTemplateViewSet, basename="template")
 router.register("template-zones", ExtractionTemplateZoneViewSet, basename="template-zone")
 router.register("training-jobs", ClassifierTrainingJobViewSet, basename="training-job")
 router.register("model-versions", ClassifierModelVersionViewSet, basename="model-version")
+router.register(
+    "configuration",
+    DocumentIntelligenceConfigurationViewSet,
+    basename="configuration",
+)
 
 urlpatterns = [
     path("", include(router.urls)),

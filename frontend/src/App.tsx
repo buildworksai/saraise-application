@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { ModuleLayout } from "./components/layout/ModuleLayout";
@@ -17,6 +17,13 @@ const registryTenantRoutes = getTenantRoutesForMode(
   tenantRoutes,
   import.meta.env.VITE_SARAISE_MODE,
 );
+
+function RouteTitle({ title }: { title: string }) {
+  useEffect(() => {
+    document.title = `${title} · SARAISE`;
+  }, [title]);
+  return null;
+}
 
 // Public legal/support pages
 const TermsOfService = lazy(() =>
@@ -1715,13 +1722,14 @@ function AnimatedRoutes() {
 
           {/* Migration shim: module-owned routes coexist with the legacy inventory.
               Remove matching legacy declarations as each module completes migration. */}
-          {registryTenantRoutes.map(({ id, path, Page }) => (
+          {registryTenantRoutes.map(({ id, path, title, Page }) => (
             <Route
               key={`registry:${id}`}
               path={path}
               element={
                 <ProtectedRoute>
                   <ModuleLayout>
+                    {title && <RouteTitle title={title} />}
                     <Page />
                   </ModuleLayout>
                 </ProtectedRoute>

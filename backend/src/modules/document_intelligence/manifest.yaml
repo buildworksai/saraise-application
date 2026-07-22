@@ -32,6 +32,8 @@ permissions:
   - document_intelligence.model:read
   - document_intelligence.model:activate
   - document_intelligence.model:rollback
+  - document_intelligence.configuration:read
+  - document_intelligence.configuration:update
   - document_intelligence.health:read
 sod_actions: []
 search_indexes:
@@ -40,6 +42,88 @@ search_indexes:
   - document_intelligence_extraction_templates
   - document_intelligence_classifier_training_jobs
   - document_intelligence_classifier_model_versions
+entities:
+  - {name: DocumentExtraction, table: document_intelligence_extractions, tenant_scoped: true}
+  - {name: DocumentExtractionPage, table: document_intelligence_extraction_pages, tenant_scoped: true, immutable: true}
+  - {name: DocumentClassification, table: document_intelligence_classifications, tenant_scoped: true}
+  - {name: DocumentClassificationScore, table: document_intelligence_classification_scores, tenant_scoped: true, immutable: true}
+  - {name: ExtractionTemplate, table: document_intelligence_extraction_templates, tenant_scoped: true}
+  - {name: ExtractionTemplateZone, table: document_intelligence_extraction_template_zones, tenant_scoped: true}
+  - {name: ClassifierTrainingJob, table: document_intelligence_classifier_training_jobs, tenant_scoped: true}
+  - {name: ClassifierModelVersion, table: document_intelligence_classifier_model_versions, tenant_scoped: true}
+  - {name: DocumentIntelligenceConfiguration, table: document_intelligence_configurations, tenant_scoped: true}
+  - {name: ConfigurationVersion, table: document_intelligence_configuration_versions, tenant_scoped: true, immutable: true}
+  - {name: ConfigurationAudit, table: document_intelligence_configuration_audits, tenant_scoped: true, immutable: true}
+  - {name: QuotaReservation, table: document_intelligence_quota_reservations, tenant_scoped: true}
+endpoints:
+  - resource: extractions
+    path: /api/v2/document-intelligence/extractions/
+    methods: [GET, POST]
+    detail_methods: [GET, DELETE]
+    actions: [{path: pages, method: GET}, {path: retry, method: POST}, {path: cancel, method: POST}]
+    permissions: [document_intelligence.extraction:read, document_intelligence.extraction:create, document_intelligence.extraction:delete, document_intelligence.extraction:retry, document_intelligence.extraction:cancel]
+    request_contract: DocumentExtractionCreateSerializer
+    response_contract: DocumentExtractionDetailSerializer
+  - resource: extraction-pages
+    path: /api/v2/document-intelligence/extraction-pages/{id}/
+    methods: [GET]
+    permissions: [document_intelligence.extraction:read]
+    response_contract: DocumentExtractionPageSerializer
+  - resource: classifications
+    path: /api/v2/document-intelligence/classifications/
+    methods: [GET, POST]
+    detail_methods: [GET, DELETE]
+    actions: [{path: scores, method: GET}, {path: review, method: POST}, {path: retry, method: POST}, {path: cancel, method: POST}]
+    permissions: [document_intelligence.classification:read, document_intelligence.classification:create, document_intelligence.classification:review, document_intelligence.classification:delete, document_intelligence.classification:retry, document_intelligence.classification:cancel]
+    request_contract: DocumentClassificationCreateSerializer
+    response_contract: DocumentClassificationDetailSerializer
+  - resource: classification-scores
+    path: /api/v2/document-intelligence/classification-scores/{id}/
+    methods: [GET]
+    permissions: [document_intelligence.classification:read]
+    response_contract: DocumentClassificationScoreSerializer
+  - resource: templates
+    path: /api/v2/document-intelligence/templates/
+    methods: [GET, POST]
+    detail_methods: [GET, PATCH, DELETE]
+    actions: [{path: activate, method: POST}, {path: deactivate, method: POST}, {path: clone, method: POST}, {path: match, method: POST}]
+    permissions: [document_intelligence.template:read, document_intelligence.template:create, document_intelligence.template:update, document_intelligence.template:delete, document_intelligence.template:activate]
+    request_contract: ExtractionTemplateCreateSerializer
+    response_contract: ExtractionTemplateDetailSerializer
+  - resource: template-zones
+    path: /api/v2/document-intelligence/template-zones/
+    methods: [GET, POST]
+    detail_methods: [GET, PATCH, DELETE]
+    permissions: [document_intelligence.template:read, document_intelligence.template:update]
+    request_contract: ExtractionTemplateZoneCreateSerializer
+    response_contract: ExtractionTemplateZoneReadSerializer
+  - resource: training-jobs
+    path: /api/v2/document-intelligence/training-jobs/
+    methods: [GET, POST]
+    detail_methods: [GET]
+    actions: [{path: retry, method: POST}, {path: cancel, method: POST}]
+    permissions: [document_intelligence.training:read, document_intelligence.training:create, document_intelligence.training:retry, document_intelligence.training:cancel]
+    request_contract: ClassifierTrainingJobCreateSerializer
+    response_contract: ClassifierTrainingJobDetailSerializer
+  - resource: model-versions
+    path: /api/v2/document-intelligence/model-versions/
+    methods: [GET]
+    detail_methods: [GET]
+    actions: [{path: activate, method: POST}, {path: rollback, method: POST}]
+    permissions: [document_intelligence.model:read, document_intelligence.model:activate, document_intelligence.model:rollback]
+    response_contract: ClassifierModelVersionDetailSerializer
+  - resource: configuration
+    path: /api/v2/document-intelligence/configuration/current/
+    methods: [GET, PUT, PATCH]
+    actions: [{path: defaults, method: GET}, {path: versions, method: GET}, {path: audit, method: GET}, {path: rollback, method: POST}, {path: import, method: POST}, {path: export, method: GET}, {path: simulate, method: POST}]
+    permissions: [document_intelligence.configuration:read, document_intelligence.configuration:update]
+    request_contract: ConfigurationWriteSerializer
+    response_contract: ConfigurationSerializer
+  - resource: health
+    path: /api/v2/document-intelligence/health/
+    methods: [GET]
+    permissions: [document_intelligence.health:read]
+    response_contract: ModuleHealthSerializer
 ai_tools:
   - document_intelligence.extract
   - document_intelligence.classify

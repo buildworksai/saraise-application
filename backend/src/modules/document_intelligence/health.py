@@ -13,7 +13,6 @@ from src.core.health import HealthCheckResult, health_registry
 
 from .adapters import DependencyHealth, RegisteredProviderResolver, get_dms_gateway, get_provider_resolver
 
-STALE_AFTER = timedelta(seconds=30)
 DOMAIN_TABLES = (
     "document_intelligence_extractions",
     "document_intelligence_extraction_pages",
@@ -74,9 +73,9 @@ def async_readiness_probe() -> HealthCheckResult:
         return HealthCheckResult(False, "async_dependency_unavailable", now, {"code": "dependency_unavailable"})
 
 
-def dms_readiness_probe() -> HealthCheckResult:
+def dms_readiness_probe(stale_after_seconds: int | None = None) -> HealthCheckResult:
     try:
-        return _dependency_result(get_dms_gateway().health(), required=True)
+        return _dependency_result(get_dms_gateway().health(), required=True, stale_after_seconds=stale_after_seconds)
     except Exception:
         return HealthCheckResult(
             False,
@@ -86,7 +85,17 @@ def dms_readiness_probe() -> HealthCheckResult:
         )
 
 
-def provider_readiness_probe() -> HealthCheckResult:
+def _stale_window(seconds: int | None) -> timedelta:
+    if seconds is None:
+        from .services import default_configuration_document
+
+        seconds = int(default_configuration_document()["health"]["stale_after_seconds"])
+    if isinstance(seconds, bool) or seconds <= 0:
+        raise ValueError("health stale window must be a positive integer")
+    return timedelta(seconds=seconds)
+
+
+def provider_readiness_probe(stale_after_seconds: int | None = None) -> HealthCheckResult:
     """Require one usable OCR adapter; report partial provider failure as degraded."""
     now = timezone.now()
     resolver = get_provider_resolver()
@@ -119,7 +128,7 @@ def provider_readiness_probe() -> HealthCheckResult:
             results.append(adapter.health())
         except Exception:
             continue
-    available = sum(1 for result in results if result.available and not _stale(result))
+    available = sum(1 for result in results if result.available and not _stale(result, stale_after_seconds))
     if available == 0:
         circuit_open = any(result.circuit_state == "open" for result in results)
         return HealthCheckResult(
@@ -137,19 +146,21 @@ def provider_readiness_probe() -> HealthCheckResult:
     )
 
 
-def _stale(result: DependencyHealth) -> bool:
+def _stale(result: DependencyHealth, stale_after_seconds: int | None = None) -> bool:
     checked_at = result.checked_at
     if not hasattr(checked_at, "tzinfo"):
         return True
     try:
-        return timezone.now() - checked_at > STALE_AFTER
+        return timezone.now() - checked_at > _stale_window(stale_after_seconds)
     except (TypeError, ValueError):
         return True
 
 
-def _dependency_result(result: DependencyHealth, *, required: bool) -> HealthCheckResult:
+def _dependency_result(
+    result: DependencyHealth, *, required: bool, stale_after_seconds: int | None = None
+) -> HealthCheckResult:
     now = timezone.now()
-    stale = _stale(result)
+    stale = _stale(result, stale_after_seconds)
     healthy = bool(result.available) and not stale
     code = "stale" if stale else result.code
     return HealthCheckResult(
@@ -160,13 +171,17 @@ def _dependency_result(result: DependencyHealth, *, required: bool) -> HealthChe
     )
 
 
-def get_module_health() -> ModuleHealthReport:
+def get_module_health(stale_after_seconds: int | None = None) -> ModuleHealthReport:
     """Return a non-sensitive readiness report for the authenticated endpoint."""
+    dms_result = dms_readiness_probe() if stale_after_seconds is None else dms_readiness_probe(stale_after_seconds)
+    provider_result = (
+        provider_readiness_probe() if stale_after_seconds is None else provider_readiness_probe(stale_after_seconds)
+    )
     probes = {
         "database": database_readiness_probe(),
         "async_execution": async_readiness_probe(),
-        "dms": dms_readiness_probe(),
-        "providers": provider_readiness_probe(),
+        "dms": dms_result,
+        "providers": provider_result,
     }
     critical = ("database", "async_execution", "dms", "providers")
     unavailable = any(not probes[name].healthy for name in critical)

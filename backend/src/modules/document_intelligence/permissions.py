@@ -35,6 +35,8 @@ PERMISSIONS: Final[tuple[str, ...]] = (
     "document_intelligence.model:read",
     "document_intelligence.model:activate",
     "document_intelligence.model:rollback",
+    "document_intelligence.configuration:read",
+    "document_intelligence.configuration:update",
     "document_intelligence.health:read",
 )
 

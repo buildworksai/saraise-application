@@ -65,6 +65,7 @@ class ExtractionTemplateFactory(factory.django.DjangoModelFactory):
 
     tenant_id = factory.LazyFunction(uuid.uuid4)
     created_by = factory.LazyFunction(uuid.uuid4)
+    idempotency_key = factory.LazyFunction(lambda: f"template:{uuid.uuid4()}")
     name = factory.Sequence(lambda number: f"Invoice template {number}")
     description = "Versioned invoice extraction configuration"
     document_category = "invoice"
@@ -307,6 +308,13 @@ class DeterministicClassifierAdapter:
 
     def validate_artifact(self, artifact_ref: str, checksum: str) -> bool:
         return artifact_ref.startswith("tenant-artifact://") and len(checksum) == 64
+
+    def publish_artifact(self, artifact_ref: str, checksum: str) -> None:
+        if not self.validate_artifact(artifact_ref, checksum):
+            raise ValueError("invalid staged artifact")
+
+    def abort_artifact(self, artifact_ref: str) -> None:
+        del artifact_ref
 
     def health(self) -> DependencyHealth:
         return DependencyHealth(True, "ready", timezone.now())

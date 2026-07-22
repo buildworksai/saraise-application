@@ -31,6 +31,7 @@ from .models import (
     DocumentClassificationScore,
     DocumentExtraction,
     DocumentExtractionPage,
+    DocumentIntelligenceConfiguration,
     ExtractionTemplate,
     ExtractionTemplateZone,
 )
@@ -45,6 +46,12 @@ from .serializers import (
     ClassifierTrainingJobDetailSerializer,
     ClassifierTrainingJobListSerializer,
     CloneTemplateSerializer,
+    ConfigurationAuditSerializer,
+    ConfigurationImportSerializer,
+    ConfigurationRollbackSerializer,
+    ConfigurationSimulationSerializer,
+    ConfigurationVersionSerializer,
+    ConfigurationWriteSerializer,
     DocumentClassificationCreateSerializer,
     DocumentClassificationDetailSerializer,
     DocumentClassificationListSerializer,
@@ -53,6 +60,7 @@ from .serializers import (
     DocumentExtractionDetailSerializer,
     DocumentExtractionListSerializer,
     DocumentExtractionPageSerializer,
+    DocumentIntelligenceConfigurationSerializer,
     ExtractionCancelSerializer,
     ExtractionRetrySerializer,
     ExtractionTemplateCreateSerializer,
@@ -71,7 +79,14 @@ from .serializers import (
     TrainingCancelSerializer,
     TrainingRetrySerializer,
 )
-from .services import DocumentClassificationService, DocumentExtractionService, TemplateMatchingService
+from .services import (
+    ConfigurationService,
+    DocumentClassificationService,
+    DocumentExtractionService,
+    DocumentIntelligenceError,
+    TemplateMatchingService,
+    default_configuration_document,
+)
 
 
 class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.GenericViewSet):
@@ -79,13 +94,21 @@ class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.Ge
 
     filterset_class: type | None = None
 
-    def tenant_id(self) -> UUID:
+    def resolved_tenant_id(self) -> UUID | None:
         value = get_user_tenant_id(self.request.user)
         try:
             tenant_id = UUID(str(value))
-        except (TypeError, ValueError, AttributeError) as exc:
-            raise PermissionDenied("Authenticated identity has no valid tenant.") from exc
+        except (TypeError, ValueError, AttributeError):
+            return None
         self.request.tenant_id = tenant_id
+        return tenant_id
+
+    def tenant_id(self) -> UUID:
+        """Return a valid tenant for commands, failing closed when absent."""
+
+        tenant_id = self.resolved_tenant_id()
+        if tenant_id is None:
+            raise PermissionDenied("Authenticated identity has no valid tenant.")
         return tenant_id
 
     def actor_id(self) -> UUID:
@@ -103,7 +126,12 @@ class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.Ge
     def filtered_queryset(self, queryset: QuerySet[Any]) -> QuerySet[Any]:
         if self.filterset_class is None:
             return queryset
-        filters = self.filterset_class(self.request.query_params, queryset=queryset)
+        search_max_length = int(ConfigurationService().get_value(self.tenant_id(), "limits.search_max_length"))
+        filters = self.filterset_class(
+            self.request.query_params,
+            queryset=queryset,
+            search_max_length=search_max_length,
+        )
         if not filters.is_valid():
             raise ValidationError(filters.errors)
         return filters.qs
@@ -134,9 +162,10 @@ class DocumentExtractionViewSet(
     action_quotas = {"create": "document_intelligence.processing_requests"}
 
     def get_queryset(self) -> QuerySet[DocumentExtraction]:
-        return (
-            DocumentExtraction.objects.for_tenant(self.tenant_id()).filter(is_deleted=False).select_related("template")
-        )
+        tenant_id = self.resolved_tenant_id()
+        if tenant_id is None:
+            return DocumentExtraction.objects.none()
+        return DocumentExtraction.objects.for_tenant(tenant_id).filter(is_deleted=False).select_related("template")
 
     def get_serializer_class(self) -> type:
         return {
@@ -219,7 +248,10 @@ class DocumentExtractionPageViewSet(mixins.RetrieveModelMixin, TenantGovernedVie
     action_permissions = {"retrieve": "document_intelligence.extraction:read"}
 
     def get_queryset(self) -> QuerySet[DocumentExtractionPage]:
-        return DocumentExtractionPage.objects.for_tenant(self.tenant_id()).select_related("extraction")
+        tenant_id = self.resolved_tenant_id()
+        if tenant_id is None:
+            return DocumentExtractionPage.objects.none()
+        return DocumentExtractionPage.objects.for_tenant(tenant_id).select_related("extraction")
 
 
 class DocumentClassificationViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, TenantGovernedViewSet):
@@ -238,8 +270,11 @@ class DocumentClassificationViewSet(mixins.ListModelMixin, mixins.RetrieveModelM
     action_quotas = {"create": "document_intelligence.processing_requests"}
 
     def get_queryset(self) -> QuerySet[DocumentClassification]:
+        tenant_id = self.resolved_tenant_id()
+        if tenant_id is None:
+            return DocumentClassification.objects.none()
         return (
-            DocumentClassification.objects.for_tenant(self.tenant_id())
+            DocumentClassification.objects.for_tenant(tenant_id)
             .filter(is_deleted=False)
             .select_related("model_version")
         )
@@ -338,7 +373,10 @@ class DocumentClassificationScoreViewSet(mixins.RetrieveModelMixin, TenantGovern
     action_permissions = {"retrieve": "document_intelligence.classification:read"}
 
     def get_queryset(self) -> QuerySet[DocumentClassificationScore]:
-        return DocumentClassificationScore.objects.for_tenant(self.tenant_id()).select_related("classification")
+        tenant_id = self.resolved_tenant_id()
+        if tenant_id is None:
+            return DocumentClassificationScore.objects.none()
+        return DocumentClassificationScore.objects.for_tenant(tenant_id).select_related("classification")
 
 
 class ExtractionTemplateViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, TenantGovernedViewSet):
@@ -358,8 +396,11 @@ class ExtractionTemplateViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin
     action_quotas = {"match": "document_intelligence.processing_requests"}
 
     def get_queryset(self) -> QuerySet[ExtractionTemplate]:
+        tenant_id = self.resolved_tenant_id()
+        if tenant_id is None:
+            return ExtractionTemplate.objects.none()
         return (
-            ExtractionTemplate.objects.for_tenant(self.tenant_id())
+            ExtractionTemplate.objects.for_tenant(tenant_id)
             .filter(is_deleted=False)
             .annotate(zone_count=Count("zones"))
             .prefetch_related("zones")
@@ -478,11 +519,10 @@ class ExtractionTemplateZoneViewSet(mixins.ListModelMixin, mixins.RetrieveModelM
     }
 
     def get_queryset(self) -> QuerySet[ExtractionTemplateZone]:
-        return (
-            ExtractionTemplateZone.objects.for_tenant(self.tenant_id())
-            .filter(is_deleted=False)
-            .select_related("template")
-        )
+        tenant_id = self.resolved_tenant_id()
+        if tenant_id is None:
+            return ExtractionTemplateZone.objects.none()
+        return ExtractionTemplateZone.objects.for_tenant(tenant_id).filter(is_deleted=False).select_related("template")
 
     def get_serializer_class(self) -> type:
         return {
@@ -535,7 +575,10 @@ class ClassifierTrainingJobViewSet(mixins.ListModelMixin, mixins.RetrieveModelMi
     action_quotas = {"create": "document_intelligence.processing_requests"}
 
     def get_queryset(self) -> QuerySet[ClassifierTrainingJob]:
-        return ClassifierTrainingJob.objects.for_tenant(self.tenant_id()).all()
+        tenant_id = self.resolved_tenant_id()
+        if tenant_id is None:
+            return ClassifierTrainingJob.objects.none()
+        return ClassifierTrainingJob.objects.for_tenant(tenant_id).all()
 
     def get_serializer_class(self) -> type:
         return {
@@ -551,7 +594,10 @@ class ClassifierTrainingJobViewSet(mixins.ListModelMixin, mixins.RetrieveModelMi
 
     def create(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        serializer = ClassifierTrainingJobCreateSerializer(data=self.request.data)
+        serializer = ClassifierTrainingJobCreateSerializer(
+            data=self.request.data,
+            context={"tenant_id": self.tenant_id()},
+        )
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         accepted = self.service_class().train_classifier(
@@ -608,7 +654,10 @@ class ClassifierModelVersionViewSet(mixins.ListModelMixin, mixins.RetrieveModelM
     }
 
     def get_queryset(self) -> QuerySet[ClassifierModelVersion]:
-        return ClassifierModelVersion.objects.for_tenant(self.tenant_id()).select_related("training_job")
+        tenant_id = self.resolved_tenant_id()
+        if tenant_id is None:
+            return ClassifierModelVersion.objects.none()
+        return ClassifierModelVersion.objects.for_tenant(tenant_id).select_related("training_job")
 
     def get_serializer_class(self) -> type:
         return {
@@ -644,6 +693,142 @@ class ClassifierModelVersionViewSet(mixins.ListModelMixin, mixins.RetrieveModelM
         return Response(ClassifierModelVersionDetailSerializer(value).data)
 
 
+class DocumentIntelligenceConfigurationViewSet(TenantGovernedViewSet):
+    """RBAC-gated client surface for the complete configuration lifecycle."""
+
+    service_class = ConfigurationService
+    action_permissions = {
+        "current": "document_intelligence.configuration:read",
+        "defaults": "document_intelligence.configuration:read",
+        "versions": "document_intelligence.configuration:read",
+        "audit": "document_intelligence.configuration:read",
+        "export_configuration": "document_intelligence.configuration:read",
+        "rollback": "document_intelligence.configuration:update",
+        "import_configuration": "document_intelligence.configuration:update",
+        "simulate": "document_intelligence.configuration:update",
+    }
+
+    def get_permissions(self) -> list[object]:
+        if getattr(self, "action", "") == "current" and self.request.method != "GET":
+            self.action_permissions = {
+                **self.action_permissions,
+                "current": "document_intelligence.configuration:update",
+            }
+        return super().get_permissions()
+
+    def get_queryset(self) -> QuerySet[DocumentIntelligenceConfiguration]:
+        tenant_id = self.resolved_tenant_id()
+        if tenant_id is None:
+            return DocumentIntelligenceConfiguration.objects.none()
+        return DocumentIntelligenceConfiguration.objects.for_tenant(tenant_id)
+
+    def _environment(self) -> str | None:
+        value = self.request.query_params.get("environment")
+        return str(value) if value else None
+
+    def _correlation_id(self) -> str | None:
+        value = getattr(self.request, "correlation_id", None)
+        return str(value) if value else None
+
+    @action(detail=False, methods=["get", "put", "patch"])
+    def current(self, request: object) -> Response:
+        del request
+        service = self.service_class()
+        if self.request.method == "GET":
+            try:
+                record = service.get_record(self.tenant_id(), self._environment())
+            except DocumentIntelligenceError as exc:
+                if exc.error_code != "configuration_unavailable":
+                    raise
+                record = service.save(
+                    self.tenant_id(),
+                    self.actor_id(),
+                    default_configuration_document(),
+                    environment=self._environment(),
+                    change_reason="Initialize validated tenant defaults",
+                    correlation_id=self._correlation_id(),
+                )
+            return Response(DocumentIntelligenceConfigurationSerializer(record).data)
+        serializer = ConfigurationWriteSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        record = service.save(
+            self.tenant_id(),
+            self.actor_id(),
+            data["document"],
+            environment=data.get("environment"),
+            change_reason=data["change_reason"],
+            correlation_id=self._correlation_id(),
+            partial=self.request.method == "PATCH",
+        )
+        return Response(DocumentIntelligenceConfigurationSerializer(record).data)
+
+    @action(detail=False, methods=["get"])
+    def defaults(self, request: object) -> Response:
+        del request
+        return Response(default_configuration_document())
+
+    @action(detail=False, methods=["get"])
+    def versions(self, request: object) -> Response:
+        del request
+        values = self.service_class().versions(self.tenant_id(), self._environment())
+        return Response(ConfigurationVersionSerializer(values, many=True).data)
+
+    @action(detail=False, methods=["get"])
+    def audit(self, request: object) -> Response:
+        del request
+        values = self.service_class().audits(self.tenant_id(), self._environment())
+        return Response(ConfigurationAuditSerializer(values, many=True).data)
+
+    @action(detail=False, methods=["post"])
+    def rollback(self, request: object) -> Response:
+        del request
+        serializer = ConfigurationRollbackSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        record = self.service_class().rollback(
+            self.tenant_id(),
+            self.actor_id(),
+            data["version"],
+            environment=data.get("environment"),
+            change_reason=data["change_reason"],
+            correlation_id=self._correlation_id(),
+        )
+        return Response(DocumentIntelligenceConfigurationSerializer(record).data)
+
+    @action(detail=False, methods=["post"], url_path="import")
+    def import_configuration(self, request: object) -> Response:
+        del request
+        serializer = ConfigurationImportSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = dict(serializer.validated_data)
+        reason = payload.pop("change_reason", "Import configuration document")
+        if "exported_at" in payload:
+            payload["exported_at"] = payload["exported_at"].isoformat()
+        record = self.service_class().import_document(
+            self.tenant_id(),
+            self.actor_id(),
+            payload,
+            change_reason=reason,
+            correlation_id=self._correlation_id(),
+        )
+        return Response(DocumentIntelligenceConfigurationSerializer(record).data)
+
+    @action(detail=False, methods=["get"], url_path="export")
+    def export_configuration(self, request: object) -> Response:
+        del request
+        return Response(self.service_class().export_document(self.tenant_id(), self._environment()))
+
+    @action(detail=False, methods=["post"])
+    def simulate(self, request: object) -> Response:
+        del request
+        serializer = ConfigurationSimulationSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        result = self.service_class().simulate(self.tenant_id(), data["document"], environment=data.get("environment"))
+        return Response(result)
+
+
 class ModuleHealthAPIView(GovernedAPIViewMixin, APIView):
     authentication_classes = (SessionAuthentication401,)
     permission_classes = ()
@@ -666,7 +851,13 @@ class ModuleHealthAPIView(GovernedAPIViewMixin, APIView):
 
     def get(self, request: object) -> Response:
         del request
-        report = get_module_health()
+        tenant_value = get_user_tenant_id(self.request.user)
+        try:
+            tenant_id = UUID(str(tenant_value))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise PermissionDenied("Authenticated identity has no valid tenant.") from exc
+        stale_after = int(ConfigurationService().get_value(tenant_id, "health.stale_after_seconds"))
+        report = get_module_health(stale_after)
         return Response(report.payload, status=report.status_code)
 
 

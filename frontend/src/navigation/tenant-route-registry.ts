@@ -117,6 +117,9 @@ function validateRequiredFields(
   if (!route.sourceFile.trim()) {
     addIssue(issues, route, "sourceFile must not be empty");
   }
+  if (route.module === "document_intelligence" && !route.title?.trim()) {
+    addIssue(issues, route, "title must not be empty");
+  }
   if (!route.path.startsWith("/")) {
     addIssue(issues, route, "path must be absolute");
   }
@@ -133,7 +136,11 @@ function validateSidebarRoute(
   if (!Number.isFinite(route.navigation.order)) {
     addIssue(issues, route, "sidebar order must be finite");
   }
-  if (hasRouteParameter(route.path)) {
+  const navigationPath = route.navigation.path ?? route.path;
+  if (!navigationPath.startsWith("/")) {
+    addIssue(issues, route, "sidebar navigation path must be absolute");
+  }
+  if (hasRouteParameter(navigationPath)) {
     addIssue(issues, route, "sidebar paths cannot contain route parameters");
   }
 }
@@ -185,6 +192,11 @@ export function getTenantRouteValidationIssues(
     } else if (parent.module !== route.module) {
       addIssue(issues, route, "contextual parent must belong to the same module");
     }
+    if (route.module === "document_intelligence") {
+      if (!route.navigation.label?.trim()) addIssue(issues, route, "contextual NavItem label must not be empty");
+      if (!route.navigation.icon) addIssue(issues, route, "contextual NavItem icon is required");
+      if (!Number.isFinite(route.navigation.order)) addIssue(issues, route, "contextual NavItem order must be finite");
+    }
   }
 
   return issues;
@@ -209,7 +221,10 @@ export function validateTenantSidebarTree(
       if (!route) {
         throw new Error(`Sidebar leaf ${leaf.id} does not resolve to a tenant route.`);
       }
-      if (route.path !== leaf.path || route.navigation.type !== "sidebar") {
+      if (
+        route.navigation.type !== "sidebar" ||
+        (route.navigation.path ?? route.path) !== leaf.path
+      ) {
         throw new Error(`Sidebar leaf ${leaf.id} does not match its tenant route.`);
       }
       if (hasRouteParameter(leaf.path)) {
@@ -233,7 +248,7 @@ export function buildTenantSidebarTree(
       id: route.id,
       routeId: route.id,
       module: route.module,
-      path: route.path,
+      path: route.navigation.path ?? route.path,
       label: route.navigation.label,
       icon: route.navigation.icon,
       order: route.navigation.order,

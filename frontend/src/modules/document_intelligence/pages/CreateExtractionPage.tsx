@@ -10,6 +10,7 @@ import { ApiProblem, PageHeader } from '../components/ModuleShell';
 import { deterministicKey, useUnsavedChanges } from '../components/module-utils';
 import { DocumentIntelligenceApiError, documentIntelligenceService } from '../services/document-intelligence-service';
 import type { DocumentExtractionCreateRequest, ExtractionEngine, ExtractionType } from '../contracts';
+import { DOCUMENT_INTELLIGENCE_PATHS } from '../paths';
 
 export function CreateExtractionPage() {
   const navigate = useNavigate();
@@ -24,7 +25,7 @@ export function CreateExtractionPage() {
   useUnsavedChanges(dirty && !submitted);
   const mutation = useMutation({
     mutationFn: (request: DocumentExtractionCreateRequest) => documentIntelligenceService.createExtraction(request),
-    onSuccess: ({ extraction }) => { setSubmitted(true); navigate(`/document-intelligence/extractions/${extraction.id}`); },
+    onSuccess: ({ extraction }) => { setSubmitted(true); navigate(DOCUMENT_INTELLIGENCE_PATHS.EXTRACTIONS.DETAIL(extraction.id)); },
   });
   const fieldErrors = mutation.error instanceof DocumentIntelligenceApiError ? mutation.error.detail.field_errors ?? [] : [];
   const errorFor = (field: string) => fieldErrors.find((error) => error.field === field)?.message;
@@ -38,7 +39,7 @@ export function CreateExtractionPage() {
   };
   return (
     <main className="space-y-6 p-4 sm:p-8">
-      <PageHeader title="Process a document" description="Validate an immutable DMS version, reserve quota, and enqueue a durable evidence-producing extraction." actions={<Button variant="ghost" onClick={() => navigate('/document-intelligence/extractions')}><ArrowLeft className="mr-2 h-4 w-4" />Back</Button>} />
+      <PageHeader title="Process a document" description="Validate an immutable DMS version, reserve quota, and enqueue a durable evidence-producing extraction." actions={<Button variant="ghost" onClick={() => navigate(DOCUMENT_INTELLIGENCE_PATHS.EXTRACTIONS.LIST)}><ArrowLeft className="mr-2 h-4 w-4" />Back</Button>} />
       {mutation.error && <ApiProblem error={mutation.error} onRetry={() => mutation.reset()} inline />}
       <Card className="mx-auto max-w-3xl p-6">
         <form className="space-y-5" onSubmit={submit} noValidate>

@@ -14,6 +14,7 @@ from src.modules.document_intelligence.adapters import (
     MAX_DOCUMENT_BYTES,
     ClassificationResult,
     ClassificationScoreResult,
+    DependencyCircuitOpen,
     DocumentDescriptor,
     InvalidProviderOutput,
     LocalTesseractOCRAdapter,
@@ -22,6 +23,8 @@ from src.modules.document_intelligence.adapters import (
     OCRResult,
     ProviderUnavailable,
     RegisteredProviderResolver,
+    ResilienceExecutor,
+    ResiliencePolicy,
     TemplateMatchResult,
     TrainingResult,
 )
@@ -159,6 +162,26 @@ def test_provider_registry_has_explicit_collision_and_no_fallback() -> None:
         registry.register_ocr("local", ocr)
     with pytest.raises(ProviderUnavailable, match="not configured"):
         registry.resolve_ocr(uuid.uuid4(), "unknown")
+
+
+def test_resilience_executor_retries_with_backoff_and_opens_circuit() -> None:
+    sleeps: list[float] = []
+    clock = [0.0]
+    executor = ResilienceExecutor(monotonic=lambda: clock[0], sleep=sleeps.append, random_value=lambda: 0.5)
+    policy = ResiliencePolicy(1, 2, 0.1, 1, 0.2, 2, 30)
+    attempts = 0
+
+    def unavailable() -> object:
+        nonlocal attempts
+        attempts += 1
+        raise ProviderUnavailable("unavailable")
+
+    with pytest.raises(ProviderUnavailable):
+        executor.execute("ocr.test", unavailable, policy)
+    assert attempts == 2
+    assert sleeps == [pytest.approx(0.11)]
+    with pytest.raises(DependencyCircuitOpen, match="open"):
+        executor.execute("ocr.test", lambda: object(), policy)
 
 
 @pytest.mark.django_db

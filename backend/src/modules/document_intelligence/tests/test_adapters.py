@@ -247,17 +247,11 @@ def test_tesseract_unavailable_mode_timeout_and_invalid_evidence(monkeypatch: py
 
 
 def test_tesseract_schema_parser_rejects_gaps_and_bad_geometry() -> None:
-    gap = (
-        "level\tpage_num\tleft\ttop\twidth\theight\tconf\ttext\n"
-        "1\t2\t0\t0\t100\t100\t-1\t\n"
-    )
+    gap = "level\tpage_num\tleft\ttop\twidth\theight\tconf\ttext\n" "1\t2\t0\t0\t100\t100\t-1\t\n"
     with pytest.raises(InvalidProviderOutput, match="ordered from one"):
         LocalTesseractOCRAdapter._parse_tsv(gap, processing_time_ms=1)
 
-    malformed = (
-        "level\tpage_num\tleft\ttop\twidth\theight\tconf\ttext\n"
-        "1\t1\t0\t0\t0\t100\t-1\t\n"
-    )
+    malformed = "level\tpage_num\tleft\ttop\twidth\theight\tconf\ttext\n" "1\t1\t0\t0\t0\t100\t-1\t\n"
     with pytest.raises(InvalidProviderOutput, match="width"):
         LocalTesseractOCRAdapter._parse_tsv(malformed, processing_time_ms=1)
 

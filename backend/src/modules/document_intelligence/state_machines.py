@@ -41,14 +41,38 @@ class AuditedStateMachine(StateMachine[ModelT]):
         audit["actor_id"] = str(audit["actor_id"])
         audit["correlation_id"] = str(audit["correlation_id"])
         audit["reason"] = str(audit["reason"])
+        aggregate = next((value for value in args if isinstance(value, models.Model)), kwargs.get("aggregate"))
+        command = next((value for value in args if isinstance(value, str)), None)
+        if aggregate is not None and command is not None and self.name:
+            from .services import ConfigurationService
+
+            workflow_name = self.name.rsplit(".", 1)[-1]
+            configured = ConfigurationService().get_value(aggregate.tenant_id, f"workflows.{workflow_name}")
+            current_state = str(getattr(aggregate, self.state_field))
+            configured_edges = {(str(edge["command"]), str(edge["from"]), str(edge["to"])) for edge in configured}
+            declared_edges = {
+                (edge.command, edge.source, edge.target)
+                for edge in self.transitions
+                if edge.command == command and edge.source == current_state
+            }
+            if not declared_edges or declared_edges.isdisjoint(configured_edges):
+                raise StateMachineConfigurationError(
+                    f"Tenant workflow does not allow {command!r} from {current_state!r}."
+                )
         return super().apply(*args, metadata=audit, **kwargs)
 
 
 def _artifact_ready(model: ClassifierModelVersion, context: Mapping[str, Any]) -> bool:
     """Activation requires measured quality and a successful readiness probe."""
 
+    from .services import ConfigurationService
+
+    threshold = Decimal(
+        str(ConfigurationService().get_value(model.tenant_id, "classifier.activation_accuracy_threshold"))
+    )
+
     return (
-        model.accuracy > Decimal("0.8000")
+        model.accuracy > threshold
         and _SHA256_RE.fullmatch(model.artifact_checksum) is not None
         and context.get("artifact_ready") is True
     )
