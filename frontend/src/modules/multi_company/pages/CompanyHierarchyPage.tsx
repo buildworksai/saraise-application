@@ -1,0 +1,1 @@
+export { CompanyHierarchyPage } from './workspaces';

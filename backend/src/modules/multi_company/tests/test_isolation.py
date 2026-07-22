@@ -126,3 +126,55 @@ class TestCompanyTenantIsolation:
         # Try to access tenant B's company
         response = api_client.get(f"/api/v1/multi-company/companies/{company_b.id}/")
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_create_binds_authenticated_tenant_and_ignores_spoofed_owner(
+        self, api_client, tenant_a_user, tenant_b_user
+    ):
+        """A server-owned tenant identifier can never redirect a create."""
+        tenant_a_id = uuid.UUID(get_user_tenant_id(tenant_a_user))
+        tenant_b_id = uuid.UUID(get_user_tenant_id(tenant_b_user))
+        api_client.force_authenticate(user=tenant_a_user)
+
+        response = api_client.post(
+            "/api/v1/multi-company/companies/",
+            {
+                "tenant_id": str(tenant_b_id),
+                "company_code": "BOUND-A",
+                "company_name": "Bound to A",
+                "legal_name": "Bound to A Limited",
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED
+        company = Company.objects.get(pk=response.data["id"])
+        assert company.tenant_id == tenant_a_id
+        assert company.tenant_id != tenant_b_id
+
+    def test_cross_tenant_update_and_delete_are_404_and_leave_row_unchanged(
+        self, api_client, tenant_a_user, tenant_b_user
+    ):
+        """Mutation lookup is tenant-scoped before either update or deletion."""
+        tenant_b_id = uuid.UUID(get_user_tenant_id(tenant_b_user))
+        company_b = Company.objects.create(
+            tenant_id=tenant_b_id,
+            company_code="PROTECTED-B",
+            company_name="Protected B",
+            legal_name="Protected B Limited",
+            currency="USD",
+        )
+        before = Company.objects.filter(pk=company_b.pk).values().get()
+        api_client.force_authenticate(user=tenant_a_user)
+
+        patch_response = api_client.patch(
+            f"/api/v1/multi-company/companies/{company_b.id}/",
+            {"company_name": "Compromised"},
+            format="json",
+        )
+        delete_response = api_client.delete(
+            f"/api/v1/multi-company/companies/{company_b.id}/"
+        )
+
+        assert patch_response.status_code == status.HTTP_404_NOT_FOUND
+        assert delete_response.status_code == status.HTTP_404_NOT_FOUND
+        assert Company.objects.filter(pk=company_b.pk).values().get() == before

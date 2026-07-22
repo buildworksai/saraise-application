@@ -1,0 +1,1 @@
+export { CreateTransferPricingRulePage } from './workspaces';

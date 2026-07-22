@@ -1,11 +1,17 @@
-# Multi-Company
+# Multi-company frontend
 
-**Status**: ✅ TODO: Implementation pending
+The open-source multi-company workspace consumes the governed `/api/v2/multi-company/`
+API exclusively. `contracts.ts` owns DTOs and endpoint construction;
+`services/multi-company-service.ts` rejects malformed response envelopes and preserves
+correlation IDs for support.
 
-**Current Phase**: Phase 8 (Core Modules)
+`routes.ts` publishes all company, access, transaction, reconciliation, consolidation,
+elimination, transfer-pricing, simulator, and configuration pages through the tenant
+route registry. Six sidebar destinations are available in development, self-hosted,
+and SaaS modes. Contextual pages inherit those destinations and every route supplies a
+human-readable browser title.
 
-**TODO**: This module is scaffolded and ready for implementation.
-
-Backend API, types, and endpoints need to be implemented.
-
-See: saraise-documentation/modules/02-core/multi-company/README.md
+The UI uses the repository's semantic design tokens and persisted light/dark/system
+theme. Financial and destructive commands use accessible impact dialogs; no page uses
+browser confirmation. Configuration is versioned, validated server-side, previewable,
+auditable, importable/exportable, and rollback-capable.

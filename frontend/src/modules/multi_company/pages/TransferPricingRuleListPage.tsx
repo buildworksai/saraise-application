@@ -1,0 +1,1 @@
+export { TransferPricingRuleListPage } from './workspaces';

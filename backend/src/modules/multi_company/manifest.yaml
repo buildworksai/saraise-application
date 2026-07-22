@@ -1,25 +1,94 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: multi_company
-version: 1.0.0
-category: core_business
-display_name: Multi-Company Management
-description: |
-  Support for managing multiple companies within a single tenant.
-
-# Dependencies
-dependencies: []
-
-# Permissions
+version: 2.0.0
+description: Tenant-isolated company registry, intercompany accounting, consolidation, transfer pricing, and governed configuration
+type: domain
+lifecycle: core
+dependencies:
+  - name: core-tenancy
+    version: ">=1.0.0"
+  - name: core-access
+    version: ">=1.0.0"
+  - name: core-api
+    version: ">=2.0.0"
+  - name: core-observability
+    version: ">=1.0.0"
+  - name: core-resilience
+    version: ">=1.0.0"
+  - name: core-async-jobs
+    version: ">=1.0.0"
+  - name: core-state-machine
+    version: ">=1.0.0"
 permissions:
-  - multi_company.company:create
   - multi_company.company:read
+  - multi_company.company:create
   - multi_company.company:update
+  - multi_company.company:deactivate
   - multi_company.company:delete
-
-# Health Checks
-health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
-    interval: 60
+  - multi_company.company:read_sensitive
+  - multi_company.company_access:read
+  - multi_company.company_access:grant
+  - multi_company.company_access:revoke
+  - multi_company.transaction:read
+  - multi_company.transaction:create
+  - multi_company.transaction:update
+  - multi_company.transaction:submit
+  - multi_company.transaction:approve
+  - multi_company.transaction:post
+  - multi_company.transaction:dispute
+  - multi_company.transaction:cancel
+  - multi_company.transaction:reverse
+  - multi_company.consolidation:read
+  - multi_company.consolidation:create
+  - multi_company.consolidation:update
+  - multi_company.consolidation:execute
+  - multi_company.consolidation:approve
+  - multi_company.consolidation:publish
+  - multi_company.elimination:read
+  - multi_company.elimination:create
+  - multi_company.transfer_pricing:read
+  - multi_company.transfer_pricing:create
+  - multi_company.transfer_pricing:update
+  - multi_company.transfer_pricing:delete
+  - multi_company.transfer_pricing:calculate
+  - multi_company.configuration:read
+  - multi_company.configuration:write
+  - multi_company.configuration:activate
+  - multi_company.configuration:rollback
+  - multi_company.configuration:import
+  - multi_company.configuration:export
+  - multi_company.extension:read
+  - multi_company.health:read
+sod_actions:
+  - multi_company.transaction:approve
+  - multi_company.consolidation:approve
+  - multi_company.consolidation:publish
+  - multi_company.configuration:activate
+  - multi_company.company_access:grant
+search_indexes: []
+ai_tools: []
+metadata:
+  governed_api_prefix: /api/v2/multi-company/
+  compatibility:
+    v1_company_api: /api/v1/multi-company/companies/
+    sunset: 2026-12-31T23:59:59Z
+  health_endpoint: /api/v2/multi-company/health/
+  entitlement: module.multi_company
+  quota_resources:
+    - multi_company.api_reads
+    - multi_company.api_writes
+    - multi_company.transaction_posts
+    - multi_company.consolidation_runs
+  soft_dependencies:
+    - accounting
+    - workflow
+    - notifications
+    - currency-reference-data
+    - reports
+  extension_surface: multi-company-spi-v1
+  separation_of_duties:
+    - transaction_creator_vs_approver
+    - transaction_source_approver_vs_target_approver
+    - consolidation_executor_vs_approver
+    - consolidation_executor_vs_publisher
+    - production_configuration_author_vs_activator
+    - company_access_grantor_role_ceiling

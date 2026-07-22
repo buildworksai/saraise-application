@@ -71,6 +71,7 @@ urlpatterns = [
     path("api/v1/project-management/", include("src.modules.project_management.urls")),
     path("api/v2/master-data-management/", include("src.modules.master_data_management.urls")),
     path("api/v1/multi-company/", include("src.modules.multi_company.urls")),
+    path("api/v2/multi-company/", include("src.modules.multi_company.v2_urls")),
     path("api/v1/asset-management/", include("src.modules.asset_management.urls")),
     path("api/v1/bank-reconciliation/", include("src.modules.bank_reconciliation.urls")),
     path("api/v2/bank-reconciliation/", include("src.modules.bank_reconciliation.urls")),
