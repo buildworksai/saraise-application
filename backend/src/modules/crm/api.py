@@ -1,63 +1,93 @@
-"""
-DRF ViewSets for CRM module.
+"""Governed, tenant-isolated CRM API v2 controllers."""
 
-Provides REST API endpoints for all models.
-"""
+from __future__ import annotations
 
-import uuid
-from datetime import date, timedelta
+from collections.abc import Mapping, Sequence
+from datetime import date
+from typing import Any, cast
+from uuid import UUID
 
-from django.db import models
-from django.shortcuts import get_object_or_404
-from django.utils import timezone
-from rest_framework import status, viewsets
+from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
+from django.db.models import Q, QuerySet
+from django.utils.dateparse import parse_date
+from rest_framework import status
+from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError as DRFValidationError
+from rest_framework.exceptions import MethodNotAllowed, NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 
-from src.core.auth_utils import get_user_id, get_user_tenant_id
-from src.core.authentication import RelaxedCsrfSessionAuthentication
+from src.core.access import RequiresAccess
+from src.core.api import GovernedAPIViewMixin, GovernedPageNumberPagination
+from src.core.api.results import OperationFailed
+from src.core.async_jobs.models import AsyncJob
+from src.core.views.tenant_scoped import TenantScopedModelViewSet
 
+from .jobs import enqueue_lead_scoring_job
 from .models import (
     Account,
+    AccountType,
     Activity,
+    ActivityType,
     Contact,
     Lead,
     LeadStatus,
     Opportunity,
+    OpportunityStage,
     OpportunityStatus,
+    RelatedToType,
+)
+from .permissions import (
+    ACCOUNT_ACTION_PERMISSIONS,
+    ACTIVITY_ACTION_PERMISSIONS,
+    CONTACT_ACTION_PERMISSIONS,
+    FORECAST_ACTION_PERMISSIONS,
+    LEAD_ACTION_PERMISSIONS,
+    OPPORTUNITY_ACTION_PERMISSIONS,
+    permission_for_job_command,
 )
 from .serializers import (
     AccountCreateSerializer,
     AccountHierarchySerializer,
-    AccountSerializer,
+    AccountReadSerializer,
     AccountUpdateSerializer,
+    ActivityCompleteSerializer,
     ActivityCreateSerializer,
-    ActivitySerializer,
+    ActivityReadSerializer,
     ActivityUpdateSerializer,
-    AIPredictionSerializer,
-    CloseLostRequestSerializer,
-    CloseWonRequestSerializer,
+    AsyncOperationSerializer,
+    CloseLostSerializer,
+    CloseWonSerializer,
     ContactCreateSerializer,
-    ContactSerializer,
+    ContactReadSerializer,
     ContactUpdateSerializer,
+    DuplicateAccountQuerySerializer,
+    ForecastQuerySerializer,
     ForecastSerializer,
+    LeadConvertSerializer,
     LeadCreateSerializer,
-    LeadScoringResponseSerializer,
-    LeadSerializer,
+    LeadReadSerializer,
+    LeadScoreRequestSerializer,
+    LeadTransitionSerializer,
     LeadUpdateSerializer,
-    OpportunityCreateFromLeadSerializer,
     OpportunityCreateSerializer,
-    OpportunitySerializer,
+    OpportunityReadSerializer,
+    OpportunityStageTransitionSerializer,
     OpportunityUpdateSerializer,
+    RevenuePredictionRequestSerializer,
+    RevenuePredictionSerializer,
+    StageForecastSerializer,
     WinRateSerializer,
 )
-from .pagination import CRMResultsSetPagination
 from .services import (
     AccountService,
     ActivityService,
     ContactService,
+    CRMServiceError,
     ForecastingService,
     IntegrationService,
     LeadService,
@@ -65,879 +95,829 @@ from .services import (
 )
 
 
-# ===== Lead ViewSet =====
+class CsrfSessionAuthentication(SessionAuthentication):
+    """Normal session authentication with CSRF and a real 401 challenge."""
+
+    def authenticate_header(self, request: Request) -> str:
+        del request
+        return "Session"
 
 
-class LeadViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for Lead CRUD operations.
+def _actor(request: Request) -> str:
+    value = getattr(request.user, "id", getattr(request.user, "pk", None))
+    if value is None:
+        raise PermissionDenied("Authenticated actor identifier is required.")
+    return str(value)
 
-    Endpoints:
-    - GET /api/v1/crm/leads/ - List all leads
-    - POST /api/v1/crm/leads/ - Create lead
-    - GET /api/v1/crm/leads/{id}/ - Get lead detail
-    - PATCH /api/v1/crm/leads/{id}/ - Update lead
-    - DELETE /api/v1/crm/leads/{id}/ - Soft delete lead
-    - POST /api/v1/crm/leads/{id}/convert/ - Convert lead to opportunity
-    - POST /api/v1/crm/leads/{id}/ai-score/ - Run AI scoring
-    """
 
-    permission_classes = [IsAuthenticated]
-    authentication_classes = [RelaxedCsrfSessionAuthentication]
-    pagination_class = CRMResultsSetPagination
+def _parse_uuid(value: object, field: str) -> UUID:
+    try:
+        return value if isinstance(value, UUID) else UUID(str(value))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValidationError({field: "Must be a valid UUID."}) from exc
 
-    def get_queryset(self):
-        """Filter leads by tenant_id from authenticated user."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        if not tenant_id_str:
-            return Lead.objects.none()
 
+def _parse_int(value: str | None, field: str, *, minimum: int, maximum: int) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError({field: "Must be an integer."}) from exc
+    if not minimum <= parsed <= maximum:
+        raise ValidationError({field: f"Must be from {minimum} to {maximum}."})
+    return parsed
+
+
+def _parse_bool(value: str | None, field: str) -> bool | None:
+    if value is None:
+        return None
+    if value.lower() in {"true", "1"}:
+        return True
+    if value.lower() in {"false", "0"}:
+        return False
+    raise ValidationError({field: "Must be true or false."})
+
+
+def _parse_date(value: str | None, field: str) -> date | None:
+    if value is None:
+        return None
+    parsed = parse_date(value)
+    if parsed is None:
+        raise ValidationError({field: "Must be an ISO-8601 date."})
+    return parsed
+
+
+class GovernedCRMViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):
+    """Deny-default v2 profile shared by all mutable CRM resources."""
+
+    authentication_classes = (CsrfSessionAuthentication,)
+    permission_classes = (IsAuthenticated, RequiresAccess)
+    pagination_class = GovernedPageNumberPagination
+    required_entitlement = "crm"
+    permission_map: Mapping[str, str] = {}
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_permissions(self) -> Sequence[Any]:
+        """Retain the authenticated v1 development contract during migration.
+
+        API v2 and every non-development deployment use the unified access
+        pipeline.  The deprecated v1 API remains usable in development, where
+        the application contract enables all modules without provisioning an
+        external policy engine, entitlement projection, or quota ledger.
+        Tenant isolation is still enforced by the tenant-scoped queryset.
+        """
+
+        if self.request.path.startswith("/api/v1/") and getattr(settings, "SARAISE_MODE", "") == "development":
+            return [IsAuthenticated()]
+        return cast(Sequence[Any], super().get_permissions())
+
+    def check_permissions(self, request: Request) -> None:
+        method = request.method or ""
+        if method.lower() not in self.http_method_names:
+            raise MethodNotAllowed(method)
+        tenant_id = self._get_tenant_id()
+        if tenant_id is not None:
+            request.tenant_id = tenant_id  # type: ignore[attr-defined]
         try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            return Lead.objects.none()
+            self.required_permission = self.permission_map[getattr(self, "action", "")]
+        except KeyError:
+            self.required_permission = ""
+        self.quota_resource = f"crm.api.{getattr(self, 'action', 'unknown')}"
+        self.quota_cost = 1
+        super().check_permissions(request)
 
-        queryset = Lead.objects.filter(tenant_id=tenant_id, is_deleted=False)
+    def tenant_id(self) -> UUID:
+        return self._require_tenant_id()
 
-        # Filtering
-        status_filter = self.request.query_params.get("status")
-        if status_filter:
-            queryset = queryset.filter(status=status_filter)
+    def correlation_id(self) -> str:
+        return str(getattr(self.request, "correlation_id", "") or "") or None  # type: ignore[return-value]
 
-        owner_id_filter = self.request.query_params.get("owner_id")
-        if owner_id_filter:
+    def _validate_query(self, allowed: set[str]) -> None:
+        common = {"page", "page_size", "format"}
+        unknown = set(self.request.query_params) - allowed - common
+        if unknown:
+            raise ValidationError({field: "Unknown query parameter." for field in sorted(unknown)})
+
+    def _ordering(self, queryset: QuerySet[Any], allowed: set[str], default: str) -> QuerySet[Any]:
+        ordering = self.request.query_params.get("ordering", default)
+        fields = ordering.split(",")
+        if any(not field or field.lstrip("-") not in allowed for field in fields):
+            raise ValidationError({"ordering": "Unsupported ordering field."})
+        return queryset.order_by(*fields, "-id")
+
+    def _expected_version(self, values: dict[str, Any], instance: Any) -> int:
+        body_version = values.pop("version", None)
+        header = self.request.headers.get("If-Match")
+        header_version: int | None = None
+        if header:
+            normalized = header.strip().removeprefix("W/").strip('"')
             try:
-                owner_id = uuid.UUID(owner_id_filter)
-                queryset = queryset.filter(owner_id=owner_id)
-            except (ValueError, TypeError):
-                pass
+                header_version = int(normalized)
+            except ValueError as exc:
+                raise ValidationError({"If-Match": "Must contain an integer entity version."}) from exc
+        if body_version is not None and header_version is not None and body_version != header_version:
+            raise ValidationError({"version": "Body version does not match If-Match."})
+        expected = header_version if header_version is not None else body_version
+        if expected is None and self.request.path.startswith("/api/v1/"):
+            expected = instance.version
+        if expected is None:
+            raise ValidationError({"version": "Version or If-Match is required."})
+        return int(expected)
 
-        score_min = self.request.query_params.get("score_min")
-        if score_min:
-            try:
-                queryset = queryset.filter(score__gte=int(score_min))
-            except ValueError:
-                pass
+    def _require_additional_permission(self, permission: str) -> None:
+        if not RequiresAccess(permission).has_permission(self.request, self):
+            raise PermissionDenied("The additional action permission is required.")
 
-        # Search
-        search = self.request.query_params.get("search")
-        if search:
-            queryset = queryset.filter(
-                models.Q(first_name__icontains=search)
-                | models.Q(last_name__icontains=search)
-                | models.Q(company__icontains=search)
-                | models.Q(email__icontains=search)
+    def handle_exception(self, exc: Exception) -> Response:
+        if isinstance(exc, CRMServiceError):
+            exc = OperationFailed(
+                error_code=exc.error_code, message=exc.public_message, detail=exc.detail, http_status=exc.http_status
             )
+        elif isinstance(exc, DjangoValidationError):
+            detail = getattr(exc, "message_dict", None) or {
+                "non_field_errors": getattr(exc, "messages", ["Validation failed."])
+            }
+            exc = OperationFailed(
+                error_code="CRM_VALIDATION_ERROR",
+                message="CRM validation failed.",
+                detail=detail,
+                http_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+        elif isinstance(exc, IntegrityError):
+            exc = OperationFailed(
+                error_code="CONFLICT",
+                message="The requested change conflicts with existing CRM data.",
+                http_status=status.HTTP_409_CONFLICT,
+            )
+        elif isinstance(exc, ObjectDoesNotExist):
+            exc = NotFound()
+        return super().handle_exception(exc)
 
-        # Ordering (default: -created_at)
-        ordering = self.request.query_params.get("ordering", "-created_at")
-        # Validate ordering field to prevent SQL injection
-        allowed_ordering_fields = [
-            "created_at", "-created_at",
-            "updated_at", "-updated_at",
-            "score", "-score",
-            "last_name", "-last_name",
-            "company", "-company",
-        ]
-        if ordering in allowed_ordering_fields:
-            queryset = queryset.order_by(ordering)
-        else:
-            queryset = queryset.order_by("-created_at")
 
-        return queryset
+class LeadViewSet(GovernedCRMViewSet):
+    queryset = Lead.objects.all()
+    serializer_class = LeadReadSerializer
+    permission_map = LEAD_ACTION_PERMISSIONS
 
-    def get_serializer_class(self):
-        """Return appropriate serializer based on action."""
-        if self.action == "create":
-            return LeadCreateSerializer
-        elif self.action in ["update", "partial_update"]:
-            return LeadUpdateSerializer
-        return LeadSerializer
-
-    def perform_create(self, serializer):
-        """Set tenant_id and created_by from authenticated user."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        user_id_str = get_user_id(self.request.user)
-
-        if not tenant_id_str:
-            raise DRFValidationError("Tenant ID required")
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        # Use service to create lead
-        lead_service = LeadService()
-        lead = lead_service.create_lead(
-            tenant_id=tenant_id,
-            data=serializer.validated_data,
-            created_by=user_id_str,
+    def get_queryset(self) -> QuerySet[Lead]:
+        queryset = super().get_queryset().filter(is_deleted=False)
+        if not hasattr(self, "request"):
+            return queryset
+        self._validate_query({"status", "owner_id", "score_min", "score_max", "source", "search", "ordering"})
+        params = self.request.query_params
+        if params.get("status"):
+            if params["status"] not in LeadStatus.values:
+                raise ValidationError({"status": "Unsupported lead status."})
+            queryset = queryset.filter(status=params["status"])
+        if params.get("owner_id"):
+            queryset = queryset.filter(owner_id=_parse_uuid(params["owner_id"], "owner_id"))
+        minimum = _parse_int(params.get("score_min"), "score_min", minimum=0, maximum=100)
+        maximum = _parse_int(params.get("score_max"), "score_max", minimum=0, maximum=100)
+        if minimum is not None:
+            queryset = queryset.filter(score__gte=minimum)
+        if maximum is not None:
+            queryset = queryset.filter(score__lte=maximum)
+        if minimum is not None and maximum is not None and minimum > maximum:
+            raise ValidationError({"score_min": "Cannot exceed score_max."})
+        if params.get("source"):
+            queryset = queryset.filter(source=params["source"])
+        if params.get("search"):
+            search = params["search"].strip()
+            queryset = queryset.filter(
+                Q(first_name__icontains=search)
+                | Q(last_name__icontains=search)
+                | Q(company__icontains=search)
+                | Q(email__icontains=search)
+            )
+        return self._ordering(
+            queryset, {"created_at", "updated_at", "last_name", "company", "score", "status"}, "-created_at"
         )
 
-        # Return serialized lead
-        serializer.instance = lead
-
-    def perform_update(self, serializer):
-        """Update lead using service."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        lead_service = LeadService()
-        updated_lead = lead_service.update_lead(
-            lead_id=self.get_object().id,
-            tenant_id=tenant_id,
-            data=serializer.validated_data,
+    def get_serializer_class(self) -> type[Any]:
+        return {"create": LeadCreateSerializer, "partial_update": LeadUpdateSerializer}.get(
+            self.action, LeadReadSerializer
         )
-        serializer.instance = updated_lead
 
-    def destroy(self, request, *args, **kwargs):
-        """Soft delete lead."""
-        tenant_id_str = get_user_tenant_id(request.user)
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
+    def create(self, request: Request) -> Response:
+        serializer = LeadCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        lead = LeadService.create_lead(
+            self.tenant_id(),
+            data=serializer.validated_data,
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
+        )
+        return Response(LeadReadSerializer(lead).data, status=status.HTTP_201_CREATED)
 
-        lead = self.get_object()
-        LeadService().delete_lead(lead_id=lead.id, tenant_id=tenant_id)
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        serializer = LeadUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data)
+        expected = self._expected_version(values, instance)
+        lead = LeadService.update_lead(
+            self.tenant_id(), lead_id=instance.id, data=values, expected_version=expected, actor_id=_actor(request)
+        )
+        return Response(LeadReadSerializer(lead).data)
+
+    def destroy(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        expected = self._expected_version({}, instance)
+        LeadService.delete_lead(
+            self.tenant_id(), lead_id=instance.id, expected_version=expected, actor_id=_actor(request)
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"])
-    def convert(self, request, pk=None):
-        """Convert lead to opportunity."""
-        lead = self.get_object()
-        tenant_id_str = get_user_tenant_id(request.user)
-        user_id_str = get_user_id(request.user)
-
-        if not tenant_id_str:
-            raise DRFValidationError("Tenant ID required")
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        serializer = OpportunityCreateFromLeadSerializer(data=request.data)
+    def transition(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        serializer = LeadTransitionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        lead = LeadService.transition_lead(
+            self.tenant_id(),
+            lead_id=instance.id,
+            command=values["command"],
+            transition_key=values["transition_key"],
+            context=values.get("context", {}),
+            actor_id=_actor(request),
+            expected_version=values["expected_version"],
+        )
+        return Response(LeadReadSerializer(lead).data)
 
-        integration_service = IntegrationService()
-        result = integration_service.convert_lead_to_opportunity(
-            lead_id=lead.id,
-            tenant_id=tenant_id,
-            opportunity_data=serializer.validated_data,
-            user_id=user_id_str,
+    @action(detail=True, methods=["post"])
+    def convert(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        payload = dict(request.data)
+        if request.path.startswith("/api/v1/"):
+            payload.setdefault("expected_version", instance.version)
+            payload.setdefault("transition_key", f"legacy-convert:{instance.id}")
+            payload.setdefault("create_new_account", True)
+            payload.setdefault("currency", "USD")
+            payload.setdefault("close_date", (date.today()).isoformat())
+        serializer = LeadConvertSerializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data)
+        if request.path.startswith("/api/v1/"):
+            for field in ("account_id", "create_new_account", "expected_version", "transition_key"):
+                values.pop(field, None)
+            legacy_result = IntegrationService.convert_lead_to_opportunity(
+                instance.id,
+                self.tenant_id(),
+                values,
+                _actor(request),
+            )
+            return Response(
+                OpportunityReadSerializer(legacy_result["opportunity"]).data,
+                status=status.HTTP_201_CREATED,
+            )
+        expected = values.pop("expected_version")
+        key = values.pop("transition_key")
+        conversion = LeadService.convert_lead(
+            self.tenant_id(),
+            lead_id=instance.id,
+            data=values,
+            expected_version=expected,
+            transition_key=key,
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
+        )
+        return Response(
+            {
+                "lead": LeadReadSerializer(conversion.lead).data,
+                "account": AccountReadSerializer(conversion.account).data,
+                "contact": ContactReadSerializer(conversion.contact).data if conversion.contact else None,
+                "opportunity": OpportunityReadSerializer(conversion.opportunity).data,
+            },
+            status=status.HTTP_201_CREATED,
         )
 
-        opportunity_serializer = OpportunitySerializer(result["opportunity"])
-        return Response(opportunity_serializer.data, status=status.HTTP_201_CREATED)
-
-    @action(detail=True, methods=["post"], url_path="ai-score")
-    def ai_score(self, request, pk=None):
-        """Run AI scoring on lead."""
-        lead = self.get_object()
-        tenant_id_str = get_user_tenant_id(request.user)
-
-        if not tenant_id_str:
-            raise DRFValidationError("Tenant ID required")
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        lead_service = LeadService()
-        updated_lead = lead_service.score_lead(lead_id=lead.id, tenant_id=tenant_id)
-
-        response_data = {
-            "score": updated_lead.score,
-            "grade": updated_lead.grade,
-            "bant_qualification": updated_lead.metadata.get("bant_qualification", {}),
-        }
-
-        serializer = LeadScoringResponseSerializer(response_data)
-        return Response(serializer.data)
+    @action(detail=True, methods=["post"])
+    def score(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        serializer = LeadScoreRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        if values.get("async_execution"):
+            job = enqueue_lead_scoring_job(
+                self.tenant_id(),
+                lead_id=instance.id,
+                idempotency_key=values["idempotency_key"],
+                actor_id=_actor(request),
+                correlation_id=self.correlation_id(),
+            )
+            return Response(AsyncOperationSerializer(job).data, status=status.HTTP_202_ACCEPTED)
+        result = LeadService.score_lead(
+            self.tenant_id(), lead_id=instance.id, actor_id=_actor(request), correlation_id=self.correlation_id()
+        )
+        lead = result.unwrap()
+        return Response(LeadReadSerializer(lead).data)
 
 
-# ===== Account ViewSet =====
+class AccountViewSet(GovernedCRMViewSet):
+    queryset = Account.objects.all()
+    serializer_class = AccountReadSerializer
+    permission_map = ACCOUNT_ACTION_PERMISSIONS
 
+    def get_queryset(self) -> QuerySet[Account]:
+        queryset = super().get_queryset().filter(is_deleted=False)
+        if not hasattr(self, "request"):
+            return queryset
+        self._validate_query(
+            {"account_type", "owner_id", "parent_account_id", "industry", "search", "ordering", "name", "website"}
+            if self.action == "duplicates"
+            else {"account_type", "owner_id", "parent_account_id", "industry", "search", "ordering"}
+        )
+        params = self.request.query_params
+        if params.get("account_type"):
+            if params["account_type"] not in AccountType.values:
+                raise ValidationError({"account_type": "Unsupported account type."})
+            queryset = queryset.filter(account_type=params["account_type"])
+        for field in ("owner_id", "parent_account_id"):
+            if params.get(field):
+                queryset = queryset.filter(**{field: _parse_uuid(params[field], field)})
+        if params.get("industry"):
+            queryset = queryset.filter(industry=params["industry"])
+        if params.get("search"):
+            search = params["search"].strip()
+            queryset = queryset.filter(
+                Q(name__icontains=search) | Q(website__icontains=search) | Q(industry__icontains=search)
+            )
+        return self._ordering(
+            queryset, {"created_at", "updated_at", "name", "annual_revenue", "employees", "account_type"}, "name"
+        )
 
-class AccountViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for Account CRUD operations.
+    def get_serializer_class(self) -> type[Any]:
+        return {"create": AccountCreateSerializer, "partial_update": AccountUpdateSerializer}.get(
+            self.action, AccountReadSerializer
+        )
 
-    Endpoints:
-    - GET /api/v1/crm/accounts/ - List all accounts
-    - POST /api/v1/crm/accounts/ - Create account
-    - GET /api/v1/crm/accounts/{id}/ - Get account detail
-    - PATCH /api/v1/crm/accounts/{id}/ - Update account
-    - DELETE /api/v1/crm/accounts/{id}/ - Soft delete account
-    - GET /api/v1/crm/accounts/{id}/hierarchy/ - Get account hierarchy
-    """
-
-    permission_classes = [IsAuthenticated]
-    authentication_classes = [RelaxedCsrfSessionAuthentication]
-    pagination_class = CRMResultsSetPagination
-
-    def get_queryset(self):
-        """Filter accounts by tenant_id from authenticated user."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        if not tenant_id_str:
-            return Account.objects.none()
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            return Account.objects.none()
-
-        queryset = Account.objects.filter(tenant_id=tenant_id, is_deleted=False)
-
-        # Filtering
-        account_type_filter = self.request.query_params.get("account_type")
-        if account_type_filter:
-            queryset = queryset.filter(account_type=account_type_filter)
-
-        owner_id_filter = self.request.query_params.get("owner_id")
-        if owner_id_filter:
-            try:
-                owner_id = uuid.UUID(owner_id_filter)
-                queryset = queryset.filter(owner_id=owner_id)
-            except (ValueError, TypeError):
-                pass
-
-        # Search
-        search = self.request.query_params.get("search")
-        if search:
-            queryset = queryset.filter(name__icontains=search)
-
-        # Ordering (default: -created_at)
-        ordering = self.request.query_params.get("ordering", "-created_at")
-        allowed_ordering_fields = [
-            "created_at", "-created_at",
-            "updated_at", "-updated_at",
-            "name", "-name",
-        ]
-        if ordering in allowed_ordering_fields:
-            queryset = queryset.order_by(ordering)
-        else:
-            queryset = queryset.order_by("-created_at")
-
-        return queryset
-
-    def get_serializer_class(self):
-        """Return appropriate serializer based on action."""
-        if self.action == "create":
-            return AccountCreateSerializer
-        elif self.action in ["update", "partial_update"]:
-            return AccountUpdateSerializer
-        return AccountSerializer
-
-    def perform_create(self, serializer):
-        """Set tenant_id and created_by from authenticated user."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        user_id_str = get_user_id(self.request.user)
-
-        if not tenant_id_str:
-            raise DRFValidationError("Tenant ID required")
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        account_service = AccountService()
-        account = account_service.create_account(
-            tenant_id=tenant_id,
+    def create(self, request: Request) -> Response:
+        serializer = AccountCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        account = AccountService.create_account(
+            self.tenant_id(),
             data=serializer.validated_data,
-            created_by=user_id_str,
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
         )
-        serializer.instance = account
+        return Response(AccountReadSerializer(account).data, status=status.HTTP_201_CREATED)
 
-    def perform_update(self, serializer):
-        """Update account using service."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        account_service = AccountService()
-        updated_account = account_service.update_account(
-            account_id=self.get_object().id,
-            tenant_id=tenant_id,
-            data=serializer.validated_data,
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        serializer = AccountUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data)
+        expected = self._expected_version(values, instance)
+        account = AccountService.update_account(
+            self.tenant_id(), account_id=instance.id, data=values, expected_version=expected, actor_id=_actor(request)
         )
-        serializer.instance = updated_account
+        return Response(AccountReadSerializer(account).data)
 
-    def destroy(self, request, *args, **kwargs):
-        """Soft delete account."""
-        tenant_id_str = get_user_tenant_id(request.user)
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        account = self.get_object()
-        AccountService().delete_account(account_id=account.id, tenant_id=tenant_id)
+    def destroy(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        AccountService.delete_account(
+            self.tenant_id(),
+            account_id=instance.id,
+            expected_version=self._expected_version({}, instance),
+            actor_id=_actor(request),
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["get"])
-    def hierarchy(self, request, pk=None):
-        """Get account hierarchy tree."""
-        account = self.get_object()
-        tenant_id_str = get_user_tenant_id(request.user)
+    def hierarchy(self, request: Request, pk: str | None = None) -> Response:
+        del request
+        instance = self.get_object()
+        tree = AccountService.get_hierarchy(self.tenant_id(), account_id=instance.id)
+        return Response(AccountHierarchySerializer(tree).data)
 
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        account_service = AccountService()
-        hierarchy = account_service.get_account_hierarchy(account_id=account.id, tenant_id=tenant_id)
-
-        serializer = AccountHierarchySerializer(hierarchy)
-        return Response(serializer.data)
-
-
-# ===== Contact ViewSet =====
-
-
-class ContactViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for Contact CRUD operations.
-
-    Endpoints:
-    - GET /api/v1/crm/contacts/ - List all contacts
-    - POST /api/v1/crm/contacts/ - Create contact
-    - GET /api/v1/crm/contacts/{id}/ - Get contact detail
-    - PATCH /api/v1/crm/contacts/{id}/ - Update contact
-    - DELETE /api/v1/crm/contacts/{id}/ - Soft delete contact
-    """
-
-    permission_classes = [IsAuthenticated]
-    authentication_classes = [RelaxedCsrfSessionAuthentication]
-    pagination_class = CRMResultsSetPagination
-
-    def get_queryset(self):
-        """Filter contacts by tenant_id from authenticated user."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        if not tenant_id_str:
-            return Contact.objects.none()
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            return Contact.objects.none()
-
-        queryset = Contact.objects.filter(tenant_id=tenant_id, is_deleted=False)
-
-        # Filtering
-        account_id_filter = self.request.query_params.get("account_id")
-        if account_id_filter:
-            try:
-                account_id = uuid.UUID(account_id_filter)
-                queryset = queryset.filter(account_id=account_id)
-            except (ValueError, TypeError):
-                pass
-
-        owner_id_filter = self.request.query_params.get("owner_id")
-        if owner_id_filter:
-            try:
-                owner_id = uuid.UUID(owner_id_filter)
-                queryset = queryset.filter(owner_id=owner_id)
-            except (ValueError, TypeError):
-                pass
-
-        return queryset.order_by("-created_at")
-
-    def get_serializer_class(self):
-        """Return appropriate serializer based on action."""
-        if self.action == "create":
-            return ContactCreateSerializer
-        elif self.action in ["update", "partial_update"]:
-            return ContactUpdateSerializer
-        return ContactSerializer
-
-    def perform_create(self, serializer):
-        """Set tenant_id and created_by from authenticated user."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        user_id_str = get_user_id(self.request.user)
-
-        if not tenant_id_str:
-            raise DRFValidationError("Tenant ID required")
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        contact_service = ContactService()
-        contact = contact_service.create_contact(
-            tenant_id=tenant_id,
-            data=serializer.validated_data,
-            created_by=user_id_str,
+    @action(detail=False, methods=["get"])
+    def duplicates(self, request: Request) -> Response:
+        serializer = DuplicateAccountQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        result = AccountService.find_duplicates(self.tenant_id(), **serializer.validated_data)
+        return Response(
+            {
+                "local_matches": AccountReadSerializer(result.local_matches, many=True).data,
+                "external_matches": result.external_matches,
+                "enrichment_status": result.enrichment_status,
+            }
         )
-        serializer.instance = contact
 
-    def perform_update(self, serializer):
-        """Update contact using service."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
 
-        contact_service = ContactService()
-        updated_contact = contact_service.update_contact(
-            contact_id=self.get_object().id,
-            tenant_id=tenant_id,
-            data=serializer.validated_data,
+class ContactViewSet(GovernedCRMViewSet):
+    queryset = Contact.objects.all()
+    serializer_class = ContactReadSerializer
+    permission_map = CONTACT_ACTION_PERMISSIONS
+
+    def get_queryset(self) -> QuerySet[Contact]:
+        queryset = super().get_queryset().filter(is_deleted=False)
+        if not hasattr(self, "request"):
+            return queryset
+        self._validate_query({"account_id", "owner_id", "engagement_min", "search", "ordering"})
+        params = self.request.query_params
+        for field in ("account_id", "owner_id"):
+            if params.get(field):
+                queryset = queryset.filter(**{field: _parse_uuid(params[field], field)})
+        minimum = _parse_int(params.get("engagement_min"), "engagement_min", minimum=0, maximum=100)
+        if minimum is not None:
+            queryset = queryset.filter(engagement_score__gte=minimum)
+        if params.get("search"):
+            search = params["search"].strip()
+            queryset = queryset.filter(
+                Q(first_name__icontains=search)
+                | Q(last_name__icontains=search)
+                | Q(email__icontains=search)
+                | Q(department__icontains=search)
+            )
+        return self._ordering(
+            queryset, {"created_at", "updated_at", "last_name", "engagement_score", "last_contacted_at"}, "last_name"
         )
-        serializer.instance = updated_contact
 
-    def destroy(self, request, *args, **kwargs):
-        """Soft delete contact."""
-        tenant_id_str = get_user_tenant_id(request.user)
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
+    def get_serializer_class(self) -> type[Any]:
+        return {"create": ContactCreateSerializer, "partial_update": ContactUpdateSerializer}.get(
+            self.action, ContactReadSerializer
+        )
 
-        contact = self.get_object()
-        ContactService().delete_contact(contact_id=contact.id, tenant_id=tenant_id)
+    def create(self, request: Request) -> Response:
+        serializer = ContactCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data)
+        override = bool(values.pop("domain_override_reason", ""))
+        if override:
+            self._require_additional_permission("crm.contact:override_domain")
+        contact = ContactService.create_contact(
+            self.tenant_id(),
+            data=values,
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
+            allow_domain_override=override,
+        )
+        return Response(ContactReadSerializer(contact).data, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        serializer = ContactUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data)
+        override = bool(values.pop("domain_override_reason", ""))
+        if override:
+            self._require_additional_permission("crm.contact:override_domain")
+        expected = self._expected_version(values, instance)
+        contact = ContactService.update_contact(
+            self.tenant_id(),
+            contact_id=instance.id,
+            data=values,
+            expected_version=expected,
+            actor_id=_actor(request),
+            allow_domain_override=override,
+        )
+        return Response(ContactReadSerializer(contact).data)
+
+    def destroy(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        ContactService.delete_contact(
+            self.tenant_id(),
+            contact_id=instance.id,
+            expected_version=self._expected_version({}, instance),
+            actor_id=_actor(request),
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-# ===== Opportunity ViewSet =====
+class OpportunityViewSet(GovernedCRMViewSet):
+    queryset = Opportunity.objects.all()
+    serializer_class = OpportunityReadSerializer
+    permission_map = OPPORTUNITY_ACTION_PERMISSIONS
 
-
-class OpportunityViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for Opportunity CRUD operations.
-
-    Endpoints:
-    - GET /api/v1/crm/opportunities/ - List all opportunities
-    - POST /api/v1/crm/opportunities/ - Create opportunity
-    - GET /api/v1/crm/opportunities/{id}/ - Get opportunity detail
-    - PATCH /api/v1/crm/opportunities/{id}/ - Update opportunity
-    - DELETE /api/v1/crm/opportunities/{id}/ - Soft delete opportunity
-    - POST /api/v1/crm/opportunities/{id}/close-won/ - Close as won
-    - POST /api/v1/crm/opportunities/{id}/close-lost/ - Close as lost
-    """
-
-    permission_classes = [IsAuthenticated]
-    authentication_classes = [RelaxedCsrfSessionAuthentication]
-    pagination_class = CRMResultsSetPagination
-
-    def get_queryset(self):
-        """Filter opportunities by tenant_id from authenticated user."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        if not tenant_id_str:
-            return Opportunity.objects.none()
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            return Opportunity.objects.none()
-
-        queryset = Opportunity.objects.filter(tenant_id=tenant_id, is_deleted=False)
-
-        # Filtering
-        status_filter = self.request.query_params.get("status")
-        if status_filter:
-            queryset = queryset.filter(status=status_filter)
-
-        stage_filter = self.request.query_params.get("stage")
-        if stage_filter:
-            queryset = queryset.filter(stage=stage_filter)
-
-        owner_id_filter = self.request.query_params.get("owner_id")
-        if owner_id_filter:
-            try:
-                owner_id = uuid.UUID(owner_id_filter)
-                queryset = queryset.filter(owner_id=owner_id)
-            except (ValueError, TypeError):
-                pass
-
-        account_id_filter = self.request.query_params.get("account_id")
-        if account_id_filter:
-            try:
-                account_id = uuid.UUID(account_id_filter)
-                queryset = queryset.filter(account_id=account_id)
-            except (ValueError, TypeError):
-                pass
-
-        # Ordering (default: -created_at)
-        ordering = self.request.query_params.get("ordering", "-created_at")
-        allowed_ordering_fields = [
-            "created_at", "-created_at",
-            "updated_at", "-updated_at",
-            "close_date", "-close_date",
-            "amount", "-amount",
-            "name", "-name",
-        ]
-        if ordering in allowed_ordering_fields:
-            queryset = queryset.order_by(ordering)
-        else:
-            queryset = queryset.order_by("-created_at")
-
-        return queryset
-
-    def get_serializer_class(self):
-        """Return appropriate serializer based on action."""
-        if self.action == "create":
-            return OpportunityCreateSerializer
-        elif self.action in ["update", "partial_update"]:
-            return OpportunityUpdateSerializer
-        return OpportunitySerializer
-
-    def perform_create(self, serializer):
-        """Set tenant_id and created_by from authenticated user."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        user_id_str = get_user_id(self.request.user)
-
-        if not tenant_id_str:
-            raise DRFValidationError("Tenant ID required")
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        opportunity_service = OpportunityService()
-        opportunity = opportunity_service.create_opportunity(
-            tenant_id=tenant_id,
-            data=serializer.validated_data,
-            created_by=user_id_str,
+    def get_queryset(self) -> QuerySet[Opportunity]:
+        queryset = super().get_queryset().filter(is_deleted=False)
+        if not hasattr(self, "request"):
+            return queryset
+        self._validate_query(
+            {"status", "stage", "owner_id", "account_id", "close_date_from", "close_date_to", "search", "ordering"}
         )
-        serializer.instance = opportunity
-
-    def perform_update(self, serializer):
-        """Update opportunity using service."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        opportunity_service = OpportunityService()
-        updated_opportunity = opportunity_service.update_opportunity(
-            opportunity_id=self.get_object().id,
-            tenant_id=tenant_id,
-            data=serializer.validated_data,
+        params = self.request.query_params
+        if params.get("status"):
+            if params["status"] not in OpportunityStatus.values:
+                raise ValidationError({"status": "Unsupported opportunity status."})
+            queryset = queryset.filter(status=params["status"])
+        if params.get("stage"):
+            if params["stage"] not in OpportunityStage.values:
+                raise ValidationError({"stage": "Unsupported opportunity stage."})
+            queryset = queryset.filter(stage=params["stage"])
+        for field in ("owner_id", "account_id"):
+            if params.get(field):
+                queryset = queryset.filter(**{field: _parse_uuid(params[field], field)})
+        start = _parse_date(params.get("close_date_from"), "close_date_from")
+        end = _parse_date(params.get("close_date_to"), "close_date_to")
+        if start:
+            queryset = queryset.filter(close_date__gte=start)
+        if end:
+            queryset = queryset.filter(close_date__lte=end)
+        if start and end and start > end:
+            raise ValidationError({"close_date_from": "Cannot be after close_date_to."})
+        if params.get("search"):
+            search = params["search"].strip()
+            queryset = queryset.filter(Q(name__icontains=search) | Q(description__icontains=search))
+        return self._ordering(
+            queryset,
+            {"created_at", "updated_at", "name", "amount", "probability", "stage", "close_date", "last_activity_at"},
+            "close_date",
         )
-        serializer.instance = updated_opportunity
 
-    def destroy(self, request, *args, **kwargs):
-        """Soft delete opportunity."""
-        tenant_id_str = get_user_tenant_id(request.user)
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
+    def get_serializer_class(self) -> type[Any]:
+        return {"create": OpportunityCreateSerializer, "partial_update": OpportunityUpdateSerializer}.get(
+            self.action, OpportunityReadSerializer
+        )
 
-        opportunity = self.get_object()
-        OpportunityService().delete_opportunity(opportunity_id=opportunity.id, tenant_id=tenant_id)
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-    @action(detail=True, methods=["post"], url_path="close-won")
-    def close_won(self, request, pk=None):
-        """Close opportunity as won."""
-        opportunity = self.get_object()
-        tenant_id_str = get_user_tenant_id(request.user)
-        user_id_str = get_user_id(request.user)
-
-        if not tenant_id_str:
-            raise DRFValidationError("Tenant ID required")
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        serializer = CloseWonRequestSerializer(data=request.data)
+    def create(self, request: Request) -> Response:
+        serializer = OpportunityCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        opportunity_service = OpportunityService()
-        updated_opportunity = opportunity_service.close_won(
-            opportunity_id=opportunity.id,
-            tenant_id=tenant_id,
-            user_id=user_id_str,
+        opportunity = OpportunityService.create_opportunity(
+            self.tenant_id(),
+            data=serializer.validated_data,
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
         )
+        return Response(OpportunityReadSerializer(opportunity).data, status=status.HTTP_201_CREATED)
 
-        response_serializer = OpportunitySerializer(updated_opportunity)
-        return Response(response_serializer.data)
-
-    @action(detail=True, methods=["post"], url_path="close-lost")
-    def close_lost(self, request, pk=None):
-        """Close opportunity as lost."""
-        opportunity = self.get_object()
-        tenant_id_str = get_user_tenant_id(request.user)
-        user_id_str = get_user_id(request.user)
-
-        if not tenant_id_str:
-            raise DRFValidationError("Tenant ID required")
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        serializer = CloseLostRequestSerializer(data=request.data)
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        serializer = OpportunityUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-
-        opportunity_service = OpportunityService()
-        updated_opportunity = opportunity_service.close_lost(
-            opportunity_id=opportunity.id,
-            tenant_id=tenant_id,
-            loss_reason=serializer.validated_data["loss_reason"],
-            user_id=user_id_str,
+        values = dict(serializer.validated_data)
+        expected = self._expected_version(values, instance)
+        opportunity = OpportunityService.update_opportunity(
+            self.tenant_id(),
+            opportunity_id=instance.id,
+            data=values,
+            expected_version=expected,
+            actor_id=_actor(request),
         )
+        return Response(OpportunityReadSerializer(opportunity).data)
 
-        response_serializer = OpportunitySerializer(updated_opportunity)
-        return Response(response_serializer.data)
-
-
-# ===== Activity ViewSet =====
-
-
-class ActivityViewSet(viewsets.ModelViewSet):
-    """
-    ViewSet for Activity CRUD operations.
-
-    Endpoints:
-    - GET /api/v1/crm/activities/ - List all activities
-    - POST /api/v1/crm/activities/ - Create activity
-    - GET /api/v1/crm/activities/{id}/ - Get activity detail
-    - PATCH /api/v1/crm/activities/{id}/ - Update activity
-    - DELETE /api/v1/crm/activities/{id}/ - Soft delete activity
-    - POST /api/v1/crm/activities/{id}/complete/ - Mark as complete
-    """
-
-    permission_classes = [IsAuthenticated]
-    authentication_classes = [RelaxedCsrfSessionAuthentication]
-    pagination_class = CRMResultsSetPagination
-
-    def get_queryset(self):
-        """Filter activities by tenant_id from authenticated user."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        if not tenant_id_str:
-            return Activity.objects.none()
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            return Activity.objects.none()
-
-        queryset = Activity.objects.filter(tenant_id=tenant_id, is_deleted=False)
-
-        # Filtering
-        related_to_type = self.request.query_params.get("related_to_type")
-        if related_to_type:
-            queryset = queryset.filter(related_to_type=related_to_type)
-
-        related_to_id = self.request.query_params.get("related_to_id")
-        if related_to_id:
-            try:
-                related_id = uuid.UUID(related_to_id)
-                queryset = queryset.filter(related_to_id=related_id)
-            except (ValueError, TypeError):
-                pass
-
-        owner_id_filter = self.request.query_params.get("owner_id")
-        if owner_id_filter:
-            try:
-                owner_id = uuid.UUID(owner_id_filter)
-                queryset = queryset.filter(owner_id=owner_id)
-            except (ValueError, TypeError):
-                pass
-
-        # Ordering (default: -created_at)
-        ordering = self.request.query_params.get("ordering", "-created_at")
-        allowed_ordering_fields = [
-            "created_at", "-created_at",
-            "updated_at", "-updated_at",
-            "due_date", "-due_date",
-        ]
-        if ordering in allowed_ordering_fields:
-            queryset = queryset.order_by(ordering)
-        else:
-            queryset = queryset.order_by("-created_at")
-
-        return queryset
-
-    def get_serializer_class(self):
-        """Return appropriate serializer based on action."""
-        if self.action == "create":
-            return ActivityCreateSerializer
-        elif self.action in ["update", "partial_update"]:
-            return ActivityUpdateSerializer
-        return ActivitySerializer
-
-    def perform_create(self, serializer):
-        """Set tenant_id and created_by from authenticated user."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        user_id_str = get_user_id(self.request.user)
-
-        if not tenant_id_str:
-            raise DRFValidationError("Tenant ID required")
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        activity_service = ActivityService()
-        activity = activity_service.create_activity(
-            tenant_id=tenant_id,
-            data=serializer.validated_data,
-            created_by=user_id_str,
+    def destroy(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        OpportunityService.delete_opportunity(
+            self.tenant_id(),
+            opportunity_id=instance.id,
+            expected_version=self._expected_version({}, instance),
+            actor_id=_actor(request),
         )
-        serializer.instance = activity
-
-    def perform_update(self, serializer):
-        """Update activity using service."""
-        tenant_id_str = get_user_tenant_id(self.request.user)
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        activity_service = ActivityService()
-        updated_activity = activity_service.update_activity(
-            activity_id=self.get_object().id,
-            tenant_id=tenant_id,
-            data=serializer.validated_data,
-        )
-        serializer.instance = updated_activity
-
-    def destroy(self, request, *args, **kwargs):
-        """Soft delete activity."""
-        tenant_id_str = get_user_tenant_id(request.user)
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
-
-        activity = self.get_object()
-        ActivityService().delete_activity(activity_id=activity.id, tenant_id=tenant_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"])
-    def complete(self, request, pk=None):
-        """Mark activity as complete."""
-        activity = self.get_object()
-        tenant_id_str = get_user_tenant_id(request.user)
+    def transition(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        serializer = OpportunityStageTransitionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        backward = str(values["command"]).startswith("reopen_to_")
+        if backward:
+            self._require_additional_permission("crm.opportunity:reopen_stage")
+        opportunity = OpportunityService.transition_stage(
+            self.tenant_id(),
+            opportunity_id=instance.id,
+            command=values["command"],
+            transition_key=values["transition_key"],
+            expected_version=values["expected_version"],
+            actor_id=_actor(request),
+            reason=values.get("reason"),
+            allow_backward=backward,
+        )
+        return Response(OpportunityReadSerializer(opportunity).data)
 
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            raise DRFValidationError("Invalid tenant ID")
+    @action(detail=True, methods=["post"], url_path="close-won")
+    def close_won(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        payload = dict(request.data)
+        if request.path.startswith("/api/v1/"):
+            payload.setdefault("transition_key", f"legacy-close-won:{instance.id}")
+            payload.setdefault("expected_version", instance.version)
+            payload.setdefault("confirmed", True)
+        serializer = CloseWonSerializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data)
+        values.pop("confirmed")
+        opportunity = OpportunityService.close_won(
+            self.tenant_id(),
+            opportunity_id=instance.id,
+            actor_id=_actor(request),
+            **values,
+        )
+        return Response(OpportunityReadSerializer(opportunity).data)
 
-        activity_service = ActivityService()
-        updated_activity = activity_service.complete_activity(
-            activity_id=activity.id, tenant_id=tenant_id
+    @action(detail=True, methods=["post"], url_path="close-lost")
+    def close_lost(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        payload = dict(request.data)
+        if request.path.startswith("/api/v1/"):
+            payload.setdefault("transition_key", f"legacy-close-lost:{instance.id}")
+            payload.setdefault("expected_version", instance.version)
+        serializer = CloseLostSerializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        opportunity = OpportunityService.close_lost(
+            self.tenant_id(), opportunity_id=instance.id, actor_id=_actor(request), **serializer.validated_data
+        )
+        return Response(OpportunityReadSerializer(opportunity).data)
+
+
+class ActivityViewSet(GovernedCRMViewSet):
+    queryset = Activity.objects.all()
+    serializer_class = ActivityReadSerializer
+    permission_map = ACTIVITY_ACTION_PERMISSIONS
+
+    def get_queryset(self) -> QuerySet[Activity]:
+        queryset = super().get_queryset().filter(is_deleted=False)
+        if not hasattr(self, "request"):
+            return queryset
+        self._validate_query(
+            {
+                "related_to_type",
+                "related_to_id",
+                "activity_type",
+                "owner_id",
+                "completed",
+                "due_from",
+                "due_to",
+                "ordering",
+            }
+        )
+        params = self.request.query_params
+        if params.get("related_to_type"):
+            if params["related_to_type"] not in RelatedToType.values:
+                raise ValidationError({"related_to_type": "Unsupported CRM relation type."})
+            queryset = queryset.filter(related_to_type=params["related_to_type"])
+        for field in ("related_to_id", "owner_id"):
+            if params.get(field):
+                queryset = queryset.filter(**{field: _parse_uuid(params[field], field)})
+        if params.get("activity_type"):
+            if params["activity_type"] not in ActivityType.values:
+                raise ValidationError({"activity_type": "Unsupported activity type."})
+            queryset = queryset.filter(activity_type=params["activity_type"])
+        completed = _parse_bool(params.get("completed"), "completed")
+        if completed is not None:
+            queryset = queryset.filter(completed=completed)
+        due_from = _parse_date(params.get("due_from"), "due_from")
+        due_to = _parse_date(params.get("due_to"), "due_to")
+        if due_from:
+            queryset = queryset.filter(due_date__date__gte=due_from)
+        if due_to:
+            queryset = queryset.filter(due_date__date__lte=due_to)
+        if due_from and due_to and due_from > due_to:
+            raise ValidationError({"due_from": "Cannot be after due_to."})
+        return self._ordering(
+            queryset, {"created_at", "updated_at", "due_date", "activity_type", "completed", "subject"}, "-created_at"
         )
 
-        serializer = ActivitySerializer(updated_activity)
-        return Response(serializer.data)
-
-
-# ===== Forecasting ViewSet =====
-
-
-class ForecastingViewSet(viewsets.ViewSet):
-    """
-    ViewSet for forecasting and analytics.
-
-    Endpoints:
-    - GET /api/v1/crm/forecasting/pipeline/ - Get weighted pipeline
-    - GET /api/v1/crm/forecasting/win-rate/ - Get win rate
-    - GET /api/v1/crm/forecasting/ai-predict/ - Get AI prediction
-    """
-
-    permission_classes = [IsAuthenticated]
-    authentication_classes = [RelaxedCsrfSessionAuthentication]
-
-    @action(detail=False, methods=["get"], url_path="pipeline")
-    def pipeline(self, request):
-        """Get weighted pipeline forecast."""
-        tenant_id_str = get_user_tenant_id(request.user)
-        if not tenant_id_str:
-            return Response({"error": "Invalid tenant"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            return Response({"error": "Invalid tenant ID"}, status=status.HTTP_400_BAD_REQUEST)
-
-        owner_id = request.query_params.get("owner_id")
-        owner_uuid = None
-        if owner_id:
-            try:
-                owner_uuid = uuid.UUID(owner_id)
-            except (ValueError, TypeError):
-                pass
-
-        period_days = int(request.query_params.get("period", 90))
-
-        forecasting_service = ForecastingService()
-        result = forecasting_service.get_weighted_pipeline(
-            tenant_id=tenant_id, owner_id=owner_uuid, period_days=period_days
+    def get_serializer_class(self) -> type[Any]:
+        return {"create": ActivityCreateSerializer, "partial_update": ActivityUpdateSerializer}.get(
+            self.action, ActivityReadSerializer
         )
 
-        serializer = ForecastSerializer(result)
-        return Response(serializer.data)
+    def create(self, request: Request) -> Response:
+        serializer = ActivityCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        activity = ActivityService.create_activity(
+            self.tenant_id(),
+            data=serializer.validated_data,
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
+        )
+        return Response(ActivityReadSerializer(activity).data, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        serializer = ActivityUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data)
+        expected = self._expected_version(values, instance)
+        activity = ActivityService.update_activity(
+            self.tenant_id(), activity_id=instance.id, data=values, expected_version=expected, actor_id=_actor(request)
+        )
+        return Response(ActivityReadSerializer(activity).data)
+
+    def destroy(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        ActivityService.delete_activity(
+            self.tenant_id(),
+            activity_id=instance.id,
+            expected_version=self._expected_version({}, instance),
+            actor_id=_actor(request),
+            is_administrator=bool(getattr(request.user, "is_staff", False)),
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["post"])
+    def complete(self, request: Request, pk: str | None = None) -> Response:
+        instance = self.get_object()
+        payload = dict(request.data)
+        if request.path.startswith("/api/v1/"):
+            payload.setdefault("transition_key", f"legacy-complete:{instance.id}")
+            payload.setdefault("expected_version", instance.version)
+        serializer = ActivityCompleteSerializer(data=payload)
+        serializer.is_valid(raise_exception=True)
+        activity = ActivityService.complete_activity(
+            self.tenant_id(), activity_id=instance.id, actor_id=_actor(request), **serializer.validated_data
+        )
+        return Response(ActivityReadSerializer(activity).data)
+
+
+class ForecastingViewSet(GovernedCRMViewSet):
+    queryset = Opportunity.objects.none()
+    serializer_class = ForecastSerializer
+    permission_map = FORECAST_ACTION_PERMISSIONS
+    http_method_names = ["get", "post", "head", "options"]
+
+    def _query(self, request: Request) -> dict[str, Any]:
+        serializer = ForecastQuerySerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        return serializer.validated_data
+
+    @action(detail=False, methods=["get"])
+    def pipeline(self, request: Request) -> Response:
+        values = self._query(request)
+        forecast = ForecastingService.get_weighted_pipeline(
+            self.tenant_id(), owner_id=values.get("owner_id"), period_days=values["period"]
+        )
+        if request.path.startswith("/api/v1/"):
+            if len(forecast.currencies) > 1:
+                raise CRMServiceError(
+                    "The v1 forecast cannot represent a multi-currency pipeline; use the currency-grouped v2 endpoint.",
+                    code="MULTI_CURRENCY_PIPELINE",
+                    http_status=status.HTTP_409_CONFLICT,
+                )
+            currency = forecast.currencies[0] if forecast.currencies else None
+            return Response(
+                {
+                    "total_pipeline_value": float(currency.total_pipeline_value) if currency else 0.0,
+                    "weighted_pipeline_value": float(currency.weighted_pipeline_value) if currency else 0.0,
+                    "opportunity_count": currency.opportunity_count if currency else 0,
+                    "period_days": forecast.period_days,
+                }
+            )
+        return Response(ForecastSerializer(forecast).data)
 
     @action(detail=False, methods=["get"], url_path="win-rate")
-    def win_rate(self, request):
-        """Get historical win rate."""
-        tenant_id_str = get_user_tenant_id(request.user)
-        if not tenant_id_str:
-            return Response({"error": "Invalid tenant"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            return Response({"error": "Invalid tenant ID"}, status=status.HTTP_400_BAD_REQUEST)
-
-        owner_id = request.query_params.get("owner_id")
-        owner_uuid = None
-        if owner_id:
-            try:
-                owner_uuid = uuid.UUID(owner_id)
-            except (ValueError, TypeError):
-                pass
-
-        period_days = int(request.query_params.get("period", 90))
-
-        forecasting_service = ForecastingService()
-        result = forecasting_service.get_win_rate(
-            tenant_id=tenant_id, owner_id=owner_uuid, period_days=period_days
+    def win_rate(self, request: Request) -> Response:
+        values = self._query(request)
+        result = ForecastingService.get_win_rate(
+            self.tenant_id(), owner_id=values.get("owner_id"), period_days=values["period"]
         )
+        return Response(WinRateSerializer(result).data)
 
-        serializer = WinRateSerializer(result)
-        return Response(serializer.data)
+    @action(detail=False, methods=["get"], url_path="by-stage")
+    def by_stage(self, request: Request) -> Response:
+        values = self._query(request)
+        rows = ForecastingService.get_pipeline_by_stage(
+            self.tenant_id(), owner_id=values.get("owner_id"), period_days=values["period"]
+        )
+        return Response(StageForecastSerializer(rows, many=True).data)
 
-    @action(detail=False, methods=["get"], url_path="ai-predict")
-    def ai_predict(self, request):
-        """Get AI-predicted revenue."""
-        tenant_id_str = get_user_tenant_id(request.user)
-        if not tenant_id_str:
-            return Response({"error": "Invalid tenant"}, status=status.HTTP_400_BAD_REQUEST)
+    @action(detail=False, methods=["post"])
+    def predict(self, request: Request) -> Response:
+        serializer = RevenuePredictionRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = ForecastingService.predict_revenue(
+            self.tenant_id(),
+            period_days=serializer.validated_data["period"],
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
+        )
+        prediction = result.unwrap()
+        return Response(RevenuePredictionSerializer(prediction).data)
 
-        try:
-            tenant_id = uuid.UUID(tenant_id_str)
-        except (ValueError, TypeError):
-            return Response({"error": "Invalid tenant ID"}, status=status.HTTP_400_BAD_REQUEST)
 
-        period_days = int(request.query_params.get("period", 90))
+class AsyncJobViewSet(GovernedCRMViewSet):
+    queryset = AsyncJob.objects.all()
+    serializer_class = AsyncOperationSerializer
+    http_method_names = ["get", "head", "options"]
+    permission_map = {"retrieve": "crm.lead:score"}
 
-        forecasting_service = ForecastingService()
-        result = forecasting_service.get_ai_prediction(tenant_id=tenant_id, period_days=period_days)
+    def get_queryset(self) -> QuerySet[AsyncJob]:
+        return super().get_queryset()
 
-        serializer = AIPredictionSerializer(result)
-        return Response(serializer.data)
+    def check_permissions(self, request: Request) -> None:
+        tenant_id = self._get_tenant_id()
+        if tenant_id is not None and getattr(self, "action", "") == "retrieve":
+            job = AsyncJob.objects.filter(tenant_id=tenant_id, id=self.kwargs.get("pk")).only("command").first()
+            try:
+                permission = permission_for_job_command(job.command) if job else ""
+            except PermissionError:
+                permission = ""
+            self.permission_map = {"retrieve": permission}
+        super().check_permissions(request)
+
+
+__all__ = [
+    "AccountViewSet",
+    "ActivityViewSet",
+    "AsyncJobViewSet",
+    "ContactViewSet",
+    "ForecastingViewSet",
+    "GovernedCRMViewSet",
+    "LeadViewSet",
+    "OpportunityViewSet",
+]

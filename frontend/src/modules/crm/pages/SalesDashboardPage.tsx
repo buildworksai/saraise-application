@@ -1,172 +1,26 @@
-/**
- * Sales Dashboard Page
- *
- * Displays sales metrics, pipeline, and forecasting.
- */
+/* eslint-disable complexity -- dashboard panels retain independent governed states */
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import { TrendingUp, DollarSign, Target, BarChart3 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
-import { WeightedPipelineChart } from '../components/WeightedPipelineChart';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { AIInsights } from '../components/AIInsights';
-import { crmService } from '../services/crm-service';
+import { CrmPage, EmptyPanel, GovernedError, PageSkeleton } from '../components/CrmPage';
+import { crmKeys, crmService } from '../services/crm-service';
 
-export const SalesDashboardPage = () => {
-  const navigate = useNavigate();
-
-  const { data: pipeline } = useQuery({
-    queryKey: ['crm-forecasting-pipeline'],
-    queryFn: () => crmService.getPipeline({ period: 90 }),
-  });
-
-  const { data: winRate } = useQuery({
-    queryKey: ['crm-forecasting-win-rate'],
-    queryFn: () => crmService.getWinRate({ period: 90 }),
-  });
-
-  const { data: opportunities } = useQuery({
-    queryKey: ['crm-opportunities'],
-    queryFn: () => crmService.listOpportunities({ status: 'open' }),
-  });
-
-  return (
-    <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-foreground">Sales Dashboard</h1>
-        <Button onClick={() => navigate('/crm/opportunities')}>View All Opportunities</Button>
-      </div>
-
-      {/* Metrics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Pipeline</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              ${pipeline?.total_pipeline_value.toLocaleString() || '0'}
-            </div>
-            <p className="text-xs text-muted-foreground">All open opportunities</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Weighted Pipeline</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              ${pipeline?.weighted_pipeline_value.toLocaleString() || '0'}
-            </div>
-            <p className="text-xs text-muted-foreground">Probability-weighted</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Win Rate</CardTitle>
-            <Target className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{winRate?.win_rate.toFixed(1) || '0'}%</div>
-            <p className="text-xs text-muted-foreground">Last 90 days</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Open Opportunities</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{opportunities?.length || 0}</div>
-            <p className="text-xs text-muted-foreground">Active deals</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Pipeline Chart */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>Pipeline by Stage</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {opportunities && opportunities.length > 0 ? (
-            <WeightedPipelineChart opportunities={opportunities} />
-          ) : (
-            <div className="flex items-center justify-center h-64 text-muted-foreground">
-              No opportunities to display
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Pipeline Summary */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Pipeline Overview</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {pipeline && (
-              <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span>Total Value</span>
-                    <span className="font-medium">${pipeline.total_pipeline_value.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span>Weighted Value</span>
-                    <span className="font-medium">${pipeline.weighted_pipeline_value.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span>Opportunities</span>
-                    <span className="font-medium">{pipeline.opportunity_count}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Win Rate Analysis</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {winRate && (
-              <div className="space-y-4">
-                <div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span>Win Rate</span>
-                    <span className="font-medium">{winRate.win_rate.toFixed(1)}%</span>
-                  </div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span>Won</span>
-                    <span className="font-medium">{winRate.won_count}</span>
-                  </div>
-                  <div className="flex justify-between text-sm mb-1">
-                    <span>Lost</span>
-                    <span className="font-medium">{winRate.lost_count}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span>Total Closed</span>
-                    <span className="font-medium">{winRate.total_closed}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* AI Insights */}
-      <div className="mt-6">
-        <AIInsights />
-      </div>
-    </div>
-  );
-};
+export function SalesDashboardPage() {
+  const pipeline = useQuery({ queryKey: crmKeys.forecast('pipeline', { period: 90 }), queryFn: () => crmService.getPipeline({ period: 90 }) });
+  const win = useQuery({ queryKey: crmKeys.forecast('win-rate', { period: 90 }), queryFn: () => crmService.getWinRate({ period: 90 }) });
+  const prediction = useQuery({ queryKey: crmKeys.forecast('prediction', { period: 90 }), queryFn: () => crmService.predictRevenue({ period: 90 }), retry: false });
+  const stale = useQuery({ queryKey: crmKeys.opportunities({ status: 'open', ordering: 'last_activity_at', page_size: 25 }), queryFn: () => crmService.listOpportunities({ status: 'open', ordering: 'last_activity_at', page_size: 25 }) });
+  if (pipeline.isLoading && win.isLoading) return <CrmPage title="Sales dashboard" description="Evidence-backed pipeline health and performance."><PageSkeleton label="Loading dashboard metrics and charts"/></CrmPage>;
+  const opportunities = pipeline.data?.currencies.reduce((count, row) => count + row.opportunity_count, 0) ?? 0;
+  const noData = opportunities === 0 && win.data?.total_closed === 0;
+  const staleDeals = stale.data?.items.filter(opportunity => !opportunity.last_activity_at || Date.now() - new Date(opportunity.last_activity_at).getTime() > 14 * 86_400_000) ?? [];
+  return <CrmPage title="Sales dashboard" description="Every number states its evidence source; unavailable predictions never become zero." actions={<><Link to="/crm/leads/new"><Button>Create lead</Button></Link><Link to="/crm/opportunities/pipeline"><Button variant="outline">Open pipeline</Button></Link></>}>
+    {noData ? <EmptyPanel title="Start your customer acquisition journey" description="Create a lead in under two minutes. Pipeline and win-rate evidence will appear as you close real opportunities." action={<Link to="/crm/leads/new"><Button>Create first lead</Button></Link>}/> : null}
+    <div className="grid gap-6 lg:grid-cols-2"><Card><CardHeader><CardTitle>Weighted pipeline</CardTitle></CardHeader><CardContent>{pipeline.isLoading?<div role="status" className="h-40 animate-pulse rounded bg-muted"><span className="sr-only">Loading pipeline chart</span></div>:pipeline.error?<GovernedError error={pipeline.error} onRetry={()=>void pipeline.refetch()} subject="Pipeline forecast"/>:<><div className="space-y-3">{pipeline.data?.currencies.map(row=><div key={row.currency} className="flex items-center justify-between rounded bg-muted p-3"><span>{row.currency}</span><strong>{new Intl.NumberFormat(undefined,{style:'currency',currency:row.currency}).format(Number(row.weighted_pipeline_value))}</strong></div>)}</div><p className="mt-3 text-xs text-muted-foreground">Evidence: weighted open opportunities · {opportunities} opportunities</p></>}</CardContent></Card>
+    <Card><CardHeader><CardTitle>Historical win rate</CardTitle></CardHeader><CardContent>{win.isLoading?<div role="status" className="h-40 animate-pulse rounded bg-muted"><span className="sr-only">Loading win rate</span></div>:win.error?<GovernedError error={win.error} onRetry={()=>void win.refetch()} subject="Win rate"/>:<><p className="text-4xl font-bold">{win.data?.win_rate===null?'Insufficient evidence':`${Number(win.data?.win_rate??0).toFixed(1)}%`}</p><p className="mt-3 text-sm text-muted-foreground">{win.data?.won_count} won · {win.data?.lost_count} lost · last {win.data?.period_days} days</p><p className="mt-1 text-xs text-muted-foreground">Evidence: historical closed opportunities</p></>}</CardContent></Card></div>
+    {stale.isError?<GovernedError error={stale.error} onRetry={()=>void stale.refetch()} subject="Stale-deal callouts"/>:staleDeals.length?<section className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-5"><h2 className="font-semibold">Stale deals need attention</h2><ul className="mt-2 space-y-2">{staleDeals.map(opportunity=><li key={opportunity.id}><Link className="text-primary hover:underline" to={`/crm/opportunities/${opportunity.id}`}>{opportunity.name}</Link> · last activity {opportunity.last_activity_at?new Date(opportunity.last_activity_at).toLocaleDateString():'not recorded'}</li>)}</ul></section>:null}
+    {prediction.isLoading?<div role="status" className="h-36 animate-pulse rounded bg-muted"><span className="sr-only">Loading provider prediction</span></div>:prediction.error?<section><AIInsights prediction={null}/><Button className="mt-3" variant="outline" onClick={()=>void prediction.refetch()}>Retry prediction</Button></section>:<AIInsights prediction={prediction.data??null}/>} 
+  </CrmPage>;
+}

@@ -1,415 +1,177 @@
-/**
- * CRM Service
- *
- * Service client for CRM module API calls.
- *
- * Uses contracts.ts for types and endpoints.
- * Reference: saraise-documentation/rules/agent-rules/27-contracts-architecture.md
- */
-
-import { apiClient } from '@/services/api-client';
-import type {
-  Account,
-  AccountCreate,
-  AccountHierarchyNode,
-  AccountUpdate,
-  Activity,
-  ActivityCreate,
-  ActivityUpdate,
-  AIPrediction,
-  Contact,
-  ContactCreate,
-  ContactUpdate,
-  Forecast,
-  Lead,
-  LeadCreate,
-  LeadScoringResponse,
-  LeadUpdate,
-  Opportunity,
-  OpportunityCreate,
-  OpportunityCreateFromLead,
-  OpportunityUpdate,
-  WinRate,
+/** Typed, governed CRM v2 client. */
+import { ApiError as ClientApiError, apiClient } from '@/services/api-client';
+import {
+  ENDPOINTS,
+  isAccount,
+  isActivity,
+  isContact,
+  isLead,
+  isOpportunity,
+  isV2Envelope,
+  isV2PageEnvelope,
 } from '../contracts';
-import { ENDPOINTS } from '../contracts';
+import type {
+  Account, AccountCreate, AccountFilters, AccountHierarchyNode, AccountUpdate, Activity,
+  ActivityCreate, ActivityFilters, ActivityUpdate, AsyncJob, CloseLostRequest, CloseWonRequest,
+  CompleteActivityRequest, Contact, ContactCreate, ContactFilters, ContactUpdate, ConversionResult,
+  DuplicateAccountResult, Forecast, ForecastFilters, Lead, LeadConversionRequest, LeadCreate,
+  LeadFilters, LeadScoringResponse, LeadTransitionRequest, LeadUpdate, Opportunity,
+  OpportunityCreate, OpportunityFilters, OpportunityTransitionRequest, OpportunityUpdate,
+  OpportunityOpenStage, OpportunityTransitionCommand, PaginationMeta, Prediction, PredictionRequest, StageForecast, WinRate,
+} from '../contracts';
 
-// Re-export types for use in components
-export type {
-  Account,
-  AccountCreate,
-  AccountHierarchyNode,
-  AccountUpdate,
-  Activity,
-  ActivityCreate,
-  ActivityUpdate,
-  AIPrediction,
-  Contact,
-  ContactCreate,
-  ContactUpdate,
-  Forecast,
-  Lead,
-  LeadCreate,
-  LeadScoringResponse,
-  LeadUpdate,
-  Opportunity,
-  OpportunityCreate,
-  OpportunityCreateFromLead,
-  OpportunityUpdate,
-  WinRate,
+export type CrmErrorKind = 'authentication' | 'permission' | 'not_found' | 'conflict' | 'validation' | 'rate_limit' | 'unavailable' | 'network' | 'invalid_response' | 'unexpected';
+
+export class CrmApiError extends Error {
+  constructor(
+    message: string,
+    readonly kind: CrmErrorKind,
+    readonly status: number | null,
+    readonly code: string,
+    readonly correlationId: string | null,
+    readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = 'CrmApiError';
+  }
+}
+
+export interface PageResult<T> {
+  readonly items: readonly T[];
+  readonly pagination: PaginationMeta & { readonly total_count: number };
+  readonly correlationId: string;
+}
+
+type Guard<T> = (value: unknown) => value is T;
+
+function kindForStatus(status: number): CrmErrorKind {
+  if (status === 401) return 'authentication';
+  if (status === 403) return 'permission';
+  if (status === 404) return 'not_found';
+  if (status === 409) return 'conflict';
+  if (status === 400 || status === 422) return 'validation';
+  if (status === 429) return 'rate_limit';
+  if (status === 503) return 'unavailable';
+  return 'unexpected';
+}
+
+async function governed<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof CrmApiError) throw error;
+    if (error instanceof ClientApiError) {
+      throw new CrmApiError(error.message, kindForStatus(error.status), error.status, error.code ?? 'request_failed', error.correlationId ?? null, error.details);
+    }
+    if (error instanceof TypeError) {
+      throw new CrmApiError('CRM could not be reached. Check your connection and retry.', 'network', null, 'network_error', null);
+    }
+    throw new CrmApiError(error instanceof Error ? error.message : 'Unexpected CRM failure.', 'unexpected', null, 'unexpected_error', null);
+  }
+}
+
+function decode<T>(value: unknown, guard: Guard<T>, label: string): T {
+  if (!isV2Envelope(value) || !guard(value.data)) {
+    throw new CrmApiError(`CRM returned an invalid ${label} response.`, 'invalid_response', null, 'invalid_response', isV2Envelope(value) ? value.meta.correlation_id : null, value);
+  }
+  return value.data;
+}
+
+function decodePage<T>(value: unknown, guard: Guard<T>, label: string): PageResult<T> {
+  if (!isV2PageEnvelope(value) || !value.data.every(guard)) {
+    throw new CrmApiError(`CRM returned an invalid ${label} page.`, 'invalid_response', null, 'invalid_response', isV2Envelope(value) ? value.meta.correlation_id : null, value);
+  }
+  return { items: value.data, pagination: { ...value.meta.pagination, total_count: value.meta.pagination.count }, correlationId: value.meta.correlation_id };
+}
+
+const isObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+const isJob: Guard<AsyncJob> = (value): value is AsyncJob => isObject(value) && typeof value.id === 'string' && typeof value.status === 'string';
+const isForecast: Guard<Forecast> = (value): value is Forecast => isObject(value) && Array.isArray(value.currencies) && typeof value.period_days === 'number';
+const isWinRate: Guard<WinRate> = (value): value is WinRate => isObject(value) && typeof value.total_closed === 'number';
+const isPrediction: Guard<Prediction> = (value): value is Prediction => isObject(value) && typeof value.amount === 'string' && typeof value.currency === 'string' && typeof value.provider === 'string';
+const isHierarchy: Guard<AccountHierarchyNode> = (value): value is AccountHierarchyNode => isObject(value) && typeof value.id === 'string' && Array.isArray(value.children);
+const isDuplicates: Guard<DuplicateAccountResult> = (value): value is DuplicateAccountResult => isObject(value) && Array.isArray(value.local_matches) && Array.isArray(value.external_matches) && typeof value.enrichment_status === 'string';
+const isConversion: Guard<ConversionResult> = (value): value is ConversionResult => isObject(value) && isLead(value.lead) && isAccount(value.account) && isOpportunity(value.opportunity);
+const isScore: Guard<LeadScoringResponse> = isLead;
+const isStageForecastArray: Guard<readonly StageForecast[]> = (value): value is readonly StageForecast[] => Array.isArray(value) && value.every((entry) => isObject(entry) && typeof entry.stage === 'string' && typeof entry.currency === 'string');
+
+function query(endpoint: string, filters?: object): string {
+  if (!filters) return endpoint;
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+  }
+  const serialized = params.toString();
+  return serialized ? `${endpoint}?${serialized}` : endpoint;
+}
+
+const ifMatch = (version: number): RequestInit => ({ headers: { 'If-Match': String(version) } });
+const stageCommand = (stage: OpportunityOpenStage): OpportunityTransitionCommand => {
+  const commands = { qualification: 'advance_to_qualification', needs_analysis: 'advance_to_needs_analysis', proposal: 'advance_to_proposal', negotiation: 'advance_to_negotiation', prospecting: 'reopen_to_prospecting' } as const;
+  return commands[stage];
+};
+
+export const crmKeys = {
+  all: ['crm'] as const,
+  leads: (filters?: LeadFilters) => ['crm', 'leads', filters ?? {}] as const,
+  lead: (id: string) => ['crm', 'lead', id] as const,
+  accounts: (filters?: AccountFilters) => ['crm', 'accounts', filters ?? {}] as const,
+  account: (id: string) => ['crm', 'account', id] as const,
+  contacts: (filters?: ContactFilters) => ['crm', 'contacts', filters ?? {}] as const,
+  contact: (id: string) => ['crm', 'contact', id] as const,
+  opportunities: (filters?: OpportunityFilters) => ['crm', 'opportunities', filters ?? {}] as const,
+  opportunity: (id: string) => ['crm', 'opportunity', id] as const,
+  activities: (filters?: ActivityFilters) => ['crm', 'activities', filters ?? {}] as const,
+  activity: (id: string) => ['crm', 'activity', id] as const,
+  forecast: (kind: string, filters?: ForecastFilters) => ['crm', 'forecast', kind, filters ?? {}] as const,
 };
 
 export const crmService = {
-  // =============================================================================
-  // Lead Operations
-  // =============================================================================
+  listLeads: (filters?: LeadFilters) => governed(async () => decodePage(await apiClient.get(query(ENDPOINTS.LEADS.LIST, filters)), isLead, 'lead')),
+  getLead: (id: string) => governed(async () => decode(await apiClient.get(ENDPOINTS.LEADS.DETAIL(id)), isLead, 'lead')),
+  createLead: (payload: LeadCreate) => governed(async () => decode(await apiClient.post(ENDPOINTS.LEADS.CREATE, payload), isLead, 'lead')),
+  updateLead: (id: string, payload: LeadUpdate) => governed(async () => decode(await apiClient.patch(ENDPOINTS.LEADS.UPDATE(id), payload, ifMatch(payload.version)), isLead, 'lead')),
+  deleteLead: (id: string, version: number) => governed(async () => { await apiClient.delete(ENDPOINTS.LEADS.DELETE(id), ifMatch(version)); }),
+  transitionLead: (id: string, payload: LeadTransitionRequest) => governed(async () => decode(await apiClient.post(ENDPOINTS.LEADS.TRANSITION(id), payload, ifMatch(payload.expected_version)), isLead, 'lead')),
+  convertLead: (id: string, payload: LeadConversionRequest | (Omit<LeadConversionRequest, 'name' | 'create_new_account'> & { opportunity_name?: string; create_account?: { name: string }; contact_decision?: string })) => governed(async () => { const name = 'opportunity_name' in payload ? payload.opportunity_name : ('name' in payload ? payload.name : undefined); const createNew = 'create_account' in payload ? !payload.account_id : ('create_new_account' in payload ? payload.create_new_account : undefined); const normalized: LeadConversionRequest = { amount: payload.amount, currency: payload.currency, close_date: payload.close_date, name, account_id: payload.account_id, create_new_account: createNew, transition_key: payload.transition_key, expected_version: payload.expected_version }; return decode(await apiClient.post(ENDPOINTS.LEADS.CONVERT(id), normalized, ifMatch(payload.expected_version)), isConversion, 'lead conversion'); }),
+  scoreLead: (id: string, expectedVersion?: number) => governed(async () => { void expectedVersion; return decode(await apiClient.post(ENDPOINTS.LEADS.SCORE(id), {}), isScore, 'lead score'); }),
 
-  /**
-   * List all leads
-   */
-  listLeads: async (params?: {
-    status?: string;
-    owner_id?: string;
-    score_min?: number;
-    search?: string;
-  }): Promise<Lead[]> => {
-    const queryParams = new URLSearchParams();
-    if (params?.status) queryParams.append('status', params.status);
-    if (params?.owner_id) queryParams.append('owner_id', params.owner_id);
-    if (params?.score_min) queryParams.append('score_min', params.score_min.toString());
-    if (params?.search) queryParams.append('search', params.search);
+  listAccounts: (filters?: AccountFilters) => governed(async () => decodePage(await apiClient.get(query(ENDPOINTS.ACCOUNTS.LIST, filters)), isAccount, 'account')),
+  getAccount: (id: string) => governed(async () => decode(await apiClient.get(ENDPOINTS.ACCOUNTS.DETAIL(id)), isAccount, 'account')),
+  createAccount: (payload: AccountCreate) => governed(async () => decode(await apiClient.post(ENDPOINTS.ACCOUNTS.CREATE, payload), isAccount, 'account')),
+  updateAccount: (id: string, payload: AccountUpdate) => governed(async () => decode(await apiClient.patch(ENDPOINTS.ACCOUNTS.UPDATE(id), payload, ifMatch(payload.version)), isAccount, 'account')),
+  deleteAccount: (id: string, version: number) => governed(async () => { await apiClient.delete(ENDPOINTS.ACCOUNTS.DELETE(id), ifMatch(version)); }),
+  getAccountHierarchy: (id: string) => governed(async () => decode(await apiClient.get(ENDPOINTS.ACCOUNTS.HIERARCHY(id)), isHierarchy, 'account hierarchy')),
+  findAccountDuplicates: (name: string, website?: string) => governed(async () => decode(await apiClient.get(query(ENDPOINTS.ACCOUNTS.DUPLICATES, { name, website })), isDuplicates, 'account duplicate')),
 
-    const queryString = queryParams.toString();
-    const url = queryString ? `${ENDPOINTS.LEADS.LIST}?${queryString}` : ENDPOINTS.LEADS.LIST;
-    return apiClient.get<Lead[]>(url);
-  },
+  listContacts: (filters?: ContactFilters) => governed(async () => decodePage(await apiClient.get(query(ENDPOINTS.CONTACTS.LIST, filters)), isContact, 'contact')),
+  getContact: (id: string) => governed(async () => decode(await apiClient.get(ENDPOINTS.CONTACTS.DETAIL(id)), isContact, 'contact')),
+  createContact: (payload: ContactCreate) => governed(async () => decode(await apiClient.post(ENDPOINTS.CONTACTS.CREATE, payload), isContact, 'contact')),
+  updateContact: (id: string, payload: ContactUpdate) => governed(async () => decode(await apiClient.patch(ENDPOINTS.CONTACTS.UPDATE(id), payload, ifMatch(payload.version)), isContact, 'contact')),
+  deleteContact: (id: string, version: number) => governed(async () => { await apiClient.delete(ENDPOINTS.CONTACTS.DELETE(id), ifMatch(version)); }),
 
-  /**
-   * Get lead by ID
-   */
-  getLead: async (id: string): Promise<Lead> => {
-    return apiClient.get<Lead>(ENDPOINTS.LEADS.DETAIL(id));
-  },
+  listOpportunities: (filters?: OpportunityFilters) => governed(async () => decodePage(await apiClient.get(query(ENDPOINTS.OPPORTUNITIES.LIST, filters)), isOpportunity, 'opportunity')),
+  getOpportunity: (id: string) => governed(async () => decode(await apiClient.get(ENDPOINTS.OPPORTUNITIES.DETAIL(id)), isOpportunity, 'opportunity')),
+  createOpportunity: (payload: OpportunityCreate) => governed(async () => decode(await apiClient.post(ENDPOINTS.OPPORTUNITIES.CREATE, payload), isOpportunity, 'opportunity')),
+  updateOpportunity: (id: string, payload: OpportunityUpdate) => governed(async () => decode(await apiClient.patch(ENDPOINTS.OPPORTUNITIES.UPDATE(id), payload, ifMatch(payload.version)), isOpportunity, 'opportunity')),
+  deleteOpportunity: (id: string, version: number) => governed(async () => { await apiClient.delete(ENDPOINTS.OPPORTUNITIES.DELETE(id), ifMatch(version)); }),
+  transitionOpportunity: (id: string, payload: OpportunityTransitionRequest | { target_stage: OpportunityOpenStage; transition_key: string; expected_version: number; reason?: string }) => governed(async () => { const normalized: OpportunityTransitionRequest = 'target_stage' in payload ? { command: stageCommand(payload.target_stage), transition_key: payload.transition_key, expected_version: payload.expected_version, reason: payload.reason } : payload; return decode(await apiClient.post(ENDPOINTS.OPPORTUNITIES.TRANSITION(id), normalized, ifMatch(payload.expected_version)), isOpportunity, 'opportunity'); }),
+  closeOpportunityWon: (id: string, payload: CloseWonRequest | { expected_version: number; transition_key: string; confirmation: true }) => governed(async () => { const normalized: CloseWonRequest = { expected_version: payload.expected_version, transition_key: payload.transition_key, confirmed: 'confirmation' in payload ? payload.confirmation : payload.confirmed }; return decode(await apiClient.post(ENDPOINTS.OPPORTUNITIES.CLOSE_WON(id), normalized, ifMatch(payload.expected_version)), isOpportunity, 'opportunity'); }),
+  closeOpportunityLost: (id: string, payload: CloseLostRequest) => governed(async () => decode(await apiClient.post(ENDPOINTS.OPPORTUNITIES.CLOSE_LOST(id), payload, ifMatch(payload.expected_version)), isOpportunity, 'opportunity')),
 
-  /**
-   * Create new lead
-   */
-  createLead: async (data: LeadCreate): Promise<Lead> => {
-    return apiClient.post<Lead>(ENDPOINTS.LEADS.CREATE, data);
-  },
+  listActivities: (filters?: ActivityFilters) => governed(async () => decodePage(await apiClient.get(query(ENDPOINTS.ACTIVITIES.LIST, filters)), isActivity, 'activity')),
+  getActivity: (id: string) => governed(async () => decode(await apiClient.get(ENDPOINTS.ACTIVITIES.DETAIL(id)), isActivity, 'activity')),
+  createActivity: (payload: ActivityCreate) => governed(async () => decode(await apiClient.post(ENDPOINTS.ACTIVITIES.CREATE, payload), isActivity, 'activity')),
+  updateActivity: (id: string, payload: ActivityUpdate) => governed(async () => decode(await apiClient.patch(ENDPOINTS.ACTIVITIES.UPDATE(id), payload, ifMatch(payload.version)), isActivity, 'activity')),
+  deleteActivity: (id: string, version: number) => governed(async () => { await apiClient.delete(ENDPOINTS.ACTIVITIES.DELETE(id), ifMatch(version)); }),
+  completeActivity: (id: string, payload: CompleteActivityRequest | { expected_version: number; idempotency_key: string }) => governed(async () => { const normalized: CompleteActivityRequest = { expected_version: payload.expected_version, transition_key: 'idempotency_key' in payload ? payload.idempotency_key : payload.transition_key }; return decode(await apiClient.post(ENDPOINTS.ACTIVITIES.COMPLETE(id), normalized, ifMatch(payload.expected_version)), isActivity, 'activity'); }),
 
-  /**
-   * Update lead
-   */
-  updateLead: async (id: string, data: LeadUpdate): Promise<Lead> => {
-    return apiClient.patch<Lead>(ENDPOINTS.LEADS.UPDATE(id), data);
-  },
-
-  /**
-   * Delete lead
-   */
-  deleteLead: async (id: string): Promise<void> => {
-    return apiClient.delete(ENDPOINTS.LEADS.DELETE(id));
-  },
-
-  /**
-   * Convert lead to opportunity
-   */
-  convertLead: async (id: string, data: OpportunityCreateFromLead): Promise<Opportunity> => {
-    return apiClient.post<Opportunity>(ENDPOINTS.LEADS.CONVERT(id), data);
-  },
-
-  /**
-   * Run AI scoring on lead
-   */
-  scoreLead: async (id: string): Promise<LeadScoringResponse> => {
-    return apiClient.post<LeadScoringResponse>(ENDPOINTS.LEADS.AI_SCORE(id));
-  },
-
-  // =============================================================================
-  // Account Operations
-  // =============================================================================
-
-  /**
-   * List all accounts
-   */
-  listAccounts: async (params?: {
-    account_type?: string;
-    owner_id?: string;
-    search?: string;
-  }): Promise<Account[]> => {
-    const queryParams = new URLSearchParams();
-    if (params?.account_type) queryParams.append('account_type', params.account_type);
-    if (params?.owner_id) queryParams.append('owner_id', params.owner_id);
-    if (params?.search) queryParams.append('search', params.search);
-
-    const queryString = queryParams.toString();
-    const url = queryString ? `${ENDPOINTS.ACCOUNTS.LIST}?${queryString}` : ENDPOINTS.ACCOUNTS.LIST;
-    return apiClient.get<Account[]>(url);
-  },
-
-  /**
-   * Get account by ID
-   */
-  getAccount: async (id: string): Promise<Account> => {
-    return apiClient.get<Account>(ENDPOINTS.ACCOUNTS.DETAIL(id));
-  },
-
-  /**
-   * Create new account
-   */
-  createAccount: async (data: AccountCreate): Promise<Account> => {
-    return apiClient.post<Account>(ENDPOINTS.ACCOUNTS.CREATE, data);
-  },
-
-  /**
-   * Update account
-   */
-  updateAccount: async (id: string, data: AccountUpdate): Promise<Account> => {
-    return apiClient.patch<Account>(ENDPOINTS.ACCOUNTS.UPDATE(id), data);
-  },
-
-  /**
-   * Delete account
-   */
-  deleteAccount: async (id: string): Promise<void> => {
-    return apiClient.delete(ENDPOINTS.ACCOUNTS.DELETE(id));
-  },
-
-  /**
-   * Get account hierarchy tree
-   */
-  getAccountHierarchy: async (id: string): Promise<AccountHierarchyNode> => {
-    return apiClient.get<AccountHierarchyNode>(ENDPOINTS.ACCOUNTS.HIERARCHY(id));
-  },
-
-  // =============================================================================
-  // Contact Operations
-  // =============================================================================
-
-  /**
-   * List all contacts
-   */
-  listContacts: async (params?: {
-    account_id?: string;
-    owner_id?: string;
-  }): Promise<Contact[]> => {
-    const queryParams = new URLSearchParams();
-    if (params?.account_id) queryParams.append('account_id', params.account_id);
-    if (params?.owner_id) queryParams.append('owner_id', params.owner_id);
-
-    const queryString = queryParams.toString();
-    const url = queryString ? `${ENDPOINTS.CONTACTS.LIST}?${queryString}` : ENDPOINTS.CONTACTS.LIST;
-    return apiClient.get<Contact[]>(url);
-  },
-
-  /**
-   * Get contact by ID
-   */
-  getContact: async (id: string): Promise<Contact> => {
-    return apiClient.get<Contact>(ENDPOINTS.CONTACTS.DETAIL(id));
-  },
-
-  /**
-   * Create new contact
-   */
-  createContact: async (data: ContactCreate): Promise<Contact> => {
-    return apiClient.post<Contact>(ENDPOINTS.CONTACTS.CREATE, data);
-  },
-
-  /**
-   * Update contact
-   */
-  updateContact: async (id: string, data: ContactUpdate): Promise<Contact> => {
-    return apiClient.patch<Contact>(ENDPOINTS.CONTACTS.UPDATE(id), data);
-  },
-
-  /**
-   * Delete contact
-   */
-  deleteContact: async (id: string): Promise<void> => {
-    return apiClient.delete(ENDPOINTS.CONTACTS.DELETE(id));
-  },
-
-  // =============================================================================
-  // Opportunity Operations
-  // =============================================================================
-
-  /**
-   * List all opportunities
-   */
-  listOpportunities: async (params?: {
-    status?: string;
-    stage?: string;
-    owner_id?: string;
-    account_id?: string;
-  }): Promise<Opportunity[]> => {
-    const queryParams = new URLSearchParams();
-    if (params?.status) queryParams.append('status', params.status);
-    if (params?.stage) queryParams.append('stage', params.stage);
-    if (params?.owner_id) queryParams.append('owner_id', params.owner_id);
-    if (params?.account_id) queryParams.append('account_id', params.account_id);
-
-    const queryString = queryParams.toString();
-    const url = queryString
-      ? `${ENDPOINTS.OPPORTUNITIES.LIST}?${queryString}`
-      : ENDPOINTS.OPPORTUNITIES.LIST;
-    return apiClient.get<Opportunity[]>(url);
-  },
-
-  /**
-   * Get opportunity by ID
-   */
-  getOpportunity: async (id: string): Promise<Opportunity> => {
-    return apiClient.get<Opportunity>(ENDPOINTS.OPPORTUNITIES.DETAIL(id));
-  },
-
-  /**
-   * Create new opportunity
-   */
-  createOpportunity: async (data: OpportunityCreate): Promise<Opportunity> => {
-    return apiClient.post<Opportunity>(ENDPOINTS.OPPORTUNITIES.CREATE, data);
-  },
-
-  /**
-   * Update opportunity
-   */
-  updateOpportunity: async (id: string, data: OpportunityUpdate): Promise<Opportunity> => {
-    return apiClient.patch<Opportunity>(ENDPOINTS.OPPORTUNITIES.UPDATE(id), data);
-  },
-
-  /**
-   * Delete opportunity
-   */
-  deleteOpportunity: async (id: string): Promise<void> => {
-    return apiClient.delete(ENDPOINTS.OPPORTUNITIES.DELETE(id));
-  },
-
-  /**
-   * Close opportunity as won
-   */
-  closeOpportunityWon: async (id: string): Promise<Opportunity> => {
-    return apiClient.post<Opportunity>(ENDPOINTS.OPPORTUNITIES.CLOSE_WON(id), {});
-  },
-
-  /**
-   * Close opportunity as lost
-   */
-  closeOpportunityLost: async (id: string, lossReason: string): Promise<Opportunity> => {
-    return apiClient.post<Opportunity>(ENDPOINTS.OPPORTUNITIES.CLOSE_LOST(id), {
-      loss_reason: lossReason,
-    });
-  },
-
-  // =============================================================================
-  // Activity Operations
-  // =============================================================================
-
-  /**
-   * List all activities
-   */
-  listActivities: async (params?: {
-    related_to_type?: string;
-    related_to_id?: string;
-    owner_id?: string;
-  }): Promise<Activity[]> => {
-    const queryParams = new URLSearchParams();
-    if (params?.related_to_type) queryParams.append('related_to_type', params.related_to_type);
-    if (params?.related_to_id) queryParams.append('related_to_id', params.related_to_id);
-    if (params?.owner_id) queryParams.append('owner_id', params.owner_id);
-
-    const queryString = queryParams.toString();
-    const url = queryString
-      ? `${ENDPOINTS.ACTIVITIES.LIST}?${queryString}`
-      : ENDPOINTS.ACTIVITIES.LIST;
-    return apiClient.get<Activity[]>(url);
-  },
-
-  /**
-   * Get activity by ID
-   */
-  getActivity: async (id: string): Promise<Activity> => {
-    return apiClient.get<Activity>(ENDPOINTS.ACTIVITIES.DETAIL(id));
-  },
-
-  /**
-   * Create new activity
-   */
-  createActivity: async (data: ActivityCreate): Promise<Activity> => {
-    return apiClient.post<Activity>(ENDPOINTS.ACTIVITIES.CREATE, data);
-  },
-
-  /**
-   * Update activity
-   */
-  updateActivity: async (id: string, data: ActivityUpdate): Promise<Activity> => {
-    return apiClient.patch<Activity>(ENDPOINTS.ACTIVITIES.UPDATE(id), data);
-  },
-
-  /**
-   * Delete activity
-   */
-  deleteActivity: async (id: string): Promise<void> => {
-    return apiClient.delete(ENDPOINTS.ACTIVITIES.DELETE(id));
-  },
-
-  /**
-   * Mark activity as complete
-   */
-  completeActivity: async (id: string): Promise<Activity> => {
-    return apiClient.post<Activity>(ENDPOINTS.ACTIVITIES.COMPLETE(id));
-  },
-
-  // =============================================================================
-  // Forecasting Operations
-  // =============================================================================
-
-  /**
-   * Get weighted pipeline forecast
-   */
-  getPipeline: async (params?: {
-    owner_id?: string;
-    period?: number;
-  }): Promise<Forecast> => {
-    const queryParams = new URLSearchParams();
-    if (params?.owner_id) queryParams.append('owner_id', params.owner_id);
-    if (params?.period) queryParams.append('period', params.period.toString());
-
-    const queryString = queryParams.toString();
-    const url = queryString
-      ? `${ENDPOINTS.FORECASTING.PIPELINE}?${queryString}`
-      : ENDPOINTS.FORECASTING.PIPELINE;
-    return apiClient.get<Forecast>(url);
-  },
-
-  /**
-   * Get historical win rate
-   */
-  getWinRate: async (params?: {
-    owner_id?: string;
-    period?: number;
-  }): Promise<WinRate> => {
-    const queryParams = new URLSearchParams();
-    if (params?.owner_id) queryParams.append('owner_id', params.owner_id);
-    if (params?.period) queryParams.append('period', params.period.toString());
-
-    const queryString = queryParams.toString();
-    const url = queryString
-      ? `${ENDPOINTS.FORECASTING.WIN_RATE}?${queryString}`
-      : ENDPOINTS.FORECASTING.WIN_RATE;
-    return apiClient.get<WinRate>(url);
-  },
-
-  /**
-   * Get AI-predicted revenue
-   */
-  getAIPrediction: async (params?: { period?: number }): Promise<AIPrediction> => {
-    const queryParams = new URLSearchParams();
-    if (params?.period) queryParams.append('period', params.period.toString());
-
-    const queryString = queryParams.toString();
-    const url = queryString
-      ? `${ENDPOINTS.FORECASTING.AI_PREDICT}?${queryString}`
-      : ENDPOINTS.FORECASTING.AI_PREDICT;
-    return apiClient.get<AIPrediction>(url);
-  },
+  getPipeline: (filters?: ForecastFilters) => governed(async () => decode(await apiClient.get(query(ENDPOINTS.FORECASTING.PIPELINE, filters)), isForecast, 'pipeline forecast')),
+  getWinRate: (filters?: ForecastFilters) => governed(async () => decode(await apiClient.get(query(ENDPOINTS.FORECASTING.WIN_RATE, filters)), isWinRate, 'win-rate forecast')),
+  getForecastByStage: (filters?: ForecastFilters) => governed(async () => decode(await apiClient.get(query(ENDPOINTS.FORECASTING.BY_STAGE, filters)), isStageForecastArray, 'stage forecast')),
+  predictRevenue: (payload?: PredictionRequest) => governed(async () => decode(await apiClient.post(ENDPOINTS.FORECASTING.PREDICT, { period: payload?.period }), isPrediction, 'revenue prediction')),
+  getAIPrediction: (filters?: ForecastFilters) => crmService.predictRevenue(filters),
+  getJob: (id: string) => governed(async () => decode(await apiClient.get(ENDPOINTS.JOBS.DETAIL(id)), isJob, 'job')),
 };
+
+export type { Account, AccountCreate, AccountUpdate, Activity, ActivityCreate, ActivityUpdate, Contact, ContactCreate, ContactUpdate, Forecast, Lead, LeadCreate, LeadUpdate, Opportunity, OpportunityCreate, OpportunityUpdate, Prediction as AIPrediction, WinRate };
