@@ -548,6 +548,108 @@ export interface ClassifierTrainingJobCreateRequest {
   idempotency_key: string;
 }
 
+export type DeploymentEnvironment = 'development' | 'self-hosted' | 'saas';
+
+/** Tenant-owned, versioned runtime values. The server remains authoritative for every bound. */
+export interface DocumentIntelligenceConfigurationDocument {
+  limits: { max_document_bytes: number; max_pages: number; max_text_characters: number; max_structured_bytes: number; max_categories: number; category_schema: string; category_slug_max_length: number; content_handle_max_length: number; page_dimension_max: number; search_max_length: number };
+  providers: { allowed_mime_types: readonly string[]; allowed_extraction_types: readonly ExtractionType[]; allowed_ocr_engines: readonly ExtractionEngine[]; default_ocr_engine: ExtractionEngine; default_classifier_provider: string; artifact_root_environment_variable: string };
+  extraction: { max_active: number; stale_job_hours: number };
+  classifier: { feature_buckets: number; provider_max_categories: number; minimum_training_documents: number; minimum_documents_per_category: number; activation_accuracy_threshold: number; secondary_confidence_threshold: number };
+  review: { low_confidence_threshold: number; note_max_length: number };
+  templates: { default_engine: ExtractionEngine; default_match_threshold: number };
+  resilience: { stream_chunk_size_bytes: number; timeout_seconds: number; max_attempts: number; initial_backoff_seconds: number; max_backoff_seconds: number; jitter_ratio: number; circuit_failure_threshold: number; circuit_recovery_seconds: number };
+  health: { stale_after_seconds: number };
+  observability: { provider_duration_buckets_seconds: readonly number[]; queue_delay_buckets_seconds: readonly number[] };
+  editor: { new_zone: { x: number; y: number; width: number; height: number; page_number: number; zone_type: ZoneType; expected_data_type: ExpectedDataType; is_required: boolean }; coordinate_snap: number; coordinate_precision: number; undo_history_limit: number; zoom_min_percent: number; zoom_max_percent: number; zoom_step_percent: number };
+  ui: { page_size: number; template_zone_page_size: number; poll_interval_ms: number; stale_after_ms: number; confidence_filter_presets: readonly number[]; positive_statuses: readonly string[]; warning_statuses: readonly string[]; navigation_order: { extractions: number; classifications: number; training: number; templates: number; health: number; configuration: number } };
+  feature_flags: { auto_classification_enabled: boolean; rollout_percentage: number; allowed_roles: readonly string[]; allowed_cohorts: readonly string[] };
+  workflows: Readonly<Record<'extraction' | 'classification' | 'training' | 'model_version' | 'template', readonly { command: string; from: string; to: string }[]>>;
+}
+
+export interface DocumentIntelligenceConfiguration extends EntityTimestamps {
+  id: UUID;
+  tenant_id: UUID;
+  version: number;
+  environment: DeploymentEnvironment;
+  document: DocumentIntelligenceConfigurationDocument;
+  created_by: UUID;
+  updated_by: UUID;
+}
+
+export interface ConfigurationVersion {
+  id: UUID;
+  tenant_id: UUID;
+  environment: DeploymentEnvironment;
+  version: number;
+  document: DocumentIntelligenceConfigurationDocument;
+  created_by: UUID;
+  created_at: ISODateTime;
+  correlation_id: string;
+  change_reason: string;
+}
+
+export interface ConfigurationAuditRecord {
+  id: UUID;
+  tenant_id: UUID;
+  environment: DeploymentEnvironment;
+  version: number;
+  operation: 'initialize' | 'update' | 'import' | 'rollback';
+  previous_document: DocumentIntelligenceConfigurationDocument | null;
+  new_document: DocumentIntelligenceConfigurationDocument;
+  created_by: UUID;
+  created_at: ISODateTime;
+  correlation_id: string;
+  change_reason: string;
+}
+
+export interface ConfigurationWriteRequest {
+  document: DocumentIntelligenceConfigurationDocument;
+  environment?: DeploymentEnvironment;
+  change_reason: string;
+}
+
+export interface ConfigurationImportRequest {
+  schema_version: 1;
+  module: 'document_intelligence';
+  environment: DeploymentEnvironment;
+  document: DocumentIntelligenceConfigurationDocument;
+  change_reason?: string;
+}
+
+export interface ConfigurationRollbackRequest {
+  version: number;
+  environment?: DeploymentEnvironment;
+  change_reason: string;
+}
+
+export interface ConfigurationSimulationRequest {
+  document: DocumentIntelligenceConfigurationDocument;
+  environment?: DeploymentEnvironment;
+}
+
+export interface ConfigurationChange {
+  path: string;
+  before: unknown;
+  after: unknown;
+}
+
+export interface ConfigurationSimulation {
+  valid: true;
+  normalized_document: DocumentIntelligenceConfigurationDocument;
+  changes: readonly ConfigurationChange[];
+  requires_restart: boolean;
+}
+
+export interface ConfigurationExportDocument {
+  schema_version: 1;
+  module: 'document_intelligence';
+  environment: DeploymentEnvironment;
+  version: number;
+  exported_at: ISODateTime;
+  document: DocumentIntelligenceConfigurationDocument;
+}
+
 export const MODULE_API_PREFIX = '/api/v2/document-intelligence';
 export const ENDPOINTS = {
   EXTRACTIONS: {
@@ -590,6 +692,16 @@ export const ENDPOINTS = {
     DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/model-versions/${id}/` as const,
     ACTIVATE: (id: UUID) => `${MODULE_API_PREFIX}/model-versions/${id}/activate/` as const,
     ROLLBACK: (id: UUID) => `${MODULE_API_PREFIX}/model-versions/${id}/rollback/` as const,
+  },
+  CONFIGURATION: {
+    CURRENT: `${MODULE_API_PREFIX}/configuration/current/`,
+    DEFAULTS: `${MODULE_API_PREFIX}/configuration/defaults/`,
+    VERSIONS: `${MODULE_API_PREFIX}/configuration/versions/`,
+    AUDIT: `${MODULE_API_PREFIX}/configuration/audit/`,
+    SIMULATE: `${MODULE_API_PREFIX}/configuration/simulate/`,
+    ROLLBACK: `${MODULE_API_PREFIX}/configuration/rollback/`,
+    IMPORT: `${MODULE_API_PREFIX}/configuration/import/`,
+    EXPORT: `${MODULE_API_PREFIX}/configuration/export/`,
   },
   HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;

@@ -12,12 +12,18 @@ export interface TenantSidebarNavigation {
   label: string;
   icon: TenantRouteIcon;
   order: number;
+  /** Stable entry path used when the owned page route requires an instance id. */
+  path?: string;
 }
 
 /** A detail, create, or edit route reached from a registered parent route. */
 export interface TenantContextualNavigation {
   type: "contextual";
   parentRouteId: string;
+  /** Contextual pages remain discoverable as required tenant NavItems. */
+  label?: string;
+  icon?: TenantRouteIcon;
+  order?: number;
 }
 
 export type TenantRouteNavigation =

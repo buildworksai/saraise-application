@@ -18,7 +18,7 @@ from django.core.validators import RegexValidator
 from django.db import models
 from django.db.models.functions import Lower
 
-from src.core.tenancy import TenantScopedModel, TimestampedModel
+from src.core.tenancy import TenantQuerySet, TenantScopedModel, TimestampedModel
 
 
 def generate_uuid() -> str:
@@ -127,8 +127,21 @@ class SoftDeletableTenantModel(TenantDomainModel):
         abstract = True
 
 
+class AppendOnlyQuerySet(TenantQuerySet):
+    """Reject bulk mutation paths that bypass model save/delete guards."""
+
+    def update(self, **kwargs: Any) -> int:
+        del kwargs
+        raise ValidationError("Append-only evidence rows cannot be updated.", code="append_only")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Append-only evidence rows cannot be deleted.", code="append_only")
+
+
 class AppendOnlyTenantModel(TenantDomainModel):
     """Reject application-level mutation of immutable evidence rows."""
+
+    objects = AppendOnlyQuerySet.as_manager()
 
     class Meta:
         abstract = True
@@ -177,10 +190,11 @@ class ExtractionTemplate(SoftDeletableTenantModel):
     """Versioned, provider-neutral configuration for zone extraction."""
 
     name = models.CharField(max_length=255)
+    idempotency_key = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     document_category = models.CharField(max_length=80, blank=True)
     engine = models.CharField(max_length=50)
-    match_threshold = models.DecimalField(max_digits=5, decimal_places=4, default=Decimal("0.7000"))
+    match_threshold = models.DecimalField(max_digits=5, decimal_places=4)
     status = models.CharField(max_length=20, choices=TemplateStatus.choices, default=TemplateStatus.DRAFT)
     version = models.PositiveIntegerField(default=1)
     activated_at = models.DateTimeField(null=True, blank=True)
@@ -198,6 +212,7 @@ class ExtractionTemplate(SoftDeletableTenantModel):
     class Meta:
         db_table = "document_intelligence_extraction_templates"
         constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "idempotency_key"], name="docintel_template_tenant_idem_uniq"),
             models.CheckConstraint(
                 condition=_confidence_check("match_threshold"),
                 name="docintel_template_threshold_range",
@@ -280,6 +295,7 @@ class DocumentExtraction(SoftDeletableTenantModel):
         "engine",
         "extraction_type",
         "template_id",
+        "transition_history",
     )
 
     class Meta:
@@ -417,9 +433,6 @@ class ClassifierTrainingJob(TenantDomainModel):
                 name="docintel_training_one_active_per_tenant",
             ),
             models.CheckConstraint(
-                condition=models.Q(training_data_count__gte=50), name="docintel_training_minimum_count"
-            ),
-            models.CheckConstraint(
                 condition=_confidence_check("accuracy", nullable=True), name="docintel_training_accuracy_range"
             ),
         ]
@@ -438,7 +451,7 @@ class ClassifierTrainingJob(TenantDomainModel):
             or not category
             or not isinstance(count, int)
             or isinstance(count, bool)
-            or count < 5
+            or count <= 0
         ]
         if invalid_counts:
             raise ValidationError({"category_counts": "Every represented category must contain at least five items."})
@@ -561,6 +574,7 @@ class DocumentClassification(SoftDeletableTenantModel):
         "failure_code",
         "failure_message",
         "completed_at",
+        "transition_history",
     )
 
     class Meta:
@@ -580,7 +594,7 @@ class DocumentClassification(SoftDeletableTenantModel):
             models.CheckConstraint(
                 condition=(
                     models.Q(secondary_category="", secondary_confidence__isnull=True)
-                    | (models.Q(secondary_category__gt="") & models.Q(secondary_confidence__gt=Decimal("0.3000")))
+                    | (models.Q(secondary_category__gt="") & models.Q(secondary_confidence__isnull=False))
                 ),
                 name="docintel_classification_secondary_pair",
             ),
@@ -594,20 +608,6 @@ class DocumentClassification(SoftDeletableTenantModel):
                     | models.Q(category__isnull=False, confidence__isnull=False, processing_time_ms__isnull=False)
                 ),
                 name="docintel_classification_completed_evidence",
-            ),
-            models.CheckConstraint(
-                condition=(
-                    ~models.Q(status=ClassificationStatus.COMPLETED, confidence__lt=Decimal("0.5000"))
-                    | models.Q(
-                        needs_review=True,
-                        review_status__in=[
-                            ClassificationReviewStatus.PENDING,
-                            ClassificationReviewStatus.CONFIRMED,
-                            ClassificationReviewStatus.CORRECTED,
-                        ],
-                    )
-                ),
-                name="docintel_classification_low_conf_review",
             ),
         ]
         indexes = [
@@ -623,23 +623,11 @@ class DocumentClassification(SoftDeletableTenantModel):
     def clean(self) -> None:
         super().clean()
         _require_same_tenant(self, "model_version")
-        if (
-            self.status == ClassificationStatus.COMPLETED
-            and self.confidence is not None
-            and self.confidence < Decimal("0.5000")
-        ):
-            previous = None
-            if not self._state.adding:
-                previous = (
-                    type(self)._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id).values("status").first()
-                )
-            if not self.needs_review or (
-                (previous is None or previous["status"] != ClassificationStatus.COMPLETED)
-                and self.review_status != ClassificationReviewStatus.PENDING
-            ):
-                raise ValidationError(
-                    {"review_status": "New low-confidence classifications must enter pending review."}
-                )
+        if self.needs_review and self.review_status == ClassificationReviewStatus.NOT_REQUIRED:
+            raise ValidationError(
+                "A classification marked for manual review must have pending review evidence.",
+                code="pending_review_required",
+            )
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         self.clean()
@@ -778,3 +766,124 @@ class ExtractionTemplateZone(SoftDeletableTenantModel):
                     "Zones can only be changed on draft or inactive templates.", code="immutable_template"
                 )
         return super().delete(*args, **kwargs)
+
+
+class QuotaReservation(TenantDomainModel):
+    """Tenant-idempotency ledger for quota mutations committed with domain state."""
+
+    resource = models.CharField(max_length=120)
+    operation_key = models.CharField(max_length=255)
+    cost = models.PositiveIntegerField()
+
+    class Meta:
+        db_table = "document_intelligence_quota_reservations"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "resource", "operation_key"], name="docintel_quota_tenant_resource_key_uniq"
+            ),
+            models.CheckConstraint(condition=models.Q(cost__gt=0), name="docintel_quota_cost_gt_zero"),
+        ]
+
+
+class ImmutableConfigurationQuerySet(TenantQuerySet):
+    """Reject bulk tampering with configuration evidence."""
+
+    def update(self, **kwargs: Any) -> int:
+        del kwargs
+        raise ValidationError("Configuration evidence is append-only.", code="append_only")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Configuration evidence is append-only.", code="append_only")
+
+
+class DocumentIntelligenceConfiguration(TenantDomainModel):
+    """The active, tenant-owned configuration document for one environment."""
+
+    environment = models.CharField(max_length=20)
+    version = models.PositiveIntegerField(default=1)
+    document = models.JSONField()
+    updated_by = models.UUIDField(editable=False)
+
+    class Meta:
+        db_table = "document_intelligence_configurations"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "environment"],
+                name="docintel_config_tenant_env_uniq",
+            ),
+            models.CheckConstraint(condition=models.Q(version__gt=0), name="docintel_config_version_gt_zero"),
+        ]
+        indexes = [
+            models.Index(fields=["tenant_id", "environment"], name="di_config_tenant_env"),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        # The service owns the complete schema and is imported lazily to avoid
+        # a model/service import cycle.  Calling it here also prevents unsafe
+        # direct ORM inserts from bypassing the governed API.
+        from .services import validate_configuration_document
+
+        validate_configuration_document(self.document, environment=self.environment)
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.clean()
+        super().save(*args, **kwargs)
+
+
+class ConfigurationVersion(AppendOnlyTenantModel):
+    """Immutable snapshot from which any prior configuration can be restored."""
+
+    environment = models.CharField(max_length=20)
+    version = models.PositiveIntegerField()
+    document = models.JSONField()
+    correlation_id = models.CharField(max_length=64, db_index=True)
+    change_reason = models.CharField(max_length=500)
+
+    objects = ImmutableConfigurationQuerySet.as_manager()
+
+    class Meta:
+        db_table = "document_intelligence_configuration_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "environment", "version"],
+                name="docintel_cfgver_tenant_env_ver_uniq",
+            ),
+            models.CheckConstraint(condition=models.Q(version__gt=0), name="docintel_cfgver_version_gt_zero"),
+        ]
+        indexes = [
+            models.Index(fields=["tenant_id", "environment", "-version"], name="di_cfgver_tenant_env_ver"),
+        ]
+
+
+class ConfigurationAudit(AppendOnlyTenantModel):
+    """Immutable who/what/when evidence for every configuration mutation."""
+
+    class Operation(models.TextChoices):
+        INITIALIZE = "initialize", "Initialize"
+        UPDATE = "update", "Update"
+        IMPORT = "import", "Import"
+        ROLLBACK = "rollback", "Rollback"
+
+    environment = models.CharField(max_length=20)
+    version = models.PositiveIntegerField()
+    operation = models.CharField(max_length=16, choices=Operation.choices)
+    previous_document = models.JSONField(null=True)
+    new_document = models.JSONField()
+    correlation_id = models.CharField(max_length=64, db_index=True)
+    change_reason = models.CharField(max_length=500)
+
+    objects = ImmutableConfigurationQuerySet.as_manager()
+
+    class Meta:
+        db_table = "document_intelligence_configuration_audits"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "environment", "version"],
+                name="docintel_cfgaudit_tenant_env_ver_uniq",
+            ),
+            models.CheckConstraint(condition=models.Q(version__gt=0), name="docintel_cfgaudit_version_gt_zero"),
+        ]
+        indexes = [
+            models.Index(fields=["tenant_id", "environment", "-version"], name="di_cfgaudit_tenant_env_ver"),
+        ]

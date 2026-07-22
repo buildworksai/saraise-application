@@ -1,7 +1,7 @@
 import { tenantRoutes } from './routes';
 
 describe('document intelligence route contract', () => {
-  it('publishes all twelve required registry routes', () => {
+  it('publishes every governed registry route with title metadata', () => {
     expect(tenantRoutes.map((route) => route.path)).toEqual([
       '/document-intelligence/extractions',
       '/document-intelligence/extractions/new',
@@ -15,16 +15,25 @@ describe('document intelligence route contract', () => {
       '/document-intelligence/training',
       '/document-intelligence/training/new',
       '/document-intelligence/training/:id',
+      '/document-intelligence/configuration',
+      '/document-intelligence/health',
     ]);
-    expect(new Set(tenantRoutes.map((route) => route.id)).size).toBe(12);
+    expect(new Set(tenantRoutes.map((route) => route.id)).size).toBe(14);
+    tenantRoutes.forEach((route) => expect(route.title).toBeTruthy());
   });
 
-  it('connects every contextual page to a sidebar leaf', () => {
+  it('publishes a safe sidebar NavItem for every page', () => {
     const sidebarIds = new Set(tenantRoutes.filter((route) => route.navigation.type === 'sidebar').map((route) => route.id));
-    expect(sidebarIds.size).toBe(4);
+    expect(sidebarIds.size).toBe(tenantRoutes.length);
     tenantRoutes.forEach((route) => {
       expect(route.module).toBe('document_intelligence');
-      if (route.navigation.type === 'contextual') expect(sidebarIds.has(route.navigation.parentRouteId)).toBe(true);
+      expect(route.navigation.type).toBe('sidebar');
+      if (route.navigation.type === 'sidebar') {
+        expect(route.navigation.label).toBeTruthy();
+        expect(route.navigation.icon).toBeTruthy();
+        const navigationPath = route.navigation.path ?? route.path;
+        expect(navigationPath).not.toContain(':');
+      }
     });
   });
 });

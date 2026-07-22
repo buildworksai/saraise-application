@@ -18,6 +18,7 @@ from src.modules.document_intelligence.models import (
     DocumentExtraction,
     ExtractionStatus,
 )
+from src.modules.document_intelligence.services import ConfigurationService, default_configuration_document
 
 from .factories import (
     AsyncJobFactory,
@@ -144,6 +145,27 @@ def test_stale_recovery_is_tenant_scoped() -> None:
     assert foreign.status == ExtractionStatus.QUEUED
 
 
+def test_stale_recovery_propagates_partial_failure_with_correlation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant_id = uuid.uuid4()
+    stale = DocumentExtractionFactory(tenant_id=tenant_id, status=ExtractionStatus.QUEUED)
+    DocumentExtraction.objects.filter(pk=stale.pk).update(updated_at=timezone.now() - timedelta(days=2))
+    extraction_service = Mock()
+    extraction_service.cancel_extraction.side_effect = RuntimeError("dependency failed")
+    classification_service = Mock()
+    classification_service.cancel_stale_training_jobs.return_value = 0
+    monkeypatch.setattr(tasks, "DocumentExtractionService", Mock(return_value=extraction_service))
+    monkeypatch.setattr(tasks, "DocumentClassificationService", Mock(return_value=classification_service))
+
+    with pytest.raises(tasks.StaleJobCancellationError) as caught:
+        tasks.cancel_stale_jobs_task(
+            tenant_id=tenant_id, cutoff=timezone.now() - timedelta(days=1), correlation_id="corr-123"
+        )
+    assert caught.value.correlation_id == "corr-123"
+    assert caught.value.failures[0]["aggregate_id"] == str(stale.id)
+
+
 def test_retention_archives_only_terminal_evidence_for_requested_tenant() -> None:
     tenant_id = uuid.uuid4()
     foreign_tenant = uuid.uuid4()
@@ -181,7 +203,6 @@ def test_dms_consumer_is_disabled_by_default_and_idempotency_is_event_derived(
     event_id = uuid.uuid4()
     service = Mock()
     monkeypatch.setattr(tasks, "DocumentClassificationService", Mock(return_value=service))
-    tasks.configure_auto_classification_policy(lambda _tenant: False)
     assert (
         tasks.consume_dms_document_uploaded(
             tenant_id,
@@ -194,7 +215,15 @@ def test_dms_consumer_is_disabled_by_default_and_idempotency_is_event_derived(
     )
     service.request_classification.assert_not_called()
 
-    tasks.configure_auto_classification_policy(lambda candidate: candidate == tenant_id)
+    document = default_configuration_document()
+    document["feature_flags"]["auto_classification_enabled"] = True
+    ConfigurationService().save(
+        tenant_id,
+        uuid.uuid4(),
+        document,
+        change_reason="Enable DMS auto-classification for the tenant",
+        correlation_id=uuid.uuid4(),
+    )
     document_id = uuid.uuid4()
     version_id = uuid.uuid4()
     actor_id = uuid.uuid4()

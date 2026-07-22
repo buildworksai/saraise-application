@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from typing import Any
 
 from rest_framework import serializers
@@ -12,10 +11,13 @@ from src.core.async_jobs.models import AsyncJob
 from .models import (
     ClassifierModelVersion,
     ClassifierTrainingJob,
+    ConfigurationAudit,
+    ConfigurationVersion,
     DocumentClassification,
     DocumentClassificationScore,
     DocumentExtraction,
     DocumentExtractionPage,
+    DocumentIntelligenceConfiguration,
     ExpectedDataType,
     ExtractionTemplate,
     ExtractionTemplateZone,
@@ -138,8 +140,6 @@ class DocumentExtractionDetailSerializer(serializers.ModelSerializer):
             "created_by",
             "document_id",
             "document_version_id",
-            "async_job_id",
-            "idempotency_key",
             "engine",
             "extraction_type",
             "template",
@@ -169,7 +169,7 @@ class DocumentExtractionCreateSerializer(RejectServerOwnedFieldsMixin, serialize
     engine = serializers.CharField(max_length=50, required=False, allow_blank=False)
     extraction_type = serializers.ChoiceField(choices=ExtractionType.choices)
     template_id = serializers.UUIDField(required=False, allow_null=True)
-    idempotency_key = serializers.CharField(max_length=255, write_only=True)
+    idempotency_key = serializers.CharField(max_length=255, write_only=True, required=False)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         attrs = super().validate(attrs)
@@ -238,8 +238,6 @@ class DocumentClassificationDetailSerializer(serializers.ModelSerializer):
             "created_by",
             "document_id",
             "document_version_id",
-            "async_job_id",
-            "idempotency_key",
             "model_version",
             "status",
             "category",
@@ -275,7 +273,7 @@ class ClassificationReviewSerializer(RejectServerOwnedFieldsMixin, serializers.S
     server_owned_fields = SERVER_OWNED_FIELDS - {"category"}
 
     category = serializers.RegexField(r"^[a-z0-9][a-z0-9._-]{0,79}$", max_length=80)
-    note = serializers.CharField(max_length=4000, required=False, allow_blank=True, trim_whitespace=True)
+    note = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
 
 
 class DocumentClassificationScoreSerializer(serializers.ModelSerializer):
@@ -325,8 +323,6 @@ class ClassifierTrainingJobDetailSerializer(serializers.ModelSerializer):
             "id",
             "tenant_id",
             "created_by",
-            "async_job_id",
-            "idempotency_key",
             "name",
             "training_items",
             "training_data_count",
@@ -360,14 +356,29 @@ class TrainingItemSerializer(serializers.Serializer):
 
 class ClassifierTrainingJobCreateSerializer(RejectServerOwnedFieldsMixin, serializers.Serializer):
     name = serializers.CharField(max_length=255, trim_whitespace=True)
-    items = TrainingItemSerializer(many=True, min_length=50, max_length=100_000)
+    items = TrainingItemSerializer(many=True, min_length=1, max_length=100_000)
     requested_version = serializers.CharField(max_length=50, trim_whitespace=True)
     idempotency_key = serializers.CharField(max_length=255, write_only=True)
 
     def validate_items(self, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        counts = Counter(item["category"] for item in value)
-        if any(count < 5 for count in counts.values()):
-            raise serializers.ValidationError("Every category requires at least five documents.")
+        from .services import ConfigurationService, default_configuration_document
+
+        tenant_id = self.context.get("tenant_id")
+        classifier_policy = (
+            ConfigurationService().get_effective(tenant_id)["classifier"]
+            if tenant_id is not None
+            else default_configuration_document()["classifier"]
+        )
+        minimum_documents = int(classifier_policy["minimum_training_documents"])
+        minimum_per_category = int(classifier_policy["minimum_documents_per_category"])
+        if len(value) < minimum_documents:
+            raise serializers.ValidationError(f"At least {minimum_documents} training documents are required.")
+        counts: dict[str, int] = {}
+        for item in value:
+            category = str(item["category"])
+            counts[category] = counts.get(category, 0) + 1
+        if any(count < minimum_per_category for count in counts.values()):
+            raise serializers.ValidationError(f"Every category requires at least {minimum_per_category} documents.")
         pairs = [(item["document_id"], item["document_version_id"]) for item in value]
         if len(pairs) != len(set(pairs)):
             raise serializers.ValidationError("A document version may only appear once.")
@@ -498,6 +509,7 @@ class ExtractionTemplateZoneReadSerializer(serializers.ModelSerializer):
 
 
 class ExtractionTemplateCreateSerializer(RejectServerOwnedFieldsMixin, serializers.Serializer):
+    idempotency_key = serializers.CharField(max_length=255, write_only=True, required=False)
     name = serializers.CharField(max_length=255, trim_whitespace=True)
     description = serializers.CharField(required=False, allow_blank=True, max_length=10_000)
     document_category = serializers.RegexField(
@@ -548,8 +560,6 @@ class ClassifierModelVersionDetailSerializer(serializers.ModelSerializer):
             "created_by",
             "version",
             "provider_key",
-            "artifact_ref",
-            "artifact_checksum",
             "training_job",
             "accuracy",
             "status",
@@ -630,6 +640,86 @@ class TemplateActivateSerializer(ActivateActionSerializer):
 
 class TemplateDeactivateSerializer(DeactivateActionSerializer):
     pass
+
+
+class DocumentIntelligenceConfigurationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DocumentIntelligenceConfiguration
+        fields = (
+            "id",
+            "tenant_id",
+            "environment",
+            "version",
+            "document",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class ConfigurationVersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConfigurationVersion
+        fields = (
+            "id",
+            "tenant_id",
+            "environment",
+            "version",
+            "document",
+            "created_by",
+            "correlation_id",
+            "change_reason",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class ConfigurationAuditSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConfigurationAudit
+        fields = (
+            "id",
+            "tenant_id",
+            "environment",
+            "version",
+            "operation",
+            "previous_document",
+            "new_document",
+            "created_by",
+            "correlation_id",
+            "change_reason",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class ConfigurationWriteSerializer(serializers.Serializer):
+    document = serializers.JSONField()
+    environment = serializers.ChoiceField(choices=("development", "self-hosted", "saas"), required=False)
+    change_reason = serializers.CharField(max_length=500, trim_whitespace=True)
+
+
+class ConfigurationRollbackSerializer(serializers.Serializer):
+    version = serializers.IntegerField(min_value=1)
+    environment = serializers.ChoiceField(choices=("development", "self-hosted", "saas"), required=False)
+    change_reason = serializers.CharField(max_length=500, trim_whitespace=True)
+
+
+class ConfigurationImportSerializer(serializers.Serializer):
+    schema_version = serializers.IntegerField(min_value=1, max_value=1)
+    module = serializers.ChoiceField(choices=("document_intelligence",))
+    environment = serializers.ChoiceField(choices=("development", "self-hosted", "saas"))
+    version = serializers.IntegerField(min_value=1, required=False)
+    exported_at = serializers.DateTimeField(required=False)
+    document = serializers.JSONField()
+    change_reason = serializers.CharField(max_length=500, trim_whitespace=True, required=False)
+
+
+class ConfigurationSimulationSerializer(serializers.Serializer):
+    document = serializers.JSONField()
+    environment = serializers.ChoiceField(choices=("development", "self-hosted", "saas"), required=False)
 
 
 __all__ = [name for name in globals() if name.endswith("Serializer")]

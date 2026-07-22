@@ -31,9 +31,22 @@ class BaseFilterSet:
     boolean_fields: ClassVar[frozenset[str]] = frozenset()
     date_fields: ClassVar[dict[str, str]] = {}
 
-    def __init__(self, data: object | None = None, queryset: QuerySet[Any] | None = None) -> None:
+    def __init__(
+        self,
+        data: object | None = None,
+        queryset: QuerySet[Any] | None = None,
+        *,
+        search_max_length: int | None = None,
+    ) -> None:
+        if search_max_length is None:
+            from .services import default_configuration_document
+
+            search_max_length = int(default_configuration_document()["limits"]["search_max_length"])
+        if isinstance(search_max_length, bool) or search_max_length <= 0:
+            raise ValueError("search_max_length must be a positive integer")
         self.data = data or {}
         self.queryset = queryset
+        self.search_max_length = search_max_length
         self.errors: dict[str, str] = {}
         self._qs: QuerySet[Any] | None = None
 
@@ -100,8 +113,8 @@ class BaseFilterSet:
                 result = result.filter(**{lookup: parsed})
         search = self._get("search")
         if search not in (None, ""):
-            if len(str(search)) > 100:
-                errors["search"] = "Search is limited to 100 characters."
+            if len(str(search)) > self.search_max_length:
+                errors["search"] = f"Search is limited to {self.search_max_length} characters."
             else:
                 result = self.apply_search(result, str(search))
         ordering = str(self._get("ordering") or self.default_ordering)
@@ -169,6 +182,7 @@ class DocumentClassificationFilterSet(BaseFilterSet):
             "needs_review",
             "review_status",
             "confidence_min",
+            "confidence_max",
             "created_after",
             "created_before",
         }
@@ -187,16 +201,28 @@ class DocumentClassificationFilterSet(BaseFilterSet):
         return queryset.filter(Q(document_id=identifier) | Q(id=identifier))
 
     def apply_extra(self, queryset: QuerySet[Any]) -> QuerySet[Any]:
-        value = self._get("confidence_min")
-        if value in (None, ""):
-            return queryset
-        try:
-            confidence = Decimal(str(value))
-        except (InvalidOperation, ValueError):
-            raise FilterValidationError({"confidence_min": "Must be a decimal between zero and one."})
-        if confidence < 0 or confidence > 1:
-            raise FilterValidationError({"confidence_min": "Must be a decimal between zero and one."})
-        return queryset.filter(confidence__gte=confidence)
+        filters: dict[str, Decimal] = {}
+        errors: dict[str, str] = {}
+        parsed: dict[str, Decimal] = {}
+        for parameter, lookup in (("confidence_min", "confidence__gte"), ("confidence_max", "confidence__lte")):
+            value = self._get(parameter)
+            if value in (None, ""):
+                continue
+            try:
+                confidence = Decimal(str(value))
+            except (InvalidOperation, ValueError):
+                errors[parameter] = "Must be a finite decimal between zero and one."
+                continue
+            if not confidence.is_finite() or confidence < 0 or confidence > 1:
+                errors[parameter] = "Must be a finite decimal between zero and one."
+                continue
+            parsed[parameter] = confidence
+            filters[lookup] = confidence
+        if not errors and parsed.get("confidence_min", Decimal("0")) > parsed.get("confidence_max", Decimal("1")):
+            errors["confidence_max"] = "Must be greater than or equal to confidence_min."
+        if errors:
+            raise FilterValidationError(errors)
+        return queryset.filter(**filters)
 
 
 class ExtractionTemplateFilterSet(BaseFilterSet):

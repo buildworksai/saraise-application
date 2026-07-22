@@ -13,9 +13,11 @@ import { TrainingModelPage } from './TrainingModelPage';
 import { TemplateDetailPage } from './TemplateDetailPage';
 import { TemplateListPage } from './TemplateListPage';
 import { documentIntelligenceService } from '../services/document-intelligence-service';
+import { documentIntelligenceConfigurationKey } from '../hooks/use-document-intelligence-configuration';
 import {
   candidateModel,
   classificationDetail,
+  documentIntelligenceConfiguration,
   extractionDetail,
   modelDetail,
   page,
@@ -31,6 +33,7 @@ vi.mock('@/stores/auth-store', () => ({
 
 function renderRoute(element: React.ReactElement, path = '/document-intelligence/test', pattern = path) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  client.setQueryData(documentIntelligenceConfigurationKey, documentIntelligenceConfiguration);
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
@@ -44,7 +47,13 @@ function setAdmin(): void {
   authState.user = { tenant_role: 'tenant_admin' };
 }
 
+// One suite preserves the end-to-end narrative across all document-intelligence operator workflows.
+// eslint-disable-next-line max-lines-per-function
 describe('document intelligence page workflows', () => {
+  beforeEach(() => {
+    vi.spyOn(documentIntelligenceService, 'getConfiguration').mockResolvedValue(documentIntelligenceConfiguration);
+  });
+
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
@@ -117,7 +126,7 @@ describe('document intelligence page workflows', () => {
     const create = vi.spyOn(documentIntelligenceService, 'createTemplate').mockResolvedValue(templateDetail);
     renderRoute(<CreateTemplatePage />);
 
-    fireEvent.change(screen.getByLabelText('Template name'), { target: { value: 'Invoice evidence' } });
+    fireEvent.change(await screen.findByLabelText('Template name'), { target: { value: 'Invoice evidence' } });
     fireEvent.change(screen.getByLabelText('Document category (optional)'), { target: { value: 'invoice' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create draft' }));
 
@@ -166,6 +175,8 @@ describe('document intelligence page workflows', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Activate' }));
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Activate' }));
+    // Vitest asymmetric matchers are intentionally untyped at this assertion boundary.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     await waitFor(() => expect(activate).toHaveBeenCalledWith(templateDetail.id, expect.objectContaining({ transition_key: expect.any(String) })));
   });
 
@@ -177,13 +188,13 @@ describe('document intelligence page workflows', () => {
     ).join('\n');
     renderRoute(<CreateTrainingJobPage />);
 
-    fireEvent.change(screen.getByLabelText('Training job name'), { target: { value: 'AP classifier' } });
+    fireEvent.change(await screen.findByLabelText('Training job name'), { target: { value: 'AP classifier' } });
     fireEvent.change(screen.getByLabelText('Requested model version'), { target: { value: '2.0.0' } });
     fireEvent.change(screen.getByLabelText('Training examples'), { target: { value: rows } });
     fireEvent.click(screen.getByRole('button', { name: 'Queue training' }));
 
     await waitFor(() => expect(create).toHaveBeenCalledOnce());
-    const request = create.mock.calls[0][0];
+    const [request] = create.mock.calls[0]!;
     expect(request.items).toHaveLength(50);
     expect(request.idempotency_key).toMatch(/^document-intelligence:train:2.0.0:50:/u);
     expect(screen.getByRole('button', { name: 'Validating and queuing…' })).toBeDisabled();
@@ -201,10 +212,12 @@ describe('document intelligence page workflows', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Activate candidate' }));
     fireEvent.click(screen.getByRole('button', { name: 'Activate' }));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     await waitFor(() => expect(activate).toHaveBeenCalledWith(candidateModel.id, expect.objectContaining({ transition_key: expect.any(String) })));
 
     fireEvent.click(screen.getByRole('button', { name: 'Rollback to version' }));
     fireEvent.click(screen.getByRole('button', { name: 'Rollback' }));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     await waitFor(() => expect(rollback).toHaveBeenCalledWith(retiredModel.id, expect.objectContaining({ transition_key: expect.any(String) })));
   });
 
@@ -214,6 +227,7 @@ describe('document intelligence page workflows', () => {
     renderRoute(<TrainingJobDetailPage />, `/document-intelligence/training/${trainingDetail.id}`, '/document-intelligence/training/:id');
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    await act(async () => { await Promise.resolve(); });
     expect(screen.getByText('Worker claimed job')).toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
     expect(get.mock.calls.length).toBeGreaterThan(1);

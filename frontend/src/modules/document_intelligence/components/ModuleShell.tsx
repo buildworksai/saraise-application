@@ -1,12 +1,14 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { AlertCircle, Clock3, FileQuestion, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Skeleton, TableSkeleton } from '@/components/ui/Skeleton';
 import { DocumentIntelligenceApiError } from '../services/document-intelligence-service';
 import type { PaginationMeta } from '../contracts';
+import { useDocumentIntelligenceConfiguration } from '../hooks/use-document-intelligence-configuration';
 
 export function PageHeader({ title, description, actions }: { title: string; description: string; actions?: ReactNode }) {
+  useEffect(() => { document.title = `${title} · SARAISE`; }, [title]);
   return (
     <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div>
@@ -67,9 +69,10 @@ export function MetricCard({ label, value, detail }: { label: string; value: str
 }
 
 export function StatusPill({ status }: { status: string }) {
-  const positive = ['active', 'completed', 'confirmed', 'healthy'].includes(status);
-  const warning = ['queued', 'processing', 'training', 'pending', 'needs_review', 'candidate', 'degraded'].includes(status);
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${positive ? 'bg-green-500/15 text-green-700 dark:text-green-300' : warning ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'bg-muted text-muted-foreground'}`}>{status.replaceAll('_', ' ')}</span>;
+  const configuration = useDocumentIntelligenceConfiguration();
+  const positive = configuration.data?.document.ui.positive_statuses.includes(status) ?? false;
+  const warning = configuration.data?.document.ui.warning_statuses.includes(status) ?? false;
+  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${positive ? 'bg-primary/15 text-primary' : warning ? 'bg-accent text-accent-foreground' : 'bg-muted text-muted-foreground'}`}>{status.replaceAll('_', ' ')}</span>;
 }
 
 export function Pagination({ value, onPage }: { value: PaginationMeta; onPage: (page: number) => void }) {
@@ -85,6 +88,8 @@ export function Pagination({ value, onPage }: { value: PaginationMeta; onPage: (
 }
 
 export function StaleIndicator({ updatedAt, active }: { updatedAt: number; active: boolean }) {
-  const stale = Date.now() - updatedAt > 15_000;
-  return <p className={`flex items-center gap-1 text-xs ${stale ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`} aria-live="polite"><Clock3 className="h-3.5 w-3.5" />{active ? 'Auto-refreshing active work' : 'Snapshot'} · updated {new Date(updatedAt).toLocaleTimeString()}{stale ? ' · stale' : ''}</p>;
+  const configuration = useDocumentIntelligenceConfiguration();
+  if (!configuration.data) return <p className="flex items-center gap-1 text-xs text-muted-foreground" aria-live="polite"><Clock3 className="h-3.5 w-3.5" />Refresh policy unavailable</p>;
+  const stale = Date.now() - updatedAt > configuration.data.document.ui.stale_after_ms;
+  return <p className={`flex items-center gap-1 text-xs ${stale ? 'text-accent-foreground' : 'text-muted-foreground'}`} aria-live="polite"><Clock3 className="h-3.5 w-3.5" />{active ? 'Auto-refreshing active work' : 'Snapshot'} · updated {new Date(updatedAt).toLocaleTimeString()}{stale ? ' · stale' : ''}</p>;
 }

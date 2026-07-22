@@ -7,12 +7,14 @@ tests can inject the same protocols directly into services.
 
 from __future__ import annotations
 
+import concurrent.futures
 import csv
 import hashlib
 import io
 import json
 import math
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -24,7 +26,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import BinaryIO, Mapping, Protocol, Sequence, runtime_checkable
+from typing import BinaryIO, Callable, Mapping, Protocol, Sequence, TypeVar, runtime_checkable
 from uuid import UUID
 
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
@@ -63,6 +65,131 @@ class DependencyTimeout(AdapterError):
 
 class DependencyCircuitOpen(AdapterError):
     """A dependency circuit breaker rejected the request."""
+
+
+T = TypeVar("T")
+
+
+@dataclass(frozen=True, slots=True)
+class ResiliencePolicy:
+    """Validated runtime policy supplied by tenant configuration."""
+
+    timeout_seconds: float
+    max_attempts: int
+    initial_backoff_seconds: float
+    max_backoff_seconds: float
+    jitter_ratio: float
+    circuit_failure_threshold: int
+    circuit_recovery_seconds: float
+
+    def __post_init__(self) -> None:
+        numeric = (
+            self.timeout_seconds,
+            self.initial_backoff_seconds,
+            self.max_backoff_seconds,
+            self.jitter_ratio,
+            self.circuit_recovery_seconds,
+        )
+        if any(isinstance(value, bool) or not math.isfinite(value) for value in numeric):
+            raise ValueError("resilience policy values must be finite numbers")
+        if not 0 < self.timeout_seconds <= 3600:
+            raise ValueError("timeout_seconds must be between zero and 3600")
+        if isinstance(self.max_attempts, bool) or not 1 <= self.max_attempts <= 10:
+            raise ValueError("max_attempts must be between one and ten")
+        if not 0 <= self.initial_backoff_seconds <= self.max_backoff_seconds <= 60:
+            raise ValueError("retry backoff bounds are invalid")
+        if not 0 <= self.jitter_ratio <= 1:
+            raise ValueError("jitter_ratio must be between zero and one")
+        if isinstance(self.circuit_failure_threshold, bool) or not 1 <= self.circuit_failure_threshold <= 100:
+            raise ValueError("circuit_failure_threshold must be between one and 100")
+        if not 0 < self.circuit_recovery_seconds <= 3600:
+            raise ValueError("circuit_recovery_seconds must be between zero and 3600")
+
+
+@dataclass(slots=True)
+class _CircuitState:
+    failures: int = 0
+    opened_at: float | None = None
+
+
+class ResilienceExecutor:
+    """Bounded timeout/retry/circuit execution for all dependency operations."""
+
+    def __init__(
+        self,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+        random_value: Callable[[], float] = random.random,
+    ) -> None:
+        self._monotonic = monotonic
+        self._sleep = sleep
+        self._random = random_value
+        self._states: dict[str, _CircuitState] = {}
+        self._lock = threading.RLock()
+
+    def execute(
+        self,
+        dependency_key: str,
+        operation: Callable[[], T],
+        policy: ResiliencePolicy,
+        *,
+        retryable: tuple[type[BaseException], ...] = (ProviderUnavailable, DependencyTimeout, OSError),
+    ) -> T:
+        if not dependency_key or len(dependency_key) > 255:
+            raise ValueError("a bounded dependency key is required")
+        last_error: BaseException | None = None
+        for attempt in range(policy.max_attempts):
+            self._before_call(dependency_key, policy)
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="docintel-dependency")
+            try:
+                future = pool.submit(operation)
+                result = future.result(timeout=policy.timeout_seconds)
+            except concurrent.futures.TimeoutError as exc:
+                last_error = DependencyTimeout(f"dependency {dependency_key!r} exceeded its configured timeout")
+                self._record_failure(dependency_key, policy)
+                if attempt + 1 >= policy.max_attempts:
+                    raise last_error from exc
+            except retryable as exc:
+                last_error = exc
+                self._record_failure(dependency_key, policy)
+                if attempt + 1 >= policy.max_attempts:
+                    raise
+            except BaseException:
+                self._record_failure(dependency_key, policy)
+                raise
+            else:
+                self._record_success(dependency_key)
+                return result
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
+            delay = min(policy.max_backoff_seconds, policy.initial_backoff_seconds * (2**attempt))
+            delay += delay * policy.jitter_ratio * self._random()
+            self._sleep(delay)
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("resilience executor exhausted without a result")
+
+    def _before_call(self, key: str, policy: ResiliencePolicy) -> None:
+        with self._lock:
+            state = self._states.setdefault(key, _CircuitState())
+            if state.opened_at is None:
+                return
+            if self._monotonic() - state.opened_at < policy.circuit_recovery_seconds:
+                raise DependencyCircuitOpen(f"dependency circuit {key!r} is open")
+            state.opened_at = None
+            state.failures = 0
+
+    def _record_failure(self, key: str, policy: ResiliencePolicy) -> None:
+        with self._lock:
+            state = self._states.setdefault(key, _CircuitState())
+            state.failures += 1
+            if state.failures >= policy.circuit_failure_threshold:
+                state.opened_at = self._monotonic()
+
+    def _record_success(self, key: str) -> None:
+        with self._lock:
+            self._states[key] = _CircuitState()
 
 
 def _decimal_confidence(value: object, field_name: str = "confidence") -> Decimal:
@@ -288,7 +415,16 @@ class ClassifierAdapter(Protocol):
         self, training_items: Sequence[Mapping[str, object]], requested_version: str, idempotency_key: str
     ) -> TrainingResult: ...
 
+    def stage_training(
+        self,
+        training_items: Sequence[Mapping[str, object]],
+        requested_version: str,
+        idempotency_key: str,
+    ) -> TrainingResult: ...
+
     def validate_artifact(self, artifact_ref: str, checksum: str) -> bool: ...
+    def publish_artifact(self, artifact_ref: str, checksum: str) -> None: ...
+    def abort_artifact(self, artifact_ref: str) -> None: ...
     def health(self) -> DependencyHealth: ...
 
 
@@ -313,6 +449,24 @@ class LocalTesseractOCRAdapter:
 
     def __init__(self, executable: str | None = None) -> None:
         self.executable = executable or shutil.which("tesseract") or ""
+        # These platform ceilings protect direct adapter consumers. Governed
+        # service calls replace them with the validated tenant policy before
+        # health or extraction is attempted.
+        self.chunk_size = self.CHUNK_SIZE
+        self.timeout_seconds = self.TIMEOUT_SECONDS
+        self.max_document_bytes = MAX_DOCUMENT_BYTES
+        self.max_text_characters = MAX_TEXT_CHARACTERS
+
+    def configure_runtime(self, configuration: Mapping[str, object]) -> None:
+        """Apply a server-validated tenant policy to this stateless adapter."""
+        limits = configuration["limits"]
+        resilience = configuration["resilience"]
+        if not isinstance(limits, Mapping) or not isinstance(resilience, Mapping):
+            raise ValueError("validated adapter configuration is required")
+        self.chunk_size = int(resilience["stream_chunk_size_bytes"])
+        self.timeout_seconds = float(resilience["timeout_seconds"])
+        self.max_document_bytes = int(limits["max_document_bytes"])
+        self.max_text_characters = int(limits["max_text_characters"])
 
     def health(self) -> DependencyHealth:
         from django.utils import timezone
@@ -339,14 +493,16 @@ class LocalTesseractOCRAdapter:
                 temporary_path = temporary.name
                 total = 0
                 while True:
-                    chunk = content.read(self.CHUNK_SIZE)
+                    chunk = content.read(self.chunk_size)
                     if not chunk:
                         break
                     if not isinstance(chunk, bytes):
                         raise InvalidProviderOutput("document content stream returned non-byte data")
                     total += len(chunk)
-                    if total > MAX_DOCUMENT_BYTES:
-                        raise InvalidProviderOutput("document content exceeds 50 MiB")
+                    if total > self.max_document_bytes:
+                        raise InvalidProviderOutput(
+                            "document content exceeds the configured byte limit (50 MiB by default)"
+                        )
                     temporary.write(chunk)
                 if total == 0:
                     raise InvalidProviderOutput("document content is empty")
@@ -356,7 +512,7 @@ class LocalTesseractOCRAdapter:
                     [self.executable, temporary_path, "stdout", "tsv"],
                     check=False,
                     capture_output=True,
-                    timeout=self.TIMEOUT_SECONDS,
+                    timeout=self.timeout_seconds,
                     env={"PATH": os.environ.get("PATH", "")},
                 )
             except subprocess.TimeoutExpired as exc:
@@ -367,7 +523,7 @@ class LocalTesseractOCRAdapter:
                 tsv = completed.stdout.decode("utf-8", errors="strict")
             except UnicodeDecodeError as exc:
                 raise InvalidProviderOutput("local OCR returned invalid UTF-8 evidence") from exc
-            if len(tsv) > MAX_TEXT_CHARACTERS * 2:
+            if len(tsv) > self.max_text_characters * 2:
                 raise InvalidProviderOutput("local OCR evidence exceeds the allowed bound")
             elapsed_ms = max(1, round((time.monotonic() - started) * 1000))
             return self._parse_tsv(tsv, processing_time_ms=elapsed_ms)
@@ -474,12 +630,43 @@ class LocalNaiveBayesClassifierAdapter:
     ) -> None:
         self.tenant_id = tenant_id
         self.dms_gateway = dms_gateway
-        self.artifact_root = artifact_root or Path(
-            os.environ.get("SARAISE_LOCAL_MODEL_DIR", "/tmp/saraise-document-intelligence-models")
-        )
+        self.artifact_root = artifact_root
+        self.feature_buckets = self.FEATURE_BUCKETS
+        self.max_categories = self.MAX_CATEGORIES
+        self.chunk_size = self.CHUNK_SIZE
+        self.max_document_bytes = MAX_DOCUMENT_BYTES
+        self.max_structured_bytes = MAX_STRUCTURED_BYTES
+
+    def configure_runtime(self, configuration: Mapping[str, object]) -> None:
+        """Apply tenant limits and resolve the configured environment reference."""
+        limits = configuration["limits"]
+        providers = configuration["providers"]
+        classifier = configuration["classifier"]
+        resilience = configuration["resilience"]
+        if not all(isinstance(value, Mapping) for value in (limits, providers, classifier, resilience)):
+            raise ValueError("validated adapter configuration is required")
+        self.feature_buckets = int(classifier["feature_buckets"])
+        self.max_categories = int(classifier["provider_max_categories"])
+        self.chunk_size = int(resilience["stream_chunk_size_bytes"])
+        self.max_document_bytes = int(limits["max_document_bytes"])
+        self.max_structured_bytes = int(limits["max_structured_bytes"])
+        if self.artifact_root is None:
+            environment_variable = str(providers["artifact_root_environment_variable"])
+            configured_root = os.environ.get(environment_variable)
+            if not configured_root:
+                raise ProviderUnavailable(
+                    f"classifier artifact root environment reference {environment_variable!r} is not configured"
+                )
+            self.artifact_root = Path(configured_root)
 
     def for_tenant(self, tenant_id: UUID) -> "LocalNaiveBayesClassifierAdapter":
-        return type(self)(tenant_id=tenant_id, dms_gateway=get_dms_gateway(), artifact_root=self.artifact_root)
+        bound = type(self)(tenant_id=tenant_id, dms_gateway=get_dms_gateway(), artifact_root=self.artifact_root)
+        bound.feature_buckets = self.feature_buckets
+        bound.max_categories = self.max_categories
+        bound.chunk_size = self.chunk_size
+        bound.max_document_bytes = self.max_document_bytes
+        bound.max_structured_bytes = self.max_structured_bytes
+        return bound
 
     def health(self) -> DependencyHealth:
         from django.utils import timezone
@@ -489,6 +676,8 @@ class LocalNaiveBayesClassifierAdapter:
             dms_ready = gateway.health().available
         except Exception:
             dms_ready = False
+        if self.artifact_root is None:
+            return DependencyHealth(False, "artifact_root_not_configured", timezone.now(), "unknown")
         parent = self.artifact_root if self.artifact_root.exists() else self.artifact_root.parent
         writable = parent.exists() and os.access(parent, os.W_OK)
         ready = dms_ready and writable
@@ -500,12 +689,28 @@ class LocalNaiveBayesClassifierAdapter:
         requested_version: str,
         idempotency_key: str,
     ) -> TrainingResult:
+        """Train and publish for direct adapter consumers.
+
+        Governed service orchestration uses :meth:`stage_training` so database
+        durability remains the publication boundary.
+        """
+
+        result = self.stage_training(training_items, requested_version, idempotency_key)
+        self.publish_artifact(result.artifact_ref, result.artifact_checksum)
+        return result
+
+    def stage_training(
+        self,
+        training_items: Sequence[Mapping[str, object]],
+        requested_version: str,
+        idempotency_key: str,
+    ) -> TrainingResult:
         del idempotency_key
         tenant_id, gateway = self._dependencies()
         categories = sorted({str(item.get("category", "")) for item in training_items})
         if (
             not categories
-            or len(categories) > self.MAX_CATEGORIES
+            or len(categories) > self.max_categories
             or any(not _CATEGORY_PATTERN.fullmatch(item) for item in categories)
         ):
             raise InvalidProviderOutput("training categories are invalid or exceed the local provider bound")
@@ -531,7 +736,7 @@ class LocalNaiveBayesClassifierAdapter:
             "schema_version": 1,
             "provider_key": self.PROVIDER_KEY,
             "requested_version": requested_version,
-            "feature_buckets": self.FEATURE_BUCKETS,
+            "feature_buckets": self.feature_buckets,
             "document_total": document_total,
             "categories": {
                 category: {
@@ -543,19 +748,21 @@ class LocalNaiveBayesClassifierAdapter:
             },
         }
         serialized = json.dumps(model, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        if len(serialized) > MAX_STRUCTURED_BYTES:
+        if len(serialized) > self.max_structured_bytes:
             raise InvalidProviderOutput("local classifier artifact exceeds the allowed bound")
         checksum = hashlib.sha256(serialized).hexdigest()
         artifact_id = uuid.uuid4()
+        if self.artifact_root is None:
+            raise ProviderUnavailable("classifier artifact root is not configured")
         tenant_dir = self.artifact_root / str(tenant_id)
         tenant_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        target = tenant_dir / f"{artifact_id}.json"
         temporary = tenant_dir / f".{artifact_id}.tmp"
+        staged = tenant_dir / f".{artifact_id}.staged"
         with temporary.open("xb") as stream:
             stream.write(serialized)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, target)
+        os.replace(temporary, staged)
         # Resubstitution accuracy is measured against every streamed training
         # document; no confidence or quality field is synthesized.
         correct = 0
@@ -569,6 +776,26 @@ class LocalNaiveBayesClassifierAdapter:
                 correct += 1
         accuracy = Decimal(correct) / Decimal(document_total)
         return TrainingResult(self.PROVIDER_KEY, f"local://{artifact_id}", checksum, accuracy)
+
+    def publish_artifact(self, artifact_ref: str, checksum: str) -> None:
+        target = self._artifact_path(artifact_ref)
+        staged = target.with_name(f".{target.stem}.staged")
+        try:
+            content = staged.read_bytes()
+        except OSError as exc:
+            raise ProviderUnavailable("staged classifier artifact is unavailable") from exc
+        if hashlib.sha256(content).hexdigest() != checksum.lower():
+            raise InvalidProviderOutput("staged classifier artifact checksum is invalid")
+        os.replace(staged, target)
+
+    def abort_artifact(self, artifact_ref: str) -> None:
+        target = self._artifact_path(artifact_ref)
+        staged = target.with_name(f".{target.stem}.staged")
+        for path in (staged, target):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
 
     def classify(self, content: BinaryIO, model: object, idempotency_key: str) -> ClassificationResult:
         del idempotency_key
@@ -609,15 +836,19 @@ class LocalNaiveBayesClassifierAdapter:
             artifact_id = UUID(artifact_ref.removeprefix("local://"))
         except ValueError as exc:
             raise InvalidProviderOutput("local classifier artifact reference is invalid") from exc
+        if self.artifact_root is None:
+            raise ProviderUnavailable("classifier artifact root is not configured")
         return self.artifact_root / str(tenant_id) / f"{artifact_id}.json"
 
     def _load(self, artifact_ref: str, checksum: str) -> dict[str, object]:
         path = self._artifact_path(artifact_ref)
+        if not path.exists():
+            path = path.with_name(f".{path.stem}.staged")
         try:
             content = path.read_bytes()
         except OSError as exc:
             raise ProviderUnavailable("local classifier artifact is unavailable") from exc
-        if len(content) > MAX_STRUCTURED_BYTES or hashlib.sha256(content).hexdigest() != checksum.lower():
+        if len(content) > self.max_structured_bytes or hashlib.sha256(content).hexdigest() != checksum.lower():
             raise InvalidProviderOutput("local classifier artifact checksum is invalid")
         try:
             model = json.loads(content)
@@ -636,18 +867,18 @@ class LocalNaiveBayesClassifierAdapter:
         previous = b""
         total = 0
         while True:
-            chunk = content.read(self.CHUNK_SIZE)
+            chunk = content.read(self.chunk_size)
             if not chunk:
                 break
             if not isinstance(chunk, bytes):
                 raise InvalidProviderOutput("document content stream returned non-byte data")
             total += len(chunk)
-            if total > MAX_DOCUMENT_BYTES:
+            if total > self.max_document_bytes:
                 raise InvalidProviderOutput("document content exceeds 50 MiB")
             data = previous + chunk
             for index in range(max(0, len(data) - 2)):
-                digest = hashlib.blake2s(data[index : index + 3], digest_size=2).digest()
-                counts[int.from_bytes(digest, "big") % self.FEATURE_BUCKETS] += 1
+                digest = hashlib.blake2s(data[index : index + 3], digest_size=2).digest()  # noqa: E203
+                counts[int.from_bytes(digest, "big") % self.feature_buckets] += 1
             previous = data[-2:]
         if total == 0:
             raise InvalidProviderOutput("document content is empty")
@@ -670,7 +901,7 @@ class LocalNaiveBayesClassifierAdapter:
             if documents <= 0 or total_features < 0 or not isinstance(saved, Mapping):
                 raise InvalidProviderOutput("local classifier category evidence is invalid")
             score = math.log(documents / document_total)
-            denominator = total_features + self.FEATURE_BUCKETS
+            denominator = total_features + self.feature_buckets
             for bucket, count in features.items():
                 score += count * math.log((int(saved.get(str(bucket), 0)) + 1) / denominator)
             log_scores[category] = score
@@ -716,7 +947,12 @@ class RegisteredProviderResolver:
             self._ocr[engine] = adapter
 
     def register_classifier(self, provider_key: str, adapter: ClassifierAdapter, *, replace: bool = False) -> None:
-        if not provider_key or len(provider_key) > 80 or not isinstance(adapter, ClassifierAdapter):
+        required_operations = ("classify", "train", "validate_artifact", "health")
+        if (
+            not provider_key
+            or len(provider_key) > 80
+            or any(not callable(getattr(adapter, operation, None)) for operation in required_operations)
+        ):
             raise ValueError("a valid classifier provider and adapter are required")
         with self._lock:
             if provider_key in self._classifiers and not replace:

@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTenantSidebarTreeForMode } from "@/navigation/tenant-route-registry";
+import { useDocumentIntelligenceConfiguration } from "@/modules/document_intelligence/hooks/use-document-intelligence-configuration";
 import type { User } from "@/stores/auth-store";
 
 interface NavItem {
@@ -38,6 +39,7 @@ interface NavItem {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   module?: string;
+  order?: number;
   children?: NavItem[];
 }
 
@@ -179,11 +181,48 @@ const registryTenantItems: NavItem[] = getTenantSidebarTreeForMode(
         label: leaf.label,
         icon: leaf.icon,
         module: leaf.module,
+        order: leaf.order,
       })),
     };
   });
 
-const renderedTenantItems = [...tenantItems, ...registryTenantItems];
+interface DocumentIntelligenceNavigationOrder {
+  extractions: number;
+  classifications: number;
+  training: number;
+  templates: number;
+  health: number;
+  configuration: number;
+}
+
+function configuredDocumentIntelligenceOrder(
+  routeId: string | undefined,
+  order: DocumentIntelligenceNavigationOrder,
+): number {
+  if (!routeId) return Number.MAX_SAFE_INTEGER;
+  const section = routeId.split(".")[1];
+  return section && section in order
+    ? order[section as keyof DocumentIntelligenceNavigationOrder]
+    : Number.MAX_SAFE_INTEGER;
+}
+
+function applyRuntimeNavigationOrder(
+  items: readonly NavItem[],
+  order: DocumentIntelligenceNavigationOrder | undefined,
+): NavItem[] {
+  return items.map((item) => {
+    if (item.module !== "document_intelligence" || !item.children || !order) return item;
+    return {
+      ...item,
+      children: [...item.children].sort(
+        (left, right) =>
+          configuredDocumentIntelligenceOrder(left.routeId, order) -
+            configuredDocumentIntelligenceOrder(right.routeId, order) ||
+          left.label.localeCompare(right.label),
+      ),
+    };
+  });
+}
 
 const NavGroup = ({ item, user }: { item: NavItem; user: User }) => {
   const location = useLocation();
@@ -259,6 +298,12 @@ const NavItem = ({ item }: { item: NavItem }) => {
 
 export const TenantSidebar = ({ user }: { user: User }) => {
   const isAdmin = user.tenant_role === "tenant_admin";
+  const documentIntelligenceConfiguration = useDocumentIntelligenceConfiguration();
+  const runtimeRegistryItems = applyRuntimeNavigationOrder(
+    registryTenantItems,
+    documentIntelligenceConfiguration.data?.document.ui.navigation_order,
+  );
+  const renderedTenantItems = [...tenantItems, ...runtimeRegistryItems];
 
   return (
     <div className="h-full flex flex-col py-6 bg-gradient-to-b from-white/5 to-transparent">

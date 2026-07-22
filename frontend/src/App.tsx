@@ -532,7 +532,7 @@ function RouteTitle({ title, children }: { title?: string; children: ReactNode }
   useEffect(() => {
     if (!title) return undefined;
     const previousTitle = document.title;
-    document.title = title;
+    document.title = `${title} · SARAISE`;
     return () => {
       document.title = previousTitle;
     };
