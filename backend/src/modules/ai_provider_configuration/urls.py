@@ -7,6 +7,7 @@ from rest_framework.routers import DefaultRouter
 from .api import (
     AIModelDeploymentViewSet,
     AIModelViewSet,
+    AIProviderConfigurationResourceViewSet,
     AIProviderCredentialViewSet,
     AIProviderViewSet,
     AIUsageLogViewSet,
@@ -16,6 +17,7 @@ from .health import health_check
 
 # Create router and register ViewSets
 router = DefaultRouter()
+router.register(r"resources", AIProviderConfigurationResourceViewSet, basename="resource")
 router.register(r"providers", AIProviderViewSet, basename="ai-provider")
 router.register(r"credentials", AIProviderCredentialViewSet, basename="ai-provider-credential")
 router.register(r"models", AIModelViewSet, basename="ai-model")

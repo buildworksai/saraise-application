@@ -1,61 +1,84 @@
-"""
-AiProviderConfiguration Health Checks
+"""Sanitized liveness/readiness endpoint for AI-provider configuration."""
 
-Rule: SARAISE-17007 (Health checks required for all modules)
-"""
-from django.core.cache import cache
+from __future__ import annotations
+
 from django.db import connection
-from django.http import JsonResponse
-from django.views.decorators.http import require_http_methods
-from .models import AIProvider
+from django.utils import timezone
+from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
+from src.core.encryption import EncryptionService
 
-@require_http_methods(["GET"])
-def health_check(request):
-    """
-    Health check endpoint for AiProviderConfiguration module.
+from .api import TenantContextMixin
+from .models import AIProviderCredential
+from .permissions import AIProviderActionPermission, SessionAuthentication401, TenantProviderThrottle
 
-    Returns:
-    - 200 OK if healthy
-    - 503 Service Unavailable if unhealthy
-    """
-    health_status = {
-        'status': 'healthy',
-        'module': 'ai-provider-configuration',
-        'checks': {}
+DOMAIN_TABLES = frozenset(
+    {
+        "ai_provider_configuration_providers",
+        "ai_provider_configuration_credentials",
+        "ai_provider_configuration_models",
+        "ai_provider_configuration_deployments",
+        "ai_provider_configuration_usage_logs",
     }
-
-    # Check database connectivity
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT 1")
-        health_status['checks']['database'] = 'ok'
-    except Exception as e:
-        health_status['status'] = 'unhealthy'
-        health_status['checks']['database'] = f'error: {str(e)}'
-
-    # Check cache (Redis) connectivity
-    try:
-        cache.set("health_check_ai_provider_configuration", "ok", 10)
-        result = cache.get("health_check_ai_provider_configuration")
-        if result == "ok":
-            health_status['checks']['cache'] = 'ok'
-        else:
-            health_status['status'] = 'degraded'
-            health_status['checks']['cache'] = 'not responding correctly'
-    except Exception as e:
-        health_status['status'] = 'unhealthy'
-        health_status['checks']['cache'] = f'error: {str(e)}'
-
-    # Check module-specific model accessibility
-    try:
-        # Verify we can query the primary model
-        count = AIProvider.objects.count()
-        health_status['checks']['module_model'] = {'status': 'ok', 'total_count': count}
-    except Exception as e:
-        health_status['status'] = 'unhealthy'
-        health_status['checks']['module_model'] = f'error: {str(e)}'
+)
 
 
-    status_code = 200 if health_status['status'] == 'healthy' else 503
-    return JsonResponse(health_status, status=status_code)
+class HealthView(TenantContextMixin, APIView):
+    """Return no row counts, identifiers, URLs, credentials, or exception text."""
+
+    authentication_classes = (SessionAuthentication401,)
+    permission_classes = (AIProviderActionPermission,)
+    throttle_classes = (TenantProviderThrottle,)
+    action = "health"
+    action_permissions = {"health": "ai_provider_configuration.health:read"}
+
+    def get(self, request: object) -> Response:
+        del request
+        tenant_id = self.tenant_id()
+        checks: dict[str, dict[str, str]] = {}
+        ready = True
+
+        try:
+            tables = set(connection.introspection.table_names())
+            schema_ready = DOMAIN_TABLES.issubset(tables)
+            checks["database"] = {"status": "healthy" if schema_ready else "unavailable"}
+            ready = ready and schema_ready
+        except Exception:
+            checks["database"] = {"status": "unavailable"}
+            ready = False
+
+        try:
+            probe = EncryptionService.encrypt("health-probe")
+            encryption_ready = EncryptionService.decrypt(probe) == "health-probe"
+            checks["encryption"] = {"status": "healthy" if encryption_ready else "unavailable"}
+            ready = ready and encryption_ready
+        except Exception:
+            checks["encryption"] = {"status": "unavailable"}
+            ready = False
+
+        try:
+            # Execute a tenant-scoped query while deliberately suppressing the
+            # count so health cannot become a tenant metadata oracle.
+            AIProviderCredential.objects.for_tenant(tenant_id).filter(is_deleted=False).exists()
+            checks["tenant_store"] = {"status": "healthy"}
+        except Exception:
+            checks["tenant_store"] = {"status": "unavailable"}
+            ready = False
+
+        payload = {
+            "module": "ai-provider-configuration",
+            "status": "healthy" if ready else "unhealthy",
+            "live": True,
+            "ready": ready,
+            "checked_at": timezone.now().isoformat(),
+            "checks": checks,
+        }
+        return Response(payload, status=status.HTTP_200_OK if ready else status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+health_check = HealthView.as_view()
+
+
+__all__ = ["HealthView", "health_check"]

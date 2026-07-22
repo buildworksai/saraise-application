@@ -116,6 +116,7 @@ _TENANT_SCOPED_MODELS = (
     "ai_agent_management.Tool",
     "ai_agent_management.ToolInvocation",
     "ai_provider_configuration.AIModelDeployment",
+    "ai_provider_configuration.AIProviderConfigurationResource",
     "ai_provider_configuration.AIProviderCredential",
     "ai_provider_configuration.AIUsageLog",
     "api_management.ApiManagementResource",

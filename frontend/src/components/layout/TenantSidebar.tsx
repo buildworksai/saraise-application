@@ -94,10 +94,22 @@ const tenantItems: NavItem[] = [
     module: "dms",
   },
   {
-    path: "/ai-providers/secrets",
-    label: "Secret Management",
-    icon: Key,
+    path: "/ai-provider-configuration",
+    label: "AI Providers",
+    icon: Bot,
     module: "ai_provider_configuration",
+    children: [
+      {
+        path: "/ai-provider-configuration",
+        label: "Provider Console",
+        icon: Database,
+      },
+      {
+        path: "/ai-providers/secrets",
+        label: "Secret Operations",
+        icon: Key,
+      },
+    ],
   },
   {
     path: "/notifications",

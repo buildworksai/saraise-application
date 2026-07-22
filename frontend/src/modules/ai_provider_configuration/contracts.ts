@@ -1,154 +1,216 @@
-/**
- * AiProviderConfiguration Module Contracts
- *
- * Rule: SARAISE-27001 (contracts.ts required for all frontend modules)
- *
- * === AGENT INSTRUCTION ===
- * Read this file FIRST when working on this module.
- * All types and endpoints for AiProviderConfiguration are defined here.
- */
+/** Public frontend contract for the tenant AI provider configuration API. */
 
-// import type { components } from '@/types/api'; // Commented out until schema types are available
+export type UUID = string;
+export type ISODateTime = string;
+export type DecimalString = string;
 
-// =============================================================================
-// EXPORTED TYPES - Import these in your components
-// =============================================================================
+export type ProviderType =
+  | 'openai'
+  | 'anthropic'
+  | 'google'
+  | 'groq'
+  | 'mistral'
+  | 'huggingface'
+  | 'azure'
+  | 'custom'
+  | (string & {});
 
-// Note: These types may not exist in the generated API schema yet.
-// If they don't exist, we define fallback types based on the backend models.
+export type DeploymentStatus = 'active' | 'inactive' | 'error';
+export type CredentialStatus = 'unverified' | 'valid' | 'invalid';
 
-/** AIProvider entity */
-export type AIProvider = {
-  id: string;
+export interface AIProvider {
+  id: UUID;
   name: string;
-  provider_type: 'openai' | 'anthropic' | 'google' | 'azure' | 'custom';
-  base_url?: string;
+  provider_type: ProviderType;
+  base_url: string;
   is_active: boolean;
-  created_at: string;
-  updated_at: string;
-};
+  models_count: number;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
 
-/** AIProviderCredential entity */
-export type AIProviderCredential = {
-  id: string;
-  tenant_id: string;
-  provider: string;
-  provider_id?: string;
-  created_at: string;
-  updated_at: string;
-};
+/** Credential responses contain metadata only. Secret material is write-only. */
+export interface AIProviderCredential {
+  id: UUID;
+  tenant_id: UUID;
+  provider: UUID;
+  provider_name: string;
+  provider_type: ProviderType;
+  label: string;
+  status: CredentialStatus;
+  secret_hint: string;
+  has_secret: boolean;
+  last_verified_at: ISODateTime | null;
+  last_error_code: string;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
 
-/** AIProviderCredential create request */
-export type AIProviderCredentialCreate = {
-  provider: string;
+export interface AIProviderCredentialCreate {
+  provider: UUID;
+  label: string;
   api_key: string;
-};
+}
 
-/** AIProviderCredential update request (partial) */
-export type AIProviderCredentialUpdate = Partial<AIProviderCredentialCreate>;
+export interface AIProviderCredentialUpdate {
+  label?: string;
+  api_key?: string;
+}
 
-/** AIModel entity */
-export type AIModel = {
-  id: string;
-  name: string;
-  provider: string;
-  provider_id?: string;
+export interface AIModelPricing {
+  input_cost_per_token?: number | DecimalString;
+  output_cost_per_token?: number | DecimalString;
+  input_cost_per_million_tokens?: number | DecimalString;
+  output_cost_per_million_tokens?: number | DecimalString;
+  currency?: string;
+  [key: string]: unknown;
+}
+
+export interface AIModel {
+  id: UUID;
+  provider: UUID;
+  provider_name: string;
+  provider_type: ProviderType;
   model_id: string;
+  display_name: string;
+  capabilities: string[];
+  pricing: AIModelPricing;
+  max_tokens: number | null;
   is_active: boolean;
-  created_at: string;
-  updated_at: string;
-};
+  deployments_count: number;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
 
-/** AIModelDeployment entity */
-export type AIModelDeployment = {
-  id: string;
-  tenant_id: string;
-  model: string;
-  model_id?: string;
+export interface AIModelDeploymentConfig {
+  temperature?: number;
+  max_tokens?: number;
+  top_p?: number;
+  timeout_seconds?: number;
+  [key: string]: unknown;
+}
+
+export interface AIModelDeployment {
+  id: UUID;
+  tenant_id: UUID;
+  model: UUID;
+  credential: UUID | null;
   deployment_name: string;
-  config: Record<string, unknown>;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-};
+  model_name: string;
+  model_id: string;
+  provider_name: string;
+  config: AIModelDeploymentConfig;
+  status: DeploymentStatus;
+  created_by: UUID;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
 
-/** AIModelDeployment create request */
-export type AIModelDeploymentCreate = {
-  model: string;
+export interface AIModelDeploymentCreate {
+  model: UUID;
+  credential?: UUID | null;
   deployment_name: string;
-  config?: Record<string, unknown>;
-  is_active?: boolean;
-};
+  config: AIModelDeploymentConfig;
+  status: DeploymentStatus;
+}
 
-/** AIModelDeployment update request (partial) */
-export type AIModelDeploymentUpdate = Partial<AIModelDeploymentCreate>;
+export type AIModelDeploymentUpdate = Partial<Pick<AIModelDeployment, 'credential' | 'deployment_name' | 'config' | 'status'>>;
 
-/** AIUsageLog entity */
-export type AIUsageLog = {
-  id: string;
-  tenant_id: string;
-  deployment: string;
-  deployment_id?: string;
-  model: string;
-  model_id?: string;
+export interface AIUsageLog {
+  id: UUID;
+  tenant_id: UUID;
+  deployment: UUID;
+  deployment_name: string;
+  model_name: string;
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
-  cost: string;
-  created_at: string;
-  updated_at: string;
-};
+  cost: DecimalString;
+  currency: string;
+  provider_request_id: string;
+  created_at: ISODateTime;
+}
 
-// =============================================================================
-// ENDPOINT REGISTRY - Use these for all API calls
-// =============================================================================
+export interface ModuleHealth {
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  module?: string;
+  message?: string;
+  timestamp?: ISODateTime;
+}
 
-/**
- * AiProviderConfiguration API Endpoints
- *
- * All endpoints should be prefixed with /api/v1/ai-provider-configuration/
- *
- * Usage:
- * ```typescript
- * import { ENDPOINTS } from './contracts';
- * apiClient.get(ENDPOINTS.PROVIDERS.LIST);
- * apiClient.get(ENDPOINTS.DEPLOYMENTS.DETAIL(id));
- * ```
- */
+export interface RotateKeyResponse {
+  new_key: string;
+  message: string;
+}
+
+export interface ReEncryptRequest {
+  old_key: string;
+  new_key: string;
+}
+
+export interface ReEncryptResponse {
+  success: boolean;
+  re_encrypted_count: number;
+  message: string;
+}
+
+export interface PaginatedResponse<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
+export type ListResponse<T> = T[] | PaginatedResponse<T>;
+
+export interface ListFilters {
+  search?: string;
+  provider_id?: UUID;
+  model_id?: UUID;
+  deployment_id?: UUID;
+  status?: DeploymentStatus;
+}
+
 export const MODULE_API_PREFIX = '/api/v1/ai-provider-configuration';
 
 export const ENDPOINTS = {
   PROVIDERS: {
     LIST: `${MODULE_API_PREFIX}/providers/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/providers/${id}/` as const,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/providers/${id}/` as const,
   },
   CREDENTIALS: {
     LIST: `${MODULE_API_PREFIX}/credentials/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/credentials/${id}/` as const,
     CREATE: `${MODULE_API_PREFIX}/credentials/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/credentials/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/credentials/${id}/` as const,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/credentials/${id}/` as const,
+    UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/credentials/${id}/` as const,
+    DELETE: (id: UUID) => `${MODULE_API_PREFIX}/credentials/${id}/` as const,
   },
   MODELS: {
     LIST: `${MODULE_API_PREFIX}/models/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/models/${id}/` as const,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/models/${id}/` as const,
   },
   DEPLOYMENTS: {
     LIST: `${MODULE_API_PREFIX}/deployments/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/deployments/${id}/` as const,
     CREATE: `${MODULE_API_PREFIX}/deployments/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/deployments/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/deployments/${id}/` as const,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/deployments/${id}/` as const,
+    UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/deployments/${id}/` as const,
+    DELETE: (id: UUID) => `${MODULE_API_PREFIX}/deployments/${id}/` as const,
   },
   USAGE_LOGS: {
     LIST: `${MODULE_API_PREFIX}/usage-logs/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/usage-logs/${id}/` as const,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/usage-logs/${id}/` as const,
   },
   SECRETS: {
-    LIST: `${MODULE_API_PREFIX}/credentials/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/credentials/${id}/` as const,
     ROTATE_KEY: `${MODULE_API_PREFIX}/secrets/rotate-key/`,
     RE_ENCRYPT: `${MODULE_API_PREFIX}/secrets/re-encrypt/`,
   },
   HEALTH: `${MODULE_API_PREFIX}/health/`,
+} as const;
+
+/** Application paths live beside the API contract to keep navigation consistent. */
+export const AI_PROVIDER_ROUTES = {
+  HOME: '/ai-provider-configuration',
+  CONNECT: '/ai-provider-configuration/create',
+  PROVIDER: (id: UUID) => `/ai-provider-configuration/${id}` as const,
+  SECRETS: '/ai-providers/secrets',
 } as const;
