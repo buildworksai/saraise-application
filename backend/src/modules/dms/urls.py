@@ -1,28 +1,31 @@
-"""
-URL routing for Dms module.
-"""
-from django.urls import path, include
+"""Governed DMS API v2 routing."""
+
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .api import (
+    DmsHealthAPIView,
     DocumentPermissionViewSet,
     DocumentShareViewSet,
     DocumentVersionViewSet,
     DocumentViewSet,
     FolderViewSet,
+    PrincipalSearchAPIView,
+    PublicShareDownloadAPIView,
 )
-from .health import health_check
 
-# Create router and register ViewSets
+app_name = "dms"
+
 router = DefaultRouter()
-router.register(r"folders", FolderViewSet, basename="folder")
-router.register(r"documents", DocumentViewSet, basename="document")
-router.register(r"document-versions", DocumentVersionViewSet, basename="document-version")
-router.register(r"document-permissions", DocumentPermissionViewSet, basename="document-permission")
-router.register(r"document-shares", DocumentShareViewSet, basename="document-share")
+router.register("folders", FolderViewSet, basename="folder")
+router.register("documents", DocumentViewSet, basename="document")
+router.register("document-versions", DocumentVersionViewSet, basename="document-version")
+router.register("document-permissions", DocumentPermissionViewSet, basename="document-permission")
+router.register("document-shares", DocumentShareViewSet, basename="document-share")
 
-# URL patterns
 urlpatterns = [
     path("", include(router.urls)),
-    path("health/", health_check, name="health_check"),
+    path("principals/", PrincipalSearchAPIView.as_view(), name="principal-search"),
+    path("public/shares/<str:token>/download/", PublicShareDownloadAPIView.as_view(), name="public-share-download"),
+    path("health/", DmsHealthAPIView.as_view(), name="health"),
 ]

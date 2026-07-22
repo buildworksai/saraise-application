@@ -17,7 +17,6 @@ import {
   Users,
   Database,
   DatabaseZap,
-  FolderTree,
   Plug,
   Key,
   Bell,
@@ -72,12 +71,6 @@ const tenantItems: NavItem[] = [
     label: "Data Migration",
     icon: DatabaseZap,
     module: "data_migration",
-  },
-  {
-    path: "/dms",
-    label: "Document Management",
-    icon: FolderTree,
-    module: "dms",
   },
   {
     path: "/integration-platform",

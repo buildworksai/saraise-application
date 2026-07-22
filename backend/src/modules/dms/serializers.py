@@ -1,175 +1,313 @@
-"""
-DRF Serializers for Dms module.
-Provides request/response validation for all models.
+"""Operation-specific serializers for the governed DMS API.
+
+Relationships are UUID values only.  Domain services resolve those values
+inside the authenticated tenant boundary; serializers never own tenancy or
+authorization decisions.
 """
 
+from __future__ import annotations
+
+from django.utils import timezone
 from rest_framework import serializers
 
 from .models import Document, DocumentPermission, DocumentShare, DocumentVersion, Folder
 
 
-class FolderSerializer(serializers.ModelSerializer):
-    """Serializer for Folder model."""
+class AllowedActionsField(serializers.Field):
+    """Render the bounded capability projection attached by the service."""
 
-    children_count = serializers.IntegerField(source="children.count", read_only=True)
-    documents_count = serializers.IntegerField(source="documents.count", read_only=True)
+    def to_representation(self, value: object) -> list[str]:
+        actions = getattr(value, "allowed_actions", ())
+        return sorted(str(action) for action in actions)
+
+    def to_internal_value(self, data: object) -> object:
+        raise serializers.ValidationError("This field is read-only.")
+
+
+class FolderListSerializer(serializers.ModelSerializer[Folder]):
+    parent_id = serializers.UUIDField(read_only=True, allow_null=True)
+    children_count = serializers.IntegerField(read_only=True, default=0)
+    documents_count = serializers.IntegerField(read_only=True, default=0)
+    allowed_actions = AllowedActionsField(source="*", read_only=True)
 
     class Meta:
         model = Folder
-        fields = [
+        fields = (
             "id",
-            "tenant_id",
             "name",
-            "parent",
+            "description",
+            "parent_id",
             "path",
+            "depth",
+            "sort_order",
             "children_count",
             "documents_count",
             "created_by",
             "created_at",
             "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "path", "created_by", "created_at", "updated_at"]
-
-    def validate_name(self, value):
-        """Validate name field."""
-        if not value or not value.strip():
-            raise serializers.ValidationError("Name cannot be empty")
-        return value.strip()
-
-    def validate_parent(self, value):
-        """Validate parent folder belongs to same tenant."""
-        if value and hasattr(self, "initial_data"):
-            tenant_id = self.initial_data.get("tenant_id")
-            if tenant_id and value.tenant_id != tenant_id:
-                raise serializers.ValidationError("Parent folder must belong to the same tenant")
-        return value
+            "allowed_actions",
+        )
 
 
-class DocumentSerializer(serializers.ModelSerializer):
-    """Serializer for Document model."""
-
-    folder_name = serializers.CharField(source="folder.name", read_only=True)
-    versions_count = serializers.IntegerField(source="versions.count", read_only=True)
-
-    class Meta:
-        model = Document
-        fields = [
-            "id",
-            "tenant_id",
-            "name",
-            "folder",
-            "folder_name",
-            "file_path",
-            "mime_type",
-            "size",
-            "checksum",
-            "versions_count",
-            "created_by",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = [
-            "id",
-            "tenant_id",
-            "file_path",
-            "mime_type",
-            "size",
-            "checksum",
-            "created_by",
-            "created_at",
-            "updated_at",
-        ]
-
-    def validate_name(self, value):
-        """Validate name field."""
-        if not value or not value.strip():
-            raise serializers.ValidationError("Name cannot be empty")
-        return value.strip()
-
-    def validate_folder(self, value):
-        """Validate folder belongs to same tenant."""
-        if value and hasattr(self, "initial_data"):
-            tenant_id = self.initial_data.get("tenant_id")
-            if tenant_id and value.tenant_id != tenant_id:
-                raise serializers.ValidationError("Folder must belong to the same tenant")
-        return value
+class FolderDetailSerializer(FolderListSerializer):
+    pass
 
 
-class DocumentVersionSerializer(serializers.ModelSerializer):
-    """Serializer for DocumentVersion model."""
+class FolderCreateSerializer(serializers.Serializer[dict[str, object]]):
+    name = serializers.CharField(max_length=255, trim_whitespace=True)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+    parent_id = serializers.UUIDField(required=False, allow_null=True, default=None)
 
-    document_name = serializers.CharField(source="document.name", read_only=True)
+
+class FolderUpdateSerializer(serializers.Serializer[dict[str, object]]):
+    name = serializers.CharField(max_length=255, trim_whitespace=True, required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+    sort_order = serializers.IntegerField(required=False)
+
+    def validate(self, attrs: dict[str, object]) -> dict[str, object]:
+        if not attrs:
+            raise serializers.ValidationError("At least one editable field is required.")
+        return attrs
+
+
+class FolderMoveSerializer(serializers.Serializer[dict[str, object]]):
+    parent_id = serializers.UUIDField(required=True, allow_null=True)
+
+
+class DocumentVersionSummarySerializer(serializers.ModelSerializer[DocumentVersion]):
+    size_bytes = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = DocumentVersion
-        fields = [
+        fields = (
             "id",
-            "document",
-            "document_name",
             "version_number",
-            "file_path",
+            "original_filename",
+            "mime_type",
+            "size_bytes",
+            "checksum_sha256",
             "created_at",
             "created_by",
-        ]
-        read_only_fields = ["id", "file_path", "created_at"]
+        )
 
 
-class DocumentPermissionSerializer(serializers.ModelSerializer):
-    """Serializer for DocumentPermission model."""
+class DocumentListSerializer(serializers.ModelSerializer[Document]):
+    folder_id = serializers.UUIDField(read_only=True, allow_null=True)
+    folder_name = serializers.CharField(source="folder.name", read_only=True, allow_null=True)
+    current_version = DocumentVersionSummarySerializer(read_only=True)
+    allowed_actions = AllowedActionsField(source="*", read_only=True)
 
-    document_name = serializers.CharField(source="document.name", read_only=True)
+    class Meta:
+        model = Document
+        fields = (
+            "id",
+            "name",
+            "description",
+            "folder_id",
+            "folder_name",
+            "tags",
+            "current_version",
+            "version_count",
+            "created_by",
+            "created_at",
+            "updated_at",
+            "allowed_actions",
+        )
+
+
+class DocumentDetailSerializer(DocumentListSerializer):
+    metadata = serializers.JSONField(read_only=True)
+
+    class Meta(DocumentListSerializer.Meta):
+        fields = DocumentListSerializer.Meta.fields + ("metadata",)
+
+
+class DocumentUploadSerializer(serializers.Serializer[dict[str, object]]):
+    file = serializers.FileField(allow_empty_file=False)
+    name = serializers.CharField(max_length=255, trim_whitespace=True)
+    folder_id = serializers.UUIDField(required=False, allow_null=True, default=None)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+    tags = serializers.ListField(
+        child=serializers.CharField(max_length=64, trim_whitespace=True),
+        required=False,
+        default=list,
+        max_length=50,
+    )
+    metadata = serializers.JSONField(required=False, default=dict)
+
+
+class DocumentUpdateSerializer(serializers.Serializer[dict[str, object]]):
+    name = serializers.CharField(max_length=255, trim_whitespace=True, required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+    tags = serializers.ListField(
+        child=serializers.CharField(max_length=64, trim_whitespace=True),
+        required=False,
+        max_length=50,
+    )
+    metadata = serializers.JSONField(required=False)
+    expected_updated_at = serializers.DateTimeField(required=True)
+
+    def validate(self, attrs: dict[str, object]) -> dict[str, object]:
+        if len(attrs) == 1:
+            raise serializers.ValidationError("At least one editable field is required.")
+        return attrs
+
+
+class DocumentMoveSerializer(serializers.Serializer[dict[str, object]]):
+    folder_id = serializers.UUIDField(required=True, allow_null=True)
+    expected_updated_at = serializers.DateTimeField(required=False)
+
+
+class DocumentVersionListSerializer(serializers.ModelSerializer[DocumentVersion]):
+    document_id = serializers.UUIDField(read_only=True)
+    source_version_id = serializers.UUIDField(read_only=True, allow_null=True)
+
+    class Meta:
+        model = DocumentVersion
+        fields = (
+            "id",
+            "document_id",
+            "version_number",
+            "original_filename",
+            "mime_type",
+            "size_bytes",
+            "checksum_sha256",
+            "change_note",
+            "source_version_id",
+            "created_by",
+            "created_at",
+        )
+
+
+class DocumentVersionDetailSerializer(DocumentVersionListSerializer):
+    pass
+
+
+class DocumentVersionCreateSerializer(serializers.Serializer[dict[str, object]]):
+    document_id = serializers.UUIDField()
+    file = serializers.FileField(allow_empty_file=False)
+    change_note = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+
+
+class DocumentVersionRestoreSerializer(serializers.Serializer[dict[str, object]]):
+    change_note = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+
+
+class DocumentPermissionReadSerializer(serializers.ModelSerializer[DocumentPermission]):
+    document_id = serializers.UUIDField(read_only=True)
 
     class Meta:
         model = DocumentPermission
-        fields = [
+        fields = (
             "id",
-            "tenant_id",
-            "document",
-            "document_name",
+            "document_id",
             "principal_type",
             "principal_id",
             "permission",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "created_at", "updated_at"]
-
-    def validate_document(self, value):
-        """Validate document belongs to same tenant."""
-        if value and hasattr(self, "initial_data"):
-            tenant_id = self.initial_data.get("tenant_id")
-            if tenant_id and value.tenant_id != tenant_id:
-                raise serializers.ValidationError("Document must belong to the same tenant")
-        return value
-
-
-class DocumentShareSerializer(serializers.ModelSerializer):
-    """Serializer for DocumentShare model."""
-
-    document_name = serializers.CharField(source="document.name", read_only=True)
-    is_expired = serializers.BooleanField(read_only=True)
-
-    class Meta:
-        model = DocumentShare
-        fields = [
-            "id",
-            "tenant_id",
-            "document",
-            "document_name",
-            "share_token",
-            "expires_at",
-            "permissions",
-            "is_expired",
             "created_by",
             "created_at",
             "updated_at",
-        ]
-        read_only_fields = ["id", "tenant_id", "share_token", "created_by", "created_at", "updated_at"]
+            "deleted_at",
+        )
 
-    def validate_document(self, value):
-        """Validate document belongs to same tenant."""
-        if value and hasattr(self, "initial_data"):
-            tenant_id = self.initial_data.get("tenant_id")
-            if tenant_id and value.tenant_id != tenant_id:
-                raise serializers.ValidationError("Document must belong to the same tenant")
-        return value
+
+class DocumentPermissionCreateSerializer(serializers.Serializer[dict[str, object]]):
+    document_id = serializers.UUIDField()
+    principal_type = serializers.ChoiceField(choices=("user", "role", "group"))
+    principal_id = serializers.UUIDField()
+    permission = serializers.ChoiceField(choices=("read", "write", "delete", "share", "manage"))
+
+
+class DocumentPermissionUpdateSerializer(serializers.Serializer[dict[str, object]]):
+    permission = serializers.ChoiceField(choices=("read", "write", "delete", "share", "manage"))
+
+
+class DocumentShareReadSerializer(serializers.ModelSerializer[DocumentShare]):
+    document_id = serializers.UUIDField(read_only=True)
+    version_id = serializers.UUIDField(read_only=True)
+    state = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DocumentShare
+        fields = (
+            "id",
+            "document_id",
+            "version_id",
+            "token_prefix",
+            "expires_at",
+            "max_access_count",
+            "access_count",
+            "last_accessed_at",
+            "revoked_at",
+            "created_by",
+            "created_at",
+            "state",
+        )
+
+    def get_state(self, value: DocumentShare) -> str:
+        if value.revoked_at is not None:
+            return "revoked"
+        if value.expires_at <= timezone.now():
+            return "expired"
+        if value.max_access_count is not None and value.access_count >= value.max_access_count:
+            return "exhausted"
+        return "active"
+
+
+class DocumentShareCreateSerializer(serializers.Serializer[dict[str, object]]):
+    document_id = serializers.UUIDField()
+    version_id = serializers.UUIDField(required=False, allow_null=True, default=None)
+    expires_at = serializers.DateTimeField()
+    max_access_count = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=10_000)
+
+
+class ShareCreatedSerializer(serializers.Serializer[dict[str, object]]):
+    share = DocumentShareReadSerializer(read_only=True)
+    share_url = serializers.URLField(read_only=True)
+
+
+class FolderContentsSerializer(serializers.Serializer[dict[str, object]]):
+    folder = FolderDetailSerializer(read_only=True, allow_null=True)
+    breadcrumbs = FolderListSerializer(read_only=True, many=True)
+    folders = FolderListSerializer(read_only=True, many=True)
+    documents = DocumentListSerializer(read_only=True, many=True)
+    allowed_actions = serializers.ListField(child=serializers.CharField(), read_only=True)
+
+
+class PrincipalSummarySerializer(serializers.Serializer[dict[str, object]]):
+    id = serializers.UUIDField(read_only=True)
+    type = serializers.ChoiceField(choices=("user", "role", "group"), read_only=True)
+    display_name = serializers.CharField(read_only=True)
+    secondary_text = serializers.CharField(read_only=True, allow_blank=True)
+
+
+class DmsHealthSerializer(serializers.Serializer[dict[str, object]]):
+    status = serializers.ChoiceField(choices=("healthy", "degraded", "unhealthy"), read_only=True)
+    checks = serializers.DictField(child=serializers.DictField(), read_only=True)
+
+
+__all__ = [
+    "DmsHealthSerializer",
+    "DocumentDetailSerializer",
+    "DocumentListSerializer",
+    "DocumentMoveSerializer",
+    "DocumentPermissionCreateSerializer",
+    "DocumentPermissionReadSerializer",
+    "DocumentPermissionUpdateSerializer",
+    "DocumentShareCreateSerializer",
+    "DocumentShareReadSerializer",
+    "DocumentUpdateSerializer",
+    "DocumentUploadSerializer",
+    "DocumentVersionCreateSerializer",
+    "DocumentVersionDetailSerializer",
+    "DocumentVersionListSerializer",
+    "DocumentVersionRestoreSerializer",
+    "FolderContentsSerializer",
+    "FolderCreateSerializer",
+    "FolderDetailSerializer",
+    "FolderListSerializer",
+    "FolderMoveSerializer",
+    "FolderUpdateSerializer",
+    "PrincipalSummarySerializer",
+    "ShareCreatedSerializer",
+]

@@ -79,6 +79,6 @@ export const ENDPOINTS = {
   },
   CAPABILITIES: {
     WORKFLOW_AUTOMATION: "/workflow-automation/workflows",
-    DOCUMENT_MANAGEMENT: "/dms",
+    DOCUMENT_MANAGEMENT: "/dms/documents",
   },
 } as const;
