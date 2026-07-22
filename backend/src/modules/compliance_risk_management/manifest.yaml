@@ -1,29 +1,122 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: compliance_risk_management
-version: 1.0.0
-category: core_business
-display_name: Compliance Risk Management
-description: |
-  Risk assessment, mitigation, and compliance risk tracking.
+version: 2.0.0
+description: >-
+  Tenant-safe risk register, explainable scoring, controls and testing,
+  regulatory requirements, compliance calendar, remediation, and governed
+  runtime configuration.
+type: core
+lifecycle: core
 
-# Dependencies
 dependencies:
-  - name: compliance_management
+  - name: workflow_automation
     version: ">=1.0.0"
     required: false
-    purpose: Policy linkage
+    purpose: Optional remediation and approval workflow initiation
+  - name: notifications
+    version: ">=1.0.0"
+    required: false
+    purpose: Optional durable compliance reminder delivery
+  - name: audit_trail
+    version: ">=1.0.0"
+    required: false
+    purpose: Optional external audit projection; local outbox audit remains authoritative
+  - name: dms
+    version: ">=1.0.0"
+    required: false
+    purpose: Fail-closed evidence reference verification when evidence is supplied
+  - name: reporting_analytics
+    version: ">=1.0.0"
+    required: false
+    purpose: Optional reporting projection
 
-# Permissions
 permissions:
-  - compliance_risk.risk:create
   - compliance_risk.risk:read
+  - compliance_risk.risk:create
   - compliance_risk.risk:update
-  - compliance_risk.assessment:read
+  - compliance_risk.risk:delete
+  - compliance_risk.risk:transition
+  - compliance_risk.risk:read_sensitive
+  - compliance_risk.control:read
+  - compliance_risk.control:create
+  - compliance_risk.control:update
+  - compliance_risk.control:delete
+  - compliance_risk.control:transition
+  - compliance_risk.test:read
+  - compliance_risk.test:schedule
+  - compliance_risk.test:execute
+  - compliance_risk.requirement:read
+  - compliance_risk.requirement:create
+  - compliance_risk.requirement:update
+  - compliance_risk.requirement:delete
+  - compliance_risk.requirement:assess
+  - compliance_risk.calendar:read
+  - compliance_risk.calendar:create
+  - compliance_risk.calendar:update
+  - compliance_risk.calendar:delete
+  - compliance_risk.calendar:transition
+  - compliance_risk.remediation:read
+  - compliance_risk.remediation:create
+  - compliance_risk.remediation:update
+  - compliance_risk.remediation:delete
+  - compliance_risk.remediation:transition
+  - compliance_risk.dashboard:read
+  - compliance_risk.configuration:read
+  - compliance_risk.configuration:manage
+  - compliance_risk.configuration:rollback
+  - compliance_risk.health:read
 
-# Health Checks
-health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
-    interval: 60
+sod_actions:
+  - compliance_risk.risk:delete
+  - compliance_risk.configuration:manage
+  - compliance_risk.configuration:rollback
+search_indexes: []
+ai_tools: []
+
+metadata:
+  category: core_business
+  api:
+    base_path: /api/v2/compliance-risk-management/
+    envelope: governed-v2
+  health_checks:
+    - name: liveness
+      path: /api/v2/compliance-risk-management/health/live/
+      required_permission: compliance_risk.health:read
+    - name: readiness
+      path: /api/v2/compliance-risk-management/health/ready/
+      required_permission: compliance_risk.health:read
+  integrations:
+    - name: workflow_automation
+      mode: soft
+      availability: configured_at_runtime
+      health_probe: real
+    - name: notifications
+      mode: soft
+      availability: configured_at_runtime
+      health_probe: real
+    - name: audit_trail
+      mode: soft
+      availability: configured_at_runtime
+      health_probe: real
+    - name: dms
+      mode: soft
+      availability: configured_at_runtime
+      health_probe: real
+      evidence_failure_policy: fail_closed
+    - name: reporting_analytics
+      mode: soft
+      availability: configured_at_runtime
+      health_probe: real
+  durable_jobs:
+    - compliance_risk.mark_calendar_overdue
+    - compliance_risk.mark_remediation_overdue
+    - compliance_risk.dispatch_reminders
+    - compliance_risk.generate_recurring_control_tests
+  extension_contract:
+    schema_version: 1
+    public_events:
+      - risk.created.v1
+      - risk.level_changed.v1
+      - control_test.completed.v1
+      - requirement.status_changed.v1
+      - remediation.overdue.v1
+    rule: Paid modules consume public services and versioned events without importing private models.
