@@ -20,13 +20,13 @@ from src.core.state_machine import (
     TransitionRecord,
     UnknownCommandError,
 )
+from src.core.tenancy.models import TenantScopedModel
 
 
-class StateMachineOrder(models.Model):
+class StateMachineOrder(TenantScopedModel):
     """Private real aggregate used to exercise locking and JSON persistence."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    tenant_id = models.UUIDField(db_index=True)
     status = models.CharField(max_length=24, default="draft")
     total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     transition_history = models.JSONField(default=list)

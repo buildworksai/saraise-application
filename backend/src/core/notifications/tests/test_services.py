@@ -101,29 +101,23 @@ class NotificationServiceTestCase(TestCase):
             device_type="web",
         )
 
-        # Mock firebase_admin and messaging (imported inside the function)
-        # Use patch.object to mock the imported modules
-        with patch("builtins.__import__") as mock_import:
-            # Mock the firebase_admin module
-            mock_firebase = MagicMock()
-            mock_messaging = MagicMock()
-            mock_credentials = MagicMock()
+        # Inject the lazily imported Firebase modules without replacing Python's
+        # process-wide import primitive.
+        mock_firebase = MagicMock()
+        mock_messaging = MagicMock()
+        mock_credentials = MagicMock()
+        mock_firebase.messaging = mock_messaging
+        mock_firebase.credentials = mock_credentials
 
-            def import_side_effect(name, *args, **kwargs):
-                if name == "firebase_admin":
-                    return mock_firebase
-                elif name == "firebase_admin.messaging":
-                    return mock_messaging
-                elif name == "firebase_admin.credentials":
-                    return mock_credentials
-                else:
-                    return __import__(name, *args, **kwargs)
-
-            mock_import.side_effect = import_side_effect
-
-            # Configure mocks
+        with patch.dict(
+            "sys.modules",
+            {
+                "firebase_admin": mock_firebase,
+                "firebase_admin.messaging": mock_messaging,
+                "firebase_admin.credentials": mock_credentials,
+            },
+        ):
             mock_firebase.get_app.side_effect = ValueError("Not initialized")
-            mock_credentials.Certificate.return_value = MagicMock()
             mock_firebase.initialize_app.return_value = MagicMock()
 
             mock_response = MagicMock()
@@ -134,8 +128,22 @@ class NotificationServiceTestCase(TestCase):
 
             NotificationService._send_push(notification)
 
-            # Verify messaging was called (if import was triggered)
-            # Note: This test verifies the function doesn't crash
+        mock_messaging.Notification.assert_called_once_with(
+            title="Test",
+            body="Test message",
+        )
+        mock_messaging.MulticastMessage.assert_called_once_with(
+            notification=mock_messaging.Notification.return_value,
+            data={"notification_id": str(notification.id), "type": "info"},
+            tokens=["test-fcm-token"],
+        )
+        mock_messaging.send_multicast.assert_called_once_with(
+            mock_messaging.MulticastMessage.return_value
+        )
+        notification.refresh_from_db()
+        self.assertEqual(notification.metadata["push_success_count"], 1)
+        self.assertEqual(notification.metadata["push_failure_count"], 0)
+        self.assertIn("push_sent_at", notification.metadata)
 
     def test_phone_number_regex_validation(self):
         """Test phone number regex validation."""
