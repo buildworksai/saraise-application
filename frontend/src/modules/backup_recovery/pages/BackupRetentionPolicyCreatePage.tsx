@@ -1,0 +1,1 @@
+export { BackupRetentionPolicyCreatePage } from "./ResourceFormPages";

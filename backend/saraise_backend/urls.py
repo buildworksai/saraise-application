@@ -48,7 +48,7 @@ urlpatterns = [
     path("api/v2/blockchain-traceability/", include("src.modules.blockchain_traceability.urls")),
     path("api/v1/billing-subscriptions/", include("src.modules.billing_subscriptions.urls")),
     path("api/v2/backup-disaster-recovery/", include("src.modules.backup_disaster_recovery.urls")),
-    path("api/v1/backup-recovery/", include("src.modules.backup_recovery.urls")),
+    path("api/v2/backup-recovery/", include("src.modules.backup_recovery.urls")),
     path("api/v1/performance-monitoring/", include("src.modules.performance_monitoring.urls")),
     path("api/v2/performance-monitoring/", include("src.modules.performance_monitoring.v2_urls")),
     path("api/v1/localization/", include("src.modules.localization.urls")),

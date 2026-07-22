@@ -1,0 +1,1 @@
+export { BackupArchiveDetailPage } from "./ResourceDetailPages";

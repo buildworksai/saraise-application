@@ -1,0 +1,250 @@
+"""Introduce the v2 catalog entities and nullable transition fields."""
+
+from __future__ import annotations
+
+import uuid
+
+import django.db.models.deletion
+from django.db import migrations, models
+from django.utils import timezone
+
+
+class Migration(migrations.Migration):
+    dependencies = [("backup_recovery", "0003_convert_legacy_uuid_columns")]
+
+    operations = [
+        # Drop legacy indexes before renaming their fields. SQLite rebuilds the
+        # table for AlterField and cannot render an index that still names the
+        # pre-rename column.
+        migrations.RemoveIndex("backupjob", "backup_reco_tenant__status_idx"),
+        migrations.RemoveIndex("backupjob", "backup_reco_tenant__type_idx"),
+        migrations.RemoveIndex("backupjob", "backup_reco_tenant__time_idx"),
+        migrations.RemoveIndex("backupjob", "backup_reco_status__time_idx"),
+        migrations.RemoveIndex("backupschedule", "backup_reco_tenant__active_idx"),
+        migrations.RemoveIndex("backupschedule", "backup_reco_tenant__freq_idx"),
+        migrations.RemoveIndex("backupschedule", "backup_reco_active__freq_idx"),
+        migrations.RemoveIndex("backupretentionpolicy", "backup_reco_tenant__active_pol_idx"),
+        migrations.RemoveIndex("backupretentionpolicy", "backup_reco_tenant__name_idx"),
+        migrations.RemoveIndex("backuparchive", "backup_reco_tenant__archived_idx"),
+        migrations.RemoveIndex("backuparchive", "backup_reco_job__archived_idx"),
+        migrations.CreateModel(
+            name="BackupStorageTarget",
+            fields=[
+                ("tenant_id", models.UUIDField(db_index=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("id", models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, serialize=False)),
+                ("created_by", models.CharField(max_length=255)),
+                ("updated_by", models.CharField(max_length=255, blank=True)),
+                ("is_deleted", models.BooleanField(default=False, db_index=True)),
+                ("deleted_at", models.DateTimeField(null=True, blank=True)),
+                ("name", models.CharField(max_length=120)),
+                ("adapter_key", models.CharField(max_length=120)),
+                ("locator_prefix_ref", models.CharField(max_length=1024)),
+                ("configuration_ref", models.CharField(max_length=255)),
+                ("encryption_key_ref", models.CharField(max_length=255, blank=True)),
+                ("is_default", models.BooleanField(default=False)),
+                ("is_active", models.BooleanField(default=True, db_index=True)),
+            ],
+            options={"db_table": "backup_recovery_storage_targets"},
+        ),
+        migrations.CreateModel(
+            name="BackupVerification",
+            fields=[
+                ("tenant_id", models.UUIDField(db_index=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                ("id", models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False, serialize=False)),
+                ("created_by", models.CharField(max_length=255)),
+                ("updated_by", models.CharField(max_length=255, blank=True)),
+                ("async_job_id", models.UUIDField(null=True, blank=True, unique=True)),
+                (
+                    "status",
+                    models.CharField(
+                        max_length=20,
+                        choices=[
+                            ("pending", "Pending"),
+                            ("running", "Running"),
+                            ("passed", "Passed"),
+                            ("failed", "Failed"),
+                            ("cancelled", "Cancelled"),
+                        ],
+                        default="pending",
+                    ),
+                ),
+                ("idempotency_key", models.CharField(max_length=128)),
+                ("requested_at", models.DateTimeField(default=timezone.now)),
+                ("started_at", models.DateTimeField(null=True, blank=True)),
+                ("completed_at", models.DateTimeField(null=True, blank=True)),
+                ("checksum_matches", models.BooleanField(null=True, blank=True)),
+                ("artifact_available", models.BooleanField(null=True, blank=True)),
+                ("encryption_metadata_valid", models.BooleanField(null=True, blank=True)),
+                ("provider_acknowledged", models.BooleanField(null=True, blank=True)),
+                ("evidence", models.JSONField(default=dict, blank=True)),
+                ("error_code", models.CharField(max_length=64, blank=True)),
+                ("error_message", models.TextField(blank=True)),
+                ("transition_history", models.JSONField(default=list, blank=True)),
+            ],
+            options={"db_table": "backup_recovery_verifications"},
+        ),
+        migrations.RenameField("backupjob", "start_time", "started_at"),
+        migrations.RenameField("backupjob", "end_time", "completed_at"),
+        migrations.RenameField("backupjob", "backup_size_bytes", "size_bytes"),
+        migrations.RenameField("backupretentionpolicy", "policy_name", "name"),
+        migrations.RenameField("backuparchive", "archive_location", "artifact_locator_ref"),
+        migrations.RenameField("backuparchive", "archive_size_bytes", "size_bytes"),
+        migrations.AlterField(
+            model_name="backuparchive",
+            name="backup_job",
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="archives",
+                to="backup_recovery.backupjob",
+            ),
+        ),
+        migrations.AlterField("backuparchive", "archived_at", models.DateTimeField(default=timezone.now)),
+        migrations.AlterField("backupretentionpolicy", "name", models.CharField(max_length=120)),
+        migrations.AlterField(
+            "backupretentionpolicy", "archive_after_days", models.PositiveIntegerField(null=True, blank=True)
+        ),
+        migrations.AlterField("backupretentionpolicy", "retention_days", models.PositiveIntegerField()),
+        migrations.AlterField("backupschedule", "retention_days", models.PositiveIntegerField(default=30)),
+        migrations.AlterField("backupjob", "created_by", models.CharField(max_length=255)),
+        migrations.AlterField("backupschedule", "created_by", models.CharField(max_length=255)),
+        migrations.AlterField("backupretentionpolicy", "created_by", models.CharField(max_length=255)),
+        migrations.AlterField("backuparchive", "created_by", models.CharField(max_length=255)),
+        migrations.AddField("backupjob", "updated_by", models.CharField(max_length=255, blank=True)),
+        migrations.AddField("backupschedule", "updated_by", models.CharField(max_length=255, blank=True)),
+        migrations.AddField("backupretentionpolicy", "updated_by", models.CharField(max_length=255, blank=True)),
+        migrations.AddField("backuparchive", "updated_by", models.CharField(max_length=255, blank=True)),
+        migrations.AddField("backupjob", "is_deleted", models.BooleanField(default=False, db_index=True)),
+        migrations.AddField("backupjob", "deleted_at", models.DateTimeField(null=True, blank=True)),
+        migrations.AddField("backupschedule", "is_deleted", models.BooleanField(default=False, db_index=True)),
+        migrations.AddField("backupschedule", "deleted_at", models.DateTimeField(null=True, blank=True)),
+        migrations.AddField("backupretentionpolicy", "is_deleted", models.BooleanField(default=False, db_index=True)),
+        migrations.AddField("backupretentionpolicy", "deleted_at", models.DateTimeField(null=True, blank=True)),
+        migrations.AddField("backupretentionpolicy", "keep_last_successful", models.PositiveIntegerField(default=3)),
+        migrations.AddField("backupschedule", "name", models.CharField(max_length=120, null=True)),
+        migrations.AddField("backupschedule", "scope_type", models.CharField(max_length=20, null=True)),
+        migrations.AddField("backupschedule", "scope_ref", models.CharField(max_length=255, null=True)),
+        migrations.AddField("backupschedule", "day_of_week", models.PositiveSmallIntegerField(null=True, blank=True)),
+        migrations.AddField("backupschedule", "day_of_month", models.PositiveSmallIntegerField(null=True, blank=True)),
+        migrations.AddField("backupschedule", "timezone", models.CharField(max_length=64, null=True)),
+        migrations.AddField(
+            "backupschedule", "next_run_at", models.DateTimeField(null=True, blank=True, db_index=True)
+        ),
+        migrations.AddField("backupschedule", "last_run_at", models.DateTimeField(null=True, blank=True)),
+        migrations.AddField(
+            "backupschedule",
+            "storage_target",
+            models.ForeignKey(
+                to="backup_recovery.backupstoragetarget",
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="schedules",
+                null=True,
+            ),
+        ),
+        migrations.AddField(
+            "backupschedule",
+            "retention_policy",
+            models.ForeignKey(
+                to="backup_recovery.backupretentionpolicy",
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="schedules",
+                null=True,
+            ),
+        ),
+        migrations.AddField(
+            "backupjob",
+            "schedule",
+            models.ForeignKey(
+                to="backup_recovery.backupschedule",
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="backup_jobs",
+                null=True,
+                blank=True,
+            ),
+        ),
+        migrations.AddField(
+            "backupjob",
+            "storage_target",
+            models.ForeignKey(
+                to="backup_recovery.backupstoragetarget",
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="backup_jobs",
+                null=True,
+            ),
+        ),
+        migrations.AddField(
+            "backupjob",
+            "retention_policy",
+            models.ForeignKey(
+                to="backup_recovery.backupretentionpolicy",
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="backup_jobs",
+                null=True,
+                blank=True,
+            ),
+        ),
+        migrations.AddField(
+            "backupjob",
+            "retry_of",
+            models.ForeignKey(
+                to="backup_recovery.backupjob",
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="retries",
+                null=True,
+                blank=True,
+            ),
+        ),
+        migrations.AddField(
+            "backupjob",
+            "base_job",
+            models.ForeignKey(
+                to="backup_recovery.backupjob",
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="dependent_backups",
+                null=True,
+                blank=True,
+            ),
+        ),
+        migrations.AddField("backupjob", "async_job_id", models.UUIDField(null=True, blank=True, unique=True)),
+        migrations.AddField("backupjob", "scope_type", models.CharField(max_length=20, null=True)),
+        migrations.AddField("backupjob", "scope_ref", models.CharField(max_length=255, null=True)),
+        migrations.AddField("backupjob", "idempotency_key", models.CharField(max_length=128, null=True)),
+        migrations.AddField("backupjob", "requested_at", models.DateTimeField(default=timezone.now)),
+        migrations.AddField("backupjob", "data_cutoff_at", models.DateTimeField(null=True, blank=True)),
+        migrations.AddField("backupjob", "error_code", models.CharField(max_length=64, blank=True)),
+        migrations.AddField("backupjob", "transition_history", models.JSONField(default=list, blank=True)),
+        migrations.AddField(
+            "backuparchive",
+            "lifecycle",
+            models.CharField(max_length=20, null=True),
+        ),
+        migrations.AddField("backuparchive", "adapter_key", models.CharField(max_length=120, null=True)),
+        migrations.AlterField("backuparchive", "artifact_locator_ref", models.CharField(max_length=1024)),
+        migrations.AddField("backuparchive", "encryption_key_ref", models.CharField(max_length=255, blank=True)),
+        migrations.AddField("backuparchive", "checksum_algorithm", models.CharField(max_length=20, null=True)),
+        migrations.AddField("backuparchive", "checksum_digest", models.CharField(max_length=64, null=True)),
+        migrations.AddField("backuparchive", "provider_acknowledgement", models.CharField(max_length=255, null=True)),
+        migrations.AddField("backuparchive", "data_cutoff_at", models.DateTimeField(null=True)),
+        migrations.AddField("backuparchive", "captured_at", models.DateTimeField(null=True)),
+        migrations.AddField("backuparchive", "expires_at", models.DateTimeField(null=True, blank=True)),
+        migrations.AddField("backuparchive", "integrity_status", models.CharField(max_length=20, null=True)),
+        migrations.AddField("backuparchive", "last_verified_at", models.DateTimeField(null=True, blank=True)),
+        migrations.AddField("backuparchive", "purged_at", models.DateTimeField(null=True, blank=True)),
+        migrations.AddField("backuparchive", "purge_async_job_id", models.UUIDField(null=True, blank=True, unique=True)),
+        migrations.AddField("backuparchive", "purge_idempotency_key", models.CharField(max_length=128, blank=True)),
+        migrations.AddField("backuparchive", "purge_attempt_count", models.PositiveIntegerField(default=0)),
+        migrations.AddField("backuparchive", "last_purge_attempt_at", models.DateTimeField(null=True, blank=True)),
+        migrations.AddField("backuparchive", "purge_error_code", models.CharField(max_length=64, blank=True)),
+        migrations.AddField(
+            "backupverification",
+            "archive",
+            models.ForeignKey(
+                to="backup_recovery.backuparchive",
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="verifications",
+            ),
+        ),
+    ]

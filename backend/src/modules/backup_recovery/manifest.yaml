@@ -1,36 +1,64 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: backup-recovery
-version: 1.0.0
-description: Extended backup capabilities - incremental backups, retention policies, archive management
+version: 2.0.0
+description: Provider-neutral backup capture, scheduling, retention, and immutable artifact catalog
 type: foundation
-lifecycle: platform
-dependencies:
-  - backup-disaster-recovery >=1.0
+lifecycle: core
+dependencies: []
+required_capabilities:
+  - core.tenancy
+  - core.api.v2
+  - core.access
+  - core.async-jobs
+  - core.observability
+  - core.resilience
+  - core.state-machine
+  - core.navigation
+provided_capabilities:
+  - backup-recovery.catalog
+  - backup-recovery.capture
+  - backup-recovery.scheduling
+  - backup-recovery.retention
+  - backup-recovery.integrity-verification
+  - port.backup-catalog:default
+  - adapter.backup-capture:local-filesystem
+async_commands:
+  - backup_recovery.capture
+  - backup_recovery.verify
+  - backup_recovery.retention
+  - backup_recovery.schedule_due
+extension_registries:
+  - backup-catalog
+  - backup-capture-adapter
+  - backup-scope-provider
+  - retention-policy-preset
+  - provider-health-probe
 permissions:
-  - backup.job:create
-  - backup.job:read
-  - backup.job:update
-  - backup.job:delete
-  - backup.schedule:create
-  - backup.schedule:read
-  - backup.schedule:update
-  - backup.schedule:delete
-  - backup.retention:create
-  - backup.retention:read
-  - backup.retention:update
-  - backup.retention:delete
-  - backup.archive:read
-  - backup.restore:execute
-sod_actions:
-  - backup.job:create
-  - backup.restore:execute
+  - backup_recovery.job:create
+  - backup_recovery.job:read
+  - backup_recovery.job:update
+  - backup_recovery.job:delete
+  - backup_recovery.job:cancel
+  - backup_recovery.job:retry
+  - backup_recovery.schedule:create
+  - backup_recovery.schedule:read
+  - backup_recovery.schedule:update
+  - backup_recovery.schedule:delete
+  - backup_recovery.schedule:activate
+  - backup_recovery.schedule:execute
+  - backup_recovery.retention:create
+  - backup_recovery.retention:read
+  - backup_recovery.retention:update
+  - backup_recovery.retention:delete
+  - backup_recovery.retention:activate
+  - backup_recovery.storage_target:create
+  - backup_recovery.storage_target:read
+  - backup_recovery.storage_target:update
+  - backup_recovery.storage_target:delete
+  - backup_recovery.storage_target:probe
+  - backup_recovery.archive:read
+  - backup_recovery.archive:verify
+  - backup_recovery.health:read
 search_indexes:
   - backup_jobs
   - backup_schedules
   - backup_archives
-ai_tools:
-  - create_backup_job
-  - schedule_backup
-  - configure_retention_policy

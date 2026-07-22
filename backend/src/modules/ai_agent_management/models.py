@@ -61,6 +61,11 @@ class AITenantModel(TenantScopedModel, TimestampedModel):
         super().save(*args, **kwargs)
 
 
+# Backward-compatible public name used by the module's sibling model files and
+# referenced while importing the immutable initial migration.
+TenantBaseModel = AITenantModel
+
+
 class AppendOnlyQuerySet(models.QuerySet[models.Model]):
     """Prevent bulk APIs from bypassing evidence immutability."""
 

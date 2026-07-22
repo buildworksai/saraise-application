@@ -1,0 +1,1 @@
+export { BackupStorageTargetEditPage } from "./ResourceFormPages";
