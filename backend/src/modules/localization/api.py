@@ -3,28 +3,113 @@ DRF ViewSets for Localization module.
 Provides REST API endpoints for all models.
 """
 
-from rest_framework import viewsets
+from django.conf import settings
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
+from rest_framework.response import Response
 
 from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
 
-from .models import (
-    CurrencyConfig,
-    Language,
-    LocaleConfig,
-    RegionalSettings,
-    Translation,
-)
+from .models import CurrencyConfig, Language, LocaleConfig, LocalizationResource, RegionalSettings, Translation
 from .serializers import (
     CurrencyConfigSerializer,
     LanguageSerializer,
     LocaleConfigSerializer,
+    LocalizationResourceSerializer,
     RegionalSettingsSerializer,
     TranslationSerializer,
 )
-from .services import TranslationService
+from .services import LocalizationService, TranslationService
+
+
+class LocalizationResourceViewSet(viewsets.ModelViewSet):
+    """Tenant-isolated CRUD endpoint for localization resources."""
+
+    serializer_class = LocalizationResourceSerializer
+    permission_classes = [IsAuthenticated]
+    authentication_classes = [RelaxedCsrfSessionAuthentication]
+
+    def get_permissions(self) -> list[BasePermission]:
+        """Allow an empty anonymous list only in explicit development mode."""
+        if self.action == "list" and settings.SARAISE_MODE == "development":
+            return [AllowAny()]
+        return super().get_permissions()
+
+    def get_queryset(self):
+        """Limit every query to the authenticated user's tenant."""
+        tenant_id = get_user_tenant_id(self.request.user)
+        if not tenant_id:
+            return LocalizationResource.objects.none()
+        return LocalizationResource.objects.filter(tenant_id=tenant_id)
+
+    def create(self, request, *args, **kwargs):
+        """Validate transport input and delegate creation to the service."""
+        tenant_id = get_user_tenant_id(request.user)
+        if not tenant_id:
+            raise PermissionDenied("User must belong to a tenant")
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        resource = LocalizationService().create_resource(
+            tenant_id=tenant_id,
+            created_by=str(request.user.id),
+            **serializer.validated_data,
+        )
+        response_serializer = self.get_serializer(resource)
+        headers = self.get_success_headers(response_serializer.data)
+        return Response(
+            response_serializer.data,
+            status=status.HTTP_201_CREATED,
+            headers=headers,
+        )
+
+    def update(self, request, *args, **kwargs):
+        """Validate transport input and delegate updates to the service."""
+        partial = kwargs.pop("partial", False)
+        resource = self.get_object()
+        serializer = self.get_serializer(resource, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        updated = LocalizationService().update_resource(
+            resource.id,
+            get_user_tenant_id(request.user),
+            **serializer.validated_data,
+        )
+        if updated is None:
+            raise PermissionDenied("Resource is outside the tenant boundary")
+        return Response(self.get_serializer(updated).data)
+
+    def destroy(self, request, *args, **kwargs):
+        """Delegate tenant-scoped deletion to the service."""
+        resource = self.get_object()
+        deleted = LocalizationService().delete_resource(
+            resource.id,
+            get_user_tenant_id(request.user),
+        )
+        if not deleted:
+            raise PermissionDenied("Resource is outside the tenant boundary")
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["post"])
+    def activate(self, request, pk=None):
+        """Activate the selected tenant-owned resource."""
+        resource = self.get_object()
+        LocalizationService().activate_resource(
+            resource.id,
+            get_user_tenant_id(request.user),
+        )
+        return Response({"status": "activated"}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def deactivate(self, request, pk=None):
+        """Deactivate the selected tenant-owned resource."""
+        resource = self.get_object()
+        LocalizationService().deactivate_resource(
+            resource.id,
+            get_user_tenant_id(request.user),
+        )
+        return Response({"status": "deactivated"}, status=status.HTTP_200_OK)
 
 
 class LanguageViewSet(viewsets.ReadOnlyModelViewSet):

@@ -7,14 +7,109 @@ High-level service layer for Localization business logic.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from django.core.cache import cache
 from django.db import transaction
 
-from .models import Language, LocaleConfig, Translation
+from .models import Language, LocaleConfig, LocalizationResource, Translation
 
 logger = logging.getLogger(__name__)
+
+
+class LocalizationService:
+    """Service boundary for tenant-scoped localization resources."""
+
+    _UPDATABLE_FIELDS = frozenset({"name", "description", "config", "is_active"})
+
+    def create_resource(
+        self,
+        tenant_id: str,
+        name: str,
+        description: str = "",
+        config: Optional[dict[str, Any]] = None,
+        created_by: str = "",
+    ) -> LocalizationResource:
+        """Create a resource inside an explicit tenant boundary."""
+        with transaction.atomic():
+            return LocalizationResource.objects.create(
+                tenant_id=tenant_id,
+                name=name,
+                description=description,
+                config=config or {},
+                created_by=created_by,
+            )
+
+    def get_resource(
+        self,
+        resource_id: str,
+        tenant_id: str,
+    ) -> Optional[LocalizationResource]:
+        """Return a resource only when it belongs to the requested tenant."""
+        return LocalizationResource.objects.filter(
+            id=resource_id,
+            tenant_id=tenant_id,
+        ).first()
+
+    def list_resources(
+        self,
+        tenant_id: str,
+        is_active: Optional[bool] = None,
+    ) -> list[LocalizationResource]:
+        """List resources belonging to one tenant."""
+        queryset = LocalizationResource.objects.filter(tenant_id=tenant_id)
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active)
+        return list(queryset)
+
+    def update_resource(
+        self,
+        resource_id: str,
+        tenant_id: str,
+        **updates: Any,
+    ) -> Optional[LocalizationResource]:
+        """Update allowed fields without permitting tenant reassignment."""
+        accepted_updates = {field: value for field, value in updates.items() if field in self._UPDATABLE_FIELDS}
+        with transaction.atomic():
+            resource = (
+                LocalizationResource.objects.select_for_update()
+                .filter(
+                    id=resource_id,
+                    tenant_id=tenant_id,
+                )
+                .first()
+            )
+            if resource is None:
+                return None
+            for field, value in accepted_updates.items():
+                setattr(resource, field, value)
+            resource.save()
+            return resource
+
+    def delete_resource(self, resource_id: str, tenant_id: str) -> bool:
+        """Delete only a resource belonging to the requested tenant."""
+        with transaction.atomic():
+            deleted_count, _ = LocalizationResource.objects.filter(
+                id=resource_id,
+                tenant_id=tenant_id,
+            ).delete()
+        return deleted_count == 1
+
+    def activate_resource(
+        self,
+        resource_id: str,
+        tenant_id: str,
+    ) -> Optional[LocalizationResource]:
+        """Activate a tenant-owned resource."""
+        return self.update_resource(resource_id, tenant_id, is_active=True)
+
+    def deactivate_resource(
+        self,
+        resource_id: str,
+        tenant_id: str,
+    ) -> Optional[LocalizationResource]:
+        """Deactivate a tenant-owned resource."""
+        return self.update_resource(resource_id, tenant_id, is_active=False)
 
 
 class TranslationService:
