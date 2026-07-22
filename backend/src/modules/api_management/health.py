@@ -1,58 +1,58 @@
-"""
-ApiManagement Health Checks
+"""Sanitized tenant-scoped dependency probes."""
 
-Rule: SARAISE-17007 (Health checks required for all modules)
-"""
+from __future__ import annotations
+
+import logging
+import uuid
+from typing import Any
 
 from django.core.cache import cache
 from django.db import connection
-from django.http import JsonResponse
-from django.views.decorators.http import require_http_methods
 
 from .models import ApiManagementResource
 
+logger = logging.getLogger(__name__)
 
-@require_http_methods(["GET"])
-def health_check(request):
-    """
-    Health check endpoint for ApiManagement module.
 
-    Returns:
-    - 200 OK if healthy
-    - 503 Service Unavailable if unhealthy
-    """
-    health_status = {"status": "healthy", "module": "api-management", "checks": {}}
+def module_health(*, tenant_id: uuid.UUID, cache_ttl_seconds: int) -> tuple[dict[str, Any], int]:
+    """Return operational status without counts or exception disclosure."""
 
-    # Check database connectivity
+    checks: dict[str, str] = {}
+    overall = "healthy"
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
-        health_status["checks"]["database"] = "ok"
-    except Exception as e:
-        health_status["status"] = "unhealthy"
-        health_status["checks"]["database"] = f"error: {str(e)}"
+        checks["database"] = "ok"
+    except Exception:
+        logger.exception("api_management database health probe failed", extra={"tenant_id": str(tenant_id)})
+        checks["database"] = "dependency_unavailable"
+        overall = "unhealthy"
 
-    # Check cache (Redis) connectivity
     try:
-        cache.set("health_check_api_management", "ok", 10)
-        result = cache.get("health_check_api_management")
-        if result == "ok":
-            health_status["checks"]["cache"] = "ok"
+        key = f"health_check_api_management:{tenant_id}"
+        cache.set(key, "ok", cache_ttl_seconds)
+        if cache.get(key) == "ok":
+            checks["cache"] = "ok"
         else:
-            health_status["status"] = "degraded"
-            health_status["checks"]["cache"] = "not responding correctly"
-    except Exception as e:
-        health_status["status"] = "unhealthy"
-        health_status["checks"]["cache"] = f"error: {str(e)}"
+            checks["cache"] = "invalid_response"
+            overall = "degraded" if overall == "healthy" else overall
+    except Exception:
+        logger.exception("api_management cache health probe failed", extra={"tenant_id": str(tenant_id)})
+        checks["cache"] = "dependency_unavailable"
+        overall = "unhealthy"
 
-    # Check module-specific model accessibility
     try:
-        # Verify we can query the primary model
-        count = ApiManagementResource.objects.count()
-        health_status["checks"]["module_model"] = {"status": "ok", "total_count": count}
-    except Exception as e:
-        health_status["status"] = "unhealthy"
-        health_status["checks"]["module_model"] = f"error: {str(e)}"
+        ApiManagementResource.objects.filter(tenant_id=tenant_id).exists()
+        checks["module_model"] = "ok"
+    except Exception:
+        logger.exception("api_management model health probe failed", extra={"tenant_id": str(tenant_id)})
+        checks["module_model"] = "dependency_unavailable"
+        overall = "unhealthy"
 
-    status_code = 200 if health_status["status"] == "healthy" else 503
-    return JsonResponse(health_status, status=status_code)
+    return (
+        {"status": overall, "module": "api-management", "checks": checks},
+        200 if overall == "healthy" else 503,
+    )
+
+
+__all__ = ["module_health"]

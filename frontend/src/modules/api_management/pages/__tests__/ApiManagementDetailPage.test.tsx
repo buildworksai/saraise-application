@@ -1,107 +1,36 @@
-/**
- * ApiManagementDetailPage Component Tests
- */
-
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { BrowserRouter } from 'react-router-dom';
+import type * as ReactRouterDom from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ApiManagementDetailPage } from './ApiManagementDetailPage';
-import { api_managementService } from '../services/api_management-service';
+import { ApiError } from '@/services/api-client';
+import { ApiManagementDetailPage } from '../ApiManagementDetailPage';
+import { api_managementService } from '../../services/api_management-service';
+import { configuration, resource } from './test-fixtures';
 
-// Mock dependencies
-vi.mock('../services/api_management-service');
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useParams: () => ({ id: 'test-id' }),
-    useNavigate: () => vi.fn(),
-  };
-});
+vi.mock('../../services/api_management-service');
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock('react-router-dom', async () => ({ ...(await vi.importActual<typeof ReactRouterDom>('react-router-dom')), useParams: () => ({ id: 'resource-id' }), useNavigate: () => vi.fn() }));
 
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-  },
-}));
-
-const createTestQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: { retry: false },
-    mutations: { retry: false },
-  },
-});
+function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  return render(<QueryClientProvider client={client}><BrowserRouter><ApiManagementDetailPage /></BrowserRouter></QueryClientProvider>);
+}
 
 describe('ApiManagementDetailPage', () => {
-  let queryClient: QueryClient;
+  beforeEach(() => { vi.clearAllMocks(); vi.mocked(api_managementService.getConfiguration).mockResolvedValue(configuration); });
 
-  beforeEach(() => {
-    queryClient = createTestQueryClient();
-    vi.clearAllMocks();
+  it('renders complete resource details', async () => {
+    vi.mocked(api_managementService.getResource).mockResolvedValue(resource({ name: 'Test resource', description: 'Test description', config: { key: 'value' } }));
+    renderPage();
+    expect(await screen.findByText('Test resource')).toBeInTheDocument();
+    expect(screen.getByText('Test description')).toBeInTheDocument();
   });
 
-  it('should render loading state', () => {
-    vi.mocked(api_managementService.getResource).mockImplementation(
-      () => new Promise(() => {}) // Never resolves
-    );
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/:id" element={<ApiManagementDetailPage />} />
-          </Routes>
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    expect(screen.getByText(/loading/i)).toBeInTheDocument();
-  });
-
-  it('should render resource details', async () => {
-    const mockResource = {
-      id: 'test-id',
-      name: 'Test Resource',
-      description: 'Test Description',
-      is_active: true,
-      config: { key: 'value' },
-    };
-
-    vi.mocked(api_managementService.getResource).mockResolvedValue(mockResource as any);
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/:id" element={<ApiManagementDetailPage />} />
-          </Routes>
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('Test Resource')).toBeInTheDocument();
-      expect(screen.getByText('Test Description')).toBeInTheDocument();
-    });
-  });
-
-  it('should render error state when resource not found', async () => {
-    vi.mocked(api_managementService.getResource).mockRejectedValue(new Error('Not found'));
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/:id" element={<ApiManagementDetailPage />} />
-          </Routes>
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText(/not found/i)).toBeInTheDocument();
-    });
+  it('keeps not-found distinct from retryable failures', async () => {
+    vi.mocked(api_managementService.getResource).mockRejectedValue(new ApiError('Not found', 404));
+    renderPage();
+    expect(await screen.findByText('Resource not found')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
   });
 });

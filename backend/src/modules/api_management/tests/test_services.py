@@ -1,149 +1,218 @@
-"""
-Service Unit Tests for ApiManagement module.
+"""Service proof for validation, audit, idempotency and reversibility."""
 
-Tests business logic in services layer.
-"""
+import uuid
 
 import pytest
 
-from src.modules.api_management.models import TenantBaseModel
-from src.modules.api_management.services import ApiManagementService
+from src.modules.api_management.models import ApiManagementAuditRecord, TenantBaseModel
+from src.modules.api_management.services import (
+    ApiManagementService,
+    ConfigurationValidationError,
+)
+
+
+@pytest.fixture
+def context():
+    return {
+        "tenant_id": uuid.uuid4(),
+        "actor_id": "user-123",
+        "correlation_id": "req_service_test",
+    }
+
+
+def mutation(context):
+    return {
+        "actor_id": context["actor_id"],
+        "correlation_id": context["correlation_id"],
+        "idempotency_key": uuid.uuid4(),
+    }
 
 
 @pytest.mark.django_db
 class TestApiManagementService:
-    """Test ApiManagementService business logic."""
-
-    def test_create_resource(self, db):
-        """Test creating a resource via service."""
+    def test_create_is_idempotent_and_audited(self, context):
         service = ApiManagementService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            description="Test description",
-            created_by="user-123",
+        key = uuid.uuid4()
+        first = service.create_resource(
+            context["tenant_id"],
+            "Test Resource",
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+            idempotency_key=key,
         )
-        assert resource.id is not None
-        assert resource.name == "Test Resource"
-        assert resource.tenant_id == "tenant-123"
+        replay = service.create_resource(
+            context["tenant_id"],
+            "Test Resource",
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+            idempotency_key=key,
+        )
+        assert replay.id == first.id
+        assert TenantBaseModel.objects.filter(tenant_id=context["tenant_id"]).count() == 1
+        assert ApiManagementAuditRecord.objects.filter(target_id=first.id, action="create").count() == 1
 
-    def test_get_resource(self, db):
-        """Test getting a resource by ID."""
+    def test_get_resource_is_tenant_isolated(self, context):
         service = ApiManagementService()
-        created = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
+        created = service.create_resource(context["tenant_id"], "Test", **mutation(context))
+        assert service.get_resource(created.id, context["tenant_id"]) == created
+        assert service.get_resource(created.id, uuid.uuid4()) is None
 
-        retrieved = service.get_resource(created.id, "tenant-123")
-        assert retrieved is not None
-        assert retrieved.id == created.id
-        assert retrieved.name == "Test Resource"
-
-    def test_get_resource_wrong_tenant(self, db):
-        """Test that getting resource from wrong tenant returns None."""
+    def test_query_uses_configured_search_and_ordering(self, context):
         service = ApiManagementService()
-        created = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
+        service.create_resource(context["tenant_id"], "Zulu", **mutation(context))
+        service.create_resource(context["tenant_id"], "Alpha", **mutation(context))
+        result = list(
+            service.query_resources(
+                context["tenant_id"],
+                {"search": "l", "ordering": "name"},
+                actor_id=context["actor_id"],
+                correlation_id=context["correlation_id"],
+            )
         )
+        assert [item.name for item in result] == ["Alpha", "Zulu"]
 
-        retrieved = service.get_resource(created.id, "tenant-456")
-        assert retrieved is None
-
-    def test_list_resources(self, db):
-        """Test listing resources for tenant."""
+    def test_update_rejects_system_fields(self, context):
         service = ApiManagementService()
-        service.create_resource(
-            tenant_id="tenant-123",
-            name="Resource 1",
-            created_by="user-123",
-        )
-        service.create_resource(
-            tenant_id="tenant-123",
-            name="Resource 2",
-            created_by="user-123",
-        )
-        service.create_resource(
-            tenant_id="tenant-456",
-            name="Resource 3",
-            created_by="user-456",
-        )
+        resource = service.create_resource(context["tenant_id"], "Original", **mutation(context))
+        with pytest.raises(ValueError):
+            service.update_resource(
+                resource.id,
+                context["tenant_id"],
+                updates={"is_active": False},
+                **mutation(context),
+            )
 
-        resources = service.list_resources("tenant-123", is_active=True)
-        assert len(resources) == 2
-        assert all(r.tenant_id == "tenant-123" for r in resources)
-
-    def test_update_resource(self, db):
-        """Test updating a resource."""
+    def test_update_success_and_missing_resource_paths(self, context):
         service = ApiManagementService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Original Name",
-            created_by="user-123",
-        )
-
+        resource = service.create_resource(context["tenant_id"], "Original", **mutation(context))
         updated = service.update_resource(
             resource.id,
-            "tenant-123",
-            name="Updated Name",
-            description="Updated description",
+            context["tenant_id"],
+            updates={"name": "Updated", "description": "Updated description"},
+            **mutation(context),
         )
         assert updated is not None
-        assert updated.name == "Updated Name"
-        assert updated.description == "Updated description"
-
-    def test_delete_resource(self, db):
-        """Test deleting a resource."""
-        service = ApiManagementService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="To Delete",
-            created_by="user-123",
+        assert updated.name == "Updated"
+        assert (
+            service.update_resource(
+                uuid.uuid4(), context["tenant_id"], updates={"name": "Missing"}, **mutation(context)
+            )
+            is None
         )
+        assert service.delete_resource(uuid.uuid4(), context["tenant_id"], **mutation(context)) is False
 
-        result = service.delete_resource(resource.id, "tenant-123")
-        assert result is True
-        assert not TenantBaseModel.objects.filter(id=resource.id).exists()
-
-    def test_update_missing_resource(self, db):
-        """Test updating a missing tenant resource returns no result."""
+    def test_activate_and_deactivate_follow_configuration(self, context):
         service = ApiManagementService()
-
-        assert service.update_resource("missing-resource", "tenant-123", name="Updated") is None
-
-    def test_delete_missing_resource(self, db):
-        """Test deleting a missing tenant resource reports no deletion."""
-        service = ApiManagementService()
-
-        assert service.delete_resource("missing-resource", "tenant-123") is False
-
-    def test_activate_resource(self, db):
-        """Test activating a resource."""
-        service = ApiManagementService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
+        resource = service.create_resource(context["tenant_id"], "Transitions", **mutation(context))
+        deactivated = service.deactivate_resource(resource.id, context["tenant_id"], **mutation(context))
+        assert deactivated is not None and deactivated.is_active is False
+        activated = service.activate_resource(resource.id, context["tenant_id"], **mutation(context))
+        assert activated is not None and activated.is_active is True
+        configuration = service.get_configuration(
+            context["tenant_id"], actor_id=context["actor_id"], correlation_id=context["correlation_id"]
         )
-        resource.is_active = False
-        resource.save()
+        document = dict(configuration.document)
+        document["activation_enabled"] = False
+        service.update_configuration(context["tenant_id"], document, **mutation(context))
+        service.deactivate_resource(resource.id, context["tenant_id"], **mutation(context))
+        with pytest.raises(PermissionError):
+            service.activate_resource(resource.id, context["tenant_id"], **mutation(context))
 
-        activated = service.activate_resource(resource.id, "tenant-123")
-        assert activated is not None
-        assert activated.is_active is True
-
-    def test_deactivate_resource(self, db):
-        """Test deactivating a resource."""
+    def test_archive_and_restore_are_reversible(self, context):
         service = ApiManagementService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
+        resource = service.create_resource(context["tenant_id"], "To archive", **mutation(context))
+        assert service.delete_resource(resource.id, context["tenant_id"], **mutation(context)) is True
+        assert service.get_resource(resource.id, context["tenant_id"]) is None
+        restored = service.restore_resource(resource.id, context["tenant_id"], **mutation(context))
+        assert restored is not None
+        assert restored.deleted_at is None
 
-        deactivated = service.deactivate_resource(resource.id, "tenant-123")
-        assert deactivated is not None
-        assert deactivated.is_active is False
+    def test_configuration_version_preview_rollback_and_export(self, context):
+        service = ApiManagementService()
+        current = service.get_configuration(
+            context["tenant_id"],
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+        )
+        changed = dict(current.document)
+        changed["resource_name_max_length"] = 100
+        preview = service.preview_configuration(context["tenant_id"], changed)
+        assert preview["valid"] is True
+        assert preview["changes"] == [{"field": "resource_name_max_length", "before": 255, "after": 100}]
+        updated = service.update_configuration(context["tenant_id"], changed, **mutation(context))
+        assert updated.version == 2
+        rolled_back = service.rollback_configuration(context["tenant_id"], 1, **mutation(context))
+        assert rolled_back.version == 3
+        assert rolled_back.document["resource_name_max_length"] == 255
+        exported = service.export_configuration(
+            context["tenant_id"],
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+        )
+        assert exported["module"] == "api_management"
+        imported_document = dict(rolled_back.document)
+        imported_document["resource_name_min_length"] = 2
+        imported = service.import_configuration(
+            context["tenant_id"], {"module": "api_management", "document": imported_document}, **mutation(context)
+        )
+        assert imported.version == 4
+        assert imported.document["resource_name_min_length"] == 2
+
+    def test_configuration_invalid_dependencies_are_unsavable(self, context):
+        service = ApiManagementService()
+        document = service.default_configuration()
+        document["page_size"] = document["max_page_size"] + 1
+        with pytest.raises(ConfigurationValidationError):
+            service.update_configuration(context["tenant_id"], document, **mutation(context))
+
+    def test_feature_flag_and_targeted_rollout_gate_resource_operations(self, context):
+        service = ApiManagementService()
+        resource = service.create_resource(context["tenant_id"], "Governed", **mutation(context))
+        current = service.get_configuration(
+            context["tenant_id"],
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+        )
+        disabled = dict(current.document)
+        disabled.update(
+            feature_enabled=False,
+            rollout_percentage=0,
+            rollout_roles=[],
+            rollout_cohorts=[],
+            activation_enabled=False,
+            deactivation_enabled=False,
+        )
+        service.update_configuration(context["tenant_id"], disabled, **mutation(context))
+        with pytest.raises(PermissionError):
+            service.query_resources(
+                context["tenant_id"],
+                {},
+                actor_id=context["actor_id"],
+                correlation_id=context["correlation_id"],
+            )
+        with pytest.raises(PermissionError):
+            service.delete_resource(resource.id, context["tenant_id"], **mutation(context))
+
+        targeted = dict(disabled)
+        targeted.update(
+            feature_enabled=True,
+            rollout_roles=["beta_operator"],
+            activation_enabled=True,
+            deactivation_enabled=True,
+        )
+        service.update_configuration(context["tenant_id"], targeted, **mutation(context))
+        with pytest.raises(PermissionError):
+            service.query_resources(
+                context["tenant_id"],
+                {},
+                actor_id=context["actor_id"],
+                correlation_id=context["correlation_id"],
+            )
+        visible = service.query_resources(
+            context["tenant_id"],
+            {},
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+            audience_roles=["beta_operator"],
+        )
+        assert list(visible) == [resource]

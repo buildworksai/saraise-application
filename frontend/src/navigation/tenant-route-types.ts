@@ -34,6 +34,8 @@ export interface TenantRoute {
   id: string;
   module: string;
   path: string;
+  /** Human-readable browser title applied by the shared route renderer. */
+  title?: string;
   sourceFile: string;
   Page: LazyExoticComponent<ComponentType>;
   modes?: readonly TenantApplicationMode[];
