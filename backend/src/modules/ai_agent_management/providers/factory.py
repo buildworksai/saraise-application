@@ -31,6 +31,11 @@ class ProviderFactory:
         self._resolver = resolver
         self._registry = registry or get_registry()
 
+    @property
+    def is_configured(self) -> bool:
+        """Whether a published tenant-first configuration resolver exists."""
+        return self._resolver is not None
+
     def resolve(self, tenant_id: UUID, provider_config_id: UUID) -> OperationResult[LLMProvider]:
         if self._resolver is None:
             return OperationResult.unavailable(
@@ -77,8 +82,7 @@ class ProviderFactory:
         self._registry.register(provider.name, type(provider))
 
     def get(self, name: str) -> LLMProvider | None:
-        del name
-        return None
+        raise RuntimeError(f"Provider {name!r} requires tenant-bound configuration resolution")
 
     def call_with_failover(self, *_: Any, **__: Any) -> Any:
         raise RuntimeError("Implicit provider failover is forbidden; resolve a tenant configuration")
@@ -98,8 +102,7 @@ def configure_provider_factory(resolver: ProviderConfigurationResolver) -> Provi
 
 
 def get_provider(name: str) -> None:
-    del name
-    return None
+    raise RuntimeError(f"Provider {name!r} requires tenant-bound configuration resolution")
 
 
 __all__ = [

@@ -27,6 +27,7 @@ urlpatterns = [
     # ===== Module Routes =====
     # AI Agent Management
     path("api/v1/ai-agents/", include("src.modules.ai_agent_management.urls")),
+    path("api/v2/ai-agent-management/", include("src.modules.ai_agent_management.urls")),
     # Platform Management (mode-aware: Full CRUD in self-hosted, read-only in SaaS)
     path("api/v1/platform/", include("src.modules.platform_management.urls")),
     # Tenant Management

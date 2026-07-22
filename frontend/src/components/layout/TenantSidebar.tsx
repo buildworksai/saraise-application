@@ -10,9 +10,6 @@ import { NavLink, useLocation } from "react-router-dom";
 import { useState } from "react";
 import {
   LayoutDashboard,
-  Bot,
-  Zap,
-  FileText,
   Shield,
   Users,
   Database,
@@ -44,24 +41,6 @@ interface NavItem {
 
 const tenantItems: NavItem[] = [
   { path: "/tenant/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  {
-    path: "/ai-agents",
-    label: "AI Agents",
-    icon: Bot,
-    module: "ai-agent-management",
-  },
-  {
-    path: "/ai-agents/executions",
-    label: "Executions",
-    icon: Zap,
-    module: "ai-agent-management",
-  },
-  {
-    path: "/ai-agents/approvals",
-    label: "Approvals",
-    icon: FileText,
-    module: "ai-agent-management",
-  },
   {
     path: "/metadata",
     label: "Metadata Modeling",

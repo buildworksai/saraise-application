@@ -16,6 +16,24 @@ permissions:
   - ai.agent:terminate
   - ai.tool:register
   - ai.tool:view
+  - ai.tool:update
+  - ai.tool:delete
+  - ai.tool:invoke
+  - ai.execution:view
+  - ai.schedule:manage
+  - ai.approval:view
+  - ai.approval:request
+  - ai.approval:decide
+  - ai.governance:view
+  - ai.governance:manage
+  - ai.secret:view
+  - ai.secret:manage
+  - ai.secret:access
+  - ai.usage:view
+  - ai.audit:view
+  - ai.evaluation:run
+  - ai.evaluation:red_team
+  - ai.health:view
 sod_actions:
   - ai.agent:execute
   - ai.agent:terminate

@@ -1,168 +1,49 @@
-/**
- * AgentListPage Component Tests
- */
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { aiAgentService } from "../services/ai-agent-service";
+import { AgentListPage } from "./AgentListPage";
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { BrowserRouter } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AgentListPage } from './AgentListPage';
-import { aiAgentService } from '../services/ai-agent-service';
+vi.mock("../services/ai-agent-service");
 
-// Mock dependencies
-vi.mock('../services/ai-agent-service');
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => vi.fn(),
-  };
-});
+const pagination = { count: 0, page: 1, page_size: 25, total_pages: 0, has_next: false, has_previous: false };
+const page = (items: readonly [{ readonly id: string; readonly name: string; readonly description: string; readonly identity_type: "system_bound"; readonly runner_key: string; readonly provider_config_id: null; readonly status: "draft"; readonly updated_at: string; readonly created_at: string }] | readonly []) => ({ items, pagination: { ...pagination, count: items.length }, correlationId: "correlation-1", receivedAt: "2026-07-23T00:00:00Z" });
+const agent = { id: "agent-1", name: "Close books", description: "Reconciles ledgers", identity_type: "system_bound" as const, runner_key: "finance_runner", provider_config_id: null, status: "draft" as const, updated_at: "2026-07-23T00:00:00Z", created_at: "2026-07-23T00:00:00Z" };
 
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-  },
-}));
+function renderPage() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}><MemoryRouter><AgentListPage/></MemoryRouter></QueryClientProvider>);
+}
 
-const createTestQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: { retry: false },
-    mutations: { retry: false },
-  },
-});
+describe("AgentListPage", () => {
+  beforeEach(() => vi.clearAllMocks());
 
-describe('AgentListPage', () => {
-  let queryClient: QueryClient;
-
-  beforeEach(() => {
-    queryClient = createTestQueryClient();
-    vi.clearAllMocks();
+  it("renders a skeleton while loading", () => {
+    vi.mocked(aiAgentService.listAgents).mockImplementation(() => new Promise(() => undefined));
+    renderPage();
+    expect(screen.getByLabelText("Loading AI agent data")).toHaveAttribute("aria-busy", "true");
   });
 
-  it('should render loading state', () => {
-    vi.mocked(aiAgentService.listAgents).mockImplementation(
-      () => new Promise(() => {}) // Never resolves
-    );
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <AgentListPage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    // Should show skeleton or loading indicator
-    expect(screen.getByText(/ai agents/i)).toBeInTheDocument();
+  it("renders governed agent rows and sends server-side filters", async () => {
+    vi.mocked(aiAgentService.listAgents).mockResolvedValue(page([agent]));
+    renderPage();
+    expect(await screen.findByText("Close books")).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Search agents"), "ledger");
+    await waitFor(() => expect(aiAgentService.listAgents).toHaveBeenLastCalledWith(expect.objectContaining({ search: "ledger", page: 1, page_size: 25 })));
   });
 
-  it('should render agents list', async () => {
-    const mockAgents = [
-      {
-        id: '1',
-        name: 'Test Agent',
-        description: 'Test description',
-        identity_type: 'user_bound' as const,
-        subject_id: 'user-123',
-        framework: 'langgraph',
-        is_active: true,
-      },
-    ];
-
-    vi.mocked(aiAgentService.listAgents).mockResolvedValueOnce(mockAgents);
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <AgentListPage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('Test Agent')).toBeInTheDocument();
-    });
+  it("renders onboarding when the catalog is empty", async () => {
+    vi.mocked(aiAgentService.listAgents).mockResolvedValue(page([]));
+    renderPage();
+    expect(await screen.findByText("Create your first governed agent")).toBeInTheDocument();
   });
 
-  it('should render empty state when no agents', async () => {
-    vi.mocked(aiAgentService.listAgents).mockResolvedValueOnce([]);
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <AgentListPage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText(/no ai agents yet/i)).toBeInTheDocument();
-    });
-  });
-
-  it('should filter agents by search term', async () => {
-    const user = userEvent.setup();
-    const mockAgents = [
-      {
-        id: '1',
-        name: 'Test Agent',
-        description: 'Test description',
-        identity_type: 'user_bound' as const,
-        subject_id: 'user-123',
-        framework: 'langgraph',
-        is_active: true,
-      },
-      {
-        id: '2',
-        name: 'Another Agent',
-        description: 'Another description',
-        identity_type: 'user_bound' as const,
-        subject_id: 'user-456',
-        framework: 'langgraph',
-        is_active: true,
-      },
-    ];
-
-    vi.mocked(aiAgentService.listAgents).mockResolvedValueOnce(mockAgents);
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <AgentListPage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('Test Agent')).toBeInTheDocument();
-    });
-
-    const searchInput = screen.getByPlaceholderText(/search/i);
-    await user.clear(searchInput);
-    await user.type(searchInput, 'Test');
-
-    // Wait for deferred value to update
-    await waitFor(() => {
-      expect(screen.getByText('Test Agent')).toBeInTheDocument();
-    }, { timeout: 3000 });
-  });
-
-  it('should show error state on failure', async () => {
-    vi.mocked(aiAgentService.listAgents).mockRejectedValueOnce(new Error('Failed to load'));
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <AgentListPage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText(/failed to load agents/i)).toBeInTheDocument();
-    });
+  it("renders a retryable error", async () => {
+    vi.mocked(aiAgentService.listAgents).mockRejectedValue(new Error("dependency failed"));
+    renderPage();
+    expect(await screen.findByRole("alert")).toHaveTextContent("dependency failed");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 });

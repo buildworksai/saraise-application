@@ -61,6 +61,50 @@ class AITenantModel(TenantScopedModel, TimestampedModel):
         super().save(*args, **kwargs)
 
 
+class GovernedStateQuerySet(models.QuerySet[models.Model]):
+    """Lifecycle writes must hold a row lock and append transition evidence."""
+
+    def update(self, **kwargs: Any) -> int:
+        del kwargs
+        raise ValidationError("Lifecycle records must be changed through their service.", code="state_machine")
+
+
+class GovernedStateManager(models.Manager.from_queryset(GovernedStateQuerySet)):  # type: ignore[misc]
+    pass
+
+
+class StatefulTenantModel(AITenantModel):
+    """Allow state transitions until terminal, then make the row immutable."""
+
+    state_field = "state"
+    terminal_states: frozenset[str] = frozenset()
+    objects = GovernedStateManager()
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding and self.pk:
+            prior = (
+                type(self)
+                ._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id)
+                .values(self.state_field, "transition_history")
+                .first()
+            )
+            if prior:
+                old_state = prior[self.state_field]
+                new_state = getattr(self, self.state_field)
+                if old_state in self.terminal_states:
+                    raise ValidationError("Terminal lifecycle records are immutable.", code="terminal_immutable")
+                if old_state != new_state and prior["transition_history"] == self.transition_history:
+                    raise ValidationError("State changes require transition evidence.", code="state_machine")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Lifecycle records cannot be deleted.", code="evidence_protected")
+
+
 class AppendOnlyQuerySet(models.QuerySet[models.Model]):
     """Prevent bulk APIs from bypassing evidence immutability."""
 
@@ -135,7 +179,7 @@ class ScheduleStatus(models.TextChoices):
 
 
 @tenancy_scope(TENANT_SCOPED)
-class Agent(AITenantModel):
+class Agent(StatefulTenantModel):
     """A tenant-owned versioned agent definition."""
 
     name = models.CharField(max_length=255)
@@ -150,6 +194,9 @@ class Agent(AITenantModel):
     transition_history = models.JSONField(default=list, blank=True, editable=False)
     created_by = models.UUIDField()
     deleted_at = models.DateTimeField(null=True, blank=True, editable=False)
+
+    state_field = "status"
+    terminal_states = frozenset((AgentStatus.RETIRED,))
 
     class Meta:
         db_table = "ai_agents"
@@ -213,7 +260,7 @@ class Agent(AITenantModel):
 
 
 @tenancy_scope(TENANT_SCOPED)
-class AgentExecution(AITenantModel):
+class AgentExecution(StatefulTenantModel):
     """Immutable-at-terminal evidence for one governed execution."""
 
     agent = models.ForeignKey(Agent, on_delete=models.PROTECT, related_name="executions")
@@ -222,7 +269,7 @@ class AgentExecution(AITenantModel):
     transition_history = models.JSONField(default=list, blank=True, editable=False)
     initiating_actor_id = models.UUIDField()
     session_id = models.UUIDField(null=True, blank=True)
-    task_definition = models.JSONField(default=dict)
+    task_definition = models.JSONField(default=dict, blank=True)
     input_metadata = models.JSONField(default=dict, blank=True)
     result = models.JSONField(null=True, blank=True)
     error_code = models.CharField(max_length=100, blank=True, default="")
@@ -232,14 +279,36 @@ class AgentExecution(AITenantModel):
     idempotency_key = models.CharField(max_length=255)
     provider_config_id = models.UUIDField(null=True, blank=True)
 
+    terminal_states = frozenset(
+        (ExecutionState.COMPLETED, ExecutionState.FAILED, ExecutionState.TERMINATED, ExecutionState.TIMED_OUT)
+    )
+
     class Meta:
         db_table = "ai_agent_executions"
         constraints = [
             models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="ai_exec_t_idem_uniq"),
             models.CheckConstraint(
                 condition=(
-                    Q(state__in=(ExecutionState.COMPLETED, ExecutionState.FAILED, ExecutionState.TERMINATED, ExecutionState.TIMED_OUT), completed_at__isnull=False)
-                    | (~Q(state__in=(ExecutionState.COMPLETED, ExecutionState.FAILED, ExecutionState.TERMINATED, ExecutionState.TIMED_OUT)) & Q(completed_at__isnull=True))
+                    Q(
+                        state__in=(
+                            ExecutionState.COMPLETED,
+                            ExecutionState.FAILED,
+                            ExecutionState.TERMINATED,
+                            ExecutionState.TIMED_OUT,
+                        ),
+                        completed_at__isnull=False,
+                    )
+                    | (
+                        ~Q(
+                            state__in=(
+                                ExecutionState.COMPLETED,
+                                ExecutionState.FAILED,
+                                ExecutionState.TERMINATED,
+                                ExecutionState.TIMED_OUT,
+                            )
+                        )
+                        & Q(completed_at__isnull=True)
+                    )
                 ),
                 name="ai_exec_terminal_time_ck",
             ),
@@ -252,7 +321,9 @@ class AgentExecution(AITenantModel):
                 name="ai_exec_failure_code_ck",
             ),
             models.CheckConstraint(
-                condition=Q(started_at__isnull=True) | Q(completed_at__isnull=True) | Q(completed_at__gte=F("started_at")),
+                condition=Q(started_at__isnull=True)
+                | Q(completed_at__isnull=True)
+                | Q(completed_at__gte=F("started_at")),
                 name="ai_exec_time_order_ck",
             ),
         ]
@@ -275,7 +346,7 @@ class AgentExecution(AITenantModel):
 
 
 @tenancy_scope(TENANT_SCOPED)
-class AgentSchedulerTask(AITenantModel):
+class AgentSchedulerTask(StatefulTenantModel):
     """Scheduling projection linked to the canonical async-job authority."""
 
     agent = models.ForeignKey(Agent, on_delete=models.PROTECT, related_name="scheduled_tasks")
@@ -293,13 +364,16 @@ class AgentSchedulerTask(AITenantModel):
     retry_count = models.PositiveSmallIntegerField(default=0)
     status = models.CharField(max_length=20, choices=ScheduleStatus.choices, default=ScheduleStatus.PENDING)
     transition_history = models.JSONField(default=list, blank=True, editable=False)
-    task_data = models.JSONField(default=dict)
+    task_data = models.JSONField(default=dict, blank=True)
     error_code = models.CharField(max_length=100, blank=True, default="")
     error_message = models.TextField(blank=True, default="")
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     created_by = models.UUIDField()
     idempotency_key = models.CharField(max_length=255)
+
+    state_field = "status"
+    terminal_states = frozenset((ScheduleStatus.COMPLETED, ScheduleStatus.FAILED, ScheduleStatus.CANCELLED))
 
     class Meta:
         db_table = "ai_agent_scheduler_tasks"
@@ -308,7 +382,9 @@ class AgentSchedulerTask(AITenantModel):
             models.CheckConstraint(condition=Q(priority__gte=-100, priority__lte=100), name="ai_sched_priority_ck"),
             models.CheckConstraint(condition=Q(retry_count__lte=F("max_retries")), name="ai_sched_retry_ck"),
             models.CheckConstraint(
-                condition=Q(started_at__isnull=True) | Q(completed_at__isnull=True) | Q(completed_at__gte=F("started_at")),
+                condition=Q(started_at__isnull=True)
+                | Q(completed_at__isnull=True)
+                | Q(completed_at__gte=F("started_at")),
                 name="ai_sched_time_order_ck",
             ),
         ]
@@ -328,3 +404,44 @@ class AgentSchedulerTask(AITenantModel):
     def __str__(self) -> str:
         return f"Schedule {self.id} ({self.status})"
 
+
+# Django imports only ``models`` during app discovery. Import the split domain
+# files here so every model is registered even when URL configuration is not
+# loaded (management commands and migration tests rely on this).
+from .approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy, SoDViolation  # noqa: E402
+from .audit_models import AuditEvent, AuditEventType, AuditTrail, AuditTrailEvent  # noqa: E402
+from .egress_models import EgressRequest, EgressRule, Secret, SecretAccess  # noqa: E402
+from .quota_models import KillSwitch, QuotaUsage, ShardSaturation  # noqa: E402
+from .token_models import CostRecord, CostSummary, TokenUsage  # noqa: E402
+from .tool_models import Tool, ToolInvocation  # noqa: E402
+
+__all__ = [
+    "Agent",
+    "AgentExecution",
+    "AgentIdentityType",
+    "AgentLifecycleState",
+    "AgentSchedulerTask",
+    "AgentStatus",
+    "ApprovalRequest",
+    "ApprovalStatus",
+    "AuditEvent",
+    "AuditEventType",
+    "AuditTrail",
+    "AuditTrailEvent",
+    "CostRecord",
+    "CostSummary",
+    "EgressRequest",
+    "EgressRule",
+    "ExecutionState",
+    "KillSwitch",
+    "QuotaUsage",
+    "ScheduleStatus",
+    "Secret",
+    "SecretAccess",
+    "ShardSaturation",
+    "SoDPolicy",
+    "SoDViolation",
+    "TokenUsage",
+    "Tool",
+    "ToolInvocation",
+]

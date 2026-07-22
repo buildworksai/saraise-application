@@ -107,6 +107,8 @@ class EvaluationResult:
 
     @property
     def overall_status(self) -> EvaluationStatus:
+        if self.total_cases == 0:
+            return EvaluationStatus.ERROR
         if self.errors > 0:
             return EvaluationStatus.ERROR
         if self.failed > 0:
@@ -303,7 +305,9 @@ class AgentEvaluationHarness:
                 )
 
         # Determine overall status
-        if any(m.status == EvaluationStatus.FAIL for m in metric_results):
+        if not metric_results or any(m.status == EvaluationStatus.ERROR for m in metric_results):
+            status = EvaluationStatus.ERROR
+        elif any(m.status == EvaluationStatus.FAIL for m in metric_results):
             status = EvaluationStatus.FAIL
         elif any(m.status == EvaluationStatus.WARN for m in metric_results):
             status = EvaluationStatus.WARN

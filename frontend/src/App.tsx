@@ -479,39 +479,6 @@ const CreateMultiCompanyPage = lazy(() =>
   }))
 );
 
-// Lazy load pages for code splitting
-const AgentListPage = lazy(() =>
-  import("./modules/ai_agent_management/pages/AgentListPage").then((m) => ({
-    default: m.AgentListPage,
-  }))
-);
-
-const AgentDetailPage = lazy(() =>
-  import("./modules/ai_agent_management/pages/AgentDetailPage").then((m) => ({
-    default: m.AgentDetailPage,
-  }))
-);
-
-const CreateAgentPage = lazy(() =>
-  import("./modules/ai_agent_management/pages/CreateAgentPage").then((m) => ({
-    default: m.CreateAgentPage,
-  }))
-);
-
-const ExecutionMonitorPage = lazy(() =>
-  import("./modules/ai_agent_management/pages/ExecutionMonitorPage").then(
-    (m) => ({
-      default: m.ExecutionMonitorPage,
-    })
-  )
-);
-
-const ApprovalQueuePage = lazy(() =>
-  import("./modules/ai_agent_management/pages/ApprovalQueuePage").then((m) => ({
-    default: m.ApprovalQueuePage,
-  }))
-);
-
 // Workflow Automation Components
 const WorkflowListPage = lazy(() =>
   import("./modules/workflow_automation/pages/WorkflowListPage").then((m) => ({
@@ -667,70 +634,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <TenantDashboard />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* AI Agent Management routes */}
-          <Route
-            path="/ai-agents"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <AgentListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/ai-agents/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateAgentPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/ai-agents/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <AgentDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/ai-agents/:id/edit"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <div className="p-8">
-                    <p>Edit page coming soon</p>
-                  </div>
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/ai-agents/executions"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <ExecutionMonitorPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/ai-agents/approvals"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <ApprovalQueuePage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
