@@ -69,6 +69,7 @@ urlpatterns = [
     path("api/v1/purchase-management/", include("src.modules.purchase_management.urls")),
     path("api/v1/sales-management/", include("src.modules.sales_management.urls")),
     path("api/v1/project-management/", include("src.modules.project_management.urls")),
+    path("api/v2/project-management/", include("src.modules.project_management.urls")),
     path("api/v2/master-data-management/", include("src.modules.master_data_management.urls")),
     path("api/v1/multi-company/", include("src.modules.multi_company.urls")),
     path("api/v2/multi-company/", include("src.modules.multi_company.v2_urls")),

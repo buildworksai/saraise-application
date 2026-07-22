@@ -1,0 +1,1 @@
+export {ConfigurationHistoryPage} from './ModulePages';

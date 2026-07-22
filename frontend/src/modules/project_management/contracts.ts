@@ -1,147 +1,46 @@
-/**
- * Project Management Module Contracts
- *
- * Rule: SARAISE-27001 (contracts.ts required for all frontend modules)
- *
- * === AGENT INSTRUCTION ===
- * Read this file FIRST when working on this module.
- * All types and endpoints for Project Management are defined here.
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
-// =============================================================================
-// EXPORTED TYPES - Import these in your components
-// =============================================================================
-
-/** Project - Project container */
-export type Project = {
-  id: string;
-  tenant_id: string;
-  project_code: string;
-  project_name: string;
-  description?: string;
-  start_date?: string;
-  end_date?: string;
-  status: 'planning' | 'active' | 'on_hold' | 'completed' | 'cancelled';
-  project_manager_id?: string;
-  budget?: string;
-  currency: string;
-  created_at: string;
-  updated_at: string;
-};
-
-/** Project create request */
-export type ProjectCreate = {
-  project_code: string;
-  project_name: string;
-  description?: string;
-  start_date?: string;
-  end_date?: string;
-  status?: 'planning' | 'active' | 'on_hold' | 'completed' | 'cancelled';
-  project_manager_id?: string;
-  budget?: string;
-  currency: string;
-};
-
-/** Task - Individual task within a project */
-export type Task = {
-  id: string;
-  tenant_id: string;
-  project: string;
-  task_code: string;
-  task_name: string;
-  description?: string;
-  assigned_to_id?: string;
-  due_date?: string;
-  estimated_hours?: string;
-  actual_hours: string;
-  status: 'todo' | 'in_progress' | 'review' | 'done' | 'blocked' | 'cancelled';
-  parent_task_id?: string;
-  created_at: string;
-  updated_at: string;
-};
-
-/** Project Member - Team member assigned to project */
-export type ProjectMember = {
-  id: string;
-  tenant_id: string;
-  project: string;
-  employee_id: string;
-  role: string;
-  allocation_percentage: string;
-  created_at: string;
-  updated_at: string;
-};
-
-/** Time Entry - Time logged on tasks */
-export type TimeEntry = {
-  id: string;
-  tenant_id: string;
-  project: string;
-  task?: string;
-  employee_id: string;
-  entry_date: string;
-  hours_worked: string;
-  description?: string;
-  created_at: string;
-  updated_at: string;
-};
-
-/** Project Milestone - Key project milestone */
-export type ProjectMilestone = {
-  id: string;
-  tenant_id: string;
-  project: string;
-  milestone_name: string;
-  target_date: string;
-  achieved_date?: string;
-  description?: string;
-  created_at: string;
-  updated_at: string;
-};
-
-// =============================================================================
-// ENDPOINT REGISTRY - Use these for all API calls
-// =============================================================================
-
-export const MODULE_API_PREFIX = '/api/v1/project-management';
-
-export const ENDPOINTS = {
-  PROJECTS: {
-    LIST: `${MODULE_API_PREFIX}/projects/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/projects/${id}/` as const,
-    CREATE: `${MODULE_API_PREFIX}/projects/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/projects/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/projects/${id}/` as const,
-  },
-  TASKS: {
-    LIST: `${MODULE_API_PREFIX}/tasks/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/tasks/${id}/` as const,
-    CREATE: `${MODULE_API_PREFIX}/tasks/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/tasks/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/tasks/${id}/` as const,
-  },
-  MEMBERS: {
-    LIST: `${MODULE_API_PREFIX}/members/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/members/${id}/` as const,
-    CREATE: `${MODULE_API_PREFIX}/members/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/members/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/members/${id}/` as const,
-  },
-  TIME_ENTRIES: {
-    LIST: `${MODULE_API_PREFIX}/time-entries/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/time-entries/${id}/` as const,
-    CREATE: `${MODULE_API_PREFIX}/time-entries/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/time-entries/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/time-entries/${id}/` as const,
-  },
-  MILESTONES: {
-    LIST: `${MODULE_API_PREFIX}/milestones/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/milestones/${id}/` as const,
-    CREATE: `${MODULE_API_PREFIX}/milestones/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/milestones/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/milestones/${id}/` as const,
-  },
-  HEALTH: `${MODULE_API_PREFIX}/health/`,
-} as const;
+/** Exact governed v2 contracts for project execution. */
+export type ProjectStatus='planning'|'active'|'on_hold'|'completed'|'cancelled';
+export type TaskStatus='todo'|'in_progress'|'review'|'done'|'blocked'|'cancelled';
+export type TaskPriority='critical'|'high'|'medium'|'low';
+export type MemberRole='project_manager'|'team_lead'|'member'|'stakeholder';
+export type ConfigurationEnvironment='development'|'staging'|'production';
+export type ConfigurationState='draft'|'active'|'superseded';
+export type LifecycleAction='update'|'transition'|'archive'|'restore'|'duplicate'|'reorder';
+export interface PaginationMeta{readonly count:number;readonly page:number;readonly page_size:number;readonly total_pages:number;readonly has_next:boolean;readonly has_previous:boolean}
+export interface ApiMeta{readonly correlation_id:string;readonly timestamp:string;readonly pagination?:PaginationMeta}
+export interface ApiSuccess<T>{readonly data:T;readonly meta:ApiMeta}
+export interface ApiPage<T>{readonly data:readonly T[];readonly meta:ApiMeta&{readonly pagination:PaginationMeta}}
+export interface ApiError{readonly error:{readonly code:string;readonly message:string;readonly detail:Record<string, string|readonly string[]>;readonly correlation_id:string}}
+export interface Project{readonly id:string;readonly project_code:string;readonly project_name:string;readonly description:string;readonly start_date:string|null;readonly end_date:string|null;readonly status:ProjectStatus;readonly project_manager_id:string|null;readonly budget:string|null;readonly currency:string;readonly transition_history:readonly TransitionRecord[];readonly version:number;readonly archived_at:string|null;readonly created_at:string;readonly updated_at:string;readonly allowed_actions:readonly LifecycleAction[]}
+export interface Task{readonly id:string;readonly project:string;readonly project_code:string;readonly task_code:string;readonly task_name:string;readonly description:string;readonly assigned_to_id:string|null;readonly parent_task:string|null;readonly start_date:string|null;readonly due_date:string|null;readonly priority:TaskPriority;readonly estimated_hours:string|null;readonly actual_hours:string;readonly percent_complete:string;readonly status:TaskStatus;readonly position:number;readonly transition_history:readonly TransitionRecord[];readonly version:number;readonly archived_at:string|null;readonly created_at:string;readonly updated_at:string;readonly allowed_actions:readonly LifecycleAction[]}
+export interface ProjectMember{readonly id:string;readonly project:string;readonly project_code:string;readonly employee_id:string;readonly role:MemberRole;readonly allocation_percentage:string;readonly joined_at:string;readonly left_at:string|null;readonly archived_at:string|null;readonly created_at:string;readonly updated_at:string;readonly allowed_actions:readonly LifecycleAction[]}
+export interface TimeEntry{readonly id:string;readonly project:string;readonly project_code:string;readonly task:string|null;readonly task_code:string|null;readonly employee_id:string;readonly entry_date:string;readonly hours_worked:string;readonly description:string;readonly billable:boolean;readonly version:number;readonly archived_at:string|null;readonly created_at:string;readonly updated_at:string;readonly allowed_actions:readonly LifecycleAction[]}
+export interface ProjectMilestone{readonly id:string;readonly project:string;readonly project_code:string;readonly milestone_name:string;readonly target_date:string;readonly achieved_date:string|null;readonly cancelled_at:string|null;readonly description:string;readonly version:number;readonly archived_at:string|null;readonly created_at:string;readonly updated_at:string;readonly allowed_actions:readonly LifecycleAction[]}
+export interface TransitionRecord{readonly transition_key:string;readonly command:string;readonly from:string;readonly to:string;readonly reason:string;readonly actor_id:string;readonly at:string}
+export interface ProjectSummary{readonly project_id:string;readonly task_count:number;readonly completed_task_count:number;readonly blocked_task_count:number;readonly progress_percentage:string;readonly milestone_count:number;readonly achieved_milestone_count:number;readonly time_hours:string;readonly next_due_date:string|null}
+export interface PortfolioSummary{readonly project_count:number;readonly active_project_count:number;readonly task_count:number;readonly overdue_task_count:number;readonly blocked_task_count:number;readonly upcoming_milestone_count:number;readonly budget_by_currency:readonly{readonly currency:string;readonly amount:string}[]}
+export interface ProjectActivity{readonly id:string;readonly project:string|null;readonly entity_type:'project'|'task'|'member'|'time_entry'|'milestone'|'configuration';readonly entity_id:string;readonly action:string;readonly actor_id:string;readonly correlation_id:string;readonly before:Record<string,string|number|boolean|null>;readonly after:Record<string,string|number|boolean|null>;readonly metadata:Record<string,string|number|boolean|null>;readonly created_at:string}
+export interface ProjectConfiguration{readonly id:string;readonly environment:ConfigurationEnvironment;readonly version:number;readonly state:ConfigurationState;readonly default_currency:string;readonly project_code_pattern:string;readonly task_code_pattern:string;readonly max_daily_hours:string;readonly max_allocation_percentage:string;readonly enforce_project_date_bounds:boolean;readonly allow_future_time_entries:boolean;readonly require_time_description:boolean;readonly default_billable:boolean;readonly enabled_views:readonly ('list'|'board'|'calendar'|'timeline')[];readonly paid_extension_rollout:Record<string,boolean|string|readonly string[]>;readonly change_summary:string;readonly created_by_id:string;readonly created_at:string}
+export type ProjectCreateRequest=Pick<Project,'project_code'|'project_name'>&Partial<Pick<Project,'description'|'start_date'|'end_date'|'project_manager_id'|'budget'|'currency'>>;
+export type ProjectUpdateRequest=Partial<ProjectCreateRequest>&{version:number;idempotency_key:string};
+export type TaskCreateRequest=Pick<Task,'project'|'task_code'|'task_name'>&Partial<Pick<Task,'description'|'assigned_to_id'|'parent_task'|'start_date'|'due_date'|'priority'|'estimated_hours'|'position'>>;
+export type TaskUpdateRequest=Partial<TaskCreateRequest>&{version:number;idempotency_key:string};
+export type MemberCreateRequest=Pick<ProjectMember,'project'|'employee_id'>&Partial<Pick<ProjectMember,'role'|'allocation_percentage'|'joined_at'|'left_at'>>;
+export type MemberUpdateRequest=Partial<Omit<MemberCreateRequest,'project'|'employee_id'>> & {idempotency_key:string};
+export type TimeEntryCreateRequest=Pick<TimeEntry,'project'|'employee_id'|'entry_date'|'hours_worked'>&Partial<Pick<TimeEntry,'task'|'description'|'billable'>>;
+export type TimeEntryUpdateRequest=Partial<TimeEntryCreateRequest>&{version:number;idempotency_key:string};
+export type MilestoneCreateRequest=Pick<ProjectMilestone,'project'|'milestone_name'|'target_date'>&Partial<Pick<ProjectMilestone,'description'>>;
+export type MilestoneUpdateRequest=Partial<MilestoneCreateRequest>&{version:number;idempotency_key:string};
+export interface TransitionRequest{transition_key:string;reason?:string;target_state?:'todo'|'in_progress'}
+export interface ArchiveRequest{version:number;idempotency_key:string}
+export interface ConfigurationDraftRequest{environment:ConfigurationEnvironment;values:Partial<ConfigurationValues>;change_summary:string}
+export type ConfigurationValues=Pick<ProjectConfiguration,'default_currency'|'project_code_pattern'|'task_code_pattern'|'max_daily_hours'|'max_allocation_percentage'|'enforce_project_date_bounds'|'allow_future_time_entries'|'require_time_description'|'default_billable'|'enabled_views'|'paid_extension_rollout'>;
+export interface ConfigurationSimulation{readonly valid:boolean;readonly errors:readonly string[];readonly affected_records:Record<string,number>}
+export interface ListFilters{page?:number;page_size?:number;search?:string;ordering?:string;include_archived?:boolean;[key:string]:string|number|boolean|undefined}
+export const MODULE_API_PREFIX='/api/v2/project-management';
+const resource=(name:string)=>({LIST:`${MODULE_API_PREFIX}/${name}/`,CREATE:`${MODULE_API_PREFIX}/${name}/`,DETAIL:(id:string)=>`${MODULE_API_PREFIX}/${name}/${id}/`,UPDATE:(id:string)=>`${MODULE_API_PREFIX}/${name}/${id}/`,ARCHIVE:(id:string)=>`${MODULE_API_PREFIX}/${name}/${id}/`,RESTORE:(id:string)=>`${MODULE_API_PREFIX}/${name}/${id}/restore/`});
+export const ENDPOINTS={
+ PROJECTS:{...resource('projects'),SUMMARY:(id:string)=>`${MODULE_API_PREFIX}/projects/${id}/summary/`,ACTIVATE:(id:string)=>`${MODULE_API_PREFIX}/projects/${id}/activate/`,HOLD:(id:string)=>`${MODULE_API_PREFIX}/projects/${id}/hold/`,RESUME:(id:string)=>`${MODULE_API_PREFIX}/projects/${id}/resume/`,COMPLETE:(id:string)=>`${MODULE_API_PREFIX}/projects/${id}/complete/`,CANCEL:(id:string)=>`${MODULE_API_PREFIX}/projects/${id}/cancel/`,DUPLICATE:(id:string)=>`${MODULE_API_PREFIX}/projects/${id}/duplicate/`},
+ TASKS:{...resource('tasks'),START:(id:string)=>`${MODULE_API_PREFIX}/tasks/${id}/start/`,SUBMIT_REVIEW:(id:string)=>`${MODULE_API_PREFIX}/tasks/${id}/submit-review/`,REQUEST_CHANGES:(id:string)=>`${MODULE_API_PREFIX}/tasks/${id}/request-changes/`,COMPLETE:(id:string)=>`${MODULE_API_PREFIX}/tasks/${id}/complete/`,BLOCK:(id:string)=>`${MODULE_API_PREFIX}/tasks/${id}/block/`,UNBLOCK:(id:string)=>`${MODULE_API_PREFIX}/tasks/${id}/unblock/`,CANCEL:(id:string)=>`${MODULE_API_PREFIX}/tasks/${id}/cancel/`,REORDER:(id:string)=>`${MODULE_API_PREFIX}/tasks/${id}/reorder/`},
+ MEMBERS:resource('members'),TIME_ENTRIES:resource('time-entries'),MILESTONES:{...resource('milestones'),ACHIEVE:(id:string)=>`${MODULE_API_PREFIX}/milestones/${id}/achieve/`,REOPEN:(id:string)=>`${MODULE_API_PREFIX}/milestones/${id}/reopen/`,CANCEL:(id:string)=>`${MODULE_API_PREFIX}/milestones/${id}/cancel/`},ACTIVITIES:{LIST:`${MODULE_API_PREFIX}/activities/`,DETAIL:(id:string)=>`${MODULE_API_PREFIX}/activities/${id}/`},CONFIGURATION:{ACTIVE:`${MODULE_API_PREFIX}/configuration/`,DRAFTS:`${MODULE_API_PREFIX}/configuration/drafts/`,SIMULATE:(id:string)=>`${MODULE_API_PREFIX}/configuration/drafts/${id}/simulate/`,PUBLISH:(id:string)=>`${MODULE_API_PREFIX}/configuration/drafts/${id}/publish/`,ROLLBACK:`${MODULE_API_PREFIX}/configuration/rollback/`,EXPORT:`${MODULE_API_PREFIX}/configuration/export/`,IMPORT:`${MODULE_API_PREFIX}/configuration/import/`,VERSIONS:`${MODULE_API_PREFIX}/configuration/versions/`,VERSION:(id:string)=>`${MODULE_API_PREFIX}/configuration/versions/${id}/`},HEALTH:`${MODULE_API_PREFIX}/health/`
+ ,DASHBOARD:`${MODULE_API_PREFIX}/dashboard/`,MY_WORK:`${MODULE_API_PREFIX}/my-work/`} as const;

@@ -1,0 +1,1 @@
+export {ProjectMemberDetailPage} from './ModulePages';
