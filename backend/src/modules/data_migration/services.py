@@ -1,1087 +1,934 @@
-"""
-DataMigration Services.
+"""Tenant-safe business services for durable data migration.
 
-High-level service layer for DataMigration business logic.
+HTTP views are intentionally thin clients of this module.  Every mutating
+operation establishes the tenant boundary again, locks its aggregate, records
+immutable evidence, and emits an outbox event in the same transaction.
 """
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
-import logging
+import json
 import os
 import re
 import socket
-from typing import Any, Dict, List, Optional, Set, Union
+import uuid
+from dataclasses import asdict, dataclass
+from decimal import Decimal
+from typing import Any, Iterable, Mapping, Sequence
+from uuid import UUID
+from urllib.parse import urlsplit
 
-from django.conf import settings
-from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
+from django.db.models import QuerySet
 from django.utils import timezone
+from rest_framework.exceptions import NotFound
 
-from src.core.encryption.service import EncryptionService
+from src.core.async_jobs.models import AsyncJob
+from src.core.async_jobs.services import enqueue
+from src.core.middleware.correlation import get_correlation_id
 
+from .adapters import SOURCE_ADAPTERS, TARGET_ADAPTERS
+from .events import publish_event
 from .models import (
+    DataMigrationConfiguration,
+    DataMigrationConfigurationAudit,
     ExternalConnection,
+    MigrationChange,
     MigrationJob,
-    MigrationLog,
+    MigrationJobVersion,
     MigrationMapping,
     MigrationRollback,
-    MigrationValidation,
+    MigrationRun,
+    MigrationRunIssue,
+    ValidationRule,
 )
-
-logger = logging.getLogger(__name__)
+from .schemas import validate_rule_config, validate_source_config, validate_transform_config
+from .state_machines import JOB_MACHINE, ROLLBACK_MACHINE, RUN_MACHINE
 
 IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
-
-DATABASE_SOURCE_CONFIG_KEYS = frozenset({"connection_id", "table", "columns", "filters"})
-FORBIDDEN_DATABASE_SOURCE_KEYS = frozenset(
-    {
-        "connection_string",
-        "query",
-        "sql_query",
-        "dsn",
-        "hostaddr",
-        "host",
-        "service",
-        "port",
-        "database",
-        "dbname",
-        "db_scheme",
-        "scheme",
-        "username",
-        "user",
-        "password",
-        "passfile",
-        "options",
-        "sslmode",
-        "socket",
-    }
-)
+PII_KEYS = frozenset({"password", "secret", "token", "authorization", "email", "phone", "ssn", "address"})
 
 
-def _configured_allowed_hosts() -> Set[str]:
-    """Return the operator allowlist; missing or empty configuration denies all hosts."""
-    raw = os.environ.get("DATA_MIGRATION_ALLOWED_DB_HOSTS", "")
-    return {host.strip().lower() for host in raw.split(",") if host.strip()}
+class MigrationServiceError(RuntimeError):
+    """Stable service failure carrying a machine-readable error code."""
+
+    def __init__(self, message: str, *, code: str = "DATA_MIGRATION_ERROR") -> None:
+        super().__init__(message)
+        self.code = code
 
 
-def _primary_db_hosts() -> Set[str]:
-    """Host identifiers of the application's own databases — never a valid source."""
-    hosts: Set[str] = set()
-    for alias_config in (settings.DATABASES or {}).values():
-        host = str(alias_config.get("HOST") or "").strip().lower()
-        if host:
-            hosts.add(host)
-    return hosts
+class ConfigurationConflict(MigrationServiceError):
+    def __init__(self) -> None:
+        super().__init__("The migration definition changed; reload and compare before retrying.", code="VERSION_CONFLICT")
 
 
-def _resolved_addresses(host: str) -> Set[IPAddress]:
-    """Resolve a hostname to every IP it maps to; empty set if unresolvable."""
-    addresses: Set[IPAddress] = set()
+class CapabilityUnavailable(MigrationServiceError):
+    def __init__(self, capability: str) -> None:
+        super().__init__(f"Capability {capability!r} is not installed or available.", code="CAPABILITY_UNAVAILABLE")
+
+
+@dataclass(frozen=True, slots=True)
+class DefinitionValidationResult:
+    valid: bool
+    blockers: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class RuleOutcome:
+    rule_id: UUID
+    field_name: str
+    severity: str
+    passed: bool
+    code: str
+    message: str
+    row_number: int
+
+
+@dataclass(frozen=True, slots=True)
+class SourceProfile:
+    fields: tuple[dict[str, object], ...]
+    representative_values: tuple[dict[str, object], ...]
+    row_estimate: int
+    source_checksum: str
+    warnings: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewResult:
+    records: tuple[dict[str, object], ...]
+    source_checksum: str
+    truncated: bool
+
+
+def _uuid(value: object, field: str) -> UUID:
     try:
-        for info in socket.getaddrinfo(host, None):
-            try:
-                addresses.add(ipaddress.ip_address(info[4][0]))
-            except ValueError:
-                continue
-    except socket.gaierror:
-        return set()
-    return addresses
+        return value if isinstance(value, UUID) else UUID(str(value))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise MigrationServiceError(f"{field} must be a canonical UUID", code="INVALID_ARGUMENT") from exc
 
 
-def _validate_database_source_config(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Validate the caller contract without accepting connection parameters."""
-    if not isinstance(config, dict):
-        raise ValueError("Database source_config must be an object")
-    if "connection_string" in config:
-        raise ValueError(
-            "Legacy database source_config contains connection_string; migration required: "
-            "register an ExternalConnection and replace it with connection_id"
+def _text(value: object, field: str, maximum: int = 255) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise MigrationServiceError(f"{field} is required", code="INVALID_ARGUMENT")
+    normalized = value.strip()
+    if len(normalized) > maximum:
+        raise MigrationServiceError(f"{field} must not exceed {maximum} characters", code="INVALID_ARGUMENT")
+    return normalized
+
+
+def _correlation(value: str | None = None) -> str:
+    return _text(value or get_correlation_id() or str(uuid.uuid4()), "correlation_id", 128)
+
+
+def _destination_allowlist(kind: str) -> set[str]:
+    key = "DATA_MIGRATION_ALLOWED_HTTP_HOSTS" if kind == "http" else "DATA_MIGRATION_ALLOWED_DB_HOSTS"
+    return {item.strip().lower() for item in os.environ.get(key, "").split(",") if item.strip()}
+
+
+def _validated_external_hostaddr(host: str, *, kind: str = "database") -> str:
+    """Return a DNS-pinned public address for an explicitly allow-listed host."""
+    if not isinstance(host, str) or host != host.strip() or not host or any(token in host for token in ("/", ",", "\x00")):
+        raise ValueError("External destination host is not canonical")
+    normalized = host.lower()
+    if normalized not in _destination_allowlist(kind):
+        raise ValueError("External destination is not allow-listed")
+    try:
+        addresses = {ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(normalized, None)}
+    except (socket.gaierror, ValueError) as exc:
+        raise ValueError("External destination could not be resolved") from exc
+    if not addresses:
+        raise ValueError("External destination could not be resolved")
+    for address in addresses:
+        if address.is_loopback or address.is_link_local or address.is_private or address.is_reserved or address.is_multicast or address.is_unspecified:
+            raise ValueError("External destination resolves to an internal or non-routable address")
+    return str(min(addresses, key=lambda item: (item.version, int(item))))
+
+
+def _validate_connection_destination(values: Mapping[str, object]) -> None:
+    kind = str(values.get("kind", ""))
+    if kind == "http":
+        parsed = urlsplit(str(values.get("base_url", "")))
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise MigrationServiceError("HTTP connections require a canonical HTTPS base URL without credentials.", code="DENIED_DESTINATION")
+        _validated_external_hostaddr(parsed.hostname, kind="http")
+    elif kind in {"postgresql", "mysql"}:
+        _validated_external_hostaddr(str(values.get("host", "")), kind="database")
+    else:
+        raise MigrationServiceError("Unsupported external connection kind.", code="INVALID_CONNECTION")
+
+
+def _job(tenant_id: UUID, job_id: object, *, lock: bool = False, include_deleted: bool = False) -> MigrationJob:
+    query = MigrationJob.objects.for_tenant(tenant_id)
+    if lock:
+        query = query.select_for_update()
+    if not include_deleted:
+        query = query.filter(is_deleted=False)
+    result = query.filter(pk=job_id).first()
+    if result is None:
+        raise NotFound("Migration job not found.")
+    return result
+
+
+def _safe_snapshot(job: MigrationJob) -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "job_id": str(job.id),
+        "tenant_id": str(job.tenant_id),
+        "name": job.name,
+        "description": job.description,
+        "source_type": job.source_type,
+        "source_artifact_id": str(job.source_artifact_id) if job.source_artifact_id else None,
+        "source_config": job.source_config,
+        "target_adapter": job.target_adapter,
+        "target_entity": job.target_entity,
+        "write_mode": job.write_mode,
+        "lookup_fields": job.lookup_fields,
+        "mappings": [
+            {
+                "source_field": item.source_field,
+                "target_field": item.target_field,
+                "position": item.position,
+                "transform_type": item.transform_type,
+                "transform_config": item.transform_config,
+                "is_required": item.is_required,
+                "origin": item.origin,
+                "confidence": str(item.confidence) if item.confidence is not None else None,
+            }
+            for item in job.mappings.order_by("position", "id")
+        ],
+        "rules": [
+            {
+                "field_name": item.field_name,
+                "rule_type": item.rule_type,
+                "rule_config": item.rule_config,
+                "error_message": item.error_message,
+                "severity": item.severity,
+                "position": item.position,
+                "is_active": item.is_active,
+            }
+            for item in job.validation_rules.order_by("position", "id")
+        ],
+    }
+
+
+def _snapshot_checksum(document: Mapping[str, object]) -> str:
+    sanitized = {key: value for key, value in document.items() if key != "checksum"}
+    return hashlib.sha256(json.dumps(sanitized, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+
+
+def _version(job: MigrationJob, actor_id: UUID, correlation_id: str, summary: str) -> MigrationJobVersion:
+    snapshot = _safe_snapshot(job)
+    return MigrationJobVersion.objects.create(
+        tenant_id=job.tenant_id,
+        job=job,
+        version=job.configuration_version,
+        snapshot=snapshot,
+        change_summary=summary[:500],
+        created_by=actor_id,
+        correlation_id=correlation_id,
+    )
+
+
+def _redact(record: Mapping[str, object], limit: int = 12) -> dict[str, object]:
+    redacted: dict[str, object] = {}
+    for key, value in list(record.items())[:limit]:
+        lowered = key.lower()
+        if any(marker in lowered for marker in PII_KEYS):
+            redacted[key] = "[REDACTED]"
+        elif isinstance(value, str) and len(value) > 120:
+            redacted[key] = value[:117] + "..."
+        else:
+            redacted[key] = value
+    return redacted
+
+
+def _configuration(tenant_id: UUID) -> DataMigrationConfiguration:
+    with transaction.atomic():
+        config, created = DataMigrationConfiguration.objects.get_or_create(
+            tenant_id=tenant_id,
+            defaults={"created_by": uuid.UUID(int=0)},
         )
-    if "query" in config or "sql_query" in config:
-        raise ValueError("Raw SQL queries are not supported")
-    forbidden = sorted(FORBIDDEN_DATABASE_SOURCE_KEYS.intersection(config))
-    if forbidden:
-        raise ValueError(f"Database source_config contains forbidden connection or SQL fields: {', '.join(forbidden)}")
-    unsupported = sorted(set(config).difference(DATABASE_SOURCE_CONFIG_KEYS))
-    if unsupported:
-        raise ValueError(f"Database source_config contains unsupported fields: {', '.join(unsupported)}")
-    if not config.get("connection_id") or not config.get("table"):
-        raise ValueError("Database source_config requires connection_id and table")
+        if created:
+            DataMigrationConfigurationAudit.objects.create(
+                tenant_id=tenant_id,
+                configuration=config,
+                version=1,
+                before={},
+                after=config.as_document(),
+                changed_by=uuid.UUID(int=0),
+                correlation_id=_correlation(),
+            )
     return config
 
 
-def _primary_db_addresses() -> Set[IPAddress]:
-    """Resolve every configured Django database host for destination blocking."""
-    addresses: Set[IPAddress] = set()
-    for host in _primary_db_hosts():
-        try:
-            addresses.add(ipaddress.ip_address(host))
-        except ValueError:
-            addresses.update(_resolved_addresses(host))
-    return addresses
-
-
-def _validated_external_hostaddr(host: str) -> str:
-    """Return a DNS-pinned public IP only for an explicitly allowlisted host.
-
-    Primary and internal destination checks are unconditional and run before
-    the allowlist gate. A missing or empty allowlist therefore denies every
-    otherwise-valid public destination instead of enabling unrestricted egress.
-    """
-    if not isinstance(host, str) or not host or host != host.strip():
-        raise ValueError("External database host must be a non-empty canonical hostname or IP")
-    normalized_host = host.lower()
-    if normalized_host.startswith("/") or "," in normalized_host or "\x00" in normalized_host:
-        raise ValueError("Unix-socket and multi-host external database hosts are forbidden")
-
-    primary_hosts = _primary_db_hosts()
-    if normalized_host in primary_hosts:
-        raise ValueError("External database may not target a configured Django database host")
-
-    addresses = _resolved_addresses(normalized_host)
-    if not addresses:
-        raise ValueError(f"External database host could not be resolved: {normalized_host}")
-
-    primary_addresses = _primary_db_addresses()
-    for address in addresses:
-        if address in primary_addresses:
-            raise ValueError("External database may not target a configured Django database address")
-        if (
-            address.is_loopback
-            or address.is_link_local
-            or address.is_private
-            or address.is_reserved
-            or address.is_multicast
-            or address.is_unspecified
-        ):
-            raise ValueError("External database may not target internal or non-routable addresses")
-
-    allowed_hosts = _configured_allowed_hosts()
-    if normalized_host not in allowed_hosts:
-        raise ValueError("External database host is not in DATA_MIGRATION_ALLOWED_DB_HOSTS allowlist")
-
-    pinned = min(addresses, key=lambda address: (address.version, int(address)))
-    return str(pinned)
-
-
-def _validated_identifier(value: Any, field_name: str) -> str:
-    """Validate a SQL identifier that cannot be passed as a query parameter."""
-    if not isinstance(value, str) or not IDENTIFIER_PATTERN.fullmatch(value):
-        raise ValueError(f"Invalid {field_name}: {value}")
-    return value
-
-
-def _positive_timeout(setting_name: str, default: int) -> int:
-    """Read an operator timeout setting and fail closed on invalid values."""
-    value = getattr(settings, setting_name, default)
-    if isinstance(value, bool):
-        raise ValueError(f"{setting_name} must be a positive integer")
+def _source_adapter(key: str) -> object:
     try:
-        parsed = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{setting_name} must be a positive integer") from exc
-    if parsed <= 0:
-        raise ValueError(f"{setting_name} must be a positive integer")
-    return parsed
+        return SOURCE_ADAPTERS.get(key)
+    except LookupError as exc:
+        raise CapabilityUnavailable(key) from exc
 
 
-def _connect_external_database(connection_config: ExternalConnection):
-    """Open a DNS-pinned, read-only external connection from server state."""
-    pinned_hostaddr = _validated_external_hostaddr(connection_config.host)
-    password = EncryptionService.decrypt(connection_config.password_encrypted)
-    connect_timeout = _positive_timeout("DATA_MIGRATION_DB_CONNECT_TIMEOUT_SECONDS", 10)
-    statement_timeout = _positive_timeout("DATA_MIGRATION_DB_STATEMENT_TIMEOUT_MS", 30000)
+def _target_adapter(key: str) -> object:
+    try:
+        return TARGET_ADAPTERS.get(key)
+    except LookupError as exc:
+        raise CapabilityUnavailable(key) from exc
 
-    if connection_config.db_scheme == "postgresql":
-        import psycopg2
 
-        connection = psycopg2.connect(
-            host=connection_config.host,
-            hostaddr=pinned_hostaddr,
-            port=connection_config.port,
-            dbname=connection_config.database,
-            user=connection_config.username,
-            password=password,
-            connect_timeout=connect_timeout,
-            options=f"-c statement_timeout={statement_timeout}",
-            sslmode=getattr(settings, "DATA_MIGRATION_POSTGRES_SSLMODE", "verify-full"),
-            application_name="saraise-data-migration-readonly",
-            target_session_attrs="any",
-            client_encoding="UTF8",
-            service="",
-        )
-        connection.set_session(readonly=True, autocommit=False)
-        return connection
-    if connection_config.db_scheme == "mysql":
-        import pymysql
+def _enforce_runtime_policy(tenant: UUID, target_adapter: str) -> DataMigrationConfiguration:
+    config = _configuration(tenant)
+    if not config.enabled:
+        raise CapabilityUnavailable("data_migration.core")
+    cohort = int(hashlib.sha256(tenant.bytes).hexdigest()[:8], 16) % 100
+    if cohort >= config.rollout_percentage:
+        raise CapabilityUnavailable("data_migration.core.rollout")
+    if target_adapter not in config.allowed_target_adapters:
+        raise CapabilityUnavailable(target_adapter)
+    return config
 
-        connection = pymysql.connect(
-            host=pinned_hostaddr,
-            port=connection_config.port,
-            user=connection_config.username,
-            password=password,
-            database=connection_config.database,
-            connect_timeout=connect_timeout,
-            read_timeout=max(1, statement_timeout // 1000),
-            write_timeout=max(1, statement_timeout // 1000),
-            autocommit=False,
-            local_infile=False,
-        )
-        # SARAISE-33006: External-session hardening on an operator-registered non-application database.
-        with connection.cursor() as cursor:
-            cursor.execute("SET SESSION MAX_EXECUTION_TIME = %s", (statement_timeout,))
-            cursor.execute("SET SESSION TRANSACTION READ ONLY")
-        return connection
-    raise ValueError(f"Unsupported external database type: {connection_config.db_scheme}")
+
+def _validate_source_reference(tenant: UUID, actor: UUID, source_type: str, source_config: Mapping[str, object], artifact_id: object | None) -> None:
+    """Resolve every source reference through its owning service boundary."""
+    if source_type in {"database", "api"}:
+        connection_id = source_config.get("connection_id")
+        if not ExternalConnection.objects.for_tenant(tenant).filter(pk=connection_id, is_active=True).exists():
+            raise MigrationServiceError("Active source connection not found for tenant.", code="INVALID_SOURCE_REFERENCE")
+    elif source_type in {"csv", "excel", "json", "xml"}:
+        if artifact_id is None:
+            raise MigrationServiceError("File sources require a DMS artifact version.", code="INVALID_SOURCE_REFERENCE")
+        from src.modules.dms.services import VersionService
+
+        try:
+            VersionService().get_version(tenant, actor, _uuid(artifact_id, "source_artifact_id"))
+        except Exception as exc:
+            raise MigrationServiceError("Source artifact is unavailable to this tenant.", code="INVALID_SOURCE_REFERENCE") from exc
 
 
 class ExternalConnectionService:
-    """Persist operator-managed connections without storing plaintext secrets."""
+    """Manage safe references; credentials remain in the approved secret store."""
 
     @staticmethod
     @transaction.atomic
-    def register(*, tenant_id: Any, created_by: str, data: Dict[str, Any]) -> ExternalConnection:
-        """Encrypt the password and register a canonical external connection."""
-        values = dict(data)
-        password = values.pop("password")
-        return ExternalConnection.objects.create(
-            tenant_id=tenant_id,
-            created_by=created_by,
-            password_encrypted=EncryptionService.encrypt(password),
-            **values,
-        )
-
-    @staticmethod
-    @transaction.atomic
-    def update(*, connection: ExternalConnection, data: Dict[str, Any]) -> ExternalConnection:
-        """Update canonical fields and rotate the encrypted password if supplied."""
-        values = dict(data)
-        password = values.pop("password", None)
-        for field, value in values.items():
-            setattr(connection, field, value)
-        if password is not None:
-            connection.password_encrypted = EncryptionService.encrypt(password)
+    def register(tenant_id: object, actor_id: object, payload: Mapping[str, object]) -> ExternalConnection:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        values = dict(payload)
+        values.pop("tenant_id", None)
+        if any(key in values for key in ("password", "token", "secret")):
+            raise MigrationServiceError("Secret material is forbidden; provide credential_ref.", code="SECRET_MATERIAL_FORBIDDEN")
+        _validate_connection_destination(values)
+        connection = ExternalConnection(tenant_id=tenant, created_by=actor, **values)
+        connection.full_clean()
         connection.save()
         return connection
 
+    @staticmethod
+    @transaction.atomic
+    def update(tenant_id: object, connection_id: object, actor_id: object, payload: Mapping[str, object]) -> ExternalConnection:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        connection = ExternalConnection.objects.for_tenant(tenant).select_for_update().filter(pk=connection_id).first()
+        if connection is None:
+            raise NotFound("External connection not found.")
+        immutable = {"id", "tenant_id", "created_by", "credential_ref"}
+        if set(payload) & immutable:
+            raise MigrationServiceError("Immutable connection fields cannot be updated.", code="IMMUTABLE_FIELD")
+        for field, value in payload.items():
+            setattr(connection, field, value)
+        connection.updated_by = actor
+        _validate_connection_destination({field.name: getattr(connection, field.name) for field in connection._meta.fields})
+        connection.full_clean()
+        connection.save()
+        return connection
 
-class MigrationResult:
-    """Result of migration execution."""
+    @staticmethod
+    @transaction.atomic
+    def rotate_credential(tenant_id: object, connection_id: object, actor_id: object, credential_ref: str) -> ExternalConnection:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        connection = ExternalConnection.objects.for_tenant(tenant).select_for_update().filter(pk=connection_id).first()
+        if connection is None:
+            raise NotFound("External connection not found.")
+        connection.credential_ref = _text(credential_ref, "credential_ref")
+        connection.updated_by = actor
+        connection.full_clean()
+        connection.save(update_fields=("credential_ref", "updated_by", "updated_at"))
+        return connection
 
-    def __init__(
-        self,
-        success: bool,
-        records_processed: int = 0,
-        records_failed: int = 0,
-        errors: Optional[List[str]] = None,
-    ):
-        self.success = success
-        self.records_processed = records_processed
-        self.records_failed = records_failed
-        self.errors = errors or []
+    @staticmethod
+    @transaction.atomic
+    def deactivate(tenant_id: object, connection_id: object, actor_id: object) -> ExternalConnection:
+        return ExternalConnectionService.update(tenant_id, connection_id, actor_id, {"is_active": False})
 
+    @staticmethod
+    def list_references(tenant_id: object) -> QuerySet[ExternalConnection]:
+        return ExternalConnection.objects.for_tenant(_uuid(tenant_id, "tenant_id")).filter(is_active=True).order_by("name")
 
-class MigrationEngine:
-    """Service for executing data migrations."""
-
-    def execute_migration(
-        self,
-        job_id: str,
-        tenant_id: str,
-        dry_run: bool = False,
-    ) -> MigrationResult:
-        """Execute migration job.
-
-        Args:
-            job_id: Migration job ID.
-            tenant_id: Tenant ID.
-            dry_run: If True, validate but don't import data.
-
-        Returns:
-            MigrationResult instance.
-
-        Raises:
-            ValueError: If job not found.
-        """
-        job = MigrationJob.objects.filter(id=job_id, tenant_id=tenant_id).first()
-        if not job:
-            raise ValueError(f"Migration job {job_id} not found for tenant {tenant_id}")
-
-        if job.status == "running":
-            raise ValueError(f"Migration job {job_id} is already running")
-
-        with transaction.atomic():
-            job.status = "running"
-            job.started_at = timezone.now()
-            job.save()
-
-            # Create checkpoint
-            checkpoint = self._create_checkpoint(job)
-
-            try:
-                # Load source data
-                source_data = self._load_source_data(job)
-
-                records_processed = 0
-                records_failed = 0
-                errors = []
-                imported_record_ids = []  # Track imported records for rollback
-
-                for index, record in enumerate(source_data):
-                    # Apply mappings
-                    transformed_record = self._apply_mappings(job, record)
-
-                    # Validate record
-                    validation_errors = self._validate_record(job, transformed_record, index)
-                    if validation_errors:
-                        records_failed += 1
-                        errors.extend(validation_errors)
-                        continue
-
-                    if not dry_run:
-                        # Import record and track ID for rollback
-                        record_id = self._import_record(job, transformed_record, tenant_id)
-                        if record_id:
-                            imported_record_ids.append(record_id)
-
-                    records_processed += 1
-
-                # Update checkpoint with imported record IDs for rollback capability
-                if imported_record_ids:
-                    checkpoint.checkpoint_data["imported_record_ids"] = imported_record_ids
-                    checkpoint.save()
-
-                job.status = "completed" if records_failed == 0 else "failed"
-                job.completed_at = timezone.now()
-                job.records_processed = records_processed
-                job.records_failed = records_failed
-                job.records_total = len(source_data)
-                job.error_message = "; ".join(errors[:10]) if errors else ""
-                job.save()
-
-                return MigrationResult(
-                    success=records_failed == 0,
-                    records_processed=records_processed,
-                    records_failed=records_failed,
-                    errors=errors,
-                )
-
-            except Exception as e:
-                job.status = "failed"
-                job.completed_at = timezone.now()
-                job.error_message = str(e)
-                job.save()
-
-                logger.error(f"Migration job {job_id} failed: {e}")
-                raise
-
-    def _create_checkpoint(self, job: MigrationJob) -> MigrationRollback:
-        """Create checkpoint for rollback.
-
-        Args:
-            job: Migration job.
-
-        Returns:
-            MigrationRollback instance.
-        """
-        checkpoint_data = {
-            "job_id": job.id,
-            "status": job.status,
-            "records_processed": job.records_processed,
-            "timestamp": timezone.now().isoformat(),
-        }
-        return MigrationRollback.objects.create(
-            tenant_id=job.tenant_id,
-            job=job,
-            checkpoint_data=checkpoint_data,
-        )
-
-    def _load_source_data(self, job: MigrationJob) -> List[Dict[str, Any]]:
-        """Load data from source.
-
-        Args:
-            job: Migration job.
-
-        Returns:
-            List of source records.
-
-        Raises:
-            ValueError: If source type is not supported or configuration is invalid.
-        """
-        source_type = job.source_type
-        source_config = job.source_config or {}
-
-        logger.info(f"Loading source data for job {job.id} from {source_type}")
-
+    @staticmethod
+    def test(tenant_id: object, connection_id: object, actor_id: object) -> dict[str, object]:
+        tenant = _uuid(tenant_id, "tenant_id")
+        _uuid(actor_id, "actor_id")
+        connection = ExternalConnection.objects.for_tenant(tenant).filter(pk=connection_id, is_active=True).first()
+        if connection is None:
+            raise NotFound("Active external connection not found.")
+        # Providers register a source adapter that performs the smallest verified read.
+        key = "core.api" if connection.kind == "http" else "core.database"
         try:
-            if source_type == "csv":
-                return self._load_csv_data(source_config)
-            elif source_type == "excel":
-                return self._load_excel_data(source_config)
-            elif source_type == "json":
-                return self._load_json_data(source_config)
-            elif source_type == "database":
-                return self._load_database_data(source_config, str(job.tenant_id))
-            elif source_type == "api":
-                return self._load_api_data(source_config)
-            else:
-                raise ValueError(f"Unsupported source type: {source_type}")
-        except Exception as e:
-            logger.error(f"Failed to load source data for job {job.id}: {e}")
-            raise ValueError(f"Failed to load source data: {str(e)}")
+            adapter = SOURCE_ADAPTERS.get(key)
+        except LookupError as exc:
+            raise CapabilityUnavailable(f"{key}.connection_test") from exc
+        if not hasattr(adapter, "test_connection"):
+            raise CapabilityUnavailable(f"{key}.connection_test")
+        evidence = adapter.test_connection(connection)
+        if not evidence or not evidence.get("verified"):
+            raise MigrationServiceError("Connection test returned no verified evidence.", code="UNVERIFIED_CONNECTION")
+        return dict(evidence)
 
-    def _load_csv_data(self, config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Load data from CSV file.
 
-        Args:
-            config: Configuration dict with 'file_path' and optional 'delimiter', 'encoding'.
+class MigrationJobService:
+    @staticmethod
+    @transaction.atomic
+    def create(tenant_id: object, actor_id: object, command: Mapping[str, object]) -> MigrationJob:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        values = dict(command)
+        values.pop("tenant_id", None)
+        source_type = _text(values.get("source_type"), "source_type", 20)
+        values["source_config"] = validate_source_config(source_type, values.get("source_config", {}))
+        _validate_source_reference(tenant, actor, source_type, values["source_config"], values.get("source_artifact_id"))
+        _enforce_runtime_policy(tenant, _text(values.get("target_adapter"), "target_adapter", 100))
+        job = MigrationJob(tenant_id=tenant, created_by=actor, **values)
+        job.full_clean()
+        job.save()
+        correlation = _correlation()
+        _version(job, actor, correlation, "Initial definition")
+        publish_event(tenant, "data_migration.job.created", "migration_job", job.id, actor_id=actor, correlation_id=correlation, payload={"version": 1, "status": job.status})
+        return job
 
-        Returns:
-            List of records as dictionaries.
-        """
-        import csv
+    @staticmethod
+    @transaction.atomic
+    def update(tenant_id: object, job_id: object, actor_id: object, command: Mapping[str, object], expected_version: int) -> MigrationJob:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        job = _job(tenant, job_id, lock=True)
+        if job.configuration_version != expected_version:
+            raise ConfigurationConflict()
+        forbidden = {"id", "tenant_id", "created_by", "configuration_version", "status", "transition_history"}
+        if set(command) & forbidden:
+            raise MigrationServiceError("Server-managed job fields cannot be changed.", code="IMMUTABLE_FIELD")
+        values = dict(command)
+        source_type = str(values.get("source_type", job.source_type))
+        source_config = values.get("source_config", job.source_config)
+        values["source_config"] = validate_source_config(source_type, source_config)
+        _validate_source_reference(tenant, actor, source_type, values["source_config"], values.get("source_artifact_id", job.source_artifact_id))
+        _enforce_runtime_policy(tenant, str(values.get("target_adapter", job.target_adapter)))
+        for field, value in values.items():
+            setattr(job, field, value)
+        job.updated_by = actor
+        job.configuration_version += 1
+        if job.status == "ready":
+            job.status = "draft"
+        job.full_clean()
+        job.save()
+        correlation = _correlation()
+        _version(job, actor, correlation, "Definition updated")
+        publish_event(tenant, "data_migration.job.updated", "migration_job", job.id, actor_id=actor, correlation_id=correlation, payload={"version": job.configuration_version, "status": job.status})
+        return job
 
-        from django.core.files.storage import default_storage
+    @staticmethod
+    @transaction.atomic
+    def soft_delete(tenant_id: object, job_id: object, actor_id: object) -> None:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        job = _job(tenant, job_id, lock=True)
+        if job.runs.filter(status__in=("queued", "running")).exists():
+            raise MigrationServiceError("A job with an active run cannot be deleted.", code="ACTIVE_RUN")
+        job.is_deleted, job.deleted_at, job.updated_by = True, timezone.now(), actor
+        job.save(update_fields=("is_deleted", "deleted_at", "updated_by", "updated_at"))
+        publish_event(tenant, "data_migration.job.deleted", "migration_job", job.id, actor_id=actor)
 
-        file_path = config.get("file_path")
-        if not file_path:
-            raise ValueError("CSV file_path is required in source_config")
+    @staticmethod
+    @transaction.atomic
+    def restore_deleted(tenant_id: object, job_id: object, actor_id: object) -> MigrationJob:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        job = _job(tenant, job_id, lock=True, include_deleted=True)
+        job.is_deleted, job.deleted_at, job.status, job.updated_by = False, None, "draft", actor
+        job.save(update_fields=("is_deleted", "deleted_at", "status", "updated_by", "updated_at"))
+        publish_event(tenant, "data_migration.job.restored", "migration_job", job.id, actor_id=actor, payload={"status": "draft"})
+        return job
 
-        delimiter = config.get("delimiter", ",")
-        encoding = config.get("encoding", "utf-8")
+    @staticmethod
+    @transaction.atomic
+    def validate_definition(tenant_id: object, job_id: object, actor_id: object) -> DefinitionValidationResult:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        job = _job(tenant, job_id, lock=True)
+        blockers: list[str] = []
+        try:
+            validate_source_config(job.source_type, job.source_config)
+        except (ValueError, ValidationError, MigrationServiceError) as exc:
+            blockers.append(str(exc))
+        if not TARGET_ADAPTERS.contains(job.target_adapter):
+            blockers.append("Target adapter is unavailable.")
+        if not job.mappings.exists():
+            blockers.append("At least one mapping is required.")
+        if job.write_mode == "upsert" and not job.lookup_fields:
+            blockers.append("Upsert requires lookup fields.")
+        for rule in job.validation_rules.filter(is_active=True):
+            try:
+                validate_rule_config(rule.rule_type, rule.rule_config)
+            except (ValueError, ValidationError) as exc:
+                blockers.append(f"Rule {rule.position}: {exc}")
+        if blockers:
+            return DefinitionValidationResult(False, tuple(blockers))
+        JOB_MACHINE.apply(job, "validate", transition_key=f"validate:{job.configuration_version}", context={"actor_id": str(actor)})
+        return DefinitionValidationResult(True, ())
 
+    @staticmethod
+    @transaction.atomic
+    def archive(tenant_id: object, job_id: object, actor_id: object, transition_key: str) -> MigrationJob:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        job = _job(tenant, job_id, lock=True)
+        result = JOB_MACHINE.apply(job, "archive", transition_key=_text(transition_key, "transition_key"), context={"actor_id": str(actor)})
+        publish_event(tenant, "data_migration.job.archived", "migration_job", result.id, actor_id=actor, payload={"status": result.status})
+        return result
+
+    @staticmethod
+    @transaction.atomic
+    def restore_version(tenant_id: object, job_id: object, version: int, actor_id: object, expected_version: int) -> MigrationJob:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        job = _job(tenant, job_id, lock=True, include_deleted=True)
+        if job.configuration_version != expected_version:
+            raise ConfigurationConflict()
+        historic = MigrationJobVersion.objects.for_tenant(tenant).filter(job=job, version=version).first()
+        if historic is None:
+            raise NotFound("Migration job version not found.")
+        snapshot = historic.snapshot
+        for field in ("name", "description", "source_type", "source_artifact_id", "source_config", "target_adapter", "target_entity", "write_mode", "lookup_fields"):
+            if field in snapshot:
+                setattr(job, field, snapshot[field])
+        job.configuration_version += 1
+        job.status, job.is_deleted, job.deleted_at, job.updated_by = "draft", False, None, actor
+        job.full_clean()
+        job.save()
+        _version(job, actor, _correlation(), f"Restored version {version}")
+        return job
+
+    @staticmethod
+    def export_definition(tenant_id: object, job_id: object) -> dict[str, object]:
+        job = _job(_uuid(tenant_id, "tenant_id"), job_id)
+        snapshot = _safe_snapshot(job)
+        document = {"schema_version": "2.0", "job": {key: snapshot[key] for key in ("name", "description", "source_type", "source_artifact_id", "source_config", "target_adapter", "target_entity", "write_mode", "lookup_fields")}, "mappings": snapshot["mappings"], "rules": snapshot["rules"]}
+        document["checksum"] = _snapshot_checksum(document)
+        return document
+
+    @staticmethod
+    @transaction.atomic
+    def import_definition(tenant_id: object, actor_id: object, document: Mapping[str, object]) -> MigrationJob:
+        supplied = dict(document)
+        if supplied.get("schema_version") != "2.0" or supplied.get("checksum") != _snapshot_checksum(supplied):
+            raise MigrationServiceError("Import document checksum or schema version is invalid.", code="INVALID_IMPORT")
+        forbidden = {"tenant_id", "job_id", "created_by", "credential_ref", "runs", "changes"}
+        if set(supplied) & forbidden:
+            raise MigrationServiceError("Import document contains forbidden identity or execution fields.", code="INVALID_IMPORT")
+        mappings = supplied.get("mappings", [])
+        rules = supplied.get("rules", [])
+        job = MigrationJobService.create(tenant_id, actor_id, supplied.get("job", {}))
+        for item in mappings:
+            MigrationMappingService.create(tenant_id, job.id, actor_id, item)
+        for item in rules:
+            ValidationRuleService.create(tenant_id, job.id, actor_id, item)
+        return job
+
+
+class MigrationMappingService:
+    @staticmethod
+    @transaction.atomic
+    def create(tenant_id: object, job_id: object, actor_id: object, payload: Mapping[str, object]) -> MigrationMapping:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        job = _job(tenant, job_id, lock=True)
+        values = dict(payload)
+        values.pop("tenant_id", None); values.pop("job", None)
+        values["transform_config"] = validate_transform_config(str(values.get("transform_type", "identity")), values.get("transform_config", {}))
+        mapping = MigrationMapping(tenant_id=tenant, job=job, created_by=actor, **values)
+        mapping.full_clean(); mapping.save()
+        _bump_definition(job, actor, "Mapping created")
+        return mapping
+
+    @staticmethod
+    @transaction.atomic
+    def update(tenant_id: object, mapping_id: object, actor_id: object, payload: Mapping[str, object]) -> MigrationMapping:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        mapping = MigrationMapping.objects.for_tenant(tenant).select_for_update().select_related("job").filter(pk=mapping_id, job__is_deleted=False).first()
+        if mapping is None: raise NotFound("Mapping not found.")
+        if set(payload) & {"id", "tenant_id", "job", "created_by"}: raise MigrationServiceError("Immutable mapping field.", code="IMMUTABLE_FIELD")
+        for field, value in payload.items(): setattr(mapping, field, value)
+        mapping.transform_config = validate_transform_config(mapping.transform_type, mapping.transform_config)
+        mapping.updated_by = actor; mapping.full_clean(); mapping.save()
+        _bump_definition(mapping.job, actor, "Mapping updated")
+        return mapping
+
+    @staticmethod
+    @transaction.atomic
+    def delete(tenant_id: object, mapping_id: object, actor_id: object) -> None:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        mapping = MigrationMapping.objects.for_tenant(tenant).select_for_update().select_related("job").filter(pk=mapping_id).first()
+        if mapping is None: raise NotFound("Mapping not found.")
+        job = mapping.job; mapping.delete(); _bump_definition(job, actor, "Mapping deleted")
+
+    @staticmethod
+    @transaction.atomic
+    def reorder(tenant_id: object, job_id: object, actor_id: object, ordered_ids: Sequence[object]) -> list[MigrationMapping]:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        job = _job(tenant, job_id, lock=True)
+        rows = list(MigrationMapping.objects.for_tenant(tenant).select_for_update().filter(job=job))
+        by_id = {str(row.id): row for row in rows}
+        if len(ordered_ids) != len(rows) or set(map(str, ordered_ids)) != set(by_id):
+            raise MigrationServiceError("Reorder must contain every mapping exactly once.", code="INVALID_ORDER")
+        for position, identifier in enumerate(ordered_ids):
+            row = by_id[str(identifier)]; row.position = position; row.updated_by = actor
+        MigrationMapping.objects.bulk_update(rows, ("position", "updated_by", "updated_at"))
+        _bump_definition(job, actor, "Mappings reordered")
+        return sorted(rows, key=lambda item: item.position)
+
+    @staticmethod
+    def suggest_deterministic(tenant_id: object, job_id: object) -> list[dict[str, object]]:
+        tenant = _uuid(tenant_id, "tenant_id"); job = _job(tenant, job_id)
+        adapter = _target_adapter(job.target_adapter)
+        schema = adapter.describe_schema(job.target_entity)
+        profile = SourceInspectionService.preview(tenant, job.id, min(25, _configuration(tenant).preview_row_limit))
+        source_fields = sorted({key for record in profile.records for key in record})
+        targets = {str(item["name"]).lower(): item for item in schema.get("fields", [])}
+        suggestions = []
+        for source in source_fields:
+            normalized = re.sub(r"[^a-z0-9]", "", source.lower())
+            match = next((field for name, field in targets.items() if re.sub(r"[^a-z0-9]", "", name) == normalized), None)
+            if match and not match.get("pii", False):
+                suggestion_id = hashlib.sha256(f"{job.id}:{source}:{match['name']}".encode()).hexdigest()[:24]
+                suggestions.append({"id": suggestion_id, "source_field": source, "target_field": match["name"], "confidence": "1.0000", "origin": "deterministic"})
+        return suggestions
+
+    @staticmethod
+    def apply_suggestions(tenant_id: object, job_id: object, actor_id: object, suggestion_ids: Sequence[str]) -> list[MigrationMapping]:
+        suggestions = {item["id"]: item for item in MigrationMappingService.suggest_deterministic(tenant_id, job_id)}
+        if not set(suggestion_ids) <= set(suggestions): raise MigrationServiceError("Unknown or stale mapping suggestion.", code="INVALID_SUGGESTION")
+        start = MigrationMapping.objects.for_tenant(_uuid(tenant_id, "tenant_id")).filter(job_id=job_id).count()
+        return [MigrationMappingService.create(tenant_id, job_id, actor_id, {"source_field": suggestions[key]["source_field"], "target_field": suggestions[key]["target_field"], "position": start + index, "origin": "deterministic", "confidence": Decimal(str(suggestions[key]["confidence"]))}) for index, key in enumerate(suggestion_ids)]
+
+
+def _bump_definition(job: MigrationJob, actor: UUID, summary: str) -> None:
+    job.configuration_version += 1; job.updated_by = actor
+    if job.status == "ready": job.status = "draft"
+    job.save(update_fields=("configuration_version", "updated_by", "status", "updated_at"))
+    _version(job, actor, _correlation(), summary)
+
+
+class ValidationRuleService:
+    @staticmethod
+    @transaction.atomic
+    def create(tenant_id: object, job_id: object, actor_id: object, payload: Mapping[str, object]) -> ValidationRule:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id"); job = _job(tenant, job_id, lock=True)
+        values = dict(payload); values.pop("tenant_id", None); values.pop("job", None)
+        values["rule_config"] = validate_rule_config(str(values.get("rule_type")), values.get("rule_config", {}))
+        rule = ValidationRule(tenant_id=tenant, job=job, created_by=actor, **values); rule.full_clean(); rule.save(); _bump_definition(job, actor, "Validation rule created"); return rule
+
+    @staticmethod
+    @transaction.atomic
+    def update(tenant_id: object, rule_id: object, actor_id: object, payload: Mapping[str, object]) -> ValidationRule:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        rule = ValidationRule.objects.for_tenant(tenant).select_for_update().select_related("job").filter(pk=rule_id).first()
+        if rule is None: raise NotFound("Validation rule not found.")
+        if set(payload) & {"id", "tenant_id", "job", "created_by"}: raise MigrationServiceError("Immutable rule field.", code="IMMUTABLE_FIELD")
+        for field, value in payload.items(): setattr(rule, field, value)
+        rule.rule_config = validate_rule_config(rule.rule_type, rule.rule_config); rule.updated_by = actor; rule.full_clean(); rule.save(); _bump_definition(rule.job, actor, "Validation rule updated"); return rule
+
+    @staticmethod
+    @transaction.atomic
+    def delete(tenant_id: object, rule_id: object, actor_id: object) -> None:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        rule = ValidationRule.objects.for_tenant(tenant).select_for_update().select_related("job").filter(pk=rule_id).first()
+        if rule is None: raise NotFound("Validation rule not found.")
+        job = rule.job; rule.delete(); _bump_definition(job, actor, "Validation rule deleted")
+
+    reorder = staticmethod(lambda tenant_id, job_id, actor_id, ordered_ids: _reorder_rules(tenant_id, job_id, actor_id, ordered_ids))
+
+    @staticmethod
+    def evaluate(tenant_id: object, job_id: object, mapped_record: Mapping[str, object], row_number: int) -> list[RuleOutcome]:
+        tenant = _uuid(tenant_id, "tenant_id"); job = _job(tenant, job_id); outcomes: list[RuleOutcome] = []
+        adapter = _target_adapter(job.target_adapter)
+        for rule in job.validation_rules.filter(is_active=True).order_by("position"):
+            config = validate_rule_config(rule.rule_type, rule.rule_config); value = mapped_record.get(rule.field_name); passed = True
+            if rule.rule_type == "required": passed = value not in (None, "")
+            elif rule.rule_type == "type":
+                expected = config["type"]; passed = {"string": lambda: isinstance(value, str), "integer": lambda: isinstance(value, int) and not isinstance(value, bool), "number": lambda: isinstance(value, (int, float, Decimal)) and not isinstance(value, bool), "boolean": lambda: isinstance(value, bool)}.get(expected, lambda: False)()
+            elif rule.rule_type == "range": passed = value is not None and (config.get("min") is None or value >= config["min"]) and (config.get("max") is None or value <= config["max"])
+            elif rule.rule_type == "length": passed = value is not None and (config.get("min") is None or len(value) >= config["min"]) and (config.get("max") is None or len(value) <= config["max"])
+            elif rule.rule_type == "regex": passed = isinstance(value, str) and re.fullmatch(config["pattern"], value) is not None
+            elif rule.rule_type == "allowed_values": passed = value in config["values"]
+            elif rule.rule_type in ("unique", "referential"): passed = bool(adapter.validate_reference(job.target_entity, rule.field_name, value, rule.rule_type, config))
+            else: raise MigrationServiceError(f"Unknown validation rule {rule.rule_type!r}.", code="UNKNOWN_RULE")
+            outcomes.append(RuleOutcome(rule.id, rule.field_name, rule.severity, passed, rule.rule_type.upper(), "" if passed else rule.error_message, row_number))
+        return outcomes
+
+
+@transaction.atomic
+def _reorder_rules(tenant_id: object, job_id: object, actor_id: object, ordered_ids: Sequence[object]) -> list[ValidationRule]:
+    tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id"); job = _job(tenant, job_id, lock=True)
+    rows = list(ValidationRule.objects.for_tenant(tenant).select_for_update().filter(job=job)); by_id = {str(row.id): row for row in rows}
+    if len(ordered_ids) != len(rows) or set(map(str, ordered_ids)) != set(by_id): raise MigrationServiceError("Reorder must contain every rule exactly once.", code="INVALID_ORDER")
+    for position, identifier in enumerate(ordered_ids): by_id[str(identifier)].position = position; by_id[str(identifier)].updated_by = actor
+    ValidationRule.objects.bulk_update(rows, ("position", "updated_by", "updated_at")); _bump_definition(job, actor, "Validation rules reordered"); return sorted(rows, key=lambda item: item.position)
+
+
+class SourceInspectionService:
+    @staticmethod
+    @transaction.atomic
+    def request_inspection(tenant_id: object, job_id: object, actor_id: object, idempotency_key: str) -> AsyncJob:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id"); job = _job(tenant, job_id)
+        version = MigrationJobVersion.objects.for_tenant(tenant).get(job=job, version=job.configuration_version)
+        return enqueue(tenant, actor, "data_migration.inspect", {"job_id": str(job.id), "job_version_id": str(version.id)}, f"data-migration:inspect:{_text(idempotency_key, 'idempotency_key')}")
+
+    @staticmethod
+    def inspect(tenant_id: object, job_id: object, job_version_id: object) -> SourceProfile:
+        tenant = _uuid(tenant_id, "tenant_id"); job = _job(tenant, job_id)
+        version = MigrationJobVersion.objects.for_tenant(tenant).filter(pk=job_version_id, job=job).first()
+        if version is None: raise NotFound("Migration job version not found.")
+        adapter = _source_adapter(f"core.{job.source_type}")
+        profile = adapter.inspect(tenant, job.source_artifact_id, job.source_config, _configuration(tenant))
+        if not profile or not profile.get("source_checksum"): raise MigrationServiceError("Inspection produced no verified source evidence.", code="UNVERIFIED_SOURCE")
+        return SourceProfile(tuple(profile.get("fields", ())), tuple(_redact(item) for item in profile.get("representative_values", ())), int(profile.get("row_estimate", 0)), str(profile["source_checksum"]), tuple(profile.get("warnings", ())))
+
+    @staticmethod
+    def preview(tenant_id: object, job_id: object, limit: int) -> PreviewResult:
+        tenant = _uuid(tenant_id, "tenant_id"); job = _job(tenant, job_id); configured = _configuration(tenant).preview_row_limit
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1 or limit > min(100, configured): raise MigrationServiceError(f"Preview limit must be between 1 and {min(100, configured)}.", code="INVALID_LIMIT")
+        adapter = _source_adapter(f"core.{job.source_type}"); iterator = adapter.iter_records(tenant, job.source_artifact_id, job.source_config, _configuration(tenant))
         records = []
+        for record in iterator:
+            records.append(_redact(record))
+            if len(records) > limit: break
+        visible = records[:limit]; checksum = hashlib.sha256(json.dumps(visible, sort_keys=True, default=str).encode()).hexdigest()
+        return PreviewResult(tuple(visible), checksum, len(records) > limit)
+
+
+class MigrationExecutionService:
+    @staticmethod
+    @transaction.atomic
+    def request_run(tenant_id: object, job_id: object, actor_id: object, mode: str, idempotency_key: str) -> MigrationRun:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id"); mode = _text(mode, "mode", 10)
+        if mode not in ("dry_run", "commit"): raise MigrationServiceError("mode must be dry_run or commit", code="INVALID_MODE")
+        job = _job(tenant, job_id, lock=True)
+        if job.status != "ready": raise MigrationServiceError("Only ready jobs may run.", code="JOB_NOT_READY")
+        key = _text(idempotency_key, "idempotency_key")
+        existing = MigrationRun.objects.for_tenant(tenant).filter(idempotency_key=key).first()
+        if existing:
+            if existing.job_id != job.id or existing.mode != mode: raise MigrationServiceError("Idempotency key belongs to another run request.", code="IDEMPOTENCY_CONFLICT")
+            return existing
+        profile = SourceInspectionService.inspect(tenant, job.id, MigrationJobVersion.objects.for_tenant(tenant).get(job=job, version=job.configuration_version).id)
+        async_job = enqueue(tenant, actor, "data_migration.execute", {"pending": True}, f"data-migration:run:{key}")
+        version = MigrationJobVersion.objects.for_tenant(tenant).get(job=job, version=job.configuration_version)
+        run = MigrationRun.objects.create(tenant_id=tenant, job=job, job_version=version, async_job_id=async_job.id, mode=mode, idempotency_key=key, source_checksum=profile.source_checksum, created_by=actor, correlation_id=async_job.correlation_id)
+        async_job.payload = {"run_id": str(run.id)}; async_job.save(update_fields=("payload", "updated_at"))
+        publish_event(tenant, "data_migration.run.queued", "migration_run", run.id, actor_id=actor, correlation_id=run.correlation_id, payload={"mode": mode, "status": "queued"})
+        return run
+
+    @staticmethod
+    @transaction.atomic
+    def cancel(tenant_id: object, run_id: object, actor_id: object, transition_key: str) -> MigrationRun:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        run = MigrationRun.objects.for_tenant(tenant).select_for_update().filter(pk=run_id).first()
+        if run is None: raise NotFound("Migration run not found.")
+        run.cancel_requested_at = timezone.now(); run.save(update_fields=("cancel_requested_at", "updated_at"))
+        if run.status == "queued": run = RUN_MACHINE.apply(run, "cancel", transition_key=_text(transition_key, "transition_key"), context={"actor_id": str(actor)})
+        return run
+
+    @staticmethod
+    def execute(tenant_id: object, run_id: object) -> MigrationRun:
+        tenant = _uuid(tenant_id, "tenant_id")
+        with transaction.atomic():
+            run = MigrationRun.objects.for_tenant(tenant).select_for_update().select_related("job").filter(pk=run_id).first()
+            if run is None: raise NotFound("Migration run not found.")
+            if run.status in ("succeeded", "partial", "failed", "cancelled", "rolled_back"): return run
+            run = RUN_MACHINE.apply(run, "start", transition_key=f"start:{run.id}")
+            run.started_at = timezone.now(); run.save(update_fields=("started_at", "updated_at"))
+        job = run.job; source = _source_adapter(f"core.{job.source_type}"); target = _target_adapter(job.target_adapter); config = _configuration(tenant)
+        batch: list[tuple[int, Mapping[str, object]]] = []
         try:
-            with default_storage.open(file_path, mode="r", encoding=encoding) as f:
-                reader = csv.DictReader(f, delimiter=delimiter)
-                records = list(reader)
-        except FileNotFoundError:
-            raise ValueError(f"CSV file not found: {file_path}")
-        except Exception as e:
-            raise ValueError(f"Failed to read CSV file: {str(e)}")
-
-        logger.info(f"Loaded {len(records)} records from CSV file")
-        return records
-
-    def _load_excel_data(self, config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Load data from Excel file.
-
-        Args:
-            config: Configuration dict with 'file_path' and optional 'sheet_name', 'header_row'.
-
-        Returns:
-            List of records as dictionaries.
-        """
-        try:
-            import pandas as pd
-        except ImportError:
-            raise ValueError("pandas is required for Excel file support. Install with: pip install pandas openpyxl")
-
-        file_path = config.get("file_path")
-        if not file_path:
-            raise ValueError("Excel file_path is required in source_config")
-
-        sheet_name = config.get("sheet_name", 0)
-        header_row = config.get("header_row", 0)
-
-        try:
-            from django.core.files.storage import default_storage
-
-            with default_storage.open(file_path, mode="rb") as f:
-                df = pd.read_excel(f, sheet_name=sheet_name, header=header_row)
-                records = df.to_dict("records")
-        except FileNotFoundError:
-            raise ValueError(f"Excel file not found: {file_path}")
-        except Exception as e:
-            raise ValueError(f"Failed to read Excel file: {str(e)}")
-
-        logger.info(f"Loaded {len(records)} records from Excel file")
-        return records
-
-    def _load_json_data(self, config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Load data from JSON file or JSON string.
-
-        Args:
-            config: Configuration dict with 'file_path' or 'data' (JSON string).
-
-        Returns:
-            List of records as dictionaries.
-        """
-        import json
-
-        from django.core.files.storage import default_storage
-
-        if "data" in config:
-            # JSON string provided directly
-            try:
-                data = json.loads(config["data"])
-                if isinstance(data, list):
-                    return data
-                elif isinstance(data, dict):
-                    return [data]
-                else:
-                    raise ValueError("JSON data must be a list or object")
-            except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON data: {str(e)}")
-
-        file_path = config.get("file_path")
-        if not file_path:
-            raise ValueError("JSON file_path or data is required in source_config")
-
-        try:
-            with default_storage.open(file_path, mode="r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    return data
-                elif isinstance(data, dict):
-                    return [data]
-                else:
-                    raise ValueError("JSON file must contain a list or object")
-        except FileNotFoundError:
-            raise ValueError(f"JSON file not found: {file_path}")
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON file: {str(e)}")
-        except Exception as e:
-            raise ValueError(f"Failed to read JSON file: {str(e)}")
-
-    def _load_database_data(self, config: Dict[str, Any], tenant_id: str) -> List[Dict[str, Any]]:
-        """Load data from external database.
-
-        Args:
-            config: Structured external database connection, table, columns, and filters.
-            tenant_id: Tenant owning the already-scoped migration job.
-
-        Returns:
-            List of records as dictionaries.
-        """
-        if not tenant_id:
-            raise ValueError("Tenant context is required for database migrations")
-        _validate_database_source_config(config)
-
-        try:
-            connection_config = ExternalConnection.objects.filter(
-                id=config["connection_id"],
-                tenant_id=tenant_id,
-                is_active=True,
-            ).first()
-        except (DjangoValidationError, ValueError, TypeError) as exc:
-            raise ValueError("Database connection_id is invalid") from exc
-        if connection_config is None:
-            raise ValueError("Active external connection not found for tenant")
-
-        table = _validated_identifier(config.get("table"), "table")
-        configured_columns = config.get("columns", ["*"])
-        if not isinstance(configured_columns, list) or not configured_columns:
-            raise ValueError("Database columns must be a non-empty list")
-        if configured_columns == ["*"]:
-            columns_sql = "*"
-        else:
-            columns_sql = ", ".join(_validated_identifier(column, "column") for column in configured_columns)
-
-        filters = config.get("filters", {})
-        if not isinstance(filters, dict):
-            raise ValueError("Database filters must be an object")
-        where_parts = []
-        values = []
-        for column, value in filters.items():
-            where_parts.append(f"{_validated_identifier(column, 'filter column')} = %s")
-            values.append(value)
-        where_sql = f" WHERE {' AND '.join(where_parts)}" if where_parts else ""
-        select_sql = f"SELECT {columns_sql} FROM {table}{where_sql}"
-
-        connection = None
-        try:
-            connection = _connect_external_database(connection_config)
-            # SARAISE-33006: External-source read on an operator-registered non-application database.
-            with connection.cursor() as cursor:
-                cursor.execute(select_sql, values)
-                columns = [col[0] for col in cursor.description]
-                rows = cursor.fetchall()
-                records = [dict(zip(columns, row)) for row in rows]
-        except Exception as e:
-            raise ValueError(f"Failed to query database: {str(e)}")
-        finally:
-            if connection is not None:
-                connection.close()
-
-        logger.info("Loaded %s records from external database for tenant %s", len(records), tenant_id)
-        return records
-
-    def _load_api_data(self, config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Load data from API endpoint.
-
-        Args:
-            config: Configuration dict with 'url', 'method', 'headers', 'params'.
-
-        Returns:
-            List of records as dictionaries.
-        """
-        try:
-            import httpx
-        except ImportError:
-            raise ValueError("httpx is required for API source support. Install with: pip install httpx")
-
-        url = config.get("url")
-        if not url:
-            raise ValueError("API url is required in source_config")
-
-        method = config.get("method", "GET").upper()
-        headers = config.get("headers", {})
-        params = config.get("params", {})
-        timeout = config.get("timeout", 30)
-
-        try:
-            response = httpx.request(method, url, headers=headers, params=params, timeout=timeout)
-            response.raise_for_status()
-            data = response.json()
-
-            if isinstance(data, list):
-                return data
-            elif isinstance(data, dict):
-                # Check if data contains a list (common API pattern)
-                if "results" in data:
-                    return data["results"]
-                elif "data" in data:
-                    return data["data"] if isinstance(data["data"], list) else [data["data"]]
-                else:
-                    return [data]
-            else:
-                raise ValueError("API response must be JSON array or object")
-        except httpx.HTTPError as e:
-            raise ValueError(f"API request failed: {str(e)}")
-        except Exception as e:
-            raise ValueError(f"Failed to load data from API: {str(e)}")
-
-    def _apply_mappings(
-        self,
-        job: MigrationJob,
-        record: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """Apply field mappings to record.
-
-        Args:
-            job: Migration job.
-            record: Source record.
-
-        Returns:
-            Transformed record.
-        """
-        mappings = MigrationMapping.objects.filter(job=job)
-        transformed = {}
-
-        for mapping in mappings:
-            source_value = record.get(mapping.source_field)
-            transform = mapping.transform
-
-            # Apply transformation
-            if "type" in transform:
-                # Type conversion
-                target_type = transform["type"]
-                if target_type == "string":
-                    source_value = str(source_value) if source_value is not None else ""
-                elif target_type == "integer":
-                    source_value = int(source_value) if source_value else 0
-                elif target_type == "decimal":
-                    from decimal import Decimal
-
-                    source_value = Decimal(str(source_value)) if source_value else Decimal("0.00")
-
-            if "default" in transform and source_value is None:
-                source_value = transform["default"]
-
-            transformed[mapping.target_field] = source_value
-
-        return transformed
-
-    def _validate_record(
-        self,
-        job: MigrationJob,
-        record: Dict[str, Any],
-        index: int,
-    ) -> List[str]:
-        """Validate transformed record.
-
-        Args:
-            job: Migration job.
-            record: Transformed record.
-            index: Record index.
-
-        Returns:
-            List of validation error messages.
-        """
-        errors = []
-        validation_rules = job.source_config.get("validation_rules", {})
-
-        # Get required fields from validation rules
-        required_fields = validation_rules.get("required_fields", [])
-        field_types = validation_rules.get("field_types", {})
-        field_constraints = validation_rules.get("field_constraints", {})
-
-        # Validate required fields
-        for field in required_fields:
-            if field not in record or record[field] is None or record[field] == "":
-                error_msg = f"Field {field} is required at record {index}"
-                MigrationValidation.objects.create(
-                    tenant_id=job.tenant_id,
-                    job=job,
-                    field=field,
-                    rule="required",
-                    status="failed",
-                    message=error_msg,
-                    record_index=index,
-                )
-                errors.append(error_msg)
-
-        # Validate field types
-        for field, expected_type in field_types.items():
-            if field not in record:
-                continue
-
-            value = record[field]
-            if value is None or value == "":
-                continue  # Skip null/empty values (handled by required check)
-
-            type_valid = False
-            if expected_type == "string":
-                type_valid = isinstance(value, str)
-            elif expected_type == "integer":
-                type_valid = isinstance(value, int) or (isinstance(value, str) and value.isdigit())
-            elif expected_type == "decimal" or expected_type == "float":
-                try:
-                    float(value)
-                    type_valid = True
-                except (ValueError, TypeError):
-                    type_valid = False
-            elif expected_type == "boolean":
-                type_valid = isinstance(value, bool) or str(value).lower() in ("true", "false", "1", "0", "yes", "no")
-            elif expected_type == "date":
-                from datetime import datetime
-
-                try:
-                    datetime.fromisoformat(str(value))
-                    type_valid = True
-                except (ValueError, TypeError):
-                    type_valid = False
-            elif expected_type == "email":
-                import re
-
-                email_pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-                type_valid = isinstance(value, str) and bool(re.match(email_pattern, value))
-            else:
-                # Unknown type, skip validation
-                continue
-
-            if not type_valid:
-                error_msg = f"Field {field} must be of type {expected_type} at record {index}"
-                MigrationValidation.objects.create(
-                    tenant_id=job.tenant_id,
-                    job=job,
-                    field=field,
-                    rule="type_check",
-                    status="failed",
-                    message=error_msg,
-                    record_index=index,
-                )
-                errors.append(error_msg)
-
-        # Validate field constraints
-        for field, constraints in field_constraints.items():
-            if field not in record:
-                continue
-
-            value = record[field]
-            if value is None or value == "":
-                continue
-
-            # Min length constraint
-            if "min_length" in constraints:
-                min_length = constraints["min_length"]
-                if isinstance(value, str) and len(value) < min_length:
-                    error_msg = f"Field {field} must be at least {min_length} characters at record {index}"
-                    MigrationValidation.objects.create(
-                        tenant_id=job.tenant_id,
-                        job=job,
-                        field=field,
-                        rule="min_length",
-                        status="failed",
-                        message=error_msg,
-                        record_index=index,
-                    )
-                    errors.append(error_msg)
-
-            # Max length constraint
-            if "max_length" in constraints:
-                max_length = constraints["max_length"]
-                if isinstance(value, str) and len(value) > max_length:
-                    error_msg = f"Field {field} must be at most {max_length} characters at record {index}"
-                    MigrationValidation.objects.create(
-                        tenant_id=job.tenant_id,
-                        job=job,
-                        field=field,
-                        rule="max_length",
-                        status="failed",
-                        message=error_msg,
-                        record_index=index,
-                    )
-                    errors.append(error_msg)
-
-            # Min value constraint
-            if "min_value" in constraints:
-                min_value = constraints["min_value"]
-                try:
-                    num_value = float(value)
-                    if num_value < min_value:
-                        error_msg = f"Field {field} must be at least {min_value} at record {index}"
-                        MigrationValidation.objects.create(
-                            tenant_id=job.tenant_id,
-                            job=job,
-                            field=field,
-                            rule="min_value",
-                            status="failed",
-                            message=error_msg,
-                            record_index=index,
-                        )
-                        errors.append(error_msg)
-                except (ValueError, TypeError):
-                    pass  # Not a number, skip
-
-            # Max value constraint
-            if "max_value" in constraints:
-                max_value = constraints["max_value"]
-                try:
-                    num_value = float(value)
-                    if num_value > max_value:
-                        error_msg = f"Field {field} must be at most {max_value} at record {index}"
-                        MigrationValidation.objects.create(
-                            tenant_id=job.tenant_id,
-                            job=job,
-                            field=field,
-                            rule="max_value",
-                            status="failed",
-                            message=error_msg,
-                            record_index=index,
-                        )
-                        errors.append(error_msg)
-                except (ValueError, TypeError):
-                    pass  # Not a number, skip
-
-            # Pattern/regex constraint
-            if "pattern" in constraints:
-                import re
-
-                pattern = constraints["pattern"]
-                if isinstance(value, str) and not re.match(pattern, value):
-                    error_msg = f"Field {field} does not match required pattern at record {index}"
-                    MigrationValidation.objects.create(
-                        tenant_id=job.tenant_id,
-                        job=job,
-                        field=field,
-                        rule="pattern",
-                        status="failed",
-                        message=error_msg,
-                        record_index=index,
-                    )
-                    errors.append(error_msg)
-
-        return errors
-
-    def _import_record(
-        self,
-        job: MigrationJob,
-        record: Dict[str, Any],
-        tenant_id: str,
-    ) -> Optional[str]:
-        """Import record into target system.
-
-        Args:
-            job: Migration job.
-            record: Transformed record.
-            tenant_id: Tenant ID.
-
-        Returns:
-            Imported record ID (str) if successful, None otherwise.
-
-        Raises:
-            ValueError: If target model is not specified or import fails.
-        """
-        target_config = job.source_config.get("target", {})
-        target_model_path = target_config.get("model")
-        target_action = target_config.get("action", "create")  # 'create' or 'update'
-
-        if not target_model_path:
-            # If no target model specified, log the record for manual import
-            logger.warning(f"No target model specified for job {job.id}, skipping import")
-            MigrationLog.objects.create(
-                tenant_id=tenant_id,
-                job=job,
-                level="warning",
-                message=f"Record skipped (no target model): {record}",
-            )
-            return None
-
-        try:
-            # Import target model dynamically
-            # Format: "app_label.ModelName" or "module.path.ModelName"
-            if "." in target_model_path:
-                parts = target_model_path.rsplit(".", 1)
-                module_path = parts[0]
-                model_name = parts[1]
-
-                from importlib import import_module
-
-                module = import_module(module_path)
-                Model = getattr(module, model_name)
-
-                # Prepare record data with tenant_id
-                record_data = record.copy()
-                record_data["tenant_id"] = tenant_id
-
-                if target_action == "update":
-                    # Update requires a lookup field
-                    lookup_field = target_config.get("lookup_field", "id")
-                    lookup_value = record_data.get(lookup_field)
-
-                    if lookup_value:
-                        # Try to find existing record
-                        existing = Model.objects.filter(
-                            tenant_id=tenant_id,
-                            **{lookup_field: lookup_value},
-                        ).first()
-
-                        if existing:
-                            # Update existing record
-                            for key, value in record_data.items():
-                                if key != lookup_field and hasattr(existing, key):
-                                    setattr(existing, key, value)
-                            existing.save()
-                            record_id = str(getattr(existing, "id", existing.pk))
-                            logger.debug(f"Updated {target_model_path} record: {lookup_value}")
-                        else:
-                            # Create new record if not found
-                            new_record = Model.objects.create(**record_data)
-                            record_id = str(getattr(new_record, "id", new_record.pk))
-                            logger.debug(f"Created {target_model_path} record (update not found): {lookup_value}")
-                    else:
-                        raise ValueError(f"Lookup field {lookup_field} not found in record for update")
-                else:
-                    # Create new record
-                    new_record = Model.objects.create(**record_data)
-                    record_id = str(getattr(new_record, "id", new_record.pk))
-                    logger.debug(f"Created {target_model_path} record")
-
-                # Log successful import
-                MigrationLog.objects.create(
-                    tenant_id=tenant_id,
-                    job=job,
-                    level="info",
-                    message=f"Successfully imported record into {target_model_path}",
-                )
-
-                return record_id
-
-        except ImportError as e:
-            error_msg = f"Failed to import target model {target_model_path}: {str(e)}"
-            logger.error(error_msg)
-            MigrationLog.objects.create(
-                tenant_id=tenant_id,
-                job=job,
-                level="error",
-                message=error_msg,
-            )
-            raise ValueError(error_msg)
-        except Exception as e:
-            error_msg = f"Failed to import record into {target_model_path}: {str(e)}"
-            logger.error(error_msg)
-            MigrationLog.objects.create(
-                tenant_id=tenant_id,
-                job=job,
-                level="error",
-                message=error_msg,
-            )
-            raise ValueError(error_msg)
-
-    def rollback(self, checkpoint_id: str, tenant_id: str) -> None:
-        """Rollback migration to checkpoint.
-
-        Args:
-            checkpoint_id: Checkpoint ID.
-            tenant_id: Tenant ID.
-
-        Raises:
-            ValueError: If checkpoint not found or rollback fails.
-        """
-        checkpoint = MigrationRollback.objects.filter(
-            id=checkpoint_id,
-            tenant_id=tenant_id,
-        ).first()
-
-        if not checkpoint:
-            raise ValueError(f"Checkpoint {checkpoint_id} not found for tenant {tenant_id}")
-
-        job = checkpoint.job
-        checkpoint_data = checkpoint.checkpoint_data
-
-        logger.info(f"Rolling back migration job {job.id} to checkpoint {checkpoint_id}")
-
-        try:
+            for number, record in enumerate(source.iter_records(tenant, job.source_artifact_id, job.source_config, config), start=1):
+                batch.append((number, record))
+                if len(batch) >= config.batch_size: MigrationExecutionService._process_batch(tenant, run.id, batch, target); batch = []
+                if MigrationRun.objects.for_tenant(tenant).filter(pk=run.id, cancel_requested_at__isnull=False).exists():
+                    with transaction.atomic():
+                        locked = MigrationRun.objects.for_tenant(tenant).select_for_update().get(pk=run.id); return RUN_MACHINE.apply(locked, "cancel", transition_key=f"cancel:worker:{run.id}")
+            if batch: MigrationExecutionService._process_batch(tenant, run.id, batch, target)
             with transaction.atomic():
-                # Restore job status
-                job.status = checkpoint_data.get("status", "pending")
-                job.records_processed = checkpoint_data.get("records_processed", 0)
-                job.save()
+                run = MigrationRun.objects.for_tenant(tenant).select_for_update().get(pk=run.id)
+                run.total_records = run.processed_records; run.save(update_fields=("total_records", "updated_at"))
+                command = "succeed" if run.failed_records == 0 else "partial"; run = RUN_MACHINE.apply(run, command, transition_key=f"terminal:{run.id}")
+                run.completed_at = timezone.now(); run.save(update_fields=("completed_at", "updated_at"))
+            return run
+        except Exception:
+            with transaction.atomic():
+                locked = MigrationRun.objects.for_tenant(tenant).select_for_update().get(pk=run.id)
+                if locked.status in ("queued", "running"): locked = RUN_MACHINE.apply(locked, "fail", transition_key=f"failed:{run.id}")
+                locked.completed_at = timezone.now(); locked.save(update_fields=("completed_at", "updated_at"))
+            raise
 
-                # Get target model configuration
-                target_config = job.source_config.get("target", {})
-                target_model_path = target_config.get("model")
+    @staticmethod
+    @transaction.atomic
+    def _process_batch(tenant: UUID, run_id: UUID, batch: Sequence[tuple[int, Mapping[str, object]]], target: object) -> None:
+        run = MigrationRun.objects.for_tenant(tenant).select_for_update().select_related("job").get(pk=run_id); job = run.job
+        mappings = list(job.mappings.order_by("position"))
+        for row_number, source_record in batch:
+            mapped: dict[str, object] = {}
+            try:
+                for mapping in mappings: mapped[mapping.target_field] = _transform(source_record.get(mapping.source_field), mapping.transform_type, mapping.transform_config, source_record)
+                outcomes = ValidationRuleService.evaluate(tenant, job.id, mapped, row_number)
+                failures = [outcome for outcome in outcomes if not outcome.passed]
+                for outcome in failures:
+                    MigrationRunIssue.objects.create(tenant_id=tenant, run=run, row_number=row_number, field_name=outcome.field_name, stage="validation", severity=outcome.severity, code=outcome.code, message=outcome.message, redacted_sample=_redact(mapped))
+                if any(outcome.severity == "error" for outcome in failures): run.failed_records += 1
+                elif run.mode == "dry_run": run.succeeded_records += 1
+                else:
+                    evidence = target.write(tenant, job.target_entity, mapped, write_mode=job.write_mode, lookup_fields=job.lookup_fields, idempotency_key=f"{run.id}:{row_number}")
+                    if not evidence or not evidence.get("record_id") or not evidence.get("after_checksum"): raise MigrationServiceError("Target adapter returned no durable write evidence.", code="UNVERIFIED_WRITE")
+                    MigrationChange.objects.create(tenant_id=tenant, run=run, sequence=row_number, target_adapter=job.target_adapter, target_entity=job.target_entity, target_record_id=evidence["record_id"], operation=evidence["operation"], before_payload_encrypted=evidence.get("before_payload_encrypted", ""), after_checksum=evidence["after_checksum"], idempotency_key=f"{run.id}:{row_number}")
+                    run.succeeded_records += 1
+                if any(outcome.severity == "warning" for outcome in failures): run.warning_records += 1
+            except Exception as exc:
+                run.failed_records += 1
+                MigrationRunIssue.objects.create(tenant_id=tenant, run=run, row_number=row_number, stage="target", severity="error", code=getattr(exc, "code", "ROW_FAILED"), message="Record processing failed; use the correlation ID for support.", redacted_sample=_redact(mapped))
+            run.processed_records += 1
+        run.total_records = max(run.total_records, run.processed_records); run.save(update_fields=("total_records", "processed_records", "succeeded_records", "failed_records", "warning_records", "updated_at"))
 
-                if target_model_path:
-                    # Import target model
-                    if "." in target_model_path:
-                        parts = target_model_path.rsplit(".", 1)
-                        module_path = parts[0]
-                        model_name = parts[1]
 
-                        from importlib import import_module
+def _transform(value: object, kind: str, config: Mapping[str, object], record: Mapping[str, object]) -> object:
+    validated = validate_transform_config(kind, config)
+    if kind == "identity": return value
+    if kind == "default": return validated["value"] if value in (None, "") else value
+    if kind == "cast":
+        target = validated["to"]
+        if target == "string": return "" if value is None else str(value)
+        if target == "integer": return int(value)
+        if target == "number": return Decimal(str(value))
+        if target == "boolean": return str(value).strip().lower() in validated.get("true_values", ["true", "1", "yes"])
+    if kind == "lookup": return validated.get("values", {}).get(str(value), validated.get("default"))
+    if kind == "concat": return str(validated.get("separator", "")).join(str(record.get(field, "")) for field in validated["fields"])
+    if kind == "split": return str(value).split(str(validated["separator"]))[int(validated.get("index", 0))]
+    if kind == "regex_replace": return re.sub(str(validated["pattern"]), str(validated.get("replacement", "")), str(value))
+    if kind == "date_parse":
+        from datetime import datetime
+        return datetime.strptime(str(value), str(validated["format"])).isoformat()
+    if kind == "boolean_map": return value in validated["true_values"] if value not in validated["false_values"] else False
+    raise MigrationServiceError(f"Unknown transform {kind!r}.", code="UNKNOWN_TRANSFORM")
 
-                        module = import_module(module_path)
-                        Model = getattr(module, model_name)
 
-                        # Find records created/updated after checkpoint
-                        # Note: This is a simplified rollback - in production, you'd want to
-                        # track which records were imported by this job
-                        # For now, we'll delete records that match the job's import pattern
-                        # This requires the job to store imported record IDs in checkpoint_data
+class RollbackService:
+    @staticmethod
+    @transaction.atomic
+    def request(tenant_id: object, run_id: object, actor_id: object, idempotency_key: str) -> MigrationRollback:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id"); key = _text(idempotency_key, "idempotency_key")
+        existing = MigrationRollback.objects.for_tenant(tenant).filter(idempotency_key=key).first()
+        if existing: return existing
+        run = MigrationRun.objects.for_tenant(tenant).select_for_update().filter(pk=run_id).first()
+        if run is None: raise NotFound("Migration run not found.")
+        if run.mode != "commit" or run.status not in ("succeeded", "partial"): raise MigrationServiceError("Only successful committed runs can be rolled back.", code="ROLLBACK_NOT_ALLOWED")
+        async_job = enqueue(tenant, actor, "data_migration.rollback", {"pending": True}, f"data-migration:rollback:{key}")
+        rollback = MigrationRollback.objects.create(tenant_id=tenant, run=run, async_job_id=async_job.id, idempotency_key=key, records_total=run.changes.filter(reversed_at__isnull=True).count(), requested_by=actor, correlation_id=async_job.correlation_id)
+        async_job.payload = {"rollback_id": str(rollback.id)}; async_job.save(update_fields=("payload", "updated_at"))
+        publish_event(tenant, "data_migration.rollback.queued", "migration_rollback", rollback.id, actor_id=actor, correlation_id=rollback.correlation_id, payload={"status": "queued"})
+        return rollback
 
-                        imported_record_ids = checkpoint_data.get("imported_record_ids", [])
+    @staticmethod
+    def execute(tenant_id: object, rollback_id: object) -> MigrationRollback:
+        tenant = _uuid(tenant_id, "tenant_id")
+        with transaction.atomic():
+            rollback = MigrationRollback.objects.for_tenant(tenant).select_for_update().select_related("run").filter(pk=rollback_id).first()
+            if rollback is None: raise NotFound("Rollback not found.")
+            if rollback.status in ("succeeded", "failed"): return rollback
+            rollback = ROLLBACK_MACHINE.apply(rollback, "start", transition_key=f"start:{rollback.id}"); rollback.started_at = timezone.now(); rollback.save(update_fields=("started_at", "updated_at"))
+        target_cache: dict[str, object] = {}
+        try:
+            for change in MigrationChange.objects.for_tenant(tenant).filter(run=rollback.run, reversed_at__isnull=True).order_by("-sequence"):
+                adapter = target_cache.setdefault(change.target_adapter, _target_adapter(change.target_adapter))
+                result = adapter.reverse(tenant, change.target_entity, change.target_record_id, operation=change.operation, before_payload_encrypted=change.before_payload_encrypted, expected_checksum=change.after_checksum, idempotency_key=f"rollback:{rollback.id}:{change.sequence}")
+                if not result or not result.get("verified"): raise MigrationServiceError("Rollback conflict: target record changed after migration.", code="ROLLBACK_CONFLICT")
+                with transaction.atomic():
+                    locked_change = MigrationChange.objects.for_tenant(tenant).select_for_update().get(pk=change.id)
+                    if locked_change.reversed_at is None: locked_change.mark_reversed(timezone.now()); MigrationRollback.objects.for_tenant(tenant).filter(pk=rollback.id).update(records_reversed=models.F("records_reversed") + 1)
+            with transaction.atomic():
+                rollback = MigrationRollback.objects.for_tenant(tenant).select_for_update().select_related("run").get(pk=rollback.id); rollback = ROLLBACK_MACHINE.apply(rollback, "succeed", transition_key=f"terminal:{rollback.id}"); rollback.completed_at = timezone.now(); rollback.save(update_fields=("completed_at", "updated_at")); RUN_MACHINE.apply(rollback.run, "mark_rolled_back", transition_key=f"rollback:{rollback.id}")
+            return rollback
+        except Exception as exc:
+            with transaction.atomic():
+                rollback = MigrationRollback.objects.for_tenant(tenant).select_for_update().get(pk=rollback.id); rollback.records_failed = rollback.records_total - rollback.records_reversed; rollback.failure_summary = getattr(exc, "code", "ROLLBACK_FAILED"); rollback = ROLLBACK_MACHINE.apply(rollback, "fail", transition_key=f"failed:{rollback.id}"); rollback.completed_at = timezone.now(); rollback.save(update_fields=("records_failed", "failure_summary", "completed_at", "updated_at"))
+            raise
 
-                        if imported_record_ids:
-                            # Delete records that were imported after this checkpoint
-                            deleted_count = Model.objects.filter(
-                                tenant_id=tenant_id,
-                                id__in=imported_record_ids,
-                            ).delete()[0]
 
-                            logger.info(f"Deleted {deleted_count} records during rollback")
+class DataMigrationConfigurationService:
+    """Versioned tenant runtime controls with immutable audit and rollback."""
 
-                # Log rollback
-                MigrationLog.objects.create(
-                    tenant_id=tenant_id,
-                    job=job,
-                    level="info",
-                    message=f"Migration rolled back to checkpoint {checkpoint_id}",
-                )
+    FIELDS = frozenset({"source_row_limit", "batch_size", "connect_timeout_seconds", "read_timeout_seconds", "retry_count", "issue_sample_limit", "preview_row_limit", "retention_days", "allowed_target_adapters", "enabled_roles", "rollout_percentage", "enabled"})
 
-                logger.info(f"Successfully rolled back migration job {job.id}")
+    @classmethod
+    def get(cls, tenant_id: object) -> DataMigrationConfiguration:
+        return _configuration(_uuid(tenant_id, "tenant_id"))
 
-        except Exception as e:
-            error_msg = f"Failed to rollback migration: {str(e)}"
-            logger.error(error_msg)
-            MigrationLog.objects.create(
-                tenant_id=tenant_id,
-                job=job,
-                level="error",
-                message=error_msg,
-            )
-            raise ValueError(error_msg)
+    @classmethod
+    @transaction.atomic
+    def update(cls, tenant_id: object, actor_id: object, payload: Mapping[str, object], expected_version: int, correlation_id: str | None = None) -> DataMigrationConfiguration:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id"); _configuration(tenant)
+        config = DataMigrationConfiguration.objects.for_tenant(tenant).select_for_update().get()
+        if config.version != expected_version: raise ConfigurationConflict()
+        unknown = set(payload) - cls.FIELDS
+        if unknown: raise MigrationServiceError(f"Unknown configuration fields: {', '.join(sorted(unknown))}", code="INVALID_CONFIGURATION")
+        before = config.as_document()
+        for field, value in payload.items(): setattr(config, field, value)
+        config.version += 1; config.updated_by = actor; config.full_clean(); config.save(); after = config.as_document(); correlation = _correlation(correlation_id)
+        DataMigrationConfigurationAudit.objects.create(tenant_id=tenant, configuration=config, version=config.version, before=before, after=after, changed_by=actor, correlation_id=correlation)
+        publish_event(tenant, "data_migration.configuration.changed", "data_migration_configuration", config.id, actor_id=actor, correlation_id=correlation, payload={"version": config.version, "from_version": expected_version})
+        return config
+
+    @classmethod
+    def preview(cls, tenant_id: object, payload: Mapping[str, object]) -> dict[str, object]:
+        config = cls.get(tenant_id); before = config.as_document(); proposed = {**before, **dict(payload)}
+        candidate = DataMigrationConfiguration(
+            tenant_id=config.tenant_id,
+            created_by=config.created_by,
+            **{key: proposed[key] for key in cls.FIELDS if key in proposed},
+        )
+        candidate.full_clean(validate_unique=False, validate_constraints=False)
+        return {
+            "from_version": config.version,
+            "changes": [
+                {"field": key, "before": before.get(key), "after": proposed.get(key)}
+                for key in sorted(cls.FIELDS)
+                if before.get(key) != proposed.get(key)
+            ],
+        }
+
+    @classmethod
+    def export(cls, tenant_id: object) -> dict[str, object]:
+        document = {"schema_version": "1.0", "configuration": cls.get(tenant_id).as_document()}; document["checksum"] = _snapshot_checksum(document); return document
+
+    @classmethod
+    def import_document(cls, tenant_id: object, actor_id: object, document: Mapping[str, object], expected_version: int) -> DataMigrationConfiguration:
+        if document.get("schema_version") != "1.0" or document.get("checksum") != _snapshot_checksum(document): raise MigrationServiceError("Invalid configuration document.", code="INVALID_IMPORT")
+        return cls.update(tenant_id, actor_id, document.get("configuration", {}), expected_version)
+
+    @classmethod
+    def restore(cls, tenant_id: object, actor_id: object, version: int, expected_version: int) -> DataMigrationConfiguration:
+        tenant = _uuid(tenant_id, "tenant_id"); audit = DataMigrationConfigurationAudit.objects.for_tenant(tenant).filter(version=version).first()
+        if audit is None: raise NotFound("Configuration version not found.")
+        return cls.update(tenant, actor_id, audit.after, expected_version)
+
+
+# Django F is imported late to keep the core service imports readable.
+from django.db import models  # noqa: E402
+
+
+__all__ = [
+    "CapabilityUnavailable", "ConfigurationConflict", "DataMigrationConfigurationService",
+    "DefinitionValidationResult", "ExternalConnectionService", "MigrationExecutionService",
+    "MigrationJobService", "MigrationMappingService", "MigrationServiceError", "PreviewResult",
+    "RollbackService", "RuleOutcome", "SourceInspectionService", "SourceProfile", "ValidationRuleService",
+]

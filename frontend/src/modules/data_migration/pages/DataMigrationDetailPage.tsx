@@ -1,119 +1,39 @@
-/**
- * DataMigration Detail Page
- * 
- * Displays resource details and allows editing.
- */
-import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { Download, Edit, Play, TestTube2 } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { migrationService } from '../services/migration-service';
-import type { MigrationJob } from '../contracts';
-import { Edit, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { DataMigrationApiError, dataMigrationService } from '../services/data-migration-service';
+import { EmptyPanel, FailureState, PageShell, PageSkeleton, StateBadge } from '../components/MigrationUI';
+
+const tabs = ['overview', 'source profile', 'mappings', 'validation rules', 'runs', 'configuration history'] as const;
+type Tab = typeof tabs[number];
+const newKey = () => crypto.randomUUID();
 
 export const DataMigrationDetailPage = () => {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-
-  const { data: resource, isLoading } = useQuery({
-    queryKey: ['data_migration-job', id],
-    queryFn: () => migrationService.jobs.get(id!),
-    enabled: !!id,
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (resourceId: string) => migrationService.jobs.delete(resourceId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['data_migration-jobs'] });
-      toast.success('Migration job deleted successfully');
-      navigate('/data-migration');
-    },
-    onError: () => {
-      toast.error('Failed to delete migration job. Please try again.');
-    },
-  });
-
-  const handleDelete = async () => {
-    if (window.confirm('Are you sure you want to delete this resource?')) {
-      await deleteMutation.mutateAsync(id!);
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="p-8">
-        <div className="text-gray-600">Loading resource...</div>
-      </div>
-    );
-  }
-
-  if (!resource) {
-    return (
-      <div className="p-8">
-        <div className="text-red-600">Resource not found</div>
-      </div>
-    );
-  }
-
-  const resourceData = resource as MigrationJob;
-
-  return (
-    <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">{String(resourceData.name)}</h1>
-          <p className="mt-2 text-gray-600">Source Type: {String(resourceData.source_type)}</p>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={() => navigate('/data-migration/' + id + '/edit')}>
-            <Edit className="w-4 h-4 mr-2" />
-            Edit
-          </Button>
-          <Button variant="danger" onClick={handleDelete}>
-            <Trash2 className="w-4 h-4 mr-2" />
-            Delete
-          </Button>
-        </div>
-      </div>
-
-      <Card className="p-6">
-        <div className="space-y-4">
-          <div>
-            <label className="text-sm font-medium text-gray-700">ID</label>
-            <p className="mt-1 text-gray-900">{String(resourceData.id)}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-700">Name</label>
-            <p className="mt-1 text-gray-900">{String(resourceData.name)}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-700">Source Type</label>
-            <p className="mt-1 text-gray-900">{String(resourceData.source_type)}</p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-700">Status</label>
-            <p className="mt-1">
-              <span className={resourceData.status === 'completed' ? 'px-2 py-1 rounded text-xs bg-green-100 text-green-800' : resourceData.status === 'failed' ? 'px-2 py-1 rounded text-xs bg-red-100 text-red-800' : 'px-2 py-1 rounded text-xs bg-gray-100 text-gray-800'}>
-                {resourceData.status}
-              </span>
-            </p>
-          </div>
-          <div>
-            <label className="text-sm font-medium text-gray-700">Records Processed</label>
-            <p className="mt-1 text-gray-900">{String(resourceData.records_processed)} / {String(resourceData.records_total)}</p>
-          </div>
-          {resourceData.source_config && (
-            <div>
-              <label className="text-sm font-medium text-gray-700">Source Configuration</label>
-              <pre className="mt-1 p-2 bg-gray-100 rounded text-sm overflow-auto">
-                {JSON.stringify(resourceData.source_config, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
-      </Card>
-    </div>
-  );
+  const { id } = useParams<{ id: string }>(); const navigate = useNavigate(); const [tab, setTab] = useState<Tab>('overview');
+  const job = useQuery({ queryKey: ['data-migration', 'job', id], queryFn: () => dataMigrationService.jobs.get(id!), enabled: Boolean(id) });
+  const mappings = useQuery({ queryKey: ['data-migration', 'mappings', id], queryFn: () => dataMigrationService.mappings.list(id!, { page_size: 100 }), enabled: Boolean(id) && tab === 'mappings' });
+  const rules = useQuery({ queryKey: ['data-migration', 'rules', id], queryFn: () => dataMigrationService.rules.list(id!, { page_size: 100 }), enabled: Boolean(id) && tab === 'validation rules' });
+  const runs = useQuery({ queryKey: ['data-migration', 'runs', id], queryFn: () => dataMigrationService.runs.list(id!, { page_size: 25 }), enabled: Boolean(id) && tab === 'runs' });
+  const versions = useQuery({ queryKey: ['data-migration', 'versions', id], queryFn: () => dataMigrationService.jobs.versions(id!, { page_size: 25 }), enabled: Boolean(id) && tab === 'configuration history' });
+  const preview = useQuery({ queryKey: ['data-migration', 'preview', id], queryFn: () => dataMigrationService.jobs.preview(id!, 25), enabled: Boolean(id) && tab === 'source profile', retry: false });
+  const start = useMutation({ mutationFn: (dry: boolean) => dry ? dataMigrationService.runs.dryRun(id!, { idempotency_key: newKey() }) : dataMigrationService.runs.start(id!, { idempotency_key: newKey() }), onSuccess: (run) => navigate(`/data-migration/runs/${run.id}`), onError: () => toast.error('The run was not accepted.') });
+  const exportDefinition = async () => { try { const value = await dataMigrationService.jobs.export(id!); const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${value.job.name}.migration.json`; anchor.click(); URL.revokeObjectURL(url); } catch { toast.error('Export failed.'); } };
+  if (job.isLoading) return <PageSkeleton label="Loading migration definition" />;
+  if (job.error || !job.data) return <PageShell title="Migration definition" description="Configuration and durable execution evidence."><FailureState forbidden={job.error instanceof DataMigrationApiError && job.error.status === 403} title="Migration not found" message={job.error instanceof Error ? job.error.message : 'This migration is unavailable.'} onRetry={() => { void job.refetch(); }} /></PageShell>;
+  const value = job.data; const can = (action: NonNullable<typeof value.allowed_actions>[number]) => value.allowed_actions?.includes(action) ?? false;
+  const activeQuery = tab === 'mappings' ? mappings : tab === 'validation rules' ? rules : tab === 'runs' ? runs : tab === 'configuration history' ? versions : tab === 'source profile' ? preview : undefined;
+  return <PageShell title={value.name} description={`${value.source_type.toUpperCase()} → ${value.target_adapter} / ${value.target_entity} · configuration v${value.configuration_version}`} actions={<>{can('export') ? <Button variant="outline" onClick={() => { void exportDefinition(); }}><Download className="mr-2 h-4 w-4" />Export</Button> : null}{can('update') ? <Button variant="outline" onClick={() => navigate(`/data-migration/jobs/${value.id}/edit`)}><Edit className="mr-2 h-4 w-4" />Edit</Button> : null}{can('dry_run') ? <Button variant="outline" disabled={start.isPending} onClick={() => { if (window.confirm(`Dry run ${value.name}? No records will be written. Estimated quota is checked again by the server.`)) start.mutate(true); }}><TestTube2 className="mr-2 h-4 w-4" />Dry run</Button> : null}{can('run') ? <Button disabled={start.isPending} onClick={() => { if (window.confirm(`Commit ${value.name} at v${value.configuration_version}? Writes will produce rollback evidence where supported.`)) start.mutate(false); }}><Play className="mr-2 h-4 w-4" />Commit run</Button> : null}</>}>
+    <nav className="flex gap-1 overflow-x-auto border-b border-border" aria-label="Migration definition sections">{tabs.map((item) => <button key={item} className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm capitalize ${tab === item ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`} aria-current={tab === item ? 'page' : undefined} onClick={() => setTab(item)}>{item}</button>)}</nav>
+    {activeQuery?.isLoading ? <PageSkeleton label={`Loading ${tab}`} /> : activeQuery?.error ? <FailureState message={activeQuery.error instanceof Error ? activeQuery.error.message : `Unable to load ${tab}.`} onRetry={() => { void activeQuery.refetch(); }} /> : null}
+    {tab === 'overview' ? <div className="grid gap-4 lg:grid-cols-3"><Card className="p-5 lg:col-span-2"><div className="flex items-center gap-2"><StateBadge state={value.status} />{value.readiness.ready ? <span className="text-sm text-primary">Ready to run</span> : <span className="text-sm text-destructive">Not ready</span>}</div><h2 className="mt-5 font-semibold text-foreground">Readiness</h2>{value.readiness.blockers.length ? <ul className="mt-2 space-y-2">{value.readiness.blockers.map((blocker) => <li key={`${blocker.code}:${blocker.section}`}><button className="text-left text-sm text-destructive underline-offset-4 hover:underline" onClick={() => setTab(blocker.section === 'rules' ? 'validation rules' : blocker.section === 'source' ? 'source profile' : blocker.section === 'mappings' ? 'mappings' : 'overview')}>{blocker.message} <span className="text-muted-foreground">({blocker.section})</span></button></li>)}</ul> : <p className="mt-2 text-sm text-muted-foreground">Source, target, mappings, and active rules passed validation.</p>}</Card><Card className="p-5"><h2 className="font-semibold text-foreground">Safe source</h2><dl className="mt-3 space-y-3 text-sm"><div><dt className="text-muted-foreground">Type</dt><dd className="text-foreground">{value.source_type.toUpperCase()}</dd></div><div><dt className="text-muted-foreground">Artifact</dt><dd className="break-all text-foreground">{value.source_artifact_id ?? 'Named external connection'}</dd></div><div><dt className="text-muted-foreground">Write mode</dt><dd className="text-foreground">{value.write_mode}</dd></div></dl></Card></div> : null}
+    {tab === 'source profile' && preview.data ? <Card className="p-5"><h2 className="font-semibold text-foreground">Redacted source preview</h2><p className="mt-1 text-sm text-muted-foreground">{preview.data.records.length.toLocaleString()} bounded preview rows · checksum {preview.data.source_checksum}</p>{preview.data.records.length === 0 ? <div className="mt-4"><EmptyPanel title="No preview rows" description="The source is empty or durable inspection evidence is not ready yet." /></div> : <div className="mt-4 rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">Preview evidence is available and redacted. Raw source records are intentionally never dumped into the browser UI. {preview.data.truncated ? 'More rows exist beyond this bounded preview.' : 'The preview reached the source boundary.'}</div>}</Card> : null}
+    {tab === 'mappings' && mappings.data ? (mappings.data.items.length ? <Card className="divide-y divide-border">{mappings.data.items.map((item) => <div key={item.id} className="grid gap-1 p-4 text-sm sm:grid-cols-3"><span className="text-foreground">{item.source_field}</span><span className="text-muted-foreground">→ {item.target_field}</span><span className="text-muted-foreground">{item.transform_type} · {item.origin}{item.confidence ? ` · ${Math.round(Number(item.confidence) * 100)}%` : ''}</span></div>)}</Card> : <EmptyPanel title="No mappings" description="Add mappings in Edit before validating this definition." action={can('update') ? { label: 'Edit mappings', onClick: () => navigate(`/data-migration/jobs/${id}/edit`) } : undefined} />) : null}
+    {tab === 'validation rules' && rules.data ? (rules.data.items.length ? <Card className="divide-y divide-border">{rules.data.items.map((item) => <div key={item.id} className="p-4 text-sm"><div className="flex justify-between"><strong className="text-foreground">{item.field_name}: {item.rule_type}</strong><span className={item.severity === 'error' ? 'text-destructive' : 'text-muted-foreground'}>{item.severity}</span></div><p className="mt-1 text-muted-foreground">{item.error_message}</p></div>)}</Card> : <EmptyPanel title="No validation rules" description="Add explicit data quality rules before committing a migration." />) : null}
+    {tab === 'runs' && runs.data ? (runs.data.items.length ? <Card className="divide-y divide-border">{runs.data.items.map((run) => <button key={run.id} className="flex w-full items-center justify-between p-4 text-left" onClick={() => navigate(`/data-migration/runs/${run.id}`)}><span><strong className="text-foreground">{run.mode.replace('_', ' ')}</strong><span className="ml-2 text-xs text-muted-foreground">{new Date(run.created_at).toLocaleString()}</span></span><StateBadge state={run.status} /></button>)}</Card> : <EmptyPanel title="No runs yet" description="A dry run exercises the same mapping and validation pipeline without target writes." />) : null}
+    {tab === 'configuration history' && versions.data ? <Card className="divide-y divide-border">{versions.data.items.map((version) => <div key={version.id} className="flex items-center justify-between p-4"><span><strong className="text-foreground">Version {version.version}</strong><span className="ml-2 text-sm text-muted-foreground">{version.change_summary}</span></span><span className="text-xs text-muted-foreground">{new Date(version.created_at).toLocaleString()}</span></div>)}</Card> : null}
+  </PageShell>;
 };

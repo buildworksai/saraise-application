@@ -1,212 +1,74 @@
-/**
- * Data Migration List Page
- * 
- * Displays all migration jobs with filtering, search, and CRUD operations.
- * Follows the same design pattern as WorkflowListPage.
- */
-import { useState, useDeferredValue } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useDeferredValue, useState } from 'react';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Archive, Copy, DatabaseZap, Play, Plus, Search, TestTube2, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { migrationService } from '../services/migration-service';
-import { MigrationJob } from '../contracts';
-import { Plus, Search, DatabaseZap, Play, MoreVertical } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
-import { TableSkeleton, EmptyState, ErrorState } from '@/components/ui';
+import { DataMigrationApiError, dataMigrationService } from '../services/data-migration-service';
+import type { JobFilters, MigrationJob, SourceType } from '../contracts';
+import { EmptyPanel, FailureState, PageShell, PageSkeleton, StateBadge } from '../components/MigrationUI';
+
+function key(): string { return crypto.randomUUID(); }
+function can(job: MigrationJob, action: NonNullable<MigrationJob['allowed_actions']>[number]): boolean { return job.allowed_actions?.includes(action) ?? false; }
 
 export const DataMigrationListPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [searchTerm, setSearchTerm] = useState('');
-  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const [search, setSearch] = useState('');
+  const deferredSearch = useDeferredValue(search);
+  const [page, setPage] = useState(1);
+  const [status, setStatus] = useState<JobFilters['status']>();
+  const [sourceType, setSourceType] = useState<SourceType>();
+  const [ordering, setOrdering] = useState<JobFilters['ordering']>('-updated_at');
+  const filters: JobFilters = { page, page_size: 25, search: deferredSearch || undefined, status, source_type: sourceType, ordering };
 
-  const { data: jobs, isLoading, error, refetch } = useQuery({
-    queryKey: ['migration-jobs', deferredSearchTerm],
-    queryFn: migrationService.jobs.list,
+  const query = useQuery({
+    queryKey: ['data-migration', 'jobs', filters],
+    queryFn: () => dataMigrationService.jobs.list(filters),
+    placeholderData: keepPreviousData,
+    refetchInterval: ({ state }) => document.visibilityState === 'visible' && state.data?.items.some((job) => job.latest_run?.status === 'queued' || job.latest_run?.status === 'running') ? 5000 : false,
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => migrationService.jobs.delete(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['migration-jobs'] });
-      toast.success('Migration job deleted successfully');
-    },
-    onError: () => {
-      toast.error('Failed to delete migration job. Please try again.');
-    },
-  });
+  const remove = useMutation({ mutationFn: dataMigrationService.jobs.delete, onSuccess: async () => { toast.success('Migration definition deleted'); await queryClient.invalidateQueries({ queryKey: ['data-migration', 'jobs'] }); }, onError: () => toast.error('The migration definition could not be deleted.') });
+  const archive = useMutation({ mutationFn: (id: string) => dataMigrationService.jobs.archive(id, key()), onSuccess: async () => { toast.success('Migration definition archived'); await queryClient.invalidateQueries({ queryKey: ['data-migration', 'jobs'] }); }, onError: () => toast.error('The migration definition could not be archived.') });
+  const start = useMutation({ mutationFn: ({ job, dry }: { job: MigrationJob; dry: boolean }) => dry ? dataMigrationService.runs.dryRun(job.id, { idempotency_key: key() }) : dataMigrationService.runs.start(job.id, { idempotency_key: key() }), onSuccess: (run) => { toast.success(run.mode === 'dry_run' ? 'Dry run accepted' : 'Migration run accepted'); navigate(`/data-migration/runs/${run.id}`); }, onError: () => toast.error('The run was not accepted. Review readiness and quota, then retry.') });
 
-  const filteredJobs = jobs?.filter((job: MigrationJob) => {
-    if (!deferredSearchTerm) return true;
-    const name = String(job.name || '');
-    return name.toLowerCase().includes(deferredSearchTerm.toLowerCase());
-  });
-
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this migration job?')) {
-      await deleteMutation.mutateAsync(id);
-    }
-  };
-
-  const handleExecute = async (id: string) => {
+  const clone = async (job: MigrationJob) => {
     try {
-      await migrationService.jobs.execute(id);
-      toast.success('Migration job started');
-      void refetch();
-    } catch (e) {
-      toast.error('Failed to start migration job');
-    }
+      const document = await dataMigrationService.jobs.export(job.id);
+      const preview = await dataMigrationService.jobs.import({ document: { ...document, job: { ...document.job, name: `${document.job.name} copy` } }, preview_only: false });
+      if (!preview.job) throw new Error('Import returned no durable definition.');
+      toast.success('Migration definition cloned'); navigate(`/data-migration/jobs/${preview.job.id}/edit`);
+    } catch { toast.error('The migration definition could not be cloned.'); }
   };
 
-  const handleDryRun = async (id: string) => {
-    try {
-      await migrationService.jobs.dryRun(id);
-      toast.success('Dry run completed');
-      void refetch();
-    } catch (e) {
-      toast.error('Failed to run dry run');
-    }
-  };
+  if (query.isLoading) return <PageSkeleton label="Loading migration definitions" />;
+  if (query.error) return <PageShell title="Data migration" description="Safe, durable imports with traceable dry runs and conflict-aware rollback."><FailureState forbidden={query.error instanceof DataMigrationApiError && query.error.status === 403} message={query.error instanceof Error ? query.error.message : 'The server did not return migration definitions.'} onRetry={() => { void query.refetch(); }} /></PageShell>;
 
-  if (isLoading) {
-    return (
-      <div className="p-8">
-        <TableSkeleton rows={5} columns={4} />
-      </div>
-    );
-  }
+  const jobs = query.data?.items ?? [];
+  return <PageShell title="Data migration" description="Inspect, map, validate, dry run, and commit tenant data with durable evidence." actions={<><Button variant="outline" onClick={() => navigate('/data-migration/settings/connections')}>Connections</Button><Button onClick={() => navigate('/data-migration/jobs/new')}><Plus className="mr-2 h-4 w-4" />New migration</Button></>}>
+    <Card className="grid gap-3 p-4 md:grid-cols-[minmax(14rem,1fr)_repeat(3,minmax(9rem,auto))]" aria-label="Migration filters">
+      <label className="relative"><span className="sr-only">Search migrations</span><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" /><Input className="pl-9" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search migration definitions" /></label>
+      <label><span className="sr-only">Filter by status</span><select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground" value={status ?? ''} onChange={(event) => { setStatus((event.target.value || undefined) as JobFilters['status']); setPage(1); }}><option value="">All statuses</option><option value="draft">Draft</option><option value="ready">Ready</option><option value="archived">Archived</option></select></label>
+      <label><span className="sr-only">Filter by source type</span><select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground" value={sourceType ?? ''} onChange={(event) => { setSourceType((event.target.value || undefined) as SourceType | undefined); setPage(1); }}><option value="">All sources</option>{(['csv','excel','json','xml','database','api'] as const).map((type) => <option key={type} value={type}>{type.toUpperCase()}</option>)}</select></label>
+      <label><span className="sr-only">Sort migrations</span><select className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground" value={ordering} onChange={(event) => setOrdering(event.target.value as JobFilters['ordering'])}><option value="-updated_at">Recently active</option><option value="name">Name A–Z</option><option value="-created_at">Newest first</option></select></label>
+    </Card>
 
-  if (error) {
-    return (
-      <div className="p-8">
-        <ErrorState
-          message="Failed to load migration jobs. Please check your connection and try again."
-          onRetry={() => {
-            void refetch();
-          }}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Data Migration</h1>
-          <p className="text-muted-foreground">
-            Manage and monitor data migration jobs
-          </p>
+    {jobs.length === 0 ? <EmptyPanel title={search || status || sourceType ? 'No migrations match these filters' : 'No migration definitions yet'} description={search || status || sourceType ? 'Clear or adjust the server-side filters.' : 'The guided workflow will help you reach a safe dry run without needing documentation.'} action={!search && !status && !sourceType ? { label: 'Start guided migration', onClick: () => navigate('/data-migration/jobs/new') } : undefined} /> : <div className="space-y-3" aria-live="polite">
+      {jobs.map((job) => <Card key={job.id} className="p-5"><div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <button className="min-w-0 text-left" onClick={() => navigate(`/data-migration/jobs/${job.id}`)}><div className="flex flex-wrap items-center gap-2"><h2 className="truncate text-lg font-semibold text-foreground">{job.name}</h2><StateBadge state={job.status} />{job.readiness.ready ? <span className="text-xs text-primary">Ready</span> : <span className="text-xs text-destructive">{job.readiness.blockers.length} blocker{job.readiness.blockers.length === 1 ? '' : 's'}</span>}</div><p className="mt-1 text-sm text-muted-foreground">{job.source_type.toUpperCase()} → {job.target_adapter} / {job.target_entity} · v{job.configuration_version}</p><p className="mt-1 text-xs text-muted-foreground">Last activity {new Date(job.updated_at).toLocaleString()}{job.latest_run ? ` · latest ${job.latest_run.mode.replace('_', ' ')} ${job.latest_run.status}` : ''}</p></button>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" onClick={() => navigate(`/data-migration/jobs/${job.id}`)}>Open</Button>
+          {can(job, 'export') ? <Button size="sm" variant="outline" onClick={() => { void clone(job); }}><Copy className="mr-1 h-4 w-4" />Clone</Button> : null}
+          {can(job, 'dry_run') ? <Button size="sm" variant="outline" disabled={start.isPending} onClick={() => { if (window.confirm(`Start a dry run for ${job.name}? No target records will be written.`)) start.mutate({ job, dry: true }); }}><TestTube2 className="mr-1 h-4 w-4" />Dry run</Button> : null}
+          {can(job, 'run') ? <Button size="sm" disabled={start.isPending} onClick={() => { if (window.confirm(`Commit ${job.name} using configuration v${job.configuration_version}? Target writes may require conflict-safe rollback.`)) start.mutate({ job, dry: false }); }}><Play className="mr-1 h-4 w-4" />Run</Button> : null}
+          {can(job, 'archive') ? <Button size="icon" variant="ghost" aria-label={`Archive ${job.name}`} onClick={() => archive.mutate(job.id)}><Archive className="h-4 w-4" /></Button> : null}
+          {can(job, 'delete') ? <Button size="icon" variant="ghost" aria-label={`Delete ${job.name}`} onClick={() => { if (window.confirm(`Delete ${job.name}? Historical runs remain immutable.`)) remove.mutate(job.id); }}><Trash2 className="h-4 w-4" /></Button> : null}
         </div>
-        <Button onClick={() => navigate('/data-migration/jobs/new')}>
-          <Plus className="w-4 h-4 mr-2" />
-          New Migration Job
-        </Button>
-      </div>
-
-      {!filteredJobs || filteredJobs.length === 0 ? (
-        <EmptyState
-          icon={DatabaseZap}
-          title="No migration jobs yet"
-          description="Create your first migration job to import data."
-          action={{
-            label: 'Create Migration Job',
-            onClick: () => navigate('/data-migration/jobs/new'),
-          }}
-        />
-      ) : (
-        <>
-          <div className="mb-4">
-            <div className="relative max-w-md">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-              <Input
-                type="text"
-                placeholder="Search migration jobs..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
-              />
-            </div>
-          </div>
-
-          <div className="grid gap-4">
-            {filteredJobs.map((job: MigrationJob) => (
-              <Card key={job.id} className="p-4 flex items-center justify-between hover:shadow-md transition-shadow">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className="font-semibold text-lg text-foreground">{job.name}</h3>
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs font-medium border ${
-                        job.status === 'completed'
-                          ? 'bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20 dark:border-green-400/20'
-                          : job.status === 'running'
-                          ? 'bg-primary/10 text-primary border-primary/20'
-                          : job.status === 'failed'
-                          ? 'bg-destructive/10 text-destructive border-destructive/20'
-                          : 'bg-muted text-muted-foreground border-border'
-                      }`}
-                    >
-                      {job.status?.toUpperCase() || 'PENDING'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <DatabaseZap className="w-4 h-4" />
-                      {job.source_type?.toUpperCase() || 'CSV'}
-                    </span>
-                    {job.records_total > 0 && (
-                      <>
-                        <span>•</span>
-                        <span>
-                          {job.records_processed || 0} / {job.records_total} processed
-                        </span>
-                      </>
-                    )}
-                    {job.progress_percentage !== undefined && (
-                      <>
-                        <span>•</span>
-                        <span>{job.progress_percentage}% complete</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  {job.status === 'pending' && (
-                    <>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDryRun(job.id)}
-                      >
-                        Dry Run
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={() => handleExecute(job.id)}
-                      >
-                        <Play className="w-4 h-4 mr-2" />
-                        Execute
-                      </Button>
-                    </>
-                  )}
-                  {job.status === 'running' && (
-                    <span className="text-sm text-muted-foreground">Running...</span>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => navigate(`/data-migration/jobs/${job.id}`)}
-                  >
-                    View
-                  </Button>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
+      </div></Card>)}
+    </div>}
+    {query.data && query.data.pagination.total_pages > 1 ? <nav className="flex items-center justify-between" aria-label="Migration pages"><Button variant="outline" disabled={!query.data.pagination.has_previous || query.isFetching} onClick={() => setPage((value) => Math.max(1, value - 1))}>Previous</Button><span className="text-sm text-muted-foreground">Page {query.data.pagination.page} of {query.data.pagination.total_pages}</span><Button variant="outline" disabled={!query.data.pagination.has_next || query.isFetching} onClick={() => setPage((value) => value + 1)}>Next</Button></nav> : null}
+  </PageShell>;
 };
