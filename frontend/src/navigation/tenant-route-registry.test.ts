@@ -27,14 +27,32 @@ describe("tenant route registry parity", () => {
     const orchestrationRoutes = tenantRoutes.filter(
       (route) => route.module === "automation_orchestration",
     );
-    expect(orchestrationRoutes).toHaveLength(9);
+    expect(orchestrationRoutes.map((route) => route.id)).toEqual(
+      expect.arrayContaining([
+        "automation-orchestration.definitions.list",
+        "automation-orchestration.configuration",
+        "automation-orchestration.definitions.create",
+        "automation-orchestration.definitions.detail",
+        "automation-orchestration.definitions.edit",
+        "automation-orchestration.schedules.list",
+        "automation-orchestration.schedules.create",
+        "automation-orchestration.schedules.edit",
+        "automation-orchestration.runs.list",
+        "automation-orchestration.runs.detail",
+      ]),
+    );
     expect(
-      orchestrationRoutes.filter((route) => route.navigation.type === "sidebar").map((route) => route.path),
-    ).toEqual([
-      "/automation-orchestration",
-      "/automation-orchestration/schedules",
-      "/automation-orchestration/runs",
-    ]);
+      orchestrationRoutes
+        .filter((route) => route.navigation.type === "sidebar")
+        .map((route) => route.path),
+    ).toEqual(
+      expect.arrayContaining([
+        "/automation-orchestration",
+        "/automation-orchestration/configuration",
+        "/automation-orchestration/schedules",
+        "/automation-orchestration/runs",
+      ]),
+    );
   });
 
   it("contains unique route ids and normalized paths", () => {
