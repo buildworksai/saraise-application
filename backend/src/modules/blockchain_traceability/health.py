@@ -20,9 +20,16 @@ from .providers import (
     ledger_provider_registry,
     list_provider_capabilities,
 )
+from .services import DEFAULT_CONFIGURATION
 
-PROBE_TTL_SECONDS = 30
-OUTBOX_FRESHNESS = timedelta(minutes=5)
+PROBE_TTL_SECONDS = int(DEFAULT_CONFIGURATION["health_policy"]["provider_probe_cache_ttl_seconds"])
+OUTBOX_FRESHNESS = timedelta(seconds=int(DEFAULT_CONFIGURATION["health_policy"]["outbox_freshness_seconds"]))
+
+
+def _health_policy(tenant_id: UUID) -> Mapping[str, object]:
+    from .services import BlockchainTraceabilityConfigurationService
+
+    return BlockchainTraceabilityConfigurationService().document(tenant_id)["health_policy"]
 
 
 def _now() -> str:
@@ -55,7 +62,7 @@ def _cache_check(tenant_id: UUID) -> dict[str, object]:
     key = f"blockchain_traceability:health:cache:{tenant_id}"
     try:
         marker = _now()
-        cache.set(key, marker, timeout=10)
+        cache.set(key, marker, timeout=int(_health_policy(tenant_id)["cache_marker_ttl_seconds"]))
         ready = cache.get(key) == marker
         return _dependency("cache", "healthy" if ready else "unavailable", "ready" if ready else "roundtrip_failed")
     except Exception:
@@ -80,7 +87,8 @@ def _outbox_check(tenant_id: UUID) -> dict[str, object]:
             max(0.0, (checked_at - oldest_created_at).total_seconds()) if oldest_created_at is not None else 0.0
         )
         metrics.OUTBOX_AGE.set(age_seconds)
-        stale = oldest_created_at is not None and oldest_created_at < checked_at - OUTBOX_FRESHNESS
+        freshness_seconds = int(_health_policy(tenant_id)["outbox_freshness_seconds"])
+        stale = oldest_created_at is not None and (checked_at - oldest_created_at).total_seconds() > freshness_seconds
         return _dependency(
             "async_outbox",
             "unavailable" if stale else "healthy",
@@ -149,7 +157,11 @@ def _network_check(tenant_id: UUID) -> dict[str, object]:
 
     try:
         adapter = get_ledger_provider(network.provider_type)
-        provider_health = adapter.health(network)
+        from .services import execute_resilient_provider_call
+
+        provider_health = execute_resilient_provider_call(
+            tenant_id, "health_network_probe", lambda: adapter.health(network)
+        )
         evidence = provider_health.evidence if isinstance(provider_health.evidence, Mapping) else {}
         circuit_state = _breaker_state(adapter, network.dependency_key, evidence)
         available = bool(provider_health.available)
@@ -166,7 +178,11 @@ def _network_check(tenant_id: UUID) -> dict[str, object]:
         result = _dependency("network", "unavailable", "provider_unavailable", circuit_state="unknown")
 
     try:
-        cache.set(cache_key, result, timeout=PROBE_TTL_SECONDS)
+        cache.set(
+            cache_key,
+            result,
+            timeout=int(_health_policy(tenant_id)["provider_probe_cache_ttl_seconds"]),
+        )
     except Exception:
         pass
     return result

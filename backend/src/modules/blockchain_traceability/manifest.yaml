@@ -41,6 +41,11 @@ permissions:
   - blockchain_traceability.compliance:verify
   - blockchain_traceability.verification:read
   - blockchain_traceability.health:read
+  - blockchain_traceability.configuration:read
+  - blockchain_traceability.configuration:update
+  - blockchain_traceability.configuration:rollback
+  - blockchain_traceability.configuration:import
+  - blockchain_traceability.configuration:export
 sod_actions:
   - blockchain_traceability.network:manage
   - blockchain_traceability.anchor:verify
@@ -48,19 +53,81 @@ sod_actions:
   - blockchain_traceability.credential:revoke
   - blockchain_traceability.compliance:create
   - blockchain_traceability.compliance:finalize
+  - blockchain_traceability.configuration:update
+  - blockchain_traceability.configuration:rollback
 search_indexes:
   - blockchain_traceability_assets
   - blockchain_traceability_events
   - blockchain_traceability_ledger_anchors
   - blockchain_traceability_authenticity_credentials
   - blockchain_traceability_compliance_evidence
-ai_tools:
-  - blockchain_traceability.product_history
-  - blockchain_traceability.verify_chain
-  - blockchain_traceability.verify_authenticity
+ai_tools: []
 metadata:
   api_version: v2
   public_api_prefix: /api/v2/blockchain-traceability/
+  sod_pairs:
+    - actions:
+        - blockchain_traceability.network:manage
+        - blockchain_traceability.anchor:verify
+    - actions:
+        - blockchain_traceability.credential:issue
+        - blockchain_traceability.credential:revoke
+    - actions:
+        - blockchain_traceability.compliance:create
+        - blockchain_traceability.compliance:finalize
+    - actions:
+        - blockchain_traceability.configuration:update
+        - blockchain_traceability.configuration:rollback
+  entities:
+    - blockchain_traceability_ledger_networks
+    - blockchain_traceability_assets
+    - blockchain_traceability_events
+    - blockchain_traceability_ledger_anchors
+    - blockchain_traceability_authenticity_credentials
+    - blockchain_traceability_compliance_evidence
+    - blockchain_traceability_verification_attempts
+    - blockchain_traceability_configuration
+    - blockchain_traceability_configuration_versions
+    - blockchain_traceability_configuration_audit
+    - blockchain_traceability_mutation_idempotency
+    - blockchain_traceability_lifecycle_transitions
+    - blockchain_traceability_credential_saga_events
+  endpoints:
+    - registration: router
+      prefix: networks
+      basename: network
+      viewset: LedgerNetworkViewSet
+    - registration: router
+      prefix: assets
+      basename: asset
+      viewset: TraceabilityAssetViewSet
+    - registration: router
+      prefix: events
+      basename: event
+      viewset: TraceabilityEventViewSet
+    - registration: router
+      prefix: anchors
+      basename: anchor
+      viewset: LedgerAnchorViewSet
+    - registration: router
+      prefix: credentials
+      basename: credential
+      viewset: AuthenticityCredentialViewSet
+    - registration: router
+      prefix: compliance-evidence
+      basename: compliance-evidence
+      viewset: ComplianceEvidenceViewSet
+    - registration: router
+      prefix: verification-attempts
+      basename: verification-attempt
+      viewset: VerificationAttemptViewSet
+    - registration: router
+      prefix: configuration
+      basename: configuration
+      viewset: BlockchainTraceabilityConfigurationViewSet
+    - registration: path
+      route: health/
+      name: health
   soft_dependencies:
     - name: inventory-management
       version: ">=1.0.0"

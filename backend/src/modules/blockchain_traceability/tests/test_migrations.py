@@ -11,7 +11,7 @@ from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 
 LEGACY = ("blockchain_traceability", "0001_initial")
-LATEST = ("blockchain_traceability", "0004_domain_rls")
+LATEST = ("blockchain_traceability", "0005_compliance_configuration")
 LEGACY_TABLE = "blockchain_traceability_resources"
 DOMAIN_TABLES = {
     "blockchain_traceability_ledger_networks",
@@ -22,6 +22,15 @@ DOMAIN_TABLES = {
     "blockchain_traceability_compliance_evidence",
     "blockchain_traceability_verification_attempts",
 }
+CONFIGURATION_TABLES = {
+    "blockchain_traceability_configuration",
+    "blockchain_traceability_configuration_versions",
+    "blockchain_traceability_configuration_audit",
+    "blockchain_traceability_mutation_idempotency",
+    "blockchain_traceability_lifecycle_transitions",
+    "blockchain_traceability_credential_saga_events",
+}
+ALL_DOMAIN_TABLES = DOMAIN_TABLES | CONFIGURATION_TABLES
 
 
 def _tables() -> set[str]:
@@ -64,24 +73,22 @@ def test_forward_reverse_forward_preserves_legacy_bytes_and_domain_tables() -> N
         model.__name__ for model in latest_apps.get_models() if model._meta.app_label == "blockchain_traceability"
     }
     assert "LegacyBlockchainTraceabilityResource" not in latest_names
-    assert DOMAIN_TABLES <= _tables() and LEGACY_TABLE in _tables()
+    assert ALL_DOMAIN_TABLES <= _tables() and LEGACY_TABLE in _tables()
     assert _legacy_snapshot(identifier) == original
 
     executor = MigrationExecutor(connection)
     executor.migrate([LEGACY])
-    assert DOMAIN_TABLES.isdisjoint(_tables()) and LEGACY_TABLE in _tables()
+    assert ALL_DOMAIN_TABLES.isdisjoint(_tables()) and LEGACY_TABLE in _tables()
     assert _legacy_snapshot(identifier) == original
 
     executor = MigrationExecutor(connection)
     executor.migrate([LATEST])
-    assert DOMAIN_TABLES <= _tables()
+    assert ALL_DOMAIN_TABLES <= _tables()
     assert _legacy_snapshot(identifier) == original
 
 
 def test_quarantine_renames_state_only_and_has_real_reverse() -> None:
-    module = importlib.import_module(
-        "src.modules.blockchain_traceability.migrations.0002_quarantine_legacy_resource"
-    )
+    module = importlib.import_module("src.modules.blockchain_traceability.migrations.0002_quarantine_legacy_resource")
     operation = module.Migration.operations[0]
     assert operation.__class__.__name__ == "SeparateDatabaseAndState"
     assert [item.__class__.__name__ for item in operation.state_operations] == ["RenameModel"]
@@ -98,9 +105,7 @@ def test_domain_migration_declares_exact_tables_uuid_tenants_constraints_and_rev
         tenant_field = dict(operation.fields)["tenant_id"]
         assert tenant_field.__class__.__name__ == "UUIDField" and tenant_field.db_index is True
     constraints = [
-        operation
-        for operation in module.Migration.operations
-        if operation.__class__.__name__ == "AddConstraint"
+        operation for operation in module.Migration.operations if operation.__class__.__name__ == "AddConstraint"
     ]
     names = {operation.constraint.name for operation in constraints}
     assert {
@@ -130,11 +135,15 @@ def test_manifest_is_validator_compatible_and_declares_extension_contract() -> N
     import yaml
 
     from src.core.module_manifest_schema import manifest_validator
+    from src.modules.blockchain_traceability.permissions import PERMISSIONS, SOD_ACTIONS
 
     path = __file__.replace("tests/test_migrations.py", "manifest.yaml")
     manifest = manifest_validator.validate_from_yaml(open(path, encoding="utf-8").read())
     data = yaml.safe_load(open(path, encoding="utf-8"))
-    assert manifest.version == "2.0.0" and len(manifest.permissions) == 27
+    assert manifest.version == "2.0.0" and set(manifest.permissions) == set(PERMISSIONS)
+    assert manifest.ai_tools == []
+    assert tuple(tuple(pair["actions"]) for pair in data["metadata"]["sod_pairs"]) == SOD_ACTIONS
+    assert tuple(manifest.sod_actions) == tuple(action for pair in SOD_ACTIONS for action in pair)
     assert data["metadata"]["durable_job_commands"] == ["blockchain_traceability.submit_anchor"]
     assert len(data["metadata"]["domain_events"]) == 10
     assert len(data["metadata"]["extension_points"]) == 4
@@ -161,7 +170,9 @@ def test_postgresql_force_rls_and_non_owner_crud_isolation() -> None:
             [list(DOMAIN_TABLES)],
         )
         rows = cursor.fetchall()
-        assert len(rows) == 7 and all(enabled and forced and using and checking for _, enabled, forced, using, checking in rows)
+        assert len(rows) == 7 and all(
+            enabled and forced and using and checking for _, enabled, forced, using, checking in rows
+        )
         cursor.execute(f"CREATE ROLE {role_q} NOLOGIN")
         cursor.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO {role_q}")
         try:

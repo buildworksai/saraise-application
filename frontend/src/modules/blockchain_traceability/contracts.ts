@@ -127,6 +127,7 @@ export interface TraceabilityEvent {
   hash_algorithm: 'sha256';
   created_by: string;
   correlation_id: string;
+  anchor_state?: string;
 }
 
 /** Exact fields emitted by TraceabilityEventListSerializer. */
@@ -336,6 +337,142 @@ export interface ModuleHealth {
   checked_at: ISODateTime;
   dependencies: readonly HealthDependency[];
 }
+
+export interface TraceabilityValidationConfiguration {
+  max_json_bytes: number;
+  max_json_depth: number;
+  max_json_keys: number;
+  gtin_lengths: readonly number[];
+  max_revocation_reason_chars: number;
+  max_authenticity_token_chars: number;
+  max_actor_id_chars: number;
+  credential_type_max_chars: number;
+}
+
+export interface TraceabilityNetworkPolicy {
+  default_confirmation_depth: number;
+  max_confirmation_depth: number;
+}
+
+export interface TraceabilitySchemaPolicy {
+  default_version: number;
+  allowed_versions: readonly number[];
+}
+
+export interface TraceabilityListPolicy {
+  default_page_size: number;
+  max_page_size: number;
+  history_chunk_size: number;
+  verification_chunk_size: number;
+}
+
+export interface TraceabilityHealthPolicy {
+  provider_probe_cache_ttl_seconds: number;
+  outbox_freshness_seconds: number;
+  cache_marker_ttl_seconds: number;
+}
+
+export interface TraceabilityInventoryPolicy { validation_required: boolean }
+export interface TraceabilityAnchorPolicy { default_start_sequence: number; use_current_head_default: boolean }
+export interface TraceabilityCredentialPolicy { issuer_type: string; token_entropy_bytes: number }
+
+export interface TraceabilityResiliencePolicy {
+  timeout_seconds: number;
+  max_attempts: number;
+  base_backoff_seconds: number;
+  max_backoff_seconds: number;
+  circuit_failure_threshold: number;
+  circuit_recovery_seconds: number;
+}
+
+export interface TraceabilityWorkflowPolicy {
+  machines: JsonObject;
+  network_deletable_statuses: readonly LedgerNetworkStatus[];
+  asset_deletable_statuses: readonly TraceabilityAssetStatus[];
+}
+
+export interface TraceabilityUiConfiguration {
+  sidebar_order: number;
+  positive_statuses: readonly string[];
+  warning_statuses: readonly string[];
+  default_recall_reason: string;
+  default_revocation_reason: string;
+}
+
+export interface TraceabilityFeatureConfiguration {
+  enabled: boolean;
+  roles: readonly string[];
+  cohorts: readonly string[];
+  enable_supersede: boolean;
+  enable_health: boolean;
+}
+
+export interface TraceabilityConfigurationDocument {
+  validation: TraceabilityValidationConfiguration;
+  network_policy: TraceabilityNetworkPolicy;
+  schema_policy: TraceabilitySchemaPolicy;
+  list_policy: TraceabilityListPolicy;
+  health_policy: TraceabilityHealthPolicy;
+  inventory_policy: TraceabilityInventoryPolicy;
+  anchor_policy: TraceabilityAnchorPolicy;
+  credential_policy: TraceabilityCredentialPolicy;
+  resilience: TraceabilityResiliencePolicy;
+  workflow: TraceabilityWorkflowPolicy;
+  ui: TraceabilityUiConfiguration;
+  features: TraceabilityFeatureConfiguration;
+}
+
+export interface TraceabilityConfiguration {
+  id: UUID;
+  tenant_id: UUID;
+  environment: string;
+  version: number;
+  document: TraceabilityConfigurationDocument;
+  updated_at: ISODateTime;
+  updated_by: string;
+}
+
+export interface TraceabilityConfigurationExport {
+  schema: 'saraise.blockchain_traceability.configuration/v1';
+  environment: string;
+  version: number;
+  document: TraceabilityConfigurationDocument;
+}
+
+export interface TraceabilityConfigurationChange {
+  path: string;
+  before: JsonValue;
+  after: JsonValue;
+}
+
+export interface TraceabilityConfigurationPreview {
+  valid: boolean;
+  changes: readonly TraceabilityConfigurationChange[];
+  document: TraceabilityConfigurationDocument;
+}
+
+export interface TraceabilityConfigurationVersion {
+  version: number;
+  document: TraceabilityConfigurationDocument;
+  change_type: 'create' | 'update' | 'import' | 'rollback';
+  created_by: string;
+  created_at: ISODateTime;
+  correlation_id: string;
+}
+
+export interface TraceabilityCapabilities {
+  can_read: boolean;
+  can_update: boolean;
+  can_preview: boolean;
+  can_rollback: boolean;
+  can_import: boolean;
+  can_export: boolean;
+  can_mutate_resources: boolean;
+  document: TraceabilityConfigurationDocument;
+}
+
+export interface ConfigurationDocumentRequest { document: TraceabilityConfigurationDocument; environment?: string }
+export interface ConfigurationRollbackRequest { version: number; environment?: string }
 
 export interface ApiV2Pagination {
   page: number;
@@ -583,6 +720,16 @@ export const ENDPOINTS = {
     LIST: `${MODULE_API_PREFIX}/verification-attempts/`,
     DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/verification-attempts/${id}/` as const,
   },
+  CONFIGURATION: {
+    DETAIL: `${MODULE_API_PREFIX}/configuration/`,
+    UPDATE: `${MODULE_API_PREFIX}/configuration/current/`,
+    PREVIEW: `${MODULE_API_PREFIX}/configuration/preview/`,
+    HISTORY: `${MODULE_API_PREFIX}/configuration/history/`,
+    ROLLBACK: `${MODULE_API_PREFIX}/configuration/rollback/`,
+    IMPORT: `${MODULE_API_PREFIX}/configuration/import-document/`,
+    EXPORT: `${MODULE_API_PREFIX}/configuration/export-document/`,
+    CAPABILITIES: `${MODULE_API_PREFIX}/configuration/capabilities/`,
+  },
   HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
 
@@ -608,7 +755,9 @@ export const ROUTE_PATHS = {
   COMPLIANCE_CREATE: '/blockchain-traceability/compliance/new',
   COMPLIANCE_DETAIL: (id: UUID) => `/blockchain-traceability/compliance/${id}` as const,
   COMPLIANCE_EDIT: (id: UUID) => `/blockchain-traceability/compliance/${id}/edit` as const,
+  COMPLIANCE_SUPERSEDE: '/blockchain-traceability/compliance/supersede',
   VERIFY: '/blockchain-traceability/verify',
   ATTEMPTS: '/blockchain-traceability/verification-attempts',
   ATTEMPT_DETAIL: (id: UUID) => `/blockchain-traceability/verification-attempts/${id}` as const,
+  CONFIGURATION: '/blockchain-traceability/configuration',
 } as const;

@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import threading
 import uuid
-from datetime import datetime, timedelta, timezone as dt_timezone
+from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +20,12 @@ from ..hashing import CanonicalizationError, compute_event_hash, compute_merkle_
 from ..models import (
     AuthenticityCredentialStatus,
     ComplianceEvidenceStatus,
+    ImmutableEvidenceError,
     LedgerAnchor,
     LedgerAnchorStatus,
     LedgerNetworkStatus,
+    LifecycleTransition,
+    MutationIdempotencyRecord,
     TraceabilityAsset,
     TraceabilityAssetStatus,
     TraceabilityEvent,
@@ -147,7 +151,9 @@ def register_asset(tenant: uuid.UUID, key: str = "asset-1") -> TraceabilityAsset
     )
 
 
-def append_event(tenant: uuid.UUID, asset: TraceabilityAsset, key: str, event_type: str = "manufactured") -> TraceabilityEvent:
+def append_event(
+    tenant: uuid.UUID, asset: TraceabilityAsset, key: str, event_type: str = "manufactured"
+) -> TraceabilityEvent:
     return TraceabilityEventService().append_event(
         tenant,
         "user:recorder",
@@ -219,6 +225,59 @@ def test_append_first_chain_idempotency_conflict_and_atomic_outbox() -> None:
     assert TraceabilityEvent.objects.filter(tenant_id=tenant, asset=asset).count() == 2
 
 
+def test_mutation_idempotency_and_lifecycle_audit_are_tenant_scoped_and_immutable(
+    ledger: WorkingLedger,
+) -> None:
+    tenant = uuid.uuid4()
+    network_request = {
+        "network_key": "idempotent-network",
+        "name": "Idempotent network",
+        "provider_type": ledger.provider_type,
+        "dependency_key": "ledger.idempotent",
+        "network_namespace": "saraise:idempotent",
+    }
+    network_service = LedgerNetworkService()
+    network = network_service.create_network(tenant, "admin", network_request)
+    assert network_service.create_network(tenant, "admin", network_request).id == network.id
+    with pytest.raises(IdempotencyConflictError):
+        network_service.create_network(tenant, "admin", {**network_request, "name": "Tampered"})
+
+    asset_request = {
+        "asset_key": "idempotent-asset",
+        "name": "Idempotent asset",
+        "asset_type": "medicine",
+        "serial_number": "SERIAL-IDEMPOTENT",
+    }
+    asset_service = TraceabilityAssetService()
+    asset = asset_service.register_asset(tenant, "operator", asset_request)
+    assert asset_service.register_asset(tenant, "operator", asset_request).id == asset.id
+    with pytest.raises(IdempotencyConflictError):
+        asset_service.register_asset(tenant, "operator", {**asset_request, "name": "Tampered"})
+
+    evidence_request = {
+        "asset_id": asset.id,
+        "evidence_key": "idempotent-evidence",
+        "evidence_type": "certificate",
+        "standard": "ISO-1",
+        "result": "pass",
+        "observed_at": timezone.now(),
+    }
+    evidence_service = ComplianceEvidenceService()
+    evidence = evidence_service.create_draft(tenant, "auditor", evidence_request)
+    assert evidence_service.create_draft(tenant, "auditor", evidence_request).id == evidence.id
+    with pytest.raises(IdempotencyConflictError):
+        evidence_service.create_draft(tenant, "auditor", {**evidence_request, "standard": "ISO-2"})
+
+    assert MutationIdempotencyRecord.objects.filter(tenant_id=tenant).count() == 3
+    network_service.activate_network(tenant, network.id, "admin", "activate-idempotent")
+    transition = LifecycleTransition.objects.get(tenant_id=tenant, aggregate_id=network.id)
+    transition.command = "tampered"
+    with pytest.raises(ImmutableEvidenceError, match="cannot be updated"):
+        transition.save()
+    with pytest.raises(ImmutableEvidenceError, match="cannot be deleted"):
+        LifecycleTransition.objects.filter(pk=transition.pk).delete()
+
+
 def test_event_append_rolls_back_event_outbox_and_head_on_head_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     tenant = uuid.uuid4()
     asset = register_asset(tenant)
@@ -233,7 +292,9 @@ def test_event_append_rolls_back_event_outbox_and_head_on_head_failure(monkeypat
     with pytest.raises(RuntimeError, match="head persistence"):
         append_event(tenant, asset, "will-rollback")
     assert TraceabilityEvent.objects.filter(tenant_id=tenant).count() == 0
-    assert not OutboxEvent.objects.filter(tenant_id=tenant, event_type="blockchain_traceability.event.appended").exists()
+    assert not OutboxEvent.objects.filter(
+        tenant_id=tenant, event_type="blockchain_traceability.event.appended"
+    ).exists()
     asset.refresh_from_db()
     assert asset.head_sequence == 0 and asset.head_hash == ""
 
@@ -291,14 +352,22 @@ def test_anchor_range_durable_job_replay_refresh_and_verification(ledger: Workin
     anchor, job = service.request_anchor(
         tenant,
         "anchor-user",
-        {"asset_id": asset.id, "network_id": network.id, "start_sequence": 1, "end_sequence": 2, "idempotency_key": "a-1"},
+        {
+            "asset_id": asset.id,
+            "network_id": network.id,
+            "start_sequence": 1,
+            "end_sequence": 2,
+            "idempotency_key": "a-1",
+        },
     )
     assert anchor.root_hash == compute_merkle_root([first.event_hash, second.event_hash])
     assert anchor.status == LedgerAnchorStatus.QUEUED and anchor.async_job_id == job.id
     assert AsyncJob.objects.filter(id=job.id).exists()
     assert JobTransition.objects.filter(job=job, to_status="queued").exists()
     assert OutboxEvent.objects.filter(aggregate_id=job.id, event_type="async_job.enqueued").exists()
-    assert OutboxEvent.objects.filter(aggregate_id=anchor.id, event_type="blockchain_traceability.anchor.queued").exists()
+    assert OutboxEvent.objects.filter(
+        aggregate_id=anchor.id, event_type="blockchain_traceability.anchor.queued"
+    ).exists()
     result = service.submit_anchor_job(job)
     replay = service.submit_anchor_job(job)
     assert result == replay and result["status"] == LedgerAnchorStatus.SUBMITTED

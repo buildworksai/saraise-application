@@ -40,4 +40,15 @@ describe('blockchain traceability v2 service', () => {
     expect(failure.correlationId).toBe('corr-provider');
     expect(failure.fieldErrors.get('network_id')).toBe('Network unavailable');
   });
+
+  it('uses the governed singleton configuration endpoints without inventing an envelope', async () => {
+    const configuration = { id: 'configuration-1', tenant_id: 'tenant-1', environment: 'default', version: 1, document: {}, updated_at: meta.timestamp, updated_by: 'actor-1' };
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValue(configuration);
+    await expect(blockchainTraceabilityService.getConfiguration()).resolves.toBe(configuration);
+    expect(get).toHaveBeenCalledWith('/api/v2/blockchain-traceability/configuration/');
+
+    const put = vi.spyOn(apiClient, 'put').mockResolvedValue(configuration);
+    await blockchainTraceabilityService.updateConfiguration({ document: configuration.document as never });
+    expect(put).toHaveBeenCalledWith('/api/v2/blockchain-traceability/configuration/current/', { document: configuration.document });
+  });
 });

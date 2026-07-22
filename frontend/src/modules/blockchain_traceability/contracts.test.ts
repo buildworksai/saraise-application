@@ -8,6 +8,8 @@ describe('blockchain traceability v2 contracts', () => {
     expect(ENDPOINTS.ANCHORS.RETRY('anchor-1')).toBe('/api/v2/blockchain-traceability/anchors/anchor-1/retry/');
     expect(ENDPOINTS.CREDENTIALS.VERIFY).toBe('/api/v2/blockchain-traceability/credentials/verify/');
     expect(ENDPOINTS.COMPLIANCE_EVIDENCE.SUPERSEDE('evidence-1')).toContain('/compliance-evidence/evidence-1/supersede/');
+    expect(ENDPOINTS.CONFIGURATION.UPDATE).toBe('/api/v2/blockchain-traceability/configuration/current/');
+    expect(ENDPOINTS.CONFIGURATION.CAPABILITIES).toBe('/api/v2/blockchain-traceability/configuration/capabilities/');
   });
 
   it('publishes typed contextual path helpers and exact literals', () => {
@@ -16,5 +18,6 @@ describe('blockchain traceability v2 contracts', () => {
     expect([outcome, result]).toEqual(['dependency_unavailable', 'not_applicable']);
     expect(ROUTE_PATHS.ASSET_DETAIL('asset-1')).toBe('/blockchain-traceability/assets/asset-1');
     expect(ROUTE_PATHS.ATTEMPT_DETAIL('attempt-1')).toBe('/blockchain-traceability/verification-attempts/attempt-1');
+    expect(ROUTE_PATHS.CONFIGURATION).toBe('/blockchain-traceability/configuration');
   });
 });

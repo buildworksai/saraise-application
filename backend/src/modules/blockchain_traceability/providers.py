@@ -177,6 +177,8 @@ class CredentialIssuerAdapter(Protocol):
 
     def verify_signature(self, tenant_id: UUID, credential: Any) -> ProofResult: ...
 
+    def invalidate_signature(self, tenant_id: UUID, issuer_key_ref: str, signature: SignatureResult) -> None: ...
+
 
 @runtime_checkable
 class InventoryReferenceResolver(Protocol):
@@ -356,6 +358,11 @@ class DjangoSigningCredentialIssuer:
             evidence={"claims_hash": expected_claims_hash, "signature_algorithm": "hmac-sha256"},
         )
 
+    def invalidate_signature(self, tenant_id: UUID, issuer_key_ref: str, signature: SignatureResult) -> None:
+        """No external state exists; dropping the unpersisted signature is the compensation."""
+
+        del tenant_id, issuer_key_ref, signature
+
 
 def register_builtin_adapters() -> None:
     """Register foundation adapters without masking a competing owner."""
@@ -368,6 +375,4 @@ def register_builtin_adapters() -> None:
         return
     identity = lambda value: (type(value).__module__, type(value).__qualname__)
     if identity(existing) != identity(candidate):
-        raise AdapterRegistrationError(
-            f"credential issuer {candidate.issuer_type!r} is owned by a competing adapter"
-        )
+        raise AdapterRegistrationError(f"credential issuer {candidate.issuer_type!r} is owned by a competing adapter")

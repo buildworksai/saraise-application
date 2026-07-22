@@ -10,6 +10,8 @@ import {
   type AuthenticityCredentialListItem,
   type AuthenticityVerificationRequest,
   type ChainVerificationRequest,
+  type ConfigurationDocumentRequest,
+  type ConfigurationRollbackRequest,
   type ComplianceEvidence,
   type ComplianceEvidenceCreate,
   type ComplianceEvidenceFilters,
@@ -41,6 +43,11 @@ import {
   type TraceabilityAssetFilters,
   type TraceabilityAssetListItem,
   type TraceabilityAssetUpdate,
+  type TraceabilityCapabilities,
+  type TraceabilityConfiguration,
+  type TraceabilityConfigurationExport,
+  type TraceabilityConfigurationPreview,
+  type TraceabilityConfigurationVersion,
   type TraceabilityEvent,
   type TraceabilityEventAppend,
   type TraceabilityEventFilters,
@@ -146,6 +153,12 @@ function withQuery(path: string, params: URLSearchParams): string {
   return query ? `${path}?${query}` : path;
 }
 
+function configurationQuery(path: string, environment?: string): string {
+  const params = new URLSearchParams();
+  setString(params, 'environment', environment);
+  return withQuery(path, params);
+}
+
 export function networkQuery(filters: LedgerNetworkFilters): string {
   const params = new URLSearchParams(); setPageFilters(params, filters);
   setString(params, 'status', filters.status); setString(params, 'provider_type', filters.provider_type);
@@ -202,6 +215,15 @@ export function attemptQuery(filters: VerificationAttemptFilters): string {
 }
 
 export const blockchainTraceabilityService = {
+  getConfiguration: (environment?: string) => call(() => apiClient.get<TraceabilityConfiguration>(configurationQuery(ENDPOINTS.CONFIGURATION.DETAIL, environment))),
+  updateConfiguration: (request: ConfigurationDocumentRequest) => call(() => apiClient.put<TraceabilityConfiguration>(ENDPOINTS.CONFIGURATION.UPDATE, request)),
+  previewConfiguration: (request: ConfigurationDocumentRequest) => call(() => apiClient.post<TraceabilityConfigurationPreview>(ENDPOINTS.CONFIGURATION.PREVIEW, request)),
+  listConfigurationHistory: (environment?: string) => call(() => apiClient.get<readonly TraceabilityConfigurationVersion[]>(configurationQuery(ENDPOINTS.CONFIGURATION.HISTORY, environment))),
+  rollbackConfiguration: (request: ConfigurationRollbackRequest) => call(() => apiClient.post<TraceabilityConfiguration>(ENDPOINTS.CONFIGURATION.ROLLBACK, request)),
+  importConfiguration: (request: ConfigurationDocumentRequest) => call(() => apiClient.post<TraceabilityConfiguration>(ENDPOINTS.CONFIGURATION.IMPORT, request)),
+  exportConfiguration: (environment?: string) => call(() => apiClient.get<TraceabilityConfigurationExport>(configurationQuery(ENDPOINTS.CONFIGURATION.EXPORT, environment))),
+  getCapabilities: (environment?: string) => call(() => apiClient.get<TraceabilityCapabilities>(configurationQuery(ENDPOINTS.CONFIGURATION.CAPABILITIES, environment))),
+
   listNetworks: (filters: LedgerNetworkFilters = {}) => getPage(() => apiClient.get<ApiV2PaginatedEnvelope<LedgerNetworkListItem>>(networkQuery(filters))),
   createNetwork: (request: LedgerNetworkCreate) => getData(() => apiClient.post<ApiV2Envelope<LedgerNetwork>>(ENDPOINTS.NETWORKS.CREATE, request)),
   getNetwork: (id: UUID) => getData(() => apiClient.get<ApiV2Envelope<LedgerNetwork>>(ENDPOINTS.NETWORKS.DETAIL(id))),

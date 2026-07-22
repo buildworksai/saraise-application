@@ -10,11 +10,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
-from math import ceil
 from typing import Any, TypeVar
 from uuid import UUID
 
-from django.core.exceptions import ObjectDoesNotExist, ValidationError as DjangoValidationError
+from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
 from django.db.models import Q, QuerySet
 from django.db.models.deletion import ProtectedError
@@ -22,10 +22,11 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.viewsets import ViewSet
 
 from src.core.api.profile import GovernedAPIViewMixin
 from src.core.api.results import OperationFailed, OperationResult
@@ -57,13 +58,17 @@ from .permissions import (
     ASSET_READ,
     ASSET_TRANSITION,
     ASSET_UPDATE,
-    ActionAccessMixin,
     COMPLIANCE_CREATE,
     COMPLIANCE_DELETE,
     COMPLIANCE_FINALIZE,
     COMPLIANCE_READ,
     COMPLIANCE_UPDATE,
     COMPLIANCE_VERIFY,
+    CONFIG_EXPORT,
+    CONFIG_IMPORT,
+    CONFIG_READ,
+    CONFIG_ROLLBACK,
+    CONFIG_UPDATE,
     CREDENTIAL_ISSUE,
     CREDENTIAL_READ,
     CREDENTIAL_REVOKE,
@@ -75,8 +80,9 @@ from .permissions import (
     NETWORK_MANAGE,
     NETWORK_PROBE,
     NETWORK_READ,
-    SessionAuthentication401,
     VERIFICATION_READ,
+    ActionAccessMixin,
+    SessionAuthentication401,
 )
 from .providers import ProviderUnavailableError
 from .serializers import (
@@ -89,6 +95,10 @@ from .serializers import (
     ComplianceEvidenceDetailSerializer,
     ComplianceEvidenceListSerializer,
     ComplianceEvidenceUpdateSerializer,
+    ConfigurationImportSerializer,
+    ConfigurationPreviewSerializer,
+    ConfigurationRollbackSerializer,
+    ConfigurationUpdateSerializer,
     CredentialRevokeSerializer,
     EvidenceSupersedeSerializer,
     LedgerAnchorCreateSerializer,
@@ -112,6 +122,7 @@ from .serializers import (
 )
 from .services import (
     AuthenticityService,
+    BlockchainTraceabilityConfigurationService,
     ComplianceEvidenceService,
     DomainNotFoundError,
     LedgerAnchorService,
@@ -186,114 +197,6 @@ def _operation_payload(value: object, *, code: str, message: str) -> dict[str, o
     return {"ok": True, "code": code, "message": message, "value": value}
 
 
-def _asset_history_payload(tenant_id: UUID, asset: TraceabilityAsset, history: object) -> dict[str, object]:
-    """Build the discriminated, complete timeline wire contract in bounded queries."""
-
-    items = tuple(getattr(history, "items", ()))
-    identifiers: dict[str, set[UUID]] = {
-        "event": set(),
-        "anchor": set(),
-        "credential": set(),
-        "compliance": set(),
-    }
-    for item in items:
-        kind = str(getattr(item, "kind", ""))
-        if kind not in identifiers:
-            raise OperationFailed(
-                error_code="HISTORY_EVIDENCE_INVALID",
-                message="Asset history contains an unsupported evidence type.",
-                http_status=status.HTTP_409_CONFLICT,
-            )
-        identifiers[kind].add(_parse_uuid(getattr(item, "identifier", None), "history_item_id"))
-
-    events = TraceabilityEvent.objects.filter(tenant_id=tenant_id, id__in=identifiers["event"]).in_bulk()
-    anchors = (
-        LedgerAnchor.objects.filter(tenant_id=tenant_id, id__in=identifiers["anchor"])
-        .select_related("asset", "network")
-        .in_bulk()
-    )
-    credentials = (
-        AuthenticityCredential.objects.filter(tenant_id=tenant_id, id__in=identifiers["credential"])
-        .select_related("asset")
-        .in_bulk()
-    )
-    evidence = (
-        ComplianceEvidence.objects.filter(tenant_id=tenant_id, id__in=identifiers["compliance"])
-        .select_related("asset", "event", "supersedes")
-        .in_bulk()
-    )
-    records: Mapping[str, Mapping[UUID, object]] = {
-        "event": events,
-        "anchor": anchors,
-        "credential": credentials,
-        "compliance": evidence,
-    }
-    serializers_by_kind = {
-        "event": ("event", TraceabilityEventDetailSerializer),
-        "anchor": ("anchor", LedgerAnchorDetailSerializer),
-        "credential": ("credential", AuthenticityCredentialDetailSerializer),
-        "compliance": ("evidence", ComplianceEvidenceDetailSerializer),
-    }
-    timeline: list[dict[str, object]] = []
-    for item in items:
-        kind = str(getattr(item, "kind"))
-        identifier = _parse_uuid(getattr(item, "identifier"), "history_item_id")
-        model = records[kind].get(identifier)
-        if model is None:
-            raise OperationFailed(
-                error_code="HISTORY_EVIDENCE_MISSING",
-                message="Referenced asset-history evidence is unavailable.",
-                http_status=status.HTTP_409_CONFLICT,
-            )
-        field_name, serializer_class = serializers_by_kind[kind]
-        sequence = getattr(item, "sequence", None)
-        if sequence is None and kind == "anchor":
-            sequence = getattr(model, "end_sequence")
-        if sequence is None and kind == "compliance":
-            related_event = getattr(model, "event", None)
-            sequence = getattr(related_event, "sequence", None)
-        # Zero is the explicit off-chain sentinel; event sequences begin at one.
-        timeline.append(
-            {
-                "kind": kind,
-                "occurred_at": str(getattr(item, "occurred_at")),
-                "sequence": sequence if isinstance(sequence, int) else 0,
-                field_name: serializer_class(model).data,
-            }
-        )
-
-    pagination = getattr(history, "pagination", {})
-    if not isinstance(pagination, Mapping):
-        raise OperationFailed(
-            error_code="HISTORY_PAGINATION_INVALID",
-            message="Asset history pagination evidence is invalid.",
-            http_status=status.HTTP_409_CONFLICT,
-        )
-    page = int(pagination.get("page", 1))
-    page_size = int(pagination.get("page_size", 25))
-    count = int(pagination.get("total", 0))
-    proof_status = {
-        "Locally consistent — not externally anchored": "locally_consistent",
-        "Externally verified": "externally_verified",
-        "Invalid proof": "invalid",
-        "Verification unavailable": "unavailable",
-    }.get(str(getattr(history, "proof_status", "")), "unavailable")
-    return {
-        "asset": TraceabilityAssetDetailSerializer(asset).data,
-        "items": timeline,
-        "proof_status": proof_status,
-        "failing_sequence": getattr(history, "failing_sequence", None),
-        "pagination": {
-            "page": page,
-            "page_size": page_size,
-            "total_pages": ceil(count / page_size) if count else 0,
-            "count": count,
-            "has_next": bool(pagination.get("has_next", False)),
-            "has_previous": page > 1,
-        },
-    }
-
-
 def _parse_uuid(value: object, field_name: str) -> UUID:
     try:
         return value if isinstance(value, UUID) else UUID(str(value))
@@ -313,7 +216,10 @@ class GovernedTenantMixin(ActionAccessMixin):
 
     @property
     def tenant_id(self) -> UUID:
-        return self._require_tenant_id()
+        tenant_id = getattr(self.request, "tenant_id", None)
+        if not isinstance(tenant_id, UUID):
+            raise PermissionDenied("Authenticated tenant context is required.")
+        return tenant_id
 
     @property
     def actor_id(self) -> str:
@@ -322,11 +228,16 @@ class GovernedTenantMixin(ActionAccessMixin):
             raise ValidationError({"actor": ["Authenticated identity is incomplete."]})
         return str(identifier)
 
+    def get_serializer_context(self) -> dict[str, object]:
+        context = super().get_serializer_context()
+        context["configuration"] = BlockchainTraceabilityConfigurationService().document(self.tenant_id)
+        return context
+
     def _paginate(self, queryset: QuerySet[Any], serializer_class: type) -> Response:
         page = self.paginate_queryset(queryset)
         if page is None:
             raise RuntimeError("Governed collection endpoints require bounded pagination.")
-        serializer = serializer_class(page, many=True)
+        serializer = serializer_class(page, many=True, context=self.get_serializer_context())
         return self.get_paginated_response(serializer.data)
 
     def _exact_filters(self, queryset: QuerySet[Any], names: tuple[str, ...]) -> QuerySet[Any]:
@@ -388,6 +299,141 @@ class GovernedTenantReadOnlyViewSet(
     """Immutable tenant boundary for audit evidence."""
 
 
+def _configuration_payload(current: object) -> dict[str, object]:
+    return {
+        "id": str(getattr(current, "id")),
+        "tenant_id": str(getattr(current, "tenant_id")),
+        "environment": str(getattr(current, "environment")),
+        "version": int(getattr(current, "version")),
+        "document": getattr(current, "document"),
+        "updated_at": getattr(current, "updated_at").isoformat(),
+        "updated_by": str(getattr(current, "updated_by")),
+    }
+
+
+class BlockchainTraceabilityConfigurationViewSet(
+    GovernedAPIViewMixin,
+    GovernedTenantMixin,
+    ViewSet,
+):
+    """RBAC-gated singleton configuration API; all decisions live in the service."""
+
+    service = BlockchainTraceabilityConfigurationService()
+    action_permissions = {
+        "list": CONFIG_READ,
+        "current": CONFIG_UPDATE,
+        "preview": CONFIG_UPDATE,
+        "history": CONFIG_READ,
+        "rollback": CONFIG_ROLLBACK,
+        "import_document": CONFIG_IMPORT,
+        "export_document": CONFIG_EXPORT,
+        "capabilities": CONFIG_READ,
+    }
+    read_actions = frozenset({"list", "history", "export_document", "capabilities"})
+
+    @staticmethod
+    def _environment(request: Request) -> str:
+        return str(request.query_params.get("environment", "default"))
+
+    def list(self, request: Request) -> Response:
+        current = _service_call(lambda: self.service.current(self.tenant_id, self._environment(request)))
+        return Response(_configuration_payload(current))
+
+    @action(detail=False, methods=("put",), url_path="current")
+    def current(self, request: Request) -> Response:
+        serializer = ConfigurationUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        current = _service_call(
+            lambda: self.service.update(
+                self.tenant_id,
+                self.actor_id,
+                serializer.validated_data["document"],
+                serializer.validated_data["environment"],
+            )
+        )
+        return Response(_configuration_payload(current))
+
+    @action(detail=False, methods=("post",))
+    def preview(self, request: Request) -> Response:
+        serializer = ConfigurationPreviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            _service_call(
+                lambda: self.service.preview(
+                    self.tenant_id,
+                    serializer.validated_data["document"],
+                    serializer.validated_data["environment"],
+                )
+            )
+        )
+
+    @action(detail=False, methods=("get",))
+    def history(self, request: Request) -> Response:
+        rows = _service_call(lambda: self.service.history(self.tenant_id, self._environment(request)))
+        return Response(
+            [
+                {
+                    "version": row.version,
+                    "document": row.document,
+                    "created_at": row.created_at.isoformat(),
+                    "created_by": row.created_by,
+                    "correlation_id": row.correlation_id,
+                    "change_type": row.change_type,
+                }
+                for row in rows
+            ]
+        )
+
+    @action(detail=False, methods=("post",))
+    def rollback(self, request: Request) -> Response:
+        serializer = ConfigurationRollbackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        current = _service_call(
+            lambda: self.service.rollback(
+                self.tenant_id,
+                self.actor_id,
+                serializer.validated_data["version"],
+                serializer.validated_data["environment"],
+            )
+        )
+        return Response(_configuration_payload(current))
+
+    @action(detail=False, methods=("post",), url_path="import-document")
+    def import_document(self, request: Request) -> Response:
+        serializer = ConfigurationImportSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        environment = serializer.validated_data.pop("environment")
+        current = _service_call(
+            lambda: self.service.import_document(self.tenant_id, self.actor_id, serializer.validated_data, environment)
+        )
+        return Response(_configuration_payload(current))
+
+    @action(detail=False, methods=("get",), url_path="export-document")
+    def export_document(self, request: Request) -> Response:
+        return Response(_service_call(lambda: self.service.export_document(self.tenant_id, self._environment(request))))
+
+    @action(detail=False, methods=("get",))
+    def capabilities(self, request: Request) -> Response:
+        user = request.user
+
+        def permitted(permission: str) -> bool:
+            checker = getattr(user, "has_perm", None)
+            return bool(checker(permission)) if callable(checker) else False
+
+        return Response(
+            {
+                "can_read": True,
+                "can_update": permitted(CONFIG_UPDATE),
+                "can_preview": permitted(CONFIG_UPDATE),
+                "can_rollback": permitted(CONFIG_ROLLBACK),
+                "can_import": permitted(CONFIG_IMPORT),
+                "can_export": permitted(CONFIG_EXPORT),
+                "can_mutate_resources": permitted(NETWORK_MANAGE),
+                "document": self.service.document(self.tenant_id, self._environment(request)),
+            }
+        )
+
+
 class LedgerNetworkViewSet(GovernedTenantModelViewSet):
     queryset = LedgerNetwork.objects.all()
     service = LedgerNetworkService()
@@ -429,7 +475,7 @@ class LedgerNetworkViewSet(GovernedTenantModelViewSet):
         return self._paginate(self.get_queryset(), LedgerNetworkListSerializer)
 
     def create(self, request: Request) -> Response:
-        serializer = LedgerNetworkCreateSerializer(data=request.data)
+        serializer = LedgerNetworkCreateSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         network = _service_call(
             lambda: self.service.create_network(self.tenant_id, self.actor_id, dict(serializer.validated_data))
@@ -438,7 +484,9 @@ class LedgerNetworkViewSet(GovernedTenantModelViewSet):
 
     def partial_update(self, request: Request, pk: str | None = None) -> Response:
         self.get_object()
-        serializer = LedgerNetworkUpdateSerializer(data=request.data, partial=True)
+        serializer = LedgerNetworkUpdateSerializer(
+            data=request.data, partial=True, context=self.get_serializer_context()
+        )
         serializer.is_valid(raise_exception=True)
         network = _service_call(
             lambda: self.service.update_network(
@@ -560,7 +608,7 @@ class TraceabilityAssetViewSet(GovernedTenantModelViewSet):
         return self._paginate(self.get_queryset(), TraceabilityAssetListSerializer)
 
     def create(self, request: Request) -> Response:
-        serializer = TraceabilityAssetCreateSerializer(data=request.data)
+        serializer = TraceabilityAssetCreateSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         value = _service_call(
             lambda: self.service.register_asset(self.tenant_id, self.actor_id, dict(serializer.validated_data))
@@ -569,7 +617,9 @@ class TraceabilityAssetViewSet(GovernedTenantModelViewSet):
 
     def partial_update(self, request: Request, pk: str | None = None) -> Response:
         self.get_object()
-        serializer = TraceabilityAssetUpdateSerializer(data=request.data, partial=True)
+        serializer = TraceabilityAssetUpdateSerializer(
+            data=request.data, partial=True, context=self.get_serializer_context()
+        )
         serializer.is_valid(raise_exception=True)
         value = _service_call(
             lambda: self.service.update_asset(
@@ -617,7 +667,7 @@ class TraceabilityAssetViewSet(GovernedTenantModelViewSet):
     @action(detail=True, methods=("post",))
     def recall(self, request: Request, pk: str | None = None) -> Response:
         self.get_object()
-        serializer = RecallSerializer(data=request.data)
+        serializer = RecallSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         value = _service_call(
             lambda: self.service.recall_asset(
@@ -633,11 +683,12 @@ class TraceabilityAssetViewSet(GovernedTenantModelViewSet):
     @action(detail=True, methods=("get",))
     def history(self, request: Request, pk: str | None = None) -> Response:
         asset = self.get_object()
+        list_policy = BlockchainTraceabilityConfigurationService().document(self.tenant_id)["list_policy"]
         page = request.query_params.get("page", "1")
-        page_size = request.query_params.get("page_size", "25")
+        page_size = request.query_params.get("page_size", str(list_policy["default_page_size"]))
         try:
             parsed_page = max(1, int(page))
-            parsed_size = min(100, max(1, int(page_size)))
+            parsed_size = min(int(list_policy["max_page_size"]), max(1, int(page_size)))
         except ValueError as exc:
             raise ValidationError({"pagination": ["page and page_size must be integers."]}) from exc
         value = _service_call(
@@ -648,7 +699,7 @@ class TraceabilityAssetViewSet(GovernedTenantModelViewSet):
                 parsed_size,
             )
         )
-        return Response(_asset_history_payload(self.tenant_id, asset, value))
+        return Response(self.service.history_payload(asset, value))
 
     @action(detail=True, methods=("post",), url_path="verify-chain")
     def verify_chain(self, request: Request, pk: str | None = None) -> Response:
@@ -702,7 +753,7 @@ class TraceabilityEventViewSet(GovernedTenantModelViewSet):
         return self._paginate(self.get_queryset(), TraceabilityEventListSerializer)
 
     def create(self, request: Request) -> Response:
-        serializer = TraceabilityEventCreateSerializer(data=request.data)
+        serializer = TraceabilityEventCreateSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         value = _service_call(
             lambda: self.service.append_event(self.tenant_id, self.actor_id, dict(serializer.validated_data))
@@ -893,7 +944,7 @@ class AuthenticityCredentialViewSet(GovernedTenantModelViewSet):
     @action(detail=True, methods=("post",))
     def revoke(self, request: Request, pk: str | None = None) -> Response:
         self.get_object()
-        serializer = CredentialRevokeSerializer(data=request.data)
+        serializer = CredentialRevokeSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         value = _service_call(
             lambda: self.service.revoke_credential(
@@ -908,7 +959,7 @@ class AuthenticityCredentialViewSet(GovernedTenantModelViewSet):
 
     @action(detail=False, methods=("post",))
     def verify(self, request: Request) -> Response:
-        serializer = AuthenticityVerificationSerializer(data=request.data)
+        serializer = AuthenticityVerificationSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         value = _service_call(
@@ -972,7 +1023,7 @@ class ComplianceEvidenceViewSet(GovernedTenantModelViewSet):
         return self._paginate(self.get_queryset(), ComplianceEvidenceListSerializer)
 
     def create(self, request: Request) -> Response:
-        serializer = ComplianceEvidenceCreateSerializer(data=request.data)
+        serializer = ComplianceEvidenceCreateSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         value = _service_call(
             lambda: self.service.create_draft(self.tenant_id, self.actor_id, dict(serializer.validated_data))
@@ -981,7 +1032,9 @@ class ComplianceEvidenceViewSet(GovernedTenantModelViewSet):
 
     def partial_update(self, request: Request, pk: str | None = None) -> Response:
         self.get_object()
-        serializer = ComplianceEvidenceUpdateSerializer(data=request.data, partial=True)
+        serializer = ComplianceEvidenceUpdateSerializer(
+            data=request.data, partial=True, context=self.get_serializer_context()
+        )
         serializer.is_valid(raise_exception=True)
         value = _service_call(
             lambda: self.service.update_draft(
@@ -1017,7 +1070,7 @@ class ComplianceEvidenceViewSet(GovernedTenantModelViewSet):
     @action(detail=True, methods=("post",))
     def supersede(self, request: Request, pk: str | None = None) -> Response:
         self.get_object()
-        serializer = EvidenceSupersedeSerializer(data=request.data)
+        serializer = EvidenceSupersedeSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         replacement = dict(serializer.validated_data)
         transition_key = str(replacement.pop("transition_key"))

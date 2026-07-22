@@ -117,10 +117,12 @@ _SECRET_KEY_PARTS = frozenset(
 )
 
 
-def _reject_secret_material(value: Any, field_name: str, *, reject_urls: bool = False) -> None:
+def _reject_secret_material(
+    value: Any, field_name: str, *, reject_urls: bool = False, structural_keys: frozenset[str] = frozenset()
+) -> None:
     for path, nested in _walk_json(value):
         key = path.rsplit(".", 1)[-1].lower().replace("-", "_")
-        sensitive_key = (
+        sensitive_key = key not in structural_keys and (
             key in _SECRET_KEY_PARTS
             or key.startswith(("private_key", "api_key"))
             or key.endswith(("_token", "_secret", "_password", "_credential", "_credentials"))
@@ -205,6 +207,167 @@ class AppendOnlyTenantModel(TenantScopedModel):
         raise ImmutableEvidenceError("Append-only evidence cannot be deleted.", code="append_only")
 
 
+class ConfigurationQuerySet(TenantQuerySet):
+    def update(self, **kwargs: Any) -> int:
+        raise ImmutableEvidenceError(
+            "Configuration must be changed through the versioned service.", code="versioned_configuration_required"
+        )
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ImmutableEvidenceError("Configuration is retained for rollback.", code="configuration_retained")
+
+
+class BlockchainTraceabilityConfiguration(MutableTenantModel):
+    """The effective, tenant-owned configuration document for one environment."""
+
+    environment = models.SlugField(max_length=64, default="default")
+    version = models.PositiveBigIntegerField(default=1)
+    document = models.JSONField(default=dict)
+    objects = ConfigurationQuerySet.as_manager()
+
+    class Meta:
+        db_table = "blockchain_traceability_configuration"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "environment"], name="bct_config_tenant_environment_uniq"),
+            models.CheckConstraint(condition=Q(version__gte=1), name="bct_config_version_gte_1"),
+        ]
+        indexes = [models.Index(fields=["tenant_id", "environment"], name="bct_config_tenant_env")]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_object(self.document, "document")
+        _reject_secret_material(self.document, "document", reject_urls=True, structural_keys=frozenset({"credential"}))
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise ImmutableEvidenceError("Configuration is retained for rollback.", code="configuration_retained")
+
+
+class BlockchainTraceabilityConfigurationVersion(AppendOnlyTenantModel):
+    environment = models.SlugField(max_length=64)
+    version = models.PositiveBigIntegerField()
+    document = models.JSONField()
+    created_by = models.CharField(max_length=255)
+    correlation_id = models.CharField(max_length=64, db_index=True)
+    change_type = models.CharField(max_length=32)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "blockchain_traceability_configuration_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "environment", "version"], name="bct_config_version_tenant_env_uniq"
+            )
+        ]
+        indexes = [models.Index(fields=["tenant_id", "environment", "-version"], name="bct_config_version_lookup")]
+        ordering = ["-version"]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_object(self.document, "document")
+        _reject_secret_material(self.document, "document", reject_urls=True, structural_keys=frozenset({"credential"}))
+
+
+class BlockchainTraceabilityConfigurationAudit(AppendOnlyTenantModel):
+    environment = models.SlugField(max_length=64)
+    from_version = models.PositiveBigIntegerField(null=True, blank=True)
+    to_version = models.PositiveBigIntegerField()
+    before = models.JSONField(default=dict, blank=True)
+    after = models.JSONField()
+    changed_by = models.CharField(max_length=255)
+    correlation_id = models.CharField(max_length=64, db_index=True)
+    action = models.CharField(max_length=32)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "blockchain_traceability_configuration_audit"
+        indexes = [models.Index(fields=["tenant_id", "environment", "-created_at"], name="bct_config_audit_lookup")]
+        ordering = ["-created_at"]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_object(self.before, "before")
+        _require_object(self.after, "after")
+
+
+class MutationIdempotencyRecord(AppendOnlyTenantModel):
+    operation = models.CharField(max_length=128)
+    idempotency_key = models.CharField(max_length=255)
+    request_fingerprint = models.CharField(max_length=64, validators=[lower_sha256_validator])
+    resource_type = models.CharField(max_length=64)
+    resource_id = models.UUIDField()
+    correlation_id = models.CharField(max_length=64, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "blockchain_traceability_mutation_idempotency"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "operation", "idempotency_key"], name="bct_mutation_idempotency_uniq"
+            )
+        ]
+
+
+class LifecycleTransition(AppendOnlyTenantModel):
+    aggregate_type = models.CharField(max_length=64)
+    aggregate_id = models.UUIDField()
+    transition_key = models.CharField(max_length=128)
+    command = models.CharField(max_length=64)
+    from_state = models.CharField(max_length=32)
+    to_state = models.CharField(max_length=32)
+    actor_id = models.CharField(max_length=255)
+    correlation_id = models.CharField(max_length=64, db_index=True)
+    reason = models.TextField(blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    occurred_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "blockchain_traceability_lifecycle_transitions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "aggregate_type", "aggregate_id", "transition_key"],
+                name="bct_lifecycle_transition_uniq",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant_id", "aggregate_type", "aggregate_id", "occurred_at"],
+                name="bct_lifecycle_lookup",
+            )
+        ]
+        ordering = ["occurred_at", "id"]
+
+
+class CredentialIssuanceSagaEvent(AppendOnlyTenantModel):
+    saga_id = models.UUIDField(db_index=True)
+    credential_id = models.UUIDField(null=True, blank=True)
+    event_type = models.CharField(max_length=64)
+    evidence = models.JSONField(default=dict)
+    actor_id = models.CharField(max_length=255)
+    correlation_id = models.CharField(max_length=64, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "blockchain_traceability_credential_saga_events"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "saga_id", "event_type"], name="bct_credential_saga_event_uniq"
+            )
+        ]
+
+
+class LifecycleAggregateQuerySet(TenantQuerySet):
+    def update(self, **kwargs: Any) -> int:
+        if "transition_history" in kwargs:
+            raise ImmutableEvidenceError(
+                "Lifecycle history is stored in immutable transition records.", code="audit_immutable"
+            )
+        return super().update(**kwargs)
+
+
 class LedgerNetwork(MutableTenantModel):
     network_key = models.SlugField(max_length=64)
     name = models.CharField(max_length=255)
@@ -228,6 +391,7 @@ class LedgerNetwork(MutableTenantModel):
     last_health_code = models.CharField(max_length=64, blank=True)
     last_health_checked_at = models.DateTimeField(null=True, blank=True)
     last_successful_anchor_at = models.DateTimeField(null=True, blank=True)
+    objects = LifecycleAggregateQuerySet.as_manager()
 
     class Meta:
         db_table = "blockchain_traceability_ledger_networks"
@@ -256,6 +420,8 @@ class LedgerNetwork(MutableTenantModel):
             raise ValidationError({"transition_history": "Transition history must be a JSON array."})
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        if _changed_fields(self, ("transition_history",)):
+            raise ImmutableEvidenceError("Lifecycle audit history cannot be rewritten.", code="audit_immutable")
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -284,6 +450,7 @@ class TraceabilityAsset(MutableTenantModel):
     activated_at = models.DateTimeField(null=True, blank=True)
     recalled_at = models.DateTimeField(null=True, blank=True)
     retired_at = models.DateTimeField(null=True, blank=True)
+    objects = LifecycleAggregateQuerySet.as_manager()
 
     class Meta:
         db_table = "blockchain_traceability_assets"
@@ -324,6 +491,8 @@ class TraceabilityAsset(MutableTenantModel):
             raise ValidationError({"transition_history": "Transition history must be a JSON array."})
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        if _changed_fields(self, ("transition_history",)):
+            raise ImmutableEvidenceError("Lifecycle audit history cannot be rewritten.", code="audit_immutable")
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -391,6 +560,8 @@ class TerminalEvidenceQuerySet(TenantQuerySet):
     terminal_statuses: frozenset[str] = frozenset()
 
     def update(self, **kwargs: Any) -> int:
+        if "transition_history" in kwargs:
+            raise ImmutableEvidenceError("Lifecycle audit history cannot be rewritten.", code="audit_immutable")
         if self.filter(status__in=self.terminal_statuses).exists():
             raise ImmutableEvidenceError("Terminal evidence cannot be updated.", code="terminal_immutable")
         return super().update(**kwargs)
@@ -480,6 +651,8 @@ class LedgerAnchor(TenantScopedModel, TimestampedModel):
                 raise ValidationError({"confirmations": "The configured confirmation depth has not been reached."})
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        if _changed_fields(self, ("transition_history",)):
+            raise ImmutableEvidenceError("Lifecycle audit history cannot be rewritten.", code="audit_immutable")
         if _changed_fields(self, [field.name for field in self._meta.concrete_fields]) and not self._state.adding:
             previous_status = type(self)._base_manager.filter(pk=self.pk).values_list("status", flat=True).first()
             if previous_status == LedgerAnchorStatus.CONFIRMED:
@@ -531,8 +704,12 @@ class AuthenticityCredential(TenantScopedModel, TimestampedModel):
                 condition=Q(expires_at__isnull=True) | Q(expires_at__gt=F("issued_at")),
                 name="bct_credential_expiry_after_issue",
             ),
-            models.CheckConstraint(condition=Q(token_digest__regex=LOWER_SHA256_RE), name="bct_credential_digest_valid"),
-            models.CheckConstraint(condition=Q(claims_hash__regex=LOWER_SHA256_RE), name="bct_credential_claims_hash_valid"),
+            models.CheckConstraint(
+                condition=Q(token_digest__regex=LOWER_SHA256_RE), name="bct_credential_digest_valid"
+            ),
+            models.CheckConstraint(
+                condition=Q(claims_hash__regex=LOWER_SHA256_RE), name="bct_credential_claims_hash_valid"
+            ),
         ]
         indexes = [
             models.Index(fields=["tenant_id", "asset", "status"], name="cred_tenant_asset_status"),
@@ -551,6 +728,8 @@ class AuthenticityCredential(TenantScopedModel, TimestampedModel):
             raise ValidationError({"transition_history": "Transition history must be a JSON array."})
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        if _changed_fields(self, ("transition_history",)):
+            raise ImmutableEvidenceError("Lifecycle audit history cannot be rewritten.", code="audit_immutable")
         if not self._state.adding:
             prior = type(self)._base_manager.filter(pk=self.pk).values_list("status", flat=True).first()
             if prior in {AuthenticityCredentialStatus.REVOKED, AuthenticityCredentialStatus.EXPIRED}:
@@ -567,19 +746,21 @@ class AuthenticityCredential(TenantScopedModel, TimestampedModel):
 
 class ComplianceEvidenceQuerySet(TenantQuerySet):
     def update(self, **kwargs: Any) -> int:
+        if "transition_history" in kwargs:
+            raise ImmutableEvidenceError("Lifecycle audit history cannot be rewritten.", code="audit_immutable")
         if self.exclude(status=ComplianceEvidenceStatus.DRAFT).exists():
             raise ImmutableEvidenceError("Finalized evidence is immutable.", code="finalized_immutable")
         return super().update(**kwargs)
 
     def delete(self) -> tuple[int, dict[str, int]]:
-        if self.exclude(status=ComplianceEvidenceStatus.DRAFT).exists():
-            raise ImmutableEvidenceError("Finalized evidence cannot be deleted.", code="finalized_immutable")
-        return super().delete()
+        raise ImmutableEvidenceError("Compliance evidence cannot be deleted.", code="evidence_retained")
 
 
 class ComplianceEvidence(MutableTenantModel):
     asset = models.ForeignKey(TraceabilityAsset, models.PROTECT, related_name="compliance_evidence")
-    event = models.ForeignKey(TraceabilityEvent, models.PROTECT, null=True, blank=True, related_name="compliance_evidence")
+    event = models.ForeignKey(
+        TraceabilityEvent, models.PROTECT, null=True, blank=True, related_name="compliance_evidence"
+    )
     evidence_key = models.CharField(max_length=128)
     evidence_type = models.CharField(max_length=64)
     standard = models.CharField(max_length=128)
@@ -661,6 +842,8 @@ class ComplianceEvidence(MutableTenantModel):
                 raise ValidationError({"finalized_at": "Finalized evidence requires a finalization time."})
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        if _changed_fields(self, ("transition_history",)):
+            raise ImmutableEvidenceError("Lifecycle audit history cannot be rewritten.", code="audit_immutable")
         if not self._state.adding:
             prior_status = type(self)._base_manager.filter(pk=self.pk).values_list("status", flat=True).first()
             if prior_status in {ComplianceEvidenceStatus.FINALIZED, ComplianceEvidenceStatus.SUPERSEDED}:
@@ -674,9 +857,7 @@ class ComplianceEvidence(MutableTenantModel):
         super().save(*args, **kwargs)
 
     def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
-        if self.status != ComplianceEvidenceStatus.DRAFT:
-            raise ImmutableEvidenceError("Finalized evidence cannot be deleted.", code="finalized_immutable")
-        return super().delete(*args, **kwargs)
+        raise ImmutableEvidenceError("Compliance evidence cannot be deleted.", code="evidence_retained")
 
     def __str__(self) -> str:
         return f"{self.evidence_key} ({self.standard}) [{self.status}]"
@@ -734,7 +915,9 @@ class VerificationAttempt(AppendOnlyTenantModel):
             ),
         ]
         indexes = [
-            models.Index(fields=["tenant_id", "verification_type", "created_at"], name="bct_verify_tenant_type_created"),
+            models.Index(
+                fields=["tenant_id", "verification_type", "created_at"], name="bct_verify_tenant_type_created"
+            ),
             models.Index(fields=["tenant_id", "outcome", "created_at"], name="verify_tenant_outcome_created"),
             models.Index(fields=["tenant_id", "asset", "created_at"], name="verify_tenant_asset_created"),
         ]
