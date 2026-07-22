@@ -1,26 +1,42 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: integration-platform
-version: 1.0.0
-description: iPaaS for third-party integrations, connectors, webhooks, event streaming
+version: 2.0.0
+description: Production integration foundation for governed connectors, credentials, webhooks, deliveries, and deterministic mappings
 type: foundation
-lifecycle: platform
+lifecycle: production
 dependencies:
   - core-identity >=1.0
   - api-management >=1.0
 permissions:
-  - integration_platform.resource:create
-  - integration_platform.resource:read
-  - integration_platform.resource:update
-  - integration_platform.resource:delete
-  - integration_platform.resource:activate
-  - integration_platform.resource:deactivate
+  - integration_platform.connector:read
+  - integration_platform.integration:create
+  - integration_platform.integration:read
+  - integration_platform.integration:update
+  - integration_platform.integration:delete
+  - integration_platform.integration:test
+  - integration_platform.integration:sync
+  - integration_platform.integration:activate
+  - integration_platform.integration:deactivate
+  - integration_platform.credential:create
+  - integration_platform.credential:read
+  - integration_platform.credential:rotate
+  - integration_platform.credential:revoke
+  - integration_platform.webhook:create
+  - integration_platform.webhook:read
+  - integration_platform.webhook:update
+  - integration_platform.webhook:delete
+  - integration_platform.webhook:activate
+  - integration_platform.webhook:deactivate
+  - integration_platform.webhook:rotate_secret
+  - integration_platform.delivery:read
+  - integration_platform.delivery:redrive
+  - integration_platform.mapping:create
+  - integration_platform.mapping:read
+  - integration_platform.mapping:update
+  - integration_platform.mapping:delete
+  - integration_platform.mapping:preview
+  - integration_platform.health:read
 sod_actions:
-  - [integration_platform.resource:create, integration_platform.resource:delete]
-search_indexes:
-  - integration_platform_resources
-ai_tools:
-  - create_integration_platform_resource
-  - update_integration_platform_resource
-  - delete_integration_platform_resource
+  - [integration_platform.integration:create, integration_platform.integration:delete]
+  - [integration_platform.credential:create, integration_platform.credential:revoke]
+search_indexes: []
+ai_tools: []

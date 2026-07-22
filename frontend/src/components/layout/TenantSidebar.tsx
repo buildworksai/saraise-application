@@ -19,7 +19,6 @@ import {
   Workflow,
   DatabaseZap,
   FolderTree,
-  Plug,
   Key,
   Bell,
   BarChart3,
@@ -86,12 +85,6 @@ const tenantItems: NavItem[] = [
     label: "Document Management",
     icon: FolderTree,
     module: "dms",
-  },
-  {
-    path: "/integration-platform",
-    label: "Integration Platform",
-    icon: Plug,
-    module: "integration_platform",
   },
   {
     path: "/ai-providers/secrets",

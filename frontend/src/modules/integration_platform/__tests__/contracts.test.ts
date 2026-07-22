@@ -1,0 +1,39 @@
+import { describe, expect, it } from 'vitest';
+import { ENDPOINTS, INBOUND_WEBHOOK_HEADERS, MODULE_API_PREFIX, ROUTE_PATHS } from '../contracts';
+
+describe('Integration Platform contracts', () => {
+  it('publishes only governed v2 endpoints for every required operation', () => {
+    expect(MODULE_API_PREFIX).toBe('/api/v2/integration-platform');
+    const paths = [
+      ENDPOINTS.INTEGRATIONS.LIST, ENDPOINTS.INTEGRATIONS.CREATE, ENDPOINTS.INTEGRATIONS.DETAIL('i'),
+      ENDPOINTS.INTEGRATIONS.UPDATE('i'), ENDPOINTS.INTEGRATIONS.DELETE('i'), ENDPOINTS.INTEGRATIONS.ACTIVATE('i'),
+      ENDPOINTS.INTEGRATIONS.DEACTIVATE('i'), ENDPOINTS.INTEGRATIONS.TEST('i'), ENDPOINTS.INTEGRATIONS.SYNC('i'),
+      ENDPOINTS.INTEGRATIONS.JOB('i', 'j'), ENDPOINTS.INTEGRATIONS.CREDENTIALS('i'), ENDPOINTS.CREDENTIALS.DETAIL('c'),
+      ENDPOINTS.CREDENTIALS.ROTATE('c'), ENDPOINTS.CREDENTIALS.REVOKE('c'), ENDPOINTS.CONNECTORS.LIST,
+      ENDPOINTS.CONNECTORS.DETAIL('c'), ENDPOINTS.CONNECTORS.SCHEMA('c'), ENDPOINTS.CONNECTORS.HEALTH('c'),
+      ENDPOINTS.WEBHOOKS.LIST, ENDPOINTS.WEBHOOKS.CREATE, ENDPOINTS.WEBHOOKS.DETAIL('w'),
+      ENDPOINTS.WEBHOOKS.UPDATE('w'), ENDPOINTS.WEBHOOKS.DELETE('w'), ENDPOINTS.WEBHOOKS.ACTIVATE('w'),
+      ENDPOINTS.WEBHOOKS.DEACTIVATE('w'), ENDPOINTS.WEBHOOKS.ROTATE_SECRET('w'), ENDPOINTS.WEBHOOKS.INBOUND('p'),
+      ENDPOINTS.DELIVERIES.LIST, ENDPOINTS.DELIVERIES.DETAIL('d'), ENDPOINTS.DELIVERIES.REDRIVE('d'),
+      ENDPOINTS.MAPPINGS.LIST, ENDPOINTS.MAPPINGS.CREATE, ENDPOINTS.MAPPINGS.DETAIL('m'),
+      ENDPOINTS.MAPPINGS.UPDATE('m'), ENDPOINTS.MAPPINGS.DELETE('m'), ENDPOINTS.MAPPINGS.VALIDATE,
+      ENDPOINTS.MAPPINGS.PREVIEW, ENDPOINTS.HEALTH,
+    ];
+    expect(paths).toHaveLength(38);
+    expect(paths.every((path) => path.startsWith(`${MODULE_API_PREFIX}/`))).toBe(true);
+    expect(paths.some((path) => path.includes('/resources'))).toBe(false);
+  });
+
+  it('keeps all user routes inside the module namespace', () => {
+    const paths = [ROUTE_PATHS.INTEGRATIONS, ROUTE_PATHS.INTEGRATION_CREATE, ROUTE_PATHS.INTEGRATION_DETAIL('i'), ROUTE_PATHS.CONNECTORS, ROUTE_PATHS.WEBHOOKS, ROUTE_PATHS.DELIVERIES, ROUTE_PATHS.MAPPINGS];
+    expect(paths.every((path) => path.startsWith('/integration-platform'))).toBe(true);
+  });
+
+  it('publishes the canonical signed transport headers', () => {
+    expect(INBOUND_WEBHOOK_HEADERS).toEqual({
+      TIMESTAMP: 'X-SARAISE-Webhook-Timestamp',
+      NONCE: 'X-SARAISE-Webhook-Nonce',
+      SIGNATURE: 'X-SARAISE-Webhook-Signature',
+    });
+  });
+});

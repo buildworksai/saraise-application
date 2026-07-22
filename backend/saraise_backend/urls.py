@@ -35,7 +35,7 @@ urlpatterns = [
     path("api/v2/security-access-control/", include("src.modules.security_access_control.urls")),
     path("api/v1/workflow-automation/", include("src.modules.workflow_automation.urls")),
     path("api/v1/api-management/", include("src.modules.api_management.urls")),
-    path("api/v1/integration-platform/", include("src.modules.integration_platform.urls")),
+    path("api/v2/integration-platform/", include("src.modules.integration_platform.urls")),
     path("api/v2/customization-framework/", include("src.modules.customization_framework.urls")),
     path("api/v1/ai-provider-configuration/", include("src.modules.ai_provider_configuration.urls")),
     path("api/v2/automation-orchestration/", include("src.modules.automation_orchestration.urls")),
