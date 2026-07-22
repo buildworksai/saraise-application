@@ -94,6 +94,11 @@ class ImmutableTransitionError(RuntimeError):
 class AppendOnlyTransitionQuerySet(models.QuerySet["JobTransition"]):
     """Prevent bulk mutation of the job transition audit trail."""
 
+    def for_tenant(self, tenant_id: uuid.UUID) -> "AppendOnlyTransitionQuerySet":
+        """Retain the canonical explicit tenant boundary on the narrowed manager."""
+
+        return self.filter(tenant_id=tenant_id)
+
     def update(self, **kwargs: Any) -> int:
         raise ImmutableTransitionError("JobTransition records are append-only")
 

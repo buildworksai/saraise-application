@@ -37,6 +37,7 @@ from .factories import (
     tenant_b_user,
     tenant_pair,
 )
+from .tenant_contract import TenantIsolationContract
 
 __all__ = [
     "TEST_PASSWORD",
@@ -69,4 +70,5 @@ __all__ = [
     "tenant_b_profile",
     "tenant_b_user",
     "tenant_pair",
+    "TenantIsolationContract",
 ]
