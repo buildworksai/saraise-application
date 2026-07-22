@@ -1,48 +1,18 @@
-# Bank Reconciliation Module - Cursor Rules
-# These rules are automatically applied when editing files in this directory
+# Bank Reconciliation Module Rules
 
-# =============================================================================
-# MODULE OVERVIEW
-# =============================================================================
-#
-# This module manages Bank Reconciliation functionality.
-# Status: Scaffold - Phase 8 module (NOT FOR IMPLEMENTATION UNTIL PHASE 8)
+# This is a production v2 module. `contracts.ts` is the frontend authority for
+# all DTOs, literal enums, API endpoints, application routes, and query keys.
 
-# =============================================================================
-# CRITICAL: Read contracts.ts FIRST
-# =============================================================================
-#
-# Before modifying any file in this module, you MUST read:
-#   frontend/src/modules/bank_reconciliation/contracts.ts
-#
-# ⚠️ PHASE 8 MODULE - DO NOT IMPLEMENT YET
-# This module is documented for Phase 8 implementation only.
-# Framework must be complete (Phases 1-7) before implementation.
+# Required boundaries
+# - Never expose raw bank account identifiers in read DTOs or UI.
+# - Never add a v1 response fallback or hardcoded API URL.
+# - Keep decimal amounts as strings and use exact fixed-point arithmetic.
+# - Treat HTTP 202 import responses as accepted work, not completion.
+# - Imported source values and finalized evidence are immutable in the UI.
+# - Missing providers show an explicit unavailable/degraded state; never invent results.
+# - Module routes belong in routes.ts and are discovered through TenantRoute.
 
-# =============================================================================
-# TYPE IMPORTS
-# =============================================================================
-#
-# ✅ CORRECT: Import types from contracts.ts
-#   import { Entity, EntityCreate, ENDPOINTS } from './contracts';
-#
-# ❌ FORBIDDEN: Import directly from @/types/api in pages/components
-# ❌ FORBIDDEN: Define ad-hoc types in page files
-
-# =============================================================================
-# ENDPOINT USAGE
-# =============================================================================
-#
-# ✅ CORRECT: Use ENDPOINTS constant
-#   apiClient.get<Entity[]>(ENDPOINTS.ENTITIES.LIST);
-#
-# ❌ FORBIDDEN: Hardcode URL strings
-
-# =============================================================================
-# VALIDATION CHECKPOINTS
-# =============================================================================
-#
-# After editing any TypeScript file in this module:
-# 1. Run: npx tsc --noEmit src/modules/bank_reconciliation/{file}.tsx
-# 2. Run: npx eslint src/modules/bank_reconciliation/{file}.tsx --max-warnings 0
-# 3. Fix ALL errors before proceeding
+# Validation
+# npm run typecheck
+# npx eslint src/modules/bank_reconciliation --ext .ts,.tsx --max-warnings 0
+# npm run test -- bank_reconciliation
