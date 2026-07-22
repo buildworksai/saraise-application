@@ -304,23 +304,6 @@ const CreatePurchaseSupplierPage = lazy(() =>
   }))
 );
 
-// Inventory Management
-const InventoryWarehouseListPage = lazy(() =>
-  import("./modules/inventory_management/pages/WarehouseListPage").then((m) => ({
-    default: m.WarehouseListPage,
-  }))
-);
-const InventoryWarehouseDetailPage = lazy(() =>
-  import("./modules/inventory_management/pages/WarehouseDetailPage").then((m) => ({
-    default: m.WarehouseDetailPage,
-  }))
-);
-const CreateInventoryWarehousePage = lazy(() =>
-  import("./modules/inventory_management/pages/CreateWarehousePage").then((m) => ({
-    default: m.CreateWarehousePage,
-  }))
-);
-
 // Project Management
 const ProjectListPage = lazy(() =>
   import("./modules/project_management/pages/ProjectListPage").then((m) => ({
@@ -850,38 +833,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <PurchaseSupplierDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Inventory Management */}
-          <Route
-            path="/inventory-management/warehouses"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <InventoryWarehouseListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/inventory-management/warehouses/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateInventoryWarehousePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/inventory-management/warehouses/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <InventoryWarehouseDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -1575,8 +1526,7 @@ function AnimatedRoutes() {
             }
           />
 
-          {/* Migration shim: module-owned routes coexist with the legacy inventory.
-              Remove matching legacy declarations as each module completes migration. */}
+          {/* Module-owned tenant routes are discovered once and rendered consistently. */}
           {registryTenantRoutes.map(({ id, path, title, Page }) => (
             <Route
               key={`registry:${id}`}
