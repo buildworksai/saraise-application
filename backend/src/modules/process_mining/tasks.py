@@ -9,7 +9,7 @@ from src.core.async_jobs.models import AsyncJob
 from src.core.async_jobs.services import register_handler
 from src.core.tenancy import tenant_context_worker
 
-from .services import BottleneckService, ConformanceService, EventLogService, ExportService, ProcessDiscoveryService
+from .services import BottleneckService, ConformanceService, EventLogService, ExportService, ProcessDiscoveryService, ProcessMiningConfigurationService
 
 
 def _uuid(payload: Mapping[str, object], key: str) -> UUID:
@@ -44,9 +44,11 @@ def analyze_bottlenecks_task(*, tenant_id: UUID, analysis_id: UUID, async_job_id
 
 
 @tenant_context_worker
-def purge_events_task(*, tenant_id: UUID, retention_days: int, actor_id: UUID) -> dict[str, int]:
+def purge_events_task(*, tenant_id: UUID, retention_days: int | None, actor_id: UUID) -> dict[str, int]:
     count = EventLogService().purge_expired_events(tenant_id, retention_days, actor_id)
-    return {"purged": count}
+    # Evidence remains append-only.  Report exactly what happened: a governed
+    # retention authorization was recorded for these rows, not a physical purge.
+    return {"retention_authorized": count}
 
 
 @register_handler("process_mining.export_event_log")
@@ -71,7 +73,9 @@ def _bottleneck_handler(job: AsyncJob) -> dict[str, str]:
 
 @register_handler("process_mining.purge_events")
 def _purge_handler(job: AsyncJob) -> dict[str, int]:
-    days = job.payload.get("retention_days", 365)
+    days = job.payload.get("retention_days")
+    if days is None:
+        days = ProcessMiningConfigurationService().resolve(job.tenant_id)["retention_days"]
     if isinstance(days, bool) or not isinstance(days, int):
         raise ValueError("retention_days must be an integer")
     return purge_events_task(tenant_id=job.tenant_id, retention_days=days, actor_id=_uuid(job.payload, "actor_id"))

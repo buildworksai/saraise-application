@@ -61,3 +61,28 @@ def test_cross_tenant_update_delete_and_actions_are_404(authenticated_tenant_a_c
 def test_worker_without_tenant_fails_closed():
     with pytest.raises(Exception, match="requires tenant_id"):
         discover_process_task(discovery_id=DiscoveryFactory().id, async_job_id=DiscoveryFactory().id)
+
+
+@pytest.mark.parametrize(
+    ("resource", "factory"),
+    [
+        ("exports", ExportFactory),
+        ("discoveries", DiscoveryFactory),
+        ("conformance-checks", ConformanceFactory),
+        ("bottleneck-analyses", AnalysisFactory),
+    ],
+)
+def test_complete_cross_tenant_verb_matrix(authenticated_tenant_a_client, tenant_a, tenant_b, resource, factory):
+    record = factory(tenant_id=tenant_b.id)
+    listing = authenticated_tenant_a_client.get(f"{BASE}/{resource}/")
+    assert listing.status_code == 200
+    assert str(record.id) not in str(listing.json())
+    assert authenticated_tenant_a_client.get(f"{BASE}/{resource}/{record.id}/").status_code == 404
+    assert authenticated_tenant_a_client.patch(f"{BASE}/{resource}/{record.id}/", {"status": "completed"}, format="json").status_code in {404, 405}
+    assert authenticated_tenant_a_client.delete(f"{BASE}/{resource}/{record.id}/").status_code == 404
+    spoofed = authenticated_tenant_a_client.post(
+        f"{BASE}/{resource}/", {"tenant_id": str(tenant_b.id)}, format="json"
+    )
+    assert spoofed.status_code == 400
+    record.refresh_from_db()
+    assert record.tenant_id == tenant_b.id and not record.is_deleted

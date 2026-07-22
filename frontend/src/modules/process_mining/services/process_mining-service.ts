@@ -34,12 +34,61 @@ import {
   type ProcessModelUpdateRequest,
   type ProcessModelVersion,
   type ProcessOverview,
+  type ProcessMiningConfiguration,
+  type ProcessMiningConfigurationDocument,
+  type ProcessMiningConfigurationVersion,
+  type ConfigurationPreview,
+  type ConfigurationExport,
   type ProcessVariant,
   type SetReferenceRequest,
   type TransitionActionRequest,
   type UUID,
   type VariantFilters,
 } from '../contracts';
+
+let cachedConfiguration: ProcessMiningConfigurationDocument | null = null;
+let downloadFailures = 0;
+let downloadCircuitOpenedAt = 0;
+
+const wait = (milliseconds: number) => new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+
+async function resilientDownload(id: UUID, configuration: ProcessMiningConfigurationDocument): Promise<Blob> {
+  const now = Date.now();
+  if (downloadFailures >= configuration.download_circuit_failure_threshold) {
+    if (now - downloadCircuitOpenedAt < configuration.download_circuit_reset_ms) {
+      throw new ProcessMiningApiError('Export download circuit is open.', 503, 'CIRCUIT_OPEN', null, {});
+    }
+    downloadFailures = 0;
+  }
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= configuration.download_retry_attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), configuration.download_timeout_ms);
+    try {
+      const response = await fetch(ENDPOINTS.EXPORTS.DOWNLOAD(id), { credentials: 'include', signal: controller.signal });
+      if (!response.ok) {
+        let body: unknown;
+        try { body = await response.json(); } catch { body = {}; }
+        const error = governedError(new ApiError(response.statusText || 'Download failed', response.status, body));
+        if (response.status < 500 || attempt === configuration.download_retry_attempts) throw error;
+        lastError = error;
+      } else {
+        downloadFailures = 0;
+        return await response.blob();
+      }
+    } catch (error) {
+      lastError = error;
+      if (attempt === configuration.download_retry_attempts) break;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+    const maximumDelay = configuration.download_retry_base_ms * (2 ** attempt);
+    await wait(Math.random() * maximumDelay);
+  }
+  downloadFailures += 1;
+  if (downloadFailures >= configuration.download_circuit_failure_threshold) downloadCircuitOpenedAt = Date.now();
+  throw lastError instanceof Error ? lastError : new Error('Export download failed.');
+}
 
 export class ProcessMiningApiError extends Error {
   constructor(
@@ -98,13 +147,8 @@ export const processMiningService = {
   cancelExport: (id: UUID, request: TransitionActionRequest) => data(() => apiClient.post<ApiEnvelope<EventExport>>(ENDPOINTS.EXPORTS.CANCEL(id), request)),
   retryExport: (id: UUID, request: TransitionActionRequest) => data(() => apiClient.post<ApiEnvelope<EventExport>>(ENDPOINTS.EXPORTS.RETRY(id), request)),
   downloadExport: async (id: UUID): Promise<Blob> => {
-    const response = await fetch(ENDPOINTS.EXPORTS.DOWNLOAD(id), { credentials: 'include' });
-    if (!response.ok) {
-      let body: unknown;
-      try { body = await response.json(); } catch { body = {}; }
-      throw governedError(new ApiError(response.statusText || 'Download failed', response.status, body));
-    }
-    return response.blob();
+    const configuration = cachedConfiguration ?? (await processMiningService.getConfiguration()).document;
+    return resilientDownload(id, configuration);
   },
 
   listDiscoveries: (filters: DiscoveryFilters = {}) => page(() => apiClient.get<PaginatedEnvelope<DiscoveryJob>>(ENDPOINTS.DISCOVERIES.QUERY(filters))),
@@ -129,7 +173,7 @@ export const processMiningService = {
   createConformance: (request: ConformanceCreateRequest) => data(() => apiClient.post<ApiEnvelope<ConformanceCheck>>(ENDPOINTS.CONFORMANCE.CREATE, request)),
   deleteConformance: (id: UUID) => call(() => apiClient.delete<void>(ENDPOINTS.CONFORMANCE.DETAIL(id))),
   listDeviations: (id: UUID, filters: DeviationFilters = {}) => page(() => apiClient.get<PaginatedEnvelope<ConformanceDeviation>>(ENDPOINTS.CONFORMANCE.DEVIATIONS(id, filters))),
-  getFitness: (id: UUID) => data(() => apiClient.get<ApiEnvelope<FitnessEvidence>>(ENDPOINTS.CONFORMANCE.FITNESS(id))),
+  getFitness: (id: UUID) => page(() => apiClient.get<PaginatedEnvelope<FitnessEvidence>>(ENDPOINTS.CONFORMANCE.FITNESS(id))),
   cancelConformance: (id: UUID, request: TransitionActionRequest) => data(() => apiClient.post<ApiEnvelope<ConformanceCheck>>(ENDPOINTS.CONFORMANCE.CANCEL(id), request)),
   retryConformance: (id: UUID, request: TransitionActionRequest) => data(() => apiClient.post<ApiEnvelope<ConformanceCheck>>(ENDPOINTS.CONFORMANCE.RETRY(id), request)),
 
@@ -142,6 +186,29 @@ export const processMiningService = {
   cancelBottleneck: (id: UUID, request: TransitionActionRequest) => data(() => apiClient.post<ApiEnvelope<BottleneckAnalysis>>(ENDPOINTS.BOTTLENECKS.CANCEL(id), request)),
   retryBottleneck: (id: UUID, request: TransitionActionRequest) => data(() => apiClient.post<ApiEnvelope<BottleneckAnalysis>>(ENDPOINTS.BOTTLENECKS.RETRY(id), request)),
   health: () => data(() => apiClient.get<ApiEnvelope<ModuleHealth>>(ENDPOINTS.HEALTH)),
+  getConfiguration: async () => {
+    const value = await data(() => apiClient.get<ApiEnvelope<ProcessMiningConfiguration>>(ENDPOINTS.CONFIGURATION.CURRENT));
+    cachedConfiguration = value.document;
+    return value;
+  },
+  updateConfiguration: async (document: ProcessMiningConfigurationDocument) => {
+    const value = await data(() => apiClient.put<ApiEnvelope<ProcessMiningConfiguration>>(ENDPOINTS.CONFIGURATION.UPDATE, { document }));
+    cachedConfiguration = value.document;
+    return value;
+  },
+  previewConfiguration: (document: ProcessMiningConfigurationDocument) => data(() => apiClient.post<ApiEnvelope<ConfigurationPreview>>(ENDPOINTS.CONFIGURATION.PREVIEW, { document })),
+  configurationHistory: (pageNumber = 1) => page(() => apiClient.get<PaginatedEnvelope<ProcessMiningConfigurationVersion>>(ENDPOINTS.CONFIGURATION.HISTORY(pageNumber))),
+  rollbackConfiguration: async (version: number) => {
+    const value = await data(() => apiClient.post<ApiEnvelope<ProcessMiningConfiguration>>(ENDPOINTS.CONFIGURATION.ROLLBACK, { version }));
+    cachedConfiguration = value.document;
+    return value;
+  },
+  importConfiguration: async (configuration: ConfigurationExport) => {
+    const value = await data(() => apiClient.post<ApiEnvelope<ProcessMiningConfiguration>>(ENDPOINTS.CONFIGURATION.IMPORT, { configuration }));
+    cachedConfiguration = value.document;
+    return value;
+  },
+  exportConfiguration: () => data(() => apiClient.get<ApiEnvelope<ConfigurationExport>>(ENDPOINTS.CONFIGURATION.EXPORT)),
 };
 
 export const process_mining_service = processMiningService;
