@@ -53,6 +53,9 @@ permissions:
   - backup_disaster_recovery.exercise:update
   - backup_disaster_recovery.exercise:execute
   - backup_disaster_recovery.report:read
+  - backup_disaster_recovery.configuration:read
+  - backup_disaster_recovery.configuration:write
+  - backup_disaster_recovery.health:read
 
 ports:
   required:
@@ -86,6 +89,175 @@ extension_registries:
   - readiness-rule
   - provider-health-probe
   - metrics-collector
+
+entities:
+  - name: RecoveryPoint
+    model: models.RecoveryPoint
+    serializers: [RecoveryPointListSerializer, RecoveryPointDetailSerializer]
+    tenant_scoped: true
+  - name: RecoveryPointEvidence
+    model: models.RecoveryPointEvidence
+    serializers: [RecoveryPointDetailSerializer]
+    tenant_scoped: true
+    immutable: true
+  - name: DRRunbook
+    model: models.DRRunbook
+    serializers: [DRRunbookListSerializer, DRRunbookDetailSerializer]
+    tenant_scoped: true
+  - name: RunbookStep
+    model: models.RunbookStep
+    serializers: [RunbookStepListSerializer, RunbookStepDetailSerializer]
+    tenant_scoped: true
+  - name: DRExercise
+    model: models.DRExercise
+    serializers: [DRExerciseListSerializer, DRExerciseDetailSerializer]
+    tenant_scoped: true
+  - name: RestoreRun
+    model: models.RestoreRun
+    serializers: [RestoreRunListSerializer, RestoreRunDetailSerializer]
+    tenant_scoped: true
+  - name: DRStepExecution
+    model: models.DRStepExecution
+    serializers: [DRStepExecutionListSerializer, DRStepExecutionDetailSerializer]
+    tenant_scoped: true
+  - name: BDRConfiguration
+    model: models.BDRConfiguration
+    serializers: [BDRConfigurationSerializer, BDRConfigurationWriteSerializer]
+    tenant_scoped: true
+  - name: BDRConfigurationVersion
+    model: models.BDRConfigurationVersion
+    serializers: [BDRConfigurationVersionSerializer]
+    tenant_scoped: true
+    immutable: true
+
+endpoints:
+  - name: backup-executions
+    route: /api/v2/backup-disaster-recovery/backup-executions/
+    viewset: BackupExecutionViewSet
+    methods: [GET, POST]
+    serializers: [BackupExecutionCreateSerializer, BackupExecutionReceiptSerializer, BackupExecutionStatusSerializer]
+    permissions:
+      create: backup_disaster_recovery.backup:execute
+      retrieve: backup_disaster_recovery.backup:read
+  - name: recovery-points
+    route: /api/v2/backup-disaster-recovery/recovery-points/
+    viewset: RecoveryPointViewSet
+    methods: [GET, POST]
+    serializers: [RecoveryPointListSerializer, RecoveryPointDetailSerializer, RecoveryPointVerifySerializer]
+    permissions:
+      list: backup_disaster_recovery.*:read
+      retrieve: backup_disaster_recovery.*:read
+      verify: backup_disaster_recovery.recovery_point:verify
+      expire: backup_disaster_recovery.recovery_point:verify
+    actions:
+      - {route: "{id}/verify/", method: POST, serializer: RecoveryPointVerifySerializer}
+      - {route: "{id}/expire/", method: POST, serializer: RecoveryPointDetailSerializer}
+  - name: restore-runs
+    route: /api/v2/backup-disaster-recovery/restore-runs/
+    viewset: RestoreRunViewSet
+    methods: [GET, POST]
+    serializers: [RestoreRunListSerializer, RestoreRunDetailSerializer, RestoreRunCreateSerializer]
+    permissions:
+      list: backup_disaster_recovery.*:read
+      retrieve: backup_disaster_recovery.*:read
+      create: backup_disaster_recovery.restore:create
+      execute: backup_disaster_recovery.restore:execute
+      cancel: backup_disaster_recovery.restore:execute
+    actions:
+      - {route: "{id}/execute/", method: POST, serializer: RestoreRunExecuteSerializer}
+      - {route: "{id}/cancel/", method: POST, serializer: RestoreRunCancelSerializer}
+  - name: runbooks
+    route: /api/v2/backup-disaster-recovery/runbooks/
+    viewset: DRRunbookViewSet
+    methods: [GET, POST, PATCH, DELETE]
+    serializers: [DRRunbookListSerializer, DRRunbookDetailSerializer, DRRunbookCreateSerializer, DRRunbookUpdateSerializer]
+    permissions:
+      list: backup_disaster_recovery.*:read
+      retrieve: backup_disaster_recovery.*:read
+      create: backup_disaster_recovery.runbook:create
+      partial_update: backup_disaster_recovery.runbook:update
+      destroy: backup_disaster_recovery.runbook:delete
+      clone: backup_disaster_recovery.runbook:create
+      publish: backup_disaster_recovery.runbook:publish
+      retire: backup_disaster_recovery.runbook:publish
+      reorder_steps: backup_disaster_recovery.runbook:update
+    actions:
+      - {route: "{id}/clone/", method: POST, serializer: DRRunbookCloneSerializer}
+      - {route: "{id}/publish/", method: POST, serializer: DRRunbookDetailSerializer}
+      - {route: "{id}/retire/", method: POST, serializer: DRRunbookDetailSerializer}
+      - {route: "{id}/reorder-steps/", method: POST, serializer: RunbookStepReorderSerializer}
+  - name: runbook-steps
+    route: /api/v2/backup-disaster-recovery/runbook-steps/
+    viewset: RunbookStepViewSet
+    methods: [GET, POST, PATCH, DELETE]
+    serializers: [RunbookStepListSerializer, RunbookStepDetailSerializer, RunbookStepCreateSerializer, RunbookStepUpdateSerializer]
+    permissions:
+      list: backup_disaster_recovery.*:read
+      retrieve: backup_disaster_recovery.*:read
+      create: backup_disaster_recovery.runbook:update
+      partial_update: backup_disaster_recovery.runbook:update
+      destroy: backup_disaster_recovery.runbook:update
+  - name: exercises
+    route: /api/v2/backup-disaster-recovery/exercises/
+    viewset: DRExerciseViewSet
+    methods: [GET, POST, PATCH]
+    serializers: [DRExerciseListSerializer, DRExerciseDetailSerializer, DRExerciseCreateSerializer, DRExerciseUpdateSerializer]
+    permissions:
+      list: backup_disaster_recovery.*:read
+      retrieve: backup_disaster_recovery.*:read
+      create: backup_disaster_recovery.exercise:create
+      partial_update: backup_disaster_recovery.exercise:update
+      start: backup_disaster_recovery.exercise:execute
+      cancel: backup_disaster_recovery.exercise:execute
+    actions:
+      - {route: "{id}/start/", method: POST, serializer: DRExerciseStartSerializer}
+      - {route: "{id}/cancel/", method: POST, serializer: DRExerciseCancelSerializer}
+  - name: step-executions
+    route: /api/v2/backup-disaster-recovery/step-executions/
+    viewset: DRStepExecutionViewSet
+    methods: [GET]
+    serializers: [DRStepExecutionListSerializer, DRStepExecutionDetailSerializer]
+    permissions:
+      list: backup_disaster_recovery.*:read
+      retrieve: backup_disaster_recovery.*:read
+  - name: configurations
+    route: /api/v2/backup-disaster-recovery/configurations/
+    viewset: BDRConfigurationViewSet
+    methods: [GET, POST, PATCH]
+    serializers: [BDRConfigurationSerializer, BDRConfigurationWriteSerializer, BDRConfigurationVersionSerializer, BDRConfigurationRollbackSerializer]
+    permissions:
+      current: backup_disaster_recovery.configuration:read
+      preview: backup_disaster_recovery.configuration:write
+      versions: backup_disaster_recovery.configuration:read
+      rollback: backup_disaster_recovery.configuration:write
+      import_document: backup_disaster_recovery.configuration:write
+      export_document: backup_disaster_recovery.configuration:read
+    actions:
+      - {route: current/, method: GET, serializer: BDRConfigurationSerializer, permission: backup_disaster_recovery.configuration:read}
+      - {route: current/, method: PATCH, serializer: BDRConfigurationWriteSerializer, permission: backup_disaster_recovery.configuration:write}
+      - {route: preview/, method: POST, serializer: BDRConfigurationWriteSerializer}
+      - {route: versions/, method: GET, serializer: BDRConfigurationVersionSerializer}
+      - {route: rollback/, method: POST, serializer: BDRConfigurationRollbackSerializer}
+      - {route: import-document/, method: POST, serializer: BDRConfigurationWriteSerializer}
+      - {route: export-document/, method: GET, serializer: BDRConfigurationSerializer}
+  - name: objective-report
+    route: /api/v2/backup-disaster-recovery/reports/objectives/
+    viewset: ObjectiveReportViewSet
+    methods: [GET]
+    serializers: [ObjectiveReportQuerySerializer, ObjectiveReportSerializer]
+    permissions: {list: backup_disaster_recovery.report:read}
+  - name: readiness
+    route: /api/v2/backup-disaster-recovery/readiness/
+    viewset: ReadinessViewSet
+    methods: [GET]
+    serializers: [ReadinessSummarySerializer]
+    permissions: {list: backup_disaster_recovery.report:read}
+  - name: health
+    route: /api/v2/backup-disaster-recovery/health/
+    view: BDRHealthView
+    methods: [GET]
+    serializers: [ModuleReadinessResponseSerializer]
+    permissions: {get: backup_disaster_recovery.health:read}
 
 search_indexes:
   - entity: recovery_point

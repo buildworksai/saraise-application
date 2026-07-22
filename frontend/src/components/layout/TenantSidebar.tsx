@@ -26,12 +26,14 @@ import {
   CheckSquare,
   ChevronDown,
   ChevronRight,
+  Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTenantSidebarTreeForMode } from "@/navigation/tenant-route-registry";
 import type { User } from "@/stores/auth-store";
 
 interface NavItem {
+  routeId?: string;
   path: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -172,6 +174,7 @@ const registryTenantItems: NavItem[] = getTenantSidebarTreeForMode(
       icon: branch.icon,
       module: branch.module,
       children: branch.children.map((leaf) => ({
+        routeId: leaf.routeId,
         path: leaf.path,
         label: leaf.label,
         icon: leaf.icon,
@@ -223,7 +226,7 @@ const NavGroup = ({ item, user }: { item: NavItem; user: User }) => {
             if (child.children && child.children.length > 0) {
               return <NavGroup key={child.path} item={child} user={user} />;
             }
-            return <NavItem key={child.path} item={child} />;
+            return <NavItem key={child.routeId ?? child.path} item={child} />;
           })}
         </div>
       )}

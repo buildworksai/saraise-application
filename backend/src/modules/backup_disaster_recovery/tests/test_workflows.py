@@ -13,16 +13,15 @@ from ..models import (
     RecoveryPointStatus,
     RestoreRunStatus,
     RunbookActionType,
-    RunbookStatus,
     ScopeType,
     StepFailureBehavior,
 )
-from ..ports import BackupArtifactDescriptor, BackupType, ScopeType as PortScopeType
+from ..ports import BackupArtifactDescriptor, BackupType
+from ..ports import ScopeType as PortScopeType
 from ..services import (
     BackupExecutionFacade,
-    BDRDomainError,
-    DRExerciseService,
     DomainConflict,
+    DRExerciseService,
     ExerciseCommand,
     RecoveryObjectiveService,
     RecoveryPointService,
@@ -188,9 +187,7 @@ def test_exercise_success_restore_and_objective_reports(workflow_context):
             point.id,
         ),
     )
-    exercise = service.update_scheduled_exercise(
-        tenant_id, actor, exercise.id, {"name": "Updated exercise"}
-    )
+    exercise = service.update_scheduled_exercise(tenant_id, actor, exercise.id, {"name": "Updated exercise"})
     job = service.start_exercise(tenant_id, actor, exercise.id, "exercise-start")
     completed = service.execute_exercise(tenant_id, exercise.id, job.id)
     assert completed.status == ExerciseStatus.PASSED
@@ -300,7 +297,10 @@ def test_restore_validation_failure_cancel_and_conflict(workflow_context):
             actor,
             RestoreRunCommand(point.id, "isolated", "busy", "full", (), "restore-second"),
         )
-    assert RestoreService().cancel_restore(tenant_id, actor, first.id, "cancel-restore").status == RestoreRunStatus.CANCELLED
+    assert (
+        RestoreService().cancel_restore(tenant_id, actor, first.id, "cancel-restore").status
+        == RestoreRunStatus.CANCELLED
+    )
     with pytest.raises(DomainConflict, match="preflight"):
         RestoreService().execute_restore(tenant_id, actor, first.id, "too-late")
 
@@ -330,6 +330,7 @@ def test_expired_recovery_point_transitions(workflow_context):
     expired = RECOVERY_POINT_MACHINE.apply(
         expired, "mark_available", tenant_id=tenant_id, transition_key=f"job:{verify_job.id}:available"
     )
-    assert RecoveryPointService().expire_recovery_point(
-        tenant_id, actor, expired.id, "expire-now"
-    ).status == RecoveryPointStatus.EXPIRED
+    assert (
+        RecoveryPointService().expire_recovery_point(tenant_id, actor, expired.id, "expire-now").status
+        == RecoveryPointStatus.EXPIRED
+    )

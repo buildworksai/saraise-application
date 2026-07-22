@@ -24,10 +24,12 @@ from ..ports import (
     BackupStatus,
     BackupStatusSnapshot,
     BackupType,
+    RestoreCompensationResult,
+    RestorePreflightResult,
     RestoreProviderReceipt,
     RestoreVerificationResult,
-    ScopeType as PortScopeType,
 )
+from ..ports import ScopeType as PortScopeType
 from ..services import (
     BackupExecutionFacade,
     BackupRequestCommand,
@@ -82,9 +84,34 @@ class Storage:
             {"target_ref": "sandbox", "checksum_digest": "a" * 64, "size_bytes": 4},
         )
 
+    def validate_restore_target(self, tenant_id, descriptor, target, *, idempotency_key):
+        del tenant_id, idempotency_key
+        capacity_valid = descriptor.size_bytes is not None and descriptor.size_bytes >= 0
+        compatibility_valid = target.mode.value in {"full", "selective"}
+        target_available = bool(target.target_ref.strip())
+        return RestorePreflightResult(
+            capacity_valid,
+            compatibility_valid,
+            target_available,
+            {
+                "descriptor_size_known": descriptor.size_bytes is not None,
+                "target_reference_present": target_available,
+                "restore_mode": target.mode.value,
+            },
+        )
+
     def verify_restore(self, tenant_id, receipt, *, idempotency_key):
         del tenant_id, receipt, idempotency_key
         return RestoreVerificationResult(True, {"verified": True})
+
+    def compensate_restore(self, tenant_id, receipt, *, idempotency_key):
+        del tenant_id, idempotency_key
+        compensated = receipt.accepted and receipt.completed
+        return RestoreCompensationResult(
+            compensated,
+            {"provider_operation_acknowledged": compensated},
+            "" if compensated else "provider_operation_incomplete",
+        )
 
     def health(self):
         return HealthCheckResult(True)
@@ -139,6 +166,27 @@ def test_register_and_verify_recovery_point(domain_ports):
 
 
 @pytest.mark.django_db
+def test_recovery_point_verification_appends_correlation_bearing_evidence(domain_ports):
+    tenant_id, descriptor, _ = domain_ports
+    actor_id = uuid.uuid4()
+    point = BackupExecutionFacade().register_recovery_point(tenant_id, actor_id, descriptor.backup_job_id)
+
+    first_job = RecoveryPointService().request_verification(tenant_id, actor_id, point.id, "append-evidence-1")
+    first_result = RecoveryPointService().execute_verification(tenant_id, point.id, first_job.id)
+    first_event = first_result.verification_events.get(sequence=1)
+    first_snapshot = dict(first_event.evidence)
+    second_job = RecoveryPointService().request_verification(tenant_id, actor_id, point.id, "append-evidence-2")
+    second_result = RecoveryPointService().execute_verification(tenant_id, point.id, second_job.id)
+
+    events = list(second_result.verification_events.order_by("sequence"))
+    assert [event.sequence for event in events] == [1, 2]
+    assert all(event.actor_id == actor_id for event in events)
+    assert all(isinstance(event.correlation_id, uuid.UUID) for event in events)
+    assert events[0].evidence == first_snapshot
+    assert second_result.latest_verification_evidence_id == events[1].id
+
+
+@pytest.mark.django_db
 def test_recovery_point_tenant_isolation(domain_ports):
     tenant_id, descriptor, _ = domain_ports
     point = BackupExecutionFacade().register_recovery_point(tenant_id, uuid.uuid4(), descriptor.backup_job_id)
@@ -149,7 +197,9 @@ def test_recovery_point_tenant_isolation(domain_ports):
 @pytest.mark.django_db
 def test_expire_recovery_point_rejects_future_retention(domain_ports):
     tenant_id, _, _ = domain_ports
-    point = recovery_point_factory(tenant_id=tenant_id, adapter_key="test-storage", status=RecoveryPointStatus.AVAILABLE)
+    point = recovery_point_factory(
+        tenant_id=tenant_id, adapter_key="test-storage", status=RecoveryPointStatus.AVAILABLE
+    )
     with pytest.raises(DomainConflict, match="expiry"):
         RecoveryPointService().expire_recovery_point(tenant_id, uuid.uuid4(), point.id, "expire-1")
 
@@ -159,9 +209,7 @@ def test_runbook_publish_clone_and_restore(domain_ports):
     tenant_id, descriptor, _ = domain_ports
     actor = uuid.uuid4()
     point = BackupExecutionFacade().register_recovery_point(tenant_id, actor, descriptor.backup_job_id)
-    verify_job = RecoveryPointService().request_verification(
-        tenant_id, actor, point.id, "publish-point"
-    )
+    verify_job = RecoveryPointService().request_verification(tenant_id, actor, point.id, "publish-point")
     point = RecoveryPointService().execute_verification(tenant_id, point.id, verify_job.id)
     service = RunbookService()
     runbook = service.create_runbook(
@@ -224,17 +272,13 @@ def test_runbook_publish_clone_and_restore(domain_ports):
 def test_production_restore_requires_approval(domain_ports):
     tenant_id, descriptor, _ = domain_ports
     point = BackupExecutionFacade().register_recovery_point(tenant_id, uuid.uuid4(), descriptor.backup_job_id)
-    verify_job = RecoveryPointService().request_verification(
-        tenant_id, uuid.uuid4(), point.id, "production-point"
-    )
+    verify_job = RecoveryPointService().request_verification(tenant_id, uuid.uuid4(), point.id, "production-point")
     point = RecoveryPointService().execute_verification(tenant_id, point.id, verify_job.id)
     with pytest.raises(Exception, match="approval"):
         RestoreService().create_restore_run(
             tenant_id,
             uuid.uuid4(),
-            RestoreRunCommand(
-                point.id, "production", "prod", "full", (), "restore-prod"
-            ),
+            RestoreRunCommand(point.id, "production", "prod", "full", (), "restore-prod"),
         )
 
 
@@ -242,9 +286,7 @@ def test_production_restore_requires_approval(domain_ports):
 def test_objective_threshold_equality_is_compliant(domain_ports):
     tenant_id, descriptor, _ = domain_ports
     point = BackupExecutionFacade().register_recovery_point(tenant_id, uuid.uuid4(), descriptor.backup_job_id)
-    verify_job = RecoveryPointService().request_verification(
-        tenant_id, uuid.uuid4(), point.id, "objective-point"
-    )
+    verify_job = RecoveryPointService().request_verification(tenant_id, uuid.uuid4(), point.id, "objective-point")
     point = RecoveryPointService().execute_verification(tenant_id, point.id, verify_job.id)
     run = RestoreService().create_restore_run(
         tenant_id,

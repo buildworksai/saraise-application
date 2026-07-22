@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import os
+import queue
+import random
 import shutil
 import tempfile
 import threading
+import time
 from collections.abc import Callable, Mapping
+from contextvars import ContextVar, copy_context
+from dataclasses import dataclass
 from datetime import datetime
+from functools import wraps
 from pathlib import Path
 from typing import Generic, TypeVar, cast
 from uuid import UUID
@@ -28,7 +34,8 @@ from .ports import (
     BackupStatus,
     BackupStatusSnapshot,
     BackupType,
-    RestoreMode,
+    RestoreCompensationResult,
+    RestorePreflightResult,
     RestoreProviderReceipt,
     RestoreTarget,
     RestoreVerificationResult,
@@ -37,6 +44,174 @@ from .ports import (
 )
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True, slots=True)
+class ResiliencePolicy:
+    """Validated tenant policy applied uniformly to every provider call."""
+
+    timeout_seconds: float
+    max_attempts: int
+    initial_backoff_seconds: float
+    max_backoff_seconds: float
+    jitter_seconds: float
+    circuit_failure_threshold: int
+    circuit_reset_seconds: float
+    checksum_chunk_bytes: int
+    local_filesystem_restore_modes: frozenset[str]
+
+
+class ProviderTimeoutError(TimeoutError):
+    """Raised when a provider does not complete inside its tenant limit."""
+
+
+_active_policy: ContextVar[ResiliencePolicy | None] = ContextVar("bdr_resilience_policy", default=None)
+
+
+def _positive_number(value: object, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        raise ProviderConfigurationError(f"{field} must be a positive number")
+    return float(value)
+
+
+def _positive_integer(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ProviderConfigurationError(f"{field} must be a positive integer")
+    return value
+
+
+def _policy_for(tenant_id: UUID | None) -> ResiliencePolicy:
+    from .services import DEFAULT_CONFIGURATION_DOCUMENT, get_configuration
+
+    document = get_configuration(tenant_id).document if tenant_id is not None else DEFAULT_CONFIGURATION_DOCUMENT
+    resilience = document.get("resilience")
+    providers = document.get("providers")
+    if not isinstance(resilience, Mapping) or not isinstance(providers, Mapping):
+        raise ProviderConfigurationError("provider resilience configuration is unavailable")
+    raw_modes = providers.get("local_filesystem_restore_modes")
+    if (
+        not isinstance(raw_modes, (list, tuple))
+        or not raw_modes
+        or not all(isinstance(item, str) for item in raw_modes)
+    ):
+        raise ProviderConfigurationError("local filesystem restore modes are unavailable")
+    policy = ResiliencePolicy(
+        timeout_seconds=_positive_number(resilience.get("timeout_seconds"), "resilience.timeout_seconds"),
+        max_attempts=_positive_integer(resilience.get("max_attempts"), "resilience.max_attempts"),
+        initial_backoff_seconds=_positive_number(
+            resilience.get("initial_backoff_seconds"), "resilience.initial_backoff_seconds"
+        ),
+        max_backoff_seconds=_positive_number(resilience.get("max_backoff_seconds"), "resilience.max_backoff_seconds"),
+        jitter_seconds=_positive_number(resilience.get("jitter_seconds"), "resilience.jitter_seconds"),
+        circuit_failure_threshold=_positive_integer(
+            resilience.get("circuit_failure_threshold"), "resilience.circuit_failure_threshold"
+        ),
+        circuit_reset_seconds=_positive_number(
+            resilience.get("circuit_reset_seconds"), "resilience.circuit_reset_seconds"
+        ),
+        checksum_chunk_bytes=_positive_integer(
+            resilience.get("checksum_chunk_bytes"), "resilience.checksum_chunk_bytes"
+        ),
+        local_filesystem_restore_modes=frozenset(item.strip().lower() for item in raw_modes if item.strip()),
+    )
+    if not policy.local_filesystem_restore_modes:
+        raise ProviderConfigurationError("local filesystem restore modes are unavailable")
+    if policy.initial_backoff_seconds > policy.max_backoff_seconds:
+        raise ProviderConfigurationError("initial provider backoff exceeds its maximum")
+    return policy
+
+
+class ProviderInvocationExecutor:
+    """Bound every logical invocation and isolate repeated dependency failure."""
+
+    def __init__(self) -> None:
+        self._breakers: dict[tuple[UUID | None, str, int, float], CircuitBreaker[object]] = {}
+        self._lock = threading.RLock()
+
+    def _breaker(self, tenant_id: UUID | None, dependency: str, policy: ResiliencePolicy) -> CircuitBreaker[object]:
+        key = (
+            tenant_id,
+            dependency,
+            policy.circuit_failure_threshold,
+            policy.circuit_reset_seconds,
+        )
+        with self._lock:
+            breaker = self._breakers.get(key)
+            if breaker is None:
+                breaker = CircuitBreaker(
+                    dependency=f"{tenant_id or 'global'}:{dependency}",
+                    failure_threshold=policy.circuit_failure_threshold,
+                    reset_timeout=policy.circuit_reset_seconds,
+                )
+                self._breakers[key] = breaker
+            return breaker
+
+    @staticmethod
+    def _bounded(operation: Callable[[], T], timeout_seconds: float) -> T:
+        outcomes: queue.Queue[tuple[bool, object]] = queue.Queue(maxsize=1)
+        execution_context = copy_context()
+
+        def invoke() -> None:
+            try:
+                outcomes.put_nowait((True, execution_context.run(operation)))
+            except Exception as exc:
+                outcomes.put_nowait((False, exc))
+
+        worker = threading.Thread(target=invoke, name="bdr-provider-invocation", daemon=True)
+        worker.start()
+        worker.join(timeout_seconds)
+        if worker.is_alive():
+            raise ProviderTimeoutError("provider invocation exceeded its configured timeout")
+        try:
+            successful, result = outcomes.get_nowait()
+        except queue.Empty as exc:
+            raise ProviderOperationError("provider invocation produced no result") from exc
+        if not successful:
+            if isinstance(result, BaseException):
+                raise result
+            raise ProviderOperationError("provider invocation failed without an exception")
+        return cast(T, result)
+
+    def execute(self, tenant_id: UUID | None, dependency: str, operation: Callable[[], T]) -> T:
+        if tenant_id is not None and not isinstance(tenant_id, UUID):
+            raise ProviderConfigurationError("provider invocation requires a tenant UUID")
+        policy = _policy_for(tenant_id)
+        breaker = self._breaker(tenant_id, _required_text(dependency, "dependency"), policy)
+
+        def attempt_all() -> T:
+            token = _active_policy.set(policy)
+            try:
+                for attempt in range(policy.max_attempts):
+                    try:
+                        return self._bounded(operation, policy.timeout_seconds)
+                    except Exception:
+                        if attempt + 1 >= policy.max_attempts:
+                            raise
+                        exponential = policy.initial_backoff_seconds * (2**attempt)
+                        delay = min(exponential, policy.max_backoff_seconds)
+                        time.sleep(delay + random.uniform(0.0, policy.jitter_seconds))
+                raise ProviderOperationError("provider retry policy completed without a result")
+            finally:
+                _active_policy.reset(token)
+
+        return cast(T, breaker.call(attempt_all))
+
+    def circuit_state(self, tenant_id: UUID | None, dependency: str) -> str:
+        policy = _policy_for(tenant_id)
+        return self._breaker(tenant_id, dependency, policy).state.value
+
+
+provider_executor = ProviderInvocationExecutor()
+
+
+def execute_provider_call(tenant_id: UUID | None, dependency: str, operation: Callable[[], T]) -> T:
+    """Public, centrally governed invocation boundary for health/extensions."""
+
+    return provider_executor.execute(tenant_id, dependency, operation)
+
+
+def provider_circuit_state(tenant_id: UUID | None, dependency: str) -> str:
+    return provider_executor.circuit_state(tenant_id, dependency)
 
 
 class AdapterRegistryError(RuntimeError):
@@ -109,6 +284,64 @@ _readiness_rules: _Registry[Callable[..., object]] = _Registry("readiness rule")
 _provider_health_probes: _Registry[Callable[[], HealthCheckResult]] = _Registry("provider health probe")
 _metrics_collectors: _Registry[Callable[[], None]] = _Registry("metrics collector")
 
+_CATALOG_METHODS = (
+    "request_backup",
+    "get_backup_status",
+    "describe_completed_artifact",
+    "validate_schedule",
+)
+_STORAGE_METHODS = (
+    "validate_artifact",
+    "validate_restore_target",
+    "restore",
+    "verify_restore",
+    "compensate_restore",
+)
+
+
+def _tenant_argument(args: tuple[object, ...], kwargs: Mapping[str, object]) -> UUID:
+    raw = args[0] if args else kwargs.get("tenant_id")
+    if not isinstance(raw, UUID):
+        raise ProviderConfigurationError("provider invocation requires tenant_id as a UUID")
+    return raw
+
+
+def _install_resilience(value: T, *, dependency: str, methods: tuple[str, ...]) -> T:
+    """Instrument a provider in place so registry lookup preserves identity."""
+
+    installed = getattr(value, "__bdr_resilient_methods__", frozenset())
+    if not isinstance(installed, frozenset):
+        raise TypeError("provider resilience metadata is invalid")
+    completed = set(installed)
+    for method_name in methods:
+        if method_name in completed:
+            continue
+        original = getattr(value, method_name, None)
+        if not callable(original):
+            continue
+
+        @wraps(original)
+        def governed(
+            *args: object, __method: Callable[..., object] = original, __name: str = method_name, **kwargs: object
+        ) -> object:
+            tenant_id = _tenant_argument(args, kwargs)
+            return execute_provider_call(
+                tenant_id,
+                f"{dependency}.{__name}",
+                lambda: __method(*args, **kwargs),
+            )
+
+        try:
+            setattr(value, method_name, governed)
+        except (AttributeError, TypeError) as exc:
+            raise TypeError(f"provider method {method_name!r} cannot be resilience-wrapped") from exc
+        completed.add(method_name)
+    try:
+        setattr(value, "__bdr_resilient_methods__", frozenset(completed))
+    except (AttributeError, TypeError) as exc:
+        raise TypeError("provider cannot retain resilience metadata") from exc
+    return value
+
 
 def register_backup_catalog(
     key: str,
@@ -118,7 +351,13 @@ def register_backup_catalog(
 ) -> BackupCatalogPort:
     if not isinstance(adapter, BackupCatalogPort):
         raise TypeError("adapter must implement BackupCatalogPort")
-    return _backup_catalogs.register(key, adapter, replace=replace)
+    normalized = _Registry._key(key)
+    governed = _install_resilience(
+        adapter,
+        dependency=f"backup-catalog.{normalized}",
+        methods=_CATALOG_METHODS,
+    )
+    return _backup_catalogs.register(normalized, governed, replace=replace)
 
 
 def get_backup_catalog(key: str = "default") -> BackupCatalogPort:
@@ -133,7 +372,13 @@ def register_storage_adapter(
 ) -> StorageRecoveryAdapter:
     if not isinstance(adapter, StorageRecoveryAdapter):
         raise TypeError("adapter must implement StorageRecoveryAdapter")
-    return _storage_adapters.register(key, adapter, replace=replace)
+    normalized = _Registry._key(key)
+    governed = _install_resilience(
+        adapter,
+        dependency=f"storage-adapter.{normalized}",
+        methods=_STORAGE_METHODS,
+    )
+    return _storage_adapters.register(normalized, governed, replace=replace)
 
 
 def get_storage_adapter(key: str) -> StorageRecoveryAdapter:
@@ -487,11 +732,16 @@ class LocalFilesystemStorageRecoveryAdapter:
         configured_restore = restore_root or getattr(settings, "BDR_LOCAL_RESTORE_ROOT", None)
         self._storage_root = Path(configured_storage).expanduser() if configured_storage else None
         self._restore_root = Path(configured_restore).expanduser() if configured_restore else None
-        self._breaker = breaker or CircuitBreaker("bdr.local-filesystem", failure_threshold=3, reset_timeout=30)
+        self._breaker = breaker
 
     @property
     def circuit_state(self) -> str:
-        return self._breaker.state.value
+        return self._breaker.state.value if self._breaker is not None else "managed"
+
+    def _call(self, operation: Callable[[], T]) -> T:
+        if self._breaker is None:
+            return operation()
+        return cast(T, self._breaker.call(operation))
 
     @staticmethod
     def _confined(root: Path | None, reference: str, field: str) -> Path:
@@ -519,7 +769,9 @@ class LocalFilesystemStorageRecoveryAdapter:
         size = 0
         try:
             with path.open("rb") as stream:
-                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                policy = _active_policy.get()
+                read_chunk = (lambda: stream.read(policy.checksum_chunk_bytes)) if policy is not None else stream.read1
+                for chunk in iter(read_chunk, b""):
                     digest.update(chunk)
                     size += len(chunk)
         except OSError as exc:
@@ -570,7 +822,55 @@ class LocalFilesystemStorageRecoveryAdapter:
                 error_code="" if valid else "artifact_integrity_failed",
             )
 
-        return cast(ArtifactValidationResult, self._breaker.call(operation))
+        return self._call(operation)
+
+    def validate_restore_target(
+        self,
+        tenant_id: UUID,
+        descriptor: BackupArtifactDescriptor,
+        target: RestoreTarget,
+        *,
+        idempotency_key: str,
+    ) -> RestorePreflightResult:
+        del tenant_id
+        _required_text(idempotency_key, "idempotency_key")
+
+        def operation() -> RestorePreflightResult:
+            policy = _active_policy.get()
+            if policy is None:
+                raise ProviderConfigurationError("tenant provider policy is not bound")
+            source = self._artifact(descriptor)
+            destination = self._confined(self._restore_root, target.target_ref, "restore target")
+            artifact_available = source.is_file()
+            required_bytes = descriptor.size_bytes
+            capacity_valid = (
+                artifact_available
+                and isinstance(required_bytes, int)
+                and required_bytes >= 0
+                and self._restore_root is not None
+                and shutil.disk_usage(self._restore_root).free >= required_bytes
+            )
+            compatibility_valid = (
+                target.mode.value in policy.local_filesystem_restore_modes and descriptor.checksum_algorithm == "sha256"
+            )
+            target_available = not destination.exists()
+            if destination.is_file():
+                checksum, _ = self._checksum(destination)
+                target_available = checksum == descriptor.checksum_digest
+            valid = capacity_valid and compatibility_valid and target_available
+            return RestorePreflightResult(
+                capacity_valid=capacity_valid,
+                compatibility_valid=compatibility_valid,
+                target_available=target_available,
+                evidence={
+                    "artifact_available": artifact_available,
+                    "capacity_measured": isinstance(required_bytes, int),
+                    "target_inspected": True,
+                },
+                error_code="" if valid else "restore_preflight_failed",
+            )
+
+        return self._call(operation)
 
     def restore(
         self,
@@ -582,8 +882,9 @@ class LocalFilesystemStorageRecoveryAdapter:
     ) -> RestoreProviderReceipt:
         del tenant_id
         key = _required_text(idempotency_key, "idempotency_key")
-        if target.mode is not RestoreMode.FULL or target.selected_components:
-            raise ProviderOperationError("local filesystem adapter supports full restores only")
+        policy = _active_policy.get()
+        if policy is not None and target.mode.value not in policy.local_filesystem_restore_modes:
+            raise ProviderOperationError("restore mode is disabled by tenant provider policy")
 
         def operation() -> RestoreProviderReceipt:
             source = self._artifact(descriptor)
@@ -632,7 +933,7 @@ class LocalFilesystemStorageRecoveryAdapter:
                 },
             )
 
-        return cast(RestoreProviderReceipt, self._breaker.call(operation))
+        return self._call(operation)
 
     def verify_restore(
         self,
@@ -662,7 +963,38 @@ class LocalFilesystemStorageRecoveryAdapter:
                 error_code="" if verified else "restore_checksum_mismatch",
             )
 
-        return cast(RestoreVerificationResult, self._breaker.call(operation))
+        return self._call(operation)
+
+    def compensate_restore(
+        self,
+        tenant_id: UUID,
+        receipt: RestoreProviderReceipt,
+        *,
+        idempotency_key: str,
+    ) -> RestoreCompensationResult:
+        del tenant_id
+        _required_text(idempotency_key, "idempotency_key")
+        target_ref = receipt.evidence.get("target_ref")
+        expected_checksum = receipt.evidence.get("checksum_digest")
+        if not isinstance(target_ref, str) or not isinstance(expected_checksum, str):
+            raise ProviderOperationError("provider receipt lacks compensation evidence")
+
+        def operation() -> RestoreCompensationResult:
+            destination = self._confined(self._restore_root, target_ref, "restore target")
+            if not destination.exists():
+                return RestoreCompensationResult(True, evidence={"target_absent": True})
+            if not destination.is_file():
+                raise ProviderOperationError("restore target is not a regular file")
+            actual_checksum, _ = self._checksum(destination)
+            if actual_checksum != expected_checksum:
+                raise ProviderOperationError("restore target changed after provider operation")
+            try:
+                destination.unlink()
+            except OSError as exc:
+                raise ProviderOperationError("restore target compensation failed") from exc
+            return RestoreCompensationResult(True, evidence={"target_removed": True})
+
+        return self._call(operation)
 
     def health(self) -> HealthCheckResult:
         checked_at = timezone.now()
@@ -693,7 +1025,7 @@ class LocalFilesystemStorageRecoveryAdapter:
             )
 
         try:
-            return cast(HealthCheckResult, self._breaker.call(operation))
+            return self._call(operation)
         except CircuitBreakerError:
             return HealthCheckResult(
                 healthy=False,
@@ -717,7 +1049,11 @@ __all__ = [
     "BackupRecoveryCatalogAdapter",
     "LocalFilesystemStorageRecoveryAdapter",
     "ProviderConfigurationError",
+    "ProviderInvocationExecutor",
     "ProviderOperationError",
+    "ProviderTimeoutError",
+    "ResiliencePolicy",
+    "execute_provider_call",
     "get_backup_catalog",
     "get_evidence_enricher",
     "get_extension_action",
@@ -727,6 +1063,7 @@ __all__ = [
     "get_report_exporter",
     "get_storage_adapter",
     "list_storage_adapters",
+    "provider_circuit_state",
     "register_backup_catalog",
     "register_evidence_enricher",
     "register_extension_action",

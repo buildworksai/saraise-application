@@ -126,6 +126,7 @@ def _run(
     operation: Callable[[AsyncJob], object],
 ) -> dict[str, object]:
     job = _load_job(tenant_id, job_id, command)
+    correlation_id = str(job.correlation_id)
     queued_at = job.created_at
     delay = max(0.0, (datetime.now(tz=queued_at.tzinfo) - queued_at).total_seconds())
     BDR_JOB_QUEUE_DELAY.observe(delay)
@@ -138,8 +139,10 @@ def _run(
                 BDR_BACKUP_REQUESTS.labels(result="failed").inc()
             BDR_PROVIDER_FAILURES.labels(adapter="domain", error_class=_metric_error_class(exc)).inc()
             logger.exception(
-                "Disaster-recovery worker failed",
+                "backup_disaster_recovery.worker.failed",
                 extra={
+                    "event_name": "backup_disaster_recovery.worker.failed",
+                    "correlation_id": correlation_id,
                     "operation": command,
                     "tenant_id": str(tenant_id),
                     "job_id": str(job_id),
@@ -152,8 +155,10 @@ def _run(
         if command == BACKUP_REQUEST_COMMAND:
             BDR_BACKUP_REQUESTS.labels(result="accepted").inc()
         logger.info(
-            "Disaster-recovery worker completed",
+            "backup_disaster_recovery.worker.completed",
             extra={
+                "event_name": "backup_disaster_recovery.worker.completed",
+                "correlation_id": correlation_id,
                 "operation": command,
                 "tenant_id": str(tenant_id),
                 "job_id": str(job_id),

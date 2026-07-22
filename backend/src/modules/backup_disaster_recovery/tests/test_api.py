@@ -122,6 +122,13 @@ def test_policy_denial_is_403_with_stable_envelope(authenticated_tenant_a_client
 
 
 @pytest.mark.django_db
+def test_unmapped_framework_action_fails_closed(authenticated_tenant_a_client):
+    response = authenticated_tenant_a_client.options(f"{PREFIX}/recovery-points/")
+
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+@pytest.mark.django_db
 def test_csrf_is_enforced_for_runbook_create(tenant_a_user):
     client = APIClient(enforce_csrf_checks=True)
     assert client.login(username=tenant_a_user.username, password=TEST_PASSWORD)
