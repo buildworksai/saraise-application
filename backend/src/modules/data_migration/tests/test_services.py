@@ -1,862 +1,346 @@
-"""
-Service Unit Tests for DataMigration module.
+"""Production service contracts for tenant-safe, durable data migration."""
 
-Tests business logic in services layer.
-"""
+from __future__ import annotations
 
-import json
 import uuid
-from unittest.mock import MagicMock, patch
 
 import pytest
+from django.core.exceptions import ValidationError
+from rest_framework.exceptions import NotFound
 
-from src.core.encryption.service import EncryptionService
+from src.core.async_jobs.models import AsyncJob, OutboxEvent
+from src.modules.data_migration.adapters import SOURCE_ADAPTERS, TARGET_ADAPTERS
 from src.modules.data_migration.models import (
+    DataMigrationConfiguration,
+    DataMigrationConfigurationAudit,
     ExternalConnection,
+    MigrationChange,
     MigrationJob,
-    MigrationLog,
+    MigrationJobVersion,
     MigrationMapping,
-    MigrationRollback,
+    MigrationRun,
+    ValidationRule,
 )
-from src.modules.data_migration.services import MigrationEngine, MigrationResult
+from src.modules.data_migration.schemas import (
+    validate_rule_config,
+    validate_source_config,
+    validate_transform_config,
+)
+from src.modules.data_migration.services import (
+    ConfigurationConflict,
+    DataMigrationConfigurationService,
+    ExternalConnectionService,
+    MigrationExecutionService,
+    MigrationJobService,
+    MigrationMappingService,
+    MigrationServiceError,
+    ValidationRuleService,
+)
 
-TEST_TENANT_ID = uuid.uuid4()
+
+class FakeSourceAdapter:
+    def __init__(self, records: tuple[dict[str, object], ...] = ({"name": "Ada"},)) -> None:
+        self.records = records
+
+    def validate_config(self, config):
+        return config
+
+    def inspect(self, tenant_id, artifact_id, config, runtime):
+        del tenant_id, artifact_id, config, runtime
+        return {
+            "fields": ({"name": "name", "type": "string"},),
+            "representative_values": ({"name": "Ada", "email": "ada@example.test"},),
+            "row_estimate": len(self.records),
+            "source_checksum": "a" * 64,
+            "warnings": (),
+        }
+
+    def iter_records(self, tenant_id, artifact_id, config, runtime):
+        del tenant_id, artifact_id, config, runtime
+        yield from self.records
+
+
+class FakeTargetAdapter:
+    def __init__(self) -> None:
+        self.writes: list[dict[str, object]] = []
+
+    def describe_schema(self, entity):
+        del entity
+        return {"fields": {"full_name": {"type": "string", "aliases": ["name"]}}}
+
+    def validate_reference(self, entity, field, value, rule_type, config):
+        del entity, field, rule_type, config
+        return value != "invalid"
+
+    def lookup(self, tenant_id, entity, fields):
+        del tenant_id, entity, fields
+        return None
+
+    def write(self, tenant_id, entity, record, **context):
+        self.writes.append(dict(record))
+        return {
+            "record_id": str(uuid.uuid4()),
+            "operation": "create",
+            "after_checksum": "b" * 64,
+            "before_payload_encrypted": "",
+            "idempotency_key": context["idempotency_key"],
+        }
+
+    def reverse(self, tenant_id, entity, record_id, **context):
+        del tenant_id, entity, record_id, context
+        return {"verified": True}
+
+
+@pytest.fixture(autouse=True)
+def adapter_registry(monkeypatch) -> tuple[FakeSourceAdapter, FakeTargetAdapter]:
+    monkeypatch.setattr("src.modules.dms.services.VersionService.get_version", lambda self, tenant, actor, version: object())
+    monkeypatch.setattr("src.modules.data_migration.services._validate_connection_destination", lambda values: None)
+    SOURCE_ADAPTERS.clear()
+    TARGET_ADAPTERS.clear()
+    source = FakeSourceAdapter()
+    target = FakeTargetAdapter()
+    SOURCE_ADAPTERS.register("core.csv", source)
+    TARGET_ADAPTERS.register("core.record", target)
+    yield source, target
+    SOURCE_ADAPTERS.clear()
+    TARGET_ADAPTERS.clear()
+
+
+@pytest.fixture
+def identities() -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    return uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+
+def job_command(name: str = "Customer import") -> dict[str, object]:
+    return {
+        "name": name,
+        "description": "Deterministic customer import",
+        "source_type": "csv",
+        "source_artifact_id": uuid.uuid4(),
+        "source_config": {"encoding": "utf-8", "batch_size": 2},
+        "target_adapter": "core.record",
+        "target_entity": "customer",
+        "write_mode": "create",
+        "lookup_fields": [],
+    }
 
 
 @pytest.mark.django_db
-class TestMigrationResult:
-    """Test MigrationResult class."""
-
-    def test_migration_result_initialization(self):
-        """Test MigrationResult initialization."""
-        result = MigrationResult(
-            success=True,
-            records_processed=10,
-            records_failed=0,
-            errors=[],
-        )
-        assert result.success is True
-        assert result.records_processed == 10
-        assert result.records_failed == 0
-        assert result.errors == []
-
-    def test_migration_result_with_errors(self):
-        """Test MigrationResult with errors."""
-        errors = ["Error 1", "Error 2"]
-        result = MigrationResult(
-            success=False,
-            records_processed=5,
-            records_failed=2,
-            errors=errors,
-        )
-        assert result.success is False
-        assert result.records_processed == 5
-        assert result.records_failed == 2
-        assert result.errors == errors
+def test_job_create_binds_tenant_persists_version_and_outbox(identities) -> None:
+    tenant, other_tenant, actor = identities
+    command = {**job_command(), "tenant_id": other_tenant}
+    job = MigrationJobService.create(tenant, actor, command)
+    assert job.tenant_id == tenant
+    version = MigrationJobVersion.objects.get(job=job, version=1)
+    assert version.snapshot["name"] == job.name
+    event = OutboxEvent.objects.get(aggregate_id=job.id, event_type="data_migration.job.created")
+    assert event.tenant_id == tenant
+    assert event.payload["payload"] == {"version": 1, "status": "draft"}
 
 
 @pytest.mark.django_db
-class TestMigrationEngine:
-    """Test MigrationEngine business logic."""
+@pytest.mark.parametrize(
+    "source_type,config",
+    (
+        ("database", {"connection_id": str(uuid.uuid4()), "table": "users; DROP TABLE x", "columns": ["id"]}),
+        ("database", {"connection_id": str(uuid.uuid4()), "table": "users", "columns": ["id"], "sql": "SELECT *"}),
+        ("api", {"connection_id": str(uuid.uuid4()), "relative_path": "https://internal.test/data"}),
+        ("api", {"connection_id": str(uuid.uuid4()), "relative_path": "/data", "method": "POST"}),
+    ),
+)
+def test_unsafe_source_configuration_fails_without_persistence(identities, source_type, config) -> None:
+    tenant, _, actor = identities
+    command = {**job_command(), "source_type": source_type, "source_artifact_id": None, "source_config": config}
+    with pytest.raises((ValueError, MigrationServiceError, ValidationError)):
+        MigrationJobService.create(tenant, actor, command)
+    assert not MigrationJob.objects.filter(tenant_id=tenant).exists()
+    assert not OutboxEvent.objects.filter(tenant_id=tenant).exists()
 
-    def test_execute_migration_job_not_found(self, db):
-        """Test executing migration with non-existent job."""
-        engine = MigrationEngine()
-        with pytest.raises(ValueError, match="not found"):
-            engine.execute_migration("non-existent-id", TEST_TENANT_ID)
 
-    def test_execute_migration_job_already_running(self, db):
-        """Test executing migration when job is already running."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={"data": json.dumps([{"name": "Test"}]), "validation_rules": {}},
-            status="running",
-            created_by="user-123",
-        )
+@pytest.mark.django_db
+def test_job_update_is_optimistic_versioned_and_revises_ready(identities) -> None:
+    tenant, _, actor = identities
+    job = MigrationJobService.create(tenant, actor, job_command())
+    job.status = MigrationJob.Status.READY
+    job.save(update_fields=("status", "updated_at"))
+    updated = MigrationJobService.update(tenant, job.id, actor, {"description": "Changed"}, expected_version=1)
+    assert updated.configuration_version == 2
+    assert updated.status == MigrationJob.Status.DRAFT
+    assert list(MigrationJobVersion.objects.filter(job=job).values_list("version", flat=True).order_by("version")) == [1, 2]
+    with pytest.raises(ConfigurationConflict):
+        MigrationJobService.update(tenant, job.id, actor, {"description": "Stale"}, expected_version=1)
+    updated.refresh_from_db()
+    assert updated.description == "Changed"
 
-        engine = MigrationEngine()
-        with pytest.raises(ValueError, match="already running"):
-            engine.execute_migration(job.id, TEST_TENANT_ID)
 
-    def test_execute_migration_dry_run_json(self, db):
-        """Test executing a migration in dry-run mode with JSON data."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "data": json.dumps([{"name": "Test Record", "value": "123"}]),
-                "validation_rules": {},
-            },
-            created_by="user-123",
-        )
-
-        engine = MigrationEngine()
-        result = engine.execute_migration(job.id, TEST_TENANT_ID, dry_run=True)
-
-        assert result is not None
-        assert isinstance(result, MigrationResult)
-        assert result.records_processed == 1
-        assert result.records_failed == 0
-
-        # Verify job status updated
-        job.refresh_from_db()
-        assert job.status == "completed"
-        assert job.records_processed == 1
-
-    def test_execute_migration_with_validation_errors(self, db):
-        """Test executing migration with validation errors."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "data": json.dumps([{"name": ""}]),
-                "validation_rules": {
-                    "required_fields": ["name"],
-                },
-            },
-            created_by="user-123",
-        )
-
-        engine = MigrationEngine()
-        result = engine.execute_migration(job.id, TEST_TENANT_ID, dry_run=True)
-
-        assert result is not None
-        assert result.records_failed == 1
-        assert len(result.errors) > 0
-
-        # Verify job status
-        job.refresh_from_db()
-        assert job.status == "failed"
-
-    def test_create_checkpoint(self, db):
-        """Test creating a checkpoint."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={},
-            status="pending",
-            created_by="user-123",
-        )
-
-        engine = MigrationEngine()
-        checkpoint = engine._create_checkpoint(job)
-
-        assert checkpoint is not None
-        assert checkpoint.job == job
-        assert checkpoint.tenant_id == job.tenant_id
-        assert "job_id" in checkpoint.checkpoint_data
-        assert checkpoint.checkpoint_data["job_id"] == str(job.id)
-
-    def test_load_json_data_from_string(self, db):
-        """Test loading JSON data from string."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "data": json.dumps([{"name": "Test 1"}, {"name": "Test 2"}]),
-            },
-            created_by="user-123",
-        )
-
-        engine = MigrationEngine()
-        data = engine._load_source_data(job)
-
-        assert len(data) == 2
-        assert data[0]["name"] == "Test 1"
-        assert data[1]["name"] == "Test 2"
-
-    def test_load_json_data_invalid(self, db):
-        """Test loading invalid JSON data."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={"data": "invalid json"},
-            created_by="user-123",
-        )
-
-        engine = MigrationEngine()
-        with pytest.raises(ValueError, match="Invalid JSON"):
-            engine._load_source_data(job)
-
-    def test_load_source_data_unsupported_type(self, db):
-        """Test loading data from unsupported source type."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="unsupported",
-            source_config={},
-            created_by="user-123",
-        )
-
-        engine = MigrationEngine()
-        with pytest.raises(ValueError, match="Unsupported source type"):
-            engine._load_source_data(job)
-
-    @patch("django.core.files.storage.default_storage")
-    def test_load_csv_data(self, mock_storage, db):
-        """Test loading CSV data."""
-        from io import StringIO
-
-        mock_storage.open.return_value = StringIO("name,value\nTest,123")
-
-        config = {"file_path": "/tmp/test.csv", "delimiter": ","}
-        engine = MigrationEngine()
-        data = engine._load_csv_data(config)
-
-        assert len(data) == 1
-        assert data[0]["name"] == "Test"
-        assert data[0]["value"] == "123"
-
-    def test_load_csv_data_missing_file_path(self, db):
-        """Test loading CSV data without file_path."""
-        config = {}
-        engine = MigrationEngine()
-        with pytest.raises(ValueError, match="file_path is required"):
-            engine._load_csv_data(config)
-
-    def test_apply_mappings(self, db):
-        """Test applying field mappings."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={},
-            created_by="user-123",
-        )
-
-        MigrationMapping.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            job=job,
-            source_field="old_name",
-            target_field="new_name",
-            transform={"type": "string"},
-        )
-
-        engine = MigrationEngine()
-        record = {"old_name": "Test Value"}
-        transformed = engine._apply_mappings(job, record)
-
-        assert "new_name" in transformed
-        assert transformed["new_name"] == "Test Value"
-
-    def test_apply_mappings_with_type_conversion(self, db):
-        """Test applying mappings with type conversion."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={},
-            created_by="user-123",
-        )
-
-        MigrationMapping.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            job=job,
-            source_field="value",
-            target_field="amount",
-            transform={"type": "integer"},
-        )
-
-        engine = MigrationEngine()
-        record = {"value": "123"}
-        transformed = engine._apply_mappings(job, record)
-
-        assert transformed["amount"] == 123
-        assert isinstance(transformed["amount"], int)
-
-    def test_apply_mappings_with_default_value(self, db):
-        """Test applying mappings with default value."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={},
-            created_by="user-123",
-        )
-
-        MigrationMapping.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            job=job,
-            source_field="missing_field",
-            target_field="target_field",
-            transform={"default": "Default Value"},
-        )
-
-        engine = MigrationEngine()
-        record = {}
-        transformed = engine._apply_mappings(job, record)
-
-        assert transformed["target_field"] == "Default Value"
-
-    def test_validate_record_required_fields(self, db):
-        """Test validating required fields."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "validation_rules": {
-                    "required_fields": ["name", "email"],
-                },
-            },
-            created_by="user-123",
-        )
-
-        engine = MigrationEngine()
-        record = {"name": "Test"}
-        errors = engine._validate_record(job, record, 0)
-
-        assert len(errors) > 0
-        assert any("email" in error.lower() for error in errors)
-
-    def test_validate_record_field_types(self, db):
-        """Test validating field types."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "validation_rules": {
-                    "field_types": {
-                        "age": "integer",
-                        "email": "email",
-                    },
-                },
-            },
-            created_by="user-123",
-        )
-
-        engine = MigrationEngine()
-        record = {"age": "not_a_number", "email": "invalid-email"}
-        errors = engine._validate_record(job, record, 0)
-
-        assert len(errors) >= 1
-
-    def test_validate_record_field_constraints(self, db):
-        """Test validating field constraints."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "validation_rules": {
-                    "field_constraints": {
-                        "name": {
-                            "min_length": 5,
-                            "max_length": 10,
-                        },
-                    },
-                },
-            },
-            created_by="user-123",
-        )
-
-        engine = MigrationEngine()
-        record = {"name": "Hi"}  # Too short
-        errors = engine._validate_record(job, record, 0)
-
-        assert len(errors) > 0
-        # Check that error mentions the field and constraint
-        assert any("name" in error.lower() and ("least" in error.lower() or "min" in error.lower()) for error in errors)
-
-    def test_validate_record_pattern(self, db):
-        """Test validating field pattern."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "validation_rules": {
-                    "field_constraints": {
-                        "code": {
-                            "pattern": r"^[A-Z]{3}$",
-                        },
-                    },
-                },
-            },
-            created_by="user-123",
-        )
-
-        engine = MigrationEngine()
-        record = {"code": "abc"}  # Lowercase, should fail
-        errors = engine._validate_record(job, record, 0)
-
-        assert len(errors) > 0
-
-    def test_import_record_no_target_model(self, db):
-        """Test importing record without target model."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={},
-            created_by="user-123",
-        )
-
-        engine = MigrationEngine()
-        record = {"name": "Test"}
-        result = engine._import_record(job, record, TEST_TENANT_ID)
-
-        assert result is None
-        # Verify log was created
-        log = MigrationLog.objects.filter(job=job, level="warning").first()
-        assert log is not None
-
-    def test_rollback_checkpoint_not_found(self, db):
-        """Test rollback with non-existent checkpoint."""
-        engine = MigrationEngine()
-        with pytest.raises(ValueError, match="not found"):
-            engine.rollback("non-existent-id", TEST_TENANT_ID)
-
-    def test_rollback_success(self, db):
-        """Test successful rollback."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={},
-            status="completed",
-            records_processed=10,
-            created_by="user-123",
-        )
-
-        checkpoint = MigrationRollback.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            job=job,
-            checkpoint_data={
-                "status": "pending",
-                "records_processed": 0,
-            },
-        )
-
-        engine = MigrationEngine()
-        engine.rollback(checkpoint.id, TEST_TENANT_ID)
-
-        # Verify job status restored
-        job.refresh_from_db()
-        assert job.status == "pending"
-        assert job.records_processed == 0
-
-        # Verify log was created
-        log = MigrationLog.objects.filter(job=job, level="info").first()
-        assert log is not None
-
-    @pytest.mark.skipif(
-        True,  # Skip if pandas not available - test would require pandas installation
-        reason="Requires pandas to be installed",
+@pytest.mark.django_db
+def test_mapping_and_rule_mutations_validate_and_bump_definition_version(identities) -> None:
+    tenant, _, actor = identities
+    job = MigrationJobService.create(tenant, actor, job_command())
+    mapping = MigrationMappingService.create(
+        tenant, job.id, actor,
+        {"source_field": "name", "target_field": "full_name", "position": 0, "transform_type": "identity", "transform_config": {}},
     )
-    def test_load_excel_data(self, db):
-        """Test loading Excel data - skipped if pandas not available."""
-        pass
+    job.refresh_from_db()
+    assert mapping.tenant_id == tenant and job.configuration_version == 2
+    rule = ValidationRuleService.create(
+        tenant, job.id, actor,
+        {"field_name": "full_name", "rule_type": "required", "rule_config": {}, "error_message": "Name required", "severity": "error", "position": 0},
+    )
+    job.refresh_from_db()
+    assert rule.tenant_id == tenant and job.configuration_version == 3
+    with pytest.raises((ValueError, MigrationServiceError)):
+        MigrationMappingService.update(tenant, mapping.id, actor, {"transform_type": "unknown"})
+    with pytest.raises((ValueError, MigrationServiceError)):
+        ValidationRuleService.update(tenant, rule.id, actor, {"rule_type": "regex", "rule_config": {"pattern": "(a+)+"}})
 
-    def test_load_excel_data_missing_pandas(self, db):
-        """Test loading Excel data when pandas is not installed."""
-        # This test verifies the error message when pandas import fails
-        # We'll test the error path by checking the code handles ImportError
-        config = {"file_path": "/tmp/test.xlsx"}
-        engine = MigrationEngine()
 
-        # If pandas is not installed, this should raise ValueError
-        # If pandas is installed, we skip this test
-        try:
-            import pandas  # noqa: F401
-
-            pytest.skip("pandas is installed, cannot test missing pandas scenario")
-        except ImportError:
-            with pytest.raises(ValueError, match="pandas is required"):
-                engine._load_excel_data(config)
-
-    def test_load_excel_data_missing_file_path(self, db):
-        """Test loading Excel data without file_path."""
-        # Skip if pandas not installed (will fail on pandas import first)
-        try:
-            import pandas  # noqa: F401
-        except ImportError:
-            pytest.skip("pandas not installed, cannot test file_path validation")
-
-        config = {}
-        engine = MigrationEngine()
-        with pytest.raises(ValueError, match="file_path is required"):
-            engine._load_excel_data(config)
-
-    def test_load_json_data_from_file(self, db):
-        """Test loading JSON data from file path."""
-        from io import StringIO
-
-        with patch("django.core.files.storage.default_storage") as mock_storage:
-            mock_storage.open.return_value = StringIO(json.dumps([{"name": "Test"}]))
-
-            config = {"file_path": "/tmp/test.json"}
-            engine = MigrationEngine()
-            data = engine._load_json_data(config)
-
-            assert len(data) == 1
-            assert data[0]["name"] == "Test"
-
-    def test_load_json_data_single_object(self, db):
-        """Test loading JSON data that is a single object."""
-        config = {"data": json.dumps({"name": "Test"})}
-        engine = MigrationEngine()
-        data = engine._load_json_data(config)
-
-        assert len(data) == 1
-        assert data[0]["name"] == "Test"
-
-    @pytest.mark.skipif(True, reason="Requires httpx to be installed")  # Skip if httpx not available
-    def test_load_api_data(self, db):
-        """Test loading data from API - skipped if httpx not available."""
-        pass
-
-    @pytest.mark.skipif(True, reason="Requires httpx to be installed")  # Skip if httpx not available
-    def test_load_api_data_with_results_key(self, db):
-        """Test loading API data with 'results' key - skipped if httpx not available."""
-        pass
-
-    def test_load_api_data_missing_httpx(self, db):
-        """Test loading API data when httpx is not installed."""
-        config = {"url": "https://api.example.com/data"}
-        engine = MigrationEngine()
-
-        # If httpx is not installed, this should raise ValueError
-        # If httpx is installed, we skip this test
-        try:
-            import httpx  # noqa: F401
-
-            pytest.skip("httpx is installed, cannot test missing httpx scenario")
-        except ImportError:
-            with pytest.raises(ValueError, match="httpx is required"):
-                engine._load_api_data(config)
-
-    def test_load_api_data_missing_url(self, db):
-        """Test loading API data without URL."""
-        config = {}
-        engine = MigrationEngine()
-        with pytest.raises(ValueError, match="url is required"):
-            engine._load_api_data(config)
-
-    def test_validate_record_max_length(self, db):
-        """Test validating max_length constraint."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "validation_rules": {
-                    "field_constraints": {
-                        "name": {"max_length": 3},
-                    },
-                },
-            },
-            created_by="user-123",
+@pytest.mark.django_db
+def test_cross_tenant_parent_and_entity_access_is_not_found(identities) -> None:
+    tenant_a, tenant_b, actor = identities
+    job_b = MigrationJobService.create(tenant_b, actor, job_command("Tenant B"))
+    with pytest.raises(NotFound):
+        MigrationMappingService.create(
+            tenant_a, job_b.id, actor,
+            {"source_field": "name", "target_field": "full_name", "position": 0, "transform_type": "identity", "transform_config": {}},
         )
+    mapping_b = MigrationMappingService.create(
+        tenant_b, job_b.id, actor,
+        {"source_field": "name", "target_field": "full_name", "position": 0, "transform_type": "identity", "transform_config": {}},
+    )
+    with pytest.raises(NotFound):
+        MigrationMappingService.update(tenant_a, mapping_b.id, actor, {"source_field": "stolen"})
+    mapping_b.refresh_from_db()
+    assert mapping_b.source_field == "name"
 
-        engine = MigrationEngine()
-        record = {"name": "Too Long"}
-        errors = engine._validate_record(job, record, 0)
 
-        assert len(errors) > 0
+@pytest.mark.django_db
+def test_definition_export_import_checksum_and_identity_safety(identities) -> None:
+    tenant_a, tenant_b, actor = identities
+    job = MigrationJobService.create(tenant_a, actor, job_command())
+    MigrationMappingService.create(
+        tenant_a, job.id, actor,
+        {"source_field": "name", "target_field": "full_name", "position": 0, "transform_type": "identity", "transform_config": {}},
+    )
+    document = MigrationJobService.export_definition(tenant_a, job.id)
+    assert "tenant_id" not in document and "job_id" not in document
+    imported = MigrationJobService.import_definition(tenant_b, actor, document)
+    assert imported.tenant_id == tenant_b
+    assert imported.mappings.count() == 1
+    tampered = {**document, "description": "tampered"}
+    with pytest.raises(MigrationServiceError, match="checksum"):
+        MigrationJobService.import_definition(tenant_b, actor, tampered)
+    with pytest.raises(MigrationServiceError):
+        MigrationJobService.import_definition(tenant_b, actor, {**document, "tenant_id": str(tenant_a)})
 
-    def test_validate_record_min_value(self, db):
-        """Test validating min_value constraint."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "validation_rules": {
-                    "field_constraints": {
-                        "age": {"min_value": 18},
-                    },
-                },
-            },
-            created_by="user-123",
-        )
 
-        engine = MigrationEngine()
-        record = {"age": 15}
-        errors = engine._validate_record(job, record, 0)
+@pytest.mark.django_db
+def test_configuration_preview_update_export_import_restore_and_audit(identities) -> None:
+    tenant, _, actor = identities
+    config = DataMigrationConfigurationService.get(tenant)
+    preview = DataMigrationConfigurationService.preview(tenant, {"batch_size": 250})
+    assert preview == {"from_version": 1, "changes": [{"field": "batch_size", "before": 500, "after": 250}]}
+    updated = DataMigrationConfigurationService.update(tenant, actor, {"batch_size": 250}, 1, "corr-config-1")
+    assert updated.version == 2 and updated.batch_size == 250
+    audit = DataMigrationConfigurationAudit.objects.get(configuration=config, version=2)
+    assert audit.before["batch_size"] == 500 and audit.after["batch_size"] == 250
+    assert audit.correlation_id == "corr-config-1"
+    document = DataMigrationConfigurationService.export(tenant)
+    DataMigrationConfigurationService.import_document(tenant, actor, document, expected_version=2)
+    restored = DataMigrationConfigurationService.restore(tenant, actor, version=2, expected_version=3)
+    assert restored.version == 4 and restored.batch_size == 250
+    with pytest.raises(ConfigurationConflict):
+        DataMigrationConfigurationService.update(tenant, actor, {"batch_size": 10}, 1)
+    with pytest.raises(MigrationServiceError):
+        DataMigrationConfigurationService.import_document(tenant, actor, {**document, "checksum": "0" * 64}, 4)
 
-        assert len(errors) > 0
 
-    def test_validate_record_max_value(self, db):
-        """Test validating max_value constraint."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "validation_rules": {
-                    "field_constraints": {
-                        "age": {"max_value": 100},
-                    },
-                },
-            },
-            created_by="user-123",
-        )
+@pytest.mark.django_db
+def test_configuration_target_adapter_allowlist_is_runtime_configurable(identities) -> None:
+    tenant, _, actor = identities
+    config = DataMigrationConfigurationService.get(tenant)
+    updated = DataMigrationConfigurationService.update(
+        tenant, actor, {"allowed_target_adapters": ["core.record", "crm.customer"]}, config.version
+    )
+    assert updated.allowed_target_adapters == ["core.record", "crm.customer"]
+    exported = DataMigrationConfigurationService.export(tenant)
+    assert exported["configuration"]["allowed_target_adapters"] == ["core.record", "crm.customer"]
 
-        engine = MigrationEngine()
-        record = {"age": 150}
-        errors = engine._validate_record(job, record, 0)
 
-        assert len(errors) > 0
+@pytest.mark.django_db
+def test_run_request_is_durable_idempotent_and_conflict_safe(identities, adapter_registry) -> None:
+    tenant, _, actor = identities
+    job = MigrationJobService.create(tenant, actor, job_command())
+    MigrationMappingService.create(
+        tenant, job.id, actor,
+        {"source_field": "name", "target_field": "full_name", "position": 0, "transform_type": "identity", "transform_config": {}},
+    )
+    result = MigrationJobService.validate_definition(tenant, job.id, actor)
+    assert result.valid
+    run = MigrationExecutionService.request_run(tenant, job.id, actor, "dry_run", "run-key-1")
+    repeated = MigrationExecutionService.request_run(tenant, job.id, actor, "dry_run", "run-key-1")
+    assert repeated.id == run.id
+    assert AsyncJob.objects.filter(id=run.async_job_id, status="queued").exists()
+    assert OutboxEvent.objects.filter(aggregate_id=run.id, event_type="data_migration.run.queued").exists()
+    with pytest.raises(MigrationServiceError, match="Idempotency"):
+        MigrationExecutionService.request_run(tenant, job.id, actor, "commit", "run-key-1")
+    completed = MigrationExecutionService.execute(tenant, run.id)
+    assert completed.status == MigrationRun.Status.SUCCEEDED
+    assert completed.processed_records == completed.succeeded_records == 1
+    assert not adapter_registry[1].writes
+    assert not MigrationChange.objects.filter(run=completed).exists()
 
-    def test_import_record_with_target_model(self, db):
-        """Test importing record with target model specified."""
-        import uuid
 
-        from django.contrib.auth import get_user_model
+@pytest.mark.django_db
+def test_run_request_rejects_non_ready_job_without_async_evidence(identities) -> None:
+    tenant, _, actor = identities
+    job = MigrationJobService.create(tenant, actor, job_command())
+    before_jobs = AsyncJob.objects.count()
+    with pytest.raises(MigrationServiceError, match="ready"):
+        MigrationExecutionService.request_run(tenant, job.id, actor, "commit", "not-ready")
+    assert AsyncJob.objects.count() == before_jobs
+    assert not MigrationRun.objects.filter(job=job).exists()
 
-        from src.modules.workflow_automation.models import Workflow
 
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser2", email="test2@example.com", password="pass")
+@pytest.mark.django_db
+def test_external_connection_rejects_secret_material_and_cross_tenant_access(identities) -> None:
+    tenant_a, tenant_b, actor = identities
+    payload = {
+        "name": "Warehouse", "kind": "postgresql", "host": "db.example.test", "port": 5432,
+        "database": "warehouse", "username": "readonly", "credential_ref": "vault://migration/warehouse",
+        "tls_mode": "verify-full", "public_options": {},
+    }
+    connection = ExternalConnectionService.register(tenant_b, actor, payload)
+    assert connection.credential_ref == "vault://migration/warehouse"
+    with pytest.raises(MigrationServiceError, match="Secret material"):
+        ExternalConnectionService.register(tenant_a, actor, {**payload, "name": "Unsafe", "password": "plaintext"})
+    with pytest.raises(NotFound):
+        ExternalConnectionService.update(tenant_a, connection.id, actor, {"name": "Stolen"})
+    connection.refresh_from_db()
+    assert connection.name == "Warehouse"
 
-        job = MigrationJob.objects.create(
-            tenant_id=str(uuid.uuid4()),
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "target": {
-                    "model": "src.modules.workflow_automation.models.Workflow",
-                    "action": "create",
-                },
-            },
-            created_by=str(user.id),
-        )
 
-        engine = MigrationEngine()
-        record = {
-            "name": "Test Workflow",
-            "description": "Test",
-            "trigger_type": "manual",
-            "created_by_id": user.id,  # Use created_by_id for ForeignKey
-        }
+@pytest.mark.parametrize(
+    "operation,args",
+    (
+        (validate_source_config, ("xml", {"record_path": "/rows/row", "batch_size": 1})),
+        (validate_transform_config, ("boolean_map", {"true_values": ["yes"], "false_values": ["no"]})),
+        (validate_rule_config, ("allowed_values", {"values": ["a", "b"]})),
+    ),
+)
+def test_schema_variants_accept_bounded_known_configuration(operation, args) -> None:
+    assert operation(*args)
 
-        # This will create a Workflow record
-        record_id = engine._import_record(job, record, job.tenant_id)
 
-        assert record_id is not None
-        # Verify workflow was created
-        workflow = Workflow.objects.filter(tenant_id=job.tenant_id, name="Test Workflow").first()
-        assert workflow is not None
-
-    def test_import_record_with_update_action(self, db):
-        """Test importing record with update action."""
-        import uuid
-
-        from django.contrib.auth import get_user_model
-
-        from src.modules.workflow_automation.models import Workflow
-
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser3", email="test3@example.com", password="pass")
-        tenant_id = str(uuid.uuid4())
-
-        # Create existing workflow
-        existing_workflow = Workflow.objects.create(
-            tenant_id=tenant_id,
-            name="Existing Workflow",
-            trigger_type="manual",
-            created_by=user,
-        )
-
-        job = MigrationJob.objects.create(
-            tenant_id=tenant_id,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "target": {
-                    "model": "src.modules.workflow_automation.models.Workflow",
-                    "action": "update",
-                    "lookup_field": "id",
-                },
-            },
-            created_by=str(user.id),
-        )
-
-        engine = MigrationEngine()
-        record = {
-            "id": str(existing_workflow.id),
-            "name": "Updated Workflow",
-            "description": "Updated",
-            "trigger_type": "manual",
-        }
-
-        # This should update the existing workflow
-        record_id = engine._import_record(job, record, tenant_id)
-
-        assert record_id is not None
-        # Verify workflow was updated
-        existing_workflow.refresh_from_db()
-        assert existing_workflow.name == "Updated Workflow"
-
-    def test_import_record_update_not_found(self, db):
-        """Test importing record with update action when record not found."""
-        import uuid
-
-        from django.contrib.auth import get_user_model
-
-        from src.modules.workflow_automation.models import Workflow
-
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser4", email="test4@example.com", password="pass")
-        tenant_id = str(uuid.uuid4())
-
-        job = MigrationJob.objects.create(
-            tenant_id=tenant_id,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "target": {
-                    "model": "src.modules.workflow_automation.models.Workflow",
-                    "action": "update",
-                    "lookup_field": "id",
-                },
-            },
-            created_by=str(user.id),
-        )
-
-        engine = MigrationEngine()
-        record = {
-            "id": str(uuid.uuid4()),  # Non-existent ID
-            "name": "New Workflow",
-            "trigger_type": "manual",
-        }
-
-        # This should create a new workflow since update target not found
-        record_id = engine._import_record(job, record, tenant_id)
-
-        assert record_id is not None
-        # Verify new workflow was created
-        workflow = Workflow.objects.filter(tenant_id=tenant_id, name="New Workflow").first()
-        assert workflow is not None
-
-    def test_import_record_update_missing_lookup(self, db):
-        """Test importing record with update action but missing lookup field."""
-        import uuid
-
-        from django.contrib.auth import get_user_model
-
-        User = get_user_model()
-        user = User.objects.create_user(username="testuser5", email="test5@example.com", password="pass")
-        tenant_id = str(uuid.uuid4())
-
-        job = MigrationJob.objects.create(
-            tenant_id=tenant_id,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "target": {
-                    "model": "src.modules.workflow_automation.models.Workflow",
-                    "action": "update",
-                    "lookup_field": "id",
-                },
-            },
-            created_by=str(user.id),
-        )
-
-        engine = MigrationEngine()
-        record = {
-            "name": "Test Workflow",
-            "trigger_type": "manual",
-            # Missing "id" field
-        }
-
-        # This should raise ValueError
-        with pytest.raises(ValueError, match="Lookup field"):
-            engine._import_record(job, record, tenant_id)
-
-    def test_import_record_import_error(self, db):
-        """Test importing record with invalid model path."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="json",
-            source_config={
-                "target": {
-                    "model": "invalid.module.path.NonExistentModel",
-                    "action": "create",
-                },
-            },
-            created_by="user-123",
-        )
-
-        engine = MigrationEngine()
-        record = {"name": "Test"}
-
-        with pytest.raises(ValueError, match="Failed to import target model"):
-            engine._import_record(job, record, TEST_TENANT_ID)
-
-    def test_load_database_data(self, db):
-        """Test loading structured data through a named connection."""
-        connection_config = ExternalConnection.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test source",
-            db_scheme="postgresql",
-            host="external.example",
-            port=5432,
-            database="source",
-            username="readonly_user",
-            password_encrypted=EncryptionService.encrypt("secret"),
-            created_by="user-123",
-        )
-        cursor = MagicMock()
-        cursor.__enter__.return_value = cursor
-        cursor.description = [("name",), ("value",)]
-        cursor.fetchall.return_value = [("record", "42")]
-        connection = MagicMock()
-        connection.cursor.return_value = cursor
-
-        engine = MigrationEngine()
-        with patch(
-            "src.modules.data_migration.services._connect_external_database",
-            return_value=connection,
-        ):
-            data = engine._load_database_data(
-                {
-                    "connection_id": str(connection_config.id),
-                    "table": "source_records",
-                    "columns": ["name", "value"],
-                },
-                str(TEST_TENANT_ID),
-            )
-
-        assert data == [{"name": "record", "value": "42"}]
-
-    def test_load_database_data_missing_config(self, db):
-        """Test the named-connection source contract is mandatory."""
-        config = {}
-        engine = MigrationEngine()
-        with pytest.raises(ValueError, match="connection_id and table"):
-            engine._load_database_data(config, str(TEST_TENANT_ID))
-
-    def test_execute_migration_with_exception(self, db):
-        """Test executing migration that raises an exception."""
-        job = MigrationJob.objects.create(
-            tenant_id=TEST_TENANT_ID,
-            name="Test Migration",
-            source_type="unsupported",
-            source_config={},
-            created_by="user-123",
-        )
-
-        engine = MigrationEngine()
-        with pytest.raises(ValueError):
-            engine.execute_migration(job.id, TEST_TENANT_ID)
-
-        # Verify job status is set to failed (exception handler sets it)
-        # Note: The exception handler saves the job with status="failed" before raising
-        # However, if the transaction is rolled back, the status might revert
-        # So we check that the exception was raised (which is the main test)
-        # and optionally check the job status if it was saved
-        job.refresh_from_db()
-        # The job should be in failed state if the save succeeded before exception
-        # or still in pending if transaction was rolled back
-        assert job.status in ["failed", "pending", "running"]
+@pytest.mark.parametrize(
+    "operation,args",
+    (
+        (validate_source_config, ("api", {"connection_id": str(uuid.uuid4()), "relative_path": "//internal"})),
+        (validate_transform_config, ("regex_replace", {"pattern": "(a+)+", "replacement": ""})),
+        (validate_rule_config, ("unknown", {})),
+        (validate_rule_config, ("allowed_values", {"values": list(range(1001))})),
+    ),
+)
+def test_schema_variants_fail_closed(operation, args) -> None:
+    with pytest.raises(ValueError):
+        operation(*args)

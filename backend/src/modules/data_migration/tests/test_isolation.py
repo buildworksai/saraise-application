@@ -1,714 +1,236 @@
-"""
-Tenant Isolation Tests for DataMigration module.
+"""Black-box tenant isolation contracts for every mutable public entity."""
 
-CRITICAL: These tests verify that tenants cannot access each other's data.
-This is the PRIMARY security mechanism for multi-tenant isolation.
+from __future__ import annotations
 
-Reference: saraise-documentation/rules/compliance-enforcement.md
-Rule: ALL tenant-scoped queries MUST filter by tenant_id
-"""
-
-import ipaddress
 import uuid
-from unittest.mock import MagicMock, patch
+from typing import Any
 
 import pytest
-from django.contrib.auth import get_user_model
+from rest_framework.exceptions import NotFound
 from rest_framework import status
-from rest_framework.test import APIClient
 
-from src.core.auth_utils import get_user_tenant_id
-from src.core.encryption.service import EncryptionService
+from src.core.access.permissions import RequiresAccess
+from src.core.testing import TenantIsolationContract
 from src.modules.data_migration.models import (
     ExternalConnection,
     MigrationJob,
-    MigrationLog,
+    MigrationJobVersion,
     MigrationMapping,
-    MigrationValidation,
+    MigrationRun,
+    ValidationRule,
 )
-from src.modules.data_migration.services import (
-    MigrationEngine,
-    _connect_external_database,
-    _validated_external_hostaddr,
-)
+from src.modules.data_migration.services import MigrationJobService, MigrationServiceError
 
-User = get_user_model()
+pytest_plugins = ["src.core.testing.factories"]
 
 
 @pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
-    settings.SARAISE_MODE = "development"
-    settings.MIDDLEWARE = [
-        middleware
-        for middleware in settings.MIDDLEWARE
-        if middleware != "src.core.auth.mode_auth_middleware.ModeAuthMiddleware"
-    ]
+def fast_test_password_hashing(settings) -> None:
+    settings.PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
+
+def _items(response: Any) -> list[dict[str, Any]]:
+    payload = response.data
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+        return payload["data"]
+    if isinstance(payload, dict) and isinstance(payload.get("results"), list):
+        return payload["results"]
+    raise AssertionError(f"Unexpected collection payload: {payload!r}")
+
+
+@pytest.fixture(autouse=True)
+def allow_access_pipeline(monkeypatch) -> None:
+    """Keep isolation focused after the shared access pipeline's own tests."""
+
+    monkeypatch.setattr(RequiresAccess, "has_permission", lambda self, request, view: True)
+    monkeypatch.setattr(RequiresAccess, "has_object_permission", lambda self, request, view, obj: True)
+    monkeypatch.setattr("src.modules.dms.services.VersionService.get_version", lambda self, tenant, actor, version: object())
 
 
 @pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
+def actor_id(tenant_a_user) -> uuid.UUID:
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:user:{tenant_a_user.pk}")
 
 
-@pytest.fixture
-def tenant_a_user(db):
-    """Create user for tenant A."""
-    from unittest.mock import patch
-
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_a",
-        email="usera@example.com",
-        password="testpass123",  # pragma: allowlist secret
+def _job(tenant_id: uuid.UUID, actor: uuid.UUID, name: str) -> MigrationJob:
+    return MigrationJobService.create(
+        tenant_id,
+        actor,
+        {
+            "name": name,
+            "source_type": "csv",
+            "source_artifact_id": uuid.uuid4(),
+            "source_config": {"encoding": "utf-8", "batch_size": 50},
+            "target_adapter": "core.record",
+            "target_entity": "record",
+            "write_mode": "create",
+            "lookup_fields": [],
+        },
     )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
 
 
-@pytest.fixture
-def tenant_b_user(db):
-    """Create user for tenant B."""
-    from unittest.mock import patch
+class GovernedEnvelopeIsolationContract(TenantIsolationContract):
+    read_denial_statuses = frozenset({status.HTTP_404_NOT_FOUND})
 
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_b",
-        email="userb@example.com",
-        password="testpass123",  # pragma: allowlist secret
-    )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
-
-
-@pytest.fixture
-def platform_operator_user(db):
-    """Create a platform-scoped operator with no tenant membership."""
-    user = User.objects.create_user(
-        username="platform_operator",
-        email="operator@example.com",
-        password="testpass123",  # pragma: allowlist secret
-    )
-    profile = user.profile
-    profile.platform_role = "platform_operator"
-    profile.save()
-    return User.objects.get(pk=user.pk)
-
-
-@pytest.fixture
-def external_connection(tenant_a_user):
-    """Create an active named connection owned by tenant A."""
-    return ExternalConnection.objects.create(
-        tenant_id=get_user_tenant_id(tenant_a_user),
-        name="Partner warehouse",
-        db_scheme="postgresql",
-        host="warehouse.partner.example",
-        port=5432,
-        database="warehouse",
-        username="readonly_user",
-        password_encrypted=EncryptionService.encrypt("operator-secret"),
-        created_by=str(tenant_a_user.id),
-    )
+    def get_list_items(self, response):
+        return _items(response)
 
 
 @pytest.mark.django_db
-class TestMigrationJobTenantIsolation:
-    """Tenant isolation tests for MigrationJob model."""
+class TestMigrationJobIsolation(GovernedEnvelopeIsolationContract):
+    model = MigrationJob
+    list_url = "/api/v2/data-migration/jobs/"
+    detail_url_template = "/api/v2/data-migration/jobs/{pk}/"
+    create_payload = {
+        "name": "Spoof attempt",
+        "source_type": "csv",
+        "source_artifact_id": "00000000-0000-0000-0000-000000000123",
+        "source_config": {"encoding": "utf-8", "batch_size": 25},
+        "target_adapter": "core.record",
+        "target_entity": "record",
+        "write_mode": "create",
+        "lookup_fields": [],
+    }
+    update_payload = {"description": "cross-tenant edit", "expected_version": 1}
 
-    def test_user_cannot_list_other_tenant_jobs(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's migration jobs in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
+    @pytest.fixture(autouse=True)
+    def context(self, authenticated_tenant_a_client, tenant_a, tenant_b, actor_id):
+        self.client = authenticated_tenant_a_client
+        self.tenant_a_row = _job(tenant_a.id, actor_id, "Tenant A job")
+        self.tenant_b_row = _job(tenant_b.id, actor_id, "Tenant B job")
 
-        # Create job for tenant A
-        job_a = MigrationJob.objects.create(
-            tenant_id=tenant_a_id,
-            name="Tenant A Job",
-            source_type="csv",
-            created_by=str(tenant_a_user.id),
+
+@pytest.mark.django_db
+class TestMigrationMappingIsolation(GovernedEnvelopeIsolationContract):
+    model = MigrationMapping
+    detail_url_template = "/api/v2/data-migration/mappings/{pk}/"
+    create_payload = {
+        "source_field": "source_new",
+        "target_field": "target_new",
+        "position": 1,
+        "transform_type": "identity",
+        "transform_config": {},
+        "is_required": False,
+    }
+    update_payload = {"source_field": "cross_tenant"}
+
+    @pytest.fixture(autouse=True)
+    def context(self, authenticated_tenant_a_client, tenant_a, tenant_b, actor_id):
+        self.client = authenticated_tenant_a_client
+        self.job_a = _job(tenant_a.id, actor_id, "Tenant A mappings")
+        job_b = _job(tenant_b.id, actor_id, "Tenant B mappings")
+        self.tenant_a_row = MigrationMapping.objects.create(
+            tenant_id=tenant_a.id, job=self.job_a, source_field="name", target_field="full_name",
+            position=0, transform_type="identity", transform_config={}, created_by=actor_id,
+        )
+        self.tenant_b_row = MigrationMapping.objects.create(
+            tenant_id=tenant_b.id, job=job_b, source_field="name", target_field="full_name",
+            position=0, transform_type="identity", transform_config={}, created_by=actor_id,
         )
 
-        # Create job for tenant B
-        job_b = MigrationJob.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Job",
-            source_type="csv",
-            created_by=str(tenant_b_user.id),
+    def get_list_url(self) -> str:
+        return f"/api/v2/data-migration/jobs/{self.job_a.id}/mappings/"
+
+
+@pytest.mark.django_db
+class TestValidationRuleIsolation(GovernedEnvelopeIsolationContract):
+    model = ValidationRule
+    detail_url_template = "/api/v2/data-migration/validation-rules/{pk}/"
+    create_payload = {
+        "field_name": "external_id",
+        "rule_type": "required",
+        "rule_config": {},
+        "error_message": "Required",
+        "severity": "error",
+        "position": 1,
+        "is_active": True,
+    }
+    update_payload = {"error_message": "cross-tenant edit"}
+
+    @pytest.fixture(autouse=True)
+    def context(self, authenticated_tenant_a_client, tenant_a, tenant_b, actor_id):
+        self.client = authenticated_tenant_a_client
+        self.job_a = _job(tenant_a.id, actor_id, "Tenant A rules")
+        job_b = _job(tenant_b.id, actor_id, "Tenant B rules")
+        self.tenant_a_row = ValidationRule.objects.create(
+            tenant_id=tenant_a.id, job=self.job_a, field_name="name", rule_type="required",
+            rule_config={}, error_message="Required", severity="error", position=0, created_by=actor_id,
+        )
+        self.tenant_b_row = ValidationRule.objects.create(
+            tenant_id=tenant_b.id, job=job_b, field_name="name", rule_type="required",
+            rule_config={}, error_message="Required", severity="error", position=0, created_by=actor_id,
         )
 
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
+    def get_list_url(self) -> str:
+        return f"/api/v2/data-migration/jobs/{self.job_a.id}/validation-rules/"
 
-        response = api_client.get("/api/v1/data-migration/jobs/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        job_ids = [j["id"] for j in data]
 
-        # User A should see tenant A's job, but NOT tenant B's job
-        assert job_a.id in job_ids
-        assert job_b.id not in job_ids
+@pytest.mark.django_db
+class TestExternalConnectionIsolation(GovernedEnvelopeIsolationContract):
+    model = ExternalConnection
+    list_url = "/api/v2/data-migration/connections/"
+    detail_url_template = "/api/v2/data-migration/connections/{pk}/"
+    create_payload = {
+        "name": "Spoofed connection", "kind": "http", "base_url": "https://api.example.test",
+        "credential_ref": "vault://migration/spoof", "tls_mode": "verify-full", "public_options": {},
+    }
+    update_payload = {"name": "cross-tenant edit"}
+    read_denial_statuses = frozenset({status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND, status.HTTP_405_METHOD_NOT_ALLOWED})
 
-    def test_user_cannot_get_other_tenant_job_by_id(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot GET other tenant's job by ID (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create job for tenant B
-        job_b = MigrationJob.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Job",
-            source_type="csv",
-            created_by=str(tenant_b_user.id),
+    @pytest.fixture(autouse=True)
+    def context(self, authenticated_tenant_a_client, tenant_a, tenant_b, actor_id):
+        self.client = authenticated_tenant_a_client
+        self.tenant_a_row = ExternalConnection.objects.create(
+            tenant_id=tenant_a.id, name="Tenant A API", kind="http", base_url="https://a.example.test",
+            credential_ref="vault://a", tls_mode="verify-full", public_options={}, created_by=actor_id,
+        )
+        self.tenant_b_row = ExternalConnection.objects.create(
+            tenant_id=tenant_b.id, name="Tenant B API", kind="http", base_url="https://b.example.test",
+            credential_ref="vault://b", tls_mode="verify-full", public_options={}, created_by=actor_id,
         )
 
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
 
-        # Try to access tenant B's job
-        response = api_client.get(f"/api/v1/data-migration/jobs/{job_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    def test_user_cannot_execute_other_tenant_job(self, api_client, tenant_a_user, tenant_b_user):
-        """Execution lookup is tenant-scoped and cannot reach another tenant's source."""
-        job_b = MigrationJob.objects.create(
-            tenant_id=get_user_tenant_id(tenant_b_user),
-            name="Tenant B database job",
-            source_type="database",
-            source_config={
-                "connection_string": "postgresql://external/source",
-                "table": "customers",
-            },
-            created_by=str(tenant_b_user.id),
-        )
-        api_client.force_authenticate(user=tenant_a_user)
-
-        with patch.object(MigrationEngine, "execute_migration") as execute:
-            response = api_client.post(f"/api/v1/data-migration/jobs/{job_b.id}/execute/")
-
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-        execute.assert_not_called()
-
-
-class TestExternalDatabaseSourceSecurity:
-    """Database migration sources never execute caller SQL on the application DB."""
-
-    @pytest.mark.parametrize(
-        "forbidden_key",
-        ["connection_string", "query", "sql_query", "dsn", "hostaddr", "host", "service"],
+@pytest.mark.django_db
+def test_cross_tenant_actions_are_exact_404(
+    authenticated_tenant_a_client, tenant_a, tenant_b, actor_id
+) -> None:
+    job_b = _job(tenant_b.id, actor_id, "Tenant B actions")
+    version_b = MigrationJobVersion.objects.get(job=job_b, version=1)
+    run_b = MigrationRun.objects.create(
+        tenant_id=tenant_b.id, job=job_b, job_version=version_b, async_job_id=uuid.uuid4(),
+        mode="commit", status="queued", idempotency_key="tenant-b-run", source_checksum="a" * 64,
+        created_by=actor_id, correlation_id="corr-b",
     )
-    def test_caller_connection_and_sql_fields_are_rejected_by_api(
-        self,
-        forbidden_key,
-        api_client,
-        tenant_a_user,
-        external_connection,
-    ):
-        api_client.force_authenticate(user=tenant_a_user)
-        source_config = {
-            "connection_id": str(external_connection.id),
-            "table": "customers",
-            forbidden_key: "caller-controlled-value",
-        }
-        response = api_client.post(
-            "/api/v1/data-migration/jobs/",
-            {
-                "name": "Injected source",
-                "source_type": "database",
-                "source_config": source_config,
-            },
-            format="json",
-        )
-
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        error = str(response.data)
-        assert forbidden_key in error or "migration required" in error or "Raw SQL" in error
-
-    def test_legacy_stored_connection_string_fails_with_migration_required(self, tenant_a_user):
-        tenant_id = get_user_tenant_id(tenant_a_user)
-        job = MigrationJob.objects.create(
-            tenant_id=tenant_id,
-            name="Legacy database job",
-            source_type="database",
-            source_config={
-                "connection_string": "postgresql://legacy.invalid/source",
-                "table": "customers",
-            },
-            created_by=str(tenant_a_user.id),
-        )
-
-        with pytest.raises(ValueError, match="migration required"):
-            MigrationEngine().execute_migration(job.id, tenant_id, dry_run=True)
-
-    def test_cross_tenant_connection_reference_is_rejected(
-        self,
-        api_client,
-        tenant_b_user,
-        external_connection,
-    ):
-        api_client.force_authenticate(user=tenant_b_user)
-        response = api_client.post(
-            "/api/v1/data-migration/jobs/",
-            {
-                "name": "Cross-tenant source",
-                "source_type": "database",
-                "source_config": {
-                    "connection_id": str(external_connection.id),
-                    "table": "customers",
-                },
-            },
-            format="json",
-        )
-
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert "not found for tenant" in str(response.data)
-
-    def test_non_operator_cannot_register_or_edit_connection(
-        self,
-        api_client,
-        tenant_a_user,
-        external_connection,
-    ):
-        api_client.force_authenticate(user=tenant_a_user)
-        response = api_client.post(
-            "/api/v1/data-migration/connections/",
-            {
-                "tenant_id": get_user_tenant_id(tenant_a_user),
-                "name": "Forbidden registration",
-                "db_scheme": "postgresql",
-                "host": "warehouse.partner.example",
-                "port": 5432,
-                "database": "warehouse",
-                "username": "readonly_user",
-                "password": "must-not-be-stored",  # pragma: allowlist secret
-            },
-            format="json",
-        )
-
-        assert response.status_code == status.HTTP_403_FORBIDDEN
-        assert not ExternalConnection.objects.filter(name="Forbidden registration").exists()
-
-        edit_response = api_client.patch(
-            f"/api/v1/data-migration/connections/{external_connection.id}/",
-            {"name": "Forbidden edit"},
-            format="json",
-        )
-        assert edit_response.status_code == status.HTTP_403_FORBIDDEN
-        external_connection.refresh_from_db()
-        assert external_connection.name == "Partner warehouse"
-
-    def test_operator_registration_tenant_reference_and_pinned_readonly_connection(
-        self,
-        api_client,
-        tenant_a_user,
-        platform_operator_user,
-        monkeypatch,
-    ):
-        monkeypatch.setenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", "warehouse.partner.example")
-        tenant_id = get_user_tenant_id(tenant_a_user)
-        api_client.force_authenticate(user=platform_operator_user)
-        registration = api_client.post(
-            "/api/v1/data-migration/connections/",
-            {
-                "tenant_id": tenant_id,
-                "name": "Operator managed warehouse",
-                "db_scheme": "postgresql",
-                "host": "warehouse.partner.example",
-                "port": 5432,
-                "database": "warehouse",
-                "username": "readonly_user",
-                "password": "operator-secret",  # pragma: allowlist secret
-            },
-            format="json",
-        )
-
-        assert registration.status_code == status.HTTP_201_CREATED
-        assert "password" not in registration.data
-        connection_config = ExternalConnection.objects.get(id=registration.data["id"])
-        assert connection_config.password_encrypted != "operator-secret"  # pragma: allowlist secret
-        assert (
-            EncryptionService.decrypt(connection_config.password_encrypted) == "operator-secret"
-        )  # pragma: allowlist secret
-
-        api_client.force_authenticate(user=tenant_a_user)
-        listing = api_client.get("/api/v1/data-migration/connections/")
-        assert listing.status_code == status.HTTP_200_OK
-        listed = listing.data if isinstance(listing.data, list) else listing.data["results"]
-        assert listed[0]["id"] == str(connection_config.id)
-        assert "host" not in listed[0]
-        assert "username" not in listed[0]
-        assert "password" not in listed[0]
-
-        job_response = api_client.post(
-            "/api/v1/data-migration/jobs/",
-            {
-                "name": "Named connection job",
-                "source_type": "database",
-                "source_config": {
-                    "connection_id": str(connection_config.id),
-                    "table": "customers",
-                    "columns": ["id", "name"],
-                    "filters": {"account_id": "tenant-value"},
-                },
-            },
-            format="json",
-        )
-        assert job_response.status_code == status.HTTP_201_CREATED
-
-        cursor = MagicMock()
-        cursor.__enter__.return_value = cursor
-        cursor.description = [("id",), ("name",)]
-        cursor.fetchall.return_value = [(1, "Acme")]
-        database_connection = MagicMock()
-        database_connection.cursor.return_value = cursor
-        public_ip = ipaddress.ip_address("8.8.8.8")
-        with (
-            patch(
-                "src.modules.data_migration.services._resolved_addresses",
-                return_value={public_ip},
-            ),
-            patch("src.modules.data_migration.services._primary_db_addresses", return_value=set()),
-            patch(
-                "psycopg2.connect",
-                return_value=database_connection,
-            ) as connect,
-        ):
-            records = MigrationEngine()._load_database_data(job_response.data["source_config"], tenant_id)
-
-        connect_kwargs = connect.call_args.kwargs
-        assert connect_kwargs["host"] == "warehouse.partner.example"
-        assert connect_kwargs["hostaddr"] == "8.8.8.8"
-        assert connect_kwargs["password"] == "operator-secret"  # pragma: allowlist secret
-        assert connect_kwargs["connect_timeout"] == 10
-        assert connect_kwargs["options"] == "-c statement_timeout=30000"
-        assert connect_kwargs["service"] == ""
-        assert connect_kwargs["sslmode"] == "verify-full"
-        database_connection.set_session.assert_called_once_with(readonly=True, autocommit=False)
-        database_connection.close.assert_called_once_with()
-        assert records == [{"id": 1, "name": "Acme"}]
-
-    @pytest.mark.parametrize(
-        "config",
-        [
-            {
-                "table": "customers; DROP TABLE users",
-            },
-            {
-                "table": "customers",
-                "columns": ["name, (SELECT password FROM users)"],
-            },
-            {
-                "table": "customers",
-                "filters": {"tenant_id OR 1=1": "attacker"},
-            },
-        ],
+    client = authenticated_tenant_a_client
+    calls = (
+        ("post", f"/api/v2/data-migration/jobs/{job_b.id}/validate/", {}),
+        ("get", f"/api/v2/data-migration/jobs/{job_b.id}/preview/", None),
+        ("post", f"/api/v2/data-migration/jobs/{job_b.id}/inspect/", {}),
+        ("post", f"/api/v2/data-migration/jobs/{job_b.id}/versions/1/restore/", {"expected_version": 1}),
+        ("post", f"/api/v2/data-migration/jobs/{job_b.id}/runs/", {}),
+        ("post", f"/api/v2/data-migration/runs/{run_b.id}/cancel/", {"transition_key": "cancel-a"}),
+        ("get", f"/api/v2/data-migration/runs/{run_b.id}/issues/export/", None),
+        ("post", f"/api/v2/data-migration/runs/{run_b.id}/rollback/", {}),
     )
-    def test_identifier_injection_is_rejected_before_connect(self, config, tenant_a_user, external_connection):
-        config["connection_id"] = str(external_connection.id)
-        with patch("src.modules.data_migration.services._connect_external_database") as connect:
-            with pytest.raises(ValueError, match="Invalid"):
-                MigrationEngine()._load_database_data(config, get_user_tenant_id(tenant_a_user))
-        connect.assert_not_called()
-
-    def test_uses_only_named_connection_and_parameterized_filters(self, tenant_a_user, external_connection):
-        cursor = MagicMock()
-        cursor.__enter__.return_value = cursor
-        cursor.description = [("id",), ("name",)]
-        cursor.fetchall.return_value = [(1, "Acme")]
-        database_connection = MagicMock()
-        database_connection.cursor.return_value = cursor
-
-        with patch(
-            "src.modules.data_migration.services._connect_external_database",
-            return_value=database_connection,
-        ) as connect:
-            records = MigrationEngine()._load_database_data(
-                {
-                    "connection_id": str(external_connection.id),
-                    "table": "customers",
-                    "columns": ["id", "name"],
-                    "filters": {"account_id": "tenant-supplied-value"},
-                },
-                get_user_tenant_id(tenant_a_user),
-            )
-
-        connect.assert_called_once_with(external_connection)
-        cursor.execute.assert_called_once_with(
-            "SELECT id, name FROM customers WHERE account_id = %s",
-            ["tenant-supplied-value"],
-        )
-        database_connection.close.assert_called_once_with()
-        assert records == [{"id": 1, "name": "Acme"}]
-
-    def test_raw_sql_never_reaches_any_connection(self, tenant_a_user, external_connection):
-        with patch("src.modules.data_migration.services._connect_external_database") as connect:
-            with pytest.raises(ValueError, match="Raw SQL"):
-                MigrationEngine()._load_database_data(
-                    {
-                        "connection_id": str(external_connection.id),
-                        "table": "customers",
-                        "query": "SELECT * FROM crm_customer",
-                    },
-                    get_user_tenant_id(tenant_a_user),
-                )
-        connect.assert_not_called()
-
-    def test_registered_host_targeting_primary_db_host_is_rejected(self, settings):
-        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": "primary-db.internal"}}
-        with pytest.raises(ValueError, match="configured Django database host"):
-            _validated_external_hostaddr("primary-db.internal")
-
-    def test_registered_host_targeting_loopback_is_rejected_even_when_allowlisted(
-        self,
-        settings,
-        monkeypatch,
-    ):
-        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
-        monkeypatch.setenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", "127.0.0.1")
-        with pytest.raises(ValueError, match="internal or non-routable"):
-            _validated_external_hostaddr("127.0.0.1")
-
-    def test_host_resolving_to_primary_database_ip_is_rejected(self, settings):
-        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": "primary-db.internal"}}
-
-        def resolve(host):
-            assert host in {"warehouse.partner.example", "primary-db.internal"}
-            return {ipaddress.ip_address("8.8.8.8")}
-
-        with patch("src.modules.data_migration.services._resolved_addresses", side_effect=resolve):
-            with pytest.raises(ValueError, match="configured Django database address"):
-                _validated_external_hostaddr("warehouse.partner.example")
-
-    def test_unset_allowlist_still_rejects_internal_address(self, settings, monkeypatch):
-        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
-        monkeypatch.delenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", raising=False)
-        private_ip = ipaddress.ip_address("10.1.2.3")
-
-        with patch("src.modules.data_migration.services._resolved_addresses", return_value={private_ip}):
-            with pytest.raises(ValueError, match="internal or non-routable"):
-                _validated_external_hostaddr("warehouse.partner.example")
-
-    def test_unset_allowlist_rejects_public_host(self, settings, monkeypatch):
-        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
-        monkeypatch.delenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", raising=False)
-        public_ip = ipaddress.ip_address("8.8.8.8")
-
-        with patch("src.modules.data_migration.services._resolved_addresses", return_value={public_ip}):
-            with pytest.raises(ValueError, match="allowlist"):
-                _validated_external_hostaddr("warehouse.partner.example")
-
-    def test_empty_allowlist_rejects_public_host(self, settings, monkeypatch):
-        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
-        monkeypatch.setenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", "")
-        public_ip = ipaddress.ip_address("8.8.8.8")
-
-        with patch("src.modules.data_migration.services._resolved_addresses", return_value={public_ip}):
-            with pytest.raises(ValueError, match="allowlist"):
-                _validated_external_hostaddr("warehouse.partner.example")
-
-    def test_empty_host_is_rejected(self, settings):
-        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
-        with pytest.raises(ValueError, match="non-empty canonical"):
-            _validated_external_hostaddr("")
-
-    def test_allowlist_blocks_hosts_not_listed(self, settings, monkeypatch):
-        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
-        monkeypatch.setenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", "warehouse.partner.example")
-        public_ip = ipaddress.ip_address("8.8.8.8")
-
-        with patch("src.modules.data_migration.services._resolved_addresses", return_value={public_ip}):
-            with pytest.raises(ValueError, match="allowlist"):
-                _validated_external_hostaddr("other.example")
-
-    def test_allowlist_never_exempts_unresolvable_host(self, settings, monkeypatch):
-        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
-        monkeypatch.setenv("DATA_MIGRATION_ALLOWED_DB_HOSTS", "warehouse.partner.example")
-        with patch("src.modules.data_migration.services._resolved_addresses", return_value=set()):
-            with pytest.raises(ValueError, match="could not be resolved"):
-                _validated_external_hostaddr("warehouse.partner.example")
-
-    def test_guard_runs_before_connect_for_internal_registered_host(self, settings, external_connection):
-        settings.DATABASES = {"default": {"ENGINE": "django.db.backends.postgresql", "HOST": ""}}
-        external_connection.host = "127.0.0.1"
-        external_connection.save(update_fields=["host"])
-        with patch("psycopg2.connect") as connect:
-            with pytest.raises(ValueError, match="internal or non-routable"):
-                _connect_external_database(external_connection)
-        connect.assert_not_called()
+    for method, url, data in calls:
+        response = getattr(client, method)(url, data=data, format="json", HTTP_IDEMPOTENCY_KEY="isolation-key")
+        assert response.status_code == status.HTTP_404_NOT_FOUND, (method, url, response.status_code, response.data)
 
 
 @pytest.mark.django_db
-class TestMigrationMappingTenantIsolation:
-    """Tenant isolation tests for MigrationMapping model."""
-
-    def test_user_cannot_list_other_tenant_mappings(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's mappings in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create jobs
-        job_a = MigrationJob.objects.create(
-            tenant_id=tenant_a_id,
-            name="Tenant A Job",
-            source_type="csv",
-            created_by=str(tenant_a_user.id),
-        )
-
-        job_b = MigrationJob.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Job",
-            source_type="csv",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Create mappings
-        mapping_a = MigrationMapping.objects.create(
-            tenant_id=tenant_a_id,
-            job=job_a,
-            source_field="field_a",
-            target_field="target_a",
-        )
-
-        mapping_b = MigrationMapping.objects.create(
-            tenant_id=tenant_b_id,
-            job=job_b,
-            source_field="field_b",
-            target_field="target_b",
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        response = api_client.get("/api/v1/data-migration/mappings/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        mapping_ids = [m["id"] for m in data]
-
-        # User A should see tenant A's mapping, but NOT tenant B's mapping
-        assert mapping_a.id in mapping_ids
-        assert mapping_b.id not in mapping_ids
-
-
-@pytest.mark.django_db
-class TestMigrationLogTenantIsolation:
-    """Tenant isolation tests for MigrationLog model."""
-
-    def test_user_cannot_list_other_tenant_logs(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's logs in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create jobs
-        job_a = MigrationJob.objects.create(
-            tenant_id=tenant_a_id,
-            name="Tenant A Job",
-            source_type="csv",
-            created_by=str(tenant_a_user.id),
-        )
-
-        job_b = MigrationJob.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Job",
-            source_type="csv",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Create logs
-        log_a = MigrationLog.objects.create(
-            tenant_id=tenant_a_id,
-            job=job_a,
-            level="info",
-            message="Tenant A log message",
-        )
-
-        log_b = MigrationLog.objects.create(
-            tenant_id=tenant_b_id,
-            job=job_b,
-            level="info",
-            message="Tenant B log message",
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        response = api_client.get("/api/v1/data-migration/logs/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        log_ids = [log["id"] for log in data]
-
-        # User A should see tenant A's log, but NOT tenant B's log
-        assert log_a.id in log_ids
-        assert log_b.id not in log_ids
-
-
-@pytest.mark.django_db
-class TestMigrationValidationTenantIsolation:
-    """Tenant isolation tests for MigrationValidation model."""
-
-    def test_user_cannot_list_other_tenant_validations(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's validations in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create jobs
-        job_a = MigrationJob.objects.create(
-            tenant_id=tenant_a_id,
-            name="Tenant A Job",
-            source_type="csv",
-            created_by=str(tenant_a_user.id),
-        )
-
-        job_b = MigrationJob.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Job",
-            source_type="csv",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Create validations
-        validation_a = MigrationValidation.objects.create(
-            tenant_id=tenant_a_id,
-            job=job_a,
-            field="field_a",
-            rule="required",
-            status="failed",
-        )
-
-        validation_b = MigrationValidation.objects.create(
-            tenant_id=tenant_b_id,
-            job=job_b,
-            field="field_b",
-            rule="required",
-            status="failed",
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        response = api_client.get("/api/v1/data-migration/validations/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        validation_ids = [v["id"] for v in data]
-
-        # User A should see tenant A's validation, but NOT tenant B's validation
-        assert validation_a.id in validation_ids
-        assert validation_b.id not in validation_ids
+def test_external_connection_reference_cannot_cross_tenants(tenant_a, tenant_b, actor_id) -> None:
+    connection_b = ExternalConnection.objects.create(
+        tenant_id=tenant_b.id, name="Tenant B database", kind="postgresql", host="db.example.test",
+        port=5432, database="source", username="readonly", credential_ref="vault://b/db",
+        tls_mode="verify-full", public_options={}, created_by=actor_id,
+    )
+    command = {
+        "name": "Cross-tenant source", "source_type": "database", "source_artifact_id": None,
+        "source_config": {"connection_id": str(connection_b.id), "table": "customers", "columns": ["id"], "filters": {}},
+        "target_adapter": "core.record", "target_entity": "record", "write_mode": "create", "lookup_fields": [],
+    }
+    with pytest.raises((NotFound, MigrationServiceError)):
+        MigrationJobService.create(tenant_a.id, actor_id, command)
+    assert not MigrationJob.objects.filter(tenant_id=tenant_a.id, name="Cross-tenant source").exists()

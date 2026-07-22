@@ -1,26 +1,56 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Scaffold - requires implementation
-
 name: data-migration
-version: 1.0.0
-description: Intelligent data import/migration from external systems with AI-powered field mapping, validation, rollback
+version: 2.0.0
+description: Tenant-safe, durable source inspection, deterministic mapping, validation, migration, and conflict-aware rollback.
 type: foundation
-lifecycle: platform
+lifecycle: production
+api:
+  current: /api/v2/data-migration/
+  deprecated:
+    - /api/v1/data-migration/
 dependencies:
-  - core-identity >=1.0
-  - ai-agent-management >=1.0
+  - core-access
+  - core-async-jobs
+  - core-observability
+  - core-resilience
+  - core-state-machine
+  - core-tenancy
+  - dms
 permissions:
-  - data_migration.resource:create
-  - data_migration.resource:read
-  - data_migration.resource:update
-  - data_migration.resource:delete
-  - data_migration.resource:activate
-  - data_migration.resource:deactivate
-sod_actions:
-  - [data_migration.resource:create, data_migration.resource:delete]
-search_indexes:
-  - data_migration_resources
-ai_tools:
-  - create_data_migration_resource
-  - update_data_migration_resource
-  - delete_data_migration_resource
+  - data_migration.job:read
+  - data_migration.job:create
+  - data_migration.job:update
+  - data_migration.job:delete
+  - data_migration.job:export
+  - data_migration.job:import
+  - data_migration.mapping:manage
+  - data_migration.rule:manage
+  - data_migration.source:preview
+  - data_migration.run:execute
+  - data_migration.run:cancel
+  - data_migration.rollback:execute
+  - data_migration.connection:read
+  - data_migration.connection:manage
+  - data_migration.connection:test
+entitlements:
+  - data_migration.core
+health:
+  liveness: /api/v2/data-migration/health/live/
+  readiness: /api/v2/data-migration/health/ready/
+events:
+  - data_migration.job.created
+  - data_migration.job.updated
+  - data_migration.job.deleted
+  - data_migration.job.restored
+  - data_migration.job.archived
+  - data_migration.run.queued
+  - data_migration.run.cancelled
+  - data_migration.run.completed
+  - data_migration.rollback.queued
+  - data_migration.rollback.completed
+  - data_migration.configuration.changed
+extension_points:
+  - source_adapters
+  - target_adapters
+  - mapping_dictionaries
+  - validation_packs
+  - mapping_suggesters

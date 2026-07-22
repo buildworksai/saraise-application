@@ -100,28 +100,6 @@ const NotificationCenterPage = lazy(() =>
   }))
 );
 
-const DataMigrationListPage = lazy(() =>
-  import("./modules/data_migration/pages/DataMigrationListPage").then((m) => ({
-    default: m.DataMigrationListPage,
-  }))
-);
-
-const DataMigrationDetailPage = lazy(() =>
-  import("./modules/data_migration/pages/DataMigrationDetailPage").then(
-    (m) => ({
-      default: m.DataMigrationDetailPage,
-    })
-  )
-);
-
-const CreateDataMigrationResourcePage = lazy(() =>
-  import("./modules/data_migration/pages/CreateDataMigrationResourcePage").then(
-    (m) => ({
-      default: m.CreateDataMigrationResourcePage,
-    })
-  )
-);
-
 const MetadataModelingListPage = lazy(() =>
   import("./modules/metadata_modeling/pages/MetadataModelingListPage").then(
     (m) => ({
@@ -1202,58 +1180,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <NotificationCenterPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* DataMigration routes */}
-          <Route
-            path="/data-migration"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <DataMigrationListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/data-migration/jobs/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateDataMigrationResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/data-migration/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateDataMigrationResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/data-migration/jobs/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <DataMigrationDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/data-migration/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <DataMigrationDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
