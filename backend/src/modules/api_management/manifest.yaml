@@ -1,13 +1,11 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
+# SARAISE tenant API-registration and configuration contract
 name: api-management
-version: 1.0.0
-description: GraphQL & REST API gateway, rate limiting, API versioning, developer portal
+version: 2.0.0
+description: Tenant-isolated managed API registrations with audited, versioned runtime configuration
 type: foundation
-lifecycle: platform
+lifecycle: core
 dependencies:
-  - core-identity >=1.0
+  - core-identity >=1.0.0
 permissions:
   - api_management.resource:create
   - api_management.resource:read
@@ -15,11 +13,62 @@ permissions:
   - api_management.resource:delete
   - api_management.resource:activate
   - api_management.resource:deactivate
+  - api_management.resource:restore
+  - api_management.configuration:read
+  - api_management.configuration:update
+  - api_management.configuration:rollback
+  - api_management.configuration:import
+  - api_management.configuration:export
+  - api_management.health:read
 sod_actions:
-  - [api_management.resource:create, api_management.resource:delete]
-search_indexes:
-  - api_management_resources
-ai_tools:
-  - create_api_management_resource
-  - update_api_management_resource
-  - delete_api_management_resource
+  - api_management.resource:create
+  - api_management.resource:delete
+  - api_management.configuration:update
+  - api_management.configuration:rollback
+metadata:
+  entities:
+    - api_management_resource
+    - api_management_configuration
+    - api_management_configuration_version
+    - api_management_audit_record
+  capabilities:
+    - managed_api_registration
+    - reversible_resource_archival
+    - tenant_runtime_configuration
+    - configuration_preview
+    - configuration_version_history
+    - configuration_rollback
+    - configuration_import_export
+  endpoints:
+    - path: /api/v1/api-management/resources/
+      permissions:
+        read: api_management.resource:read
+        create: api_management.resource:create
+    - path: /api/v1/api-management/resources/{id}/
+      permissions:
+        read: api_management.resource:read
+        update: api_management.resource:update
+        delete: api_management.resource:delete
+    - path: /api/v1/api-management/resources/{id}/activate/
+      permission: api_management.resource:activate
+    - path: /api/v1/api-management/resources/{id}/deactivate/
+      permission: api_management.resource:deactivate
+    - path: /api/v1/api-management/resources/{id}/restore/
+      permission: api_management.resource:restore
+    - path: /api/v1/api-management/configuration/
+      permissions:
+        read: api_management.configuration:read
+        update: api_management.configuration:update
+    - path: /api/v1/api-management/configuration/preview/
+      permission: api_management.configuration:update
+    - path: /api/v1/api-management/configuration/history/
+      permission: api_management.configuration:read
+    - path: /api/v1/api-management/configuration/rollback/
+      permission: api_management.configuration:rollback
+    - path: /api/v1/api-management/configuration/import/
+      permission: api_management.configuration:import
+    - path: /api/v1/api-management/configuration/export/
+      permission: api_management.configuration:export
+    - path: /api/v1/api-management/health/
+      permission: api_management.health:read
+ai_tools: []

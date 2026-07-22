@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { AnimatePresence } from "framer-motion";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { ModuleLayout } from "./components/layout/ModuleLayout";
@@ -38,28 +38,6 @@ const Support = lazy(() =>
   import("./pages/Support").then((m) => ({
     default: m.Support,
   }))
-);
-
-const ApiManagementListPage = lazy(() =>
-  import("./modules/api_management/pages/ApiManagementListPage").then((m) => ({
-    default: m.ApiManagementListPage,
-  }))
-);
-
-const ApiManagementDetailPage = lazy(() =>
-  import("./modules/api_management/pages/ApiManagementDetailPage").then(
-    (m) => ({
-      default: m.ApiManagementDetailPage,
-    })
-  )
-);
-
-const CreateApiManagementResourcePage = lazy(() =>
-  import("./modules/api_management/pages/CreateApiManagementResourcePage").then(
-    (m) => ({
-      default: m.CreateApiManagementResourcePage,
-    })
-  )
 );
 
 const AiProviderConfigurationListPage = lazy(() =>
@@ -598,6 +576,19 @@ function LoadingFallback() {
       <div className="text-muted-foreground">Loading...</div>
     </div>
   );
+}
+
+function RouteTitle({ title, children }: { title?: string; children: ReactNode }) {
+  useEffect(() => {
+    if (!title) return undefined;
+    const previousTitle = document.title;
+    document.title = title;
+    return () => {
+      document.title = previousTitle;
+    };
+  }, [title]);
+
+  return children;
 }
 
 // Legacy route inventory is being migrated module-by-module into the typed registry.
@@ -1220,38 +1211,6 @@ function AnimatedRoutes() {
           {/* 404 */}
           <Route path="*" element={<div className="p-8">Page not found</div>} />
 
-          {/* ApiManagement routes */}
-          <Route
-            path="/api-management"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <ApiManagementListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/api-management/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateApiManagementResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/api-management/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <ApiManagementDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
           {/* AiProviderConfiguration routes */}
           <Route
             path="/ai-provider-configuration"
@@ -1715,14 +1674,16 @@ function AnimatedRoutes() {
 
           {/* Migration shim: module-owned routes coexist with the legacy inventory.
               Remove matching legacy declarations as each module completes migration. */}
-          {registryTenantRoutes.map(({ id, path, Page }) => (
+          {registryTenantRoutes.map(({ id, path, title, Page }) => (
             <Route
               key={`registry:${id}`}
               path={path}
               element={
                 <ProtectedRoute>
                   <ModuleLayout>
-                    <Page />
+                    <RouteTitle title={title}>
+                      <Page />
+                    </RouteTitle>
                   </ModuleLayout>
                 </ProtectedRoute>
               }
