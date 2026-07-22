@@ -34,6 +34,11 @@ permissions:
   - process_mining.bottleneck:retry
   - process_mining.bottleneck:delete
   - process_mining.health:read
+  - process_mining.configuration:read
+  - process_mining.configuration:update
+  - process_mining.configuration:rollback
+  - process_mining.configuration:import
+  - process_mining.configuration:export
 sod_actions: []
 search_indexes: []
 ai_tools: []
@@ -41,6 +46,57 @@ metadata:
   api_version: v2
   entitlement: process_mining.core
   extension_surface: process-mining-spi-v1
+  entities:
+    - process_event
+    - event_export_job
+    - export_artifact_deletion
+    - process_discovery_job
+    - process_model
+    - process_model_version
+    - process_model_reference_assignment
+    - conformance_check
+    - conformance_deviation
+    - conformance_case_metric
+    - bottleneck_analysis
+    - bottleneck_finding
+    - process_variant
+    - process_mining_configuration
+    - process_mining_configuration_version
+    - process_mining_configuration_audit
+    - process_event_retention_tombstone
+  configuration:
+    tenant_scoped: true
+    api_client_ui: /process-mining/configuration
+    versioned: true
+    immutable_audit: true
+    rollback: any_prior_version
+    import_export_schema: process_mining.configuration.v1
+    preview: true
+    feature_rollout: [tenant, role, cohort]
+  endpoints:
+    - {path: "/api/v2/process-mining/processes/", methods: [GET], permission: process_mining.event:read, quota: process_mining.api_reads}
+    - {path: "/api/v2/process-mining/events/", methods: [GET, POST], permissions: {GET: process_mining.event:read, POST: process_mining.event:ingest}, quota: process_mining.events_ingested}
+    - {path: "/api/v2/process-mining/events/{id}/", methods: [GET], permission: process_mining.event:read, quota: process_mining.api_reads}
+    - {path: "/api/v2/process-mining/exports/", methods: [GET, POST], permissions: {GET: process_mining.export:read, POST: process_mining.export:create}, quota: process_mining.export_bytes}
+    - {path: "/api/v2/process-mining/exports/{id}/", methods: [GET, DELETE], permissions: {GET: process_mining.export:read, DELETE: process_mining.export:delete}, quota: process_mining.api_reads}
+    - {path: "/api/v2/process-mining/exports/{id}/{action}/", actions: [download, cancel, retry], methods: [GET, POST], permissions: [process_mining.export:download, process_mining.export:cancel, process_mining.export:create]}
+    - {path: "/api/v2/process-mining/discoveries/", methods: [GET, POST], permissions: {GET: process_mining.discovery:read, POST: process_mining.discovery:create}, quota: process_mining.analysis_compute}
+    - {path: "/api/v2/process-mining/discoveries/{id}/", methods: [GET, DELETE], permissions: {GET: process_mining.discovery:read, DELETE: process_mining.discovery:delete}}
+    - {path: "/api/v2/process-mining/discoveries/{id}/{action}/", actions: [model, cancel, retry], methods: [GET, POST], permissions: [process_mining.discovery:read, process_mining.discovery:cancel, process_mining.discovery:retry]}
+    - {path: "/api/v2/process-mining/models/", methods: [GET, POST], permissions: {GET: process_mining.model:read, POST: process_mining.model:create}}
+    - {path: "/api/v2/process-mining/models/{id}/", methods: [GET, PATCH, DELETE], permissions: {GET: process_mining.model:read, PATCH: process_mining.model:update, DELETE: process_mining.model:delete}}
+    - {path: "/api/v2/process-mining/models/{id}/{action}/", actions: [versions, set-reference], methods: [GET, POST], permissions: [process_mining.model:read, process_mining.model:set_reference]}
+    - {path: "/api/v2/process-mining/model-versions/{id}/", methods: [GET], permission: process_mining.model:read}
+    - {path: "/api/v2/process-mining/conformance-checks/", methods: [GET, POST], permissions: {GET: process_mining.conformance:read, POST: process_mining.conformance:create}, quota: process_mining.analysis_compute}
+    - {path: "/api/v2/process-mining/conformance-checks/{id}/", methods: [GET, DELETE], permissions: {GET: process_mining.conformance:read, DELETE: process_mining.conformance:delete}}
+    - {path: "/api/v2/process-mining/conformance-checks/{id}/{action}/", actions: [deviations, fitness, cancel, retry], methods: [GET, POST], permissions: [process_mining.conformance:read, process_mining.conformance:cancel, process_mining.conformance:retry]}
+    - {path: "/api/v2/process-mining/bottleneck-analyses/", methods: [GET, POST], permissions: {GET: process_mining.bottleneck:read, POST: process_mining.bottleneck:create}, quota: process_mining.analysis_compute}
+    - {path: "/api/v2/process-mining/bottleneck-analyses/{id}/", methods: [GET, DELETE], permissions: {GET: process_mining.bottleneck:read, DELETE: process_mining.bottleneck:delete}}
+    - {path: "/api/v2/process-mining/bottleneck-analyses/{id}/{action}/", actions: [findings, variants, cancel, retry], methods: [GET, POST], permissions: [process_mining.bottleneck:read, process_mining.bottleneck:cancel, process_mining.bottleneck:retry]}
+    - {path: "/api/v2/process-mining/configuration/current/", methods: [GET], permission: process_mining.configuration:read}
+    - {path: "/api/v2/process-mining/configuration/update/", methods: [PUT, PATCH], permission: process_mining.configuration:update}
+    - {path: "/api/v2/process-mining/configuration/{action}/", actions: [preview, history, rollback, import, export], methods: [GET, POST], permissions: [process_mining.configuration:read, process_mining.configuration:update, process_mining.configuration:rollback, process_mining.configuration:import, process_mining.configuration:export]}
+    - {path: "/api/v2/process-mining/health/", methods: [GET], permission: process_mining.health:read}
   quota_resources:
     - process_mining.api_reads
     - process_mining.events_ingested

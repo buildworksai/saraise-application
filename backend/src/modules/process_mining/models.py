@@ -10,7 +10,7 @@ from typing import Any
 from django.core.exceptions import ValidationError
 from django.db import models
 
-from src.core.tenancy import TenantScopedModel, TimestampedModel
+from src.core.tenancy import TenantQuerySet, TenantScopedModel, TimestampedModel
 
 
 def generate_uuid() -> str:
@@ -79,10 +79,20 @@ class MutableDomainModel(TenantScopedModel, TimestampedModel):
         abstract = True
 
 
+class AppendOnlyQuerySet(TenantQuerySet):
+    def update(self, **kwargs: object) -> int:
+        del kwargs
+        raise ValidationError("Append-only evidence cannot be updated.", code="append_only")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Append-only evidence cannot be deleted.", code="append_only")
+
+
 class AppendOnlyDomainModel(TenantScopedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     created_by = models.UUIDField(db_index=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    objects = AppendOnlyQuerySet.as_manager()
 
     class Meta:
         abstract = True
@@ -311,6 +321,122 @@ class ProcessModelVersion(AppendOnlyDomainModel):
         validate_graph(self.model_data)
 
 
+class ProcessModelReferenceAssignment(AppendOnlyDomainModel):
+    """Immutable evidence selecting a reference version; latest assignment wins."""
+
+    process_model = models.ForeignKey(ProcessModel, on_delete=models.PROTECT, related_name="reference_assignments")
+    process_model_version = models.ForeignKey(
+        ProcessModelVersion, on_delete=models.PROTECT, related_name="reference_assignments"
+    )
+    transition_key = models.CharField(max_length=255)
+    reason = models.TextField(blank=True)
+    correlation_id = models.CharField(max_length=128, db_index=True)
+
+    class Meta:
+        db_table = "process_mining_model_reference_assignments"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "process_model", "transition_key"], name="pm_ref_assignment_key_uniq"
+            )
+        ]
+        indexes = [models.Index(fields=["tenant_id", "process_model", "created_at"], name="pm_ref_current")]
+
+    def clean(self) -> None:
+        _same_tenant(self, "process_model")
+        _same_tenant(self, "process_model_version")
+        if self.process_model_version_id and self.process_model_id:
+            if self.process_model_version.process_model_id != self.process_model_id:
+                raise ValidationError(
+                    {"process_model_version": "Reference version does not belong to this model."},
+                    code="invalid_reference",
+                )
+
+
+class ProcessMiningConfiguration(TenantScopedModel, TimestampedModel):
+    """The single current, tenant-bound process-mining configuration document."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    document = models.JSONField()
+    version = models.PositiveIntegerField(default=1)
+    updated_by = models.UUIDField(db_index=True)
+
+    class Meta:
+        db_table = "process_mining_configurations"
+        constraints = [models.UniqueConstraint(fields=["tenant_id"], name="pm_config_one_per_tenant")]
+
+
+class ProcessMiningConfigurationVersion(AppendOnlyDomainModel):
+    """Immutable snapshot used for history, export, and rollback."""
+
+    configuration = models.ForeignKey(
+        ProcessMiningConfiguration, on_delete=models.PROTECT, related_name="versions"
+    )
+    version = models.PositiveIntegerField()
+    document = models.JSONField()
+    correlation_id = models.CharField(max_length=128, db_index=True)
+    source = models.CharField(max_length=32)
+
+    class Meta:
+        db_table = "process_mining_configuration_versions"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "configuration", "version"], name="pm_config_version_uniq")
+        ]
+        indexes = [models.Index(fields=["tenant_id", "configuration", "version"], name="pm_config_history")]
+
+    def clean(self) -> None:
+        _same_tenant(self, "configuration")
+
+
+class ProcessMiningConfigurationAudit(AppendOnlyDomainModel):
+    """Immutable who/what/when evidence for every configuration mutation."""
+
+    configuration = models.ForeignKey(ProcessMiningConfiguration, on_delete=models.PROTECT, related_name="audits")
+    version = models.PositiveIntegerField()
+    action = models.CharField(max_length=32)
+    previous_document = models.JSONField(blank=True)
+    current_document = models.JSONField()
+    correlation_id = models.CharField(max_length=128, db_index=True)
+
+    class Meta:
+        db_table = "process_mining_configuration_audits"
+        indexes = [models.Index(fields=["tenant_id", "configuration", "created_at"], name="pm_config_audit_time")]
+
+    def clean(self) -> None:
+        _same_tenant(self, "configuration")
+
+
+class ProcessEventRetentionTombstone(AppendOnlyDomainModel):
+    """Governed immutable authorization evidence; source events remain intact."""
+
+    cutoff = models.DateTimeField()
+    event_count = models.PositiveBigIntegerField()
+    reason = models.TextField()
+    correlation_id = models.CharField(max_length=128, db_index=True)
+
+    class Meta:
+        db_table = "process_mining_event_retention_tombstones"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "cutoff"], name="pm_retention_cutoff_uniq")
+        ]
+
+
+class ExportArtifactDeletion(AppendOnlyDomainModel):
+    """Durable idempotent deletion request committed before artifact removal."""
+
+    export_job = models.ForeignKey(EventExportJob, on_delete=models.PROTECT, related_name="artifact_deletions")
+    artifact_key = models.CharField(max_length=1024)
+    correlation_id = models.CharField(max_length=128, db_index=True)
+
+    class Meta:
+        db_table = "process_mining_export_artifact_deletions"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "export_job"], name="pm_export_delete_once")
+        ]
+
+    def clean(self) -> None:
+        _same_tenant(self, "export_job")
+
+
 class ConformanceCheck(StatefulDomainModel):
     process_model_version = models.ForeignKey(ProcessModelVersion, on_delete=models.PROTECT, related_name="checks")
     event_filter = models.JSONField(default=dict)
@@ -518,6 +644,12 @@ __all__ = [
     "ProcessEvent",
     "ProcessModel",
     "ProcessModelVersion",
+    "ProcessModelReferenceAssignment",
+    "ProcessMiningConfiguration",
+    "ProcessMiningConfigurationVersion",
+    "ProcessMiningConfigurationAudit",
+    "ProcessEventRetentionTombstone",
+    "ExportArtifactDeletion",
     "ProcessVariant",
     "generate_uuid",
     "validate_graph",

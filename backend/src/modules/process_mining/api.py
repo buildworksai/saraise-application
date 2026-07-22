@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from django.db.models import Q, QuerySet
+from django.db.models import QuerySet
 from django.http import FileResponse
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
@@ -13,11 +13,12 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from src.core.api.envelope import correlation_id_for_request
 from src.core.api.profile import GovernedAPIViewMixin
-from src.core.auth_utils import get_user_tenant_id
+from src.core.auth_utils import get_user_tenant_id, get_user_tenant_role
 
 from .health import get_module_health
-from .models import BottleneckAnalysis, ConformanceCheck, EventExportJob, ProcessDiscoveryJob, ProcessModel, ProcessModelVersion
+from .models import BottleneckAnalysis, ConformanceCheck, EventExportJob, ProcessDiscoveryJob, ProcessEvent, ProcessMiningConfiguration, ProcessModel, ProcessModelVersion
 from .permissions import ActionAccessMixin
 from .serializers import (
     BottleneckAnalysisDetailSerializer, BottleneckAnalysisListSerializer, BottleneckCreateSerializer,
@@ -28,8 +29,10 @@ from .serializers import (
     ProcessEventListSerializer, ProcessModelCreateSerializer, ProcessModelDetailSerializer, ProcessModelListSerializer,
     ProcessModelUpdateSerializer, ProcessModelVersionDetailSerializer, ProcessModelVersionListSerializer,
     ProcessVariantSerializer, SetReferenceSerializer, TransitionActionSerializer,
+    ConfigurationDocumentSerializer, ConfigurationImportSerializer, ConfigurationRollbackSerializer,
+    ProcessMiningConfigurationSerializer, ProcessMiningConfigurationVersionSerializer,
 )
-from .services import BottleneckService, ConformanceService, EventLogService, ExportService, ProcessDiscoveryService, ProcessModelService
+from .services import BottleneckService, ConformanceService, EventLogService, ExportService, ProcessDiscoveryService, ProcessMiningConfigurationService, ProcessMiningQueryService, ProcessModelService
 
 
 class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.GenericViewSet):
@@ -42,7 +45,30 @@ class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.Ge
         except (TypeError, ValueError, AttributeError) as exc:
             raise PermissionDenied("Authenticated identity has no valid tenant.") from exc
         self.request.tenant_id = tenant
+        if not getattr(self, "configuration_management", False):
+            configuration = ProcessMiningConfigurationService().resolve(tenant)
+            role = get_user_tenant_role(self.request.user)
+            groups = getattr(self.request.user, "groups", None)
+            cohorts = set(groups.values_list("name", flat=True)) if hasattr(groups, "values_list") else set()
+            allowed_roles = set(configuration["rollout_roles"])
+            allowed_cohorts = set(configuration["rollout_cohorts"])
+            if not configuration["enabled"]:
+                raise PermissionDenied("Process mining is disabled for this tenant.")
+            if allowed_roles and role not in allowed_roles:
+                raise PermissionDenied("Process mining is not enabled for this role.")
+            if allowed_cohorts and not cohorts.intersection(allowed_cohorts):
+                raise PermissionDenied("Process mining is not enabled for this cohort.")
         return tenant
+
+    def tenant_queryset(self, model: type[Any]) -> QuerySet[Any]:
+        """Return an empty model queryset when tenant context is absent/invalid."""
+        value = get_user_tenant_id(getattr(self.request, "user", None))
+        try:
+            tenant = UUID(str(value))
+        except (TypeError, ValueError, AttributeError):
+            return model.objects.none()
+        self.request.tenant_id = tenant
+        return model.objects.for_tenant(tenant)
 
     def actor_id(self) -> UUID:
         value = getattr(self.request.user, "id", None)
@@ -58,20 +84,6 @@ class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.Ge
         if page is None:
             raise RuntimeError("Governed pagination is required.")
         return self.get_paginated_response(serializer(page, many=True, context=context).data)
-
-
-def _ordering(params: Any, allowed: set[str], default: str) -> str:
-    value = str(params.get("ordering") or default)
-    if value.lstrip("-") not in allowed:
-        raise ValidationError({"ordering": "Unsupported ordering field."})
-    return value
-
-
-def _filter_fields(queryset: QuerySet[Any], params: Any, fields: tuple[str, ...]) -> QuerySet[Any]:
-    for field in fields:
-        if params.get(field) not in (None, ""):
-            queryset = queryset.filter(**{field: params[field]})
-    return queryset
 
 
 class ProcessOverviewViewSet(mixins.ListModelMixin, TenantGovernedViewSet):
@@ -99,6 +111,9 @@ class ProcessEventViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Tena
     action_quotas = {"create": "process_mining.events_ingested"}
 
     def get_queryset(self) -> Any:
+        scoped = self.tenant_queryset(ProcessEvent)
+        if not getattr(self.request, "tenant_id", None):
+            return scoped
         if self.action == "list":
             return self.service_class().query_events(self.tenant_id(), self.request.query_params)
         return self.service_class().query_events(self.tenant_id(), {"process_name": self.request.query_params.get("process_name"), "start": self.request.query_params.get("start"), "end": self.request.query_params.get("end")})
@@ -126,14 +141,14 @@ class TransitionActionsMixin:
     @action(detail=True, methods=["post"])
     def cancel(self, request: object, pk: str | None = None) -> Response:
         del request, pk
-        if not self.get_queryset().filter(pk=self.kwargs["pk"]).exists():
+        if not ProcessMiningQueryService.exists(self.get_queryset(), self.kwargs["pk"]):
             raise NotFound()
         return self._transition("cancel")
 
     @action(detail=True, methods=["post"])
     def retry(self, request: object, pk: str | None = None) -> Response:
         del request, pk
-        if not self.get_queryset().filter(pk=self.kwargs["pk"]).exists():
+        if not ProcessMiningQueryService.exists(self.get_queryset(), self.kwargs["pk"]):
             raise NotFound()
         return self._transition("retry")
 
@@ -144,13 +159,8 @@ class EventExportViewSet(TransitionActionsMixin, TenantGovernedViewSet):
     action_quotas = {"create": "process_mining.export_bytes", "retry": "process_mining.export_bytes"}
 
     def get_queryset(self) -> QuerySet[EventExportJob]:
-        queryset = EventExportJob.objects.for_tenant(self.tenant_id()).filter(is_deleted=False)
-        queryset = _filter_fields(queryset, self.request.query_params, ("process_name", "format", "status"))
-        if self.request.query_params.get("created_after"):
-            queryset = queryset.filter(created_at__gte=self.request.query_params["created_after"])
-        if self.request.query_params.get("created_before"):
-            queryset = queryset.filter(created_at__lte=self.request.query_params["created_before"])
-        return queryset.order_by(_ordering(self.request.query_params, {"created_at", "completed_at"}, "-created_at"), "id")
+        empty = self.tenant_queryset(EventExportJob)
+        return empty if not getattr(self.request, "tenant_id", None) else ProcessMiningQueryService.exports(self.request.tenant_id, self.request.query_params)
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -158,7 +168,7 @@ class EventExportViewSet(TransitionActionsMixin, TenantGovernedViewSet):
 
     def retrieve(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        value = self.get_queryset().filter(pk=self.kwargs["pk"]).first()
+        value = ProcessMiningQueryService.find(self.get_queryset(), self.kwargs["pk"])
         if value is None: raise NotFound()
         return Response(EventExportDetailSerializer(value).data)
 
@@ -171,14 +181,14 @@ class EventExportViewSet(TransitionActionsMixin, TenantGovernedViewSet):
 
     def destroy(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        if not self.get_queryset().filter(pk=self.kwargs["pk"]).exists(): raise NotFound()
+        if not ProcessMiningQueryService.exists(self.get_queryset(), self.kwargs["pk"]): raise NotFound()
         self.service_class().delete_export(self.tenant_id(), self.kwargs["pk"], self.actor_id())
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["get"])
     def download(self, request: object, pk: str | None = None) -> FileResponse:
         del request, pk
-        if not self.get_queryset().filter(pk=self.kwargs["pk"]).exists(): raise NotFound()
+        if not ProcessMiningQueryService.exists(self.get_queryset(), self.kwargs["pk"]): raise NotFound()
         record, stream = self.service_class().open_download(self.tenant_id(), self.kwargs["pk"])
         return FileResponse(stream, content_type=record.content_type, as_attachment=True, filename=f"{record.process_name}.{record.format}")
 
@@ -198,9 +208,8 @@ class DiscoveryViewSet(TransitionActionsMixin, TenantGovernedViewSet):
     action_quotas = {"create": "process_mining.analysis_compute", "retry": "process_mining.analysis_compute"}
 
     def get_queryset(self) -> QuerySet[ProcessDiscoveryJob]:
-        queryset = ProcessDiscoveryJob.objects.for_tenant(self.tenant_id()).filter(is_deleted=False)
-        queryset = _filter_fields(queryset, self.request.query_params, ("process_name", "algorithm", "status"))
-        return queryset.order_by(_ordering(self.request.query_params, {"created_at", "completed_at"}, "-created_at"), "id")
+        empty = self.tenant_queryset(ProcessDiscoveryJob)
+        return empty if not getattr(self.request, "tenant_id", None) else ProcessMiningQueryService.discoveries(self.request.tenant_id, self.request.query_params)
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -208,7 +217,7 @@ class DiscoveryViewSet(TransitionActionsMixin, TenantGovernedViewSet):
 
     def retrieve(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        value = self.get_queryset().filter(pk=self.kwargs["pk"]).first()
+        value = ProcessMiningQueryService.find(self.get_queryset(), self.kwargs["pk"])
         if value is None: raise NotFound()
         return Response(DiscoveryDetailSerializer(value).data)
 
@@ -220,7 +229,7 @@ class DiscoveryViewSet(TransitionActionsMixin, TenantGovernedViewSet):
 
     def destroy(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        if not self.get_queryset().filter(pk=self.kwargs["pk"]).exists(): raise NotFound()
+        if not ProcessMiningQueryService.exists(self.get_queryset(), self.kwargs["pk"]): raise NotFound()
         self.service_class().delete_discovery(self.tenant_id(), self.kwargs["pk"], self.actor_id()); return Response(status=204)
 
     @action(detail=True, methods=["get"])
@@ -242,13 +251,8 @@ class ProcessModelViewSet(TenantGovernedViewSet):
     action_permissions = {"list": "process_mining.model:read", "retrieve": "process_mining.model:read", "create": "process_mining.model:create", "partial_update": "process_mining.model:update", "destroy": "process_mining.model:delete", "versions": "process_mining.model:read", "set_reference": "process_mining.model:set_reference"}
 
     def get_queryset(self) -> QuerySet[ProcessModel]:
-        queryset = ProcessModel.objects.for_tenant(self.tenant_id()).filter(is_deleted=False)
-        queryset = _filter_fields(queryset, self.request.query_params, ("process_name", "source_kind"))
-        if self.request.query_params.get("has_reference") is not None:
-            expected = str(self.request.query_params["has_reference"]).lower() in {"1", "true"}; queryset = queryset.filter(reference_version_number__isnull=not expected)
-        search = self.request.query_params.get("search")
-        if search: queryset = queryset.filter(Q(name__icontains=search) | Q(description__icontains=search))
-        return queryset.order_by("name", "id")
+        empty = self.tenant_queryset(ProcessModel)
+        return empty if not getattr(self.request, "tenant_id", None) else ProcessMiningQueryService.models(self.request.tenant_id, self.request.query_params)
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -256,7 +260,7 @@ class ProcessModelViewSet(TenantGovernedViewSet):
 
     def retrieve(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        value = self.get_queryset().filter(pk=self.kwargs["pk"]).first()
+        value = ProcessMiningQueryService.find(self.get_queryset(), self.kwargs["pk"])
         if value is None: raise NotFound()
         return Response(ProcessModelDetailSerializer(value).data)
 
@@ -268,7 +272,7 @@ class ProcessModelViewSet(TenantGovernedViewSet):
 
     def partial_update(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        current = self.get_queryset().filter(pk=self.kwargs["pk"]).first()
+        current = ProcessMiningQueryService.find(self.get_queryset(), self.kwargs["pk"])
         if current is None: raise NotFound()
         payload = {"name": current.name, "description": current.description, **dict(self.request.data)}
         serializer = ProcessModelUpdateSerializer(data=payload); serializer.is_valid(raise_exception=True); data = serializer.validated_data
@@ -276,20 +280,20 @@ class ProcessModelViewSet(TenantGovernedViewSet):
 
     def destroy(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        if not self.get_queryset().filter(pk=self.kwargs["pk"]).exists(): raise NotFound()
+        if not ProcessMiningQueryService.exists(self.get_queryset(), self.kwargs["pk"]): raise NotFound()
         self.service_class().soft_delete_model(self.tenant_id(), self.kwargs["pk"], self.actor_id()); return Response(status=204)
 
     @action(detail=True, methods=["get"])
     def versions(self, request: object, pk: str | None = None) -> Response:
         del request, pk
-        model = self.get_queryset().filter(pk=self.kwargs["pk"]).first()
+        model = ProcessMiningQueryService.find(self.get_queryset(), self.kwargs["pk"])
         if model is None: raise NotFound()
-        return self.paginated(ProcessModelVersion.objects.for_tenant(self.tenant_id()).filter(process_model=model).order_by("-version"), ProcessModelVersionListSerializer)
+        return self.paginated(ProcessMiningQueryService.model_versions(self.tenant_id(), model.id), ProcessModelVersionListSerializer)
 
     @action(detail=True, methods=["post"], url_path="set-reference")
     def set_reference(self, request: object, pk: str | None = None) -> Response:
         del request, pk
-        if not self.get_queryset().filter(pk=self.kwargs["pk"]).exists(): raise NotFound()
+        if not ProcessMiningQueryService.exists(self.get_queryset(), self.kwargs["pk"]): raise NotFound()
         serializer = SetReferenceSerializer(data=self.request.data); serializer.is_valid(raise_exception=True); data = serializer.validated_data
         value = self.service_class().set_reference_version(self.tenant_id(), self.kwargs["pk"], data["version_id"], self.actor_id(), data["transition_key"])
         return Response(ProcessModelVersionDetailSerializer(value).data)
@@ -299,7 +303,7 @@ class ProcessModelVersionViewSet(mixins.RetrieveModelMixin, TenantGovernedViewSe
     action_permissions = {"retrieve": "process_mining.model:read"}
     def retrieve(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        value = ProcessModelVersion.objects.for_tenant(self.tenant_id()).filter(pk=self.kwargs["pk"]).first()
+        value = ProcessMiningQueryService.find(self.tenant_queryset(ProcessModelVersion), self.kwargs["pk"])
         if value is None: raise NotFound()
         return Response(ProcessModelVersionDetailSerializer(value).data)
 
@@ -310,11 +314,8 @@ class ConformanceViewSet(TransitionActionsMixin, TenantGovernedViewSet):
     action_quotas = {"create": "process_mining.analysis_compute", "retry": "process_mining.analysis_compute"}
 
     def get_queryset(self) -> QuerySet[ConformanceCheck]:
-        queryset = ConformanceCheck.objects.for_tenant(self.tenant_id()).filter(is_deleted=False)
-        queryset = _filter_fields(queryset, self.request.query_params, ("process_model_version", "status"))
-        if self.request.query_params.get("fitness_min"): queryset = queryset.filter(fitness__gte=self.request.query_params["fitness_min"])
-        if self.request.query_params.get("fitness_max"): queryset = queryset.filter(fitness__lte=self.request.query_params["fitness_max"])
-        return queryset.order_by(_ordering(self.request.query_params, {"created_at", "completed_at", "fitness"}, "-created_at"), "id")
+        empty = self.tenant_queryset(ConformanceCheck)
+        return empty if not getattr(self.request, "tenant_id", None) else ProcessMiningQueryService.conformance(self.request.tenant_id, self.request.query_params)
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -322,7 +323,7 @@ class ConformanceViewSet(TransitionActionsMixin, TenantGovernedViewSet):
 
     def retrieve(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        value = self.get_queryset().filter(pk=self.kwargs["pk"]).first()
+        value = ProcessMiningQueryService.find(self.get_queryset(), self.kwargs["pk"])
         if value is None: raise NotFound()
         return Response(ConformanceDetailSerializer(value).data)
 
@@ -334,7 +335,7 @@ class ConformanceViewSet(TransitionActionsMixin, TenantGovernedViewSet):
 
     def destroy(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        if not self.get_queryset().filter(pk=self.kwargs["pk"]).exists(): raise NotFound()
+        if not ProcessMiningQueryService.exists(self.get_queryset(), self.kwargs["pk"]): raise NotFound()
         self.service_class().delete_check(self.tenant_id(), self.kwargs["pk"], self.actor_id()); return Response(status=204)
 
     @action(detail=True, methods=["get"])
@@ -345,8 +346,8 @@ class ConformanceViewSet(TransitionActionsMixin, TenantGovernedViewSet):
     @action(detail=True, methods=["get"])
     def fitness(self, request: object, pk: str | None = None) -> Response:
         del request, pk
-        check, cases = self.service_class().get_fitness(self.tenant_id(), self.kwargs["pk"])
-        return Response({"check": ConformanceDetailSerializer(check).data, "cases": CaseFitnessSerializer(cases, many=True).data})
+        _check, cases = self.service_class().get_fitness(self.tenant_id(), self.kwargs["pk"])
+        return self.paginated(cases, CaseFitnessSerializer)
 
     def _transition(self, command: str) -> Response:
         serializer = TransitionActionSerializer(data=self.request.data); serializer.is_valid(raise_exception=True); data = serializer.validated_data
@@ -363,9 +364,8 @@ class BottleneckViewSet(TransitionActionsMixin, TenantGovernedViewSet):
     action_quotas = {"create": "process_mining.analysis_compute", "retry": "process_mining.analysis_compute"}
 
     def get_queryset(self) -> QuerySet[BottleneckAnalysis]:
-        queryset = BottleneckAnalysis.objects.for_tenant(self.tenant_id()).filter(is_deleted=False)
-        queryset = _filter_fields(queryset, self.request.query_params, ("process_name", "status"))
-        return queryset.order_by(_ordering(self.request.query_params, {"created_at", "completed_at", "time_range_start"}, "-created_at"), "id")
+        empty = self.tenant_queryset(BottleneckAnalysis)
+        return empty if not getattr(self.request, "tenant_id", None) else ProcessMiningQueryService.bottlenecks(self.request.tenant_id, self.request.query_params)
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -373,7 +373,7 @@ class BottleneckViewSet(TransitionActionsMixin, TenantGovernedViewSet):
 
     def retrieve(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        value = self.get_queryset().filter(pk=self.kwargs["pk"]).first()
+        value = ProcessMiningQueryService.find(self.get_queryset(), self.kwargs["pk"])
         if value is None: raise NotFound()
         return Response(BottleneckAnalysisDetailSerializer(value).data)
 
@@ -385,7 +385,7 @@ class BottleneckViewSet(TransitionActionsMixin, TenantGovernedViewSet):
 
     def destroy(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        if not self.get_queryset().filter(pk=self.kwargs["pk"]).exists(): raise NotFound()
+        if not ProcessMiningQueryService.exists(self.get_queryset(), self.kwargs["pk"]): raise NotFound()
         self.service_class().delete_analysis(self.tenant_id(), self.kwargs["pk"], self.actor_id()); return Response(status=204)
 
     @action(detail=True, methods=["get"])
@@ -413,8 +413,85 @@ class ModuleHealthAPIView(GovernedAPIViewMixin, ActionAccessMixin, APIView):
 
     def get(self, request: object) -> Response:
         del request
-        report = get_module_health()
+        report = get_module_health(self.request.tenant_id)
         return Response(ModuleHealthSerializer(report.payload).data, status=report.status_code)
 
 
-__all__ = ["BottleneckViewSet", "ConformanceViewSet", "DiscoveryViewSet", "EventExportViewSet", "ModuleHealthAPIView", "ProcessEventViewSet", "ProcessModelVersionViewSet", "ProcessModelViewSet", "ProcessOverviewViewSet"]
+class ProcessMiningConfigurationViewSet(TenantGovernedViewSet):
+    configuration_management = True
+    service_class = ProcessMiningConfigurationService
+    action_permissions = {
+        "list": "process_mining.configuration:read",
+        "current": "process_mining.configuration:read",
+        "update_configuration": "process_mining.configuration:update",
+        "preview": "process_mining.configuration:update",
+        "history": "process_mining.configuration:read",
+        "rollback": "process_mining.configuration:rollback",
+        "import_document": "process_mining.configuration:import",
+        "export_document": "process_mining.configuration:export",
+    }
+
+    def get_queryset(self) -> QuerySet[ProcessMiningConfiguration]:
+        if not getattr(self.request, "tenant_id", None):
+            return self.tenant_queryset(ProcessMiningConfiguration)
+        return ProcessMiningQueryService.configurations(self.tenant_id())
+
+    def list(self, request: object, *args: object, **kwargs: object) -> Response:
+        del request, args, kwargs
+        value = self.service_class().get_configuration(
+            self.tenant_id(), self.actor_id(), correlation_id_for_request(self.request)
+        )
+        return Response(ProcessMiningConfigurationSerializer(value).data)
+
+    @action(detail=False, methods=["get"])
+    def current(self, request: object) -> Response:
+        value = self.service_class().get_configuration(
+            self.tenant_id(), self.actor_id(), correlation_id_for_request(request)
+        )
+        return Response(ProcessMiningConfigurationSerializer(value).data)
+
+    @action(detail=False, methods=["put", "patch"], url_path="update")
+    def update_configuration(self, request: object) -> Response:
+        serializer = ConfigurationDocumentSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        value = self.service_class().update(
+            self.tenant_id(), self.actor_id(), correlation_id_for_request(request), serializer.validated_data["document"]
+        )
+        return Response(ProcessMiningConfigurationSerializer(value).data)
+
+    @action(detail=False, methods=["post"])
+    def preview(self, request: object) -> Response:
+        serializer = ConfigurationDocumentSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(self.service_class().preview(self.tenant_id(), serializer.validated_data["document"]))
+
+    @action(detail=False, methods=["get"])
+    def history(self, request: object) -> Response:
+        del request
+        return self.paginated(self.service_class().history(self.tenant_id()), ProcessMiningConfigurationVersionSerializer)
+
+    @action(detail=False, methods=["post"])
+    def rollback(self, request: object) -> Response:
+        serializer = ConfigurationRollbackSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        value = self.service_class().rollback(
+            self.tenant_id(), self.actor_id(), correlation_id_for_request(request), serializer.validated_data["version"]
+        )
+        return Response(ProcessMiningConfigurationSerializer(value).data)
+
+    @action(detail=False, methods=["post"], url_path="import")
+    def import_document(self, request: object) -> Response:
+        serializer = ConfigurationImportSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        value = self.service_class().import_document(
+            self.tenant_id(), self.actor_id(), correlation_id_for_request(request), serializer.validated_data["configuration"]
+        )
+        return Response(ProcessMiningConfigurationSerializer(value).data)
+
+    @action(detail=False, methods=["get"], url_path="export")
+    def export_document(self, request: object) -> Response:
+        del request
+        return Response(self.service_class().export_document(self.tenant_id()))
+
+
+__all__ = ["BottleneckViewSet", "ConformanceViewSet", "DiscoveryViewSet", "EventExportViewSet", "ModuleHealthAPIView", "ProcessEventViewSet", "ProcessMiningConfigurationViewSet", "ProcessModelVersionViewSet", "ProcessModelViewSet", "ProcessOverviewViewSet"]

@@ -10,7 +10,9 @@ from .models import (
     BottleneckAnalysis, BottleneckFinding, ConformanceCaseMetric, ConformanceCheck,
     ConformanceDeviation, EventExportJob, ExportFormat, MiningAlgorithmName, ProcessDiscoveryJob,
     ProcessEvent, ProcessModel, ProcessModelVersion, ProcessVariant, validate_graph,
+    ProcessMiningConfiguration, ProcessMiningConfigurationAudit, ProcessMiningConfigurationVersion,
 )
+from .services import FLOAT_LIMITS, INTEGER_LIMITS
 
 SERVER_OWNED = frozenset({"id", "tenant_id", "created_by", "created_at", "updated_at", "is_deleted", "deleted_at", "status", "transition_history", "async_job_id", "artifact_key", "content_type", "row_count", "byte_size", "sha256", "expires_at", "completed_at", "started_at", "error_code", "error_message", "event_count", "case_count", "activity_count", "fitness", "precision", "generalization", "total_cases", "conformant_cases", "deviating_cases", "total_variants", "avg_case_duration_seconds"})
 
@@ -29,7 +31,7 @@ class ReadOnlyModelSerializer(serializers.ModelSerializer):
         read_only_fields: tuple[str, ...] = ()
 
 
-EVENT_LIST_FIELDS = ("id", "process_name", "source_module", "source_event_id", "case_id", "activity", "occurred_at", "resource", "ingested_at", "event_hash", "created_by", "created_at")
+EVENT_LIST_FIELDS = ("id", "process_name", "source_module", "source_event_id", "case_id", "activity", "occurred_at", "resource", "ingested_at", "created_at")
 
 
 class ProcessEventListSerializer(ReadOnlyModelSerializer):
@@ -80,7 +82,7 @@ class EventExportListSerializer(ReadOnlyModelSerializer):
 class EventExportDetailSerializer(ReadOnlyModelSerializer):
     class Meta:
         model = EventExportJob
-        fields = (*EXPORT_LIST_FIELDS, "event_filter", "transition_history", "async_job_id", "idempotency_key")
+        fields = (*EXPORT_LIST_FIELDS, "event_filter")
         read_only_fields = fields
 
 
@@ -104,7 +106,7 @@ class DiscoveryListSerializer(ReadOnlyModelSerializer):
 class DiscoveryDetailSerializer(ReadOnlyModelSerializer):
     class Meta:
         model = ProcessDiscoveryJob
-        fields = (*DISCOVERY_LIST_FIELDS, "parameters", "transition_history", "async_job_id", "idempotency_key")
+        fields = (*DISCOVERY_LIST_FIELDS, "parameters")
         read_only_fields = fields
 
 
@@ -148,17 +150,23 @@ class ProcessModelUpdateSerializer(RejectServerOwnedFieldsMixin, serializers.Ser
     description = serializers.CharField(required=False, allow_blank=True)
 
 
-VERSION_LIST_FIELDS = ("id", "process_model", "version", "discovery_job", "algorithm", "event_count", "case_count", "activity_count", "avg_case_duration_seconds", "is_reference", "published_at", "created_by", "created_at")
+VERSION_LIST_FIELDS = ("id", "process_model", "version", "algorithm", "event_count", "case_count", "activity_count", "avg_case_duration_seconds", "is_reference", "published_at", "created_at")
 
 
 class ProcessModelVersionListSerializer(ReadOnlyModelSerializer):
+    is_reference = serializers.SerializerMethodField()
+
     class Meta:
         model = ProcessModelVersion
         fields = VERSION_LIST_FIELDS
         read_only_fields = fields
 
+    def get_is_reference(self, instance: ProcessModelVersion) -> bool:
+        latest = instance.process_model.reference_assignments.filter(tenant_id=instance.tenant_id).order_by("-created_at", "-id").first()
+        return bool(latest and latest.process_model_version_id == instance.id)
 
-class ProcessModelVersionDetailSerializer(ReadOnlyModelSerializer):
+
+class ProcessModelVersionDetailSerializer(ProcessModelVersionListSerializer):
     class Meta:
         model = ProcessModelVersion
         fields = (*VERSION_LIST_FIELDS, "parameters", "model_data")
@@ -184,7 +192,7 @@ class ConformanceListSerializer(ReadOnlyModelSerializer):
 class ConformanceDetailSerializer(ReadOnlyModelSerializer):
     class Meta:
         model = ConformanceCheck
-        fields = (*CONFORMANCE_LIST_FIELDS, "event_filter", "transition_history", "async_job_id", "idempotency_key")
+        fields = (*CONFORMANCE_LIST_FIELDS, "event_filter")
         read_only_fields = fields
 
 
@@ -221,7 +229,7 @@ class BottleneckAnalysisListSerializer(ReadOnlyModelSerializer):
 class BottleneckAnalysisDetailSerializer(ReadOnlyModelSerializer):
     class Meta:
         model = BottleneckAnalysis
-        fields = (*BOTTLENECK_LIST_FIELDS, "transition_history", "async_job_id", "idempotency_key")
+        fields = BOTTLENECK_LIST_FIELDS
         read_only_fields = fields
 
 
@@ -279,6 +287,45 @@ class IngestResultSerializer(serializers.Serializer):
     rejected = serializers.IntegerField()
     duplicates = serializers.IntegerField()
     rows = IngestEvidenceSerializer(many=True)
+
+
+class ProcessMiningConfigurationSerializer(ReadOnlyModelSerializer):
+    limits = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProcessMiningConfiguration
+        fields = ("id", "version", "document", "limits", "updated_at")
+        read_only_fields = fields
+
+    def get_limits(self, instance: ProcessMiningConfiguration) -> dict[str, tuple[float, float]]:
+        del instance
+        return {**INTEGER_LIMITS, **FLOAT_LIMITS}
+
+
+class ProcessMiningConfigurationVersionSerializer(ReadOnlyModelSerializer):
+    class Meta:
+        model = ProcessMiningConfigurationVersion
+        fields = ("id", "version", "document", "source", "correlation_id", "created_at")
+        read_only_fields = fields
+
+
+class ProcessMiningConfigurationAuditSerializer(ReadOnlyModelSerializer):
+    class Meta:
+        model = ProcessMiningConfigurationAudit
+        fields = ("id", "version", "action", "previous_document", "current_document", "correlation_id", "created_at")
+        read_only_fields = fields
+
+
+class ConfigurationDocumentSerializer(RejectServerOwnedFieldsMixin, serializers.Serializer):
+    document = serializers.JSONField()
+
+
+class ConfigurationImportSerializer(RejectServerOwnedFieldsMixin, serializers.Serializer):
+    configuration = serializers.JSONField()
+
+
+class ConfigurationRollbackSerializer(RejectServerOwnedFieldsMixin, serializers.Serializer):
+    version = serializers.IntegerField(min_value=1)
 
 
 __all__ = [name for name in globals() if name.endswith("Serializer")]

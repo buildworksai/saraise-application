@@ -36,7 +36,7 @@ export function MetricCard({ label, value, detail }: { label: string; value: str
 export function StatusPill({ status }: { status: string }) {
   const positive = ['healthy', 'completed'].includes(status);
   const active = ['queued', 'running'].includes(status);
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${positive ? 'bg-green-500/15 text-green-700 dark:text-green-300' : active ? 'bg-blue-500/15 text-blue-700 dark:text-blue-300' : status === 'failed' || status === 'unavailable' ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground'}`}>{status.replaceAll('_', ' ')}</span>;
+  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${positive ? 'bg-accent text-accent-foreground' : active ? 'bg-primary/10 text-primary' : status === 'failed' || status === 'unavailable' ? 'bg-destructive/10 text-destructive' : 'bg-muted text-muted-foreground'}`}>{status.replaceAll('_', ' ')}</span>;
 }
 
 export function Pagination({ value, onPage }: { value: PaginationMeta; onPage: (page: number) => void }) {
@@ -45,7 +45,7 @@ export function Pagination({ value, onPage }: { value: PaginationMeta; onPage: (
 
 export function StaleIndicator({ updatedAt, active }: { updatedAt: number; active: boolean }) {
   const stale = Date.now() - updatedAt > 15_000;
-  return <p className={`flex items-center gap-1 text-xs ${stale ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`} aria-live="polite"><Clock3 className="h-3.5 w-3.5"/>{active ? 'Auto-refreshing durable work' : 'Evidence snapshot'} · updated {new Date(updatedAt).toLocaleTimeString()}{stale ? ' · stale' : ''}</p>;
+  return <p className={`flex items-center gap-1 text-xs ${stale ? 'text-destructive' : 'text-muted-foreground'}`} aria-live="polite"><Clock3 className="h-3.5 w-3.5"/>{active ? 'Auto-refreshing durable work' : 'Evidence snapshot'} · updated {new Date(updatedAt).toLocaleTimeString()}{stale ? ' · stale' : ''}</p>;
 }
 
 export function DataTable({ headers, rows }: { headers: readonly string[]; rows: readonly (readonly ReactNode[])[] }) {

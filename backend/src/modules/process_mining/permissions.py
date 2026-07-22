@@ -23,6 +23,9 @@ PERMISSIONS: Final[tuple[str, ...]] = (
     "process_mining.conformance:retry", "process_mining.conformance:delete",
     "process_mining.bottleneck:read", "process_mining.bottleneck:create", "process_mining.bottleneck:cancel",
     "process_mining.bottleneck:retry", "process_mining.bottleneck:delete", "process_mining.health:read",
+    "process_mining.configuration:read", "process_mining.configuration:update",
+    "process_mining.configuration:rollback", "process_mining.configuration:import",
+    "process_mining.configuration:export",
 )
 SOD_ACTIONS: Final[tuple[tuple[str, str], ...]] = ()
 

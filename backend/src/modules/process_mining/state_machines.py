@@ -1,17 +1,28 @@
-"""Audited lifecycle state machines for durable process-mining work."""
+"""Configuration-driven lifecycle state machines for durable process-mining work."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, TypeVar
 
 from django.db import models
 
-from src.core.state_machine import StateMachine, StateMachineConfigurationError, Transition, register
-
-from .models import AnalysisStatus, BottleneckAnalysis, ConformanceCheck, EventExportJob, ExportStatus, ProcessDiscoveryJob
+from src.core.state_machine import StateMachine, StateMachineConfigurationError, Transition
 
 ModelT = TypeVar("ModelT", bound=models.Model)
+
+# Commands are platform protocol, while the permitted edges and terminal states are
+# tenant policy.  Keeping this interpreter in code avoids turning configuration into
+# executable code while leaving every business workflow edge versioned and reversible.
+_COMMAND_FOR_TARGET = {
+    "running": "start",
+    "cancelled": "cancel",
+    "completed": "complete",
+    "failed": "fail",
+    "timed_out": "timeout",
+    "queued": "retry",
+    "expired": "expire",
+}
 
 
 class AuditedStateMachine(StateMachine[ModelT]):
@@ -26,54 +37,29 @@ class AuditedStateMachine(StateMachine[ModelT]):
         return super().apply(*args, metadata=audit, **kwargs)
 
 
-def _analysis_machine(name: str, model: type[ModelT]) -> AuditedStateMachine[ModelT]:
+def configured_state_machine(
+    *,
+    name: str,
+    model: type[ModelT],
+    states: Sequence[str],
+    workflow: Mapping[str, Sequence[str]],
+    terminal_states: Sequence[str],
+) -> AuditedStateMachine[ModelT]:
+    """Build a validated machine from a tenant's versioned workflow document."""
+    transitions: list[Transition] = []
+    for source, targets in workflow.items():
+        for target in targets:
+            command = _COMMAND_FOR_TARGET.get(target)
+            if command is None:
+                raise StateMachineConfigurationError(f"No command protocol exists for workflow target {target!r}")
+            transitions.append(Transition(command, source, target))
     return AuditedStateMachine(
         name=name,
         model=model,
-        states=AnalysisStatus.values,
-        terminal_states=[AnalysisStatus.COMPLETED, AnalysisStatus.CANCELLED],
-        transitions=[
-            Transition("start", AnalysisStatus.QUEUED, AnalysisStatus.RUNNING),
-            Transition("cancel", AnalysisStatus.QUEUED, AnalysisStatus.CANCELLED),
-            Transition("complete", AnalysisStatus.RUNNING, AnalysisStatus.COMPLETED),
-            Transition("fail", AnalysisStatus.RUNNING, AnalysisStatus.FAILED),
-            Transition("timeout", AnalysisStatus.RUNNING, AnalysisStatus.TIMED_OUT),
-            Transition("cancel", AnalysisStatus.RUNNING, AnalysisStatus.CANCELLED),
-            Transition("retry", AnalysisStatus.FAILED, AnalysisStatus.QUEUED),
-            Transition("retry", AnalysisStatus.TIMED_OUT, AnalysisStatus.QUEUED),
-        ],
+        states=states,
+        terminal_states=terminal_states,
+        transitions=transitions,
     )
 
 
-DISCOVERY_STATE_MACHINE = _analysis_machine("process_mining.discovery", ProcessDiscoveryJob)
-CONFORMANCE_STATE_MACHINE = _analysis_machine("process_mining.conformance", ConformanceCheck)
-BOTTLENECK_STATE_MACHINE = _analysis_machine("process_mining.bottleneck", BottleneckAnalysis)
-EXPORT_STATE_MACHINE = AuditedStateMachine(
-    name="process_mining.export",
-    model=EventExportJob,
-    states=ExportStatus.values,
-    terminal_states=[ExportStatus.CANCELLED, ExportStatus.EXPIRED],
-    transitions=[
-        Transition("start", ExportStatus.QUEUED, ExportStatus.RUNNING),
-        Transition("cancel", ExportStatus.QUEUED, ExportStatus.CANCELLED),
-        Transition("complete", ExportStatus.RUNNING, ExportStatus.COMPLETED),
-        Transition("fail", ExportStatus.RUNNING, ExportStatus.FAILED),
-        Transition("timeout", ExportStatus.RUNNING, ExportStatus.TIMED_OUT),
-        Transition("cancel", ExportStatus.RUNNING, ExportStatus.CANCELLED),
-        Transition("retry", ExportStatus.FAILED, ExportStatus.QUEUED),
-        Transition("retry", ExportStatus.TIMED_OUT, ExportStatus.QUEUED),
-        Transition("expire", ExportStatus.COMPLETED, ExportStatus.EXPIRED),
-    ],
-)
-
-for _machine in (DISCOVERY_STATE_MACHINE, CONFORMANCE_STATE_MACHINE, BOTTLENECK_STATE_MACHINE, EXPORT_STATE_MACHINE):
-    register(_machine.name or "", _machine)
-
-
-__all__ = [
-    "AuditedStateMachine",
-    "BOTTLENECK_STATE_MACHINE",
-    "CONFORMANCE_STATE_MACHINE",
-    "DISCOVERY_STATE_MACHINE",
-    "EXPORT_STATE_MACHINE",
-]
+__all__ = ["AuditedStateMachine", "configured_state_machine"]

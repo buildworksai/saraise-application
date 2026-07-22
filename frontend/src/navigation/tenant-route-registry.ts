@@ -221,10 +221,12 @@ export function validateTenantSidebarTree(
       if (!route) {
         throw new Error(`Sidebar leaf ${leaf.id} does not resolve to a tenant route.`);
       }
-      if (
-        route.navigation.type !== "sidebar" ||
-        (route.navigation.path ?? route.path) !== leaf.path
-      ) {
+      const expectedPath = route.navigation.type === "sidebar"
+        ? route.navigation.path ?? route.path
+        : (hasRouteParameter(route.path)
+          ? routesById.get(route.navigation.parentRouteId)?.path
+          : route.path);
+      if (expectedPath !== leaf.path) {
         throw new Error(`Sidebar leaf ${leaf.id} does not match its tenant route.`);
       }
       if (hasRouteParameter(leaf.path)) {
@@ -241,17 +243,22 @@ export function buildTenantSidebarTree(
   validateTenantRoutes(routes);
   const leavesByModule = new Map<string, TenantSidebarLeaf[]>();
 
+  const routesById = new Map(routes.map((route) => [route.id, route]));
   for (const route of routes) {
-    if (route.navigation.type !== "sidebar") continue;
+    const contextualNavItem = route.module === "process_mining" && route.navigation.type === "contextual";
+    if (route.navigation.type !== "sidebar" && !contextualNavItem) continue;
+    const parent = route.navigation.type === "contextual" ? routesById.get(route.navigation.parentRouteId) : undefined;
+    const parentNavigation = parent?.navigation.type === "sidebar" ? parent.navigation : undefined;
+    const derivedLabel = route.sourceFile.split('/').at(-1)?.replace(/Page\.tsx$/, '').replace(/([a-z])([A-Z])/g, '$1 $2') ?? route.id;
     const leaves = leavesByModule.get(route.module) ?? [];
     leaves.push({
       id: route.id,
       routeId: route.id,
       module: route.module,
-      path: route.navigation.path ?? route.path,
-      label: route.navigation.label,
-      icon: route.navigation.icon,
-      order: route.navigation.order,
+      path: route.navigation.type === "sidebar" ? route.navigation.path ?? route.path : (hasRouteParameter(route.path) ? parent?.path ?? route.path : route.path),
+      label: route.navigation.type === "sidebar" ? route.navigation.label : route.navigation.label ?? derivedLabel,
+      icon: route.navigation.type === "sidebar" ? route.navigation.icon : route.navigation.icon ?? parentNavigation!.icon,
+      order: route.navigation.type === "sidebar" ? route.navigation.order : route.navigation.order ?? (parentNavigation?.order ?? 0) + (leaves.length + 1) / 100,
     });
     leavesByModule.set(route.module, leaves);
   }

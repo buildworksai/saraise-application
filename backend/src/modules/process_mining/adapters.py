@@ -132,7 +132,8 @@ class BottleneckAlgorithm(Protocol):
     metadata: AdapterMetadata
 
     def analyze(
-        self, traces: Mapping[str, Sequence[CanonicalEvent]], time_range: tuple[datetime, datetime]
+        self, traces: Mapping[str, Sequence[CanonicalEvent]], time_range: tuple[datetime, datetime],
+        configuration: Mapping[str, object],
     ) -> BottleneckResult: ...
 
 
@@ -276,14 +277,14 @@ class HeuristicMiner(DirectlyFollowsMiner):
         "1.0",
         "1.0.0",
         ("discovery", "frequency", "noise_filter"),
-        {"dependency_threshold": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.8}},
+        {"dependency_threshold": {"type": "number"}},
     )
     mode = "heuristic"
 
     def _edge_allowed(self, frequency: int, maximum: int, parameters: Mapping[str, object]) -> bool:
-        threshold = float(parameters.get("dependency_threshold", 0.8))
-        if not 0 <= threshold <= 1:
-            raise ValueError("dependency_threshold must be between 0 and 1")
+        if "dependency_threshold" not in parameters:
+            raise ValueError("dependency_threshold must be supplied by tenant configuration")
+        threshold = float(parameters["dependency_threshold"])
         return frequency / maximum >= threshold
 
 
@@ -293,14 +294,14 @@ class InductiveMiner(DirectlyFollowsMiner):
         "1.0",
         "1.0.0",
         ("discovery", "sound_model", "noise_filter"),
-        {"noise_threshold": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.2}},
+        {"noise_threshold": {"type": "number"}},
     )
     mode = "inductive"
 
     def _edge_allowed(self, frequency: int, maximum: int, parameters: Mapping[str, object]) -> bool:
-        threshold = float(parameters.get("noise_threshold", 0.2))
-        if not 0 <= threshold <= 1:
-            raise ValueError("noise_threshold must be between 0 and 1")
+        if "noise_threshold" not in parameters:
+            raise ValueError("noise_threshold must be supplied by tenant configuration")
+        threshold = float(parameters["noise_threshold"])
         return frequency / maximum >= threshold
 
 
@@ -362,13 +363,13 @@ def _percentile(values: Sequence[float], percentile: float) -> float:
     return ordered[index]
 
 
-def _severity(median: float, p95: float) -> str:
+def _severity(median: float, p95: float, configuration: Mapping[str, object]) -> str:
     ratio = p95 / median if median > 0 else (float("inf") if p95 > 0 else 1)
-    if ratio > 10:
+    if ratio > float(configuration["bottleneck_critical_ratio"]):
         return "critical"
-    if ratio > 5:
+    if ratio > float(configuration["bottleneck_high_ratio"]):
         return "high"
-    if ratio > 2:
+    if ratio > float(configuration["bottleneck_medium_ratio"]):
         return "medium"
     return "low"
 
@@ -377,7 +378,8 @@ class TransitionDurationAnalyzer:
     metadata = AdapterMetadata("process_mining.transition_duration", "1.0", "1.0.0", ("bottleneck", "variants", "resource_concentration"))
 
     def analyze(
-        self, traces: Mapping[str, Sequence[CanonicalEvent]], time_range: tuple[datetime, datetime]
+        self, traces: Mapping[str, Sequence[CanonicalEvent]], time_range: tuple[datetime, datetime],
+        configuration: Mapping[str, object],
     ) -> BottleneckResult:
         start, end = time_range
         if end <= start:
@@ -405,7 +407,8 @@ class TransitionDurationAnalyzer:
                     transition_resources[key][target.resource] += 1
         if not case_durations:
             raise InvalidAdapterResult("Bottleneck analysis requires traces")
-        ranked = sorted(transition_durations, key=lambda key: (-_percentile(transition_durations[key], 0.95), key))
+        percentile = float(configuration["tail_duration_percentile"])
+        ranked = sorted(transition_durations, key=lambda key: (-_percentile(transition_durations[key], percentile), key))
         findings: list[Mapping[str, object]] = []
         for rank, key in enumerate(ranked, 1):
             values = transition_durations[key]
@@ -419,10 +422,10 @@ class TransitionDurationAnalyzer:
                     "to_activity": key[1],
                     "avg_duration_seconds": Decimal(str(round(statistics.mean(values), 2))),
                     "median_duration_seconds": Decimal(str(round(median, 2))),
-                    "p95_duration_seconds": Decimal(str(round(_percentile(values, 0.95), 2))),
+                    "p95_duration_seconds": Decimal(str(round(_percentile(values, percentile), 2))),
                     "case_count": cases,
-                    "severity": _severity(median, _percentile(values, 0.95)),
-                    "resource_bottleneck": top_resource if cases and top_count / cases > 0.5 else "",
+                    "severity": _severity(median, _percentile(values, percentile), configuration),
+                    "resource_bottleneck": top_resource if cases and top_count / cases > float(configuration["resource_concentration_threshold"]) else "",
                     "rank": rank,
                 }
             )
@@ -434,7 +437,7 @@ class TransitionDurationAnalyzer:
         for activities, count in sorted(variants.items(), key=lambda item: (-item[1], item[0])):
             percentage = count * 100 / total
             duration = statistics.mean(variant_durations[activities])
-            if percentage < 1:
+            if percentage < float(configuration["variant_grouping_percentage"]):
                 grouped_count += count
                 grouped_weighted_duration += duration * count
                 continue

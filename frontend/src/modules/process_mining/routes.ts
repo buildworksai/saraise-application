@@ -1,8 +1,9 @@
 import { lazy } from 'react';
-import { Activity, Download, GitBranch, Gauge, Route, ShieldCheck } from 'lucide-react';
+import { Activity, Download, GitBranch, Gauge, Route, Settings, ShieldCheck } from 'lucide-react';
 import type { TenantRoute } from '@/navigation/tenant-route-types';
 
-export const tenantRoutes = [
+const routeDefinitions = [
+  { id: 'process-mining.configuration', module: 'process_mining', path: '/process-mining/configuration', title: 'Configuration · Process Mining · SARAISE', sourceFile: 'modules/process_mining/pages/ConfigurationPage.tsx', Page: lazy(() => import('./pages/ConfigurationPage').then(({ ConfigurationPage }) => ({ default: ConfigurationPage }))), navigation: { type: 'sidebar', label: 'Configuration', icon: Settings, order: 460 } },
   { id: 'process-mining.processes.list', module: 'process_mining', path: '/process-mining/processes', sourceFile: 'modules/process_mining/pages/ProcessOverviewPage.tsx', Page: lazy(() => import('./pages/ProcessOverviewPage').then(({ ProcessOverviewPage }) => ({ default: ProcessOverviewPage }))), navigation: { type: 'sidebar', label: 'Processes', icon: Route, order: 400 } },
   { id: 'process-mining.processes.detail', module: 'process_mining', path: '/process-mining/processes/:processName', sourceFile: 'modules/process_mining/pages/ProcessDetailPage.tsx', Page: lazy(() => import('./pages/ProcessDetailPage').then(({ ProcessDetailPage }) => ({ default: ProcessDetailPage }))), navigation: { type: 'contextual', parentRouteId: 'process-mining.processes.list' } },
   { id: 'process-mining.models.create', module: 'process_mining', path: '/process-mining/models/new', sourceFile: 'modules/process_mining/pages/CreateProcessModelPage.tsx', Page: lazy(() => import('./pages/CreateProcessModelPage').then(({ CreateProcessModelPage }) => ({ default: CreateProcessModelPage }))), navigation: { type: 'contextual', parentRouteId: 'process-mining.processes.list' } },
@@ -27,6 +28,16 @@ export const tenantRoutes = [
 
   { id: 'process-mining.exports.list', module: 'process_mining', path: '/process-mining/exports', sourceFile: 'modules/process_mining/pages/ExportListPage.tsx', Page: lazy(() => import('./pages/ExportListPage').then(({ ExportListPage }) => ({ default: ExportListPage }))), navigation: { type: 'sidebar', label: 'Exports', icon: Download, order: 450 } },
   { id: 'process-mining.exports.create', module: 'process_mining', path: '/process-mining/exports/new', sourceFile: 'modules/process_mining/pages/CreateExportPage.tsx', Page: lazy(() => import('./pages/CreateExportPage').then(({ CreateExportPage }) => ({ default: CreateExportPage }))), navigation: { type: 'contextual', parentRouteId: 'process-mining.exports.list' } },
-] satisfies readonly TenantRoute[];
+] as const;
+
+const humanTitle = (sourceFile: string) => {
+  const file = sourceFile.split('/').at(-1)?.replace(/Page\.tsx$/, '') ?? 'Process Mining';
+  return file.replace(/([a-z])([A-Z])/g, '$1 $2');
+};
+
+export const tenantRoutes = routeDefinitions.map((route) => ({
+  ...route,
+  title: ('title' in route ? route.title : undefined) ?? `${humanTitle(route.sourceFile)} · Process Mining · SARAISE`,
+})) satisfies readonly TenantRoute[];
 
 export default tenantRoutes;
