@@ -9,7 +9,8 @@ boundary.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone as datetime_timezone
+from datetime import datetime
+from datetime import timezone as datetime_timezone
 from typing import Any
 
 from src.core.async_jobs.models import AsyncJob
@@ -60,10 +61,14 @@ def scan_schedules_worker(
     *,
     tenant_id: uuid.UUID,
     now: datetime,
-    batch_size: int = 100,
+    batch_size: int | None = None,
 ) -> dict[str, Any]:
     if now.tzinfo is None:
         raise ValueError("schedule scan timestamp must be timezone-aware")
+    if batch_size is None:
+        from .services import ConfigurationService
+
+        batch_size = ConfigurationService.effective_document(tenant_id)["limits"]["schedule_scan_batch"]
     claims = ScheduleService.claim_due_schedules(tenant_id, now, batch_size)
     enqueued: list[str] = []
     skipped: list[str] = []
@@ -78,6 +83,8 @@ def scan_schedules_worker(
             enqueued.append(str(run.id))
     from .health import mark_schedule_scanner_healthy
 
+    # The worker decorator has already installed tenant context; resolving it
+    # inside the health primitive keeps its public hook stable and tenant-safe.
     mark_schedule_scanner_healthy()
     return {
         "claimed": len(claims),
@@ -103,8 +110,8 @@ def _scan_schedules_handler(job: AsyncJob) -> dict[str, Any]:
             now = datetime.fromisoformat(str(raw_now))
         except ValueError as exc:
             raise ValueError(f"Async job {job.id} has an invalid schedule scan timestamp") from exc
-    batch_size = job.payload.get("batch_size", 100)
-    if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+    batch_size = job.payload.get("batch_size")
+    if batch_size is not None and (isinstance(batch_size, bool) or not isinstance(batch_size, int)):
         raise ValueError(f"Async job {job.id} has an invalid batch_size")
     return scan_schedules_worker(tenant_id=job.tenant_id, now=now, batch_size=batch_size)
 

@@ -359,11 +359,6 @@ export interface RetryAttemptDTO {
   readonly tenant_id: string;
   readonly task_run_id: string;
   readonly attempt_number: number;
-  readonly async_job_id: string;
-  readonly idempotency_key: string;
-  readonly delivery_token: string;
-  readonly request_fingerprint: string;
-  readonly commit_outcome: JSONValue | null;
   readonly status: RetryAttemptStatus;
   readonly available_at: string;
   readonly correlation_id: string;
@@ -409,7 +404,6 @@ export interface TaskRunDetailDTO {
   readonly remaining_dependencies: number;
   readonly current_attempt: number;
   readonly max_attempts: number;
-  readonly operation_token: string;
   readonly error_code: string;
   readonly error_message: string;
   readonly transition_history: readonly TransitionEvidence[];
@@ -470,12 +464,142 @@ export interface RunDetailDTO {
   readonly error_code: string;
   readonly error_message: string;
   readonly transition_history: readonly TransitionEvidence[];
-  readonly graph: RunGraphSnapshot;
   readonly started_at: string | null;
   readonly completed_at: string | null;
   readonly created_at: string;
   readonly updated_at: string;
-  readonly task_runs: readonly TaskRunListDTO[];
+}
+
+export type ConfigurationEnvironment = "development" | "self-hosted" | "saas";
+
+export interface OrchestrationConfigurationDocument {
+  readonly limits: {
+    readonly json_bytes: number;
+    readonly json_depth: number;
+    readonly parallel_tasks_min: number;
+    readonly parallel_tasks_max: number;
+    readonly timeout_seconds_min: number;
+    readonly timeout_seconds_max: number;
+    readonly attempts_min: number;
+    readonly attempts_max: number;
+    readonly retry_multiplier_min: number;
+    readonly retry_multiplier_max: number;
+    readonly page_size_default: number;
+    readonly page_size_max: number;
+    readonly idempotency_key_length: number;
+    readonly event_metadata_bytes: number;
+    readonly schedule_scan_batch: number;
+    readonly definition_name_min: number;
+    readonly definition_name_max: number;
+    readonly description_max: number;
+    readonly schedule_name_min: number;
+    readonly schedule_name_max: number;
+  };
+  readonly defaults: {
+    readonly max_parallel_tasks: number;
+    readonly timeout_seconds: number;
+    readonly max_attempts: number;
+    readonly retry_initial_delay_seconds: number;
+    readonly retry_backoff_multiplier: number;
+    readonly retry_max_delay_seconds: number;
+    readonly retry_jitter_ratio: number;
+    readonly edge_condition: EdgeCondition;
+    readonly edge_priority: number;
+    readonly timezone: string;
+    readonly schedule_status: ScheduleStatus;
+    readonly misfire_policy: MisfirePolicy;
+    readonly concurrency_policy: ConcurrencyPolicy;
+    readonly cron_expression: string;
+    readonly input_schema: JSONObject;
+    readonly output_schema: JSONObject;
+  };
+  readonly workflow: JSONObject;
+  readonly integrations: JSONObject;
+  readonly scheduler: {
+    readonly cron_fields: number;
+    readonly search_horizon_days: number;
+    readonly active_status: ScheduleStatus;
+    readonly enqueue_misfire_policies: readonly MisfirePolicy[];
+    readonly forbid_overlap_policy: ConcurrencyPolicy;
+  };
+  readonly health: {
+    readonly scanner_heartbeat_ttl_seconds: number;
+    readonly pending_outbox_freshness_seconds: number;
+    readonly scanner_freshness_seconds: number;
+    readonly registry_staleness_seconds: number;
+  };
+  readonly ui: {
+    readonly definition_detail_page_size: number;
+    readonly definition_page_size: number;
+    readonly schedule_page_size: number;
+    readonly task_run_page_size: number;
+    readonly published_definition_page_size: number;
+    readonly run_poll_interval_ms: number;
+    readonly run_detail_poll_interval_ms: number;
+    readonly event_poll_interval_ms: number;
+    readonly cron_preview_count: number;
+    readonly skeleton_rows: number;
+    readonly duration_seconds_threshold_ms: number;
+    readonly zoom_default: number;
+    readonly zoom_min: number;
+    readonly zoom_max: number;
+    readonly zoom_step: number;
+  };
+}
+
+export interface OrchestrationConfigurationDTO {
+  readonly id?: string;
+  readonly environment: ConfigurationEnvironment;
+  readonly cohort: string;
+  readonly version: number;
+  readonly document: OrchestrationConfigurationDocument;
+  readonly enabled: boolean;
+  readonly rollout_percentage: number;
+  readonly allowed_roles: readonly string[];
+  readonly updated_by?: string;
+  readonly correlation_id?: string;
+  readonly updated_at?: string;
+}
+
+export interface ConfigurationWriteRequest {
+  readonly environment: ConfigurationEnvironment;
+  readonly cohort: string;
+  readonly document: OrchestrationConfigurationDocument;
+  readonly enabled: boolean;
+  readonly rollout_percentage: number;
+  readonly allowed_roles: readonly string[];
+}
+
+export interface ConfigurationPreviewDTO {
+  readonly valid: true;
+  readonly changed_sections: readonly string[];
+  readonly before: OrchestrationConfigurationDocument;
+  readonly after: OrchestrationConfigurationDocument;
+}
+
+export interface ConfigurationVersionDTO {
+  readonly id: string;
+  readonly version: number;
+  readonly document: OrchestrationConfigurationDocument;
+  readonly enabled: boolean;
+  readonly rollout_percentage: number;
+  readonly allowed_roles: readonly string[];
+  readonly actor_id: string;
+  readonly correlation_id: string;
+  readonly parent_version_id: string | null;
+  readonly rollback_of_id: string | null;
+  readonly created_at: string;
+}
+
+export interface ConfigurationAuditDTO {
+  readonly id: string;
+  readonly version: number;
+  readonly action: string;
+  readonly actor_id: string;
+  readonly correlation_id: string;
+  readonly before: OrchestrationConfigurationDTO | null;
+  readonly after: OrchestrationConfigurationDTO;
+  readonly changed_at: string;
 }
 
 export interface RunStartRequest {
@@ -572,6 +696,16 @@ export interface HealthCheckDTO {
 export const MODULE_API_PREFIX = "/api/v2/automation-orchestration";
 
 export const ENDPOINTS = {
+  CONFIGURATION: {
+    DETAIL: `${MODULE_API_PREFIX}/configuration/`,
+    UPDATE: `${MODULE_API_PREFIX}/configuration/`,
+    PREVIEW: `${MODULE_API_PREFIX}/configuration/preview/`,
+    VERSIONS: `${MODULE_API_PREFIX}/configuration/versions/`,
+    AUDITS: `${MODULE_API_PREFIX}/configuration/audits/`,
+    ROLLBACK: `${MODULE_API_PREFIX}/configuration/rollback/`,
+    IMPORT: `${MODULE_API_PREFIX}/configuration/import/`,
+    EXPORT: `${MODULE_API_PREFIX}/configuration/export/`,
+  },
   DEFINITIONS: {
     LIST: `${MODULE_API_PREFIX}/definitions/`,
     CREATE: `${MODULE_API_PREFIX}/definitions/`,
@@ -620,7 +754,21 @@ export const ENDPOINTS = {
   TASK_RUNS: {
     DETAIL: (id: string) => `${MODULE_API_PREFIX}/task-runs/${id}/` as const,
     RETRY: (id: string) => `${MODULE_API_PREFIX}/task-runs/${id}/retry/` as const,
+    RECONCILE: (id: string) => `${MODULE_API_PREFIX}/task-runs/${id}/reconcile/` as const,
   },
   NODE_TYPES: `${MODULE_API_PREFIX}/node-types/`,
   HEALTH: `${MODULE_API_PREFIX}/health/`,
+} as const;
+
+export const ROUTE_PATHS = {
+  DEFINITIONS: "/automation-orchestration",
+  DEFINITION_CREATE: "/automation-orchestration/definitions/new",
+  DEFINITION_DETAIL: (id: string) => `/automation-orchestration/definitions/${id}` as const,
+  DEFINITION_EDIT: (id: string) => `/automation-orchestration/definitions/${id}/edit` as const,
+  CONFIGURATION: "/automation-orchestration/configuration",
+  SCHEDULES: "/automation-orchestration/schedules",
+  SCHEDULE_CREATE: "/automation-orchestration/schedules/new",
+  SCHEDULE_EDIT: (id: string) => `/automation-orchestration/schedules/${id}/edit` as const,
+  RUNS: "/automation-orchestration/runs",
+  RUN_DETAIL: (id: string) => `/automation-orchestration/runs/${id}` as const,
 } as const;

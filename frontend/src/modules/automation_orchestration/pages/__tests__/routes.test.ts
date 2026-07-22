@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { tenantRoutes } from "../../routes";
 
 describe("automation orchestration route registry", () => {
-  it("declares three sidebar and six contextual lazy routes", () => {
-    expect(tenantRoutes).toHaveLength(9);
-    expect(tenantRoutes.filter((route) => route.navigation.type === "sidebar")).toHaveLength(3);
+  it("declares the configuration sidebar route and six contextual lazy routes", () => {
+    expect(tenantRoutes).toHaveLength(10);
+    expect(tenantRoutes.filter((route) => route.navigation.type === "sidebar")).toHaveLength(4);
     expect(tenantRoutes.filter((route) => route.navigation.type === "contextual")).toHaveLength(6);
     expect(tenantRoutes.every((route) => typeof route.Page === "object")).toBe(true);
+    expect(tenantRoutes.every((route) => route.title.length > 0)).toBe(true);
+    expect(tenantRoutes.some((route) => route.path === "/automation-orchestration/configuration")).toBe(true);
   });
 
   it("uses unique ids and paths with valid same-module parents", () => {

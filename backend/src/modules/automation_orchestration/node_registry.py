@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import threading
 import uuid
 from collections.abc import Callable, Mapping
@@ -19,7 +18,6 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Protocol, TypeAlias, runtime_checkable
 
-from django.conf import settings
 from jsonschema import Draft202012Validator, SchemaError, ValidationError
 
 JSONScalar: TypeAlias = str | int | float | bool | None
@@ -59,7 +57,7 @@ class NodeNotRegistered(RegistryError):
 
 
 class NodeReplacementForbidden(RegistryError):
-    """Raised when replacement is attempted outside an explicit dev/test run."""
+    """Raised because in-place replacement is forbidden in every environment."""
 
 
 class NodeContractError(ValueError):
@@ -352,8 +350,7 @@ def register_node(
         if descriptor.key in _registry:
             if not replace:
                 raise DuplicateNodeRegistration(f"Node {descriptor.key!r} is already registered")
-            if not _replacement_allowed():
-                raise NodeReplacementForbidden("Node replacement is disabled outside development/test mode")
+            raise NodeReplacementForbidden("Node replacement is forbidden; use an isolated registry instance")
         _registry[descriptor.key] = (descriptor, executor)
 
 
@@ -500,11 +497,6 @@ def _validate_schema_contract(schema: dict[str, Any], field_name: str) -> None:
         Draft202012Validator.check_schema(schema)
     except SchemaError as exc:
         raise NodeContractError(f"{field_name} is not a valid JSON schema: {exc.message}") from exc
-
-
-def _replacement_allowed() -> bool:
-    mode = os.environ.get("SARAISE_MODE", "development").lower()
-    return bool(getattr(settings, "DEBUG", False)) and mode in {"development", "test"}
 
 
 def _is_visible(

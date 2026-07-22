@@ -19,6 +19,11 @@ RUN_EXECUTE = "automation_orchestration.run:execute"
 RUN_CONTROL = "automation_orchestration.run:control"
 RUN_RETRY = "automation_orchestration.run:retry"
 CATALOG_VIEW = "automation_orchestration.catalog:view"
+# Configuration and health are governed by existing manifest permissions:
+# configuration is definition policy, and health is runtime catalog metadata.
+CONFIGURATION_VIEW = DEFINITION_VIEW
+CONFIGURATION_MANAGE = DEFINITION_MANAGE
+HEALTH_VIEW = CATALOG_VIEW
 
 PERMISSIONS: tuple[str, ...] = (
     DEFINITION_VIEW,
@@ -65,9 +70,12 @@ def write_access(permission: str, *, cost: int = 1) -> AccessRequirement:
 __all__ = [
     "AccessRequirement",
     "CATALOG_VIEW",
+    "CONFIGURATION_MANAGE",
+    "CONFIGURATION_VIEW",
     "DEFINITION_MANAGE",
     "DEFINITION_PUBLISH",
     "DEFINITION_VIEW",
+    "HEALTH_VIEW",
     "PERMISSIONS",
     "RUN_CONTROL",
     "RUN_EXECUTE",

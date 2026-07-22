@@ -4,6 +4,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .api import (
+    ConfigurationViewSet,
     DefinitionViewSet,
     EdgeViewSet,
     NodeTypeViewSet,
@@ -17,6 +18,7 @@ from .api import (
 app_name = "automation_orchestration"
 
 router = DefaultRouter()
+router.register("configuration", ConfigurationViewSet, basename="configuration")
 router.register("definitions", DefinitionViewSet, basename="definition")
 router.register("nodes", NodeViewSet, basename="node")
 router.register("edges", EdgeViewSet, basename="edge")

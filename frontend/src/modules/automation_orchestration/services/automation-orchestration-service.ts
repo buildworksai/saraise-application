@@ -2,6 +2,11 @@ import { apiClient } from "@/services/api-client";
 import {
   ENDPOINTS,
   type APIEnvelope,
+  type ConfigurationAuditDTO,
+  type ConfigurationEnvironment,
+  type ConfigurationPreviewDTO,
+  type ConfigurationVersionDTO,
+  type ConfigurationWriteRequest,
   type DefinitionCreateRequest,
   type DefinitionDetailDTO,
   type DefinitionFilters,
@@ -12,6 +17,7 @@ import {
   type GraphValidationResult,
   type HealthCheckDTO,
   type NodeCreateRequest,
+  type OrchestrationConfigurationDTO,
   type NodeDescriptorDTO,
   type NodeUpdateRequest,
   type OrchestrationEdgeDTO,
@@ -70,6 +76,85 @@ async function remove(path: string): Promise<void> {
 }
 
 export const automationOrchestrationService = {
+  async getConfiguration(
+    environment: ConfigurationEnvironment = "development",
+    cohort = "all",
+  ): Promise<OrchestrationConfigurationDTO> {
+    return unwrap(
+      await apiClient.get<APIEnvelope<OrchestrationConfigurationDTO>>(
+        withQuery(ENDPOINTS.CONFIGURATION.DETAIL, { environment, cohort }),
+      ),
+    );
+  },
+
+  async updateConfiguration(data: ConfigurationWriteRequest): Promise<OrchestrationConfigurationDTO> {
+    return unwrap(
+      await apiClient.post<APIEnvelope<OrchestrationConfigurationDTO>>(
+        ENDPOINTS.CONFIGURATION.UPDATE,
+        data,
+      ),
+    );
+  },
+
+  async previewConfiguration(data: ConfigurationWriteRequest): Promise<ConfigurationPreviewDTO> {
+    return unwrap(
+      await apiClient.post<APIEnvelope<ConfigurationPreviewDTO>>(ENDPOINTS.CONFIGURATION.PREVIEW, data),
+    );
+  },
+
+  async listConfigurationVersions(
+    environment: ConfigurationEnvironment,
+    cohort: string,
+  ): Promise<PageResult<ConfigurationVersionDTO>> {
+    return unwrapPage(
+      await apiClient.get<APIEnvelope<readonly ConfigurationVersionDTO[]>>(
+        withQuery(ENDPOINTS.CONFIGURATION.VERSIONS, { environment, cohort }),
+      ),
+    );
+  },
+
+  async listConfigurationAudits(
+    environment: ConfigurationEnvironment,
+    cohort: string,
+  ): Promise<PageResult<ConfigurationAuditDTO>> {
+    return unwrapPage(
+      await apiClient.get<APIEnvelope<readonly ConfigurationAuditDTO[]>>(
+        withQuery(ENDPOINTS.CONFIGURATION.AUDITS, { environment, cohort }),
+      ),
+    );
+  },
+
+  async rollbackConfiguration(
+    environment: ConfigurationEnvironment,
+    cohort: string,
+    version: number,
+  ): Promise<OrchestrationConfigurationDTO> {
+    return unwrap(
+      await apiClient.post<APIEnvelope<OrchestrationConfigurationDTO>>(ENDPOINTS.CONFIGURATION.ROLLBACK, {
+        environment,
+        cohort,
+        version,
+      }),
+    );
+  },
+
+  async importConfiguration(data: ConfigurationWriteRequest): Promise<OrchestrationConfigurationDTO> {
+    return unwrap(
+      await apiClient.post<APIEnvelope<OrchestrationConfigurationDTO>>(ENDPOINTS.CONFIGURATION.IMPORT, data),
+    );
+  },
+
+  async exportConfiguration(
+    environment: ConfigurationEnvironment,
+    cohort: string,
+  ): Promise<OrchestrationConfigurationDTO> {
+    return unwrap(
+      await apiClient.get<APIEnvelope<OrchestrationConfigurationDTO>>(
+        withQuery(ENDPOINTS.CONFIGURATION.EXPORT, { environment, cohort }),
+      ),
+    );
+  },
+
   async listDefinitions(filters: DefinitionFilters = {}): Promise<PageResult<DefinitionListDTO>> {
     const envelope = await apiClient.get<APIEnvelope<readonly DefinitionListDTO[]>>(
       withQuery(ENDPOINTS.DEFINITIONS.LIST, filters),
@@ -290,14 +375,26 @@ export const automationOrchestrationService = {
     return unwrap(await apiClient.post<APIEnvelope<TaskRunDetailDTO>>(ENDPOINTS.TASK_RUNS.RETRY(id), data));
   },
 
+  async reconcileTaskRun(
+    id: string,
+    action: "reconcile" | "compensate",
+  ): Promise<TaskRunDetailDTO> {
+    return unwrap(
+      await apiClient.post<APIEnvelope<TaskRunDetailDTO>>(ENDPOINTS.TASK_RUNS.RECONCILE(id), {
+        action,
+        evidence: {},
+      }),
+    );
+  },
+
   async listEvents(runId: string): Promise<PageResult<OrchestrationEventDTO>> {
     return unwrapPage(
       await apiClient.get<APIEnvelope<readonly OrchestrationEventDTO[]>>(ENDPOINTS.RUNS.EVENTS(runId)),
     );
   },
 
-  async listNodeTypes(): Promise<PageResult<NodeDescriptorDTO>> {
-    return unwrapPage(await apiClient.get<APIEnvelope<readonly NodeDescriptorDTO[]>>(withQuery(ENDPOINTS.NODE_TYPES, { page_size: 100 })));
+  async listNodeTypes(pageSize: number): Promise<PageResult<NodeDescriptorDTO>> {
+    return unwrapPage(await apiClient.get<APIEnvelope<readonly NodeDescriptorDTO[]>>(withQuery(ENDPOINTS.NODE_TYPES, { page_size: pageSize })));
   },
 
   async getHealth(): Promise<HealthCheckDTO> {

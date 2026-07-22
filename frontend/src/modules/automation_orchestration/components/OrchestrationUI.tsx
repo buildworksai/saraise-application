@@ -28,12 +28,12 @@ export function PageHeader({
   );
 }
 
-export function PageSkeleton({ rows = 5 }: { rows?: number }) {
+export function PageSkeleton({ rows }: { rows?: number }) {
   return (
     <div aria-label="Loading orchestration data" aria-busy="true" className="space-y-4">
       <Skeleton className="h-10 w-72" />
       <Skeleton className="h-20 w-full" />
-      {Array.from({ length: rows }, (_, index) => (
+      {Array.from({ length: rows ?? 0 }, (_, index) => (
         <Skeleton key={index} className="h-16 w-full" />
       ))}
     </div>
@@ -42,9 +42,9 @@ export function PageSkeleton({ rows = 5 }: { rows?: number }) {
 
 export function PermissionDenied() {
   return (
-    <Card role="alert" className="border-amber-500/40">
+    <Card role="alert" className="border-secondary">
       <CardContent className="flex min-h-72 flex-col items-center justify-center text-center">
-        <LockKeyhole className="mb-4 h-10 w-10 text-amber-600" aria-hidden="true" />
+        <LockKeyhole className="mb-4 h-10 w-10 text-secondary-foreground" aria-hidden="true" />
         <h2 className="text-xl font-semibold">Permission required</h2>
         <p className="mt-2 max-w-md text-sm text-muted-foreground">
           Your role cannot access this orchestration surface. Ask a tenant administrator for the
@@ -90,23 +90,25 @@ export function EmptyPanel({
   );
 }
 
-const STATUS_COLORS: Readonly<Record<string, string>> = {
-  draft: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
-  published: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
-  active: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
-  running: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200",
-  queued: "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200",
-  retry_wait: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
-  paused: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
-  cancelling: "bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200",
-  succeeded: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
-  failed: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
-  cancelled: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200",
-  retired: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200",
+const STATUS_TOKENS: Readonly<Record<string, string>> = {
+  draft: "bg-muted text-muted-foreground",
+  published: "bg-primary/10 text-primary",
+  active: "bg-primary/10 text-primary",
+  running: "bg-accent text-accent-foreground",
+  queued: "bg-secondary text-secondary-foreground",
+  retry_wait: "bg-secondary text-secondary-foreground",
+  paused: "bg-secondary text-secondary-foreground",
+  cancelling: "bg-secondary text-secondary-foreground",
+  succeeded: "bg-primary/10 text-primary",
+  failed: "bg-destructive/10 text-destructive",
+  error: "bg-destructive/10 text-destructive",
+  cancelled: "bg-muted text-muted-foreground",
+  retired: "bg-muted text-muted-foreground",
+  warning: "bg-secondary text-secondary-foreground",
 };
 
 export function StatusPill({ status }: { status: string }) {
-  const color = STATUS_COLORS[status] ?? "bg-muted text-muted-foreground";
+  const color = STATUS_TOKENS[status] ?? "bg-muted text-muted-foreground";
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${color}`}>{status.replace("_", " ")}</span>;
 }
 
@@ -119,11 +121,11 @@ export function formatDate(value: string | null): string {
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export function formatDuration(start: string | null, end: string | null): string {
+export function formatDuration(start: string | null, end: string | null, minuteThresholdMs: number): string {
   if (!start) return "—";
   const milliseconds = Math.max(0, new Date(end ?? Date.now()).getTime() - new Date(start).getTime());
-  if (milliseconds < 60_000) return `${Math.round(milliseconds / 1_000)}s`;
-  return `${Math.floor(milliseconds / 60_000)}m ${Math.round((milliseconds % 60_000) / 1_000)}s`;
+  if (milliseconds < minuteThresholdMs) return `${Math.round(milliseconds / 1_000)}s`;
+  return `${Math.floor(milliseconds / minuteThresholdMs)}m ${Math.round((milliseconds % minuteThresholdMs) / 1_000)}s`;
 }
 
 export function Pagination({

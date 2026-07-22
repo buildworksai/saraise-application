@@ -15,6 +15,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from rest_framework import serializers
 
 from .models import (
+    OrchestrationConfigurationAudit,
+    OrchestrationConfigurationVersion,
     OrchestrationDefinition,
     OrchestrationEdge,
     OrchestrationEvent,
@@ -25,8 +27,10 @@ from .models import (
     RetryAttempt,
 )
 
-MAX_JSON_BYTES = 256 * 1024
-MAX_JSON_DEPTH = 20
+# Immutable parser ceilings prevent resource exhaustion. Tenant configuration
+# may only narrow these values and is enforced in services.py.
+PLATFORM_MAX_JSON_BYTES = 256 * 1024
+PLATFORM_MAX_JSON_DEPTH = 20
 SECRET_KEY_PATTERN = re.compile(
     r"(^|[_-])(password|passwd|secret|token|api[_-]?key|private[_-]?key|credential)([_-]|$)",
     re.IGNORECASE,
@@ -35,8 +39,8 @@ MAPPING_SOURCE_PATTERN = re.compile(r"^\$(input|tasks\.[a-z0-9_-]+\.output)(\.[a
 
 
 def _walk_json(value: object, *, depth: int = 0, reject_secrets: bool = False) -> None:
-    if depth > MAX_JSON_DEPTH:
-        raise serializers.ValidationError(f"JSON nesting must not exceed {MAX_JSON_DEPTH} levels")
+    if depth > PLATFORM_MAX_JSON_DEPTH:
+        raise serializers.ValidationError(f"JSON nesting must not exceed {PLATFORM_MAX_JSON_DEPTH} levels")
     if value is None or isinstance(value, (bool, int, float, str)):
         return
     if isinstance(value, Mapping):
@@ -62,8 +66,8 @@ def validate_bounded_json(value: object, *, reject_secrets: bool = False) -> obj
         encoded = json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise serializers.ValidationError("Value must be valid JSON") from exc
-    if len(encoded) > MAX_JSON_BYTES:
-        raise serializers.ValidationError(f"JSON document must not exceed {MAX_JSON_BYTES} bytes")
+    if len(encoded) > PLATFORM_MAX_JSON_BYTES:
+        raise serializers.ValidationError(f"JSON document must not exceed {PLATFORM_MAX_JSON_BYTES} bytes")
     return value
 
 
@@ -223,11 +227,11 @@ class NodeCreateSerializer(serializers.Serializer):
     input_mapping = serializers.JSONField(required=False, default=dict)
     timeout_seconds = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=86400)
     max_attempts = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=20)
-    retry_initial_delay_seconds = serializers.IntegerField(required=False, default=5, min_value=1, max_value=86400)
+    retry_initial_delay_seconds = serializers.IntegerField(required=False, min_value=1, max_value=86400)
     retry_backoff_multiplier = serializers.DecimalField(
-        required=False, default="2.00", max_digits=4, decimal_places=2, min_value=1, max_value=10
+        required=False, max_digits=4, decimal_places=2, min_value=1, max_value=10
     )
-    retry_max_delay_seconds = serializers.IntegerField(required=False, default=300, min_value=1, max_value=86400)
+    retry_max_delay_seconds = serializers.IntegerField(required=False, min_value=1, max_value=86400)
     priority = serializers.IntegerField(required=False, default=0, min_value=-32768, max_value=32767)
 
     def validate_config(self, value: object) -> dict[str, object]:
@@ -237,7 +241,11 @@ class NodeCreateSerializer(serializers.Serializer):
         return validate_mapping(value)
 
     def validate(self, attrs: dict[str, object]) -> dict[str, object]:
-        if int(attrs.get("retry_max_delay_seconds", 300)) < int(attrs.get("retry_initial_delay_seconds", 5)):
+        if (
+            "retry_max_delay_seconds" in attrs
+            and "retry_initial_delay_seconds" in attrs
+            and int(attrs["retry_max_delay_seconds"]) < int(attrs["retry_initial_delay_seconds"])
+        ):
             raise serializers.ValidationError(
                 {"retry_max_delay_seconds": "Must be greater than or equal to the initial delay"}
             )
@@ -281,8 +289,8 @@ class EdgeSerializer(StrictModelSerializer):
 class EdgeCreateSerializer(serializers.Serializer):
     upstream_node_id = serializers.UUIDField()
     downstream_node_id = serializers.UUIDField()
-    condition = serializers.ChoiceField(choices=("on_success", "on_failure", "always"), default="on_success")
-    priority = serializers.IntegerField(default=0, min_value=-32768, max_value=32767)
+    condition = serializers.ChoiceField(choices=("on_success", "on_failure", "always"), required=False)
+    priority = serializers.IntegerField(required=False, min_value=-32768, max_value=32767)
 
     def validate(self, attrs: dict[str, object]) -> dict[str, object]:
         if attrs["upstream_node_id"] == attrs["downstream_node_id"]:
@@ -375,9 +383,9 @@ class DefinitionCreateSerializer(serializers.Serializer):
     key = serializers.SlugField(max_length=100)
     name = serializers.CharField(max_length=255, trim_whitespace=True)
     description = serializers.CharField(required=False, allow_blank=True, default="")
-    max_parallel_tasks = serializers.IntegerField(required=False, default=10, min_value=1, max_value=100)
-    default_timeout_seconds = serializers.IntegerField(required=False, default=300, min_value=1, max_value=86400)
-    default_max_attempts = serializers.IntegerField(required=False, default=3, min_value=1, max_value=20)
+    max_parallel_tasks = serializers.IntegerField(required=False, min_value=1, max_value=100)
+    default_timeout_seconds = serializers.IntegerField(required=False, min_value=1, max_value=86400)
+    default_max_attempts = serializers.IntegerField(required=False, min_value=1, max_value=20)
     input_schema = serializers.JSONField(required=False, default=dict)
     output_schema = serializers.JSONField(required=False, default=dict)
     output_mapping = serializers.JSONField(required=False, default=dict)
@@ -487,10 +495,10 @@ class ScheduleDetailSerializer(StrictModelSerializer):
 class ScheduleCreateSerializer(serializers.Serializer):
     definition_id = serializers.UUIDField()
     name = serializers.CharField(max_length=255, trim_whitespace=True)
-    cron_expression = serializers.CharField(max_length=100, validators=(validate_cron_expression,))
-    timezone = serializers.CharField(max_length=64, validators=(validate_timezone,))
-    misfire_policy = serializers.ChoiceField(choices=("skip", "run_once"), default="skip")
-    concurrency_policy = serializers.ChoiceField(choices=("allow", "forbid"), default="forbid")
+    cron_expression = serializers.CharField(max_length=100, validators=(validate_cron_expression,), required=False)
+    timezone = serializers.CharField(max_length=64, validators=(validate_timezone,), required=False)
+    misfire_policy = serializers.ChoiceField(choices=("skip", "run_once"), required=False)
+    concurrency_policy = serializers.ChoiceField(choices=("allow", "forbid"), required=False)
     input = serializers.JSONField(required=False, default=dict)
 
     def validate_input(self, value: object) -> dict[str, object]:
@@ -542,8 +550,6 @@ class RunListSerializer(StrictModelSerializer):
 
 
 class RunDetailSerializer(StrictModelSerializer):
-    task_runs = serializers.SerializerMethodField()
-    graph = serializers.SerializerMethodField()
     definition_name = serializers.CharField(source="definition.name", read_only=True)
     definition_key = serializers.CharField(source="definition.key", read_only=True)
     definition_version = serializers.IntegerField(source="definition.version", read_only=True)
@@ -576,24 +582,8 @@ class RunDetailSerializer(StrictModelSerializer):
             "completed_at",
             "created_at",
             "updated_at",
-            "task_runs",
-            "graph",
         )
         read_only_fields = fields
-
-    def get_task_runs(self, instance: OrchestrationRun) -> list[dict[str, object]]:
-        return TaskRunListSerializer(instance.task_runs.select_related("node").order_by("created_at"), many=True).data
-
-    def get_graph(self, instance: OrchestrationRun) -> dict[str, object]:
-        definition = instance.definition
-        return {
-            "nodes": NodeDetailSerializer(
-                definition.nodes.filter(is_deleted=False).order_by("-priority", "key"), many=True
-            ).data,
-            "edges": EdgeSerializer(
-                definition.edges.filter(is_deleted=False).order_by("-priority", "created_at"), many=True
-            ).data,
-        }
 
 
 class RunStartSerializer(serializers.Serializer):
@@ -642,7 +632,9 @@ class TaskRunListSerializer(StrictModelSerializer):
         read_only_fields = fields
 
 
-class RetryAttemptSerializer(StrictModelSerializer):
+class RetryAttemptEvidenceSerializer(StrictModelSerializer):
+    """Public attempt evidence deliberately excludes delivery and idempotency internals."""
+
     class Meta:
         model = RetryAttempt
         fields = (
@@ -650,11 +642,6 @@ class RetryAttemptSerializer(StrictModelSerializer):
             "tenant_id",
             "task_run_id",
             "attempt_number",
-            "async_job_id",
-            "idempotency_key",
-            "delivery_token",
-            "request_fingerprint",
-            "commit_outcome",
             "status",
             "available_at",
             "correlation_id",
@@ -672,7 +659,7 @@ class RetryAttemptSerializer(StrictModelSerializer):
 
 
 class TaskRunDetailSerializer(StrictModelSerializer):
-    attempts = RetryAttemptSerializer(many=True, read_only=True)
+    attempts = RetryAttemptEvidenceSerializer(many=True, read_only=True)
     node = NodeListSerializer(read_only=True)
     node_key = serializers.CharField(source="node.key", read_only=True)
     node_name = serializers.CharField(source="node.name", read_only=True)
@@ -693,7 +680,6 @@ class TaskRunDetailSerializer(StrictModelSerializer):
             "remaining_dependencies",
             "current_attempt",
             "max_attempts",
-            "operation_token",
             "error_code",
             "error_message",
             "transition_history",
@@ -710,6 +696,14 @@ class TaskRetrySerializer(serializers.Serializer):
     idempotency_key = serializers.CharField(max_length=255, trim_whitespace=True)
 
 
+class ReconciliationCommandSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=("reconcile", "compensate"))
+    evidence = serializers.JSONField(required=False, default=dict)
+
+    def validate_evidence(self, value: object) -> dict[str, object]:
+        return validate_json_object(value, reject_secrets=True)
+
+
 class OrchestrationEventSerializer(StrictModelSerializer):
     class Meta:
         model = OrchestrationEvent
@@ -723,6 +717,56 @@ class OrchestrationEventSerializer(StrictModelSerializer):
             "correlation_id",
             "payload",
             "occurred_at",
+        )
+        read_only_fields = fields
+
+
+class ConfigurationWriteSerializer(serializers.Serializer):
+    environment = serializers.ChoiceField(choices=("development", "self-hosted", "saas"))
+    cohort = serializers.CharField(max_length=64, default="all")
+    document = serializers.JSONField()
+    enabled = serializers.BooleanField(default=True)
+    rollout_percentage = serializers.IntegerField(min_value=0, max_value=100, default=100)
+    allowed_roles = serializers.ListField(child=serializers.CharField(max_length=100), default=list)
+
+
+class ConfigurationRollbackSerializer(serializers.Serializer):
+    environment = serializers.ChoiceField(choices=("development", "self-hosted", "saas"))
+    cohort = serializers.CharField(max_length=64, default="all")
+    version = serializers.IntegerField(min_value=1)
+
+
+class ConfigurationVersionSerializer(StrictModelSerializer):
+    class Meta:
+        model = OrchestrationConfigurationVersion
+        fields = (
+            "id",
+            "version",
+            "document",
+            "enabled",
+            "rollout_percentage",
+            "allowed_roles",
+            "actor_id",
+            "correlation_id",
+            "parent_version_id",
+            "rollback_of_id",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class ConfigurationAuditSerializer(StrictModelSerializer):
+    class Meta:
+        model = OrchestrationConfigurationAudit
+        fields = (
+            "id",
+            "version",
+            "action",
+            "actor_id",
+            "correlation_id",
+            "before",
+            "after",
+            "changed_at",
         )
         read_only_fields = fields
 
