@@ -1,126 +1,162 @@
-/**
- * Report Detail Page - Business Intelligence
- */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
-import { toast } from 'sonner';
-import { ArrowLeft, Edit, Trash2 } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { biService } from '../services/bi-service';
-
-const MODULE_PATH = '/business-intelligence/reports';
-
-export const ReportDetailPage = () => {
-  const { id } = useParams<{ id: string }>();
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Archive, Edit, Play, Upload } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { biQueryKeys, biService, createIdempotencyKey } from "../services/bi-service";
+import {
+  BI_PATH,
+  LifecycleBadge,
+  MutationError,
+  PageShell,
+  PageSkeleton,
+  RequestError,
+  formatDate,
+  useDocumentTitle,
+  useTenantIdentity,
+} from "./shared";
+// eslint-disable-next-line max-lines-per-function -- cohesive report lifecycle and execution evidence view
+export function ReportDetailPage() {
+  useDocumentTitle("Report details");
+  const { id = "" } = useParams();
+  const tenant = useTenantIdentity();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-
-  const { data: report, isLoading, error } = useQuery({
-    queryKey: ['bi-report', id],
-    queryFn: () => (id ? biService.getReport(id) : Promise.reject(new Error('No ID'))),
-    enabled: !!id,
+  const client = useQueryClient();
+  const query = useQuery({
+    queryKey: biQueryKeys.report(tenant, id),
+    queryFn: () => biService.getReport(id),
+    enabled: Boolean(id),
   });
-
-  const deleteMutation = useMutation({
-    mutationFn: (reportId: string) => biService.deleteReport(reportId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['bi-reports'] });
-      toast.success('Report deleted successfully');
-      navigate(MODULE_PATH);
-    },
-    onError: () => {
-      toast.error('Failed to delete report. Please try again.');
+  const run = useMutation({
+    mutationFn: () => biService.executeReport(id, {}, createIdempotencyKey()),
+    onSuccess: (value) => {
+      const runId = value.execution_id ?? value.execution_ids?.[0];
+      if (runId) navigate(`${BI_PATH}/executions/${runId}`);
     },
   });
-
-  const handleDelete = () => {
-    if (id && window.confirm('Are you sure you want to delete this report?')) {
-      void deleteMutation.mutateAsync(id);
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="p-8">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-muted rounded w-1/4" />
-          <div className="h-64 bg-muted rounded" />
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !report) {
-    return (
-      <div className="p-8">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-foreground mb-4">Report not found</h2>
-          <Button onClick={() => navigate(MODULE_PATH)}>Back to Reports</Button>
-        </div>
-      </div>
-    );
-  }
-
+  const transition = useMutation({
+    mutationFn: (command: "publish" | "archive" | "restore") =>
+      biService.transitionReport(
+        id,
+        command,
+        { version: query.data?.version ?? 0 },
+        createIdempotencyKey()
+      ),
+    onSuccess: () => void client.invalidateQueries({ queryKey: biQueryKeys.report(tenant, id) }),
+  });
+  if (query.isLoading) return <PageSkeleton />;
+  if (query.error || !query.data)
+    return <RequestError error={query.error} onRetry={() => void query.refetch()} />;
+  const report = query.data;
   return (
-    <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => navigate(MODULE_PATH)}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-          <h1 className="text-3xl font-bold text-foreground">
-            {report.report_code} - {report.report_name}
-          </h1>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate(`${MODULE_PATH}/${report.id}/edit`)}>
-            <Edit className="w-4 h-4 mr-2" />
+    <PageShell
+      title={report.report_name}
+      description={`${report.report_code} · ${report.report_type}`}
+      actions={
+        <>
+          <Button variant="outline" onClick={() => navigate(`${BI_PATH}/reports/${id}/edit`)}>
+            <Edit className="mr-2 h-4 w-4" />
             Edit
           </Button>
-          <Button variant="danger" onClick={handleDelete}>
-            <Trash2 className="w-4 h-4 mr-2" />
-            Delete
+          {report.state === "draft" && (
+            <Button
+              variant="outline"
+              disabled={transition.isPending}
+              onClick={() => transition.mutate("publish")}
+            >
+              <Upload className="mr-2 h-4 w-4" />
+              Publish
+            </Button>
+          )}
+          {report.state !== "archived" && (
+            <Button
+              variant="outline"
+              disabled={transition.isPending}
+              onClick={() => transition.mutate("archive")}
+            >
+              <Archive className="mr-2 h-4 w-4" />
+              Archive
+            </Button>
+          )}
+          <Button
+            disabled={report.state !== "published" || run.isPending}
+            onClick={() => run.mutate()}
+          >
+            <Play className="mr-2 h-4 w-4" />
+            {run.isPending ? "Queuing…" : "Run report"}
           </Button>
-        </div>
+        </>
+      }
+    >
+      <MutationError error={run.error ?? transition.error} />
+      <div className="grid gap-4 lg:grid-cols-3">
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Result</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              Run this report to produce durable results. Live or sample data is never fabricated.
+            </p>
+            {report.last_execution && (
+              <Button
+                variant="outline"
+                className="mt-4"
+                onClick={() => navigate(`${BI_PATH}/executions/${report.last_execution?.id}`)}
+              >
+                View latest execution
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Definition & freshness</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <LifecycleBadge state={report.state} />
+            <p>
+              <span className="text-muted-foreground">Query: </span>
+              <button
+                className="text-primary underline"
+                onClick={() => navigate(`${BI_PATH}/queries/${report.query_definition.id}`)}
+              >
+                {report.query_definition.name}
+              </button>
+            </p>
+            <p>
+              <span className="text-muted-foreground">Dataset: </span>
+              {report.query_definition.dataset_key}
+            </p>
+            <p>
+              <span className="text-muted-foreground">Updated: </span>
+              {formatDate(report.updated_at)}
+            </p>
+          </CardContent>
+        </Card>
       </div>
-
       <Card>
         <CardHeader>
-          <CardTitle>Report Information</CardTitle>
+          <CardTitle>Execution & lifecycle history</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Code</label>
-              <p className="text-sm font-medium">{report.report_code}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Name</label>
-              <p className="text-sm font-medium">{report.report_name}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Type</label>
-              <p className="text-sm">{report.report_type}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Status</label>
-              <p className="text-sm">{report.is_active ? 'Active' : 'Inactive'}</p>
-            </div>
-            <div className="col-span-2">
-              <label className="text-sm font-medium text-muted-foreground">Query</label>
-              <p className="text-sm font-mono bg-muted p-2 rounded truncate max-w-full">
-                {report.query}
-              </p>
-            </div>
-          </div>
-          <div className="pt-4 border-t border-border text-sm text-muted-foreground">
-            <span>Created: {new Date(report.created_at).toLocaleDateString()}</span>
-            <span className="ml-4">Updated: {new Date(report.updated_at).toLocaleDateString()}</span>
-          </div>
+        <CardContent>
+          {report.transition_history.length ? (
+            <ol className="space-y-2">
+              {report.transition_history.map((event, index) => (
+                <li
+                  key={`${event.timestamp}-${index}`}
+                  className="border-l-2 border-primary pl-3 text-sm"
+                >
+                  {event.command} → {event.to_state}
+                  <div className="text-xs text-muted-foreground">{formatDate(event.timestamp)}</div>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-sm text-muted-foreground">No history yet.</p>
+          )}
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
-};
+}

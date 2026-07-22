@@ -1,25 +1,42 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: business_intelligence
-version: 1.0.0
-category: core_business
 display_name: Business Intelligence
-description: |
-  Data analytics, reporting, dashboards, and insights.
-
-# Dependencies
+version: 1.0.0
+description: Governed self-service analytics, reports, dashboards, sharing, and durable execution
+type: core
+lifecycle: core
 dependencies: []
-
-# Permissions
 permissions:
-  - bi.report:create
+  - bi.dataset:read
+  - bi.query:read
+  - bi.query:create
+  - bi.query:update
+  - bi.query:delete
+  - bi.query:execute
   - bi.report:read
+  - bi.report:create
+  - bi.report:update
+  - bi.report:delete
+  - bi.report:execute
   - bi.dashboard:read
-  - bi.insight:read
-
-# Health Checks
-health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
-    interval: 60
+  - bi.dashboard:create
+  - bi.dashboard:update
+  - bi.dashboard:delete
+  - bi.dashboard:share
+  - bi.dashboard:execute
+  - bi.execution:read
+  - bi.execution:cancel
+sod_actions: []
+search_indexes:
+  - bi_query_definitions
+  - bi_reports
+  - bi_dashboards
+  - bi_query_executions
+ai_tools: []
+metadata:
+  api_version: v2
+  entitlement: business_intelligence.core
+  execution_quota: business_intelligence.executions
+  extension_surfaces:
+    - governed-dataset-registry
+    - governed-template-registry
+    - governed-visualization-registry

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileBarChart, Plus, Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -18,39 +18,38 @@ import {
   useTenantIdentity,
 } from "./shared";
 // eslint-disable-next-line max-lines-per-function -- cohesive paginated table state and filters
-export function ReportListPage() {
-  useDocumentTitle("Reports");
-  const tenant = useTenantIdentity();
+export function QueryListPage() {
+  useDocumentTitle("Queries");
   const navigate = useNavigate();
+  const tenant = useTenantIdentity();
   const [search, setSearch] = useState("");
-  const [type, setType] = useState("");
   const [state, setState] = useState("");
   const [page, setPage] = useState(1);
   const filters = useMemo(
-    () => ({ search, report_type: type, state, page, ordering: "-updated_at" }),
-    [search, type, state, page]
+    () => ({ search, state, page, ordering: "-updated_at" }),
+    [search, state, page]
   );
   const query = useQuery({
-    queryKey: biQueryKeys.reports(tenant, filters),
-    queryFn: () => biService.listReports(filters),
+    queryKey: biQueryKeys.queries(tenant, filters),
+    queryFn: () => biService.listQueries(filters),
   });
   if (query.isLoading) return <PageSkeleton />;
   if (query.error) return <RequestError error={query.error} onRetry={() => void query.refetch()} />;
   const result = query.data;
   return (
     <PageShell
-      title="Reports"
-      description="Curated views backed by published semantic queries."
+      title="Semantic queries"
+      description="Reusable, governed definitions—never client-authored SQL."
       actions={
-        <Button onClick={() => navigate(`${BI_PATH}/reports/new`)}>
+        <Button onClick={() => navigate(`${BI_PATH}/queries/new`)}>
           <Plus className="mr-2 h-4 w-4" />
-          New report
+          New query
         </Button>
       }
     >
-      <div className="grid gap-3 md:grid-cols-[1fr_10rem_10rem]">
+      <div className="grid gap-3 sm:grid-cols-[1fr_12rem]">
         <label className="relative">
-          <span className="sr-only">Search reports</span>
+          <span className="sr-only">Search queries</span>
           <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
           <Input
             className="pl-9"
@@ -59,26 +58,17 @@ export function ReportListPage() {
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Search reports"
+            placeholder="Search code or name"
           />
         </label>
         <select
-          aria-label="Report type"
-          className="rounded-md border bg-background px-3"
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-        >
-          <option value="">All types</option>
-          <option value="table">Table</option>
-          <option value="pivot">Pivot</option>
-          <option value="chart">Chart</option>
-          <option value="kpi">KPI</option>
-        </select>
-        <select
-          aria-label="State"
-          className="rounded-md border bg-background px-3"
+          aria-label="Filter by state"
+          className="h-10 rounded-md border border-input bg-background px-3 text-sm"
           value={state}
-          onChange={(e) => setState(e.target.value)}
+          onChange={(e) => {
+            setState(e.target.value);
+            setPage(1);
+          }}
         >
           <option value="">All states</option>
           <option value="draft">Draft</option>
@@ -88,20 +78,21 @@ export function ReportListPage() {
       </div>
       {!result?.items.length ? (
         <EmptyState
-          icon={FileBarChart}
-          title="No reports found"
-          description="Create a report from a published query."
+          icon={Plus}
+          title="No queries found"
+          description="Create a semantic query from a governed dataset."
+          action={{ label: "Create query", onClick: () => navigate(`${BI_PATH}/queries/new`) }}
         />
       ) : (
         <Card className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
             <thead className="border-b bg-muted/60 text-left">
               <tr>
-                <th className="p-3">Report</th>
-                <th className="p-3">Type</th>
+                <th className="p-3">Query</th>
                 <th className="p-3">Dataset</th>
                 <th className="p-3">State</th>
-                <th className="p-3">Updated</th>
+                <th className="p-3">Version</th>
+                <th className="p-3">Last execution</th>
               </tr>
             </thead>
             <tbody>
@@ -109,19 +100,23 @@ export function ReportListPage() {
                 <tr key={item.id} className="border-b hover:bg-muted/40">
                   <td className="p-3">
                     <button
-                      className="font-medium text-primary hover:underline"
-                      onClick={() => navigate(`${BI_PATH}/reports/${item.id}`)}
+                      className="text-left font-medium text-primary hover:underline"
+                      onClick={() => navigate(`${BI_PATH}/queries/${item.id}`)}
                     >
-                      {item.report_name}
+                      {item.name}
                     </button>
-                    <div className="text-xs text-muted-foreground">{item.report_code}</div>
+                    <div className="text-xs text-muted-foreground">{item.query_code}</div>
                   </td>
-                  <td className="p-3">{item.report_type}</td>
-                  <td className="p-3">{item.dataset_key ?? "—"}</td>
+                  <td className="p-3">{item.dataset_key}</td>
                   <td className="p-3">
                     <LifecycleBadge state={item.state} />
                   </td>
-                  <td className="p-3">{formatDate(item.updated_at)}</td>
+                  <td className="p-3">v{item.version}</td>
+                  <td className="p-3">
+                    {formatDate(
+                      item.last_execution?.completed_at ?? item.last_execution?.created_at
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

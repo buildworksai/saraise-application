@@ -360,23 +360,6 @@ const CreateProjectPage = lazy(() =>
   }))
 );
 
-// Business Intelligence
-const BiReportListPage = lazy(() =>
-  import("./modules/business_intelligence/pages/ReportListPage").then((m) => ({
-    default: m.ReportListPage,
-  }))
-);
-const BiReportDetailPage = lazy(() =>
-  import("./modules/business_intelligence/pages/ReportDetailPage").then((m) => ({
-    default: m.ReportDetailPage,
-  }))
-);
-const CreateBiReportPage = lazy(() =>
-  import("./modules/business_intelligence/pages/CreateReportPage").then((m) => ({
-    default: m.CreateReportPage,
-  }))
-);
-
 // Bank Reconciliation
 const BankAccountListPage = lazy(() =>
   import("./modules/bank_reconciliation/pages/BankAccountListPage").then((m) => ({
@@ -1037,38 +1020,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <ProjectDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Business Intelligence */}
-          <Route
-            path="/business-intelligence/reports"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <BiReportListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/business-intelligence/reports/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateBiReportPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/business-intelligence/reports/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <BiReportDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
