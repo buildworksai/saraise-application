@@ -8,8 +8,9 @@ from datetime import datetime, timezone
 from typing import Final
 from uuid import UUID
 
-from src.core.async_jobs.models import OutboxEvent
-from src.core.observability import get_correlation_id
+from src.core.async_jobs.models import AsyncJob, OutboxEvent
+from src.core.async_jobs.services import HandlerNotRegistered, get_handler, register_handler
+from src.core.observability import TaskContext, bind_task_context, get_correlation_id
 
 EVENT_TYPES: Final = frozenset(
     {
@@ -22,6 +23,11 @@ EVENT_TYPES: Final = frozenset(
         "sla.report_generated",
     }
 )
+CONSUMER_COMMANDS: Final = {
+    "*.request.completed": "performance_monitoring.consume.request_completed",
+    "*.error.occurred": "performance_monitoring.consume.error_occurred",
+    "*.job.completed": "performance_monitoring.consume.job_completed",
+}
 SAFE_KEYS: Final = frozenset(
     {
         "metric_name",
@@ -141,10 +147,87 @@ def consume_job_completed(
     )
 
 
+def _required_payload_text(job: AsyncJob, field_name: str) -> str:
+    value = job.payload.get(field_name)
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Event payload field {field_name!r} is required.")
+    return value.strip()
+
+
+def _event_context(job: AsyncJob) -> TaskContext:
+    return TaskContext(
+        correlation_id=UUID(job.correlation_id),
+        tenant_id=job.tenant_id,
+        actor_id=job.actor_id,
+        causation_id=_required_payload_text(job, "event_id"),
+        job_id=str(job.id),
+    )
+
+
+def _consume_request_completed_job(job: AsyncJob) -> dict[str, str]:
+    tags = job.payload.get("tags")
+    if tags is not None and (
+        not isinstance(tags, Mapping)
+        or any(not isinstance(key, str) or not isinstance(value, str) for key, value in tags.items())
+    ):
+        raise ValueError("Event payload field 'tags' must be a string mapping.")
+    with bind_task_context(_event_context(job)):
+        record = consume_request_completed(
+            job.tenant_id,
+            event_id=UUID(_required_payload_text(job, "event_id")),
+            module=_required_payload_text(job, "module"),
+            duration_ms=float(job.payload["duration_ms"]),
+            tags=tags,
+        )
+    return {"metric_data_point_id": str(record.id)}
+
+
+def _consume_error_occurred_job(job: AsyncJob) -> dict[str, str]:
+    with bind_task_context(_event_context(job)):
+        record = consume_error_occurred(
+            job.tenant_id,
+            event_id=UUID(_required_payload_text(job, "event_id")),
+            module=_required_payload_text(job, "module"),
+            session_id=_required_payload_text(job, "session_id"),
+        )
+    return {"metric_data_point_id": str(record.id)}
+
+
+def _consume_job_completed_job(job: AsyncJob) -> dict[str, str]:
+    with bind_task_context(_event_context(job)):
+        record = consume_job_completed(
+            job.tenant_id,
+            event_id=UUID(_required_payload_text(job, "event_id")),
+            module=_required_payload_text(job, "module"),
+            duration_ms=float(job.payload["duration_ms"]),
+        )
+    return {"metric_data_point_id": str(record.id)}
+
+
+def register_event_consumers() -> None:
+    """Register the declared broker-consumer commands idempotently at startup."""
+
+    handlers = {
+        CONSUMER_COMMANDS["*.request.completed"]: _consume_request_completed_job,
+        CONSUMER_COMMANDS["*.error.occurred"]: _consume_error_occurred_job,
+        CONSUMER_COMMANDS["*.job.completed"]: _consume_job_completed_job,
+    }
+    for command, handler in handlers.items():
+        try:
+            registered = get_handler(command)
+        except HandlerNotRegistered:
+            register_handler(command, handler)
+        else:
+            if registered is not handler:
+                raise RuntimeError(f"Conflicting event consumer registered for {command!r}.")
+
+
 __all__ = [
+    "CONSUMER_COMMANDS",
     "EVENT_TYPES",
     "consume_error_occurred",
     "consume_job_completed",
     "consume_request_completed",
     "publish_domain_event",
+    "register_event_consumers",
 ]

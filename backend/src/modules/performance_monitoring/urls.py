@@ -8,10 +8,12 @@ from .v1_api import (
     V1AlertRuleViewSet,
     V1AlertViewSet,
     V1ComplianceViewSet,
+    V1ConfigurationViewSet,
     V1DashboardViewSet,
     V1EnvironmentViewSet,
     V1ExtensionViewSet,
     V1LogViewSet,
+    V1MetricDataPointViewSet,
     V1MetricDefinitionViewSet,
     V1MetricViewSet,
     V1ReportViewSet,
@@ -28,6 +30,7 @@ router.register("environments", V1EnvironmentViewSet, basename="monitoring-envir
 router.register("services", V1ServiceViewSet, basename="monitored-service")
 router.register("metric-definitions", V1MetricDefinitionViewSet, basename="metric-definition")
 router.register("metrics", V1MetricViewSet, basename="metric")
+router.register("metric-data-points", V1MetricDataPointViewSet, basename="metric-data-point")
 router.register("logs", V1LogViewSet, basename="log")
 router.register("traces", V1TraceViewSet, basename="trace")
 router.register("dashboards", V1DashboardViewSet, basename="dashboard")
@@ -38,5 +41,6 @@ router.register("slos", V1SLOViewSet, basename="slo")
 router.register("compliance-records", V1ComplianceViewSet, basename="compliance-record")
 router.register("reports", V1ReportViewSet, basename="sla-report")
 router.register("extensions", V1ExtensionViewSet, basename="monitoring-extension")
+router.register("configuration", V1ConfigurationViewSet, basename="monitoring-configuration")
 
 urlpatterns = [path("", include(router.urls)), path("health/", health_check, name="performance-monitoring-health")]

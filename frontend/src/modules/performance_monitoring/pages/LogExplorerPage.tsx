@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
 import { performanceMonitoringService } from '../services/performance-monitoring-service';
 import type { LogEntry } from '../contracts';
-import { EmptyTelemetry, MonitoringPage, OperationalError, PageSkeleton, formatTime } from '../components/MonitoringPage';
+import { EmptyTelemetry, MonitoringPage, OperationalError, PageSkeleton, formatTime, useLogLevelClass } from '../components/MonitoringPage';
 
 export function LogExplorerPage() {
   const [search, setSearch] = useState('');
@@ -25,6 +25,6 @@ export function LogExplorerPage() {
 }
 
 function LogRow({ entry, expanded, onToggle }: { entry: LogEntry; expanded: boolean; onToggle: () => void }) {
-  const levelTone: Record<LogEntry['level'], string> = { trace: 'text-slate-500', debug: 'text-indigo-600', info: 'text-sky-700', warn: 'text-amber-700', error: 'text-red-700', fatal: 'font-bold text-red-800' };
-  return <><tr className="border-b align-top hover:bg-muted/30"><td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{formatTime(entry.timestamp)}</td><td className={`px-4 py-3 font-mono text-xs uppercase ${levelTone[entry.level]}`}>{entry.level}</td><td className="max-w-xl px-4 py-3"><p className="break-words text-foreground">{entry.message}</p>{entry.correlation_id ? <p className="mt-1 font-mono text-xs text-muted-foreground">correlation: {entry.correlation_id}</p> : null}</td><td className="max-w-40 truncate px-4 py-3 font-mono text-xs text-muted-foreground">{entry.trace_id || '—'}</td><td className="px-4 py-2"><Button size="sm" variant="ghost" onClick={onToggle} aria-expanded={expanded}>Attributes</Button></td></tr>{expanded ? <tr className="border-b bg-muted/20"><td colSpan={5} className="px-4 py-3"><pre className="max-h-52 overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">{JSON.stringify(entry.attributes, null, 2)}</pre></td></tr> : null}</>;
+  const levelTone = useLogLevelClass(entry.level);
+  return <><tr className="border-b align-top hover:bg-muted/30"><td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{formatTime(entry.timestamp)}</td><td className={`px-4 py-3 font-mono text-xs uppercase ${levelTone}`}>{entry.level}</td><td className="max-w-xl px-4 py-3"><p className="break-words text-foreground">{entry.message}</p>{entry.correlation_id ? <p className="mt-1 font-mono text-xs text-muted-foreground">correlation: {entry.correlation_id}</p> : null}</td><td className="max-w-40 truncate px-4 py-3 font-mono text-xs text-muted-foreground">{entry.trace_id || '—'}</td><td className="px-4 py-2"><Button size="sm" variant="ghost" onClick={onToggle} aria-expanded={expanded}>Attributes</Button></td></tr>{expanded ? <tr className="border-b bg-muted/20"><td colSpan={5} className="px-4 py-3"><pre className="max-h-52 overflow-auto rounded-lg bg-foreground p-4 text-xs text-background">{JSON.stringify(entry.attributes, null, 2)}</pre></td></tr> : null}</>;
 }

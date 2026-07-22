@@ -4,12 +4,23 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
-from src.modules.performance_monitoring.models import AlertState, MetricDataPoint, MetricType
+from src.core.async_jobs.models import AsyncJob, OutboxEvent
+from src.modules.performance_monitoring.models import (
+    AlertState,
+    MetricDataPoint,
+    MetricType,
+    MonitoredService,
+    MonitoringEnvironment,
+    SourceType,
+    TelemetrySource,
+)
 from src.modules.performance_monitoring.services import (
     AlertingService,
+    ConflictError,
     InvalidMetricValueError,
     MetricsCollectionService,
     SLAMonitoringService,
+    TelemetryService,
 )
 
 
@@ -67,7 +78,11 @@ def test_alert_state_machine_and_tenant_boundary():
     tenant = uuid.uuid4()
     metrics = MetricsCollectionService()
     metrics.record_metric(tenant, "api.latency", 800)
-    alerts = AlertingService(notification_sender=lambda tenant_id, alert, delivery: "receipt-1")
+    alerts = AlertingService(
+        notification_sender=lambda *_args: pytest.fail(
+            "notification delivery must never run in the request transaction"
+        )
+    )
     rule = alerts.create_alert_rule(
         tenant,
         "api.latency",
@@ -78,11 +93,57 @@ def test_alert_state_machine_and_tenant_boundary():
     )
     alert = alerts.evaluate_alert_rule(tenant, rule.id)
     assert alert and alert.status == AlertState.FIRING
+    job = AsyncJob.objects.get(tenant_id=tenant, payload__alert_id=str(alert.id))
+    assert job.command == "performance_monitoring.deliver_alert_notification"
+    delivery = OutboxEvent.objects.get(tenant_id=tenant, aggregate_id=job.id)
+    assert delivery.event_type == "async_job.enqueued"
+    assert delivery.payload["correlation_id"] == job.correlation_id
     acknowledged = alerts.acknowledge_alert(tenant, alert.id, uuid.uuid4())
     assert acknowledged.status == AlertState.ACKNOWLEDGED and acknowledged.acknowledged_by
     assert alerts.resolve_alert(tenant, alert.id, resolved_by=uuid.uuid4()).status == AlertState.RESOLVED
     with pytest.raises(Exception):
         alerts.acknowledge_alert(uuid.uuid4(), alert.id, uuid.uuid4())
+
+
+@pytest.mark.django_db
+def test_log_ingestion_is_idempotent_and_conflicting_reuse_fails_deterministically():
+    tenant = uuid.uuid4()
+    actor = uuid.uuid4()
+    source = TelemetrySource.objects.create(
+        tenant_id=tenant,
+        created_by=actor,
+        name="application logs",
+        source_type=SourceType.APPLICATION,
+    )
+    environment = MonitoringEnvironment.objects.create(
+        tenant_id=tenant,
+        created_by=actor,
+        name="Production",
+        slug="production",
+    )
+    monitored_service = MonitoredService.objects.create(
+        tenant_id=tenant,
+        created_by=actor,
+        environment=environment,
+        name="Orders",
+        slug="orders",
+    )
+    payload = {
+        "source_id": source.id,
+        "service_id": monitored_service.id,
+        "environment_id": environment.id,
+        "message": "order accepted",
+        "level": "info",
+        "idempotency_key": "log-request-1",
+        "correlation_id": "request-1",
+    }
+    service = TelemetryService()
+
+    first = service.ingest_log(tenant, payload)
+    assert service.ingest_log(tenant, payload).id == first.id
+
+    with pytest.raises(ConflictError):
+        service.ingest_log(tenant, {**payload, "message": "different event"})
 
 
 @pytest.mark.django_db

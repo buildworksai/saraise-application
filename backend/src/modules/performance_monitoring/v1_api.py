@@ -13,10 +13,12 @@ from .api import (
     AlertRuleViewSet,
     AlertViewSet,
     ComplianceViewSet,
+    ConfigurationViewSet,
     DashboardViewSet,
     EnvironmentViewSet,
     ExtensionViewSet,
     LogViewSet,
+    MetricDataPointViewSet,
     MetricDefinitionViewSet,
     MetricViewSet,
     ReportViewSet,
@@ -31,9 +33,19 @@ from .api import (
 class V1PageNumberPagination(PageNumberPagination):
     """Retain the bounded DRF collection contract published by API v1."""
 
-    page_size = 25
     page_size_query_param = "page_size"
-    max_page_size = 100
+
+    def paginate_queryset(self, queryset, request, view=None):
+        from .services import CapabilityUnavailableError, ConfigurationService
+
+        profile = getattr(request.user, "profile", None)
+        tenant_id = getattr(profile, "tenant_id", None)
+        if tenant_id is None:
+            raise CapabilityUnavailableError("Tenant pagination policy is unavailable.")
+        policy = ConfigurationService().setting(tenant_id, "pagination")
+        self.page_size = int(policy["default_page_size"])
+        self.max_page_size = int(policy["max_page_size"])
+        return super().paginate_queryset(queryset, request, view)
 
 
 class V1APIViewMixin:
@@ -66,6 +78,10 @@ class V1MetricViewSet(V1APIViewMixin, MetricViewSet):
     pass
 
 
+class V1MetricDataPointViewSet(V1APIViewMixin, MetricDataPointViewSet):
+    pass
+
+
 class V1LogViewSet(V1APIViewMixin, LogViewSet):
     pass
 
@@ -95,6 +111,10 @@ class V1SLOViewSet(V1APIViewMixin, SLOViewSet):
 
 
 class V1ComplianceViewSet(V1APIViewMixin, ComplianceViewSet):
+    pass
+
+
+class V1ConfigurationViewSet(V1APIViewMixin, ConfigurationViewSet):
     pass
 
 

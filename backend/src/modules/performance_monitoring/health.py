@@ -27,10 +27,12 @@ def database_probe() -> HealthCheckResult:
         return HealthCheckResult(False, "database_unavailable", timezone.now(), {"code": "database_unavailable"})
 
 
-def cache_probe() -> HealthCheckResult:
+def cache_probe(*, timeout_seconds: int | None = None) -> HealthCheckResult:
+    if timeout_seconds is None or isinstance(timeout_seconds, bool) or timeout_seconds <= 0:
+        return HealthCheckResult(False, "cache_policy_unavailable", timezone.now(), {"code": "policy_unavailable"})
     key = "performance-monitoring:readiness"
     try:
-        cache.set(key, "ready", timeout=10)
+        cache.set(key, "ready", timeout=timeout_seconds)
         healthy = cache.get(key) == "ready"
         return HealthCheckResult(
             healthy,
@@ -48,6 +50,10 @@ def async_probe() -> HealthCheckResult:
             "performance_monitoring.evaluate_alerts",
             "performance_monitoring.snapshot_sla",
             "performance_monitoring.enforce_retention",
+            "performance_monitoring.deliver_alert_notification",
+            "performance_monitoring.consume.request_completed",
+            "performance_monitoring.consume.error_occurred",
+            "performance_monitoring.consume.job_completed",
         ):
             get_handler(command)
         return HealthCheckResult(True, "ready", timezone.now(), {"code": "ready"})
@@ -56,36 +62,71 @@ def async_probe() -> HealthCheckResult:
 
 
 def notifications_probe() -> HealthCheckResult:
+    """Use the dependency's explicit non-mutating readiness contract.
+
+    Importing a service or finding a callable proves nothing about its backing
+    persistence and delivery dependencies. An absent, malformed, or
+    inconclusive contract therefore fails closed.
+    """
+
     try:
         from src.core.notifications.services import NotificationService
 
-        healthy = callable(NotificationService.create_notification)
+        readiness_probe = getattr(NotificationService, "readiness_probe", None)
+        if not callable(readiness_probe):
+            return HealthCheckResult(
+                False,
+                "notification_unavailable",
+                timezone.now(),
+                {"code": "readiness_contract_unavailable"},
+            )
+        result = readiness_probe()
+        healthy = getattr(result, "healthy", None)
+        if healthy is not True:
+            code = "dependency_unavailable" if healthy is False else "readiness_inconclusive"
+            return HealthCheckResult(False, "notification_unavailable", timezone.now(), {"code": code})
         return HealthCheckResult(
-            healthy,
-            "ready" if healthy else "notification_unavailable",
+            True,
+            "ready",
             timezone.now(),
-            {"code": "ready" if healthy else "contract_unavailable"},
+            {"code": "ready"},
         )
     except Exception:
-        return HealthCheckResult(False, "notification_unavailable", timezone.now(), {"code": "contract_unavailable"})
+        return HealthCheckResult(False, "notification_unavailable", timezone.now(), {"code": "dependency_unavailable"})
 
 
 def register_health_probes() -> None:
     health_registry.register("performance_monitoring.database", database_probe, critical=True, replace=True)
-    health_registry.register("performance_monitoring.cache", cache_probe, critical=False, replace=True)
     health_registry.register("performance_monitoring.async", async_probe, critical=True, replace=True)
     health_registry.register("performance_monitoring.notifications", notifications_probe, critical=True, replace=True)
 
 
-def _health_response() -> Response:
+def _health_response(tenant_id: object) -> Response:
+    from .services import ConfigurationService
+
+    try:
+        document = ConfigurationService().effective_document(tenant_id, environment="default")
+        health_policy = document["health"]
+        timeout_seconds = health_policy["cache_probe_timeout_seconds"]
+        critical_dependencies = frozenset(health_policy["critical_dependencies"])
+    except Exception:
+        return Response(
+            {
+                "module": "performance-monitoring",
+                "status": "unavailable",
+                "ready": False,
+                "checks": {"configuration": {"status": "unavailable", "code": "policy_unavailable"}},
+            },
+            status=503,
+        )
     checks = {
         "database": database_probe(),
-        "cache": cache_probe(),
+        "cache": cache_probe(timeout_seconds=timeout_seconds),
         "async": async_probe(),
         "notifications": notifications_probe(),
     }
-    ready = checks["database"].healthy and checks["async"].healthy and checks["notifications"].healthy
-    degraded = ready and not checks["cache"].healthy
+    ready = all(checks[name].healthy for name in critical_dependencies)
+    degraded = ready and any(not result.healthy for name, result in checks.items() if name not in critical_dependencies)
     payload = {
         "module": "performance-monitoring",
         "status": "degraded" if degraded else "healthy" if ready else "unavailable",
@@ -102,8 +143,9 @@ def _health_response() -> Response:
 @authentication_classes((CsrfSessionAuthentication,))
 @permission_classes((IsAuthenticated, RequiresAccess("performance_monitoring.health:read")))
 def health_check(request) -> Response:
-    del request
-    return _health_response()
+    profile = getattr(request.user, "profile", None)
+    tenant_id = getattr(request, "tenant_id", None) or getattr(profile, "tenant_id", None)
+    return _health_response(tenant_id)
 
 
 @api_view(("GET",))
@@ -111,8 +153,9 @@ def health_check(request) -> Response:
 @permission_classes((IsAuthenticated, RequiresAccess("performance_monitoring.health:read")))
 @renderer_classes((SuccessEnvelopeRenderer,))
 def governed_health_check(request) -> Response:
-    del request
-    return _health_response()
+    profile = getattr(request.user, "profile", None)
+    tenant_id = getattr(request, "tenant_id", None) or getattr(profile, "tenant_id", None)
+    return _health_response(tenant_id)
 
 
 __all__ = [

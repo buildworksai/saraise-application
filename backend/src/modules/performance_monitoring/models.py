@@ -153,8 +153,26 @@ class DomainModel(TenantScopedModel, TimestampedModel):
         return 1, {self._meta.label: 1}
 
 
+class ImmutableEvidenceError(ValidationError):
+    """Raised whenever append-only monitoring evidence is mutated."""
+
+
+class ImmutableEvidenceQuerySet(models.QuerySet[models.Model]):
+    """Tenant-aware queryset that rejects every bulk mutation path."""
+
+    def for_tenant(self, tenant_id: uuid.UUID) -> "ImmutableEvidenceQuerySet":
+        return self.filter(tenant_id=tenant_id)
+
+    def update(self, **kwargs: Any) -> int:
+        del kwargs
+        raise ImmutableEvidenceError("Monitoring evidence is append-only.")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ImmutableEvidenceError("Monitoring evidence is append-only.")
+
+
 class ImmutableEvidenceModel(TenantScopedModel):
-    """Append-only evidence. Retention is performed by the retention service."""
+    """Append-only evidence protected at instance, queryset, and database layers."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -163,8 +181,12 @@ class ImmutableEvidenceModel(TenantScopedModel):
     is_deleted = models.BooleanField(default=False, db_index=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
+    objects = ImmutableEvidenceQuerySet.as_manager()
+
     class Meta:
         abstract = True
+        base_manager_name = "objects"
+        default_manager_name = "objects"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self._state.adding:
@@ -174,7 +196,7 @@ class ImmutableEvidenceModel(TenantScopedModel):
 
     def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
         del args, kwargs
-        raise ValidationError("Monitoring evidence can only be removed by the retention service.")
+        raise ImmutableEvidenceError("Monitoring evidence is append-only.")
 
 
 class TelemetrySource(DomainModel):
@@ -191,7 +213,13 @@ class TelemetrySource(DomainModel):
 
     class Meta:
         db_table = "performance_telemetry_sources"
-        constraints = [models.UniqueConstraint(Lower("name"), "tenant_id", name="pm_source_name_ci_uq")]
+        constraints = [
+            models.UniqueConstraint(Lower("name"), "tenant_id", name="pm_source_name_ci_uq"),
+            models.CheckConstraint(
+                condition=Q(daily_event_quota__gte=1, daily_event_quota__lte=100_000_000),
+                name="pm_source_daily_quota_safe",
+            ),
+        ]
         indexes = [models.Index(fields=["tenant_id", "status"]), models.Index(fields=["tenant_id", "last_seen_at"])]
 
     def clean(self) -> None:
@@ -462,14 +490,8 @@ class AlertRule(DomainModel):
             raise ValidationError({"metric": "Metric must belong to the same tenant."})
         if not self.metric_id and not self.metric_name:
             raise ValidationError({"metric_name": "Select a metric or provide a forward metric name."})
-        if self.condition == AlertCondition.ABSENCE and self.threshold is not None:
-            raise ValidationError({"threshold": "Absence rules do not use a threshold."})
-        if self.condition != AlertCondition.ABSENCE and self.threshold is None:
-            raise ValidationError({"threshold": "Threshold is required for this comparison."})
-        if self.cooldown_minutes < self.evaluation_window_minutes:
-            raise ValidationError({"cooldown_minutes": "Must be at least the evaluation window."})
-        if not isinstance(self.action, dict) or not self.action.get("channels"):
-            raise ValidationError({"action": "At least one notification channel is required."})
+        if not isinstance(self.action, dict):
+            raise ValidationError({"action": "Must be an object."})
 
 
 class Alert(DomainModel):
@@ -519,13 +541,15 @@ class AlertNotificationOutcome(ImmutableEvidenceModel):
     provider_message_id = models.CharField(max_length=200, blank=True)
     error_code = models.CharField(max_length=80, blank=True)
     error_message = models.CharField(max_length=500, blank=True)
+    correlation_id = models.CharField(max_length=128, db_index=True)
     attempted_at = models.DateTimeField(default=django_timezone.now)
     delivered_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "performance_alert_notification_outcomes"
         constraints = [
-            models.UniqueConstraint(fields=["tenant_id", "idempotency_key", "attempt"], name="pm_notify_attempt_uq")
+            models.UniqueConstraint(fields=["tenant_id", "idempotency_key", "attempt"], name="pm_notify_attempt_uq"),
+            models.CheckConstraint(condition=~Q(correlation_id=""), name="pm_notify_correlation_present"),
         ]
         indexes = [
             models.Index(fields=["tenant_id", "alert", "attempted_at"]),
@@ -702,6 +726,155 @@ class MonitoringExtension(DomainModel):
             )
         ]
         indexes = [models.Index(fields=["tenant_id", "provider", "is_active"])]
+
+
+class AppendOnlyConfigurationQuerySet(models.QuerySet):
+    """Prevent bulk mutation from bypassing append-only configuration history."""
+
+    def for_tenant(self, tenant_id: uuid.UUID) -> "AppendOnlyConfigurationQuerySet":
+        return self.filter(tenant_id=tenant_id)
+
+    def update(self, **kwargs: Any) -> int:
+        del kwargs
+        raise ValidationError("Configuration history is append-only.")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Configuration history is append-only.")
+
+
+class PerformanceMonitoringConfiguration(TenantScopedModel, TimestampedModel):
+    """The current validated configuration document for one tenant/environment."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    environment = models.SlugField(max_length=64, default="default")
+    document = models.JSONField()
+    version = models.PositiveIntegerField(default=1)
+    created_by = models.UUIDField(db_index=True)
+    updated_by = models.UUIDField(db_index=True)
+    correlation_id = models.CharField(max_length=128, db_index=True)
+
+    class Meta:
+        db_table = "performance_monitoring_configurations"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "environment"], name="pm_config_tenant_env_uq"),
+            models.CheckConstraint(condition=Q(version__gte=1), name="pm_config_version_positive"),
+            models.CheckConstraint(condition=~Q(correlation_id=""), name="pm_config_correlation_present"),
+        ]
+        indexes = [models.Index(fields=["tenant_id", "environment", "version"], name="pm_cfg_tenant_env_ver_idx")]
+
+    def clean(self) -> None:
+        super().clean()
+        if not self._state.adding and self.pk:
+            stored = type(self).objects.filter(pk=self.pk).values("tenant_id", "environment", "created_by").first()
+            if stored:
+                immutable = {
+                    field: "This field is immutable."
+                    for field in ("tenant_id", "environment", "created_by")
+                    if stored[field] != getattr(self, field)
+                }
+                if immutable:
+                    raise ValidationError(immutable)
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class ImmutableConfigurationRecord(TenantScopedModel):
+    """Shared hard append-only behavior for versions and audit records."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    actor_id = models.UUIDField(db_index=True)
+    correlation_id = models.CharField(max_length=128, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyConfigurationQuerySet.as_manager()
+
+    class Meta:
+        abstract = True
+        base_manager_name = "objects"
+        default_manager_name = "objects"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("Configuration history is append-only.")
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Configuration history is append-only.")
+
+
+class PerformanceMonitoringConfigurationVersion(ImmutableConfigurationRecord):
+    """Immutable snapshot enabling exact rollback to every prior version."""
+
+    configuration = models.ForeignKey(
+        PerformanceMonitoringConfiguration,
+        on_delete=models.PROTECT,
+        related_name="versions",
+    )
+    environment = models.SlugField(max_length=64)
+    version = models.PositiveIntegerField()
+    document = models.JSONField()
+    change_reason = models.CharField(max_length=240)
+
+    class Meta:
+        db_table = "performance_monitoring_configuration_versions"
+        base_manager_name = "objects"
+        default_manager_name = "objects"
+        constraints = [
+            models.UniqueConstraint(fields=["configuration", "version"], name="pm_config_version_uq"),
+            models.CheckConstraint(condition=Q(version__gte=1), name="pm_config_snapshot_version_positive"),
+            models.CheckConstraint(condition=~Q(correlation_id=""), name="pm_config_version_correlation_present"),
+        ]
+        indexes = [models.Index(fields=["tenant_id", "environment", "-version"], name="pm_cfg_tenant_version_idx")]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.configuration_id and self.configuration.tenant_id != self.tenant_id:
+            raise ValidationError({"configuration": "Configuration must belong to the same tenant."})
+        if self.configuration_id and self.configuration.environment != self.environment:
+            raise ValidationError({"environment": "Environment must match the configuration."})
+
+
+class PerformanceMonitoringConfigurationAudit(ImmutableConfigurationRecord):
+    """Immutable who/what/when ledger for every configuration mutation."""
+
+    configuration = models.ForeignKey(
+        PerformanceMonitoringConfiguration,
+        on_delete=models.PROTECT,
+        related_name="audit_records",
+    )
+    environment = models.SlugField(max_length=64)
+    action = models.CharField(max_length=24)
+    from_version = models.PositiveIntegerField(null=True, blank=True)
+    to_version = models.PositiveIntegerField()
+    before = models.JSONField(null=True, blank=True)
+    after = models.JSONField()
+    change_reason = models.CharField(max_length=240)
+
+    class Meta:
+        db_table = "performance_monitoring_configuration_audit"
+        base_manager_name = "objects"
+        default_manager_name = "objects"
+        constraints = [
+            models.CheckConstraint(condition=Q(to_version__gte=1), name="pm_config_audit_version_positive"),
+            models.CheckConstraint(condition=~Q(correlation_id=""), name="pm_config_audit_correlation_present"),
+            models.CheckConstraint(
+                condition=Q(action__in=("create", "update", "import", "rollback")),
+                name="pm_config_audit_action_allowed",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant_id", "environment", "-created_at"], name="pm_cfg_audit_tenant_time_idx"),
+            models.Index(fields=["tenant_id", "correlation_id"], name="pm_cfg_audit_corr_idx"),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.configuration_id and self.configuration.tenant_id != self.tenant_id:
+            raise ValidationError({"configuration": "Configuration must belong to the same tenant."})
 
 
 class PerformanceMonitoringResource(TelemetrySource):
