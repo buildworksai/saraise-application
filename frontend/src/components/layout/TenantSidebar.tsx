@@ -31,6 +31,7 @@ import {
 import { cn } from "@/lib/utils";
 import { getTenantSidebarTreeForMode } from "@/navigation/tenant-route-registry";
 import { useDocumentIntelligenceConfiguration } from "@/modules/document_intelligence/hooks/use-document-intelligence-configuration";
+import { useTraceabilityCapabilities } from "@/modules/blockchain_traceability/hooks/use-traceability-configuration";
 import type { User } from "@/stores/auth-store";
 
 interface NavItem {
@@ -299,11 +300,16 @@ const NavItem = ({ item }: { item: NavItem }) => {
 export const TenantSidebar = ({ user }: { user: User }) => {
   const isAdmin = user.tenant_role === "tenant_admin";
   const documentIntelligenceConfiguration = useDocumentIntelligenceConfiguration();
+  const traceabilityCapabilities = useTraceabilityCapabilities();
   const runtimeRegistryItems = applyRuntimeNavigationOrder(
     registryTenantItems,
     documentIntelligenceConfiguration.data?.document.ui.navigation_order,
   );
-  const renderedTenantItems = [...tenantItems, ...runtimeRegistryItems];
+  const renderedTenantItems = [...tenantItems, ...runtimeRegistryItems]
+    .map((item) => item.module === "blockchain_traceability" && traceabilityCapabilities.data
+      ? { ...item, order: traceabilityCapabilities.data.document.ui.sidebar_order }
+      : item)
+    .sort((left, right) => (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER));
 
   return (
     <div className="h-full flex flex-col py-6 bg-gradient-to-b from-white/5 to-transparent">

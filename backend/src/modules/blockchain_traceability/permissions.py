@@ -38,6 +38,11 @@ COMPLIANCE_FINALIZE: Final = "blockchain_traceability.compliance:finalize"
 COMPLIANCE_VERIFY: Final = "blockchain_traceability.compliance:verify"
 VERIFICATION_READ: Final = "blockchain_traceability.verification:read"
 HEALTH_READ: Final = "blockchain_traceability.health:read"
+CONFIG_READ: Final = "blockchain_traceability.configuration:read"
+CONFIG_UPDATE: Final = "blockchain_traceability.configuration:update"
+CONFIG_ROLLBACK: Final = "blockchain_traceability.configuration:rollback"
+CONFIG_IMPORT: Final = "blockchain_traceability.configuration:import"
+CONFIG_EXPORT: Final = "blockchain_traceability.configuration:export"
 
 PERMISSIONS: Final[tuple[str, ...]] = (
     NETWORK_READ,
@@ -67,11 +72,21 @@ PERMISSIONS: Final[tuple[str, ...]] = (
     COMPLIANCE_VERIFY,
     VERIFICATION_READ,
     HEALTH_READ,
+    CONFIG_READ,
+    CONFIG_UPDATE,
+    CONFIG_ROLLBACK,
+    CONFIG_IMPORT,
+    CONFIG_EXPORT,
 )
 
-# Managing a network and independently verifying ledger evidence are separated
-# so one principal cannot both configure and attest a provider unchecked.
-SOD_ACTIONS: Final[tuple[tuple[str, str], ...]] = ((NETWORK_MANAGE, ANCHOR_VERIFY),)
+# These pairs are the executable separation-of-duties policy. The manifest
+# carries the same pair structure and startup validation rejects any drift.
+SOD_ACTIONS: Final[tuple[tuple[str, str], ...]] = (
+    (NETWORK_MANAGE, ANCHOR_VERIFY),
+    (CREDENTIAL_ISSUE, CREDENTIAL_REVOKE),
+    (COMPLIANCE_CREATE, COMPLIANCE_FINALIZE),
+    (CONFIG_UPDATE, CONFIG_ROLLBACK),
+)
 
 
 class SessionAuthentication401(SessionAuthentication):
@@ -136,6 +151,11 @@ __all__ = [
     "COMPLIANCE_READ",
     "COMPLIANCE_UPDATE",
     "COMPLIANCE_VERIFY",
+    "CONFIG_EXPORT",
+    "CONFIG_IMPORT",
+    "CONFIG_READ",
+    "CONFIG_ROLLBACK",
+    "CONFIG_UPDATE",
     "CREDENTIAL_ISSUE",
     "CREDENTIAL_READ",
     "CREDENTIAL_REVOKE",

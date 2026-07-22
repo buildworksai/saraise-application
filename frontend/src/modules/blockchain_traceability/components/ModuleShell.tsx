@@ -5,13 +5,14 @@ import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Skeleton, TableSkeleton } from '@/components/ui/Skeleton';
-import { useAuthStore } from '@/stores/auth-store';
 import type { ApiV2Pagination, JsonValue, ProofStatus, VerificationAttempt, VerificationOutcome } from '../contracts';
+import { useTraceabilityCapabilities } from '../hooks/use-traceability-configuration';
 import { BlockchainTraceabilityApiError } from '../services/blockchain_traceability-service';
 
 export function useCanMutateTraceability(): boolean {
-  // Presentation hint only. The governed API remains authoritative and every 403 is surfaced.
-  return useAuthStore((state) => state.user?.is_superuser === true || state.user?.is_staff === true || state.user?.tenant_role === 'tenant_admin');
+  // The governed authorization API is the only source of mutation capability.
+  const capabilities = useTraceabilityCapabilities().data;
+  return capabilities?.can_mutate_resources === true && capabilities.document.features.enabled;
 }
 
 export function Breadcrumbs({ items }: { items: readonly { label: string; to?: string }[] }) {
@@ -35,17 +36,22 @@ export function ApiProblem({ error, onRetry, mutation = false }: { error: unknow
   const denied = apiError !== null && (apiError.status === 401 || apiError.status === 403);
   const title = denied ? 'Permission required' : apiError?.status === 503 ? 'Verification dependency unavailable' : 'Traceability request failed';
   const description = denied ? 'Your session is valid, but the required tenant capability was not granted.' : apiError !== null ? apiError.message : 'The operation could not be completed. No success has been assumed.';
-  return <Card className={`${mutation ? 'p-4' : 'min-h-72 p-8'} flex flex-col items-center justify-center text-center`} role="alert"><div className={`rounded-full p-4 ${denied ? 'bg-amber-500/10' : 'bg-destructive/10'}`}>{denied ? <ShieldAlert className="h-8 w-8 text-amber-700" /> : <AlertTriangle className="h-8 w-8 text-destructive" />}</div><h2 className="mt-4 text-lg font-semibold">{title}</h2><p className="mt-2 max-w-lg text-sm text-muted-foreground">{description}</p>{apiError?.correlationId && <p className="mt-3 font-mono text-xs text-muted-foreground">Correlation ID: {apiError.correlationId}</p>}{onRetry && !denied && <Button className="mt-5" variant="secondary" onClick={onRetry}><RefreshCw className="mr-2 h-4 w-4" />Retry</Button>}</Card>;
+  return <Card className={`${mutation ? 'p-4' : 'min-h-72 p-8'} flex flex-col items-center justify-center text-center`} role="alert"><div className={`rounded-full p-4 ${denied ? 'bg-accent' : 'bg-destructive/10'}`}>{denied ? <ShieldAlert className="h-8 w-8 text-accent-foreground" /> : <AlertTriangle className="h-8 w-8 text-destructive" />}</div><h2 className="mt-4 text-lg font-semibold">{title}</h2><p className="mt-2 max-w-lg text-sm text-muted-foreground">{description}</p>{apiError?.correlationId && <p className="mt-3 font-mono text-xs text-muted-foreground">Correlation ID: {apiError.correlationId}</p>}{onRetry && !denied && <Button className="mt-5" variant="secondary" onClick={onRetry}><RefreshCw className="mr-2 h-4 w-4" />Retry</Button>}</Card>;
 }
 
 export function Pagination({ value, onPage }: { value: ApiV2Pagination; onPage: (page: number) => void }) {
   return <nav className="flex flex-col gap-3 border-t p-4 sm:flex-row sm:items-center sm:justify-between" aria-label="Pagination"><p className="text-sm text-muted-foreground">Page {value.page} of {Math.max(value.total_pages, 1)} · {value.count} records</p><div className="flex gap-2"><Button variant="outline" size="sm" disabled={!value.has_previous} onClick={() => onPage(value.page - 1)}>Previous</Button><Button variant="outline" size="sm" disabled={!value.has_next} onClick={() => onPage(value.page + 1)}>Next</Button></div></nav>;
 }
 
-export function StatusPill({ status }: { status: string }) {
-  const positive = ['active', 'confirmed', 'finalized', 'healthy', 'pass'].includes(status);
-  const warning = ['draft', 'queued', 'submitting', 'submitted', 'degraded', 'recalled', 'warning'].includes(status);
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${positive ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : warning ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300' : 'bg-muted text-muted-foreground'}`}>{status.replaceAll('_', ' ')}</span>;
+export function StatusPill({ status, positiveStatuses = [], warningStatuses = [] }: { status: string; positiveStatuses?: readonly string[]; warningStatuses?: readonly string[] }) {
+  const positive = positiveStatuses.includes(status);
+  const warning = warningStatuses.includes(status);
+  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${positive ? 'bg-primary/15 text-primary' : warning ? 'bg-accent text-accent-foreground' : 'bg-muted text-muted-foreground'}`}>{status.replaceAll('_', ' ')}</span>;
+}
+
+export function ConfiguredStatusPill({ status }: { status: string }) {
+  const capabilities = useTraceabilityCapabilities();
+  return <StatusPill status={status} positiveStatuses={capabilities.data?.document.ui.positive_statuses} warningStatuses={capabilities.data?.document.ui.warning_statuses} />;
 }
 
 export const PROOF_LABELS: Readonly<Record<ProofStatus, string>> = {
@@ -64,7 +70,7 @@ export function proofStatusForAttempt(attempt: VerificationAttempt): ProofStatus
 
 export function ProofBadge({ status, simulated = false }: { status: ProofStatus; simulated?: boolean }) {
   const safeStatus = simulated && status === 'externally_verified' ? 'unavailable' : status;
-  const color = safeStatus === 'externally_verified' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : safeStatus === 'locally_consistent' ? 'bg-blue-500/15 text-blue-700 dark:text-blue-300' : safeStatus === 'invalid' ? 'bg-destructive/15 text-destructive' : 'bg-amber-500/15 text-amber-700 dark:text-amber-300';
+  const color = safeStatus === 'externally_verified' ? 'bg-primary/15 text-primary' : safeStatus === 'locally_consistent' ? 'bg-secondary text-secondary-foreground' : safeStatus === 'invalid' ? 'bg-destructive/15 text-destructive' : 'bg-accent text-accent-foreground';
   return <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${color}`}>{simulated ? 'Simulated provider — verification unavailable' : PROOF_LABELS[safeStatus]}</span>;
 }
 
