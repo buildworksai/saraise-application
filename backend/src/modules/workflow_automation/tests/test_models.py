@@ -1,251 +1,198 @@
-"""
-Model Unit Tests for WorkflowAutomation module.
+"""Domain invariants and state-machine evidence tests."""
 
-Tests model creation, validation, and relationships.
-"""
+from __future__ import annotations
+
 import uuid
-import pytest
-from django.contrib.auth import get_user_model
 
-from src.modules.workflow_automation.models import (
+import pytest
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError
+
+from src.core.state_machine import IdempotencyConflictError, TerminalStateError
+from src.core.tenancy import TenantScopedModel, TimestampedModel
+
+from ..models import (
     Workflow,
-    WorkflowStep,
     WorkflowInstance,
-    WorkflowTask,
     WorkflowStatus,
-    WorkflowTriggerType,
-    WorkflowStepType,
-    WorkflowInstanceState,
+    WorkflowStep,
+    WorkflowStepExecution,
+    WorkflowTask,
     WorkflowTaskStatus,
 )
+from ..state_machines import WORKFLOW_DEFINITION_MACHINE, WORKFLOW_TASK_MACHINE
+from .factories import (
+    WorkflowFactory,
+    WorkflowInstanceFactory,
+    WorkflowStepExecutionFactory,
+    WorkflowStepFactory,
+    WorkflowTaskFactory,
+)
 
-User = get_user_model()
-
-
-@pytest.mark.django_db
-class TestWorkflowModel:
-    """Test Workflow model."""
-
-    def test_create_workflow(self, db):
-        """Test creating a workflow."""
-        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass")
-        tenant_id = uuid.uuid4()
-
-        workflow = Workflow.objects.create(
-            tenant_id=tenant_id,
-            name="Test Workflow",
-            description="Test description",
-            status=WorkflowStatus.DRAFT,
-            trigger_type=WorkflowTriggerType.MANUAL,
-            created_by=user,
-        )
-        assert workflow.id is not None
-        assert workflow.name == "Test Workflow"
-        assert workflow.tenant_id == tenant_id
-        assert workflow.status == WorkflowStatus.DRAFT
-
-    def test_workflow_str_representation(self, db):
-        """Test workflow string representation."""
-        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass")
-        tenant_id = uuid.uuid4()
-
-        workflow = Workflow.objects.create(
-            tenant_id=tenant_id,
-            name="Test Workflow",
-            status=WorkflowStatus.DRAFT,
-            created_by=user,
-        )
-        assert str(workflow) == f"Test Workflow ({WorkflowStatus.DRAFT})"
-
-    def test_workflow_has_tenant_id(self, db):
-        """Test that workflow requires tenant_id."""
-        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass")
-
-        workflow = Workflow(
-            name="Test Workflow",
-            status=WorkflowStatus.DRAFT,
-            created_by=user,
-        )
-        # Should raise error if tenant_id is missing
-        with pytest.raises(Exception):
-            workflow.save()
+pytest_plugins = ["src.core.testing.factories"]
+pytestmark = pytest.mark.django_db
 
 
-@pytest.mark.django_db
-class TestWorkflowStepModel:
-    """Test WorkflowStep model."""
+def test_all_domain_records_are_tenant_scoped_and_timestamped() -> None:
+    for model in (Workflow, WorkflowStep, WorkflowInstance, WorkflowTask, WorkflowStepExecution):
+        assert issubclass(model, TenantScopedModel)
+        assert issubclass(model, TimestampedModel)
+        tenant_field = model._meta.get_field("tenant_id")
+        assert tenant_field.get_internal_type() == "UUIDField"
+        assert tenant_field.db_index is True
 
-    def test_create_workflow_step(self, db):
-        """Test creating a workflow step."""
-        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass")
-        tenant_id = uuid.uuid4()
 
-        workflow = Workflow.objects.create(
-            tenant_id=tenant_id,
-            name="Test Workflow",
-            status=WorkflowStatus.DRAFT,
-            created_by=user,
+def test_factory_builds_consistent_execution_evidence_graph() -> None:
+    task = WorkflowTaskFactory()
+    execution = WorkflowStepExecutionFactory(
+        tenant_id=task.tenant_id,
+        instance=task.instance,
+        step=task.step,
+    )
+    assert task.tenant_id == task.instance.tenant_id == task.step.tenant_id
+    assert task.instance.workflow_id == task.step.workflow_id
+    assert execution.tenant_id == execution.instance.tenant_id == execution.step.tenant_id
+    assert execution.attempt == 1
+
+
+@pytest.mark.parametrize("field", ["name", "key"])
+def test_workflow_rejects_blank_identity_fields(field: str) -> None:
+    workflow = WorkflowFactory.build()
+    setattr(workflow, field, "  ")
+    with pytest.raises(ValidationError):
+        workflow.full_clean()
+
+
+def test_workflow_key_version_is_unique_per_tenant() -> None:
+    workflow = WorkflowFactory()
+    with pytest.raises((IntegrityError, ValidationError)):
+        WorkflowFactory(
+            tenant_id=workflow.tenant_id,
+            key=workflow.key,
+            version=workflow.version,
         )
 
-        step = WorkflowStep.objects.create(
-            workflow=workflow,
-            name="Test Step",
-            step_type=WorkflowStepType.ACTION,
-            order=1,
-            config={"key": "value"},
-        )
-        assert step.id is not None
-        assert step.name == "Test Step"
-        assert step.step_type == WorkflowStepType.ACTION
-        assert step.order == 1
-        assert step.config == {"key": "value"}
 
-    def test_workflow_step_str_representation(self, db):
-        """Test workflow step string representation."""
-        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass")
-        tenant_id = uuid.uuid4()
-
-        workflow = Workflow.objects.create(
-            tenant_id=tenant_id,
-            name="Test Workflow",
-            status=WorkflowStatus.DRAFT,
-            created_by=user,
-        )
-
-        step = WorkflowStep.objects.create(
-            workflow=workflow,
-            name="Test Step",
-            step_type=WorkflowStepType.APPROVAL,
-            order=1,
-        )
-        assert str(step) == f"1. Test Step ({WorkflowStepType.APPROVAL})"
+def test_step_rejects_cross_tenant_workflow() -> None:
+    workflow = WorkflowFactory()
+    step = WorkflowStepFactory.build(tenant_id=uuid.uuid4(), workflow=workflow)
+    with pytest.raises(ValidationError):
+        step.full_clean()
 
 
-@pytest.mark.django_db
-class TestWorkflowInstanceModel:
-    """Test WorkflowInstance model."""
+def test_instance_rejects_cross_tenant_workflow_and_wrong_version() -> None:
+    workflow = WorkflowFactory(published=True, version=3)
+    wrong_tenant = WorkflowInstanceFactory.build(
+        tenant_id=uuid.uuid4(),
+        workflow=workflow,
+        workflow_version=workflow.version,
+    )
+    with pytest.raises(ValidationError):
+        wrong_tenant.full_clean()
 
-    def test_create_workflow_instance(self, db):
-        """Test creating a workflow instance."""
-        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass")
-        tenant_id = uuid.uuid4()
+    wrong_version = WorkflowInstanceFactory.build(
+        tenant_id=workflow.tenant_id,
+        workflow=workflow,
+        workflow_version=2,
+    )
+    with pytest.raises(ValidationError):
+        wrong_version.full_clean()
 
-        workflow = Workflow.objects.create(
-            tenant_id=tenant_id,
-            name="Test Workflow",
-            status=WorkflowStatus.PUBLISHED,
-            created_by=user,
-        )
 
-        instance = WorkflowInstance.objects.create(
-            tenant_id=tenant_id,
-            workflow=workflow,
-            state=WorkflowInstanceState.RUNNING,
-            context_data={"key": "value"},
-            started_by=user,
-        )
-        assert instance.id is not None
-        assert instance.tenant_id == tenant_id
-        assert instance.workflow == workflow
-        assert instance.state == WorkflowInstanceState.RUNNING
-        assert instance.context_data == {"key": "value"}
+def test_task_requires_normalized_assignment_shape() -> None:
+    task = WorkflowTaskFactory.build(assignment_key="role:not-the-role")
+    with pytest.raises(ValidationError):
+        task.full_clean()
 
-    def test_workflow_instance_str_representation(self, db):
-        """Test workflow instance string representation."""
-        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass")
-        tenant_id = uuid.uuid4()
 
-        workflow = Workflow.objects.create(
-            tenant_id=tenant_id,
-            name="Test Workflow",
-            status=WorkflowStatus.PUBLISHED,
-            created_by=user,
+def test_definition_transition_is_atomic_idempotent_and_append_only() -> None:
+    workflow = WorkflowFactory()
+    transitioned = WORKFLOW_DEFINITION_MACHINE.apply(
+        workflow,
+        "publish",
+        tenant_id=workflow.tenant_id,
+        transition_key="publish:v1",
+        context={
+            "definition_valid": True,
+            "handlers_registered": True,
+            "terminal_path_reachable": True,
+            "references_resolved": True,
+        },
+    )
+    assert transitioned.status == WorkflowStatus.PUBLISHED
+    assert transitioned.published_at is not None
+    assert len(transitioned.transition_history) == 1
+
+    replay = WORKFLOW_DEFINITION_MACHINE.apply(
+        transitioned,
+        "publish",
+        tenant_id=workflow.tenant_id,
+        transition_key="publish:v1",
+        context={"definition_valid": True},
+    )
+    assert len(replay.transition_history) == 1
+    with pytest.raises(IdempotencyConflictError):
+        WORKFLOW_DEFINITION_MACHINE.apply(
+            replay,
+            "archive",
+            tenant_id=workflow.tenant_id,
+            transition_key="publish:v1",
         )
 
-        instance = WorkflowInstance.objects.create(
-            tenant_id=tenant_id,
-            workflow=workflow,
-            state=WorkflowInstanceState.RUNNING,
-            started_by=user,
+
+def test_archived_definition_is_terminal_and_immutable() -> None:
+    workflow = WorkflowFactory()
+    workflow = WORKFLOW_DEFINITION_MACHINE.apply(
+        workflow,
+        "publish",
+        tenant_id=workflow.tenant_id,
+        transition_key="publish",
+        context={"definition_valid": True},
+    )
+    workflow = WORKFLOW_DEFINITION_MACHINE.apply(
+        workflow,
+        "archive",
+        tenant_id=workflow.tenant_id,
+        transition_key="archive",
+    )
+    with pytest.raises(TerminalStateError):
+        WORKFLOW_DEFINITION_MACHINE.apply(
+            workflow,
+            "publish",
+            tenant_id=workflow.tenant_id,
+            transition_key="publish-again",
         )
-        assert str(instance) == f"Instance of Test Workflow - {WorkflowInstanceState.RUNNING}"
+    workflow.name = "Mutated historical version"
+    with pytest.raises(ValidationError):
+        workflow.save()
 
 
-@pytest.mark.django_db
-class TestWorkflowTaskModel:
-    """Test WorkflowTask model."""
+def test_task_transition_records_actor_and_rejects_terminal_mutation(tenant_a_user: object) -> None:
+    task = WorkflowTaskFactory()
+    completed = WORKFLOW_TASK_MACHINE.apply(
+        task,
+        "complete",
+        tenant_id=task.tenant_id,
+        transition_key="decision:1",
+        metadata={"actor_id": getattr(tenant_a_user, "pk")},
+    )
+    assert completed.status == WorkflowTaskStatus.COMPLETED
+    assert completed.completed_at is not None
+    assert completed.completed_by_id == getattr(tenant_a_user, "pk")
+    assert completed.transition_history[0]["transition_key"] == "decision:1"
+    completed.meta_data = {"tampered": True}
+    with pytest.raises(ValidationError):
+        completed.save()
 
-    def test_create_workflow_task(self, db):
-        """Test creating a workflow task."""
-        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass")
-        tenant_id = uuid.uuid4()
 
-        workflow = Workflow.objects.create(
-            tenant_id=tenant_id,
-            name="Test Workflow",
-            status=WorkflowStatus.PUBLISHED,
-            created_by=user,
-        )
-
-        step = WorkflowStep.objects.create(
-            workflow=workflow,
-            name="Test Step",
-            step_type=WorkflowStepType.APPROVAL,
-            order=1,
-        )
-
-        instance = WorkflowInstance.objects.create(
-            tenant_id=tenant_id,
-            workflow=workflow,
-            state=WorkflowInstanceState.RUNNING,
-            started_by=user,
-        )
-
-        task = WorkflowTask.objects.create(
-            tenant_id=tenant_id,
-            instance=instance,
-            step=step,
-            assignee=user,
-            status=WorkflowTaskStatus.PENDING,
-            meta_data={"comment": "Test"},
-        )
-        assert task.id is not None
-        assert task.tenant_id == tenant_id
-        assert task.instance == instance
-        assert task.step == step
-        assert task.assignee == user
-        assert task.status == WorkflowTaskStatus.PENDING
-        assert task.meta_data == {"comment": "Test"}
-
-    def test_workflow_task_str_representation(self, db):
-        """Test workflow task string representation."""
-        user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass")
-        tenant_id = uuid.uuid4()
-
-        workflow = Workflow.objects.create(
-            tenant_id=tenant_id,
-            name="Test Workflow",
-            status=WorkflowStatus.PUBLISHED,
-            created_by=user,
-        )
-
-        step = WorkflowStep.objects.create(
-            workflow=workflow,
-            name="Test Step",
-            step_type=WorkflowStepType.APPROVAL,
-            order=1,
-        )
-
-        instance = WorkflowInstance.objects.create(
-            tenant_id=tenant_id,
-            workflow=workflow,
-            state=WorkflowInstanceState.RUNNING,
-            started_by=user,
-        )
-
-        task = WorkflowTask.objects.create(
-            tenant_id=tenant_id,
-            instance=instance,
-            step=step,
-        )
-        assert str(task) == f"Task for {instance}: Test Step"
+def test_execution_history_cannot_be_deleted() -> None:
+    instance = WorkflowInstanceFactory()
+    task = WorkflowTaskFactory(tenant_id=instance.tenant_id, instance=instance)
+    execution = WorkflowStepExecutionFactory(
+        tenant_id=instance.tenant_id,
+        instance=instance,
+        step=task.step,
+    )
+    for record in (instance, task, execution):
+        with pytest.raises(ValidationError):
+            record.delete()

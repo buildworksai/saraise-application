@@ -1,42 +1,80 @@
-"""
-Permissions Tests for WorkflowAutomation module.
+"""Fail-closed route authorization metadata tests."""
 
-Tests permission declarations and SoD actions.
-"""
-from src.modules.workflow_automation.permissions import PERMISSIONS, SOD_ACTIONS
+from __future__ import annotations
+
+import pytest
+from rest_framework.authentication import SessionAuthentication
+
+from ..api import StrictSessionAuthentication
+from ..permissions import ACTION_ACCESS, MODULE_ENTITLEMENT, PERMISSIONS, SOD_ACTIONS, access_metadata
 
 
-class TestWorkflowAutomationPermissions:
-    """Test WorkflowAutomation permission declarations."""
+EXPECTED_PERMISSIONS = {
+    "workflow_automation.workflow:read",
+    "workflow_automation.workflow:create",
+    "workflow_automation.workflow:update",
+    "workflow_automation.workflow:delete",
+    "workflow_automation.workflow:publish",
+    "workflow_automation.workflow:archive",
+    "workflow_automation.instance:read",
+    "workflow_automation.instance:start",
+    "workflow_automation.instance:cancel",
+    "workflow_automation.task:read",
+    "workflow_automation.task:complete",
+    "workflow_automation.task:reject",
+    "workflow_automation.health:read",
+}
 
-    def test_permissions_list_exists(self):
-        """Test that PERMISSIONS list exists and is not empty."""
-        assert PERMISSIONS is not None
-        assert isinstance(PERMISSIONS, list)
-        assert len(PERMISSIONS) > 0
 
-    def test_permissions_format(self):
-        """Test that permissions follow the correct format."""
-        for perm in PERMISSIONS:
-            assert isinstance(perm, str)
-            assert "workflow_automation" in perm
-            assert ":" in perm
-            # Format: module.resource:action
-            parts = perm.split(":")
-            assert len(parts) == 2
-            assert parts[1] in ["create", "read", "update", "delete", "activate", "deactivate"]
+def test_exact_public_permission_contract() -> None:
+    assert set(PERMISSIONS) == EXPECTED_PERMISSIONS
+    assert MODULE_ENTITLEMENT == "module.workflow_automation"
 
-    def test_sod_actions_list_exists(self):
-        """Test that SOD_ACTIONS list exists."""
-        assert SOD_ACTIONS is not None
-        assert isinstance(SOD_ACTIONS, list)
 
-    def test_sod_actions_are_subset_of_permissions(self):
-        """Test that SOD_ACTIONS are a subset of PERMISSIONS."""
-        for sod_action in SOD_ACTIONS:
-            assert sod_action in PERMISSIONS
+def test_every_route_action_has_permission_and_quota_metadata() -> None:
+    required_actions = {
+        "workflow_list",
+        "workflow_retrieve",
+        "workflow_create",
+        "workflow_partial_update",
+        "workflow_destroy",
+        "workflow_validate",
+        "workflow_publish",
+        "workflow_archive",
+        "workflow_clone",
+        "instance_list",
+        "instance_retrieve",
+        "instance_create",
+        "instance_cancel",
+        "task_list",
+        "task_retrieve",
+        "task_complete",
+        "task_reject",
+        "catalog_actions",
+        "catalog_conditions",
+        "catalog_subjects",
+        "catalog_assignees",
+        "health",
+    }
+    assert required_actions.issubset(ACTION_ACCESS)
+    for action in required_actions:
+        permission, quota = access_metadata(action)
+        assert permission in EXPECTED_PERMISSIONS
+        assert quota.startswith("workflow_automation.")
 
-    def test_sod_actions_include_critical_operations(self):
-        """Test that SOD_ACTIONS include critical operations."""
-        assert "workflow_automation.resource:create" in SOD_ACTIONS
-        assert "workflow_automation.resource:delete" in SOD_ACTIONS
+
+def test_unknown_action_denies_by_missing_metadata() -> None:
+    with pytest.raises(KeyError, match="No access metadata"):
+        access_metadata("workflow_unregistered_mutation")
+
+
+def test_segregation_of_duties_actions_are_explicit() -> None:
+    assert set(SOD_ACTIONS) == {
+        "workflow_automation.workflow:publish",
+        "workflow_automation.workflow:delete",
+    }
+
+
+def test_strict_authentication_uses_production_session_csrf_contract() -> None:
+    assert issubclass(StrictSessionAuthentication, SessionAuthentication)
+    assert StrictSessionAuthentication().authenticate_header(object()) == "Session"

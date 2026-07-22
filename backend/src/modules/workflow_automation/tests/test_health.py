@@ -1,96 +1,52 @@
-"""
-Health Check Tests for WorkflowAutomation module.
+"""Sanitized, fail-closed readiness tests."""
 
-Tests the health check endpoint functionality.
-"""
+from __future__ import annotations
+
+import uuid
+
 import pytest
-from django.test import Client
-from django.contrib.auth import get_user_model
-from src.core.user_models import UserProfile
-from src.core.licensing.models import Organization
-from src.modules.workflow_automation.models import Workflow
 
-User = get_user_model()
+from .. import health
 
 
-@pytest.fixture
-def client():
-    """Create test client."""
-    return Client()
+def _set_checks(monkeypatch: pytest.MonkeyPatch, *, database: bool = True, jobs: bool = True, outbox: bool = True, extensions: bool = True) -> None:
+    monkeypatch.setattr(health, "_database_ready", lambda tenant_id: database)
+    monkeypatch.setattr(health, "_handlers_registered", lambda: jobs)
+    monkeypatch.setattr(health, "_outbox_fresh", lambda tenant_id: outbox)
+    monkeypatch.setattr(health, "_required_extensions_ready", lambda tenant_id: extensions)
 
 
-@pytest.fixture
-def tenant_user(db):
-    """Create a test user with tenant."""
-    org = Organization.objects.create(name="Test Organization")
-    tenant_id = str(org.id)
-
-    user = User.objects.create_user(
-        username="testuser",
-        email="test@example.com",
-        password="testpass123",
-    )
-    profile = UserProfile.objects.get(user=user)
-    profile.tenant_id = tenant_id
-    profile.tenant_role = "tenant_admin"
-    profile.save()
-
-    return User.objects.get(pk=user.pk)
+def test_readiness_is_healthy_only_when_every_required_capability_is_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_checks(monkeypatch)
+    result = health.module_readiness(uuid.uuid4())
+    assert result.healthy is True
+    assert set(result.details) == {
+        "database_rls",
+        "async_handlers",
+        "outbox_worker",
+        "notifications",
+        "required_extensions",
+    }
 
 
-@pytest.mark.django_db
-class TestWorkflowAutomationHealthCheck:
-    """Test WorkflowAutomation health check endpoint."""
+@pytest.mark.parametrize("failed", ["database", "jobs", "outbox", "extensions"])
+def test_each_required_dependency_fails_readiness(monkeypatch: pytest.MonkeyPatch, failed: str) -> None:
+    values = {"database": True, "jobs": True, "outbox": True, "extensions": True}
+    values[failed] = False
+    _set_checks(monkeypatch, **values)
+    payload, status_code = health.sanitized_health_payload(uuid.uuid4())
+    assert status_code == 503
+    assert payload["status"] == "not_ready"
 
-    def test_health_check_returns_200(self, client):
-        """Test that health check returns 200 OK."""
-        response = client.get("/api/v1/workflow-automation/health/")
-        assert response.status_code == 200
 
-    def test_health_check_returns_json(self, client):
-        """Test that health check returns JSON response."""
-        response = client.get("/api/v1/workflow-automation/health/")
-        assert response["Content-Type"] == "application/json"
-        data = response.json()
-        assert "status" in data
-        assert "module" in data
-        assert "checks" in data
+def test_health_payload_never_leaks_tenant_counts_urls_or_exception_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_checks(monkeypatch, database=False)
+    payload, _ = health.sanitized_health_payload(uuid.uuid4())
+    rendered = repr(payload).lower()
+    for forbidden in ("tenant_id", "row_count", "exception", "password", "http://", "https://"):
+        assert forbidden not in rendered
 
-    def test_health_check_includes_module_name(self, client):
-        """Test that health check includes module name."""
-        response = client.get("/api/v1/workflow-automation/health/")
-        data = response.json()
-        assert data["module"] == "workflow-automation"
 
-    def test_health_check_database_status(self, client):
-        """Test that health check reports database status."""
-        response = client.get("/api/v1/workflow-automation/health/")
-        data = response.json()
-        assert "database" in data["checks"]
-        assert data["checks"]["database"] == "ok"
-
-    def test_health_check_cache_status(self, client):
-        """Test that health check reports cache status."""
-        response = client.get("/api/v1/workflow-automation/health/")
-        data = response.json()
-        assert "cache" in data["checks"]
-        # Cache status can be "ok" or "degraded" depending on Redis availability
-        assert data["checks"]["cache"] in ["ok", "degraded", "not responding correctly"]
-
-    def test_health_check_module_models_status(self, client, tenant_user):
-        """Test that health check reports module models status."""
-        # Create test data
-        Workflow.objects.create(
-            tenant_id=str(tenant_user.profile.tenant_id),
-            name="Test Workflow",
-            trigger_type="manual",
-            created_by=tenant_user,
-        )
-
-        response = client.get("/api/v1/workflow-automation/health/")
-        data = response.json()
-        assert "module_models" in data["checks"]
-        assert data["checks"]["module_models"]["status"] == "ok"
-        assert "workflows" in data["checks"]["module_models"]
-        assert "instances" in data["checks"]["module_models"]
-        assert "tasks" in data["checks"]["module_models"]
+def test_module_health_registration_is_idempotent() -> None:
+    health.register_module_health()
+    health.register_module_health()

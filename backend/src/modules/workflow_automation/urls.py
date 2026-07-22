@@ -1,14 +1,23 @@
-from django.urls import path, include
-from rest_framework.routers import DefaultRouter
-from .api import WorkflowViewSet, WorkflowInstanceViewSet, WorkflowTaskViewSet
-from .health import health_check
+"""Canonical workflow automation route surface.
 
-router = DefaultRouter()
-router.register(r"workflows", WorkflowViewSet, basename="workflow")
-router.register(r"instances", WorkflowInstanceViewSet, basename="workflow-instance")
-router.register(r"tasks", WorkflowTaskViewSet, basename="workflow-task")
+The project mounts these patterns at both v2 and the temporary v1 compatibility
+prefix.  Controllers add deprecation headers when reached through v1.
+"""
+
+from django.urls import include, path
+from rest_framework.routers import SimpleRouter
+
+from .api import CatalogViewSet, HealthView, WorkflowInstanceViewSet, WorkflowTaskViewSet, WorkflowViewSet
+
+app_name = "workflow_automation"
+
+router = SimpleRouter()
+router.register("workflows", WorkflowViewSet, basename="workflow")
+router.register("instances", WorkflowInstanceViewSet, basename="workflow-instance")
+router.register("tasks", WorkflowTaskViewSet, basename="workflow-task")
+router.register("catalog", CatalogViewSet, basename="workflow-catalog")
 
 urlpatterns = [
+    path("health/", HealthView.as_view(), name="health"),
     path("", include(router.urls)),
-    path("health/", health_check, name="health_check"),
 ]

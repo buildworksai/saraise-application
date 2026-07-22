@@ -1,392 +1,258 @@
-"""
-Tenant Isolation Tests for WorkflowAutomation module.
+"""Tenant isolation at HTTP, relationship, RLS, and worker boundaries."""
 
-CRITICAL: These tests verify that tenants cannot access each other's data.
-This is the PRIMARY security mechanism for multi-tenant isolation.
+from __future__ import annotations
 
-Reference: saraise-documentation/rules/compliance-enforcement.md
-Rule: ALL tenant-scoped queries MUST filter by tenant_id
-"""
 import uuid
+
 import pytest
-from django.contrib.auth import get_user_model
+from django.db import connection
 from rest_framework import status
-from rest_framework.test import APIClient
 
-from src.modules.workflow_automation.models import Workflow, WorkflowInstance, WorkflowTask, WorkflowStatus
-from src.core.auth_utils import get_user_tenant_id
+from src.core.access.decision import AccessDecision, AccessReasonCode
+from src.core.async_jobs.models import AsyncJob, OutboxEvent
+from src.core.async_jobs.services import enqueue, execute
+from src.core.tenancy import tenant_context
+from src.core.testing.tenant_contract import TenantIsolationContract
+from src.modules.security_access_control.models import Role
 
-User = get_user_model()
+from ..jobs import execute_instance_handler
+from ..models import Workflow, WorkflowInstance, WorkflowStep, WorkflowTask
+from ..services import EXECUTE_INSTANCE_COMMAND, WorkflowDefinitionService, WorkflowExecutionService
+from .factories import WorkflowInstanceFactory, WorkflowTaskFactory
+from .test_services import action_payload
+
+pytest_plugins = ["src.core.testing.factories"]
+pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
-    settings.SARAISE_MODE = "development"
+def allow_access_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
+    def allow(self, tenant_id, identity, required_permission, **kwargs):
+        del self, identity, required_permission, kwargs
+        return AccessDecision(
+            allowed=True,
+            reason_code=AccessReasonCode.ALLOW,
+            reason="allowed for isolation contract",
+            tenant_id=uuid.UUID(str(tenant_id)),
+            remaining_quota=100,
+        )
+
+    monkeypatch.setattr("src.core.access.decision.AccessDecisionPipeline.decide", allow)
 
 
-@pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
+class TestWorkflowIsolation(TenantIsolationContract):
+    model = Workflow
+    list_url = "/api/v2/workflow-automation/workflows/"
+    detail_url_template = "/api/v2/workflow-automation/workflows/{pk}/"
+    create_payload = action_payload(key="spoof-attempt")
+    read_denial_statuses = frozenset({status.HTTP_404_NOT_FOUND})
+
+    @pytest.fixture(autouse=True)
+    def isolation_context(self, tenant_a_client, tenant_a, tenant_b, tenant_a_user, tenant_b_user):
+        self.client = tenant_a_client
+        self.tenant_a_row = WorkflowDefinitionService.create_workflow(
+            tenant_a.id, tenant_a_user, action_payload(key="tenant-a-definition")
+        )
+        self.tenant_b_row = WorkflowDefinitionService.create_workflow(
+            tenant_b.id, tenant_b_user, action_payload(key="tenant-b-definition")
+        )
+
+    def get_list_items(self, response):
+        return response.json()["data"]
+
+    def get_update_payload(self):
+        return {
+            "name": "Cross-tenant mutation",
+            "expected_updated_at": self.tenant_b_row.updated_at.isoformat(),
+        }
 
 
-@pytest.fixture
-def tenant_a_user(db):
-    """Create user for tenant A."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_a",
-        email="usera@example.com",
-        password="testpass123",
+def test_nested_step_tenant_spoof_is_rejected_on_create_and_update(
+    tenant_a_client, tenant_a, tenant_b, tenant_a_user
+) -> None:
+    payload = action_payload(key="nested-create-spoof")
+    payload["steps"][0]["tenant_id"] = str(tenant_b.id)
+    response = tenant_a_client.post(
+        "/api/v2/workflow-automation/workflows/", payload, format="json"
     )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
 
-
-@pytest.fixture
-def tenant_b_user(db):
-    """Create user for tenant B."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_b",
-        email="userb@example.com",
-        password="testpass123",
+    workflow = WorkflowDefinitionService.create_workflow(
+        tenant_a.id, tenant_a_user, action_payload(key="nested-update-spoof")
     )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+    steps = action_payload()["steps"]
+    steps[0]["tenant_id"] = str(tenant_b.id)
+    response = tenant_a_client.patch(
+        f"/api/v2/workflow-automation/workflows/{workflow.id}/",
+        {"expected_updated_at": workflow.updated_at.isoformat(), "steps": steps},
+        format="json",
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert WorkflowStep.objects.for_tenant(tenant_b.id).filter(workflow_id=workflow.id).count() == 0
 
 
-@pytest.mark.django_db
-class TestWorkflowTenantIsolation:
-    """
-    CRITICAL: Tenant isolation tests for Workflow model.
-    These tests verify that tenants cannot access each other's workflows.
-    """
-
-    def test_user_cannot_list_other_tenant_workflows(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's workflows in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create workflow for tenant A
-        workflow_a = Workflow.objects.create(
-            tenant_id=tenant_a_id,
-            name="Tenant A Workflow",
-            description="Workflow for tenant A",
-            status=WorkflowStatus.DRAFT,
-            created_by=tenant_a_user,
-        )
-
-        # Create workflow for tenant B
-        workflow_b = Workflow.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Workflow",
-            description="Workflow for tenant B",
-            status=WorkflowStatus.DRAFT,
-            created_by=tenant_b_user,
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        response = api_client.get("/api/v1/workflow-automation/workflows/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        workflow_ids = [str(w["id"]) for w in data]
-
-        # User A should see tenant A's workflow, but NOT tenant B's workflow
-        assert str(workflow_a.id) in workflow_ids
-        assert str(workflow_b.id) not in workflow_ids
-
-    def test_user_cannot_get_other_tenant_workflow_by_id(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot GET other tenant's workflow by ID (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create workflow for tenant B
-        workflow_b = Workflow.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Workflow",
-            description="Workflow for tenant B",
-            status=WorkflowStatus.DRAFT,
-            created_by=tenant_b_user,
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to access tenant B's workflow
-        response = api_client.get(f"/api/v1/workflow-automation/workflows/{workflow_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    def test_user_cannot_update_other_tenant_workflow(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot UPDATE other tenant's workflow (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create workflow for tenant B
-        workflow_b = Workflow.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Workflow",
-            description="Workflow for tenant B",
-            status=WorkflowStatus.DRAFT,
-            created_by=tenant_b_user,
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to update tenant B's workflow
-        data = {"name": "Hacked Name"}
-        response = api_client.put(
-            f"/api/v1/workflow-automation/workflows/{workflow_b.id}/",
-            data,
+def test_cross_tenant_definition_actions_and_start_are_404_without_side_effects(
+    tenant_a_client, tenant_b, tenant_b_user
+) -> None:
+    workflow = WorkflowDefinitionService.create_workflow(
+        tenant_b.id, tenant_b_user, action_payload(key="tenant-b-actions")
+    )
+    workflow = WorkflowDefinitionService.publish_workflow(
+        tenant_b.id, workflow.id, tenant_b_user, "tenant-b-publish"
+    )
+    before = (workflow.status, workflow.version, workflow.updated_at)
+    for suffix, payload in (
+        ("publish", {"transition_key": "foreign-publish"}),
+        ("archive", {"transition_key": "foreign-archive"}),
+        ("clone", {}),
+    ):
+        response = tenant_a_client.post(
+            f"/api/v2/workflow-automation/workflows/{workflow.id}/{suffix}/",
+            payload,
             format="json",
         )
         assert response.status_code == status.HTTP_404_NOT_FOUND
+    workflow.refresh_from_db()
+    assert (workflow.status, workflow.version, workflow.updated_at) == before
 
-        # Verify workflow was not modified
-        workflow_b.refresh_from_db()
-        assert workflow_b.name == "Tenant B Workflow"
+    jobs_before = AsyncJob.objects.count()
+    events_before = OutboxEvent.objects.count()
+    response = tenant_a_client.post(
+        "/api/v2/workflow-automation/instances/",
+        {
+            "workflow_id": str(workflow.id),
+            "context_data": {},
+            "idempotency_key": "foreign-workflow-start",
+        },
+        format="json",
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    assert AsyncJob.objects.count() == jobs_before
+    assert OutboxEvent.objects.count() == events_before
+    assert WorkflowInstance.objects.filter(idempotency_key="foreign-workflow-start").count() == 0
 
-    def test_user_cannot_delete_other_tenant_workflow(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot DELETE other tenant's workflow (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
 
-        # Create workflow for tenant B
-        workflow_b = Workflow.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Workflow",
-            description="Workflow for tenant B",
-            status=WorkflowStatus.DRAFT,
-            created_by=tenant_b_user,
+def test_cross_tenant_instance_list_detail_and_cancel(
+    tenant_a_client, tenant_a, tenant_b, tenant_a_user, tenant_b_user
+) -> None:
+    instance_a = WorkflowInstanceFactory(tenant_id=tenant_a.id, started_by=tenant_a_user)
+    instance_b = WorkflowInstanceFactory(tenant_id=tenant_b.id, started_by=tenant_b_user)
+    listing = tenant_a_client.get("/api/v2/workflow-automation/instances/")
+    identifiers = {item["id"] for item in listing.json()["data"]}
+    assert str(instance_a.id) in identifiers
+    assert str(instance_b.id) not in identifiers
+    assert tenant_a_client.get(
+        f"/api/v2/workflow-automation/instances/{instance_b.id}/"
+    ).status_code == status.HTTP_404_NOT_FOUND
+    before = (instance_b.state, instance_b.updated_at)
+    response = tenant_a_client.post(
+        f"/api/v2/workflow-automation/instances/{instance_b.id}/cancel/",
+        {"transition_key": "foreign-cancel"},
+        format="json",
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    instance_b.refresh_from_db()
+    assert (instance_b.state, instance_b.updated_at) == before
+
+
+def test_cross_tenant_task_list_detail_complete_and_reject(
+    tenant_a_client, tenant_a, tenant_b, tenant_a_user, tenant_b_user
+) -> None:
+    task_a = WorkflowTaskFactory(
+        tenant_id=tenant_a.id,
+        assignment_kind="user",
+        assignee=tenant_a_user,
+        assignee_role_id=None,
+        assignment_key=f"user:{tenant_a_user.pk}",
+    )
+    task_b = WorkflowTaskFactory(
+        tenant_id=tenant_b.id,
+        assignment_kind="user",
+        assignee=tenant_b_user,
+        assignee_role_id=None,
+        assignment_key=f"user:{tenant_b_user.pk}",
+    )
+    listing = tenant_a_client.get("/api/v2/workflow-automation/tasks/")
+    identifiers = {item["id"] for item in listing.json()["data"]}
+    assert str(task_a.id) in identifiers
+    assert str(task_b.id) not in identifiers
+    assert tenant_a_client.get(
+        f"/api/v2/workflow-automation/tasks/{task_b.id}/"
+    ).status_code == status.HTTP_404_NOT_FOUND
+    before = (task_b.status, task_b.meta_data, task_b.updated_at)
+    for suffix, payload in (
+        ("complete", {"meta_data": {}, "transition_key": "foreign-complete"}),
+        (
+            "reject",
+            {"reason": "Not authorized", "meta_data": {}, "transition_key": "foreign-reject"},
+        ),
+    ):
+        response = tenant_a_client.post(
+            f"/api/v2/workflow-automation/tasks/{task_b.id}/{suffix}/", payload, format="json"
         )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to delete tenant B's workflow
-        response = api_client.delete(f"/api/v1/workflow-automation/workflows/{workflow_b.id}/")
         assert response.status_code == status.HTTP_404_NOT_FOUND
-
-        # Verify workflow still exists
-        assert Workflow.objects.filter(id=workflow_b.id).exists()
-
-
-@pytest.mark.django_db
-class TestWorkflowInstanceTenantIsolation:
-    """Tenant isolation tests for WorkflowInstance model."""
-
-    def test_user_cannot_list_other_tenant_instances(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's workflow instances in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create workflows
-        workflow_a = Workflow.objects.create(
-            tenant_id=tenant_a_id,
-            name="Tenant A Workflow",
-            status=WorkflowStatus.PUBLISHED,
-            created_by=tenant_a_user,
-        )
-
-        workflow_b = Workflow.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Workflow",
-            status=WorkflowStatus.PUBLISHED,
-            created_by=tenant_b_user,
-        )
-
-        # Create instances
-        instance_a = WorkflowInstance.objects.create(
-            tenant_id=tenant_a_id,
-            workflow=workflow_a,
-            started_by=tenant_a_user,
-        )
-
-        instance_b = WorkflowInstance.objects.create(
-            tenant_id=tenant_b_id,
-            workflow=workflow_b,
-            started_by=tenant_b_user,
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        response = api_client.get("/api/v1/workflow-automation/instances/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        instance_ids = [str(i["id"]) for i in data]
-
-        # User A should see tenant A's instance, but NOT tenant B's instance
-        assert str(instance_a.id) in instance_ids
-        assert str(instance_b.id) not in instance_ids
-
-    def test_user_cannot_get_other_tenant_instance_by_id(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot GET other tenant's workflow instance by ID (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create workflow and instance for tenant B
-        workflow_b = Workflow.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Workflow",
-            status=WorkflowStatus.PUBLISHED,
-            created_by=tenant_b_user,
-        )
-
-        instance_b = WorkflowInstance.objects.create(
-            tenant_id=tenant_b_id,
-            workflow=workflow_b,
-            started_by=tenant_b_user,
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to access tenant B's instance
-        response = api_client.get(f"/api/v1/workflow-automation/instances/{instance_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+    task_b.refresh_from_db()
+    assert (task_b.status, task_b.meta_data, task_b.updated_at) == before
 
 
-@pytest.mark.django_db
-class TestWorkflowTaskTenantIsolation:
-    """Tenant isolation tests for WorkflowTask model."""
+def test_role_assignment_cannot_resolve_another_tenant_role(
+    tenant_a, tenant_b, tenant_a_user
+) -> None:
+    foreign_role = Role.objects.create(
+        tenant_id=tenant_b.id,
+        name="Tenant B approver",
+        code="tenant_b_approver",
+    )
+    payload = action_payload(key="foreign-role")
+    payload["workflow_type"] = "approval"
+    payload["steps"] = [
+        {
+            "key": "approve",
+            "name": "Approve",
+            "step_type": "approval",
+            "order": 1,
+            "config": {
+                "assignment_kind": "role",
+                "assignee_id": str(foreign_role.id),
+                "rejection_behavior": "fail",
+            },
+            "is_terminal": True,
+            "next_step_keys": [],
+            "join_key": "",
+        }
+    ]
+    workflow = WorkflowDefinitionService.create_workflow(tenant_a.id, tenant_a_user, payload)
+    workflow = WorkflowDefinitionService.publish_workflow(
+        tenant_a.id, workflow.id, tenant_a_user, "foreign-role-publish"
+    )
+    instance = WorkflowExecutionService.start_workflow(
+        tenant_a.id, workflow.id, tenant_a_user, {}, "foreign-role-start"
+    )
+    execute(instance.async_job_id, tenant_a.id)
+    instance.refresh_from_db()
+    assert instance.state == "failed"
+    assert instance.failure_code == "ASSIGNEE_ROLE_NOT_FOUND"
+    assert WorkflowTask.objects.for_tenant(tenant_a.id).filter(instance=instance).count() == 0
 
-    def test_user_cannot_list_other_tenant_tasks(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's workflow tasks in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
 
-        # Create workflows
-        workflow_a = Workflow.objects.create(
-            tenant_id=tenant_a_id,
-            name="Tenant A Workflow",
-            status=WorkflowStatus.PUBLISHED,
-            created_by=tenant_a_user,
-        )
+def test_worker_tenant_context_cannot_read_foreign_instance(tenant_a, tenant_b, tenant_a_user) -> None:
+    foreign = WorkflowInstanceFactory(tenant_id=tenant_b.id)
+    job = enqueue(
+        tenant_a.id,
+        tenant_a_user.pk,
+        EXECUTE_INSTANCE_COMMAND,
+        {"instance_id": str(foreign.id)},
+        "malicious-cross-tenant-worker",
+    )
+    with pytest.raises(Exception):
+        execute_instance_handler(job)
+    foreign.refresh_from_db()
+    assert foreign.state == "pending"
 
-        workflow_b = Workflow.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Workflow",
-            status=WorkflowStatus.PUBLISHED,
-            created_by=tenant_b_user,
-        )
 
-        # Create instances
-        instance_a = WorkflowInstance.objects.create(
-            tenant_id=tenant_a_id,
-            workflow=workflow_a,
-            started_by=tenant_a_user,
-        )
-
-        instance_b = WorkflowInstance.objects.create(
-            tenant_id=tenant_b_id,
-            workflow=workflow_b,
-            started_by=tenant_b_user,
-        )
-
-        # Create steps
-        from src.modules.workflow_automation.models import WorkflowStep, WorkflowStepType
-
-        step_a = WorkflowStep.objects.create(
-            workflow=workflow_a,
-            name="Step A",
-            step_type=WorkflowStepType.APPROVAL,
-            order=1,
-        )
-
-        step_b = WorkflowStep.objects.create(
-            workflow=workflow_b,
-            name="Step B",
-            step_type=WorkflowStepType.APPROVAL,
-            order=1,
-        )
-
-        # Create tasks
-        task_a = WorkflowTask.objects.create(
-            tenant_id=tenant_a_id,
-            instance=instance_a,
-            step=step_a,
-            assignee=tenant_a_user,
-        )
-
-        task_b = WorkflowTask.objects.create(
-            tenant_id=tenant_b_id,
-            instance=instance_b,
-            step=step_b,
-            assignee=tenant_b_user,
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        response = api_client.get("/api/v1/workflow-automation/tasks/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        task_ids = [str(t["id"]) for t in data]
-
-        # User A should see tenant A's task, but NOT tenant B's task
-        assert str(task_a.id) in task_ids
-        assert str(task_b.id) not in task_ids
-
-    def test_user_cannot_get_other_tenant_task_by_id(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot GET other tenant's workflow task by ID (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create workflow, instance, step, and task for tenant B
-        workflow_b = Workflow.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Workflow",
-            status=WorkflowStatus.PUBLISHED,
-            created_by=tenant_b_user,
-        )
-
-        instance_b = WorkflowInstance.objects.create(
-            tenant_id=tenant_b_id,
-            workflow=workflow_b,
-            started_by=tenant_b_user,
-        )
-
-        from src.modules.workflow_automation.models import WorkflowStep, WorkflowStepType
-
-        step_b = WorkflowStep.objects.create(
-            workflow=workflow_b,
-            name="Step B",
-            step_type=WorkflowStepType.APPROVAL,
-            order=1,
-        )
-
-        task_b = WorkflowTask.objects.create(
-            tenant_id=tenant_b_id,
-            instance=instance_b,
-            step=step_b,
-            assignee=tenant_b_user,
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to access tenant B's task
-        response = api_client.get(f"/api/v1/workflow-automation/tasks/{task_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+def test_postgresql_rls_blocks_wrong_database_context(tenant_a, tenant_b) -> None:
+    if connection.vendor != "postgresql":
+        pytest.skip("RLS is enforced by PostgreSQL")
+    foreign = WorkflowInstanceFactory(tenant_id=tenant_b.id)
+    with tenant_context(tenant_a.id):
+        assert WorkflowInstance._base_manager.filter(id=foreign.id).count() == 0

@@ -40,31 +40,6 @@ const Support = lazy(() =>
   }))
 );
 
-// Lazy load Foundation module pages
-const WorkflowAutomationListPage = lazy(() =>
-  import("./modules/workflow_automation/pages/WorkflowAutomationListPage").then(
-    (m) => ({
-      default: m.WorkflowAutomationListPage,
-    })
-  )
-);
-
-const WorkflowAutomationDetailPage = lazy(() =>
-  import(
-    "./modules/workflow_automation/pages/WorkflowAutomationDetailPage"
-  ).then((m) => ({
-    default: m.WorkflowAutomationDetailPage,
-  }))
-);
-
-const CreateWorkflowAutomationResourcePage = lazy(() =>
-  import(
-    "./modules/workflow_automation/pages/CreateWorkflowAutomationResourcePage"
-  ).then((m) => ({
-    default: m.CreateWorkflowAutomationResourcePage,
-  }))
-);
-
 const ApiManagementListPage = lazy(() =>
   import("./modules/api_management/pages/ApiManagementListPage").then((m) => ({
     default: m.ApiManagementListPage,
@@ -647,25 +622,6 @@ const ApprovalQueuePage = lazy(() =>
   }))
 );
 
-// Workflow Automation Components
-const WorkflowListPage = lazy(() =>
-  import("./modules/workflow_automation/pages/WorkflowListPage").then((m) => ({
-    default: m.WorkflowListPage,
-  }))
-);
-const WorkflowBuilder = lazy(() =>
-  import("./modules/workflow_automation/components/WorkflowBuilder").then(
-    (m) => ({
-      default: m.WorkflowBuilder,
-    })
-  )
-);
-const TaskInboxPage = lazy(() =>
-  import("./modules/workflow_automation/pages/TaskInboxPage").then((m) => ({
-    default: m.TaskInboxPage,
-  }))
-);
-
 // Control Plane dashboards, settings, and feature flags are intentionally absent.
 // Self-hosted license management remains as a runtime-plane exception.
 
@@ -940,38 +896,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <SchemaEditorPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Workflow Automation Routes */}
-          <Route
-            path="/workflow-automation/workflows"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <WorkflowListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/workflow-automation/workflows/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <WorkflowBuilder />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/workflow-automation/tasks"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <TaskInboxPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -1533,38 +1457,6 @@ function AnimatedRoutes() {
 
           {/* 404 */}
           <Route path="*" element={<div className="p-8">Page not found</div>} />
-
-          {/* WorkflowAutomation routes */}
-          <Route
-            path="/workflow-automation"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <WorkflowAutomationListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/workflow-automation/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateWorkflowAutomationResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/workflow-automation/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <WorkflowAutomationDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
 
           {/* ApiManagement routes */}
           <Route
