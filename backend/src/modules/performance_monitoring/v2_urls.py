@@ -7,10 +7,12 @@ from .api import (
     AlertRuleViewSet,
     AlertViewSet,
     ComplianceViewSet,
+    ConfigurationViewSet,
     DashboardViewSet,
     EnvironmentViewSet,
     ExtensionViewSet,
     LogViewSet,
+    MetricDataPointViewSet,
     MetricDefinitionViewSet,
     MetricViewSet,
     ReportViewSet,
@@ -28,6 +30,7 @@ router.register("environments", EnvironmentViewSet, basename="v2-monitoring-envi
 router.register("services", ServiceViewSet, basename="v2-monitored-service")
 router.register("metric-definitions", MetricDefinitionViewSet, basename="v2-metric-definition")
 router.register("metrics", MetricViewSet, basename="v2-metric")
+router.register("metric-data-points", MetricDataPointViewSet, basename="v2-metric-data-point")
 router.register("logs", LogViewSet, basename="v2-log")
 router.register("traces", TraceViewSet, basename="v2-trace")
 router.register("dashboards", DashboardViewSet, basename="v2-dashboard")
@@ -38,6 +41,7 @@ router.register("slos", SLOViewSet, basename="v2-slo")
 router.register("compliance-records", ComplianceViewSet, basename="v2-compliance-record")
 router.register("reports", ReportViewSet, basename="v2-sla-report")
 router.register("extensions", ExtensionViewSet, basename="v2-monitoring-extension")
+router.register("configuration", ConfigurationViewSet, basename="v2-monitoring-configuration")
 
 urlpatterns = [
     path("", include(router.urls)),

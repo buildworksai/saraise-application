@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from rest_framework import serializers
@@ -20,6 +21,9 @@ from .models import (
     MonitoredService,
     MonitoringEnvironment,
     MonitoringExtension,
+    PerformanceMonitoringConfiguration,
+    PerformanceMonitoringConfigurationAudit,
+    PerformanceMonitoringConfigurationVersion,
     ServiceLevelObjective,
     Severity,
     SLAComplianceRecord,
@@ -75,10 +79,10 @@ class TelemetrySourceCreateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=160, trim_whitespace=True)
     source_type = serializers.ChoiceField(choices=SourceType.choices)
     description = serializers.CharField(required=False, allow_blank=True)
-    sampling_rate = serializers.DecimalField(max_digits=5, decimal_places=4, required=False, default=1)
-    retention_days = serializers.IntegerField(min_value=1, max_value=3650, required=False, default=90)
-    daily_event_quota = serializers.IntegerField(min_value=1, required=False, default=1_000_000)
-    redaction_fields = serializers.ListField(child=serializers.CharField(max_length=120), required=False, default=list)
+    sampling_rate = serializers.DecimalField(max_digits=5, decimal_places=4, required=False)
+    retention_days = serializers.IntegerField(min_value=1, required=False)
+    daily_event_quota = serializers.IntegerField(min_value=1, max_value=100_000_000, required=False)
+    redaction_fields = serializers.ListField(child=serializers.CharField(max_length=120), required=False)
 
 
 class TelemetrySourceUpdateSerializer(TelemetrySourceCreateSerializer):
@@ -192,7 +196,7 @@ class MetricDataPointSerializer(TenantReadOnlySerializer):
 
 
 class MetricBatchSerializer(serializers.Serializer):
-    data_points = MetricRecordSerializer(many=True, max_length=1000)
+    data_points = MetricRecordSerializer(many=True)
     atomic = serializers.BooleanField(required=False, default=False)
 
 
@@ -231,7 +235,7 @@ class LogIngestSerializer(serializers.Serializer):
     level = serializers.ChoiceField(
         choices=("trace", "debug", "info", "warn", "warning", "error", "fatal"), default="info"
     )
-    message = serializers.CharField(max_length=32_000)
+    message = serializers.CharField()
     attributes = serializers.DictField(required=False, default=dict)
     trace_id = serializers.RegexField(r"^[0-9a-f]{32}$", required=False, allow_blank=True)
     span_id = serializers.RegexField(r"^[0-9a-f]{16}$", required=False, allow_blank=True)
@@ -286,7 +290,7 @@ class TraceIngestSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=("unset", "ok", "error"), default="unset")
     attributes = serializers.DictField(required=False, default=dict)
     sampled = serializers.BooleanField(required=False, default=True)
-    spans = SpanIngestSerializer(many=True, max_length=10_000)
+    spans = SpanIngestSerializer(many=True)
 
 
 class SpanSerializer(TenantReadOnlySerializer):
@@ -388,19 +392,10 @@ class AlertRuleCreateSerializer(serializers.Serializer):
     metric_name = serializers.CharField(max_length=255)
     condition = AlertConditionField()
     threshold = serializers.DecimalField(max_digits=20, decimal_places=6, required=False, allow_null=True)
-    evaluation_window_minutes = serializers.IntegerField(min_value=1, max_value=1440, default=5, required=False)
-    cooldown_minutes = serializers.IntegerField(min_value=1, max_value=10080, default=15, required=False)
-    severity = serializers.ChoiceField(choices=Severity.choices, default=Severity.WARNING, required=False)
+    evaluation_window_minutes = serializers.IntegerField(min_value=1, required=False)
+    cooldown_minutes = serializers.IntegerField(min_value=1, required=False)
+    severity = serializers.ChoiceField(choices=Severity.choices, required=False)
     action = serializers.DictField()
-
-    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        condition = attrs.get("condition", getattr(self.instance, "condition", None))
-        threshold = attrs.get("threshold", getattr(self.instance, "threshold", None))
-        if condition == AlertCondition.ABSENCE and threshold is not None:
-            raise serializers.ValidationError({"threshold": "Absence alerts do not use a threshold."})
-        if condition is not None and condition != AlertCondition.ABSENCE and threshold is None:
-            raise serializers.ValidationError({"threshold": "Threshold is required."})
-        return attrs
 
 
 class AlertRuleUpdateSerializer(AlertRuleCreateSerializer):
@@ -483,7 +478,7 @@ class SLADefinitionCreateSerializer(serializers.Serializer):
     target = serializers.DecimalField(max_digits=10, decimal_places=4, min_value=0)
     window = serializers.ChoiceField(choices=SLAWindow.choices)
     comparison = serializers.ChoiceField(choices=((Comparison.GTE, "gte"), (Comparison.LTE, "lte")))
-    expected_interval_seconds = serializers.IntegerField(min_value=1, max_value=86400, required=False, default=60)
+    expected_interval_seconds = serializers.IntegerField(min_value=1, required=False)
 
 
 class SLADefinitionUpdateSerializer(serializers.Serializer):
@@ -492,7 +487,7 @@ class SLADefinitionUpdateSerializer(serializers.Serializer):
     target = serializers.DecimalField(max_digits=10, decimal_places=4, min_value=0, required=False)
     window = serializers.ChoiceField(choices=SLAWindow.choices, required=False)
     comparison = serializers.ChoiceField(choices=((Comparison.GTE, "gte"), (Comparison.LTE, "lte")), required=False)
-    expected_interval_seconds = serializers.IntegerField(min_value=1, max_value=86400, required=False)
+    expected_interval_seconds = serializers.IntegerField(min_value=1, required=False)
 
 
 class ComplianceQuerySerializer(serializers.Serializer):
@@ -536,6 +531,14 @@ class SLAReportCreateSerializer(serializers.Serializer):
 
 
 class SLAReportSerializer(TenantReadOnlySerializer):
+    download_id = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_download_id(instance: SLAReport) -> str | None:
+        """Expose only the governed report identifier, never storage internals."""
+
+        return str(instance.id) if instance.artifact_ref and instance.status == "ready" else None
+
     class Meta(TenantReadOnlySerializer.Meta):
         model = SLAReport
         fields = (
@@ -544,11 +547,8 @@ class SLAReportSerializer(TenantReadOnlySerializer):
             "period_end",
             "status",
             "summary",
-            "artifact_ref",
-            "artifact_sha256",
-            "generated_by",
+            "download_id",
             "generated_at",
-            "error_code",
             "created_at",
         )
         read_only_fields = fields
@@ -573,7 +573,41 @@ class SLOSerializer(TenantReadOnlySerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = TenantReadOnlySerializer.Meta.read_only_fields
+        read_only_fields = fields
+
+
+class SLOCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=180, trim_whitespace=True)
+    description = serializers.CharField(required=False, allow_blank=True)
+    service_id = serializers.UUIDField()
+    indicator_metric_id = serializers.UUIDField()
+    comparison = serializers.ChoiceField(choices=Comparison.choices)
+    threshold = serializers.FloatField()
+    objective_percentage = serializers.DecimalField(
+        max_digits=6, decimal_places=3, min_value=Decimal("0.001"), max_value=Decimal("100")
+    )
+    window_days = serializers.IntegerField(required=False, min_value=1)
+    expected_interval_seconds = serializers.IntegerField(required=False, min_value=1)
+    is_active = serializers.BooleanField(required=False, default=True)
+
+
+class SLOUpdateSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=180, trim_whitespace=True, required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+    service_id = serializers.UUIDField(required=False)
+    indicator_metric_id = serializers.UUIDField(required=False)
+    comparison = serializers.ChoiceField(choices=Comparison.choices, required=False)
+    threshold = serializers.FloatField(required=False)
+    objective_percentage = serializers.DecimalField(
+        max_digits=6,
+        decimal_places=3,
+        min_value=Decimal("0.001"),
+        max_value=Decimal("100"),
+        required=False,
+    )
+    window_days = serializers.IntegerField(required=False, min_value=1)
+    expected_interval_seconds = serializers.IntegerField(required=False, min_value=1)
+    is_active = serializers.BooleanField(required=False)
 
 
 class ErrorBudgetSerializer(TenantReadOnlySerializer):
@@ -613,3 +647,81 @@ class ExtensionSerializer(TenantReadOnlySerializer):
             "created_at",
         )
         read_only_fields = fields
+
+
+class MonitoringConfigurationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PerformanceMonitoringConfiguration
+        fields = (
+            "id",
+            "tenant_id",
+            "environment",
+            "version",
+            "document",
+            "updated_by",
+            "correlation_id",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class MonitoringConfigurationVersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PerformanceMonitoringConfigurationVersion
+        fields = (
+            "id",
+            "environment",
+            "version",
+            "document",
+            "actor_id",
+            "correlation_id",
+            "change_reason",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class MonitoringConfigurationAuditSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PerformanceMonitoringConfigurationAudit
+        fields = (
+            "id",
+            "environment",
+            "action",
+            "from_version",
+            "to_version",
+            "before",
+            "after",
+            "actor_id",
+            "correlation_id",
+            "change_reason",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class MonitoringConfigurationChangeSerializer(serializers.Serializer):
+    environment = serializers.SlugField(max_length=64, required=False, default="default")
+    document = serializers.JSONField()
+    expected_version = serializers.IntegerField(min_value=0, required=False, allow_null=True)
+    change_reason = serializers.CharField(max_length=240, trim_whitespace=True)
+
+
+class MonitoringConfigurationPreviewSerializer(serializers.Serializer):
+    environment = serializers.SlugField(max_length=64, required=False, default="default")
+    document = serializers.JSONField()
+
+
+class MonitoringConfigurationRollbackSerializer(serializers.Serializer):
+    environment = serializers.SlugField(max_length=64, required=False, default="default")
+    version = serializers.IntegerField(min_value=1)
+    expected_version = serializers.IntegerField(min_value=0, required=False, allow_null=True)
+    change_reason = serializers.CharField(max_length=240, trim_whitespace=True)
+
+
+class MonitoringConfigurationImportSerializer(serializers.Serializer):
+    environment = serializers.SlugField(max_length=64, required=False, default="default")
+    document = serializers.JSONField()
+    expected_version = serializers.IntegerField(min_value=0, required=False, allow_null=True)
+    change_reason = serializers.CharField(max_length=240, trim_whitespace=True)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Mapping
 from typing import Any
@@ -12,6 +13,7 @@ from django.db.models import QuerySet
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
@@ -29,9 +31,13 @@ from .models import (
     ErrorBudgetSnapshot,
     LogEntry,
     Metric,
+    MetricDataPoint,
     MonitoredService,
     MonitoringEnvironment,
     MonitoringExtension,
+    PerformanceMonitoringConfiguration,
+    PerformanceMonitoringConfigurationAudit,
+    PerformanceMonitoringConfigurationVersion,
     ServiceLevelObjective,
     SLAComplianceRecord,
     SLADefinition,
@@ -64,13 +70,22 @@ from .serializers import (
     MetricQuerySerializer,
     MetricRecordSerializer,
     MetricSummaryQuerySerializer,
+    MonitoringConfigurationAuditSerializer,
+    MonitoringConfigurationChangeSerializer,
+    MonitoringConfigurationImportSerializer,
+    MonitoringConfigurationPreviewSerializer,
+    MonitoringConfigurationRollbackSerializer,
+    MonitoringConfigurationSerializer,
+    MonitoringConfigurationVersionSerializer,
     ServiceSerializer,
     SLADefinitionCreateSerializer,
     SLADefinitionSerializer,
     SLADefinitionUpdateSerializer,
     SLAReportCreateSerializer,
     SLAReportSerializer,
+    SLOCreateSerializer,
     SLOSerializer,
+    SLOUpdateSerializer,
     SpanSerializer,
     TelemetrySourceCreateSerializer,
     TelemetrySourceDetailSerializer,
@@ -81,10 +96,12 @@ from .serializers import (
 )
 from .services import (
     AlertingService,
+    ConfigurationService,
     MetricsCollectionService,
     MonitoringCatalogService,
     MonitoringError,
     SLAMonitoringService,
+    SLOMonitoringService,
     TelemetryService,
 )
 
@@ -123,6 +140,10 @@ class GovernedMonitoringViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):
         self.quota_resource = permission or ""
         self.quota_cost = 1
         super().check_permissions(request)
+        if self.__class__.__name__ != "ConfigurationViewSet" and tenant_id is not None:
+            policy = ConfigurationService().setting(tenant_id, "rollout")
+            if not ConfigurationService().rollout_allows(policy, request.user):
+                raise PermissionDenied("Performance monitoring is not enabled for this rollout cohort.")
 
     def handle_exception(self, exc: Exception) -> Response:
         if isinstance(exc, MonitoringError):
@@ -215,6 +236,7 @@ class EnvironmentViewSet(CatalogViewSet):
     serializer_class = EnvironmentSerializer
     search_fields = ("name", "slug", "kind")
     ordering_fields = ("name", "kind", "created_at")
+    ordering = ("name", "id")
 
 
 class ServiceViewSet(CatalogViewSet):
@@ -223,6 +245,7 @@ class ServiceViewSet(CatalogViewSet):
     serializer_class = ServiceSerializer
     search_fields = ("name", "slug", "namespace", "owner")
     ordering_fields = ("name", "status", "last_seen_at", "created_at")
+    ordering = ("name", "id")
 
 
 class DashboardViewSet(CatalogViewSet):
@@ -231,6 +254,7 @@ class DashboardViewSet(CatalogViewSet):
     serializer_class = DashboardSerializer
     search_fields = ("name", "description")
     ordering_fields = ("name", "created_at", "updated_at")
+    ordering = ("name", "id")
 
 
 class SLOViewSet(CatalogViewSet):
@@ -244,7 +268,36 @@ class SLOViewSet(CatalogViewSet):
         "partial_update": SLA_MANAGE,
         "destroy": SLA_MANAGE,
         "budget": SLA_READ,
+        "evaluate": SLA_MANAGE,
     }
+    search_fields = ("name", "description", "service__name", "indicator_metric__metric_name")
+    ordering_fields = ("name", "objective_percentage", "window_days", "created_at", "updated_at")
+    ordering = ("name", "id")
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return SLOCreateSerializer
+        if self.action == "partial_update":
+            return SLOUpdateSerializer
+        return SLOSerializer
+
+    def create(self, request: Request) -> Response:
+        serializer = SLOCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        slo = SLOMonitoringService().create(self.tenant_id(), serializer.validated_data, created_by=_actor_id(request))
+        return Response(SLOSerializer(slo).data, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        serializer = SLOUpdateSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        slo = SLOMonitoringService().update(self.tenant_id(), pk, serializer.validated_data)
+        return Response(SLOSerializer(slo).data)
+
+    @action(detail=True, methods=("post",), url_path="evaluate")
+    def evaluate(self, request: Request, pk: str | None = None) -> Response:
+        del request
+        snapshot = SLOMonitoringService().evaluate(self.tenant_id(), pk)
+        return Response(ErrorBudgetSerializer(snapshot).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=("get",), url_path="budget")
     def budget(self, request: Request, pk: str | None = None) -> Response:
@@ -296,9 +349,7 @@ class MetricDefinitionViewSet(GovernedMonitoringViewSet):
 
     def destroy(self, request: Request, pk: str | None = None) -> Response:
         del request
-        metric = self.get_object()
-        metric.is_active = False
-        metric.delete()
+        MetricsCollectionService().deactivate_metric(self.tenant_id(), pk)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -377,6 +428,31 @@ class MetricViewSet(MetricDefinitionViewSet):
                 ]
             }
         )
+
+
+class MetricDataPointViewSet(GovernedMonitoringViewSet):
+    """Tenant-filtered, paginated and immutable metric evidence."""
+
+    queryset = MetricDataPoint.objects.select_related("metric")
+    serializer_class = MetricDataPointSerializer
+    access_map = {"list": READ, "retrieve": READ}
+    search_fields = ("metric__metric_name", "source_module", "trace_id", "span_id", "session_id")
+    ordering_fields = ("timestamp", "created_at", "value", "metric__metric_name")
+    ordering = ("-timestamp", "id")
+    http_method_names = ("get", "head", "options")
+
+    def get_queryset(self) -> QuerySet[MetricDataPoint]:
+        queryset = super().get_queryset()
+        for parameter, field in (
+            ("metric_name", "metric__metric_name"),
+            ("metric_id", "metric_id"),
+            ("trace_id", "trace_id"),
+            ("session_id", "session_id"),
+        ):
+            value = self.request.query_params.get(parameter)
+            if value:
+                queryset = queryset.filter(**{field: value})
+        return queryset
 
 
 class LogViewSet(GovernedMonitoringViewSet):
@@ -651,6 +727,10 @@ class ComplianceViewSet(GovernedAPIViewMixin, TenantScopedReadOnlyModelViewSet):
     required_permission = SLA_READ
     required_entitlement = SLA_READ
     quota_resource = SLA_READ
+    filter_backends = (SearchFilter, OrderingFilter)
+    search_fields = ("sla__name", "sla__service_name", "sla__metric_name")
+    ordering_fields = ("period_start", "period_end", "status", "created_at")
+    ordering = ("-period_end", "id")
 
     def check_permissions(self, request: Request) -> None:
         tenant_id = self._get_tenant_id()
@@ -663,9 +743,161 @@ class ReportViewSet(ComplianceViewSet):
     queryset = SLAReport.objects.all()
     serializer_class = SLAReportSerializer
     required_permission = SLA_READ
+    search_fields = ("status",)
+    ordering_fields = ("period_start", "period_end", "status", "generated_at", "created_at")
+    ordering = ("-created_at", "id")
 
 
 class ExtensionViewSet(ComplianceViewSet):
     queryset = MonitoringExtension.objects.filter(is_active=True, is_deleted=False)
     serializer_class = ExtensionSerializer
     required_permission = EXTENSION_READ
+    search_fields = ("extension_key", "provider", "schema_version")
+    ordering_fields = ("extension_key", "provider", "schema_version", "created_at")
+    ordering = ("extension_key", "schema_version", "id")
+
+
+class ConfigurationViewSet(GovernedMonitoringViewSet):
+    """RBAC-gated client surface for versioned tenant monitoring configuration."""
+
+    queryset = PerformanceMonitoringConfiguration.objects.all()
+    serializer_class = MonitoringConfigurationSerializer
+    http_method_names = ("get", "post", "patch", "head", "options")
+    access_map = {
+        "list": READ,
+        # GET initializes the tenant's first immutable default version when no
+        # configuration exists, so it is a write operation and must carry the
+        # same configure grant as PATCH. Read-only inspection remains exposed
+        # through list/history/audit/export.
+        "current": CONFIGURE,
+        "current_write": CONFIGURE,
+        "preview": READ,
+        "history": READ,
+        "audit": READ,
+        "rollback": CONFIGURE,
+        "import_configuration": CONFIGURE,
+        "export": READ,
+    }
+
+    def check_permissions(self, request: Request) -> None:
+        action_name = self.action
+        if action_name == "current" and request.method == "PATCH":
+            self.action = "current_write"
+        try:
+            super().check_permissions(request)
+        finally:
+            self.action = action_name
+
+    def _environment(self, request: Request) -> str:
+        value = str(request.query_params.get("environment", "default")).strip()
+        if not re.fullmatch(r"[-a-zA-Z0-9_]+", value) or len(value) > 64:
+            raise DjangoValidationError({"environment": "Must be a valid environment slug."})
+        return value
+
+    def _correlation_id(self, request: Request) -> str:
+        # Preserve the caller's opaque idempotency/audit key exactly.  The
+        # platform middleware's UUID correlation context is still used when
+        # the caller did not supply a header, but must not overwrite it in the
+        # immutable configuration ledger.
+        value = str(request.headers.get("X-Correlation-ID", "") or getattr(request, "correlation_id", "")).strip()
+        if not value:
+            value = f"req_{uuid.uuid4().hex[:24]}"
+            request.correlation_id = value  # type: ignore[attr-defined]
+        return value
+
+    def list(self, request: Request) -> Response:
+        """Return environments without exposing another tenant's documents."""
+        rows = self.get_queryset().order_by("environment")
+        return Response(MonitoringConfigurationSerializer(rows, many=True).data)
+
+    @action(detail=False, methods=("get", "patch"), url_path="current")
+    def current(self, request: Request) -> Response:
+        service = ConfigurationService()
+        if request.method == "GET":
+            environment = self._environment(request)
+            current = service.ensure_current(
+                self.tenant_id(),
+                environment,
+                actor_id=_actor_id(request),
+                correlation_id=self._correlation_id(request),
+            )
+        else:
+            serializer = MonitoringConfigurationChangeSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            values = dict(serializer.validated_data)
+            current = service.apply(
+                self.tenant_id(),
+                values.pop("environment"),
+                values.pop("document"),
+                actor_id=_actor_id(request),
+                correlation_id=self._correlation_id(request),
+                action="update",
+                **values,
+            )
+        return Response(MonitoringConfigurationSerializer(current).data)
+
+    @action(detail=False, methods=("post",), url_path="preview")
+    def preview(self, request: Request) -> Response:
+        serializer = MonitoringConfigurationPreviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            ConfigurationService().preview(
+                self.tenant_id(),
+                serializer.validated_data["document"],
+                serializer.validated_data["environment"],
+            )
+        )
+
+    @action(detail=False, methods=("get",), url_path="history")
+    def history(self, request: Request) -> Response:
+        rows = (
+            PerformanceMonitoringConfigurationVersion.objects.for_tenant(self.tenant_id())
+            .filter(environment=self._environment(request))
+            .order_by("-version")
+        )
+        return Response(MonitoringConfigurationVersionSerializer(rows, many=True).data)
+
+    @action(detail=False, methods=("get",), url_path="audit")
+    def audit(self, request: Request) -> Response:
+        rows = (
+            PerformanceMonitoringConfigurationAudit.objects.for_tenant(self.tenant_id())
+            .filter(environment=self._environment(request))
+            .order_by("-created_at", "-id")
+        )
+        return Response(MonitoringConfigurationAuditSerializer(rows, many=True).data)
+
+    @action(detail=False, methods=("post",), url_path="rollback")
+    def rollback(self, request: Request) -> Response:
+        serializer = MonitoringConfigurationRollbackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data)
+        current = ConfigurationService().rollback(
+            self.tenant_id(),
+            values.pop("environment"),
+            values.pop("version"),
+            actor_id=_actor_id(request),
+            correlation_id=self._correlation_id(request),
+            **values,
+        )
+        return Response(MonitoringConfigurationSerializer(current).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=("post",), url_path="import")
+    def import_configuration(self, request: Request) -> Response:
+        serializer = MonitoringConfigurationImportSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data)
+        current = ConfigurationService().apply(
+            self.tenant_id(),
+            values.pop("environment"),
+            values.pop("document"),
+            actor_id=_actor_id(request),
+            correlation_id=self._correlation_id(request),
+            action="import",
+            merge=False,
+            **values,
+        )
+        return Response(MonitoringConfigurationSerializer(current).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=("get",), url_path="export")
+    def export(self, request: Request) -> Response:
+        return Response(ConfigurationService().export(self.tenant_id(), self._environment(request)))

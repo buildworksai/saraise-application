@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- shared state helpers intentionally accompany the module shell. */
-import type { ReactNode } from 'react';
+import { createContext, useContext, useEffect, type ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { NavLink } from 'react-router-dom';
 import {
   Activity,
@@ -9,14 +10,34 @@ import {
   ScrollText,
   Settings2,
   ShieldCheck,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { ApiError } from '@/services/api-client';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui';
 import { cn } from '@/lib/utils';
-import { PerformanceMonitoringApiError } from '../services/performance-monitoring-service';
-import { ROUTES, type HealthState, type Severity } from '../contracts';
+import { PerformanceMonitoringApiError, performanceMonitoringService } from '../services/performance-monitoring-service';
+import { ROUTES, type HealthState, type MonitoringConfigurationDocument, type Severity } from '../contracts';
+
+const ConfigurationContext = createContext<MonitoringConfigurationDocument | null>(null);
+
+const semanticTokenClasses: Readonly<Record<string, string>> = {
+  'status-success': 'bg-primary/10 text-primary',
+  'status-warning': 'bg-muted text-foreground',
+  'status-danger': 'bg-destructive/10 text-destructive',
+  'status-stale': 'border-border bg-muted text-foreground',
+  'status-degraded': 'border-destructive/30 bg-destructive/10 text-destructive',
+  'log-trace': 'text-muted-foreground',
+  'log-debug': 'text-secondary-foreground',
+  'log-info': 'text-primary',
+  'log-warning': 'text-foreground',
+  'log-error': 'text-destructive',
+};
+
+function semanticClass(token: string): string {
+  return semanticTokenClasses[token] ?? 'bg-muted text-muted-foreground';
+}
 
 const sections = [
   { to: ROUTES.OVERVIEW, label: 'Overview', icon: Gauge },
@@ -24,7 +45,10 @@ const sections = [
   { to: ROUTES.LOGS, label: 'Logs', icon: ScrollText },
   { to: ROUTES.TRACES, label: 'APM & traces', icon: Network },
   { to: ROUTES.ALERTS, label: 'Alerts', icon: BellRing },
+  { to: ROUTES.ALERT_RULES, label: 'Alert rules', icon: SlidersHorizontal },
   { to: ROUTES.SLOS, label: 'SLO & SLA', icon: ShieldCheck },
+  { to: ROUTES.CATALOG, label: 'Catalog', icon: Network },
+  { to: ROUTES.CONFIGURATION, label: 'Configuration', icon: Settings2 },
   { to: ROUTES.SETUP, label: 'Setup', icon: Settings2 },
 ] as const;
 
@@ -39,7 +63,15 @@ export function MonitoringPage({
   actions?: ReactNode;
   children: ReactNode;
 }) {
+  const configuration = useQuery({ queryKey: ['performance-monitoring', 'configuration', 'default'], queryFn: () => performanceMonitoringService.getConfiguration() });
+  useEffect(() => {
+    document.title = `${title} | SARAISE`;
+  }, [title]);
+
+  if (configuration.isPending) return <main className="min-h-full p-4 sm:p-8"><PageSkeleton /></main>;
+  if (configuration.isError || !configuration.data) return <main className="min-h-full p-4 sm:p-8"><Card className="border-destructive/30"><CardContent className="p-6" role="alert"><h1 className="font-semibold">Monitoring configuration unavailable</h1><p className="mt-2 text-sm text-muted-foreground">Required tenant configuration could not be loaded. Monitoring behavior is disabled rather than using ungoverned defaults.</p><Button className="mt-4" variant="outline" onClick={() => { void configuration.refetch(); }}>Retry</Button></CardContent></Card></main>;
   return (
+    <ConfigurationContext.Provider value={configuration.data.document}>
     <main className="min-h-full bg-gradient-to-b from-background to-muted/30 p-4 sm:p-6 lg:p-8">
       <div className="mx-auto max-w-[1500px] space-y-6">
         <header className="space-y-5">
@@ -73,7 +105,14 @@ export function MonitoringPage({
         {children}
       </div>
     </main>
+    </ConfigurationContext.Provider>
   );
+}
+
+export function useMonitoringConfiguration(): MonitoringConfigurationDocument {
+  const configuration = useContext(ConfigurationContext);
+  if (!configuration) throw new Error('Monitoring configuration context is unavailable.');
+  return configuration;
 }
 
 export function PageSkeleton({ rows = 4 }: { rows?: number }) {
@@ -118,22 +157,33 @@ export function OperationalError({ error, onRetry }: { error: unknown; onRetry: 
 }
 
 export function StateBanner({ state, children }: { state: 'stale' | 'degraded'; children: ReactNode }) {
+  const configuration = useMonitoringConfiguration();
+  const token = configuration.visual.status_tokens[state];
   return (
-    <div role="status" className={cn('rounded-xl border px-4 py-3 text-sm', state === 'stale' ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-orange-300 bg-orange-50 text-orange-950')}>
+    <div role="status" className={cn('rounded-xl border px-4 py-3 text-sm', semanticClass(token))}>
       <strong>{state === 'stale' ? 'Telemetry is stale. ' : 'Partial data. '}</strong>{children}
     </div>
   );
 }
 
 export function StatusPill({ status }: { status: HealthState | Severity | 'firing' | 'acknowledged' | 'resolved' | 'ok' | 'error' | 'unset' | 'compliant' | 'breached' | 'insufficient_data' }) {
-  const tone = ['healthy', 'ok', 'compliant', 'resolved'].includes(status)
-    ? 'bg-emerald-100 text-emerald-800'
+  const configuration = useMonitoringConfiguration();
+  const token = ['healthy', 'ok', 'compliant', 'resolved'].includes(status)
+    ? configuration.visual.status_tokens.success
     : ['critical', 'firing', 'error', 'breached'].includes(status)
-      ? 'bg-red-100 text-red-800'
-      : ['warning', 'degraded', 'stale', 'acknowledged', 'insufficient_data'].includes(status)
-        ? 'bg-amber-100 text-amber-900'
-        : 'bg-slate-100 text-slate-700';
-  return <span className={cn('inline-flex rounded-full px-2 py-0.5 text-xs font-semibold capitalize', tone)}>{status.replaceAll('_', ' ')}</span>;
+      ? configuration.visual.status_tokens.danger
+      : status === 'stale'
+        ? configuration.visual.status_tokens.stale
+        : ['warning', 'degraded', 'acknowledged', 'insufficient_data'].includes(status)
+          ? configuration.visual.status_tokens.warning
+          : configuration.visual.status_tokens.degraded;
+  return <span className={cn('inline-flex rounded-full px-2 py-0.5 text-xs font-semibold capitalize', semanticClass(token))}>{status.replaceAll('_', ' ')}</span>;
+}
+
+export function useLogLevelClass(level: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'): string {
+  const configuration = useMonitoringConfiguration();
+  const configured = level === 'warn' ? configuration.visual.log_level_tokens.warning : level === 'fatal' ? configuration.visual.log_level_tokens.error : configuration.visual.log_level_tokens[level];
+  return cn(semanticClass(configured), level === 'fatal' && 'font-bold');
 }
 
 export function EmptyTelemetry({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
@@ -152,7 +202,7 @@ export function formatTime(value: string | null | undefined): string {
   return Number.isNaN(date.getTime()) ? 'Unknown' : date.toLocaleString();
 }
 
-export function isStale(value: string | null | undefined, thresholdMinutes = 15): boolean {
+export function isStale(value: string | null | undefined, thresholdMinutes: number): boolean {
   if (!value) return true;
   const instant = new Date(value).getTime();
   return Number.isNaN(instant) || Date.now() - instant > thresholdMinutes * 60_000;

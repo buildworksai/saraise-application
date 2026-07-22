@@ -22,12 +22,13 @@ const queryOptions = { page_size: 100, ordering: '-updated_at' } as const;
 
 export function PerformanceDashboardPage() {
   const navigate = useNavigate();
+  const configuration = useQuery({ queryKey: ['performance-monitoring', 'configuration', 'default'], queryFn: () => performanceMonitoringService.getConfiguration() });
   const sources = useQuery({ queryKey: ['performance-monitoring', 'sources', 'overview'], queryFn: () => performanceMonitoringService.listTelemetrySources(queryOptions) });
   const services = useQuery({ queryKey: ['performance-monitoring', 'services', 'overview'], queryFn: () => performanceMonitoringService.listServices(queryOptions) });
   const metrics = useQuery({ queryKey: ['performance-monitoring', 'metrics', 'overview'], queryFn: () => performanceMonitoringService.listMetrics(queryOptions) });
   const alerts = useQuery({ queryKey: ['performance-monitoring', 'alerts', 'overview'], queryFn: () => performanceMonitoringService.listAlerts({ ...queryOptions, status: 'firing' }) });
   const slas = useQuery({ queryKey: ['performance-monitoring', 'sla', 'overview'], queryFn: () => performanceMonitoringService.listSLAs(queryOptions) });
-  const queries = [sources, services, metrics, alerts, slas];
+  const queries = [configuration, sources, services, metrics, alerts, slas];
   const retry = () => { queries.forEach((query) => { void query.refetch(); }); };
 
   if (queries.every((query) => query.isPending)) {
@@ -43,7 +44,7 @@ export function PerformanceDashboardPage() {
   const metricItems = metrics.data?.items ?? [];
   const alertItems = alerts.data?.items ?? [];
   const hasTelemetry = sourceItems.length > 0 || metricItems.length > 0 || serviceItems.length > 0;
-  const telemetryStale = sourceItems.length > 0 && sourceItems.every((source) => isStale(source.last_seen_at));
+  const telemetryStale = sourceItems.length > 0 && configuration.data !== undefined && sourceItems.every((source) => isStale(source.last_seen_at, configuration.data.document.query.global_stale_threshold_minutes));
   const healthyServices = services.data ? serviceItems.filter((service) => service.status === 'healthy').length : null;
   const criticalAlerts = alerts.data ? alertItems.filter((alert) => alert.severity === 'critical').length : null;
 
@@ -54,7 +55,7 @@ export function PerformanceDashboardPage() {
       actions={<Button onClick={() => navigate(ROUTES.SETUP)}><RadioTower className="mr-2 h-4 w-4" />Connect telemetry</Button>}
     >
       {errors.length > 0 ? <StateBanner state="degraded">{errors.length} data source{errors.length === 1 ? ' is' : 's are'} unavailable. Available evidence is shown without estimates.</StateBanner> : null}
-      {telemetryStale ? <StateBanner state="stale">No connected source has reported during the last 15 minutes. Investigate collectors before relying on this view.</StateBanner> : null}
+      {telemetryStale ? <StateBanner state="stale">No connected source has reported within the configured {configuration.data?.document.query.global_stale_threshold_minutes} minute freshness window. Investigate collectors before relying on this view.</StateBanner> : null}
       {!hasTelemetry && errors.length === 0 ? (
         <EmptyTelemetry
           title="No telemetry received yet"
@@ -74,7 +75,7 @@ export function PerformanceDashboardPage() {
             <Card>
               <CardHeader className="flex-row items-center justify-between space-y-0"><CardTitle className="text-lg">Service health</CardTitle><Button variant="ghost" size="sm" onClick={() => navigate(ROUTES.TRACES)}>Explore APM <ArrowRight className="ml-1 h-4 w-4" /></Button></CardHeader>
               <CardContent className="space-y-2">
-                {serviceItems.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">No monitored services are registered.</p> : serviceItems.slice(0, 6).map((service) => (
+                {serviceItems.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">No monitored services are registered.</p> : serviceItems.slice(0, configuration.data?.document.defaults.dashboard.service_list_limit).map((service) => (
                   <div key={service.id} className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[1fr_auto_auto] sm:items-center">
                     <div><p className="font-medium text-foreground">{service.name}</p><p className="text-xs text-muted-foreground">Last seen {formatTime(service.last_seen_at)}</p></div>
                     <StatusPill status={service.status} />
@@ -86,7 +87,7 @@ export function PerformanceDashboardPage() {
             <Card>
               <CardHeader className="flex-row items-center justify-between space-y-0"><CardTitle className="text-lg">Active incidents</CardTitle><Button variant="ghost" size="sm" onClick={() => navigate(ROUTES.ALERTS)}>Open alert center <ArrowRight className="ml-1 h-4 w-4" /></Button></CardHeader>
               <CardContent className="space-y-3">
-                {alertItems.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">No firing alerts in available data.</p> : alertItems.slice(0, 5).map((alert) => (
+                {alertItems.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">No firing alerts in available data.</p> : alertItems.slice(0, configuration.data?.document.defaults.dashboard.alert_list_limit).map((alert) => (
                   <div key={alert.id} className="rounded-lg border p-3"><div className="flex items-start justify-between gap-3"><p className="font-medium text-foreground">{alert.title}</p><StatusPill status={alert.severity} /></div><p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{alert.description}</p><p className="mt-2 text-xs text-muted-foreground">Started {formatTime(alert.triggered_at)}</p></div>
                 ))}
               </CardContent>

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/unbound-method -- assertions intentionally reference Vitest mocks. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from '@/services/api-client';
-import { ENDPOINTS, type ApiEnvelope, type Metric } from '../contracts';
+import { ENDPOINTS, type ApiEnvelope, type Metric, type MonitoringConfigurationDocument } from '../contracts';
 import { performanceMonitoringService as service } from '../services/performance-monitoring-service';
 
 vi.mock('@/services/api-client', () => ({
@@ -73,5 +73,39 @@ describe('performanceMonitoringService', () => {
     expect(apiClient.post).toHaveBeenNthCalledWith(1, ENDPOINTS.ALERTS.ACKNOWLEDGE(metric.id), { note: 'Investigating' });
     expect(apiClient.post).toHaveBeenNthCalledWith(2, ENDPOINTS.ALERTS.RESOLVE(metric.id), { note: 'Recovered' });
     expect(apiClient.post).toHaveBeenNthCalledWith(3, ENDPOINTS.SLA.REPORTS, { sla_id: metric.id, period: 'calendar_month', format: 'json' });
+  });
+
+  it('keeps single-rule and all-rule alert evaluation distinct', async () => {
+    vi.mocked(apiClient.post).mockResolvedValue({ data: { id: metric.id, status: 'evaluated' }, meta });
+    await service.evaluateAlertRule(metric.id);
+    await service.evaluateAllAlertRules();
+    expect(apiClient.post).toHaveBeenNthCalledWith(1, ENDPOINTS.ALERT_RULES.EVALUATE(metric.id), {});
+    expect(apiClient.post).toHaveBeenNthCalledWith(2, ENDPOINTS.ALERTS.EVALUATE, {});
+  });
+
+  it('uses only the configuration endpoint registry for the complete lifecycle', async () => {
+    const document = {} as MonitoringConfigurationDocument;
+    const current = { id: metric.id, tenant_id: metric.tenant_id, environment: 'default', version: 2, document, updated_by: metric.id, correlation_id: meta.correlation_id, created_at: meta.timestamp, updated_at: meta.timestamp };
+    vi.mocked(apiClient.get).mockResolvedValue({ data: current, meta });
+    await service.getConfiguration();
+    expect(apiClient.get).toHaveBeenCalledWith(`${ENDPOINTS.CONFIGURATION.CURRENT}?environment=default`);
+
+    vi.mocked(apiClient.post).mockResolvedValue({ data: { valid: true, current_version: 2, proposed_document: document, diff: [] }, meta });
+    const request = { document, environment: 'default', expected_version: 2, change_reason: 'Audit correction' } as const;
+    await service.previewConfiguration(request);
+    expect(apiClient.post).toHaveBeenCalledWith(ENDPOINTS.CONFIGURATION.PREVIEW, request);
+
+    vi.mocked(apiClient.patch).mockResolvedValue({ data: current, meta });
+    await service.updateConfiguration(request);
+    expect(apiClient.patch).toHaveBeenCalledWith(ENDPOINTS.CONFIGURATION.CURRENT, request);
+  });
+
+  it('uses the implemented evidence and SLO evaluation endpoints', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [], meta });
+    await service.listMetricDataPoints({ metric_name: metric.metric_name });
+    expect(apiClient.get).toHaveBeenCalledWith(`${ENDPOINTS.DATA_POINTS.LIST}?metric_name=api.response_time`);
+    vi.mocked(apiClient.post).mockResolvedValue({ data: { id: metric.id }, meta });
+    await service.evaluateSLO(metric.id);
+    expect(apiClient.post).toHaveBeenCalledWith(ENDPOINTS.SLOS.EVALUATE(metric.id), {});
   });
 });

@@ -6,6 +6,10 @@ type: foundation
 lifecycle: platform
 dependencies:
   - core-identity >=1.0
+  - async-jobs >=1.0
+  - cache >=1.0
+  - database >=1.0
+  - event-broker >=1.0
   - notifications >=1.0
 permissions:
   - performance_monitoring.telemetry:read
@@ -19,6 +23,66 @@ permissions:
   - performance_monitoring.report:generate
   - performance_monitoring.extension:read
   - performance_monitoring.health:read
+entities:
+  - TelemetrySource
+  - MonitoringEnvironment
+  - MonitoredService
+  - Metric
+  - MetricDataPoint
+  - LogEntry
+  - Trace
+  - Span
+  - Dashboard
+  - AlertRule
+  - Alert
+  - AlertNotificationOutcome
+  - SLADefinition
+  - ServiceLevelObjective
+  - SLAComplianceRecord
+  - SLABreach
+  - ErrorBudgetSnapshot
+  - SLAReport
+  - MonitoringExtension
+  - PerformanceMonitoringConfiguration
+  - PerformanceMonitoringConfigurationVersion
+  - PerformanceMonitoringConfigurationAudit
+endpoints:
+  - {version: v1, path: configuration, methods: [GET, PATCH], actions: [current, preview, history, audit, rollback, import, export]}
+  - {version: v1, path: telemetry-sources, methods: [GET, POST, PATCH, DELETE]}
+  - {version: v1, path: environments, methods: [GET, POST, PATCH, DELETE]}
+  - {version: v1, path: services, methods: [GET, POST, PATCH, DELETE]}
+  - {version: v1, path: metric-definitions, methods: [GET, POST, DELETE]}
+  - {version: v1, path: metrics, methods: [GET, POST], actions: [batch, query, summary]}
+  - {version: v1, path: metric-data-points, methods: [GET]}
+  - {version: v1, path: logs, methods: [GET, POST]}
+  - {version: v1, path: traces, methods: [GET, POST], actions: [spans]}
+  - {version: v1, path: dashboards, methods: [GET, POST, PATCH, DELETE]}
+  - {version: v1, path: alerts/rules, methods: [GET, POST, PATCH, DELETE], actions: [evaluate]}
+  - {version: v1, path: alerts, methods: [GET], actions: [evaluate, acknowledge, resolve]}
+  - {version: v1, path: sla, methods: [GET, POST, PATCH, DELETE], actions: [compliance, reports]}
+  - {version: v1, path: slos, methods: [GET, POST, PATCH, DELETE], actions: [budget, evaluate]}
+  - {version: v1, path: compliance-records, methods: [GET]}
+  - {version: v1, path: reports, methods: [GET]}
+  - {version: v1, path: extensions, methods: [GET]}
+  - {version: v1, path: health, methods: [GET]}
+  - {version: v2, path: telemetry-sources, methods: [GET, POST, PATCH, DELETE]}
+  - {version: v2, path: configuration, methods: [GET, PATCH], actions: [current, preview, history, audit, rollback, import, export]}
+  - {version: v2, path: environments, methods: [GET, POST, PATCH, DELETE]}
+  - {version: v2, path: services, methods: [GET, POST, PATCH, DELETE]}
+  - {version: v2, path: metric-definitions, methods: [GET, POST, DELETE]}
+  - {version: v2, path: metrics, methods: [GET, POST], actions: [batch, query, summary]}
+  - {version: v2, path: metric-data-points, methods: [GET]}
+  - {version: v2, path: logs, methods: [GET, POST]}
+  - {version: v2, path: traces, methods: [GET, POST], actions: [spans]}
+  - {version: v2, path: dashboards, methods: [GET, POST, PATCH, DELETE]}
+  - {version: v2, path: alerts/rules, methods: [GET, POST, PATCH, DELETE], actions: [evaluate]}
+  - {version: v2, path: alerts, methods: [GET], actions: [evaluate, acknowledge, resolve]}
+  - {version: v2, path: sla, methods: [GET, POST, PATCH, DELETE], actions: [compliance, reports]}
+  - {version: v2, path: slos, methods: [GET, POST, PATCH, DELETE], actions: [budget, evaluate]}
+  - {version: v2, path: compliance-records, methods: [GET]}
+  - {version: v2, path: reports, methods: [GET]}
+  - {version: v2, path: extensions, methods: [GET]}
+  - {version: v2, path: health, methods: [GET]}
 sod_actions:
   - [performance_monitoring.telemetry:configure, performance_monitoring.alert:manage]
   - [performance_monitoring.sla:manage, performance_monitoring.report:generate]
@@ -28,6 +92,14 @@ search_indexes:
   - performance_traces
   - performance_alerts
   - performance_slas
+async_commands:
+  - performance_monitoring.evaluate_alerts
+  - performance_monitoring.snapshot_sla
+  - performance_monitoring.enforce_retention
+  - performance_monitoring.deliver_alert_notification
+  - performance_monitoring.consume.request_completed
+  - performance_monitoring.consume.error_occurred
+  - performance_monitoring.consume.job_completed
 events:
   publishes:
     - metric.recorded
@@ -37,10 +109,20 @@ events:
     - sla.breach
     - sla.compliance_checked
     - sla.report_generated
+    - performance_monitoring.evidence.archive_requested.v1
   consumes:
-    - "*.request.completed"
-    - "*.error.occurred"
-    - "*.job.completed"
+    - event: "*.request.completed"
+      handler: performance_monitoring.consume.request_completed
+      idempotency: event_id
+      correlation: propagated
+    - event: "*.error.occurred"
+      handler: performance_monitoring.consume.error_occurred
+      idempotency: event_id
+      correlation: propagated
+    - event: "*.job.completed"
+      handler: performance_monitoring.consume.job_completed
+      idempotency: event_id
+      correlation: propagated
 extension_contract:
   schema_version: "1.0"
   contributions:
@@ -51,3 +133,7 @@ extension_contract:
     - alert_rule_templates
     - drill_down_links
     - event_consumers
+  validation:
+    tenant_scoped: true
+    schema_allowlisted: true
+    unknown_contributions: rejected

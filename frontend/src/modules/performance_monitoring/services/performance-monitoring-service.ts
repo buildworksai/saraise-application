@@ -8,6 +8,7 @@ import {
   type AlertTransition,
   type ApiEnvelope,
   type HealthCheck,
+  type ErrorBudgetSnapshot,
   type ListQuery,
   type LogEntry,
   type LogQuery,
@@ -15,18 +16,31 @@ import {
   type MetricCreate,
   type MetricBatchResult,
   type MetricIngest,
+  type MetricDataPoint,
+  type MetricDataPointQuery,
   type MetricQuery,
   type MetricSeries,
   type MetricSummary,
   type MonitoringEnvironment,
+  type MonitoringEnvironmentCreate,
   type MonitoredService,
   type MonitoringDashboard,
+  type MonitoringDashboardCreate,
+  type MonitoringConfiguration,
+  type MonitoringConfigurationAudit,
+  type MonitoringConfigurationEnvironment,
+  type MonitoringConfigurationExport,
+  type MonitoringConfigurationPreview,
+  type MonitoringConfigurationRollbackRequest,
+  type MonitoringConfigurationVersion,
+  type MonitoringConfigurationWriteRequest,
   type PageResult,
   type SLAComplianceRecord,
   type SLADefinition,
   type SLADefinitionCreate,
   type SLAReportRequest,
   type SLODefinition,
+  type SLOCreate,
   type Span,
   type TelemetrySource,
   type TelemetrySourceCreate,
@@ -107,6 +121,9 @@ export const performanceMonitoringService = {
       withQuery(ENDPOINTS.ENVIRONMENTS.LIST, queryValues(query)),
     ));
   },
+  createEnvironment(payload: MonitoringEnvironmentCreate) {
+    return data(() => apiClient.post<ApiEnvelope<MonitoringEnvironment>>(ENDPOINTS.ENVIRONMENTS.LIST, payload));
+  },
   listServices(query: ListQuery = {}) {
     return page(() => apiClient.get<ApiEnvelope<readonly MonitoredService[]>>(
       withQuery(ENDPOINTS.SERVICES.LIST, queryValues(query)),
@@ -119,6 +136,9 @@ export const performanceMonitoringService = {
     return page(() => apiClient.get<ApiEnvelope<readonly MonitoringDashboard[]>>(
       withQuery(ENDPOINTS.DASHBOARDS.LIST, queryValues(query)),
     ));
+  },
+  createDashboard(payload: MonitoringDashboardCreate) {
+    return data(() => apiClient.post<ApiEnvelope<MonitoringDashboard>>(ENDPOINTS.DASHBOARDS.LIST, payload));
   },
   listMetrics(query: ListQuery = {}) {
     return page(() => apiClient.get<ApiEnvelope<readonly Metric[]>>(
@@ -149,6 +169,11 @@ export const performanceMonitoringService = {
   summarizeMetrics(metricNames: readonly string[], period = '1h') {
     return data(() => apiClient.get<ApiEnvelope<{ summaries: readonly MetricSummary[] }>>(
       withQuery(ENDPOINTS.METRICS.SUMMARY, { metric_names: metricNames.join(','), period }),
+    ));
+  },
+  listMetricDataPoints(query: MetricDataPointQuery = {}) {
+    return page(() => apiClient.get<ApiEnvelope<readonly MetricDataPoint[]>>(
+      withQuery(ENDPOINTS.DATA_POINTS.LIST, { ...queryValues(query), metric_name: query.metric_name, start: query.start, end: query.end }),
     ));
   },
   listLogs(query: LogQuery = {}) {
@@ -205,7 +230,10 @@ export const performanceMonitoringService = {
     }));
   },
   evaluateAlertRule(id: UUID) {
-    return data(() => apiClient.post<ApiEnvelope<ActionResult>>(ENDPOINTS.ALERTS.EVALUATE, { rule_id: id }));
+    return data(() => apiClient.post<ApiEnvelope<ActionResult>>(ENDPOINTS.ALERT_RULES.EVALUATE(id), {}));
+  },
+  evaluateAllAlertRules() {
+    return data(() => apiClient.post<ApiEnvelope<ActionResult>>(ENDPOINTS.ALERTS.EVALUATE, {}));
   },
   listAlerts(query: ListQuery & { status?: Alert['status']; severity?: Severity } = {}) {
     return page(() => apiClient.get<ApiEnvelope<readonly Alert[]>>(
@@ -237,11 +265,14 @@ export const performanceMonitoringService = {
       withQuery(ENDPOINTS.SLOS.LIST, queryValues(query)),
     ));
   },
-  createSLO(payload: SLADefinitionCreate) {
+  createSLO(payload: SLOCreate) {
     return data(() => apiClient.post<ApiEnvelope<SLODefinition>>(ENDPOINTS.SLOS.LIST, payload));
   },
   evaluateSLO(id: UUID) {
-    return data(() => apiClient.post<ApiEnvelope<SLAComplianceRecord>>(ENDPOINTS.SLOS.EVALUATE(id), {}));
+    return data(() => apiClient.post<ApiEnvelope<ErrorBudgetSnapshot>>(ENDPOINTS.SLOS.EVALUATE(id), {}));
+  },
+  getSLOBudget(id: UUID) {
+    return data(() => apiClient.get<ApiEnvelope<ErrorBudgetSnapshot>>(ENDPOINTS.SLOS.BUDGET(id)));
   },
   listComplianceRecords(query: ListQuery = {}) {
     return page(() => apiClient.get<ApiEnvelope<readonly SLAComplianceRecord[]>>(
@@ -250,6 +281,38 @@ export const performanceMonitoringService = {
   },
   getHealth() {
     return data(() => apiClient.get<ApiEnvelope<HealthCheck>>(ENDPOINTS.HEALTH));
+  },
+  getConfiguration(environment: MonitoringConfigurationEnvironment = 'default') {
+    return data(() => apiClient.get<ApiEnvelope<MonitoringConfiguration>>(
+      withQuery(ENDPOINTS.CONFIGURATION.CURRENT, { environment }),
+    ));
+  },
+  previewConfiguration(request: MonitoringConfigurationWriteRequest) {
+    return data(() => apiClient.post<ApiEnvelope<MonitoringConfigurationPreview>>(ENDPOINTS.CONFIGURATION.PREVIEW, request));
+  },
+  updateConfiguration(request: MonitoringConfigurationWriteRequest) {
+    return data(() => apiClient.patch<ApiEnvelope<MonitoringConfiguration>>(ENDPOINTS.CONFIGURATION.CURRENT, request));
+  },
+  listConfigurationHistory(environment: MonitoringConfigurationEnvironment = 'default') {
+    return data(() => apiClient.get<ApiEnvelope<readonly MonitoringConfigurationVersion[]>>(
+      withQuery(ENDPOINTS.CONFIGURATION.HISTORY, { environment }),
+    ));
+  },
+  listConfigurationAudit(environment: MonitoringConfigurationEnvironment = 'default') {
+    return data(() => apiClient.get<ApiEnvelope<readonly MonitoringConfigurationAudit[]>>(
+      withQuery(ENDPOINTS.CONFIGURATION.AUDIT, { environment }),
+    ));
+  },
+  rollbackConfiguration(request: MonitoringConfigurationRollbackRequest) {
+    return data(() => apiClient.post<ApiEnvelope<MonitoringConfiguration>>(ENDPOINTS.CONFIGURATION.ROLLBACK, request));
+  },
+  importConfiguration(request: MonitoringConfigurationWriteRequest) {
+    return data(() => apiClient.post<ApiEnvelope<MonitoringConfiguration>>(ENDPOINTS.CONFIGURATION.IMPORT, request));
+  },
+  exportConfiguration(environment: MonitoringConfigurationEnvironment = 'default') {
+    return data(() => apiClient.get<ApiEnvelope<MonitoringConfigurationExport>>(
+      withQuery(ENDPOINTS.CONFIGURATION.EXPORT, { environment }),
+    ));
   },
 };
 
