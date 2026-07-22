@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect, type ComponentType } from "react";
 import { AnimatePresence } from "framer-motion";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { ModuleLayout } from "./components/layout/ModuleLayout";
@@ -17,6 +17,18 @@ const registryTenantRoutes = getTenantRoutesForMode(
   tenantRoutes,
   import.meta.env.VITE_SARAISE_MODE,
 );
+
+const RegisteredTenantPage = ({ Page, routeId }: { Page: ComponentType; routeId: string }) => {
+  useEffect(() => {
+    const label = routeId
+      .split(".")
+      .slice(1)
+      .map((part) => part.replaceAll("_", " "))
+      .join(" · ");
+    document.title = `${label} | SARAISE`;
+  }, [routeId]);
+  return <Page />;
+};
 
 // Public legal/support pages
 const TermsOfService = lazy(() =>
@@ -1722,7 +1734,7 @@ function AnimatedRoutes() {
               element={
                 <ProtectedRoute>
                   <ModuleLayout>
-                    <Page />
+                    <RegisteredTenantPage Page={Page} routeId={id} />
                   </ModuleLayout>
                 </ProtectedRoute>
               }

@@ -12,10 +12,13 @@ from django.utils import timezone
 
 from src.core.tenancy import TenantScopedModel, TimestampedModel
 from src.modules.backup_disaster_recovery.models import (
+    BDRConfiguration,
+    BDRConfigurationVersion,
     DRExercise,
     DRRunbook,
     DRStepExecution,
     RecoveryPoint,
+    RecoveryPointEvidence,
     RecoveryPointStatus,
     RestoreRun,
     RunbookActionType,
@@ -25,6 +28,7 @@ from src.modules.backup_disaster_recovery.models import (
     StepExecutionStatus,
     TargetEnvironment,
 )
+from src.modules.backup_disaster_recovery.services import get_configuration
 from src.modules.backup_disaster_recovery.state_machines import (
     RECOVERY_POINT_MACHINE,
     RUNBOOK_MACHINE,
@@ -42,7 +46,17 @@ from .factories import (
 
 @pytest.mark.parametrize(
     "model",
-    [RecoveryPoint, RestoreRun, DRRunbook, RunbookStep, DRExercise, DRStepExecution],
+    [
+        RecoveryPoint,
+        RestoreRun,
+        DRRunbook,
+        RunbookStep,
+        DRExercise,
+        DRStepExecution,
+        BDRConfiguration,
+        BDRConfigurationVersion,
+        RecoveryPointEvidence,
+    ],
 )
 def test_domain_models_use_canonical_tenant_and_timestamp_bases(model: type) -> None:
     assert issubclass(model, TenantScopedModel)
@@ -222,3 +236,88 @@ def test_step_execution_identity_and_terminal_evidence_are_append_only() -> None
     terminal.evidence = {"rewritten": True}
     with pytest.raises(ValidationError, match="immutable"):
         terminal.save()
+
+
+@pytest.mark.django_db
+def test_configuration_versions_are_tenant_bound_and_immutable() -> None:
+    tenant_id = uuid.uuid4()
+    tenant_defaults = get_configuration(tenant_id)
+    configuration = BDRConfiguration.objects.create(
+        tenant_id=tenant_id,
+        environment="default",
+        document=tenant_defaults.document,
+        rollout=tenant_defaults.rollout,
+    )
+    version = BDRConfigurationVersion.objects.create(
+        tenant_id=tenant_id,
+        configuration=configuration,
+        version=1,
+        actor_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+        prior_value={},
+        new_value={"document": configuration.document, "rollout": configuration.rollout},
+    )
+
+    version.new_value = {"tampered": True}
+    with pytest.raises(ValidationError, match="immutable"):
+        version.save()
+    with pytest.raises(ValidationError, match="Bulk updates"):
+        BDRConfigurationVersion.objects.filter(pk=version.pk).update(new_value={})
+    with pytest.raises(ProtectedError):
+        version.delete()
+    with pytest.raises(ProtectedError):
+        BDRConfigurationVersion.objects.filter(pk=version.pk).delete()
+
+    foreign_tenant_id = uuid.uuid4()
+    foreign_defaults = get_configuration(foreign_tenant_id)
+    foreign_configuration = BDRConfiguration.objects.create(
+        tenant_id=foreign_tenant_id,
+        environment="default",
+        document=foreign_defaults.document,
+        rollout=foreign_defaults.rollout,
+    )
+    cross_tenant = BDRConfigurationVersion(
+        tenant_id=tenant_id,
+        configuration=foreign_configuration,
+        version=1,
+        actor_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+        prior_value={},
+        new_value={},
+    )
+    with pytest.raises(ValidationError, match="same tenant"):
+        cross_tenant.full_clean()
+
+
+@pytest.mark.django_db
+def test_recovery_point_evidence_is_append_only_and_tenant_bound() -> None:
+    point = recovery_point_factory()
+    evidence = RecoveryPointEvidence.objects.create(
+        tenant_id=point.tenant_id,
+        recovery_point=point,
+        sequence=1,
+        actor_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+        evidence={"valid": True, "checksum_matches": True},
+    )
+
+    evidence.evidence = {"valid": False}
+    with pytest.raises(ValidationError, match="immutable"):
+        evidence.save()
+    with pytest.raises(ValidationError, match="Bulk updates"):
+        RecoveryPointEvidence.objects.filter(pk=evidence.pk).update(evidence={})
+    with pytest.raises(ProtectedError):
+        evidence.delete()
+    with pytest.raises(ProtectedError):
+        RecoveryPointEvidence.objects.filter(pk=evidence.pk).delete()
+
+    cross_tenant = RecoveryPointEvidence(
+        tenant_id=uuid.uuid4(),
+        recovery_point=point,
+        sequence=2,
+        actor_id=uuid.uuid4(),
+        correlation_id=uuid.uuid4(),
+        evidence={},
+    )
+    with pytest.raises(ValidationError, match="same tenant"):
+        cross_tenant.full_clean()

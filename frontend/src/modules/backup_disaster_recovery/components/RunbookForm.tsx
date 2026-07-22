@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- blank values are part of this form contract. */
 import { useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/Button';
-import type { DRRunbookCreateRequest, ScopeType } from '../contracts';
+import type { BDRRunbookConfiguration, DRRunbookCreateRequest, ScopeType } from '../contracts';
 import { FormCard, FormField, fieldError, inputClass, textareaClass } from './ModuleUi';
 
 export interface RunbookFormValues {
@@ -15,7 +15,7 @@ export interface RunbookFormValues {
   rtoTargetSeconds: string;
 }
 
-export const blankRunbookValues: RunbookFormValues = { name: '', slug: '', description: '', scopeType: 'tenant', scopeRef: 'tenant', backupScheduleId: '', rpoTargetSeconds: '3600', rtoTargetSeconds: '14400' };
+export const blankRunbookValues = (configuration: BDRRunbookConfiguration): RunbookFormValues => ({ name: '', slug: '', description: '', scopeType: 'tenant', scopeRef: 'tenant', backupScheduleId: '', rpoTargetSeconds: String(configuration.default_rpo_seconds), rtoTargetSeconds: String(configuration.default_rto_seconds) });
 
 export const RunbookForm = ({ initial, submitting, serverError, submitLabel, onCancel, onSubmit }: { initial: RunbookFormValues; submitting: boolean; serverError: Error | null; submitLabel: string; onCancel: () => void; onSubmit: (payload: DRRunbookCreateRequest) => void }) => {
   const [values, setValues] = useState(initial);

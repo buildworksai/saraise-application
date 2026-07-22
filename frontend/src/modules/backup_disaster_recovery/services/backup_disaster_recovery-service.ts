@@ -6,6 +6,12 @@ import {
   type BackupExecutionCreateRequest,
   type BackupExecutionReceipt,
   type BackupExecutionStatus,
+  type BackupDisasterRecoveryConfiguration,
+  type BDRConfigurationMutation,
+  type BDRConfigurationExport,
+  type BDRConfigurationPreview,
+  type BDRConfigurationRollbackRequest,
+  type BDRConfigurationVersion,
   type DRExercise,
   type DRExerciseCancelRequest,
   type DRExerciseCreateRequest,
@@ -61,6 +67,7 @@ const validationFields = [
   'target_environment', 'target_ref', 'restore_mode', 'selected_components',
   'runbook_id', 'scheduled_for', 'exercise_type', 'environment',
   'rpo_target_seconds', 'rto_target_seconds', 'parameters', 'non_field_errors',
+  'document', 'environment', 'rollout',
 ] as const satisfies readonly (keyof GovernedValidationDetail)[];
 
 const isMessages = (
@@ -272,6 +279,20 @@ export const backupDisasterRecoveryService = {
     append(query, 'bucket', filters.bucket);
     return request(() => apiClient.get<ApiV2Envelope<ObjectiveReport>>(withQuery(ENDPOINTS.REPORTS.OBJECTIVES, query)));
   },
+
+  getConfiguration: () => request(() => apiClient.get<ApiV2Envelope<BackupDisasterRecoveryConfiguration>>(ENDPOINTS.CONFIGURATIONS.CURRENT)),
+  updateConfiguration: (payload: BDRConfigurationMutation) =>
+    request(() => apiClient.patch<ApiV2Envelope<BackupDisasterRecoveryConfiguration>>(ENDPOINTS.CONFIGURATIONS.CURRENT, payload)),
+  previewConfiguration: (payload: BDRConfigurationMutation) =>
+    request(() => apiClient.post<ApiV2Envelope<BDRConfigurationPreview>>(ENDPOINTS.CONFIGURATIONS.PREVIEW, payload)),
+  listConfigurationVersions: () =>
+    request(() => apiClient.get<ApiV2Envelope<readonly BDRConfigurationVersion[]>>(ENDPOINTS.CONFIGURATIONS.VERSIONS)),
+  rollbackConfiguration: (payload: BDRConfigurationRollbackRequest) =>
+    request(() => apiClient.post<ApiV2Envelope<BackupDisasterRecoveryConfiguration>>(ENDPOINTS.CONFIGURATIONS.ROLLBACK, payload)),
+  importConfiguration: (payload: BDRConfigurationMutation) =>
+    request(() => apiClient.post<ApiV2Envelope<BackupDisasterRecoveryConfiguration>>(ENDPOINTS.CONFIGURATIONS.IMPORT, payload)),
+  exportConfiguration: () =>
+    request(() => apiClient.get<ApiV2Envelope<BDRConfigurationExport>>(ENDPOINTS.CONFIGURATIONS.EXPORT)),
 };
 
 // Compatibility with the repository's historic snake_case symbol while callers migrate.

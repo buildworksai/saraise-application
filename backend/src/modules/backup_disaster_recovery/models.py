@@ -26,6 +26,24 @@ def generate_uuid() -> str:
     return str(uuid.uuid4())
 
 
+def configured_step_timeout_default() -> int:
+    from .services import DEFAULT_CONFIGURATION_DOCUMENT
+
+    return int(DEFAULT_CONFIGURATION_DOCUMENT["steps"]["default_timeout_seconds"])
+
+
+def configured_step_retry_default() -> int:
+    from .services import DEFAULT_CONFIGURATION_DOCUMENT
+
+    return int(DEFAULT_CONFIGURATION_DOCUMENT["steps"]["default_retry_limit"])
+
+
+def _tenant_policy(tenant_id: uuid.UUID) -> Mapping[str, Any]:
+    from .services import get_configuration
+
+    return get_configuration(tenant_id).document
+
+
 class ScopeType(models.TextChoices):
     TENANT = "tenant", "Tenant"
     MODULE = "module", "Module"
@@ -102,6 +120,7 @@ class ExerciseType(models.TextChoices):
 class ExerciseEnvironment(models.TextChoices):
     ISOLATED = "isolated", "Isolated"
     STANDBY = "standby", "Standby"
+    PRODUCTION = "production", "Production"
 
 
 class ExerciseStatus(models.TextChoices):
@@ -290,6 +309,13 @@ class RecoveryPoint(DomainModel):
     checksum_algorithm = models.CharField(max_length=16, default="sha256")
     checksum_digest = models.CharField(max_length=64)
     verification_evidence = models.JSONField(default=dict, blank=True)
+    latest_verification_evidence = models.ForeignKey(
+        "RecoveryPointEvidence",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="current_for_points",
+    )
     created_by = models.UUIDField()
     transition_history = models.JSONField(default=list, blank=True)
 
@@ -362,6 +388,7 @@ class DRRunbook(DomainModel):
     """Versioned disaster-recovery procedure."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    idempotency_key = models.CharField(max_length=255, default=generate_uuid)
     name = models.CharField(max_length=255)
     slug = models.CharField(max_length=120)
     version = models.PositiveIntegerField(default=1)
@@ -389,10 +416,13 @@ class DRRunbook(DomainModel):
     deleted_by = models.UUIDField(null=True, blank=True)
     transition_history = models.JSONField(default=list, blank=True)
 
+    _immutable_fields = frozenset({"tenant_id", "idempotency_key"})
+
     class Meta:
         app_label = "backup_disaster_recovery"
         db_table = "bdr_runbooks"
         constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "idempotency_key"], name="bdr_rb_tenant_idem_uniq"),
             models.UniqueConstraint(fields=["tenant_id", "slug", "version"], name="bdr_rb_tenant_slug_ver_uniq"),
             models.UniqueConstraint(
                 fields=["tenant_id", "slug"],
@@ -410,6 +440,7 @@ class DRRunbook(DomainModel):
 
     def clean(self) -> None:
         super().clean()
+        self.idempotency_key = _require_non_empty(self.idempotency_key, "idempotency_key")
         self.name = _require_non_empty(self.name, "name")
         self.slug = _require_non_empty(self.slug, "slug")
         if not _SLUG.fullmatch(self.slug):
@@ -455,6 +486,7 @@ class RunbookStep(DomainModel):
     """Ordered, typed action within a runbook version."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    idempotency_key = models.CharField(max_length=255, default=generate_uuid)
     runbook = models.ForeignKey(DRRunbook, on_delete=models.PROTECT, related_name="steps")
     step_key = models.SlugField(max_length=80, db_index=False)
     position = models.PositiveIntegerField()
@@ -463,8 +495,8 @@ class RunbookStep(DomainModel):
     action_type = models.CharField(max_length=32, choices=RunbookActionType.choices)
     extension_action_key = models.CharField(max_length=120, null=True, blank=True)
     parameters = models.JSONField(default=dict, blank=True)
-    timeout_seconds = models.PositiveIntegerField(default=300)
-    retry_limit = models.PositiveSmallIntegerField(default=0)
+    timeout_seconds = models.PositiveIntegerField(default=configured_step_timeout_default)
+    retry_limit = models.PositiveSmallIntegerField(default=configured_step_retry_default)
     on_failure = models.CharField(
         max_length=24,
         choices=StepFailureBehavior.choices,
@@ -476,10 +508,13 @@ class RunbookStep(DomainModel):
     deleted_at = models.DateTimeField(null=True, blank=True)
     deleted_by = models.UUIDField(null=True, blank=True)
 
+    _immutable_fields = frozenset({"tenant_id", "idempotency_key"})
+
     class Meta:
         app_label = "backup_disaster_recovery"
         db_table = "bdr_runbook_steps"
         constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "idempotency_key"], name="bdr_step_tenant_idem_uniq"),
             models.UniqueConstraint(
                 fields=["tenant_id", "runbook", "step_key"],
                 condition=models.Q(deleted_at__isnull=True),
@@ -491,14 +526,6 @@ class RunbookStep(DomainModel):
                 name="bdr_step_active_pos_uniq",
             ),
             models.CheckConstraint(condition=models.Q(position__gt=0), name="bdr_step_position_positive"),
-            models.CheckConstraint(
-                condition=models.Q(timeout_seconds__gte=1, timeout_seconds__lte=86400),
-                name="bdr_step_timeout_range",
-            ),
-            models.CheckConstraint(
-                condition=models.Q(retry_limit__gte=0, retry_limit__lte=10),
-                name="bdr_step_retry_range",
-            ),
             models.CheckConstraint(
                 condition=(
                     models.Q(action_type=RunbookActionType.EXTENSION, extension_action_key__isnull=False)
@@ -514,25 +541,31 @@ class RunbookStep(DomainModel):
 
     def clean(self) -> None:
         super().clean()
+        self.idempotency_key = _require_non_empty(self.idempotency_key, "idempotency_key")
+        policy = _tenant_policy(self.tenant_id)["steps"]
         self.step_key = _require_non_empty(self.step_key, "step_key")
         self.name = _require_non_empty(self.name, "name")
         if self.runbook_id:
             if self.runbook.tenant_id != self.tenant_id:
                 raise ValidationError({"runbook": "The runbook must belong to the same tenant."})
-            if self.runbook.status != RunbookStatus.DRAFT or self.runbook.deleted_at is not None:
+            if policy["require_draft_for_edits"] and (
+                self.runbook.status != RunbookStatus.DRAFT or self.runbook.deleted_at is not None
+            ):
                 raise ValidationError({"runbook": "Steps may only be changed on an active draft runbook."})
         if self.position is not None and self.position < 1:
             raise ValidationError({"position": "Positions are one-based."})
-        if self.timeout_seconds is not None and not 1 <= self.timeout_seconds <= 86400:
-            raise ValidationError({"timeout_seconds": "Must be between 1 and 86400 seconds."})
-        if self.retry_limit is not None and not 0 <= self.retry_limit <= 10:
-            raise ValidationError({"retry_limit": "Must be between 0 and 10."})
+        if self.timeout_seconds is not None and not int(policy["min_timeout_seconds"]) <= self.timeout_seconds <= int(
+            policy["max_timeout_seconds"]
+        ):
+            raise ValidationError({"timeout_seconds": "Outside configured safe limits."})
+        if self.retry_limit is not None and not 0 <= self.retry_limit <= int(policy["max_retry_limit"]):
+            raise ValidationError({"retry_limit": "Outside configured safe limits."})
         if self.action_type == RunbookActionType.EXTENSION:
             if not self.extension_action_key or not self.extension_action_key.strip():
                 raise ValidationError({"extension_action_key": "Required for extension actions."})
         elif self.extension_action_key not in (None, ""):
             raise ValidationError({"extension_action_key": "Allowed only for extension actions."})
-        if self.action_type == RunbookActionType.MANUAL_APPROVAL:
+        if self.action_type == RunbookActionType.MANUAL_APPROVAL and policy["require_manual_approval_permission"]:
             if not self.approval_permission or not self.approval_permission.strip():
                 raise ValidationError({"approval_permission": "Required for manual approval steps."})
         elif self.approval_permission not in (None, ""):
@@ -604,9 +637,10 @@ class DRExercise(DomainModel):
 
     def clean(self) -> None:
         super().clean()
+        policy = _tenant_policy(self.tenant_id)["exercises"]
         self.name = _require_non_empty(self.name, "name")
         self.idempotency_key = _require_non_empty(self.idempotency_key, "idempotency_key")
-        if self.environment == TargetEnvironment.PRODUCTION:
+        if self.environment == TargetEnvironment.PRODUCTION and not policy["production_enabled"]:
             raise ValidationError({"environment": "Production exercises are forbidden."})
         if self.runbook_id:
             if self.runbook.tenant_id != self.tenant_id:
@@ -669,6 +703,8 @@ class RestoreRun(DomainModel):
     completed_at = models.DateTimeField(null=True, blank=True)
     validation_evidence = models.JSONField(default=dict, blank=True)
     verification_evidence = models.JSONField(default=dict, blank=True)
+    compensation_state = models.CharField(max_length=24, blank=True)
+    compensation_evidence = models.JSONField(default=dict, blank=True)
     error_code = models.CharField(max_length=64, blank=True)
     error_message = models.TextField(blank=True)
     achieved_rpo_seconds = models.PositiveBigIntegerField(null=True, blank=True)
@@ -697,10 +733,6 @@ class RestoreRun(DomainModel):
         db_table = "bdr_restore_runs"
         constraints = [
             models.UniqueConstraint(fields=["tenant_id", "idempotency_key"], name="bdr_rr_tenant_idem_uniq"),
-            models.CheckConstraint(
-                condition=~models.Q(target_environment=TargetEnvironment.PRODUCTION, approved_by__isnull=True),
-                name="bdr_rr_prod_approved",
-            ),
             models.UniqueConstraint(
                 fields=["tenant_id", "target_ref"],
                 condition=models.Q(
@@ -721,9 +753,14 @@ class RestoreRun(DomainModel):
 
     def clean(self) -> None:
         super().clean()
+        policy = _tenant_policy(self.tenant_id)["restores"]
         self.target_ref = _require_non_empty(self.target_ref, "target_ref")
         self.idempotency_key = _require_non_empty(self.idempotency_key, "idempotency_key")
-        if self.target_environment == TargetEnvironment.PRODUCTION and self.approved_by is None:
+        if (
+            self.target_environment == TargetEnvironment.PRODUCTION
+            and policy["production_requires_approver"]
+            and self.approved_by is None
+        ):
             raise ValidationError({"approved_by": "Production restores require an approver."})
         if self.recovery_point_id and self.recovery_point.tenant_id != self.tenant_id:
             raise ValidationError({"recovery_point": "The recovery point must belong to the same tenant."})
@@ -735,9 +772,13 @@ class RestoreRun(DomainModel):
         if self.exercise_id and self.exercise.tenant_id != self.tenant_id:
             raise ValidationError({"exercise": "The exercise must belong to the same tenant."})
         _require_list(self.selected_components, "selected_components")
-        if self.restore_mode == RestoreMode.SELECTIVE and not self.selected_components:
+        if (
+            self.restore_mode == RestoreMode.SELECTIVE
+            and policy["selective_requires_components"]
+            and not self.selected_components
+        ):
             raise ValidationError({"selected_components": "Selective restores require at least one component."})
-        if self.restore_mode == RestoreMode.FULL and self.selected_components:
+        if self.restore_mode == RestoreMode.FULL and policy["full_prohibits_components"] and self.selected_components:
             raise ValidationError({"selected_components": "Full restores do not accept selected components."})
         if len(set(self.selected_components)) != len(self.selected_components) or any(
             not isinstance(item, str) or not _COMPONENT.fullmatch(item) for item in self.selected_components
@@ -745,6 +786,7 @@ class RestoreRun(DomainModel):
             raise ValidationError({"selected_components": "Use unique canonical component names."})
         _require_object(self.validation_evidence, "validation_evidence")
         _require_object(self.verification_evidence, "verification_evidence")
+        _require_object(self.compensation_evidence, "compensation_evidence")
         _require_list(self.transition_history, "transition_history")
 
         stored = self._stored_values([field.attname for field in self._meta.concrete_fields])
@@ -819,9 +861,114 @@ class DRStepExecution(DomainModel):
                 raise ValidationError("Terminal step-execution evidence is immutable.")
 
 
+class BDRConfiguration(DomainModel):
+    """Tenant-owned, hot-reloadable disaster-recovery policy document."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    environment = models.CharField(max_length=64, default="default")
+    document = models.JSONField(default=dict)
+    rollout = models.JSONField(default=dict)
+    version = models.PositiveIntegerField(default=1)
+
+    _immutable_fields = frozenset({"tenant_id", "environment"})
+
+    class Meta:
+        app_label = "backup_disaster_recovery"
+        db_table = "bdr_configurations"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "environment"], name="bdr_cfg_tenant_env_uniq"),
+            models.CheckConstraint(condition=models.Q(version__gt=0), name="bdr_cfg_version_positive"),
+        ]
+        indexes = [models.Index(fields=["tenant_id", "environment"], name="bdr_cfg_tenant_env_idx")]
+
+    def clean(self) -> None:
+        super().clean()
+        self.environment = _require_non_empty(self.environment, "environment")
+        _require_object(self.document, "document")
+        _require_object(self.rollout, "rollout")
+
+
+class BDRConfigurationVersion(DomainModel):
+    """Append-only before/after record for every configuration mutation."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    configuration = models.ForeignKey(BDRConfiguration, on_delete=models.PROTECT, related_name="versions")
+    version = models.PositiveIntegerField()
+    actor_id = models.UUIDField()
+    correlation_id = models.UUIDField(db_index=True)
+    prior_value = models.JSONField(default=dict, blank=True)
+    new_value = models.JSONField(default=dict)
+    rollback_of = models.ForeignKey(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="rollback_versions"
+    )
+
+    _immutable_fields = frozenset(
+        {
+            "tenant_id",
+            "configuration_id",
+            "version",
+            "actor_id",
+            "correlation_id",
+            "prior_value",
+            "new_value",
+            "rollback_of_id",
+        }
+    )
+
+    class Meta:
+        app_label = "backup_disaster_recovery"
+        db_table = "bdr_configuration_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "configuration", "version"], name="bdr_cfgver_tenant_version_uniq"
+            )
+        ]
+        indexes = [models.Index(fields=["tenant_id", "configuration", "-version"], name="bdr_cfgver_tenant_ver_idx")]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.configuration_id and self.configuration.tenant_id != self.tenant_id:
+            raise ValidationError({"configuration": "Configuration must belong to the same tenant."})
+        if self.rollback_of_id and self.rollback_of.tenant_id != self.tenant_id:
+            raise ValidationError({"rollback_of": "Rollback target must belong to the same tenant."})
+        _require_object(self.prior_value, "prior_value")
+        _require_object(self.new_value, "new_value")
+
+
+class RecoveryPointEvidence(DomainModel):
+    """Append-only verification evidence; provider facts are never overwritten."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    recovery_point = models.ForeignKey(RecoveryPoint, on_delete=models.PROTECT, related_name="verification_events")
+    sequence = models.PositiveIntegerField()
+    actor_id = models.UUIDField()
+    correlation_id = models.UUIDField(db_index=True)
+    evidence = models.JSONField(default=dict)
+
+    _immutable_fields = frozenset(
+        {"tenant_id", "recovery_point_id", "sequence", "actor_id", "correlation_id", "evidence"}
+    )
+
+    class Meta:
+        app_label = "backup_disaster_recovery"
+        db_table = "bdr_recovery_point_evidence"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "recovery_point", "sequence"], name="bdr_rpe_tenant_seq_uniq")
+        ]
+        indexes = [models.Index(fields=["tenant_id", "recovery_point", "-sequence"], name="bdr_rpe_tenant_seq_idx")]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.recovery_point_id and self.recovery_point.tenant_id != self.tenant_id:
+            raise ValidationError({"recovery_point": "Recovery point must belong to the same tenant."})
+        _require_object(self.evidence, "evidence")
+
+
 __all__ = [
     "ActionType",
     "BackupType",
+    "BDRConfiguration",
+    "BDRConfigurationVersion",
     "DRExercise",
     "DRExerciseStatus",
     "DRRunbook",
@@ -832,6 +979,7 @@ __all__ = [
     "ExerciseType",
     "OnFailure",
     "RecoveryPoint",
+    "RecoveryPointEvidence",
     "RecoveryPointStatus",
     "RestoreMode",
     "RestoreRun",
@@ -844,4 +992,6 @@ __all__ = [
     "StepFailureBehavior",
     "TargetEnvironment",
     "generate_uuid",
+    "configured_step_retry_default",
+    "configured_step_timeout_default",
 ]

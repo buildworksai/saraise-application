@@ -9,6 +9,8 @@ from rest_framework import serializers
 
 from .models import (
     BackupType,
+    BDRConfiguration,
+    BDRConfigurationVersion,
     DRExercise,
     DRRunbook,
     DRStepExecution,
@@ -44,9 +46,8 @@ class BackupExecutionCreateSerializer(serializers.Serializer[dict[str, Any]]):
 
 class BackupExecutionReceiptSerializer(serializers.Serializer[dict[str, Any]]):
     backup_job_id = serializers.UUIDField(read_only=True)
+    async_job_id = serializers.UUIDField(read_only=True)
     status = serializers.CharField(read_only=True)
-    idempotency_key = serializers.CharField(read_only=True)
-    async_job_id = serializers.UUIDField(read_only=True, required=False)
     requested_at = serializers.DateTimeField(read_only=True)
 
 
@@ -55,7 +56,7 @@ class BackupExecutionStatusSerializer(serializers.Serializer[dict[str, Any]]):
     status = serializers.CharField(read_only=True)
     completed_at = serializers.DateTimeField(read_only=True, allow_null=True)
     error_code = serializers.CharField(read_only=True, allow_blank=True)
-    error_message = serializers.CharField(read_only=True, allow_blank=True)
+    safe_error = serializers.CharField(read_only=True, allow_blank=True)
     recovery_point_id = serializers.UUIDField(read_only=True, allow_null=True)
 
 
@@ -81,16 +82,30 @@ class RecoveryPointListSerializer(serializers.ModelSerializer[RecoveryPoint]):
 
 
 class RecoveryPointDetailSerializer(RecoveryPointListSerializer):
+    verification_evidence = serializers.SerializerMethodField()
+
     class Meta(RecoveryPointListSerializer.Meta):
         fields = RecoveryPointListSerializer.Meta.fields + (
             "checksum_algorithm",
             "checksum_digest",
             "verification_evidence",
-            "created_by",
-            "transition_history",
             "updated_at",
         )
         read_only_fields = fields
+
+    def get_verification_evidence(self, obj: RecoveryPoint) -> dict[str, object] | None:
+        event = obj.latest_verification_evidence
+        raw = event.evidence if event is not None else obj.verification_evidence
+        if not raw:
+            return None
+        return {
+            "kind": "artifact_validation",
+            "checksum_valid": bool(raw.get("checksum_matches", False)),
+            "artifact_available": bool(raw.get("artifact_available", False)),
+            "encryption_metadata_valid": bool(raw.get("encryption_metadata_valid", False)),
+            "provider_acknowledged": bool(raw.get("provider_acknowledged", False)),
+            "checked_at": event.created_at if event is not None else obj.updated_at,
+        }
 
 
 class RecoveryPointVerifySerializer(serializers.Serializer[dict[str, Any]]):
@@ -126,15 +141,6 @@ class RestoreRunDetailSerializer(RestoreRunListSerializer):
     class Meta(RestoreRunListSerializer.Meta):
         fields = RestoreRunListSerializer.Meta.fields + (
             "selected_components",
-            "idempotency_key",
-            "async_job_id",
-            "requested_by",
-            "approved_by",
-            "validation_evidence",
-            "verification_evidence",
-            "error_code",
-            "error_message",
-            "transition_history",
             "created_at",
             "updated_at",
         )
@@ -152,7 +158,6 @@ class RestoreRunCreateSerializer(serializers.Serializer[dict[str, Any]]):
         child=serializers.RegexField(r"^[a-z][a-z0-9_.-]{0,119}$"),
         required=False,
         allow_empty=True,
-        max_length=100,
     )
     idempotency_key = TrimmedCharField(max_length=255)
     step_up_token = TrimmedCharField(max_length=512, required=False, write_only=True)
@@ -169,16 +174,7 @@ class RestoreRunCreateSerializer(serializers.Serializer[dict[str, Any]]):
                 {"selected_components": "Full restores cannot select individual components."}
             )
         if len(set(components)) != len(components):
-            raise serializers.ValidationError(
-                {"selected_components": "Component names must be unique."}
-            )
-        if (
-            attrs["target_environment"] == TargetEnvironment.PRODUCTION
-            and not attrs.get("step_up_token")
-        ):
-            raise serializers.ValidationError(
-                {"step_up_token": "Production restores require fresh step-up proof."}
-            )
+            raise serializers.ValidationError({"selected_components": "Component names must be unique."})
         return attrs
 
 
@@ -216,12 +212,8 @@ class RunbookStepDetailSerializer(RunbookStepListSerializer):
             "extension_action_key",
             "parameters",
             "approval_permission",
-            "created_by",
-            "updated_by",
             "created_at",
             "updated_at",
-            "deleted_at",
-            "deleted_by",
         )
         read_only_fields = fields
 
@@ -239,7 +231,6 @@ class DRRunbookListSerializer(serializers.ModelSerializer[DRRunbook]):
             "scope_ref",
             "rpo_target_seconds",
             "rto_target_seconds",
-            "owner_id",
             "published_at",
             "updated_at",
         )
@@ -254,12 +245,8 @@ class DRRunbookDetailSerializer(DRRunbookListSerializer):
         fields = DRRunbookListSerializer.Meta.fields + (
             "description",
             "backup_schedule_id",
-            "adapter_key",
             "supersedes_id",
             "retired_at",
-            "created_by",
-            "updated_by",
-            "transition_history",
             "created_at",
             "steps",
         )
@@ -277,8 +264,8 @@ class DRRunbookCreateSerializer(serializers.Serializer[dict[str, Any]]):
     scope_type = serializers.ChoiceField(choices=ScopeType.choices)
     scope_ref = TrimmedCharField(max_length=255)
     backup_schedule_id = serializers.UUIDField(required=False, allow_null=True)
-    rpo_target_seconds = serializers.IntegerField(min_value=1, max_value=315_360_000)
-    rto_target_seconds = serializers.IntegerField(min_value=1, max_value=315_360_000)
+    rpo_target_seconds = serializers.IntegerField(min_value=1)
+    rto_target_seconds = serializers.IntegerField(min_value=1)
 
     def validate_slug(self, value: str) -> str:
         return value.lower()
@@ -290,12 +277,8 @@ class DRRunbookUpdateSerializer(serializers.Serializer[dict[str, Any]]):
     scope_type = serializers.ChoiceField(choices=ScopeType.choices, required=False)
     scope_ref = TrimmedCharField(max_length=255, required=False)
     backup_schedule_id = serializers.UUIDField(required=False, allow_null=True)
-    rpo_target_seconds = serializers.IntegerField(
-        min_value=1, max_value=315_360_000, required=False
-    )
-    rto_target_seconds = serializers.IntegerField(
-        min_value=1, max_value=315_360_000, required=False
-    )
+    rpo_target_seconds = serializers.IntegerField(min_value=1, required=False)
+    rto_target_seconds = serializers.IntegerField(min_value=1, required=False)
 
 
 class DRRunbookCloneSerializer(serializers.Serializer[dict[str, Any]]):
@@ -312,17 +295,13 @@ class _RestoreParametersSerializer(serializers.Serializer[dict[str, Any]]):
     selected_components = serializers.ListField(
         child=serializers.RegexField(r"^[a-z][a-z0-9_.-]{0,119}$"),
         required=False,
-        max_length=100,
     )
 
 
 class _VerifyParametersSerializer(serializers.Serializer[dict[str, Any]]):
     checks = serializers.ListField(
-        child=serializers.ChoiceField(
-            choices=("connectivity", "integrity", "application", "security")
-        ),
+        child=TrimmedCharField(max_length=64),
         min_length=1,
-        max_length=10,
     )
 
 
@@ -373,27 +352,19 @@ class _RunbookStepWriteSerializer(serializers.Serializer[dict[str, Any]]):
     name = TrimmedCharField(max_length=255, required=False)
     description = serializers.CharField(required=False, allow_blank=True, max_length=10000)
     action_type = serializers.ChoiceField(choices=RunbookActionType.choices, required=False)
-    extension_action_key = serializers.SlugField(
-        max_length=120, required=False, allow_null=True, allow_blank=True
-    )
+    extension_action_key = serializers.SlugField(max_length=120, required=False, allow_null=True, allow_blank=True)
     parameters = RunbookStepParametersField(required=False)
-    timeout_seconds = serializers.IntegerField(min_value=1, max_value=86400, required=False)
-    retry_limit = serializers.IntegerField(min_value=0, max_value=10, required=False)
+    timeout_seconds = serializers.IntegerField(min_value=1, required=False)
+    retry_limit = serializers.IntegerField(min_value=0, required=False)
     on_failure = serializers.ChoiceField(choices=StepFailureBehavior.choices, required=False)
-    approval_permission = serializers.CharField(
-        max_length=255, required=False, allow_null=True, allow_blank=True
-    )
+    approval_permission = serializers.CharField(max_length=255, required=False, allow_null=True, allow_blank=True)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         instance = getattr(self, "instance", None)
         action_type = attrs.get("action_type", getattr(instance, "action_type", None))
         parameters = attrs.get("parameters", getattr(instance, "parameters", None))
-        extension_key = attrs.get(
-            "extension_action_key", getattr(instance, "extension_action_key", None)
-        )
-        approval_permission = attrs.get(
-            "approval_permission", getattr(instance, "approval_permission", None)
-        )
+        extension_key = attrs.get("extension_action_key", getattr(instance, "extension_action_key", None))
+        approval_permission = attrs.get("approval_permission", getattr(instance, "approval_permission", None))
         if not action_type:
             raise serializers.ValidationError({"action_type": "This field is required."})
         if parameters is None:
@@ -410,9 +381,7 @@ class _RunbookStepWriteSerializer(serializers.Serializer[dict[str, Any]]):
                 {"extension_action_key": "Only extension actions accept an extension action key."}
             )
         if action_type == RunbookActionType.MANUAL_APPROVAL and not approval_permission:
-            raise serializers.ValidationError(
-                {"approval_permission": "Manual approvals require a permission."}
-            )
+            raise serializers.ValidationError({"approval_permission": "Manual approvals require a permission."})
         return attrs
 
 
@@ -423,9 +392,9 @@ class RunbookStepCreateSerializer(_RunbookStepWriteSerializer):
     name = TrimmedCharField(max_length=255)
     action_type = serializers.ChoiceField(choices=RunbookActionType.choices)
     parameters = RunbookStepParametersField()
-    timeout_seconds = serializers.IntegerField(min_value=1, max_value=86400, default=300)
-    retry_limit = serializers.IntegerField(min_value=0, max_value=10, default=0)
-    on_failure = serializers.ChoiceField(choices=StepFailureBehavior.choices, default="stop")
+    timeout_seconds = serializers.IntegerField(min_value=1, required=False)
+    retry_limit = serializers.IntegerField(min_value=0, required=False)
+    on_failure = serializers.ChoiceField(choices=StepFailureBehavior.choices, required=False)
 
 
 class RunbookStepUpdateSerializer(_RunbookStepWriteSerializer):
@@ -433,9 +402,7 @@ class RunbookStepUpdateSerializer(_RunbookStepWriteSerializer):
 
 
 class RunbookStepReorderSerializer(serializers.Serializer[dict[str, Any]]):
-    step_ids = serializers.ListField(
-        child=serializers.UUIDField(), min_length=1, max_length=500
-    )
+    step_ids = serializers.ListField(child=serializers.UUIDField(), min_length=1)
 
     def validate_step_ids(self, value: list[Any]) -> list[Any]:
         if len(set(value)) != len(value):
@@ -470,15 +437,10 @@ class DRExerciseListSerializer(serializers.ModelSerializer[DRExercise]):
 class DRExerciseDetailSerializer(DRExerciseListSerializer):
     class Meta(DRExerciseListSerializer.Meta):
         fields = DRExerciseListSerializer.Meta.fields + (
-            "idempotency_key",
-            "async_job_id",
-            "initiated_by",
             "summary",
             "observed_rpo_seconds",
             "observed_rto_seconds",
             "failed_step_id",
-            "evidence_summary",
-            "transition_history",
             "updated_at",
         )
         read_only_fields = fields
@@ -497,9 +459,7 @@ class DRExerciseCreateSerializer(serializers.Serializer[dict[str, Any]]):
 class DRExerciseUpdateSerializer(serializers.Serializer[dict[str, Any]]):
     name = TrimmedCharField(max_length=255, required=False)
     recovery_point_id = serializers.UUIDField(required=False, allow_null=True)
-    exercise_type = serializers.ChoiceField(
-        choices=ExerciseType.choices, required=False
-    )
+    exercise_type = serializers.ChoiceField(choices=ExerciseType.choices, required=False)
     environment = serializers.ChoiceField(choices=ExerciseEnvironment.choices, required=False)
     scheduled_for = serializers.DateTimeField(required=False)
 
@@ -526,7 +486,6 @@ class DRStepExecutionListSerializer(serializers.ModelSerializer[DRStepExecution]
             "attempt",
             "started_at",
             "completed_at",
-            "error_code",
             "created_at",
         )
         read_only_fields = fields
@@ -534,14 +493,7 @@ class DRStepExecutionListSerializer(serializers.ModelSerializer[DRStepExecution]
 
 class DRStepExecutionDetailSerializer(DRStepExecutionListSerializer):
     class Meta(DRStepExecutionListSerializer.Meta):
-        fields = DRStepExecutionListSerializer.Meta.fields + (
-            "provider_operation_id",
-            "async_job_id",
-            "evidence",
-            "error_message",
-            "transition_history",
-            "updated_at",
-        )
+        fields = DRStepExecutionListSerializer.Meta.fields + ("updated_at",)
         read_only_fields = fields
 
 
@@ -549,7 +501,7 @@ class ObjectiveReportQuerySerializer(serializers.Serializer[dict[str, Any]]):
     runbook_id = serializers.UUIDField(required=False)
     from_at = serializers.DateTimeField(required=False, source="from")
     to = serializers.DateTimeField(required=False)
-    bucket = serializers.ChoiceField(choices=("day", "week", "month"), default="month")
+    bucket = serializers.CharField(required=False)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         start = attrs.get("from")
@@ -617,6 +569,42 @@ class ReadinessSummarySerializer(serializers.Serializer[dict[str, Any]]):
     provider_state = serializers.ChoiceField(choices=("operational", "degraded", "unavailable"))
     queue_state = serializers.ChoiceField(choices=("operational", "degraded", "unavailable"))
     provider_message = serializers.CharField(allow_blank=True)
+
+
+class BDRConfigurationSerializer(serializers.ModelSerializer[BDRConfiguration]):
+    class Meta:
+        model = BDRConfiguration
+        fields = ("id", "tenant_id", "environment", "version", "document", "rollout", "updated_at")
+        read_only_fields = fields
+
+
+class BDRConfigurationWriteSerializer(serializers.Serializer[dict[str, Any]]):
+    environment = TrimmedCharField(max_length=64, required=False, default="default")
+    document = serializers.JSONField()
+    rollout = serializers.JSONField(required=False)
+
+
+class BDRConfigurationRollbackSerializer(serializers.Serializer[dict[str, Any]]):
+    environment = TrimmedCharField(max_length=64, required=False, default="default")
+    version = serializers.IntegerField(min_value=1)
+
+
+class BDRConfigurationVersionSerializer(serializers.ModelSerializer[BDRConfigurationVersion]):
+    rollback_of = serializers.UUIDField(source="rollback_of_id", read_only=True, allow_null=True)
+
+    class Meta:
+        model = BDRConfigurationVersion
+        fields = (
+            "id",
+            "version",
+            "actor_id",
+            "correlation_id",
+            "prior_value",
+            "new_value",
+            "rollback_of",
+            "created_at",
+        )
+        read_only_fields = fields
 
 
 __all__ = [name for name in globals() if name.endswith("Serializer")]

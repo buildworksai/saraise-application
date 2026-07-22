@@ -124,6 +124,26 @@ class RestoreVerificationResult:
     error_code: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class RestorePreflightResult:
+    """Provider evidence required before a restore may mutate its target."""
+
+    capacity_valid: bool
+    compatibility_valid: bool
+    target_available: bool
+    evidence: Mapping[str, object] = field(default_factory=dict)
+    error_code: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class RestoreCompensationResult:
+    """Evidence that a failed restore was idempotently compensated."""
+
+    compensated: bool
+    evidence: Mapping[str, object] = field(default_factory=dict)
+    error_code: str = ""
+
+
 @runtime_checkable
 class BackupCatalogPort(Protocol):
     """Opaque access to backup capture and catalog ownership."""
@@ -186,6 +206,33 @@ class StorageRecoveryAdapter(Protocol):
     def health(self) -> HealthCheckResult: ...
 
 
+@runtime_checkable
+class RestorePreflightPort(Protocol):
+    """Optional provider capability; absence must surface as unavailable."""
+
+    def validate_restore_target(
+        self,
+        tenant_id: UUID,
+        descriptor: BackupArtifactDescriptor,
+        target: RestoreTarget,
+        *,
+        idempotency_key: str,
+    ) -> RestorePreflightResult: ...
+
+
+@runtime_checkable
+class RestoreCompensationPort(Protocol):
+    """Optional idempotent cleanup contract for failed verification."""
+
+    def compensate_restore(
+        self,
+        tenant_id: UUID,
+        receipt: RestoreProviderReceipt,
+        *,
+        idempotency_key: str,
+    ) -> RestoreCompensationResult: ...
+
+
 __all__ = [
     "ArtifactValidationResult",
     "BackupArtifactDescriptor",
@@ -197,7 +244,11 @@ __all__ = [
     "BackupType",
     "HealthCheckResult",
     "RestoreEnvironment",
+    "RestoreCompensationPort",
+    "RestoreCompensationResult",
     "RestoreMode",
+    "RestorePreflightPort",
+    "RestorePreflightResult",
     "RestoreProviderReceipt",
     "RestoreTarget",
     "RestoreVerificationResult",

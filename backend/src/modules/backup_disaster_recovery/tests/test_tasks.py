@@ -6,8 +6,9 @@ from uuid import uuid4
 import pytest
 
 from src.core.async_jobs.models import AsyncJob, JobStatus
-from src.core.async_jobs.services import HandlerNotRegistered, JobExecutionError, execute, get_handler
+from src.core.async_jobs.services import HandlerNotRegistered, JobExecutionError
 from src.core.async_jobs.services import enqueue as enqueue_job
+from src.core.async_jobs.services import execute, get_handler
 from src.core.observability import get_task_context
 from src.core.tenancy import MissingTenantContext
 from src.modules.backup_disaster_recovery import services

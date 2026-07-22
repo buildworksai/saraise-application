@@ -1,11 +1,12 @@
 /* eslint-disable react-refresh/only-export-components -- module UI primitives intentionally share presentation helpers. */
-import type { FormEventHandler, ReactNode } from 'react';
+import { useEffect, useState, type FormEventHandler, type ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { AlertTriangle, Ban, ChevronRight, CloudOff, FileQuestion, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
+import type { BDRPresentationConfiguration } from '../contracts';
 import { BackupDisasterRecoveryError } from '../services/backup_disaster_recovery-service';
 
 export const MODULE_PATHS = {
@@ -19,24 +20,26 @@ export const MODULE_PATHS = {
   exercises: '/backup-disaster-recovery/exercises',
   exerciseNew: '/backup-disaster-recovery/exercises/new',
   objectives: '/backup-disaster-recovery/reports/objectives',
+  configuration: '/backup-disaster-recovery/configuration',
 } as const;
 
 export const formatDateTime = (value: string | null): string =>
   value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : 'Not yet';
 
-export const formatDuration = (seconds: number | null): string => {
+export const formatDuration = (seconds: number | null, presentation: BDRPresentationConfiguration): string => {
   if (seconds === null) return 'Not measured';
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-  return `${(seconds / 3600).toFixed(1)}h`;
+  if (seconds < presentation.duration_minute_seconds) return `${seconds}s`;
+  if (seconds < presentation.duration_hour_seconds) return `${Math.round(seconds / presentation.duration_minute_seconds)}m`;
+  return `${(seconds / presentation.duration_hour_seconds).toFixed(1)}h`;
 };
 
-export const formatBytes = (bytes: number | null): string => {
+export const formatBytes = (bytes: number | null, presentation: BDRPresentationConfiguration): string => {
   if (bytes === null) return 'Unknown';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
-  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
-  return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+  const base = presentation.byte_base;
+  if (bytes < base) return `${bytes} B`;
+  if (bytes < base ** 2) return `${(bytes / base).toFixed(1)} KiB`;
+  if (bytes < base ** 3) return `${(bytes / base ** 2).toFixed(1)} MiB`;
+  return `${(bytes / base ** 3).toFixed(1)} GiB`;
 };
 
 export const createIdempotencyKey = (operation: string): string =>
@@ -56,6 +59,9 @@ interface PageHeaderProps {
 
 export const PageHeader = ({ title, description, actions, parentLabel, parentPath }: PageHeaderProps) => {
   const navigate = useNavigate();
+  useEffect(() => {
+    document.title = `${title} | SARAISE`;
+  }, [title]);
   return (
     <header className="space-y-4">
       {parentLabel && parentPath ? (
@@ -133,15 +139,30 @@ export const DomainEmptyState = ({ icon: Icon, title, description, actionLabel, 
   </section>
 );
 
-export const StatusPill = ({ status }: { status: string }) => {
-  const positive = ['available', 'ready', 'succeeded', 'published', 'passed', 'operational'].includes(status);
-  const negative = ['corrupt', 'failed', 'deleted', 'unavailable'].includes(status);
-  const style = positive ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200' : negative ? 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200' : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200';
+const semanticStatusClasses: Readonly<Record<string, string>> = {
+  'status-success': 'bg-primary/10 text-primary',
+  'status-danger': 'bg-destructive/10 text-destructive',
+  'status-warning': 'bg-muted text-muted-foreground',
+};
+
+export const StatusPill = ({ status, presentation }: { status: string; presentation: BDRPresentationConfiguration }) => {
+  const positive = presentation.status_positive.includes(status);
+  const negative = presentation.status_negative.includes(status);
+  const warning = presentation.status_warning.includes(status);
+  const token = positive
+    ? presentation.status_positive_token
+    : negative
+      ? presentation.status_negative_token
+      : warning
+        ? presentation.status_warning_token
+        : 'status-warning';
+  const style = semanticStatusClasses[token];
+  if (!style) throw new Error(`Unsupported semantic status token: ${token}`);
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${style}`}>{status.replaceAll('_', ' ')}</span>;
 };
 
 export const MetricCard = ({ label, value, hint, state }: { label: string; value: string; hint: string; state?: 'good' | 'warning' | 'bad' }) => (
-  <Card className={state === 'bad' ? 'border-destructive/50' : state === 'warning' ? 'border-amber-500/50' : undefined}>
+  <Card className={state === 'bad' ? 'border-destructive/50' : state === 'warning' ? 'border-primary/50' : undefined}>
     <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground">{label}</CardTitle></CardHeader>
     <CardContent><p className="text-3xl font-bold">{value}</p><p className="mt-1 text-xs text-muted-foreground">{hint}</p></CardContent>
   </Card>
@@ -185,6 +206,17 @@ export const MutationError = ({ error }: { error: Error | null }) => {
       {moduleError?.correlationId ? <p className="mt-1 font-mono text-xs">Correlation ID: {moduleError.correlationId}</p> : null}
     </div>
   );
+};
+
+export const ResourceLookup = ({ title, description, label, destination }: {
+  title: string;
+  description: string;
+  label: string;
+  destination: (id: string) => string;
+}) => {
+  const navigate = useNavigate();
+  const [id, setId] = useState('');
+  return <PageShell><PageHeader title={title} description={description} /><Card className="max-w-2xl"><CardContent className="space-y-4 pt-6"><FormField id="resource-id" label={label} hint="Tenant isolation and RBAC are enforced again when the record is opened."><input id="resource-id" className={inputClass} value={id} onChange={(event) => setId(event.target.value)} /></FormField><div className="flex justify-end"><Button disabled={!id.trim()} onClick={() => navigate(destination(id.trim()))}>Open</Button></div></CardContent></Card></PageShell>;
 };
 
 export const fieldError = (error: Error | null, field: string): string | undefined => {

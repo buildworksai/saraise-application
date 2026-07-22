@@ -7,9 +7,14 @@ transaction, then delegate the actual state/history mutation here.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+from uuid import UUID
+
+from django.db import models
 from django.utils import timezone
 
-from src.core.state_machine import StateMachine, Transition
+from src.core.state_machine import StateMachine, StateMachineConfigurationError, Transition
 
 from .models import (
     DRExercise,
@@ -29,95 +34,102 @@ def _past_retention(record: RecoveryPoint) -> bool:
     return record.expires_at is not None and record.expires_at <= timezone.now()
 
 
-RECOVERY_POINT_MACHINE = StateMachine(
-    name="backup_disaster_recovery.recovery_point",
-    model=RecoveryPoint,
-    states=RecoveryPointStatus.values,
-    terminal_states=(RecoveryPointStatus.DELETED,),
-    transitions=(
-        Transition("begin_verification", RecoveryPointStatus.DISCOVERED, RecoveryPointStatus.VERIFYING),
-        Transition("begin_verification", RecoveryPointStatus.AVAILABLE, RecoveryPointStatus.VERIFYING),
-        Transition("mark_available", RecoveryPointStatus.VERIFYING, RecoveryPointStatus.AVAILABLE),
-        Transition("mark_corrupt", RecoveryPointStatus.VERIFYING, RecoveryPointStatus.CORRUPT),
-        Transition("expire", RecoveryPointStatus.AVAILABLE, RecoveryPointStatus.EXPIRED, (_past_retention,)),
-        Transition("delete", RecoveryPointStatus.EXPIRED, RecoveryPointStatus.DELETED),
-        Transition("delete", RecoveryPointStatus.CORRUPT, RecoveryPointStatus.DELETED),
-    ),
-)
+class ConfiguredStateMachine:
+    """Resolve the validated workflow for the aggregate tenant on every use."""
+
+    def __init__(
+        self,
+        key: str,
+        model: type[models.Model],
+        allowed_states: tuple[str, ...],
+    ) -> None:
+        self.key = key
+        self.model = model
+        self.allowed_states = frozenset(allowed_states)
+        self.name = f"backup_disaster_recovery.{key}"
+
+    def _definition(self, tenant_id: UUID | None) -> Mapping[str, object]:
+        from .services import DEFAULT_CONFIGURATION_DOCUMENT, get_configuration
+
+        document = get_configuration(tenant_id).document if tenant_id is not None else DEFAULT_CONFIGURATION_DOCUMENT
+        workflows = document.get("workflows")
+        definition = workflows.get(self.key) if isinstance(workflows, Mapping) else None
+        if not isinstance(definition, Mapping):
+            raise StateMachineConfigurationError(f"Workflow {self.key!r} is unavailable")
+        return definition
+
+    def _build(self, tenant_id: UUID | None) -> StateMachine[Any]:
+        definition = self._definition(tenant_id)
+        raw_states = definition.get("states")
+        raw_terminal = definition.get("terminal_states")
+        raw_transitions = definition.get("transitions")
+        raw_guards = definition.get("retention_guard_commands")
+        if not isinstance(raw_states, list) or set(raw_states) != self.allowed_states:
+            raise StateMachineConfigurationError(f"Workflow {self.key!r} states do not match the domain model")
+        if not isinstance(raw_terminal, list) or not isinstance(raw_transitions, list):
+            raise StateMachineConfigurationError(f"Workflow {self.key!r} is malformed")
+        if not isinstance(raw_guards, list) or not all(isinstance(item, str) for item in raw_guards):
+            raise StateMachineConfigurationError(f"Workflow {self.key!r} guards are malformed")
+        guarded_commands = frozenset(raw_guards)
+        transitions: list[Transition] = []
+        for raw in raw_transitions:
+            if not isinstance(raw, Mapping):
+                raise StateMachineConfigurationError(f"Workflow {self.key!r} transition is malformed")
+            try:
+                command = str(raw["command"])
+                source = str(raw["from_state"])
+                target = str(raw["to_state"])
+            except KeyError as exc:
+                raise StateMachineConfigurationError(f"Workflow {self.key!r} transition is malformed") from exc
+            guards = (_past_retention,) if command in guarded_commands else ()
+            transitions.append(Transition(command, source, target, guards))
+        return StateMachine(
+            name=self.name,
+            model=self.model,
+            states=raw_states,
+            terminal_states=raw_terminal,
+            transitions=transitions,
+        )
+
+    @staticmethod
+    def _tenant_id(args: tuple[object, ...], kwargs: Mapping[str, object]) -> UUID | None:
+        raw = kwargs.get("tenant_id")
+        if raw is None:
+            aggregate = kwargs.get("aggregate")
+            if aggregate is None:
+                aggregate = next((item for item in args if isinstance(item, models.Model)), None)
+            raw = getattr(aggregate, "tenant_id", None)
+        if raw is None:
+            return None
+        try:
+            return raw if isinstance(raw, UUID) else UUID(str(raw))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise StateMachineConfigurationError("Workflow invocation requires a tenant UUID") from exc
+
+    def apply(self, *args: object, **kwargs: object) -> models.Model:
+        return self._build(self._tenant_id(args, kwargs)).apply(*args, **kwargs)
+
+    def allowed_commands(self, state: str, *, tenant_id: UUID | None = None) -> tuple[str, ...]:
+        return self._build(tenant_id).allowed_commands(state)
+
+    @property
+    def states(self) -> frozenset[str]:
+        return self._build(None).states
+
+    @property
+    def terminal_states(self) -> frozenset[str]:
+        return self._build(None).terminal_states
+
+    @property
+    def transitions(self) -> tuple[Transition, ...]:
+        return self._build(None).transitions
 
 
-RESTORE_RUN_MACHINE = StateMachine(
-    name="backup_disaster_recovery.restore_run",
-    model=RestoreRun,
-    states=RestoreRunStatus.values,
-    terminal_states=(
-        RestoreRunStatus.SUCCEEDED,
-        RestoreRunStatus.FAILED,
-        RestoreRunStatus.CANCELLED,
-    ),
-    transitions=(
-        Transition("begin_validation", RestoreRunStatus.QUEUED, RestoreRunStatus.VALIDATING),
-        Transition("mark_ready", RestoreRunStatus.VALIDATING, RestoreRunStatus.READY),
-        Transition("begin_restore", RestoreRunStatus.READY, RestoreRunStatus.RESTORING),
-        Transition("begin_verification", RestoreRunStatus.RESTORING, RestoreRunStatus.VERIFYING),
-        Transition("succeed", RestoreRunStatus.VERIFYING, RestoreRunStatus.SUCCEEDED),
-        Transition("fail", RestoreRunStatus.VALIDATING, RestoreRunStatus.FAILED),
-        Transition("fail", RestoreRunStatus.RESTORING, RestoreRunStatus.FAILED),
-        Transition("fail", RestoreRunStatus.VERIFYING, RestoreRunStatus.FAILED),
-        Transition("cancel", RestoreRunStatus.QUEUED, RestoreRunStatus.CANCELLED),
-        Transition("cancel", RestoreRunStatus.VALIDATING, RestoreRunStatus.CANCELLED),
-        Transition("cancel", RestoreRunStatus.READY, RestoreRunStatus.CANCELLED),
-    ),
-)
-
-
-RUNBOOK_MACHINE = StateMachine(
-    name="backup_disaster_recovery.runbook",
-    model=DRRunbook,
-    states=RunbookStatus.values,
-    terminal_states=(RunbookStatus.RETIRED,),
-    transitions=(
-        Transition("publish", RunbookStatus.DRAFT, RunbookStatus.PUBLISHED),
-        Transition("retire", RunbookStatus.PUBLISHED, RunbookStatus.RETIRED),
-    ),
-)
-
-
-EXERCISE_MACHINE = StateMachine(
-    name="backup_disaster_recovery.exercise",
-    model=DRExercise,
-    states=ExerciseStatus.values,
-    terminal_states=(ExerciseStatus.PASSED, ExerciseStatus.FAILED, ExerciseStatus.CANCELLED),
-    transitions=(
-        Transition("queue", ExerciseStatus.SCHEDULED, ExerciseStatus.QUEUED),
-        Transition("start", ExerciseStatus.QUEUED, ExerciseStatus.RUNNING),
-        Transition("pass", ExerciseStatus.RUNNING, ExerciseStatus.PASSED),
-        Transition("fail", ExerciseStatus.RUNNING, ExerciseStatus.FAILED),
-        Transition("cancel", ExerciseStatus.SCHEDULED, ExerciseStatus.CANCELLED),
-        Transition("cancel", ExerciseStatus.QUEUED, ExerciseStatus.CANCELLED),
-        Transition("cancel", ExerciseStatus.RUNNING, ExerciseStatus.CANCELLED),
-    ),
-)
-
-
-STEP_EXECUTION_MACHINE = StateMachine(
-    name="backup_disaster_recovery.step_execution",
-    model=DRStepExecution,
-    states=StepExecutionStatus.values,
-    terminal_states=(
-        StepExecutionStatus.PASSED,
-        StepExecutionStatus.FAILED,
-        StepExecutionStatus.DEGRADED,
-        StepExecutionStatus.SKIPPED,
-    ),
-    transitions=(
-        Transition("start", StepExecutionStatus.PENDING, StepExecutionStatus.RUNNING),
-        Transition("pass", StepExecutionStatus.RUNNING, StepExecutionStatus.PASSED),
-        Transition("fail", StepExecutionStatus.RUNNING, StepExecutionStatus.FAILED),
-        Transition("degrade", StepExecutionStatus.RUNNING, StepExecutionStatus.DEGRADED),
-        Transition("skip", StepExecutionStatus.PENDING, StepExecutionStatus.SKIPPED),
-    ),
-)
+RECOVERY_POINT_MACHINE = ConfiguredStateMachine("recovery_point", RecoveryPoint, tuple(RecoveryPointStatus.values))
+RESTORE_RUN_MACHINE = ConfiguredStateMachine("restore_run", RestoreRun, tuple(RestoreRunStatus.values))
+RUNBOOK_MACHINE = ConfiguredStateMachine("runbook", DRRunbook, tuple(RunbookStatus.values))
+EXERCISE_MACHINE = ConfiguredStateMachine("exercise", DRExercise, tuple(ExerciseStatus.values))
+STEP_EXECUTION_MACHINE = ConfiguredStateMachine("step_execution", DRStepExecution, tuple(StepExecutionStatus.values))
 
 
 # Lowercase aliases are retained for ergonomic imports in extension modules.

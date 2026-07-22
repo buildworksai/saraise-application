@@ -8,13 +8,12 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from django.conf import settings
 from django.db.models import Q, QuerySet
 from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
-from rest_framework.exceptions import MethodNotAllowed, ValidationError
+from rest_framework.exceptions import MethodNotAllowed, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -26,17 +25,19 @@ from src.core.async_jobs.models import AsyncJob
 from src.core.views.tenant_scoped import TenantScopedModelViewSet
 
 from .models import (
+    BDRConfiguration,
     DRExercise,
     DRRunbook,
     DRStepExecution,
     RecoveryPoint,
     RestoreRun,
     RunbookStep,
-    TargetEnvironment,
 )
 from .permissions import (
     BACKUP_EXECUTE,
     BACKUP_READ,
+    CONFIG_READ,
+    CONFIG_WRITE,
     EXERCISE_CREATE,
     EXERCISE_EXECUTE,
     EXERCISE_UPDATE,
@@ -55,6 +56,10 @@ from .serializers import (
     BackupExecutionCreateSerializer,
     BackupExecutionReceiptSerializer,
     BackupExecutionStatusSerializer,
+    BDRConfigurationRollbackSerializer,
+    BDRConfigurationSerializer,
+    BDRConfigurationVersionSerializer,
+    BDRConfigurationWriteSerializer,
     DRExerciseCancelSerializer,
     DRExerciseCreateSerializer,
     DRExerciseDetailSerializer,
@@ -86,10 +91,11 @@ from .serializers import (
     RunbookStepUpdateSerializer,
 )
 from .services import (
-    BDRDomainError,
+    DEFAULT_CONFIGURATION_DOCUMENT,
     BackupExecutionFacade,
     BackupRequestCommand,
-    DependencyUnavailable,
+    BDRDomainError,
+    ConfigurationService,
     DRExerciseService,
     ExerciseCommand,
     RecoveryObjectiveService,
@@ -136,6 +142,14 @@ def _parse_date(value: str | None, field: str) -> datetime | None:
     return parsed
 
 
+def _correlation_uuid(request: Request) -> UUID:
+    value = str(getattr(request, "correlation_id", "") or request.headers.get("X-Correlation-ID", ""))
+    try:
+        return UUID(value)
+    except (TypeError, ValueError, AttributeError):
+        return uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:correlation:{value or uuid.uuid4()}")
+
+
 class GovernedBDRViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):
     """Shared deny-default access and safe service-error translation."""
 
@@ -153,15 +167,15 @@ class GovernedBDRViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):
             request.tenant_id = tenant_id  # type: ignore[attr-defined]
         rule = self.access_map.get(getattr(self, "action", ""))
         if rule is None:
-            self.required_permission = ""
-            self.required_entitlement = ""
-            self.quota_resource = ""
-            self.quota_cost = 1
-        else:
-            self.required_permission = rule.permission
-            self.required_entitlement = rule.entitlement
-            self.quota_resource = rule.quota_resource
-            self.quota_cost = rule.quota_cost
+            raise PermissionDenied("This endpoint action is not authorized.")
+        self.required_permission = rule.permission
+        self.required_entitlement = rule.entitlement
+        self.quota_resource = rule.quota_resource
+        self.quota_cost = (
+            rule.quota_cost_for(tenant_id)
+            if tenant_id is not None
+            else int(DEFAULT_CONFIGURATION_DOCUMENT["quota_costs"][rule.quota_key])
+        )
         super().check_permissions(request)
 
     def handle_exception(self, exc: Exception) -> Response:
@@ -215,9 +229,7 @@ class BackupExecutionViewSet(GovernedBDRViewSet):
 
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
         del request
-        snapshot = BackupExecutionFacade().get_backup_status(
-            self.tenant_id(), _parse_uuid(pk, "backup_job_id")
-        )
+        snapshot = BackupExecutionFacade().get_backup_status(self.tenant_id(), _parse_uuid(pk, "backup_job_id"))
         payload = dataclass_payload(snapshot)
         payload["status"] = snapshot.status.value
         point = (
@@ -227,7 +239,7 @@ class BackupExecutionViewSet(GovernedBDRViewSet):
             .first()
         )
         payload["recovery_point_id"] = point.id if point else None
-        payload["error_message"] = ""
+        payload["safe_error"] = snapshot.error_code
         return Response(BackupExecutionStatusSerializer(payload).data)
 
 
@@ -240,6 +252,9 @@ class RecoveryPointViewSet(GovernedBDRViewSet):
     def get_queryset(self) -> QuerySet[RecoveryPoint]:
         if not hasattr(self, "request"):
             return RecoveryPoint.objects.none()
+        tenant_id = self._get_tenant_id()
+        if tenant_id is None:
+            return RecoveryPoint.objects.none()
         self._validate_query({"status", "scope_type", "scope_ref", "captured_after", "captured_before"})
         filters: dict[str, object] = {
             "status": self.request.query_params.get("status"),
@@ -248,7 +263,7 @@ class RecoveryPointViewSet(GovernedBDRViewSet):
             "captured_after": _parse_date(self.request.query_params.get("captured_after"), "captured_after"),
             "captured_before": _parse_date(self.request.query_params.get("captured_before"), "captured_before"),
         }
-        queryset = RecoveryPointService().list_recovery_points(self.tenant_id(), filters)
+        queryset = RecoveryPointService().list_recovery_points(tenant_id, filters)
         search = self.request.query_params.get("search", "").strip()
         if search:
             predicate = Q(scope_ref__icontains=search)
@@ -307,9 +322,10 @@ class RestoreRunViewSet(GovernedBDRViewSet):
     def get_queryset(self) -> QuerySet[RestoreRun]:
         if not hasattr(self, "request"):
             return RestoreRun.objects.none()
-        self._validate_query(
-            {"status", "target_environment", "recovery_point", "requested_after", "requested_before"}
-        )
+        tenant_id = self._get_tenant_id()
+        if tenant_id is None:
+            return RestoreRun.objects.none()
+        self._validate_query({"status", "target_environment", "recovery_point", "requested_after", "requested_before"})
         filters: dict[str, object] = {
             "status": self.request.query_params.get("status"),
             "target_environment": self.request.query_params.get("target_environment"),
@@ -317,7 +333,7 @@ class RestoreRunViewSet(GovernedBDRViewSet):
             "requested_after": _parse_date(self.request.query_params.get("requested_after"), "requested_after"),
             "requested_before": _parse_date(self.request.query_params.get("requested_before"), "requested_before"),
         }
-        return RestoreService().list_restore_runs(self.tenant_id(), filters)
+        return RestoreService().list_restore_runs(tenant_id, filters)
 
     def get_serializer_class(self) -> type[Any]:
         if self.action == "list":
@@ -330,10 +346,6 @@ class RestoreRunViewSet(GovernedBDRViewSet):
         serializer = RestoreRunCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
-        if values["target_environment"] == TargetEnvironment.PRODUCTION:
-            # The current foundation does not expose a verifier for fresh step-up
-            # proofs.  Do not convert possession of an opaque token into approval.
-            raise DependencyUnavailable("production restore step-up verification")
         run = RestoreService().create_restore_run(
             self.tenant_id(),
             _actor_id(request),
@@ -346,9 +358,14 @@ class RestoreRunViewSet(GovernedBDRViewSet):
                 restore_mode=str(values["restore_mode"]),
                 selected_components=tuple(values.get("selected_components", [])),
                 idempotency_key=str(values["idempotency_key"]),
+                step_up_token=values.get("step_up_token"),
             ),
         )
-        return Response(RestoreRunDetailSerializer(run).data, status=status.HTTP_202_ACCEPTED)
+        payload = dict(RestoreRunDetailSerializer(run).data)
+        # A create-command receipt may expose its durable job handle; subsequent
+        # detail responses use the redacted public aggregate DTO.
+        payload["async_job_id"] = str(run.async_job_id) if run.async_job_id else None
+        return Response(payload, status=status.HTTP_202_ACCEPTED)
 
     @action(detail=True, methods=["post"])
     def execute(self, request: Request, pk: str | None = None) -> Response:
@@ -396,13 +413,16 @@ class DRRunbookViewSet(GovernedBDRViewSet):
     def get_queryset(self) -> QuerySet[DRRunbook]:
         if not hasattr(self, "request"):
             return DRRunbook.objects.none()
+        tenant_id = self._get_tenant_id()
+        if tenant_id is None:
+            return DRRunbook.objects.none()
         self._validate_query({"status", "scope_type", "owner_id"})
         filters: dict[str, object] = {
             "status": self.request.query_params.get("status"),
             "scope_type": self.request.query_params.get("scope_type"),
             "owner_id": self.request.query_params.get("owner_id"),
         }
-        queryset = RunbookService().list_runbooks(self.tenant_id(), filters)
+        queryset = RunbookService().list_runbooks(tenant_id, filters)
         search = self.request.query_params.get("search", "").strip()
         if search:
             queryset = queryset.filter(Q(name__icontains=search) | Q(slug__icontains=search))
@@ -435,9 +455,7 @@ class DRRunbookViewSet(GovernedBDRViewSet):
                 scope_type=str(values["scope_type"]),
                 scope_ref=str(values["scope_ref"]),
                 backup_schedule_id=values.get("backup_schedule_id"),
-                adapter_key=str(
-                    getattr(settings, "BDR_STORAGE_ADAPTER_KEY", "local-filesystem")
-                ),
+                adapter_key=None,
                 rpo_target_seconds=int(values["rpo_target_seconds"]),
                 rto_target_seconds=int(values["rto_target_seconds"]),
                 owner_id=_actor_id(request),
@@ -511,8 +529,11 @@ class RunbookStepViewSet(GovernedBDRViewSet):
     def get_queryset(self) -> QuerySet[RunbookStep]:
         if not hasattr(self, "request"):
             return RunbookStep.objects.none()
+        tenant_id = self._get_tenant_id()
+        if tenant_id is None:
+            return RunbookStep.objects.none()
         self._validate_query({"runbook_id"})
-        queryset = RunbookStep.objects.for_tenant(self.tenant_id()).filter(deleted_at__isnull=True).select_related("runbook")
+        queryset = RunbookStep.objects.for_tenant(tenant_id).filter(deleted_at__isnull=True).select_related("runbook")
         runbook_id = self.request.query_params.get("runbook_id")
         if self.action == "list" and not runbook_id:
             raise ValidationError({"runbook_id": "This filter is required."})
@@ -545,9 +566,9 @@ class RunbookStepViewSet(GovernedBDRViewSet):
                 action_type=str(values["action_type"]),
                 extension_action_key=values.get("extension_action_key"),
                 parameters=values["parameters"],
-                timeout_seconds=int(values["timeout_seconds"]),
-                retry_limit=int(values["retry_limit"]),
-                on_failure=str(values["on_failure"]),
+                timeout_seconds=(int(values["timeout_seconds"]) if "timeout_seconds" in values else None),
+                retry_limit=(int(values["retry_limit"]) if "retry_limit" in values else None),
+                on_failure=(str(values["on_failure"]) if "on_failure" in values else None),
                 approval_permission=values.get("approval_permission"),
             ),
         )
@@ -582,6 +603,9 @@ class DRExerciseViewSet(GovernedBDRViewSet):
     def get_queryset(self) -> QuerySet[DRExercise]:
         if not hasattr(self, "request"):
             return DRExercise.objects.none()
+        tenant_id = self._get_tenant_id()
+        if tenant_id is None:
+            return DRExercise.objects.none()
         self._validate_query({"status", "exercise_type", "runbook", "scheduled_after", "scheduled_before"})
         filters: dict[str, object] = {
             "status": self.request.query_params.get("status"),
@@ -590,7 +614,7 @@ class DRExerciseViewSet(GovernedBDRViewSet):
             "scheduled_after": _parse_date(self.request.query_params.get("scheduled_after"), "scheduled_after"),
             "scheduled_before": _parse_date(self.request.query_params.get("scheduled_before"), "scheduled_before"),
         }
-        return DRExerciseService().list_exercises(self.tenant_id(), filters)
+        return DRExerciseService().list_exercises(tenant_id, filters)
 
     def get_serializer_class(self) -> type[Any]:
         if self.action == "list":
@@ -622,7 +646,10 @@ class DRExerciseViewSet(GovernedBDRViewSet):
         serializer = DRExerciseStartSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         job = DRExerciseService().start_exercise(
-            self.tenant_id(), _actor_id(request), _parse_uuid(pk, "id"), str(serializer.validated_data["idempotency_key"])
+            self.tenant_id(),
+            _actor_id(request),
+            _parse_uuid(pk, "id"),
+            str(serializer.validated_data["idempotency_key"]),
         )
         return Response(
             {"async_job_id": job.id, "status": job.status, "accepted_at": job.created_at},
@@ -634,7 +661,10 @@ class DRExerciseViewSet(GovernedBDRViewSet):
         serializer = DRExerciseCancelSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         exercise = DRExerciseService().cancel_exercise(
-            self.tenant_id(), _actor_id(request), _parse_uuid(pk, "id"), str(serializer.validated_data["transition_key"])
+            self.tenant_id(),
+            _actor_id(request),
+            _parse_uuid(pk, "id"),
+            str(serializer.validated_data["transition_key"]),
         )
         return Response(DRExerciseDetailSerializer(exercise).data)
 
@@ -648,8 +678,11 @@ class DRStepExecutionViewSet(GovernedBDRViewSet):
     def get_queryset(self) -> QuerySet[DRStepExecution]:
         if not hasattr(self, "request"):
             return DRStepExecution.objects.none()
+        tenant_id = self._get_tenant_id()
+        if tenant_id is None:
+            return DRStepExecution.objects.none()
         self._validate_query({"exercise", "runbook_step", "status"})
-        queryset = DRStepExecution.objects.for_tenant(self.tenant_id()).select_related("exercise", "runbook_step")
+        queryset = DRStepExecution.objects.for_tenant(tenant_id).select_related("exercise", "runbook_step")
         for field in ("exercise", "runbook_step", "status"):
             value = self.request.query_params.get(field)
             if value:
@@ -658,6 +691,99 @@ class DRStepExecutionViewSet(GovernedBDRViewSet):
 
     def get_serializer_class(self) -> type[Any]:
         return DRStepExecutionListSerializer if self.action == "list" else DRStepExecutionDetailSerializer
+
+
+class BDRConfigurationViewSet(GovernedBDRViewSet):
+    """RBAC-gated configuration-as-code surface; all mutations delegate."""
+
+    queryset = BDRConfiguration.objects.all()
+    serializer_class = BDRConfigurationSerializer
+    http_method_names = ["get", "post", "patch", "head", "options"]
+    access_map = {
+        "current": CONFIG_READ,
+        "preview": CONFIG_WRITE,
+        "versions": CONFIG_READ,
+        "rollback": CONFIG_WRITE,
+        "import_document": CONFIG_WRITE,
+        "export_document": CONFIG_READ,
+    }
+
+    def check_permissions(self, request: Request) -> None:
+        if getattr(self, "action", "") == "current" and request.method == "PATCH":
+            self.access_map = {**self.access_map, "current": CONFIG_WRITE}
+        super().check_permissions(request)
+
+    def get_queryset(self) -> QuerySet[BDRConfiguration]:
+        tenant_id = self._get_tenant_id() if hasattr(self, "request") else None
+        if tenant_id is None:
+            return BDRConfiguration.objects.none()
+        return BDRConfiguration.objects.for_tenant(tenant_id).order_by("environment")
+
+    @action(detail=False, methods=["get", "patch"])
+    def current(self, request: Request) -> Response:
+        service = ConfigurationService()
+        if request.method == "GET":
+            environment = str(request.query_params.get("environment", "default"))
+            return Response(BDRConfigurationSerializer(service.current(self.tenant_id(), environment)).data)
+        serializer = BDRConfigurationWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        configuration = service.update(
+            self.tenant_id(),
+            _actor_id(request),
+            _correlation_uuid(request),
+            values["document"],
+            values.get("rollout"),
+            str(values.get("environment", "default")),
+        )
+        return Response(BDRConfigurationSerializer(configuration).data)
+
+    @action(detail=False, methods=["post"])
+    def preview(self, request: Request) -> Response:
+        serializer = BDRConfigurationWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        result = ConfigurationService().preview(
+            self.tenant_id(),
+            values["document"],
+            values.get("rollout"),
+            str(values.get("environment", "default")),
+        )
+        return Response(result)
+
+    @action(detail=False, methods=["get"])
+    def versions(self, request: Request) -> Response:
+        environment = str(request.query_params.get("environment", "default"))
+        configuration = ConfigurationService().current(self.tenant_id(), environment)
+        maximum = int(configuration.document["reports"]["max_results"])
+        versions = ConfigurationService().versions(self.tenant_id(), environment)[:maximum]
+        return Response(BDRConfigurationVersionSerializer(versions, many=True).data)
+
+    @action(detail=False, methods=["post"])
+    def rollback(self, request: Request) -> Response:
+        serializer = BDRConfigurationRollbackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        configuration = ConfigurationService().rollback(
+            self.tenant_id(),
+            _actor_id(request),
+            _correlation_uuid(request),
+            int(values["version"]),
+            str(values.get("environment", "default")),
+        )
+        return Response(BDRConfigurationSerializer(configuration).data)
+
+    @action(detail=False, methods=["post"], url_path="import-document")
+    def import_document(self, request: Request) -> Response:
+        configuration = ConfigurationService().import_document(
+            self.tenant_id(), _actor_id(request), _correlation_uuid(request), request.data
+        )
+        return Response(BDRConfigurationSerializer(configuration).data)
+
+    @action(detail=False, methods=["get"], url_path="export-document")
+    def export_document(self, request: Request) -> Response:
+        environment = str(request.query_params.get("environment", "default"))
+        return Response(ConfigurationService().export_document(self.tenant_id(), environment))
 
 
 class ObjectiveReportViewSet(GovernedBDRViewSet):
