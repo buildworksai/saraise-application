@@ -1,11 +1,15 @@
-# Asset Management
+# Asset Management frontend
 
-**Status**: ✅ TODO: Implementation pending
+Production tenant UI for the asset register and append-only depreciation history.
 
-**Current Phase**: Phase 8 (Core Modules)
+The module provides:
 
-**TODO**: This module is scaffolded and ready for implementation.
+- responsive asset search, filters, ordering, and pagination;
+- accessible create, detail, and edit workflows with client and server validation;
+- server-controlled current values and residual-value safeguards;
+- explicit depreciation calculation with immutable history; and
+- module-owned route descriptors consumed by the tenant route/sidebar registry.
 
-Backend API, types, and endpoints need to be implemented.
-
-See: saraise-documentation/modules/02-core/asset-management/README.md
+`contracts.ts` owns all public types and API endpoints. `services/asset-service.ts`
+validates direct DRF responses and governed envelopes, and rejects malformed
+payloads instead of rendering fabricated empty states.

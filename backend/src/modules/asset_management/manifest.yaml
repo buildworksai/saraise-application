@@ -6,14 +6,31 @@ version: 1.0.0
 category: core_business
 display_name: Asset Management
 description: |
-  Comprehensive asset lifecycle management including fixed assets, depreciation, and asset tracking.
+  Tenant-safe operational asset register and depreciation preview. The
+  fixed_assets module remains the canonical authority for capitalization,
+  posting, impairment, transfer, disposal, and the financial subledger.
+
+bounded_context:
+  owns:
+    - operational_asset_register
+    - asset_location
+    - depreciation_preview_history
+  delegates_to_fixed_assets:
+    - capitalization
+    - depreciation_posting
+    - impairment
+    - disposal
+  compatibility:
+    legacy_api: /api/v1/asset-management/
+    financial_api: /api/v2/fixed-assets/
+    id_preservation: asset_management identifiers remain stable; integrations map them explicitly
 
 # Dependencies
 dependencies:
   - name: accounting_finance
     version: ">=1.0.0"
     required: false
-    purpose: Depreciation journal entries
+    purpose: Readiness discovery only; financial posting is delegated through fixed_assets services
 
 # Permissions
 permissions:
@@ -26,5 +43,14 @@ permissions:
 # Health Checks
 health_checks:
   - name: database_connectivity
-    endpoint: /health/db
+    endpoint: /api/v1/asset-management/health/
     interval: 60
+
+extension_contract:
+  spi_version: "1.0.0"
+  capabilities:
+    - asset.detail_tab
+    - asset.action
+    - asset.identity_provider
+    - asset.schema_field
+  compatibility: semantic_versioning
