@@ -8,7 +8,11 @@ All models include tenant_id for Row-Level Multitenancy.
 from __future__ import annotations
 
 import uuid
+
+from django.core.exceptions import ValidationError
 from django.db import models
+
+from src.core.tenancy.registry import TENANT_SCOPED, tenancy_scope
 
 
 def generate_uuid():
@@ -16,7 +20,7 @@ def generate_uuid():
     return str(uuid.uuid4())
 
 
-class TenantBaseModel(models.Model):
+class _TenantBaseModel(models.Model):
     """Base model for tenant-scoped models with Row-Level Multitenancy.
 
     CRITICAL: All tenant-scoped models MUST inherit from this base class
@@ -34,6 +38,47 @@ class TenantBaseModel(models.Model):
             models.Index(fields=["tenant_id"]),
             models.Index(fields=["tenant_id", "created_at"]),
         ]
+
+
+@tenancy_scope(TENANT_SCOPED)
+class LocalizationResource(models.Model):
+    """Tenant-scoped resource retained by the module's v1 API contract."""
+
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
+    tenant_id = models.CharField(max_length=36, db_index=True)
+    name = models.CharField(max_length=255, db_index=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    config = models.JSONField(
+        default=dict,
+        help_text="Module-specific configuration",
+    )
+    created_by = models.CharField(max_length=36, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        app_label = "localization"
+        db_table = "localization_resources"
+        indexes = [
+            models.Index(
+                fields=["tenant_id", "is_active"],
+                name="localizatio_tenant__d190d8_idx",
+            ),
+            models.Index(
+                fields=["tenant_id", "name"],
+                name="localizatio_tenant__c12154_idx",
+            ),
+        ]
+
+    def save(self, *args, **kwargs) -> None:
+        """Reject resources without an explicit tenant boundary."""
+        if not self.tenant_id:
+            raise ValidationError({"tenant_id": "Tenant ID is required."})
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.id})"
 
 
 class Language(models.Model):
@@ -92,7 +137,7 @@ class Language(models.Model):
         return f"{self.name} ({self.code})"
 
 
-class Translation(TenantBaseModel):
+class Translation(_TenantBaseModel):
     """Translation model for storing translated strings."""
 
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
@@ -126,7 +171,7 @@ class Translation(TenantBaseModel):
         return f"{self.key} ({self.language.code}): {self.value[:50]}"
 
 
-class LocaleConfig(TenantBaseModel):
+class LocaleConfig(_TenantBaseModel):
     """Locale configuration model for tenant-specific locale settings."""
 
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
@@ -168,7 +213,7 @@ class LocaleConfig(TenantBaseModel):
         return f"Locale config for tenant {self.tenant_id}"
 
 
-class CurrencyConfig(TenantBaseModel):
+class CurrencyConfig(_TenantBaseModel):
     """Currency configuration model for tenant-specific currency settings."""
 
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
@@ -194,7 +239,7 @@ class CurrencyConfig(TenantBaseModel):
         return f"Currency config for tenant {self.tenant_id}: {self.default_currency}"
 
 
-class RegionalSettings(TenantBaseModel):
+class RegionalSettings(_TenantBaseModel):
     """Regional settings model for tenant-specific regional configurations."""
 
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
@@ -225,3 +270,9 @@ class RegionalSettings(TenantBaseModel):
 
     def __str__(self) -> str:
         return f"Regional settings for tenant {self.tenant_id}: {self.country_code}"
+
+
+# Backward-compatible public name used by the original v1 module contract.
+# The abstract implementation base remains private so callers cannot mistake it
+# for the concrete resource manager.
+TenantBaseModel = LocalizationResource

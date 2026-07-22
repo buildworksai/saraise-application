@@ -5,13 +5,39 @@ Provides request/response validation for all models.
 
 from rest_framework import serializers
 
-from .models import (
-    CurrencyConfig,
-    Language,
-    LocaleConfig,
-    RegionalSettings,
-    Translation,
-)
+from .models import CurrencyConfig, Language, LocaleConfig, LocalizationResource, RegionalSettings, Translation
+
+
+class LocalizationResourceSerializer(serializers.ModelSerializer):
+    """Serializer for the tenant-scoped v1 localization resource."""
+
+    class Meta:
+        model = LocalizationResource
+        fields = [
+            "id",
+            "tenant_id",
+            "name",
+            "description",
+            "is_active",
+            "config",
+            "created_by",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "tenant_id",
+            "created_by",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_name(self, value: str) -> str:
+        """Normalize and reject blank resource names."""
+        normalized = value.strip()
+        if not normalized:
+            raise serializers.ValidationError("Name cannot be empty")
+        return normalized
 
 
 class LanguageSerializer(serializers.ModelSerializer):
