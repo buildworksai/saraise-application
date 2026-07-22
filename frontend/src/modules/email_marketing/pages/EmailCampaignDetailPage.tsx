@@ -1,139 +1,20 @@
-/**
- * Email Campaign Detail Page - Email Marketing
- */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+/* eslint-disable complexity -- lifecycle actions derive from one authoritative state snapshot. */
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { toast } from 'sonner';
-import { ArrowLeft, Edit, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { emailMarketingService } from '../services/email-marketing-service';
-
-const MODULE_PATH = '/email-marketing/campaigns';
-
-export const EmailCampaignDetailPage = () => {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-
-  const { data: campaign, isLoading, error } = useQuery({
-    queryKey: ['email-campaign', id],
-    queryFn: () =>
-      id ? emailMarketingService.getCampaign(id) : Promise.reject(new Error('No ID')),
-    enabled: !!id,
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (campaignId: string) => emailMarketingService.deleteCampaign(campaignId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['email-campaigns'] });
-      toast.success('Campaign deleted successfully');
-      navigate(MODULE_PATH);
-    },
-    onError: () => {
-      toast.error('Failed to delete campaign. Please try again.');
-    },
-  });
-
-  const handleDelete = () => {
-    if (id && window.confirm('Are you sure you want to delete this campaign?')) {
-      void deleteMutation.mutateAsync(id);
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="p-8">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-muted rounded w-1/4" />
-          <div className="h-64 bg-muted rounded" />
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !campaign) {
-    return (
-      <div className="p-8">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-foreground mb-4">Campaign not found</h2>
-          <Button onClick={() => navigate(MODULE_PATH)}>Back to Campaigns</Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => navigate(MODULE_PATH)}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-          <h1 className="text-3xl font-bold text-foreground">
-            {campaign.campaign_code} - {campaign.campaign_name}
-          </h1>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate(`${MODULE_PATH}/${campaign.id}/edit`)}>
-            <Edit className="w-4 h-4 mr-2" />
-            Edit
-          </Button>
-          <Button variant="danger" onClick={handleDelete}>
-            <Trash2 className="w-4 h-4 mr-2" />
-            Delete
-          </Button>
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Campaign Information</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Code</label>
-              <p className="text-sm font-medium">{campaign.campaign_code}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Name</label>
-              <p className="text-sm font-medium">{campaign.campaign_name}</p>
-            </div>
-            <div className="col-span-2">
-              <label className="text-sm font-medium text-muted-foreground">Subject</label>
-              <p className="text-sm">{campaign.subject}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Status</label>
-              <p className="text-sm">{campaign.status}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Recipients</label>
-              <p className="text-sm">{campaign.recipient_count}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Opened</label>
-              <p className="text-sm">{campaign.opened_count}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Clicked</label>
-              <p className="text-sm">{campaign.clicked_count}</p>
-            </div>
-            {campaign.sent_at && (
-              <div>
-                <label className="text-sm font-medium text-muted-foreground">Sent At</label>
-                <p className="text-sm">{new Date(campaign.sent_at).toLocaleString()}</p>
-              </div>
-            )}
-          </div>
-          <div className="pt-4 border-t border-border text-sm text-muted-foreground">
-            <span>Created: {new Date(campaign.created_at).toLocaleDateString()}</span>
-            <span className="ml-4">Updated: {new Date(campaign.updated_at).toLocaleDateString()}</span>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-};
+import { ConfirmAction, Detail, DetailGrid, formatDate, GovernedError, History, Page, PageSkeleton, PreflightPanel, Status, Surface } from '../components/EmailMarketingUI';
+import { ROUTES } from '../contracts';
+import { EMAIL_MARKETING_QUERY_KEYS, emailMarketingService } from '../services/email-marketing-service';
+const key = (action: string) => `${action}-${crypto.randomUUID()}`;
+export function EmailCampaignDetailPage() { const { id = '' } = useParams(); const navigate = useNavigate(); const client = useQueryClient(); const [notice, setNotice] = useState(''); const [schedule, setSchedule] = useState(''); const query = useQuery({ queryKey: EMAIL_MARKETING_QUERY_KEYS.campaign(id), queryFn: () => emailMarketingService.campaigns.get(id), enabled: Boolean(id) }); const analytics = useQuery({ queryKey: EMAIL_MARKETING_QUERY_KEYS.analytics(id), queryFn: () => emailMarketingService.campaigns.analytics(id), enabled: Boolean(id) }); const refresh = async () => { await client.invalidateQueries({ queryKey: EMAIL_MARKETING_QUERY_KEYS.all }); };
+  const lifecycle = useMutation({ mutationFn: async (action: 'resolve' | 'send' | 'pause' | 'resume' | 'cancel' | 'unschedule' | 'schedule') => { const idempotency_key = key(action); if (action === 'resolve') return emailMarketingService.campaigns.resolveAudience(id, { idempotency_key }); if (action === 'send') { const preflight_receipt = analytics.data?.data.preflight.receipt; if (!preflight_receipt) throw new Error('Run a successful preflight before sending.'); return emailMarketingService.campaigns.send(id, { idempotency_key, preflight_receipt }); } if (action === 'pause') return emailMarketingService.campaigns.pause(id, { idempotency_key, reason: 'Paused by operator' }); if (action === 'resume') return emailMarketingService.campaigns.resume(id, { idempotency_key }); if (action === 'cancel') return emailMarketingService.campaigns.cancel(id, { idempotency_key, reason: 'Cancelled by operator' }); if (action === 'unschedule') return emailMarketingService.campaigns.unschedule(id, { idempotency_key }); if (!schedule) throw new Error('Choose a future schedule.'); return emailMarketingService.campaigns.schedule(id, { scheduled_at: new Date(schedule).toISOString(), timezone: query.data?.data.timezone ?? 'UTC', idempotency_key }); }, onSuccess: async (result, action) => { await refresh(); setNotice(`${action} accepted · correlation ${result.correlationId}`); } });
+  const removal = useMutation({ mutationFn: () => emailMarketingService.campaigns.delete(id), onSuccess: async () => { await refresh(); navigate(ROUTES.CAMPAIGNS); } });
+  if (query.isLoading) return <PageSkeleton label="Loading campaign evidence"/>; if (query.error) return <Page title="Campaign" description="Lifecycle and provider evidence." back={{ label: 'Campaigns', to: ROUTES.CAMPAIGNS }}><GovernedError error={query.error} retry={() => void query.refetch()}/></Page>; if (!query.data) return null; const campaign = query.data.data; const canEdit = campaign.status === 'draft'; const canSchedule = campaign.status === 'draft' || campaign.status === 'scheduled'; const canSend = ['draft','scheduled','failed'].includes(campaign.status); const canPause = ['queueing','sending'].includes(campaign.status); const canResume = campaign.status === 'paused'; const canCancel = !['sent','cancelled'].includes(campaign.status); const canDelete = campaign.status === 'draft' || campaign.status === 'failed';
+  return <Page title={campaign.campaign_name} description={`${campaign.campaign_code} · ${campaign.subject}`} back={{ label: 'Campaigns', to: ROUTES.CAMPAIGNS }} actions={<>{canEdit ? <Button variant="outline" onClick={() => navigate(ROUTES.CAMPAIGN_EDIT(id))}>Edit draft</Button> : null}<Button variant="outline" disabled={lifecycle.isPending} onClick={() => lifecycle.mutate('resolve')}>Resolve audience</Button>{canSend ? <ConfirmAction label="Queue send" title="Queue eligible recipients?" description="Content is snapshotted and quota is consumed atomically. Queue acceptance is not delivery success." pending={lifecycle.isPending} onConfirm={() => lifecycle.mutate('send')}/> : null}{canPause ? <ConfirmAction label="Pause" title="Pause new submissions?" description="Already accepted provider messages remain immutable." pending={lifecycle.isPending} onConfirm={() => lifecycle.mutate('pause')}/> : null}{canResume ? <ConfirmAction label="Resume" title="Resume eligible recipients?" description="Every remaining recipient is rechecked for consent and suppression." pending={lifecycle.isPending} onConfirm={() => lifecycle.mutate('resume')}/> : null}{canCancel ? <ConfirmAction danger label="Cancel" title="Cancel unsent work?" description="This terminal transition cancels only recipients not accepted by a provider." pending={lifecycle.isPending} onConfirm={() => lifecycle.mutate('cancel')}/> : null}{canDelete ? <ConfirmAction danger label="Delete" title="Archive this campaign?" description="This soft-deletes an eligible draft or failed campaign." pending={removal.isPending} onConfirm={() => removal.mutate()}/> : null}</>}>
+    <div aria-live="polite" className="text-sm text-emerald-700">{notice}</div>{lifecycle.error ? <GovernedError error={lifecycle.error}/> : null}{removal.error ? <GovernedError error={removal.error}/> : null}
+    <div className="grid gap-6 xl:grid-cols-[2fr_1fr]"><Surface title="Campaign evidence"><DetailGrid><Detail label="Status"><Status value={campaign.status}/></Detail><Detail label="Type">{campaign.campaign_type}</Detail><Detail label="Template">{campaign.template_id ?? 'Inline content'}</Detail><Detail label="Sender">{campaign.from_name} &lt;{campaign.from_email}&gt;</Detail><Detail label="Reply-to">{campaign.reply_to_email ?? 'Sender address'}</Detail><Detail label="Timezone">{campaign.timezone}</Detail><Detail label="Resolved">{campaign.resolved_recipient_count}</Detail><Detail label="Delivered">{campaign.delivered_count}</Detail><Detail label="Opened / clicked">{campaign.unique_opened_count} / {campaign.unique_clicked_count}</Detail><Detail label="Bounced / failed">{campaign.bounced_count} / {campaign.failed_count}</Detail><Detail label="Created">{formatDate(campaign.created_at)}</Detail><Detail label="Updated">{formatDate(campaign.updated_at)}</Detail></DetailGrid>{campaign.last_error_code ? <div className="mt-5 rounded-lg border border-destructive/30 p-3 text-sm"><strong>{campaign.last_error_code}</strong><p className="text-muted-foreground">{campaign.last_error_detail}</p></div> : null}</Surface><Surface title="Schedule"><p className="text-sm">{formatDate(campaign.scheduled_at)}</p>{canSchedule ? <div className="mt-3 space-y-2"><label className="text-xs font-medium">Future date and time<input aria-label="Campaign schedule" type="datetime-local" className="mt-1 block w-full rounded-md border bg-background p-2 text-sm" value={schedule} onChange={(event) => setSchedule(event.target.value)}/></label><Button size="sm" disabled={!schedule || lifecycle.isPending} onClick={() => lifecycle.mutate('schedule')}>{campaign.status === 'scheduled' ? 'Reschedule' : 'Schedule'}</Button>{campaign.status === 'scheduled' ? <Button className="ml-2" size="sm" variant="outline" disabled={lifecycle.isPending} onClick={() => lifecycle.mutate('unschedule')}>Return to draft</Button> : null}</div> : null}</Surface></div>
+    {analytics.isLoading ? <PageSkeleton rows={3} label="Loading campaign preflight"/> : analytics.error ? <Surface title="Preflight unavailable"><GovernedError error={analytics.error} retry={() => void analytics.refetch()}/></Surface> : analytics.data ? <><PreflightPanel value={analytics.data.data.preflight} campaignStatus={campaign.status}/><Surface title="Derived analytics" description="Rates come from recipient and event truth; drift identifies stale aggregate counters."><DetailGrid><Detail label="Delivery rate">{(analytics.data.data.delivery_rate * 100).toFixed(1)}%</Detail><Detail label="Unique open rate">{(analytics.data.data.unique_open_rate * 100).toFixed(1)}%</Detail><Detail label="Unique click rate">{(analytics.data.data.unique_click_rate * 100).toFixed(1)}%</Detail><Detail label="Bounce rate">{(analytics.data.data.bounce_rate * 100).toFixed(1)}%</Detail><Detail label="Complaints">{analytics.data.data.complained}</Detail><Detail label="Counter drift">{Object.values(analytics.data.data.counter_drift).reduce((sum, value) => sum + Math.abs(value), 0)}</Detail></DetailGrid></Surface></> : null}
+    <Surface title="Lifecycle history" description={`Created by ${campaign.created_by ?? 'system'} · updated by ${campaign.updated_by ?? 'system'}`}><History entries={campaign.transition_history}/></Surface>
+  </Page>;
+}

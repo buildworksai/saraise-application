@@ -1,11 +1,20 @@
-# Email Marketing
+# Email Marketing Frontend
 
-**Status**: ✅ TODO: Implementation pending
+Production UI for the governed `/api/v2/email-marketing/` runtime.
 
-**Current Phase**: Phase 8 (Core Modules)
+The module owns campaigns, versioned templates, audience and delivery evidence,
+suppressions, and append-only consent history. `contracts.ts` is the public type,
+endpoint, and route source of truth; the service rejects malformed envelopes and
+never converts missing data into empty success.
 
-**TODO**: This module is scaffolded and ready for implementation.
+Routes are declared in `routes.ts` and discovered by the tenant route registry.
+The five sidebar leaves are Campaigns, Templates, Delivery, Suppressions, and
+Consents. Create, detail, and edit pages are contextual children.
 
-Backend API, types, and endpoints need to be implemented.
+Verification:
 
-See: saraise-documentation/modules/02-core/email-marketing/README.md
+```bash
+npx tsc --noEmit -p src/modules/email_marketing/tsconfig.json
+npx eslint src/modules/email_marketing --ext .ts,.tsx --max-warnings 0
+npx vitest run src/modules/email_marketing
+```
