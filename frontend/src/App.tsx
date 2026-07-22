@@ -411,23 +411,6 @@ const CreateBudgetPage = lazy(() =>
   }))
 );
 
-// Compliance Management
-const CompliancePolicyListPage = lazy(() =>
-  import("./modules/compliance_management/pages/CompliancePolicyListPage").then((m) => ({
-    default: m.CompliancePolicyListPage,
-  }))
-);
-const CompliancePolicyDetailPage = lazy(() =>
-  import("./modules/compliance_management/pages/CompliancePolicyDetailPage").then((m) => ({
-    default: m.CompliancePolicyDetailPage,
-  }))
-);
-const CreateCompliancePolicyPage = lazy(() =>
-  import("./modules/compliance_management/pages/CreateCompliancePolicyPage").then((m) => ({
-    default: m.CreateCompliancePolicyPage,
-  }))
-);
-
 // Compliance Risk Management
 const ComplianceRiskListPage = lazy(() =>
   import("./modules/compliance_risk_management/pages/ComplianceRiskListPage").then((m) => ({
@@ -1116,38 +1099,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <BudgetDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Compliance Management */}
-          <Route
-            path="/compliance-management/policies"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CompliancePolicyListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/compliance-management/policies/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateCompliancePolicyPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/compliance-management/policies/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CompliancePolicyDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

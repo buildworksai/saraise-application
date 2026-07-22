@@ -1,0 +1,1 @@
+export { ConfigurationDetailPage } from './CompliancePages';

@@ -1,0 +1,1 @@
+export { EditConfigurationPage } from './CompliancePages';

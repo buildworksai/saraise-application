@@ -1,0 +1,1 @@
+export { EvidenceDetailPage } from './CompliancePages';
