@@ -1,0 +1,1 @@
+export { BackupStorageTargetDetailPage } from "./ResourceDetailPages";

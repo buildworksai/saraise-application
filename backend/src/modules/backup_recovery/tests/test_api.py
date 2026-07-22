@@ -1,305 +1,226 @@
-"""
-API Integration Tests for Backup & Recovery (Extended) module.
+"""Governed API v2 endpoint and security contracts."""
 
-Tests all DRF ViewSet endpoints:
-- CRUD operations
-- Authentication/authorization
-- Tenant isolation
-- Custom actions
-"""
+from __future__ import annotations
+
+import uuid
+
 import pytest
-from django.contrib.auth import get_user_model
 from rest_framework import status
-from rest_framework.test import APIClient
 
-from src.modules.backup_recovery.models import BackupArchive, BackupJob, BackupRetentionPolicy, BackupSchedule
-from src.core.auth_utils import get_user_tenant_id
+from src.core.access.decision import AccessDecision, AccessDecisionPipeline, AccessReasonCode
+from src.core.testing.factories import authenticated_api_client
 
-User = get_user_model()
+from ..factories import completed_job_with_archive_factory, job_factory, storage_target_factory
+from ..models import BackupJob
 
+pytest_plugins = ["src.core.testing.factories"]
+pytestmark = pytest.mark.django_db
 
-@pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
-
-
-@pytest.fixture
-def tenant_user(db):
-    """Create a test user with tenant."""
-    from src.core.user_models import UserProfile
-    from src.core.licensing.models import Organization
-    import uuid
-
-    # Create a valid Organization for the tenant
-    org = Organization.objects.create(name="Test Organization")
-    tenant_id = str(org.id)
-
-    user = User.objects.create_user(
-        username="testuser",
-        email="test@example.com",
-        password="testpass123",
-    )
-    profile = UserProfile.objects.get(user=user)
-    profile.tenant_id = tenant_id
-    profile.tenant_role = "tenant_admin"
-    profile.save()
-
-    return User.objects.get(pk=user.pk)
-
-
-@pytest.fixture
-def authenticated_client(api_client, tenant_user):
-    """Create authenticated API client."""
-    api_client.force_authenticate(user=tenant_user)
-    return api_client
+PREFIX = "/api/v2/backup-recovery"
 
 
 @pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
-    settings.SARAISE_MODE = "development"
+def allow_access(monkeypatch):
+    def decide(self, tenant_id, identity, required_permission, **kwargs):
+        del self, identity, required_permission, kwargs
+        return AccessDecision(True, AccessReasonCode.ALLOW, "allowed", tenant_id=uuid.UUID(str(tenant_id)))
+
+    monkeypatch.setattr(AccessDecisionPipeline, "decide", decide)
 
 
-@pytest.mark.django_db
-class TestBackupJobViewSet:
-    """Test BackupJobViewSet CRUD operations."""
+def assert_v2(response, expected_status=200):
+    assert response.status_code == expected_status, response.content
+    body = response.json()
+    assert set(body) == {"data", "meta"}
+    assert body["meta"]["correlation_id"]
+    return body
 
-    def test_list_backup_jobs(self, authenticated_client, tenant_user):
-        """Test listing backup jobs for authenticated user."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        # Create test backup jobs
-        BackupJob.objects.create(
-            tenant_id=tenant_id,
-            backup_type="full",
-            created_by=str(tenant_user.id),
+
+def test_session_authentication_and_csrf(tenant_a_user):
+    anonymous = authenticated_api_client(tenant_a_user, enforce_csrf_checks=True)
+    anonymous.credentials()
+    response = anonymous.post(f"{PREFIX}/storage-targets/", {}, format="json")
+    assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_jobs_endpoints_pagination_filters_commands_and_no_public_worker_actions(
+    authenticated_tenant_a_client, tenant_a, tmp_path
+):
+    target = storage_target_factory(tenant_a.id, locator_prefix_ref=str(tmp_path), is_default=True)
+    payload = {
+        "backup_type": "full",
+        "scope_type": "files",
+        "scope_ref": str(tmp_path),
+        "idempotency_key": "api-job",
+        "storage_target_id": str(target.id),
+        "description": "API backup",
+    }
+    created = assert_v2(authenticated_tenant_a_client.post(f"{PREFIX}/jobs/", payload, format="json"), 202)["data"]
+    assert created["status"] == "pending" and created["async_job_id"]
+    listed = assert_v2(
+        authenticated_tenant_a_client.get(f"{PREFIX}/jobs/?status=pending&page_size=100&ordering=-requested_at")
+    )["data"]
+    assert [row["id"] for row in listed] == [created["job_id"]]
+    detail = assert_v2(authenticated_tenant_a_client.get(f"{PREFIX}/jobs/{created['job_id']}/"))["data"]
+    assert detail["id"] == created["job_id"] and detail["allowed_commands"]["cancel"]["allowed"]
+    updated = assert_v2(
+        authenticated_tenant_a_client.patch(
+            f"{PREFIX}/jobs/{created['job_id']}/", {"description": "updated"}, format="json"
         )
-        BackupJob.objects.create(
-            tenant_id=tenant_id,
-            backup_type="incremental",
-            created_by=str(tenant_user.id),
+    )["data"]
+    assert updated["description"] == "updated"
+    cancelled = assert_v2(
+        authenticated_tenant_a_client.post(
+            f"{PREFIX}/jobs/{created['job_id']}/cancel/", {"transition_key": "api-cancel"}, format="json"
         )
+    )["data"]
+    assert cancelled["status"] == "cancelled"
+    retried = assert_v2(
+        authenticated_tenant_a_client.post(
+            f"{PREFIX}/jobs/{created['job_id']}/retry/", {"idempotency_key": "api-retry"}, format="json"
+        ),
+        202,
+    )["data"]
+    retried_detail = assert_v2(authenticated_tenant_a_client.get(f"{PREFIX}/jobs/{retried['job_id']}/"))["data"]
+    assert retried_detail["retry_of"] == created["job_id"]
+    assert (
+        authenticated_tenant_a_client.post(
+            f"{PREFIX}/jobs/{created['job_id']}/complete/", {}, format="json"
+        ).status_code
+        == 404
+    )
+    assert (
+        authenticated_tenant_a_client.post(f"{PREFIX}/jobs/{created['job_id']}/fail/", {}, format="json").status_code
+        == 404
+    )
 
-        response = authenticated_client.get("/api/v1/backup-recovery/jobs/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        assert len(data) == 2
 
-    def test_create_backup_job(self, authenticated_client, tenant_user):
-        """Test creating a backup job."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        data = {
-            "backup_type": "full",
-            "description": "Test backup",
-        }
+def test_schedule_policy_and_storage_target_crud_actions(authenticated_tenant_a_client, tenant_a, tmp_path):
+    target_payload = {
+        "name": "Local",
+        "adapter_key": "local-filesystem",
+        "locator_prefix_ref": str(tmp_path),
+        "configuration_ref": "local",
+        "is_default": True,
+    }
+    target = assert_v2(
+        authenticated_tenant_a_client.post(f"{PREFIX}/storage-targets/", target_payload, format="json"), 201
+    )["data"]
+    assert assert_v2(
+        authenticated_tenant_a_client.post(f"{PREFIX}/storage-targets/{target['id']}/probe/", {}, format="json")
+    )["data"]["healthy"]
+    assert_v2(
+        authenticated_tenant_a_client.post(f"{PREFIX}/storage-targets/{target['id']}/deactivate/", {}, format="json")
+    )
+    assert_v2(
+        authenticated_tenant_a_client.post(f"{PREFIX}/storage-targets/{target['id']}/activate/", {}, format="json")
+    )
+    assert_v2(
+        authenticated_tenant_a_client.post(f"{PREFIX}/storage-targets/{target['id']}/set-default/", {}, format="json")
+    )
 
-        response = authenticated_client.post(
-            "/api/v1/backup-recovery/jobs/",
-            data,
-            format="json"
+    policy = assert_v2(
+        authenticated_tenant_a_client.post(
+            f"{PREFIX}/retention-policies/",
+            {"name": "Thirty days", "retention_days": 30, "archive_after_days": 7},
+            format="json",
+        ),
+        201,
+    )["data"]
+    preview = assert_v2(authenticated_tenant_a_client.get(f"{PREFIX}/retention-policies/{policy['id']}/preview/"))[
+        "data"
+    ]
+    assert preview["expires_at"]
+    assert_v2(
+        authenticated_tenant_a_client.post(f"{PREFIX}/retention-policies/{policy['id']}/deactivate/", {}, format="json")
+    )
+    assert_v2(
+        authenticated_tenant_a_client.post(f"{PREFIX}/retention-policies/{policy['id']}/activate/", {}, format="json")
+    )
+
+    schedule_payload = {
+        "name": "Daily",
+        "scope_type": "tenant",
+        "scope_ref": str(tenant_a.id),
+        "backup_type": "full",
+        "frequency": "daily",
+        "schedule_time": "02:00:00",
+        "timezone": "UTC",
+        "storage_target_id": target["id"],
+        "retention_policy_id": policy["id"],
+    }
+    schedule = assert_v2(
+        authenticated_tenant_a_client.post(f"{PREFIX}/schedules/", schedule_payload, format="json"), 201
+    )["data"]
+    assert_v2(
+        authenticated_tenant_a_client.patch(
+            f"{PREFIX}/schedules/{schedule['id']}/", {"description": "updated"}, format="json"
         )
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data["backup_type"] == "full"
-        assert response.data["tenant_id"] == tenant_id
+    )
+    assert_v2(
+        authenticated_tenant_a_client.post(
+            f"{PREFIX}/schedules/{schedule['id']}/run-now/", {"idempotency_key": "run-now"}, format="json"
+        ),
+        202,
+    )
+    assert_v2(authenticated_tenant_a_client.post(f"{PREFIX}/schedules/{schedule['id']}/deactivate/", {}, format="json"))
 
-    def test_get_backup_job_detail(self, authenticated_client, tenant_user):
-        """Test getting backup job detail."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        job = BackupJob.objects.create(
-            tenant_id=tenant_id,
-            backup_type="full",
-            created_by=str(tenant_user.id),
+
+def test_archive_and_verification_are_read_only_and_isolated(authenticated_tenant_a_client, tenant_a):
+    _, archive = completed_job_with_archive_factory(tenant_a.id)
+    detail = assert_v2(authenticated_tenant_a_client.get(f"{PREFIX}/archives/{archive.id}/"))["data"]
+    assert detail["artifact_locator_ref"] == archive.artifact_locator_ref
+    listed = assert_v2(authenticated_tenant_a_client.get(f"{PREFIX}/archives/"))["data"]
+    assert listed[0]["artifact_locator_ref"].startswith("***")
+    verification = assert_v2(
+        authenticated_tenant_a_client.post(
+            f"{PREFIX}/archives/{archive.id}/verify/", {"idempotency_key": "api-verify"}, format="json"
+        ),
+        202,
+    )["data"]
+    assert (
+        assert_v2(authenticated_tenant_a_client.get(f"{PREFIX}/verifications/{verification['id']}/"))["data"]["status"]
+        == "pending"
+    )
+    cancelled = assert_v2(
+        authenticated_tenant_a_client.post(
+            f"{PREFIX}/verifications/{verification['id']}/cancel/",
+            {"transition_key": "api-verify-cancel"},
+            format="json",
         )
-
-        response = authenticated_client.get(f"/api/v1/backup-recovery/jobs/{job.id}/")
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["id"] == job.id
-        assert response.data["backup_type"] == "full"
-
-    def test_start_backup_job(self, authenticated_client, tenant_user):
-        """Test starting a backup job."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        job = BackupJob.objects.create(
-            tenant_id=tenant_id,
-            backup_type="full",
-            created_by=str(tenant_user.id),
-        )
-
-        response = authenticated_client.post(f"/api/v1/backup-recovery/jobs/{job.id}/start/")
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["status"] == "running"
-
-    def test_complete_backup_job(self, authenticated_client, tenant_user):
-        """Test completing a backup job."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        job = BackupJob.objects.create(
-            tenant_id=tenant_id,
-            backup_type="full",
-            created_by=str(tenant_user.id),
-        )
-        # Start the job first
-        authenticated_client.post(f"/api/v1/backup-recovery/jobs/{job.id}/start/")
-
-        data = {
-            "backup_size_bytes": 1024000,
-            "storage_location": "s3://bucket/backup-123",
-        }
-        response = authenticated_client.post(
-            f"/api/v1/backup-recovery/jobs/{job.id}/complete/",
-            data,
-            format="json"
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["status"] == "completed"
-        assert response.data["backup_size_bytes"] == 1024000
+    )["data"]
+    assert cancelled["status"] == "cancelled"
+    assert authenticated_tenant_a_client.delete(f"{PREFIX}/archives/{archive.id}/").status_code == 405
 
 
-@pytest.mark.django_db
-class TestBackupScheduleViewSet:
-    """Test BackupScheduleViewSet CRUD operations."""
-
-    def test_list_backup_schedules(self, authenticated_client, tenant_user):
-        """Test listing backup schedules for authenticated user."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        BackupSchedule.objects.create(
-            tenant_id=tenant_id,
-            frequency="daily",
-            retention_days=30,
-            created_by=str(tenant_user.id),
-        )
-
-        response = authenticated_client.get("/api/v1/backup-recovery/schedules/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        assert len(data) == 1
-
-    def test_create_backup_schedule(self, authenticated_client, tenant_user):
-        """Test creating a backup schedule."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        data = {
-            "frequency": "daily",
-            "retention_days": 30,
-            "backup_type": "full",
-            "description": "Daily full backup",
-        }
-
-        response = authenticated_client.post(
-            "/api/v1/backup-recovery/schedules/",
-            data,
-            format="json"
-        )
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data["frequency"] == "daily"
-        assert response.data["tenant_id"] == tenant_id
-
-    def test_activate_schedule(self, authenticated_client, tenant_user):
-        """Test activating a schedule."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        schedule = BackupSchedule.objects.create(
-            tenant_id=tenant_id,
-            frequency="daily",
-            retention_days=30,
-            is_active=False,
-            created_by=str(tenant_user.id),
-        )
-
-        response = authenticated_client.post(f"/api/v1/backup-recovery/schedules/{schedule.id}/activate/")
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["is_active"] is True
+def test_spoofed_system_fields_are_rejected(authenticated_tenant_a_client, tenant_a, tmp_path):
+    target = storage_target_factory(tenant_a.id, locator_prefix_ref=str(tmp_path), is_default=True)
+    payload = {
+        "backup_type": "full",
+        "scope_type": "files",
+        "scope_ref": str(tmp_path),
+        "idempotency_key": "spoof",
+        "storage_target_id": str(target.id),
+        "tenant_id": str(uuid.uuid4()),
+        "status": "completed",
+        "checksum_digest": "0" * 64,
+    }
+    response = authenticated_tenant_a_client.post(f"{PREFIX}/jobs/", payload, format="json")
+    assert response.status_code == 400
+    assert not BackupJob.objects.filter(tenant_id=tenant_a.id, idempotency_key="spoof").exists()
 
 
-@pytest.mark.django_db
-class TestBackupRetentionPolicyViewSet:
-    """Test BackupRetentionPolicyViewSet CRUD operations."""
+def test_unknown_action_and_permission_denial_fail_closed(authenticated_tenant_a_client, tenant_a, monkeypatch):
+    job = job_factory(tenant_a.id)
+    assert authenticated_tenant_a_client.post(f"{PREFIX}/jobs/{job.id}/unknown/", {}, format="json").status_code == 404
 
-    def test_list_retention_policies(self, authenticated_client, tenant_user):
-        """Test listing retention policies for authenticated user."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        BackupRetentionPolicy.objects.create(
-            tenant_id=tenant_id,
-            policy_name="Standard Policy",
-            retention_days=30,
-            archive_after_days=15,
-            created_by=str(tenant_user.id),
-        )
+    def deny(self, tenant_id, identity, required_permission, **kwargs):
+        del self, tenant_id, identity, required_permission, kwargs
+        return AccessDecision(False, AccessReasonCode.PERMISSION_DENIED, "denied")
 
-        response = authenticated_client.get("/api/v1/backup-recovery/retention-policies/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        assert len(data) == 1
-
-    def test_create_retention_policy(self, authenticated_client, tenant_user):
-        """Test creating a retention policy."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        data = {
-            "policy_name": "Standard Policy",
-            "retention_days": 30,
-            "archive_after_days": 15,
-            "description": "Standard retention policy",
-        }
-
-        response = authenticated_client.post(
-            "/api/v1/backup-recovery/retention-policies/",
-            data,
-            format="json"
-        )
-        assert response.status_code == status.HTTP_201_CREATED
-        assert response.data["policy_name"] == "Standard Policy"
-        assert response.data["tenant_id"] == tenant_id
-
-
-@pytest.mark.django_db
-class TestBackupArchiveViewSet:
-    """Test BackupArchiveViewSet read operations."""
-
-    def test_list_backup_archives(self, authenticated_client, tenant_user):
-        """Test listing backup archives for authenticated user."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        job = BackupJob.objects.create(
-            tenant_id=tenant_id,
-            backup_type="full",
-            created_by=str(tenant_user.id),
-        )
-        BackupArchive.objects.create(
-            tenant_id=tenant_id,
-            backup_job=job,
-            archive_location="s3://bucket/archive-123",
-            created_by=str(tenant_user.id),
-        )
-
-        response = authenticated_client.get("/api/v1/backup-recovery/archives/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        assert len(data) == 1
-
-    def test_get_backup_archive_detail(self, authenticated_client, tenant_user):
-        """Test getting backup archive detail."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        job = BackupJob.objects.create(
-            tenant_id=tenant_id,
-            backup_type="full",
-            created_by=str(tenant_user.id),
-        )
-        archive = BackupArchive.objects.create(
-            tenant_id=tenant_id,
-            backup_job=job,
-            archive_location="s3://bucket/archive-123",
-            created_by=str(tenant_user.id),
-        )
-
-        response = authenticated_client.get(f"/api/v1/backup-recovery/archives/{archive.id}/")
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["id"] == archive.id
-        assert response.data["archive_location"] == "s3://bucket/archive-123"
+    monkeypatch.setattr(AccessDecisionPipeline, "decide", deny)
+    response = authenticated_tenant_a_client.get(f"{PREFIX}/jobs/")
+    assert response.status_code == 403
+    body = response.json()
+    assert body["error"]["code"]
+    assert body["meta"]["correlation_id"]

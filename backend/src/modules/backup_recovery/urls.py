@@ -1,7 +1,6 @@
-"""
-URL routing for Backup & Recovery (Extended) module.
-"""
-from django.urls import path, include
+"""Canonical API v2 routes for backup recovery."""
+
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .api import (
@@ -9,18 +8,20 @@ from .api import (
     BackupJobViewSet,
     BackupRetentionPolicyViewSet,
     BackupScheduleViewSet,
+    BackupStorageTargetViewSet,
+    BackupVerificationViewSet,
+    ModuleHealthViewSet,
 )
-from .health import health_check
 
-# Create router and register ViewSets
+app_name = "backup_recovery"
+
 router = DefaultRouter()
-router.register(r'jobs', BackupJobViewSet, basename='backup-job')
-router.register(r'schedules', BackupScheduleViewSet, basename='backup-schedule')
-router.register(r'retention-policies', BackupRetentionPolicyViewSet, basename='retention-policy')
-router.register(r'archives', BackupArchiveViewSet, basename='backup-archive')
+router.register("jobs", BackupJobViewSet, basename="job")
+router.register("schedules", BackupScheduleViewSet, basename="schedule")
+router.register("retention-policies", BackupRetentionPolicyViewSet, basename="retention-policy")
+router.register("storage-targets", BackupStorageTargetViewSet, basename="storage-target")
+router.register("archives", BackupArchiveViewSet, basename="archive")
+router.register("verifications", BackupVerificationViewSet, basename="verification")
+router.register("health", ModuleHealthViewSet, basename="health")
 
-# URL patterns
-urlpatterns = [
-    path('', include(router.urls)),
-    path('health/', health_check, name='health_check'),
-]
+urlpatterns = [path("", include(router.urls))]

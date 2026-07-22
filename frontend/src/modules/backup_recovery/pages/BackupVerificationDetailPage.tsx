@@ -1,0 +1,1 @@
+export { BackupVerificationDetailPage } from "./ResourceDetailPages";

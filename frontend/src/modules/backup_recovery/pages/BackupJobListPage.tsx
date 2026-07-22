@@ -1,229 +1,189 @@
-/**
- * Backup Job List Page
- * 
- * Displays all backup jobs with filtering, search, and CRUD operations.
- */
-import { useState, useDeferredValue } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
-import { backupRecoveryService } from '../services/backup-recovery-service';
-import { Plus, Search, HardDrive } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
-import { StatusBadge } from '@/components/ui/StatusBadge';
-import { TableSkeleton, EmptyState, ErrorState } from '@/components/ui';
+import { useQuery } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
+import { useAuthStore } from "@/stores/auth-store";
+import type { BackupJobFilters, BackupJobStatus, BackupType } from "../contracts";
+import {
+  EmptyPanel,
+  formatBytes,
+  formatDate,
+  PageHeader,
+  PageSkeleton,
+  Pagination,
+  ProblemState,
+  StaleIndicator,
+  StatusPill,
+  titleCase,
+} from "../components/BackupRecoveryUI";
+import {
+  backupRecoveryQueryKeys,
+  backupRecoveryService,
+} from "../services/backup-recovery-service";
+
+function filtersFrom(params: URLSearchParams): BackupJobFilters {
+  return {
+    page: Number(params.get("page") ?? 1),
+    page_size: 25,
+    search: params.get("search") || undefined,
+    status: (params.get("status") as BackupJobStatus | null) ?? undefined,
+    backup_type: (params.get("backup_type") as BackupType | null) ?? undefined,
+    ordering: (params.get("ordering") as BackupJobFilters["ordering"]) ?? "-requested_at",
+  };
+}
 
 export const BackupJobListPage = () => {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const [searchTerm, setSearchTerm] = useState('');
-  const deferredSearchTerm = useDeferredValue(searchTerm);
-  const [filterType, setFilterType] = useState<string>('all');
-  const [filterStatus, setFilterStatus] = useState<string>('all');
-
-  const { data: jobs, isLoading, error, refetch } = useQuery({
-    queryKey: ['backup-jobs', deferredSearchTerm],
-    queryFn: backupRecoveryService.listBackupJobs,
+  const tenantId = useAuthStore((state) => state.user?.tenant_id ?? null);
+  const [params, setParams] = useSearchParams();
+  const filters = filtersFrom(params);
+  const query = useQuery({
+    queryKey: backupRecoveryQueryKeys.jobs(tenantId, filters),
+    queryFn: () => backupRecoveryService.listBackupJobs(filters),
   });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => backupRecoveryService.deleteBackupJob(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['backup-jobs'] });
-      toast.success('Backup job deleted successfully');
-    },
-    onError: () => {
-      toast.error('Failed to delete backup job. Please try again.');
-    },
-  });
-
-  const filteredJobs = jobs?.filter((job) => {
-    const matchesSearch = deferredSearchTerm === '' || 
-      job.description?.toLowerCase().includes(deferredSearchTerm.toLowerCase());
-    
-    const matchesType = filterType === 'all' || job.backup_type === filterType;
-    const matchesStatus = filterStatus === 'all' || job.status === filterStatus;
-
-    return matchesSearch && matchesType && matchesStatus;
-  });
-
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this backup job?')) {
-      await deleteMutation.mutateAsync(id);
-    }
+  const update = (key: string, value: string) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    if (key !== "page") next.set("page", "1");
+    setParams(next);
   };
-
-  if (isLoading) {
+  const filtered = Boolean(filters.search || filters.status || filters.backup_type);
+  if (query.isLoading) return <PageSkeleton table />;
+  if (query.error)
     return (
-      <div className="p-8">
-        <TableSkeleton rows={5} columns={6} />
-      </div>
+      <main className="p-4 sm:p-8">
+        <ProblemState error={query.error} onRetry={() => void query.refetch()} />
+      </main>
     );
-  }
-
-  if (error) {
-    return (
-      <div className="p-8">
-        <ErrorState
-          message="Failed to load backup jobs. Please check your connection and try again."
-          onRetry={() => {
-            void refetch();
-          }}
-        />
-      </div>
-    );
-  }
-
-  if (!filteredJobs || filteredJobs.length === 0) {
-    if (jobs?.length === 0) {
-      return (
-        <div className="p-8">
-          <div className="mb-6 flex items-center justify-between">
-            <h1 className="text-3xl font-bold text-foreground">Backup Jobs</h1>
-            <Button onClick={() => navigate('/backup-recovery/jobs/create')}>
-              <Plus className="w-4 h-4 mr-2" />
-              Create Backup Job
-            </Button>
-          </div>
-          <EmptyState
-            icon={HardDrive}
-            title="No backup jobs yet"
-            description="Create your first backup job to protect your data."
-            action={{
-              label: "Create Backup Job",
-              onClick: () => navigate('/backup-recovery/jobs/create')
-            }}
-          />
-        </div>
-      );
-    }
-  }
-
+  const result = query.data;
   return (
-    <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-foreground">Backup Jobs</h1>
-        <Button onClick={() => navigate('/backup-recovery/jobs/create')}>
-          <Plus className="w-4 h-4" />
-          Create Backup Job
-        </Button>
+    <main className="space-y-6 p-4 sm:p-8">
+      <PageHeader
+        title="Backup jobs"
+        description="Provider-backed capture work, state transitions, and evidence—never inferred success."
+        actions={
+          <Button onClick={() => navigate("/backup-recovery/jobs/new")}>
+            <Plus className="mr-2 h-4 w-4" />
+            Request backup
+          </Button>
+        }
+      />
+      <div className="flex justify-end">
+        <StaleIndicator fetching={query.isFetching} />
       </div>
-
-      {/* Filters */}
-      <div className="mb-6 flex gap-4">
-        <div className="flex-1 relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-5 h-5" />
-          <Input
-            type="text"
-            placeholder="Search backup jobs..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
-        </div>
-
-        <Select
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
-          options={[
-            { value: 'all', label: 'All Types' },
-            { value: 'full', label: 'Full' },
-            { value: 'incremental', label: 'Incremental' },
-            { value: 'differential', label: 'Differential' },
-          ]}
+      <Card className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Input
+          aria-label="Search backup jobs"
+          placeholder="Description or exact job ID"
+          value={filters.search ?? ""}
+          onChange={(event) => update("search", event.target.value)}
         />
-
-        <Select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          options={[
-            { value: 'all', label: 'All Status' },
-            { value: 'pending', label: 'Pending' },
-            { value: 'running', label: 'Running' },
-            { value: 'completed', label: 'Completed' },
-            { value: 'failed', label: 'Failed' },
-          ]}
-        />
-      </div>
-
-      {/* Jobs Table */}
-      <Card className="overflow-hidden">
-        <table className="min-w-full divide-y divide-border">
-          <thead className="bg-muted">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Type
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Status
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Size
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Start Time
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                End Time
-              </th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {filteredJobs?.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground">
-                  No backup jobs found matching your filters
-                </td>
-              </tr>
-            ) : (
-              filteredJobs?.map((job) => (
-                <tr key={job.id} className="hover:bg-muted/50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium capitalize">{job.backup_type}</div>
-                    {job.description && (
-                      <div className="text-sm text-muted-foreground">{job.description}</div>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <StatusBadge status={job.status === 'completed' ? 'active' : job.status === 'failed' ? 'error' : 'inactive'} />
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                    {job.backup_size_bytes ? `${(job.backup_size_bytes / 1024 / 1024).toFixed(2)} MB` : 'N/A'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                    {job.start_time ? new Date(job.start_time).toLocaleString() : 'N/A'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                    {job.end_time ? new Date(job.end_time).toLocaleString() : 'N/A'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button
-                      onClick={() => navigate(`/backup-recovery/jobs/${job.id}`)}
-                      className="text-primary hover:opacity-80 mr-4"
-                    >
-                      View
-                    </button>
-                    <button
-                      onClick={() => {
-                        void handleDelete(job.id);
-                      }}
-                      className="text-destructive hover:opacity-80"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+        <select
+          aria-label="Status filter"
+          className="h-10 rounded-md border bg-background px-3"
+          value={filters.status ?? ""}
+          onChange={(event) => update("status", event.target.value)}
+        >
+          <option value="">All states</option>
+          {["pending", "running", "completed", "failed", "cancelled"].map((value) => (
+            <option key={value} value={value}>
+              {titleCase(value)}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Backup type filter"
+          className="h-10 rounded-md border bg-background px-3"
+          value={filters.backup_type ?? ""}
+          onChange={(event) => update("backup_type", event.target.value)}
+        >
+          <option value="">All types</option>
+          {["full", "incremental", "differential"].map((value) => (
+            <option key={value} value={value}>
+              {titleCase(value)}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Sort jobs"
+          className="h-10 rounded-md border bg-background px-3"
+          value={filters.ordering}
+          onChange={(event) => update("ordering", event.target.value)}
+        >
+          <option value="-requested_at">Newest requested</option>
+          <option value="requested_at">Oldest requested</option>
+          <option value="-completed_at">Recently completed</option>
+          <option value="-size_bytes">Largest</option>
+        </select>
       </Card>
-    </div>
+      {!result?.items.length ? (
+        <EmptyPanel
+          filtered={filtered}
+          onReset={() => setParams({})}
+          title={filtered ? "No jobs match these filters" : "No backups requested yet"}
+          description={
+            filtered
+              ? "Reset the governed server filters to see the full job history."
+              : "Request a full backup to establish the first auditable baseline."
+          }
+          action={
+            !filtered
+              ? {
+                  label: "Request first backup",
+                  onClick: () => navigate("/backup-recovery/jobs/new"),
+                }
+              : undefined
+          }
+        />
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="bg-muted text-left">
+                <tr>
+                  {["Requested", "State", "Type", "Scope", "Captured", "Description"].map(
+                    (heading) => (
+                      <th key={heading} className="px-4 py-3 font-medium">
+                        {heading}
+                      </th>
+                    )
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {result.items.map((job) => (
+                  <tr key={job.id} className="border-t hover:bg-muted/50">
+                    <td className="px-4 py-3">
+                      <button
+                        className="font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => navigate(`/backup-recovery/jobs/${job.id}`)}
+                      >
+                        {formatDate(job.requested_at)}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusPill value={job.status} />
+                      {job.error_code && (
+                        <p className="mt-1 font-mono text-xs text-destructive">{job.error_code}</p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">{titleCase(job.backup_type)}</td>
+                    <td className="px-4 py-3">
+                      {titleCase(job.scope_type)} · {job.scope_ref}
+                    </td>
+                    <td className="px-4 py-3">{formatBytes(job.size_bytes)}</td>
+                    <td className="max-w-xs truncate px-4 py-3">{job.description || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination meta={result.pagination} onPage={(page) => update("page", String(page))} />
+        </Card>
+      )}
+    </main>
   );
 };

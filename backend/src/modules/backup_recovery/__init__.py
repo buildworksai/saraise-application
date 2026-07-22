@@ -1,4 +1,3 @@
-"""Backup & Recovery (Extended) Module.
+"""Backup capture, scheduling, retention, and immutable artifact catalog."""
 
-Extended backup capabilities: incremental backups, retention policies, archive management.
-"""
+default_app_config = "src.modules.backup_recovery.apps.BackupRecoveryConfig"
