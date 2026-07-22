@@ -100,30 +100,6 @@ const CreateDataMigrationResourcePage = lazy(() =>
   )
 );
 
-const MetadataModelingListPage = lazy(() =>
-  import("./modules/metadata_modeling/pages/MetadataModelingListPage").then(
-    (m) => ({
-      default: m.MetadataModelingListPage,
-    })
-  )
-);
-
-const MetadataModelingDetailPage = lazy(() =>
-  import("./modules/metadata_modeling/pages/MetadataModelingDetailPage").then(
-    (m) => ({
-      default: m.MetadataModelingDetailPage,
-    })
-  )
-);
-
-const CreateMetadataModelingResourcePage = lazy(() =>
-  import(
-    "./modules/metadata_modeling/pages/CreateMetadataModelingResourcePage"
-  ).then((m) => ({
-    default: m.CreateMetadataModelingResourcePage,
-  }))
-);
-
 const BillingSubscriptionsListPage = lazy(() =>
   import(
     "./modules/billing_subscriptions/pages/BillingSubscriptionsListPage"
@@ -531,12 +507,6 @@ const LicenseSettingsPage = lazy(() =>
   )
 );
 
-const SchemaEditorPage = lazy(() =>
-  import("./modules/metadata_modeling/pages/SchemaEditorPage").then((m) => ({
-    default: m.SchemaEditorPage,
-  }))
-);
-
 function LoadingFallback() {
   return (
     <div className="min-h-screen flex items-center justify-center">
@@ -672,18 +642,6 @@ function AnimatedRoutes() {
               }
             />
           )}
-
-          {/* Metadata Modeling Routes */}
-          <Route
-            path="/metadata"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <SchemaEditorPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
 
           {/* Workflow Automation Routes */}
           <Route
@@ -1213,38 +1171,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <DataMigrationDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* MetadataModeling routes */}
-          <Route
-            path="/metadata-modeling"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <MetadataModelingListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/metadata-modeling/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateMetadataModelingResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/metadata-modeling/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <MetadataModelingDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

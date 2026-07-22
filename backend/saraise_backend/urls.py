@@ -45,6 +45,9 @@ urlpatterns = [
     path("api/v2/document-intelligence/", include("src.modules.document_intelligence.urls")),
     path("api/v2/dms/", include("src.modules.dms.urls")),
     path("api/v1/data-migration/", include("src.modules.data_migration.urls")),
+    path("api/v2/metadata-modeling/", include("src.modules.metadata_modeling.urls")),
+    # Keep v1 after v2 so un-namespaced reverse() calls from deployed legacy
+    # integrations resolve to the applied compatibility route.
     path("api/v1/metadata-modeling/", include("src.modules.metadata_modeling.urls")),
     path("api/v2/blockchain-traceability/", include("src.modules.blockchain_traceability.urls")),
     path("api/v1/billing-subscriptions/", include("src.modules.billing_subscriptions.urls")),
