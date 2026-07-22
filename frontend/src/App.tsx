@@ -394,23 +394,6 @@ const CreateBankAccountPage = lazy(() =>
   }))
 );
 
-// Budget Management
-const BudgetListPage = lazy(() =>
-  import("./modules/budget_management/pages/BudgetListPage").then((m) => ({
-    default: m.BudgetListPage,
-  }))
-);
-const BudgetDetailPage = lazy(() =>
-  import("./modules/budget_management/pages/BudgetDetailPage").then((m) => ({
-    default: m.BudgetDetailPage,
-  }))
-);
-const CreateBudgetPage = lazy(() =>
-  import("./modules/budget_management/pages/CreateBudgetPage").then((m) => ({
-    default: m.CreateBudgetPage,
-  }))
-);
-
 // Asset Management
 const AssetListPage = lazy(() =>
   import("./modules/asset_management/pages/AssetListPage").then((m) => ({
@@ -1101,38 +1084,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <BankAccountDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Budget Management */}
-          <Route
-            path="/budget-management/budgets"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <BudgetListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/budget-management/budgets/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateBudgetPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/budget-management/budgets/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <BudgetDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

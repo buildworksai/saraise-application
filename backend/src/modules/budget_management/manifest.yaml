@@ -1,31 +1,81 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: budget_management
-version: 1.0.0
+version: 2.0.0
 category: core_business
 display_name: Budget Management
-description: |
-  Budget planning, allocation, tracking, and variance analysis.
+description: >-
+  Tenant-safe budget planning, allocations, governed approvals, availability
+  control, actual-versus-budget analysis, and durable variance alerting.
+api_prefix: /api/v2/budget-management/
+module_key: budget_management
+entitlement: module.budget_management
+modes:
+  - development
+  - self-hosted
+  - saas
 
-# Dependencies
 dependencies:
   - name: accounting_finance
     version: ">=1.0.0"
     required: false
-    purpose: Account mapping for budget lines
+    purpose: Account validation and evidenced actual synchronization
+  - name: workflow_management
+    version: ">=1.0.0"
+    required: false
+    purpose: Approval policy and approver assignments
+  - name: notification_service
+    version: ">=1.0.0"
+    required: false
+    purpose: Durable budget and variance notifications
 
-# Permissions
 permissions:
   - budget.budget:create
   - budget.budget:read
   - budget.budget:update
+  - budget.budget:delete
+  - budget.budget:submit
+  - budget.budget:approve
+  - budget.budget:close
   - budget.budget_line:create
   - budget.budget_line:read
+  - budget.budget_line:update
+  - budget.budget_line:delete
+  - budget.availability:read
+  - budget.actuals:sync
   - budget.variance:read
+  - budget.variance:generate
+  - budget.variance:acknowledge
+  - budget.health:read
 
-# Health Checks
+quotas:
+  - budget_management.api_reads
+  - budget_management.api_writes
+  - budget_management.actual_sync
+  - budget_management.alert_generation
+
+durable_jobs:
+  - budget_management.sync_actuals
+  - budget_management.generate_variance_alerts
+  - budget_management.dispatch_submission_notification
+  - budget_management.dispatch_variance_alert
+
+domain_events:
+  - budget.created
+  - budget.updated
+  - budget.submitted
+  - budget.approved
+  - budget.rejected
+  - budget.revised
+  - budget.closed
+  - budget.allocations_replaced
+  - budget.actuals_synced
+  - budget.variance_alerted
+
 health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
+  - name: governed_health
+    endpoint: /api/v2/budget-management/health/
     interval: 60
+    critical_dependencies:
+      - database
+      - tenant_context
+      - rls
+      - durable_jobs

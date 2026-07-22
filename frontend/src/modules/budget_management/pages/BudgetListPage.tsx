@@ -1,153 +1,23 @@
-/**
- * Budget List Page - Budget Management
- */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
-import { Plus } from 'lucide-react';
+import { useState, type FormEvent } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { ArrowDownUp, Plus, Search } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { TableSkeleton, EmptyState, ErrorState } from '@/components/ui';
+import { Input } from '@/components/ui/Input';
+import { EmptyPanel, GovernedError, Money, PageHeader, PageSkeleton, Pagination, RefreshIndicator, StatusPill, formatDate, usePageTitle } from '../components/BudgetUI';
+import { QUERY_KEYS, ROUTES, type BudgetListFilters, type BudgetStatus, type BudgetType } from '../contracts';
 import { budgetService } from '../services/budget-service';
-import type { Budget } from '../contracts';
 
-const MODULE_PATH = '/budget-management/budgets';
-
-export const BudgetListPage = () => {
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-
-  const { data: budgets, isLoading, error, refetch } = useQuery({
-    queryKey: ['budget-budgets'],
-    queryFn: () => budgetService.listBudgets(),
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => budgetService.deleteBudget(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['budget-budgets'] });
-      toast.success('Budget deleted successfully');
-    },
-    onError: () => {
-      toast.error('Failed to delete budget. Please try again.');
-    },
-  });
-
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this budget?')) {
-      await deleteMutation.mutateAsync(id);
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="p-8">
-        <TableSkeleton rows={5} columns={5} />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="p-8">
-        <ErrorState
-          message="Failed to load budgets. Please check your connection and try again."
-          onRetry={() => void refetch()}
-        />
-      </div>
-    );
-  }
-
-  if (!budgets || budgets.length === 0) {
-    return (
-      <div className="p-8">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-3xl font-bold text-foreground">Budgets</h1>
-          <Button onClick={() => navigate(`${MODULE_PATH}/new`)}>
-            <Plus className="w-4 h-4 mr-2" />
-            Create Budget
-          </Button>
-        </div>
-        <EmptyState
-          icon={Plus}
-          title="No budgets yet"
-          description="Create your first budget to get started."
-          action={{
-            label: 'Create Budget',
-            onClick: () => navigate(`${MODULE_PATH}/new`),
-          }}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-foreground">Budgets</h1>
-        <Button onClick={() => navigate(`${MODULE_PATH}/new`)}>
-          <Plus className="w-4 h-4 mr-2" />
-          Create Budget
-        </Button>
-      </div>
-
-      <Card className="overflow-hidden">
-        <table className="min-w-full divide-y divide-border">
-          <thead className="bg-muted">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Code
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Name
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Fiscal Year
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Status
-              </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Total Budget
-              </th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {budgets.map((budget) => (
-              <tr key={budget.id} className="hover:bg-muted/50">
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                  {budget.budget_code}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm">{budget.budget_name}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm">{budget.fiscal_year}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
-                  {budget.status}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm">
-                  {budget.total_budget} {budget.currency}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                  <button
-                    onClick={() => navigate(`${MODULE_PATH}/${budget.id}`)}
-                    className="text-primary hover:opacity-80 mr-4"
-                  >
-                    View
-                  </button>
-                  <button
-                    onClick={() => void handleDelete(budget.id)}
-                    className="text-destructive hover:opacity-80"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
-    </div>
-  );
-};
+const statuses: readonly BudgetStatus[] = ['draft', 'pending_approval', 'approved', 'rejected', 'revision', 'closed'];
+const types: readonly BudgetType[] = ['operating', 'capital', 'project', 'departmental'];
+function numericParam(value: string | null, fallback: number): number { const parsed = Number(value); return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback; }
+export function BudgetListPage() {
+  usePageTitle('Budgets'); const navigate = useNavigate(); const [params, setParams] = useSearchParams(); const [search, setSearch] = useState(params.get('search') ?? '');
+  const filters: BudgetListFilters = { page: numericParam(params.get('page'), 1), page_size: 25, search: params.get('search') || undefined, fiscal_year: params.get('fiscal_year') ? Number(params.get('fiscal_year')) : undefined, budget_type: (params.get('budget_type') as BudgetType | null) ?? undefined, status: (params.get('status') as BudgetStatus | null) ?? undefined, ordering: params.get('ordering') ?? '-fiscal_year,budget_code' };
+  const query = useQuery({ queryKey: QUERY_KEYS.budgets(filters), queryFn: ({ signal }) => budgetService.listBudgets(filters, signal), placeholderData: keepPreviousData });
+  const change = (updates: Record<string, string>) => { const next = new URLSearchParams(params); Object.entries(updates).forEach(([key, value]) => value ? next.set(key, value) : next.delete(key)); setParams(next, { replace: true }); };
+  const submitSearch = (event: FormEvent) => { event.preventDefault(); change({ search: search.trim(), page: '1' }); };
+  if (query.isLoading) return <PageSkeleton rows={8}/>;
+  return <main className="space-y-6 p-4 sm:p-8"><PageHeader title="Budgets" description="Plan, reconcile, approve, and control spend against a tenant-safe fiscal baseline." actions={<Button onClick={() => navigate(ROUTES.CREATE)}><Plus className="mr-2 h-4 w-4"/>Create budget</Button>}/><section aria-label="Budget filters" className="rounded-xl border bg-card p-4"><form onSubmit={submitSearch} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><div className="flex gap-2 sm:col-span-2"><Input aria-label="Search budgets" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search code or name"/><Button type="submit" aria-label="Apply search"><Search className="h-4 w-4"/></Button></div><Input aria-label="Fiscal year" type="number" placeholder="Fiscal year" value={params.get('fiscal_year') ?? ''} onChange={(event) => change({ fiscal_year: event.target.value, page: '1' })}/><select aria-label="Budget type" className="h-10 rounded-md border bg-background px-3 text-sm" value={params.get('budget_type') ?? ''} onChange={(event) => change({ budget_type: event.target.value, page: '1' })}><option value="">All types</option>{types.map((value) => <option key={value} value={value}>{value}</option>)}</select><select aria-label="Budget status" className="h-10 rounded-md border bg-background px-3 text-sm" value={params.get('status') ?? ''} onChange={(event) => change({ status: event.target.value, page: '1' })}><option value="">All statuses</option>{statuses.map((value) => <option key={value} value={value}>{value.replaceAll('_', ' ')}</option>)}</select></form></section>{query.error ? <GovernedError error={query.error} onRetry={() => void query.refetch()}/> : query.data?.items.length === 0 ? <EmptyPanel title="No budgets match" description="Create a fiscal budget or clear filters to find an existing plan." action={<Button onClick={() => navigate(ROUTES.CREATE)}><Plus className="mr-2 h-4 w-4"/>Create first budget</Button>}/> : query.data ? <Card className="overflow-hidden"><div className="flex justify-end border-b px-4 py-2"><RefreshIndicator active={query.isFetching}/></div><div className="overflow-x-auto"><table className="min-w-[1100px] w-full text-sm"><thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground"><tr>{['Code','Name','Year','Type','Period','Status','Total','Variance','Updated'].map((label) => <th className="px-4 py-3" key={label}>{label}{label === 'Updated' ? <button aria-label="Toggle updated ordering" onClick={() => change({ ordering: filters.ordering === '-updated_at' ? 'updated_at' : '-updated_at' })}><ArrowDownUp className="ml-2 inline h-3.5 w-3.5"/></button> : null}</th>)}</tr></thead><tbody className="divide-y">{query.data.items.map((budget) => { const variance = budget.variance === undefined || budget.variance === null ? null : Number(budget.variance); return <tr key={budget.id} className="cursor-pointer hover:bg-muted/40 focus-within:bg-muted/40"><td className="px-4 py-3 font-mono font-medium"><button className="text-primary underline-offset-4 hover:underline" onClick={() => navigate(ROUTES.DETAIL(budget.id))}>{budget.budget_code}</button></td><td className="px-4 py-3 font-medium">{budget.budget_name}</td><td className="px-4 py-3">{budget.fiscal_year}</td><td className="px-4 py-3 capitalize">{budget.budget_type}</td><td className="px-4 py-3 whitespace-nowrap">{formatDate(budget.start_date)} – {formatDate(budget.end_date)}</td><td className="px-4 py-3"><StatusPill status={budget.status}/></td><td className="px-4 py-3 whitespace-nowrap"><Money value={budget.total_budget} currency={budget.currency}/></td><td className="px-4 py-3">{variance === null ? <span className="text-muted-foreground">Not synced</span> : <span className={variance >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-destructive'}>{variance >= 0 ? 'Favorable' : 'Unfavorable'} · <Money value={Math.abs(variance)} currency={budget.currency}/></span>}</td><td className="px-4 py-3 whitespace-nowrap">{formatDate(budget.updated_at)}</td></tr>; })}</tbody></table></div><Pagination value={query.data.pagination} onPage={(page) => change({ page: String(page) })}/></Card> : null}</main>;
+}

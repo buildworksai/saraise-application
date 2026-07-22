@@ -6,7 +6,7 @@
 # =============================================================================
 #
 # This module manages Budget Management functionality.
-# Status: Scaffold - Phase 8 module (NOT FOR IMPLEMENTATION UNTIL PHASE 8)
+# Status: Production implementation - governed v2 API
 
 # =============================================================================
 # CRITICAL: Read contracts.ts FIRST
@@ -15,9 +15,8 @@
 # Before modifying any file in this module, you MUST read:
 #   frontend/src/modules/budget_management/contracts.ts
 #
-# ⚠️ PHASE 8 MODULE - DO NOT IMPLEMENT YET
-# This module is documented for Phase 8 implementation only.
-# Framework must be complete (Phases 1-7) before implementation.
+# This module is active. Preserve the governed v2 API, optimistic concurrency,
+# server-derived financial values, and tenant route-registry integration.
 
 # =============================================================================
 # TYPE IMPORTS

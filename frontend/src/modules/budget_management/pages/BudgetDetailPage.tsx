@@ -1,132 +1,25 @@
-/**
- * Budget Detail Page - Budget Management
- */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, Calculator, Edit, RefreshCw, Rows3, Trash2 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, Edit, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { Input } from '@/components/ui/Input';
+import { GovernedError, Money, PageHeader, PageSkeleton, RefreshIndicator, StatusPill, formatDate, newIdempotencyKey, usePageTitle } from '../components/BudgetUI';
+import { QUERY_KEYS, ROUTES, type BudgetAvailabilityRequest, type BudgetDetail, type UUID } from '../contracts';
 import { budgetService } from '../services/budget-service';
 
-const MODULE_PATH = '/budget-management/budgets';
-
-export const BudgetDetailPage = () => {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-
-  const { data: budget, isLoading, error } = useQuery({
-    queryKey: ['budget-budget', id],
-    queryFn: () => (id ? budgetService.getBudget(id) : Promise.reject(new Error('No ID'))),
-    enabled: !!id,
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (budgetId: string) => budgetService.deleteBudget(budgetId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['budget-budgets'] });
-      toast.success('Budget deleted successfully');
-      navigate(MODULE_PATH);
-    },
-    onError: () => {
-      toast.error('Failed to delete budget. Please try again.');
-    },
-  });
-
-  const handleDelete = () => {
-    if (id && window.confirm('Are you sure you want to delete this budget?')) {
-      void deleteMutation.mutateAsync(id);
-    }
-  };
-
-  if (isLoading) {
-    return (
-      <div className="p-8">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-muted rounded w-1/4" />
-          <div className="h-64 bg-muted rounded" />
-        </div>
-      </div>
-    );
-  }
-
-  if (error || !budget) {
-    return (
-      <div className="p-8">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-foreground mb-4">Budget not found</h2>
-          <Button onClick={() => navigate(MODULE_PATH)}>Back to Budgets</Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => navigate(MODULE_PATH)}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-          <h1 className="text-3xl font-bold text-foreground">
-            {budget.budget_code} - {budget.budget_name}
-          </h1>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate(`${MODULE_PATH}/${budget.id}/edit`)}>
-            <Edit className="w-4 h-4 mr-2" />
-            Edit
-          </Button>
-          <Button variant="danger" onClick={handleDelete}>
-            <Trash2 className="w-4 h-4 mr-2" />
-            Delete
-          </Button>
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Budget Information</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Code</label>
-              <p className="text-sm font-medium">{budget.budget_code}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Name</label>
-              <p className="text-sm font-medium">{budget.budget_name}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Fiscal Year</label>
-              <p className="text-sm">{budget.fiscal_year}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Status</label>
-              <p className="text-sm">{budget.status}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Start Date</label>
-              <p className="text-sm">{new Date(budget.start_date).toLocaleDateString()}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">End Date</label>
-              <p className="text-sm">{new Date(budget.end_date).toLocaleDateString()}</p>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Total Budget</label>
-              <p className="text-sm">{budget.total_budget} {budget.currency}</p>
-            </div>
-          </div>
-          <div className="pt-4 border-t border-border text-sm text-muted-foreground">
-            <span>Created: {new Date(budget.created_at).toLocaleDateString()}</span>
-            <span className="ml-4">Updated: {new Date(budget.updated_at).toLocaleDateString()}</span>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-};
+type Command = 'delete' | 'submit' | 'approve' | 'reject' | 'revise' | 'close' | 'sync';
+export function BudgetDetailPage() {
+  const { id = '' } = useParams<{ id: UUID }>(); usePageTitle('Budget detail'); const navigate = useNavigate(); const client = useQueryClient(); const [availability, setAvailability] = useState<BudgetAvailabilityRequest>({ account_code: '', amount: '', period: new Date().toISOString().slice(0, 10), budget_id: id });
+  const query = useQuery({ queryKey: QUERY_KEYS.budget(id), queryFn: ({ signal }) => budgetService.getBudget(id, signal), enabled: Boolean(id) });
+  const command = useMutation({ mutationFn: async ({ name, budget }: { readonly name: Command; readonly budget: BudgetDetail }) => { const request = { idempotency_key: newIdempotencyKey(name) }; if (name === 'delete') { await budgetService.deleteBudget(budget.id, budget.updated_at); return null; } if (name === 'reject') { const reason = window.prompt('Rejection reason (required)'); if (!reason?.trim()) throw new Error('Rejection cancelled: a reason is required.'); return budgetService.rejectBudget(budget.id, { ...request, reason: reason.trim() }); } if (name === 'submit') return budgetService.submitBudget(budget.id, request); if (name === 'approve') return budgetService.approveBudget(budget.id, request); if (name === 'revise') return budgetService.reviseBudget(budget.id, request); if (name === 'close') return budgetService.closeBudget(budget.id, request); return budgetService.requestActualsSync(budget.id, request); }, onSuccess: (result, variables) => { void client.invalidateQueries({ queryKey: QUERY_KEYS.root }); if (variables.name === 'delete') navigate(ROUTES.BUDGETS); toast.success(variables.name === 'sync' ? 'Actual synchronization was durably queued.' : `${variables.name[0]?.toUpperCase()}${variables.name.slice(1)} completed.`); } });
+  const availabilityMutation = useMutation({ mutationFn: budgetService.checkAvailability });
+  if (query.isLoading) return <PageSkeleton rows={9}/>; if (query.error || !query.data) return <main className="p-4 sm:p-8"><GovernedError error={query.error ?? new Error('Budget not found.')} onRetry={() => void query.refetch()}/></main>;
+  const budget = query.data; const allows = (value: string) => budget.allowed_commands.includes(value); const run = (name: Command, message: string) => { if (window.confirm(message)) command.mutate({ name, budget }); };
+  return <main className="space-y-6 p-4 sm:p-8"><PageHeader title={`${budget.budget_code} · ${budget.budget_name}`} description="One controlled view of fiscal scope, allocations, lifecycle evidence, actuals, and variance." actions={<><Button variant="ghost" onClick={() => navigate(ROUTES.BUDGETS)}><ArrowLeft className="mr-2 h-4 w-4"/>Budgets</Button>{allows('update') ? <Button variant="outline" onClick={() => navigate(ROUTES.EDIT(id))}><Edit className="mr-2 h-4 w-4"/>Edit</Button> : null}{allows('replace_allocations') ? <Button variant="outline" onClick={() => navigate(ROUTES.ALLOCATIONS(id))}><Rows3 className="mr-2 h-4 w-4"/>Allocations</Button> : null}</>}/><div className="flex flex-wrap items-center gap-2"><StatusPill status={budget.status}/><RefreshIndicator active={query.isFetching}/>{allows('submit') ? <Button disabled={command.isPending} onClick={() => run('submit','Submit this budget for approval? Allocations become read-only while it is pending.')}>Submit</Button> : null}{allows('approve') ? <Button disabled={command.isPending} onClick={() => run('approve','Approve this budget at your assigned approval level?')}>Approve</Button> : null}{allows('reject') ? <Button variant="danger" disabled={command.isPending} onClick={() => run('reject','Reject this budget? You will be asked for a reason.')}>Reject</Button> : null}{allows('revise') ? <Button disabled={command.isPending} onClick={() => run('revise','Open this rejected budget for revision?')}>Revise</Button> : null}{allows('close') ? <Button variant="outline" disabled={command.isPending} onClick={() => run('close','Close this budget permanently? This lifecycle action cannot be reversed.')}>Close</Button> : null}{allows('sync_actuals') ? <Button variant="outline" disabled={command.isPending} onClick={() => run('sync','Queue an accounting actuals synchronization?')}><RefreshCw className="mr-2 h-4 w-4"/>Sync actuals</Button> : null}{allows('delete') ? <Button variant="danger" disabled={command.isPending} onClick={() => run('delete','Soft-delete this draft budget? The audit record will remain available to authorized users.')}><Trash2 className="mr-2 h-4 w-4"/>Delete</Button> : null}</div>{command.error ? <GovernedError error={command.error}/> : null}<section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4"><Metric label="Total allocated"><Money value={budget.total_budget} currency={budget.currency}/></Metric><Metric label="Ceiling">{budget.budget_ceiling ? <Money value={budget.budget_ceiling} currency={budget.currency}/> : 'No ceiling'}</Metric><Metric label="Actual">{budget.variance_summary ? <Money value={budget.variance_summary.actual} currency={budget.currency}/> : 'Not synchronized'}</Metric><Metric label="Variance">{budget.variance_summary ? <span>{budget.variance_summary.favorable ? 'Favorable' : 'Unfavorable'} · <Money value={budget.variance_summary.variance} currency={budget.currency}/></span> : 'Not available'}</Metric></section><section className="grid gap-6 xl:grid-cols-3"><Card className="xl:col-span-2"><CardHeader><CardTitle>Planning summary</CardTitle></CardHeader><CardContent><dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3"><Detail label="Fiscal year">{budget.fiscal_year}</Detail><Detail label="Type">{budget.budget_type}</Detail><Detail label="Currency">{budget.currency}</Detail><Detail label="Period">{formatDate(budget.start_date)} – {formatDate(budget.end_date)}</Detail><Detail label="Department">{budget.department_id ?? '—'}</Detail><Detail label="Project">{budget.project_id ?? '—'}</Detail><Detail label="Updated">{formatDate(budget.updated_at)}</Detail><Detail label="Submitted">{formatDate(budget.submitted_at)}</Detail><Detail label="Approved">{formatDate(budget.approved_at)}</Detail></dl></CardContent></Card><Card><CardHeader><CardTitle>Availability check</CardTitle></CardHeader><CardContent><form className="space-y-3" onSubmit={(event) => { event.preventDefault(); availabilityMutation.mutate(availability); }}><Input aria-label="Account code" required value={availability.account_code} onChange={(event) => setAvailability({ ...availability, account_code: event.target.value.toUpperCase() })} placeholder="6100"/><Input aria-label="Purchase amount" required inputMode="decimal" value={availability.amount} onChange={(event) => setAvailability({ ...availability, amount: event.target.value })} placeholder="2500.00"/><Input aria-label="Purchase period" required type="date" value={availability.period} onChange={(event) => setAvailability({ ...availability, period: event.target.value })}/><Button className="w-full" type="submit" disabled={availabilityMutation.isPending}><Calculator className="mr-2 h-4 w-4"/>Check</Button></form>{availabilityMutation.data ? <div role="status" className={`mt-4 rounded-lg border p-3 text-sm ${availabilityMutation.data.sufficient ? 'border-emerald-500/40' : 'border-destructive/40'}`}><p className="font-semibold">{availabilityMutation.data.unbudgeted ? 'Unbudgeted' : availabilityMutation.data.sufficient ? 'Sufficient' : 'Insufficient'}</p><p className="mt-1">Available: <Money value={availabilityMutation.data.available} currency={availabilityMutation.data.currency ?? budget.currency}/></p>{!availabilityMutation.data.sufficient ? <p>Deficit: <Money value={availabilityMutation.data.deficit} currency={availabilityMutation.data.currency ?? budget.currency}/></p> : null}</div> : null}{availabilityMutation.error ? <div className="mt-4"><GovernedError error={availabilityMutation.error}/></div> : null}</CardContent></Card></section><EvidenceTable title="Allocations" empty="No allocations yet." headers={['Account','Period','Budget','Committed','Actual','Variance']} rows={budget.lines.map((line) => [line.account_name ? `${line.account_code} · ${line.account_name}` : line.account_code, `${line.period_type} ${line.period_number}`, <Money value={line.budget_amount} currency={budget.currency}/>, <Money value={line.committed_amount} currency={budget.currency}/>, <Money value={line.actual_amount} currency={budget.currency}/>, <span>{Number(line.variance) >= 0 ? 'Favorable' : 'Unfavorable'} · <Money value={line.variance} currency={budget.currency}/></span>])}/><EvidenceTable title="Approval history" empty="No approval assignments have been created." headers={['Level','Approver','Status','Decision','Notes']} rows={budget.approvals.map((approval) => [approval.approval_level, approval.approver_id, approval.status, formatDate(approval.decision_at), approval.rejection_reason || approval.notes || '—'])}/><EvidenceTable title="Lifecycle transitions" empty="No lifecycle transitions yet." headers={['When','Command','From','To','Actor']} rows={budget.transitions.map((transition) => [formatDate(transition.occurred_at), transition.command, transition.from_state, transition.to_state, transition.actor_id])}/><EvidenceTable title="Variance alerts" empty="No variance alerts for this budget." headers={['Date','Type','Threshold','Consumption','Notification','Acknowledged']} rows={budget.variance_alerts.map((alert) => [formatDate(alert.alert_date), alert.alert_type.replaceAll('_',' '), `${alert.threshold_percentage}%`, <Money value={Number(alert.actual_amount) + Number(alert.committed_amount)} currency={budget.currency}/>, alert.notification_status, formatDate(alert.acknowledged_at)])}/></main>;
+}
+function Metric({ label, children }: { readonly label: string; readonly children: React.ReactNode }) { return <Card><CardContent className="p-5"><p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p><p className="mt-2 text-xl font-semibold">{children}</p></CardContent></Card>; }
+function Detail({ label, children }: { readonly label: string; readonly children: React.ReactNode }) { return <div><dt className="text-muted-foreground">{label}</dt><dd className="mt-1 font-medium break-all">{children}</dd></div>; }
+function EvidenceTable({ title, empty, headers, rows }: { readonly title: string; readonly empty: string; readonly headers: readonly string[]; readonly rows: readonly (readonly React.ReactNode[])[] }) { return <Card><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent className="overflow-x-auto">{rows.length === 0 ? <p className="py-6 text-center text-sm text-muted-foreground">{empty}</p> : <table className="w-full min-w-[720px] text-sm"><thead><tr className="border-b text-left text-xs uppercase text-muted-foreground">{headers.map((header) => <th key={header} className="px-3 py-2">{header}</th>)}</tr></thead><tbody className="divide-y">{rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex} className="px-3 py-3">{cell}</td>)}</tr>)}</tbody></table>}</CardContent></Card>; }
