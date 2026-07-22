@@ -78,28 +78,26 @@ const NotificationCenterPage = lazy(() =>
   }))
 );
 
-const MetadataModelingListPage = lazy(() =>
-  import("./modules/metadata_modeling/pages/MetadataModelingListPage").then(
-    (m) => ({
-      default: m.MetadataModelingListPage,
-    })
-  )
-);
-
-const MetadataModelingDetailPage = lazy(() =>
-  import("./modules/metadata_modeling/pages/MetadataModelingDetailPage").then(
-    (m) => ({
-      default: m.MetadataModelingDetailPage,
-    })
-  )
-);
-
-const CreateMetadataModelingResourcePage = lazy(() =>
-  import(
-    "./modules/metadata_modeling/pages/CreateMetadataModelingResourcePage"
-  ).then((m) => ({
-    default: m.CreateMetadataModelingResourcePage,
+const DataMigrationListPage = lazy(() =>
+  import("./modules/data_migration/pages/DataMigrationListPage").then((m) => ({
+    default: m.DataMigrationListPage,
   }))
+);
+
+const DataMigrationDetailPage = lazy(() =>
+  import("./modules/data_migration/pages/DataMigrationDetailPage").then(
+    (m) => ({
+      default: m.DataMigrationDetailPage,
+    })
+  )
+);
+
+const CreateDataMigrationResourcePage = lazy(() =>
+  import("./modules/data_migration/pages/CreateDataMigrationResourcePage").then(
+    (m) => ({
+      default: m.CreateDataMigrationResourcePage,
+    })
+  )
 );
 
 const BillingSubscriptionsListPage = lazy(() =>
@@ -282,6 +280,23 @@ const CreatePurchaseSupplierPage = lazy(() =>
   }))
 );
 
+// Inventory Management
+const InventoryWarehouseListPage = lazy(() =>
+  import("./modules/inventory_management/pages/WarehouseListPage").then((m) => ({
+    default: m.WarehouseListPage,
+  }))
+);
+const InventoryWarehouseDetailPage = lazy(() =>
+  import("./modules/inventory_management/pages/WarehouseDetailPage").then((m) => ({
+    default: m.WarehouseDetailPage,
+  }))
+);
+const CreateInventoryWarehousePage = lazy(() =>
+  import("./modules/inventory_management/pages/CreateWarehousePage").then((m) => ({
+    default: m.CreateWarehousePage,
+  }))
+);
+
 // Project Management
 const ProjectListPage = lazy(() =>
   import("./modules/project_management/pages/ProjectListPage").then((m) => ({
@@ -347,6 +362,23 @@ const AssetDetailPage = lazy(() =>
 const CreateAssetPage = lazy(() =>
   import("./modules/asset_management/pages/CreateAssetPage").then((m) => ({
     default: m.CreateAssetPage,
+  }))
+);
+
+// Compliance Management
+const CompliancePolicyListPage = lazy(() =>
+  import("./modules/compliance_management/pages/CompliancePolicyListPage").then((m) => ({
+    default: m.CompliancePolicyListPage,
+  }))
+);
+const CompliancePolicyDetailPage = lazy(() =>
+  import("./modules/compliance_management/pages/CompliancePolicyDetailPage").then((m) => ({
+    default: m.CompliancePolicyDetailPage,
+  }))
+);
+const CreateCompliancePolicyPage = lazy(() =>
+  import("./modules/compliance_management/pages/CreateCompliancePolicyPage").then((m) => ({
+    default: m.CreateCompliancePolicyPage,
   }))
 );
 
@@ -475,12 +507,6 @@ const LicenseSettingsPage = lazy(() =>
   )
 );
 
-const SchemaEditorPage = lazy(() =>
-  import("./modules/metadata_modeling/pages/SchemaEditorPage").then((m) => ({
-    default: m.SchemaEditorPage,
-  }))
-);
-
 function LoadingFallback() {
   return (
     <div className="min-h-screen flex items-center justify-center">
@@ -493,7 +519,7 @@ function RouteTitle({ title, children }: { title?: string; children: ReactNode }
   useEffect(() => {
     if (!title) return undefined;
     const previousTitle = document.title;
-    document.title = `${title} · SARAISE`;
+    document.title = title;
     return () => {
       document.title = previousTitle;
     };
@@ -616,18 +642,6 @@ function AnimatedRoutes() {
               }
             />
           )}
-
-          {/* Metadata Modeling Routes */}
-          <Route
-            path="/metadata"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <SchemaEditorPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
 
           {/* Workflow Automation Routes */}
           <Route
@@ -799,6 +813,38 @@ function AnimatedRoutes() {
             }
           />
 
+          {/* Inventory Management */}
+          <Route
+            path="/inventory-management/warehouses"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <InventoryWarehouseListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/inventory-management/warehouses/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateInventoryWarehousePage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/inventory-management/warehouses/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <InventoryWarehouseDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
           {/* Project Management */}
           <Route
             path="/project-management/projects"
@@ -927,6 +973,38 @@ function AnimatedRoutes() {
             }
           />
 
+          {/* Compliance Management */}
+          <Route
+            path="/compliance-management/policies"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CompliancePolicyListPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/compliance-management/policies/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CreateCompliancePolicyPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/compliance-management/policies/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <CompliancePolicyDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
           {/* Compliance Risk Management */}
           <Route
             path="/compliance-risk-management/risks"
@@ -1046,33 +1124,53 @@ function AnimatedRoutes() {
             }
           />
 
-          {/* MetadataModeling routes */}
+          {/* DataMigration routes */}
           <Route
-            path="/metadata-modeling"
+            path="/data-migration"
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <MetadataModelingListPage />
+                  <DataMigrationListPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
           />
           <Route
-            path="/metadata-modeling/create"
+            path="/data-migration/jobs/new"
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <CreateMetadataModelingResourcePage />
+                  <CreateDataMigrationResourcePage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
           />
           <Route
-            path="/metadata-modeling/:id"
+            path="/data-migration/create"
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <MetadataModelingDetailPage />
+                  <CreateDataMigrationResourcePage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/data-migration/jobs/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <DataMigrationDetailPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/data-migration/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <DataMigrationDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -1403,7 +1501,8 @@ function AnimatedRoutes() {
             }
           />
 
-          {/* Module-owned tenant routes are discovered once and rendered consistently. */}
+          {/* Migration shim: module-owned routes coexist with the legacy inventory.
+              Remove matching legacy declarations as each module completes migration. */}
           {registryTenantRoutes.map(({ id, path, title, Page }) => (
             <Route
               key={`registry:${id}`}

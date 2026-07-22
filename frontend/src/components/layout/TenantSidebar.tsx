@@ -45,12 +45,6 @@ interface NavItem {
 
 const tenantItems: NavItem[] = [
   { path: "/tenant/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  {
-    path: "/metadata",
-    label: "Metadata Modeling",
-    icon: Database,
-    module: "metadata_modeling",
-  },
   // Phase 8 & 9 Modules
   {
     path: "/workflow-automation/workflows",

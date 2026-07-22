@@ -1,12 +1,49 @@
+# Rule: SARAISE-00001 (Module Manifest Required)
+# Metadata modeling is the open-source schema and dynamic-record kernel.
 name: metadata_modeling
-version: 1.0.0
+version: 2.0.0
 type: foundation
-category: core
-description: Define custom entities and extend data models dynamically.
+lifecycle: core
+description: Define, validate, version, publish, and extend tenant-owned metadata models.
 dependencies:
-  - core
-  - tenant_management
+  - name: core
+    version: ">=1.0.0"
+  - name: tenant_management
+    version: ">=1.0.0"
 permissions:
-  - metadata_modeling.manage_schema
-  - metadata_modeling.manage_data
-settings: {}
+  - metadata_modeling.schema:read
+  - metadata_modeling.schema:create
+  - metadata_modeling.schema:update
+  - metadata_modeling.schema:publish
+  - metadata_modeling.schema:archive
+  - metadata_modeling.schema:import
+  - metadata_modeling.schema:export
+  - metadata_modeling.record:read
+  - metadata_modeling.record:create
+  - metadata_modeling.record:update
+  - metadata_modeling.record:delete
+  - metadata_modeling.record:submit
+  - metadata_modeling.record:cancel
+  - metadata_modeling.sequence:reset
+  - metadata_modeling.health:read
+sod_actions:
+  - metadata_modeling.schema:create
+  - metadata_modeling.schema:update
+  - metadata_modeling.schema:publish
+  - metadata_modeling.schema:import
+  - metadata_modeling.sequence:reset
+metadata:
+  api_base_path: /api/v2/metadata-modeling/
+  authentication: session
+  entitlements:
+    - metadata_modeling.schemas
+    - metadata_modeling.records
+    - metadata_modeling.schema_versions
+    - metadata_modeling.import_export
+  quota_resources:
+    - metadata_modeling.schema_count
+    - metadata_modeling.fields_per_schema
+    - metadata_modeling.record_count
+    - metadata_modeling.api_reads
+    - metadata_modeling.api_writes
+  extension_contract_version: 1
