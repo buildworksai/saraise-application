@@ -1,0 +1,1 @@
+export { EliminationDetailPage } from './workspaces';

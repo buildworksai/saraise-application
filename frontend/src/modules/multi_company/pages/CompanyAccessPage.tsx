@@ -1,0 +1,1 @@
+export { CompanyAccessPage } from './workspaces';

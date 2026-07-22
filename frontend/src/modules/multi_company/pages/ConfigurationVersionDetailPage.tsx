@@ -1,0 +1,1 @@
+export { ConfigurationVersionDetailPage } from './workspaces';

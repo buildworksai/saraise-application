@@ -406,23 +406,6 @@ const CreateComplianceRiskPage = lazy(() =>
   }))
 );
 
-// Multi-Company
-const MultiCompanyListPage = lazy(() =>
-  import("./modules/multi_company/pages/CompanyListPage").then((m) => ({
-    default: m.CompanyListPage,
-  }))
-);
-const MultiCompanyDetailPage = lazy(() =>
-  import("./modules/multi_company/pages/CompanyDetailPage").then((m) => ({
-    default: m.CompanyDetailPage,
-  }))
-);
-const CreateMultiCompanyPage = lazy(() =>
-  import("./modules/multi_company/pages/CreateCompanyPage").then((m) => ({
-    default: m.CreateCompanyPage,
-  }))
-);
-
 // Workflow Automation Components
 const WorkflowListPage = lazy(() =>
   import("./modules/workflow_automation/pages/WorkflowListPage").then((m) => ({
@@ -532,7 +515,7 @@ function RouteTitle({ title, children }: { title?: string; children: ReactNode }
   useEffect(() => {
     if (!title) return undefined;
     const previousTitle = document.title;
-    document.title = `${title} · SARAISE`;
+    document.title = title.endsWith("· SARAISE") ? title : `${title} · SARAISE`;
     return () => {
       document.title = previousTitle;
     };
@@ -1025,38 +1008,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <ComplianceRiskDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Multi-Company */}
-          <Route
-            path="/multi-company/companies"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <MultiCompanyListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/multi-company/companies/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateMultiCompanyPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/multi-company/companies/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <MultiCompanyDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
