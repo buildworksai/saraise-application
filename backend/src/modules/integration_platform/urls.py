@@ -1,32 +1,46 @@
-"""
-URL routing for IntegrationPlatform module.
-"""
-from django.urls import path, include
+"""URL contract for Integration Platform API v2."""
+
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .api import (
     ConnectorViewSet,
     DataMappingViewSet,
+    InboundWebhookView,
     IntegrationCredentialViewSet,
     IntegrationViewSet,
+    NestedCredentialViewSet,
     WebhookDeliveryViewSet,
-    WebhookReceiveView,
     WebhookViewSet,
 )
-from .health import health_check
+from .health import IntegrationPlatformHealthView
 
-# Create router and register ViewSets
+app_name = "integration_platform"
+
 router = DefaultRouter()
-router.register(r"integrations", IntegrationViewSet, basename="integration")
-router.register(r"integration-credentials", IntegrationCredentialViewSet, basename="integration-credential")
-router.register(r"webhooks", WebhookViewSet, basename="webhook")
-router.register(r"webhook-deliveries", WebhookDeliveryViewSet, basename="webhook-delivery")
-router.register(r"connectors", ConnectorViewSet, basename="connector")
-router.register(r"data-mappings", DataMappingViewSet, basename="data-mapping")
+router.register("connectors", ConnectorViewSet, basename="connector")
+router.register("integrations", IntegrationViewSet, basename="integration")
+router.register(
+    r"integrations/(?P<integration_id>[0-9a-fA-F-]{36})/credentials",
+    NestedCredentialViewSet,
+    basename="integration-credential-nested",
+)
+router.register(
+    "integration-credentials",
+    IntegrationCredentialViewSet,
+    basename="integration-credential",
+)
+router.register("webhooks", WebhookViewSet, basename="webhook")
+router.register("webhook-deliveries", WebhookDeliveryViewSet, basename="webhook-delivery")
+router.register("data-mappings", DataMappingViewSet, basename="data-mapping")
 
-# URL patterns
+inbound_webhook = InboundWebhookView.as_view({"post": "create"})
+
 urlpatterns = [
     path("", include(router.urls)),
-    path("webhooks/receive/<str:webhook_id>/", WebhookReceiveView.as_view(), name="webhook-receive"),
-    path("health/", health_check, name="health_check"),
+    path("webhooks/inbound/<uuid:public_id>/", inbound_webhook, name="webhook-inbound"),
+    path("health/", IntegrationPlatformHealthView.as_view(), name="health"),
 ]
+
+
+__all__ = ["app_name", "router", "urlpatterns"]

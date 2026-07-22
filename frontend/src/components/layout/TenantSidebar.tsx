@@ -16,8 +16,10 @@ import {
   Shield,
   Users,
   Database,
+  Workflow,
   DatabaseZap,
   Plug,
+  FolderTree,
   Key,
   Bell,
   BarChart3,
@@ -66,6 +68,13 @@ const tenantItems: NavItem[] = [
     icon: Database,
     module: "metadata_modeling",
   },
+  // Phase 8 & 9 Modules
+  {
+    path: "/workflow-automation/workflows",
+    label: "Workflow Automation",
+    icon: Workflow,
+    module: "workflow_automation",
+  },
   {
     path: "/data-migration",
     label: "Data Migration",
@@ -77,6 +86,12 @@ const tenantItems: NavItem[] = [
     label: "Integration Platform",
     icon: Plug,
     module: "integration_platform",
+  },
+  {
+    path: "/dms",
+    label: "Document Management",
+    icon: FolderTree,
+    module: "dms",
   },
   {
     path: "/ai-providers/secrets",

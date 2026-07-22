@@ -1,136 +1,129 @@
-"""
-Service Unit Tests for IntegrationPlatform module.
+"""Tenant-first service behavior and truthful operation evidence."""
 
-Tests business logic in services layer.
-"""
+import uuid
+
 import pytest
+from cryptography.fernet import Fernet
 
-from src.modules.integration_platform.models import TenantBaseModel
-from src.modules.integration_platform.services import IntegrationPlatformService
+from src.core.api.results import OperationResult
+from src.core.async_jobs.models import OutboxEvent
+
+from ..adapter_registry import connector_adapter_registry
+from ..adapters import AdapterDescriptor, ConnectorAdapter, PushEvidence, RecordBatch, RecordCursor
+from ..services import CredentialService, DataMappingService, IntegrationPlatformError, IntegrationService
+from .factories import connector_factory, integration_factory, mapping_factory
+
+pytest_plugins = ["src.core.testing"]
+pytestmark = pytest.mark.django_db
 
 
-@pytest.mark.django_db
-class TestIntegrationPlatformService:
-    """Test IntegrationPlatformService business logic."""
+class ProvenAdapter(ConnectorAdapter):
+    def __init__(self, key: str, *, batch: RecordBatch | None = None):
+        self.descriptor = AdapterDescriptor(key, "1.0.0", frozenset({"test", "pull", "push"}))
+        self.batch = batch or RecordBatch((), source_exhausted=True, source_count=0)
 
-    def test_create_resource(self, db):
-        """Test creating a resource via service."""
-        service = IntegrationPlatformService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            description="Test description",
-            created_by="user-123",
-        )
-        assert resource.id is not None
-        assert resource.name == "Test Resource"
-        assert resource.tenant_id == "tenant-123"
+    def validate_config(self, config):
+        return OperationResult.succeeded(dict(config), evidence={"validated": True})
 
-    def test_get_resource(self, db):
-        """Test getting a resource by ID."""
-        service = IntegrationPlatformService()
-        created = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
+    def test_connection(self, config, credential):
+        return OperationResult.succeeded({"connected": True}, evidence={"provider_ack": "ok"})
 
-        retrieved = service.get_resource(created.id, "tenant-123")
-        assert retrieved is not None
-        assert retrieved.id == created.id
-        assert retrieved.name == "Test Resource"
+    def pull(self, config, credential, cursor, limit):
+        return OperationResult.succeeded(self.batch, evidence={"source_count": self.batch.source_count})
 
-    def test_get_resource_wrong_tenant(self, db):
-        """Test that getting resource from wrong tenant returns None."""
-        service = IntegrationPlatformService()
-        created = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
+    def push(self, config, credential, records, idempotency_key):
+        evidence = PushEvidence(len(records), 0, "provider-1")
+        return OperationResult.succeeded(evidence, evidence={"accepted_count": len(records)})
 
-        retrieved = service.get_resource(created.id, "tenant-456")
-        assert retrieved is None
+    def health(self):
+        return OperationResult.succeeded({"status": "healthy"}, evidence={"probe": "real"})
 
-    def test_list_resources(self, db):
-        """Test listing resources for tenant."""
-        service = IntegrationPlatformService()
-        service.create_resource(
-            tenant_id="tenant-123",
-            name="Resource 1",
-            created_by="user-123",
-        )
-        service.create_resource(
-            tenant_id="tenant-123",
-            name="Resource 2",
-            created_by="user-123",
-        )
-        service.create_resource(
-            tenant_id="tenant-456",
-            name="Resource 3",
-            created_by="user-456",
-        )
 
-        resources = service.list_resources("tenant-123")
-        assert len(resources) == 2
-        assert all(r.tenant_id == "tenant-123" for r in resources)
+class AllowQuota:
+    class Result:
+        allowed = True
 
-    def test_update_resource(self, db):
-        """Test updating a resource."""
-        service = IntegrationPlatformService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Original Name",
-            created_by="user-123",
-        )
+    def consume(self, tenant_id, resource, cost=1):
+        return self.Result()
 
-        updated = service.update_resource(
-            resource.id,
-            "tenant-123",
-            name="Updated Name",
-            description="Updated description",
-        )
-        assert updated is not None
-        assert updated.name == "Updated Name"
-        assert updated.description == "Updated description"
 
-    def test_delete_resource(self, db):
-        """Test deleting a resource."""
-        service = IntegrationPlatformService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="To Delete",
-            created_by="user-123",
-        )
+@pytest.fixture(autouse=True)
+def domain_setup(settings):
+    settings.SARAISE_ENCRYPTION_KEY = Fernet.generate_key().decode()
+    connector_adapter_registry.clear()
+    yield
+    connector_adapter_registry.clear()
 
-        result = service.delete_resource(resource.id, "tenant-123")
-        assert result is True
-        assert not TenantBaseModel.objects.filter(id=resource.id).exists()
 
-    def test_activate_resource(self, db):
-        """Test activating a resource."""
-        service = IntegrationPlatformService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
-        resource.is_active = False
-        resource.save()
+def test_create_test_and_outbox_evidence():
+    tenant, actor = uuid.uuid4(), uuid.uuid4()
+    connector = connector_factory(schema={"type": "object", "additionalProperties": False})
+    connector_adapter_registry.register(connector.adapter_key, ProvenAdapter(connector.adapter_key))
+    service = IntegrationService(quotas=AllowQuota())
+    integration = service.create(tenant, actor, {"connector": connector, "name": "Accounting", "config": {}})
+    job = service.request_test(tenant, actor, integration.id, "test-once")
+    assert job.payload == {"integration_id": str(integration.id)}
+    assert OutboxEvent.objects.for_tenant(tenant).filter(aggregate_id=job.id).exists()
+    result = service.execute_test(tenant, job)
+    assert result.status == "succeeded"
+    integration.refresh_from_db()
+    assert integration.status == "active"
 
-        activated = service.activate_resource(resource.id, "tenant-123")
-        assert activated is not None
-        assert activated.is_active is True
 
-    def test_deactivate_resource(self, db):
-        """Test deactivating a resource."""
-        service = IntegrationPlatformService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
+def test_missing_adapter_is_explicitly_unavailable():
+    connector = connector_factory()
+    service = IntegrationService()
+    with pytest.raises(Exception) as exc:
+        service.create(uuid.uuid4(), uuid.uuid4(), {"connector": connector, "name": "Unavailable", "config": {}})
+    assert getattr(exc.value, "status_code", None) == 503
 
-        deactivated = service.deactivate_resource(resource.id, "tenant-123")
-        assert deactivated is not None
-        assert deactivated.is_active is False
+
+def test_credentials_are_encrypted_metadata_only_and_rotate_atomically():
+    integration = integration_factory()
+    service = CredentialService()
+    old = service.create(integration.tenant_id, integration.created_by, integration.id, "api_key", "clear-secret")
+    assert "clear-secret" not in old.encrypted_value
+    assert list(service.list_metadata(integration.tenant_id, integration.id))[0].display_hint.endswith("cret")
+    new = service.rotate(integration.tenant_id, integration.created_by, old.id, "next-secret", "rotate-once")
+    old.refresh_from_db()
+    assert old.status == "revoked" and new.version == 2
+    assert service.rotate(integration.tenant_id, integration.created_by, old.id, "ignored", "rotate-once").id == new.id
+
+
+def test_mapping_preview_is_deterministic_and_reports_per_record_failures():
+    integration = integration_factory()
+    mapping = mapping_factory(
+        integration,
+        source_field="name",
+        target_field="display_name",
+        transform={"operations": [{"operation": "trim", "options": {}}, {"operation": "string_case", "options": {"case": "upper"}}]},
+    )
+    result = DataMappingService().preview(
+        integration.tenant_id,
+        integration.id,
+        [mapping.id],
+        [{"name": "  alpha "}, {"name": " beta"}],
+    )
+    assert result.records == ({"display_name": "ALPHA"}, {"display_name": "BETA"})
+    assert result.failures == ()
+
+
+def test_zero_source_batch_is_a_proven_success_without_sink_counts():
+    connector = connector_factory()
+    connector_adapter_registry.register(connector.adapter_key, ProvenAdapter(connector.adapter_key))
+    integration = integration_factory(connector=connector, status="active")
+    service = IntegrationService(quotas=AllowQuota())
+    job = service.request_sync(integration.tenant_id, integration.created_by, integration.id, "pull", [], "sync-zero")
+    result = service.execute_sync(integration.tenant_id, job)
+    assert result.status == "succeeded"
+    assert result.evidence["records_read"] == result.evidence["records_written"] == 0
+
+
+def test_push_without_governed_source_fails_instead_of_fabricating_records():
+    connector = connector_factory()
+    connector_adapter_registry.register(connector.adapter_key, ProvenAdapter(connector.adapter_key))
+    integration = integration_factory(connector=connector, status="active")
+    service = IntegrationService(quotas=AllowQuota())
+    job = service.request_sync(integration.tenant_id, integration.created_by, integration.id, "push", [], "sync-push")
+    result = service.execute_sync(integration.tenant_id, job)
+    assert result.status == "failed" and result.error_code == "sync_source_unavailable"

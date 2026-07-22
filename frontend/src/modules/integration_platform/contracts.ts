@@ -1,199 +1,320 @@
-/**
- * IntegrationPlatform Module Contracts
- *
- * Rule: SARAISE-27001 (contracts.ts required for all frontend modules)
- *
- * === AGENT INSTRUCTION ===
- * Read this file FIRST when working on this module.
- * All types and endpoints for IntegrationPlatform are defined here.
- */
+/** Canonical frontend contract for Integration Platform API v2. */
 
-// import type { components } from '@/types/api'; // Commented out until schema types are available
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
+// Recursive JSON needs an interface; a Record alias is rejected as a circular alias by TypeScript.
+// eslint-disable-next-line @typescript-eslint/consistent-indexed-object-style
+export interface JsonObject { readonly [key: string]: JsonValue }
 
-// =============================================================================
-// EXPORTED TYPES - Import these in your components
-// =============================================================================
+export type ConnectorType = 'api' | 'webhook' | 'database' | 'file' | 'message_queue';
+export type ConnectorCapability = 'test' | 'pull' | 'push' | 'receive' | 'deliver';
+export type IntegrationStatus = 'inactive' | 'testing' | 'active' | 'error';
+export type CredentialType = 'api_key' | 'oauth_token' | 'username_password' | 'certificate';
+export type CredentialStatus = 'active' | 'revoked' | 'expired';
+export type WebhookDirection = 'inbound' | 'outbound';
+export type WebhookStatus = 'inactive' | 'active' | 'error';
+export type DeliveryStatus = 'queued' | 'delivering' | 'retrying' | 'delivered' | 'dead_letter' | 'cancelled';
+export type SyncDirection = 'pull' | 'push';
+export type JobStatus = 'queued' | 'running' | 'retrying' | 'succeeded' | 'failed' | 'cancelled' | 'timed_out';
+export type TransformationOperation = 'rename' | 'string_case' | 'trim' | 'number' | 'date_format' | 'default' | 'enum_map';
 
-/** Integration entity */
-export type Integration = {
+export interface ApiMeta { correlation_id: string; timestamp: string }
+export interface PaginatedMeta extends ApiMeta {
+  count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  has_next: boolean;
+  has_previous: boolean;
+}
+export interface ApiEnvelope<T> { data: T; meta: ApiMeta }
+export interface PaginatedEnvelope<T> {
+  data: T[];
+  meta: ApiMeta & { pagination: Omit<PaginatedMeta, keyof ApiMeta> };
+}
+export interface ApiErrorDetail { field?: string; message: string; code?: string }
+export interface ApiError {
+  error: { code: string; message: string; details?: ApiErrorDetail[]; correlation_id: string };
+  meta?: { timestamp: string };
+}
+
+export interface TransitionEvidence {
+  transition: string;
+  from_status: string;
+  to_status: string;
+  occurred_at: string;
+  actor_id?: string;
+  transition_key: string;
+}
+
+export interface OperationEvidence {
+  outcome: 'succeeded' | 'failed';
+  occurred_at: string;
+  correlation_id: string;
+  job_id?: string;
+  duration_ms?: number;
+  error_code?: string;
+  error_message?: string;
+  records_read?: number;
+  records_written?: number;
+  records_failed?: number;
+  zero_source_proven?: boolean;
+}
+
+export interface JsonSchemaProperty {
+  type?: 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array';
+  title?: string;
+  description?: string;
+  format?: string;
+  enum?: JsonPrimitive[];
+  default?: JsonValue;
+  secret?: boolean;
+}
+export interface ConnectorJsonSchema {
+  type: 'object';
+  title?: string;
+  description?: string;
+  required?: string[];
+  properties: Readonly<Record<string, JsonSchemaProperty>>;
+  additionalProperties?: boolean;
+}
+
+export interface Connector {
   id: string;
-  tenant_id: string;
+  key: string;
   name: string;
-  integration_type: 'api' | 'webhook' | 'database' | 'file' | 'message_queue';
-  config: Record<string, unknown>;
-  status: 'active' | 'inactive' | 'error' | 'testing';
-  credentials_count?: number;
-  mappings_count?: number;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-};
-
-/** Integration create request */
-export type IntegrationCreate = {
-  name: string;
-  integration_type: 'api' | 'webhook' | 'database' | 'file' | 'message_queue';
-  config: Record<string, unknown>;
-};
-
-/** Integration update request (partial) */
-export type IntegrationUpdate = Partial<IntegrationCreate>;
-
-/** IntegrationCredential entity */
-export type IntegrationCredential = {
-  id: string;
-  integration: string;
-  integration_id?: string;
-  credential_type: 'api_key' | 'oauth_token' | 'username_password' | 'certificate';
-  encrypted_value: string;
-  created_at: string;
-  updated_at: string;
-};
-
-/** IntegrationCredential create request */
-export type IntegrationCredentialCreate = {
-  integration: string;
-  credential_type: 'api_key' | 'oauth_token' | 'username_password' | 'certificate';
-  encrypted_value: string;
-};
-
-/** IntegrationCredential update request (partial) */
-export type IntegrationCredentialUpdate = Partial<IntegrationCredentialCreate>;
-
-/** Webhook entity */
-export type Webhook = {
-  id: string;
-  tenant_id: string;
-  name: string;
-  url: string;
-  events: string[];
-  secret: string;
+  connector_type: ConnectorType;
+  adapter_key: string;
+  version: string;
+  capabilities: ConnectorCapability[];
+  module_id: string;
+  required_entitlement: string;
   is_active: boolean;
-  created_by: string;
+  is_entitled: boolean;
+  entitlement_reason?: string;
+  adapter_available: boolean;
   created_at: string;
   updated_at: string;
-};
+}
+export interface ConnectorDetail extends Connector {
+  schema: ConnectorJsonSchema;
+  credential_schema: ConnectorJsonSchema;
+}
+export interface ConnectorSchema {
+  connector_id: string;
+  config_schema: ConnectorJsonSchema;
+  credential_schema: ConnectorJsonSchema;
+}
+export interface ConnectorHealth {
+  connector_id: string;
+  status: 'healthy' | 'degraded' | 'unavailable';
+  adapter_registered: boolean;
+  circuit_state: 'closed' | 'open' | 'half_open' | 'unavailable';
+  checked_at: string;
+  reason?: string;
+  correlation_id: string;
+}
 
-/** Webhook create request */
-export type WebhookCreate = {
-  name: string;
-  url: string;
-  events: string[];
-  secret: string;
-  is_active?: boolean;
-};
-
-/** Webhook update request (partial) */
-export type WebhookUpdate = Partial<WebhookCreate>;
-
-/** WebhookDelivery entity */
-export type WebhookDelivery = {
+export interface Integration {
   id: string;
-  webhook: string;
-  webhook_id?: string;
+  connector_id: string;
+  connector_name: string;
+  name: string;
+  description: string;
+  integration_type: ConnectorType;
+  status: IntegrationStatus;
+  last_tested_at: string | null;
+  last_test_job_id: string | null;
+  last_sync_job_id: string | null;
+  last_error_code: string;
+  last_error_message: string;
+  credentials_count: number;
+  mappings_count: number;
+  created_at: string;
+  updated_at: string;
+}
+export interface IntegrationDetail extends Integration {
+  config: JsonObject;
+  transition_history: TransitionEvidence[];
+  latest_test_evidence: OperationEvidence | null;
+  latest_sync_evidence: OperationEvidence | null;
+}
+export interface IntegrationCreateRequest {
+  connector_id: string;
+  name: string;
+  description?: string;
+  integration_type: ConnectorType;
+  config: JsonObject;
+}
+export interface IntegrationUpdateRequest { name?: string; description?: string; config?: JsonObject }
+export interface TransitionRequest { transition_key: string }
+export interface IntegrationTestRequest { idempotency_key: string }
+export interface IntegrationSyncRequest {
+  direction: SyncDirection;
+  mapping_ids: string[];
+  idempotency_key: string;
+}
+export interface AsyncJobReceipt {
+  job_id: string;
+  status: JobStatus;
+  correlation_id: string;
+  accepted_at: string;
+  poll_after_ms: number;
+}
+export interface AsyncJobState extends AsyncJobReceipt {
+  operation: 'integration_test' | 'integration_sync' | 'webhook_delivery';
+  started_at: string | null;
+  completed_at: string | null;
+  progress_percent: number;
+  evidence: OperationEvidence | null;
+}
+
+export interface IntegrationCredential {
+  id: string;
+  integration_id: string;
+  credential_type: CredentialType;
+  display_hint: string;
+  version: number;
+  status: CredentialStatus;
+  expires_at: string | null;
+  rotated_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+export interface CredentialCreateRequest { credential_type: CredentialType; plaintext: string; expires_at?: string | null }
+export interface CredentialRotateRequest { plaintext: string; expires_at?: string | null; idempotency_key: string }
+export type CredentialRevokeRequest = TransitionRequest;
+
+export interface Webhook {
+  id: string;
+  name: string;
+  direction: WebhookDirection;
+  url: string;
+  public_id: string;
+  events: string[];
+  status: WebhookStatus;
+  timeout_seconds: number;
+  max_attempts: number;
+  last_received_at: string | null;
+  last_delivered_at: string | null;
+  last_error_code: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface WebhookDetail extends Webhook { config: JsonObject; transition_history: TransitionEvidence[]; delivery_summary: DeliverySummary }
+export interface WebhookCreateRequest {
+  name: string;
+  direction: WebhookDirection;
+  url?: string;
+  events: string[];
+  config?: JsonObject;
+  timeout_seconds?: number;
+  max_attempts?: number;
+}
+export interface WebhookUpdateRequest { name?: string; url?: string; events?: string[]; config?: JsonObject; timeout_seconds?: number; max_attempts?: number }
+export interface WebhookSecretOnce { webhook: WebhookDetail; signing_secret: string; shown_once: true }
+export interface InboundWebhookRequest { timestamp: string; nonce: string; signature: string; raw_body: string }
+export interface InboundWebhookReceipt { job_id: string; correlation_id: string; accepted_at: string }
+export interface DeliverySummary { queued: number; retrying: number; delivered: number; dead_letter: number; success_rate: number | null }
+
+export interface WebhookDelivery {
+  id: string;
+  webhook_id: string;
+  webhook_name: string;
   event: string;
-  payload: Record<string, unknown>;
-  status: 'pending' | 'sent' | 'failed';
-  response_status?: number;
-  response_body?: string;
-  attempted_at?: string;
+  status: DeliveryStatus;
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at: string | null;
+  response_code: number | null;
+  error_code: string;
+  duration_ms: number | null;
+  job_id: string;
+  correlation_id: string;
+  delivered_at: string | null;
   created_at: string;
-};
+  updated_at: string;
+}
+export interface WebhookDeliveryDetail extends WebhookDelivery {
+  payload: JsonObject;
+  payload_hash: string;
+  idempotency_key: string;
+  response_body_excerpt: string;
+  error_message: string;
+  transition_history: TransitionEvidence[];
+}
+export type DeliveryRedriveRequest = TransitionRequest;
 
-/** Connector entity */
-export type Connector = {
+export interface TransformationSpec { operation: TransformationOperation; options?: JsonObject }
+export interface DataMapping {
   id: string;
+  integration_id: string;
+  integration_name: string;
   name: string;
-  connector_type: 'api' | 'database' | 'file' | 'message_queue';
-  schema: Record<string, unknown>;
-  config: Record<string, unknown>;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-};
-
-/** DataMapping entity */
-export type DataMapping = {
-  id: string;
-  tenant_id: string;
-  integration: string;
-  integration_id?: string;
   source_field: string;
   target_field: string;
-  transform: Record<string, unknown>;
+  transform: TransformationSpec;
+  position: number;
+  is_required: boolean;
+  default_value: JsonValue;
   created_at: string;
   updated_at: string;
-};
-
-/** DataMapping create request */
-export type DataMappingCreate = {
-  integration: string;
+}
+export interface DataMappingCreateRequest {
+  integration_id: string;
+  name: string;
   source_field: string;
   target_field: string;
-  transform?: Record<string, unknown>;
-};
+  transform: TransformationSpec;
+  position?: number;
+  is_required?: boolean;
+  default_value?: JsonValue;
+}
+export type DataMappingUpdateRequest = Partial<Omit<DataMappingCreateRequest, 'integration_id'>>;
+export interface MappingValidationRequest { integration_id: string; mappings: DataMappingCreateRequest[]; source_schema: ConnectorJsonSchema; target_schema: ConnectorJsonSchema }
+export interface MappingFieldResult { mapping_id?: string; source_field: string; target_field: string; valid: boolean; message?: string }
+export interface MappingValidationResult { valid: boolean; errors: { index: number; message: string }[]; mapping_count: number }
+export interface MappingPreviewRequest { integration_id: string; mapping_ids: string[]; sample: JsonObject }
+export interface MappingPreviewFailure { record_index: number; mapping_id: string; source_field: string; target_field: string; code: string; message: string }
+export interface MappingPreviewResult { records: JsonObject[]; failures: MappingPreviewFailure[] }
 
-/** DataMapping update request (partial) */
-export type DataMappingUpdate = Partial<DataMappingCreate>;
+export interface HealthCheck { name: 'database' | 'outbox' | 'broker' | 'adapters' | 'dependency_circuits'; status: 'healthy' | 'degraded' | 'unavailable'; detail: string; critical: boolean; evidence: JsonObject }
+export interface IntegrationPlatformHealth { status: 'healthy' | 'degraded' | 'unavailable'; module: 'integration-platform'; version: string; checked_at: string; checks: HealthCheck[] }
 
-// =============================================================================
-// ENDPOINT REGISTRY - Use these for all API calls
-// =============================================================================
+export interface PaginationParams { page?: number; page_size?: number }
+export interface IntegrationFilters extends PaginationParams { search?: string; status?: IntegrationStatus; integration_type?: ConnectorType; connector_id?: string; ordering?: 'name' | '-name' | 'created_at' | '-created_at' | 'updated_at' | '-updated_at' | 'status' | '-status' }
+export interface ConnectorFilters extends PaginationParams { search?: string; connector_type?: ConnectorType; module_id?: string; is_active?: boolean }
+export interface WebhookFilters extends PaginationParams { search?: string; direction?: WebhookDirection; status?: WebhookStatus; event?: string }
+export interface DeliveryFilters extends PaginationParams { webhook_id?: string; status?: DeliveryStatus; event?: string; created_after?: string; created_before?: string }
+export interface MappingFilters extends PaginationParams { search?: string; integration_id?: string; source_field?: string; target_field?: string }
 
-/**
- * IntegrationPlatform API Endpoints
- *
- * All endpoints should be prefixed with /api/v1/integration-platform/
- *
- * Usage:
- * ```typescript
- * import { ENDPOINTS } from './contracts';
- * apiClient.get(ENDPOINTS.INTEGRATIONS.LIST);
- * apiClient.get(ENDPOINTS.INTEGRATIONS.DETAIL(id));
- * ```
- */
-export const MODULE_API_PREFIX = '/api/v1/integration-platform';
-
+export const MODULE_API_PREFIX = '/api/v2/integration-platform';
+export const INBOUND_WEBHOOK_HEADERS = {
+  TIMESTAMP: 'X-SARAISE-Webhook-Timestamp',
+  NONCE: 'X-SARAISE-Webhook-Nonce',
+  SIGNATURE: 'X-SARAISE-Webhook-Signature',
+} as const;
 export const ENDPOINTS = {
   INTEGRATIONS: {
-    LIST: `${MODULE_API_PREFIX}/integrations/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/integrations/${id}/` as const,
-    CREATE: `${MODULE_API_PREFIX}/integrations/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/integrations/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/integrations/${id}/` as const,
-    TEST: (id: string) => `${MODULE_API_PREFIX}/integrations/${id}/test/` as const,
-    SYNC: (id: string) => `${MODULE_API_PREFIX}/integrations/${id}/sync/` as const,
+    LIST: `${MODULE_API_PREFIX}/integrations/`, CREATE: `${MODULE_API_PREFIX}/integrations/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/integrations/${id}/`, UPDATE: (id: string) => `${MODULE_API_PREFIX}/integrations/${id}/`, DELETE: (id: string) => `${MODULE_API_PREFIX}/integrations/${id}/`,
+    ACTIVATE: (id: string) => `${MODULE_API_PREFIX}/integrations/${id}/activate/`, DEACTIVATE: (id: string) => `${MODULE_API_PREFIX}/integrations/${id}/deactivate/`, TEST: (id: string) => `${MODULE_API_PREFIX}/integrations/${id}/test/`, SYNC: (id: string) => `${MODULE_API_PREFIX}/integrations/${id}/sync/`, JOB: (id: string, jobId: string) => `${MODULE_API_PREFIX}/integrations/${id}/jobs/${jobId}/`,
+    CREDENTIALS: (id: string) => `${MODULE_API_PREFIX}/integrations/${id}/credentials/`,
   },
-  INTEGRATION_CREDENTIALS: {
-    LIST: `${MODULE_API_PREFIX}/integration-credentials/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/integration-credentials/${id}/` as const,
-    CREATE: `${MODULE_API_PREFIX}/integration-credentials/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/integration-credentials/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/integration-credentials/${id}/` as const,
-  },
-  WEBHOOKS: {
-    LIST: `${MODULE_API_PREFIX}/webhooks/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/` as const,
-    CREATE: `${MODULE_API_PREFIX}/webhooks/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/` as const,
-    RECEIVE: (webhook_id: string) => `${MODULE_API_PREFIX}/webhooks/receive/${webhook_id}/` as const,
-  },
-  WEBHOOK_DELIVERIES: {
-    LIST: `${MODULE_API_PREFIX}/webhook-deliveries/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/webhook-deliveries/${id}/` as const,
-  },
-  CONNECTORS: {
-    LIST: `${MODULE_API_PREFIX}/connectors/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/connectors/${id}/` as const,
-    SCHEMA: (id: string) => `${MODULE_API_PREFIX}/connectors/${id}/schema/` as const,
-  },
-  DATA_MAPPINGS: {
-    LIST: `${MODULE_API_PREFIX}/data-mappings/`,
-    DETAIL: (id: string) => `${MODULE_API_PREFIX}/data-mappings/${id}/` as const,
-    CREATE: `${MODULE_API_PREFIX}/data-mappings/`,
-    UPDATE: (id: string) => `${MODULE_API_PREFIX}/data-mappings/${id}/` as const,
-    DELETE: (id: string) => `${MODULE_API_PREFIX}/data-mappings/${id}/` as const,
-  },
+  CREDENTIALS: { DETAIL: (id: string) => `${MODULE_API_PREFIX}/integration-credentials/${id}/`, ROTATE: (id: string) => `${MODULE_API_PREFIX}/integration-credentials/${id}/rotate/`, REVOKE: (id: string) => `${MODULE_API_PREFIX}/integration-credentials/${id}/revoke/` },
+  CONNECTORS: { LIST: `${MODULE_API_PREFIX}/connectors/`, DETAIL: (id: string) => `${MODULE_API_PREFIX}/connectors/${id}/`, SCHEMA: (id: string) => `${MODULE_API_PREFIX}/connectors/${id}/schema/`, HEALTH: (id: string) => `${MODULE_API_PREFIX}/connectors/${id}/health/` },
+  WEBHOOKS: { LIST: `${MODULE_API_PREFIX}/webhooks/`, CREATE: `${MODULE_API_PREFIX}/webhooks/`, DETAIL: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/`, UPDATE: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/`, DELETE: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/`, ACTIVATE: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/activate/`, DEACTIVATE: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/deactivate/`, ROTATE_SECRET: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/rotate-secret/`, INBOUND: (publicId: string) => `${MODULE_API_PREFIX}/webhooks/inbound/${publicId}/` },
+  DELIVERIES: { LIST: `${MODULE_API_PREFIX}/webhook-deliveries/`, DETAIL: (id: string) => `${MODULE_API_PREFIX}/webhook-deliveries/${id}/`, REDRIVE: (id: string) => `${MODULE_API_PREFIX}/webhook-deliveries/${id}/redrive/` },
+  MAPPINGS: { LIST: `${MODULE_API_PREFIX}/data-mappings/`, CREATE: `${MODULE_API_PREFIX}/data-mappings/`, DETAIL: (id: string) => `${MODULE_API_PREFIX}/data-mappings/${id}/`, UPDATE: (id: string) => `${MODULE_API_PREFIX}/data-mappings/${id}/`, DELETE: (id: string) => `${MODULE_API_PREFIX}/data-mappings/${id}/`, VALIDATE: `${MODULE_API_PREFIX}/data-mappings/validate/`, PREVIEW: `${MODULE_API_PREFIX}/data-mappings/preview/` },
   HEALTH: `${MODULE_API_PREFIX}/health/`,
+} as const;
+
+export const ROUTE_PATHS = {
+  INTEGRATIONS: '/integration-platform', INTEGRATION_CREATE: '/integration-platform/new', INTEGRATION_DETAIL: (id: string) => `/integration-platform/${id}`, INTEGRATION_EDIT: (id: string) => `/integration-platform/${id}/edit`,
+  INTEGRATION_CREDENTIALS: (id: string) => `/integration-platform/${id}/credentials`, CREDENTIAL_CREATE: (id: string) => `/integration-platform/${id}/credentials/new`, CREDENTIAL_ROTATE: (id: string, credentialId: string) => `/integration-platform/${id}/credentials/${credentialId}/rotate`,
+  CONNECTORS: '/integration-platform/connectors', CONNECTOR_DETAIL: (id: string) => `/integration-platform/connectors/${id}`, CONNECTOR_SETUP: (id: string) => `/integration-platform/connectors/${id}/setup`,
+  WEBHOOKS: '/integration-platform/webhooks', WEBHOOK_CREATE: '/integration-platform/webhooks/new', WEBHOOK_DETAIL: (id: string) => `/integration-platform/webhooks/${id}`, WEBHOOK_EDIT: (id: string) => `/integration-platform/webhooks/${id}/edit`,
+  DELIVERIES: '/integration-platform/deliveries', DELIVERY_DETAIL: (id: string) => `/integration-platform/deliveries/${id}`,
+  MAPPINGS: '/integration-platform/mappings', MAPPING_CREATE: '/integration-platform/mappings/new', MAPPING_DETAIL: (id: string) => `/integration-platform/mappings/${id}`, MAPPING_EDIT: (id: string) => `/integration-platform/mappings/${id}/edit`,
+  MODULE_INSTALL: (moduleId: string) => `/marketplace/${moduleId}`,
 } as const;

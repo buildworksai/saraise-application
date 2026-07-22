@@ -62,30 +62,6 @@ const CreateApiManagementResourcePage = lazy(() =>
   )
 );
 
-const IntegrationPlatformListPage = lazy(() =>
-  import(
-    "./modules/integration_platform/pages/IntegrationPlatformListPage"
-  ).then((m) => ({
-    default: m.IntegrationPlatformListPage,
-  }))
-);
-
-const IntegrationPlatformDetailPage = lazy(() =>
-  import(
-    "./modules/integration_platform/pages/IntegrationPlatformDetailPage"
-  ).then((m) => ({
-    default: m.IntegrationPlatformDetailPage,
-  }))
-);
-
-const CreateIntegrationPlatformResourcePage = lazy(() =>
-  import(
-    "./modules/integration_platform/pages/CreateIntegrationPlatformResourcePage"
-  ).then((m) => ({
-    default: m.CreateIntegrationPlatformResourcePage,
-  }))
-);
-
 const AiProviderConfigurationListPage = lazy(() =>
   import(
     "./modules/ai_provider_configuration/pages/AiProviderConfigurationListPage"
@@ -1371,38 +1347,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <ApiManagementDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* IntegrationPlatform routes */}
-          <Route
-            path="/integration-platform"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <IntegrationPlatformListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/integration-platform/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateIntegrationPlatformResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/integration-platform/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <IntegrationPlatformDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

@@ -1,267 +1,403 @@
-"""
-IntegrationPlatform Models.
+"""Persistence contract for the open integration foundation.
 
-Defines data models for IntegrationPlatform module.
-All models include tenant_id for Row-Level Multitenancy.
+Connector definitions are platform-global catalog entries.  Every other
+aggregate carries the canonical UUID tenant boundary directly, including
+credentials and operational delivery evidence.
 """
 
 from __future__ import annotations
 
+import re
 import uuid
+from typing import Any
+
+from django.core.exceptions import ValidationError
 from django.db import models
-from django.utils import timezone
+from django.db.models import Q
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
+
+from src.core.tenancy import TenantScopedModel, TimestampedModel
 
 
-def generate_uuid():
-    """Generate UUID for model primary keys."""
+def generate_uuid() -> str:
+    """Compatibility callable retained for the immutable 0001/0002 migrations."""
     return str(uuid.uuid4())
 
 
-class TenantBaseModel(models.Model):
-    """Base model for tenant-scoped models with Row-Level Multitenancy.
+class ConnectorType(models.TextChoices):
+    API = "api", "API"
+    WEBHOOK = "webhook", "Webhook"
+    DATABASE = "database", "Database"
+    FILE = "file", "File"
+    MESSAGE_QUEUE = "message_queue", "Message queue"
 
-    CRITICAL: All tenant-scoped models MUST inherit from this base class
-    and include tenant_id. All queries MUST filter explicitly by tenant_id.
-    """
 
-    tenant_id = models.UUIDField(db_index=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+class ConnectorCapability(models.TextChoices):
+    TEST = "test", "Test"
+    PULL = "pull", "Pull"
+    PUSH = "push", "Push"
+    RECEIVE = "receive", "Receive"
+    DELIVER = "deliver", "Deliver"
+
+
+class IntegrationStatus(models.TextChoices):
+    INACTIVE = "inactive", "Inactive"
+    TESTING = "testing", "Testing"
+    ACTIVE = "active", "Active"
+    ERROR = "error", "Error"
+
+
+class CredentialType(models.TextChoices):
+    API_KEY = "api_key", "API key"
+    OAUTH_TOKEN = "oauth_token", "OAuth token"
+    USERNAME_PASSWORD = "username_password", "Username/password"
+    CERTIFICATE = "certificate", "Certificate"
+
+
+class CredentialStatus(models.TextChoices):
+    ACTIVE = "active", "Active"
+    REVOKED = "revoked", "Revoked"
+    EXPIRED = "expired", "Expired"
+
+
+class WebhookDirection(models.TextChoices):
+    INBOUND = "inbound", "Inbound"
+    OUTBOUND = "outbound", "Outbound"
+
+
+class WebhookStatus(models.TextChoices):
+    INACTIVE = "inactive", "Inactive"
+    ACTIVE = "active", "Active"
+    ERROR = "error", "Error"
+
+
+class DeliveryStatus(models.TextChoices):
+    QUEUED = "queued", "Queued"
+    DELIVERING = "delivering", "Delivering"
+    RETRYING = "retrying", "Retrying"
+    DELIVERED = "delivered", "Delivered"
+    DEAD_LETTER = "dead_letter", "Dead letter"
+    CANCELLED = "cancelled", "Cancelled"
+
+
+def _validate_schema(value: object, field: str) -> None:
+    if not isinstance(value, dict):
+        raise ValidationError({field: "A JSON Schema object is required."})
+    try:
+        Draft202012Validator.check_schema(value)
+    except SchemaError as exc:
+        raise ValidationError({field: f"Invalid JSON Schema: {exc.message}"}) from exc
+    if value and value.get("type") not in (None, "object"):
+        raise ValidationError({field: "Connector schemas must describe an object."})
+
+
+def _validate_capabilities(value: object) -> None:
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        raise ValidationError({"capabilities": "Capabilities must be a string array."})
+    if len(value) != len(set(value)):
+        raise ValidationError({"capabilities": "Capabilities must be unique."})
+    unknown = set(value) - set(ConnectorCapability.values)
+    if unknown:
+        raise ValidationError({"capabilities": f"Unsupported capabilities: {', '.join(sorted(unknown))}."})
+
+
+class MutableTenantModel(TenantScopedModel, TimestampedModel):
+    """Audit and recoverable deletion fields shared by mutable resources."""
+
+    created_by = models.UUIDField()
+    updated_by = models.UUIDField(null=True, blank=True)
+    is_deleted = models.BooleanField(default=False, db_index=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.UUIDField(null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+
+class GuardedStateModel(models.Model):
+    """Reject status mutation that did not append matching transition evidence."""
+
+    class Meta:
+        abstract = True
+
+    def _validate_guarded_status(self) -> None:
+        if self._state.adding or not self.pk:
+            return
+        previous = type(self)._default_manager.filter(pk=self.pk).values("status", "transition_history").first()
+        if previous is None or previous["status"] == self.status:
+            return
+        old_history = previous["transition_history"] or []
+        history = getattr(self, "transition_history", None)
+        if not isinstance(history, list) or len(history) != len(old_history) + 1:
+            raise ValidationError({"status": "Lifecycle changes must use the registered state machine."})
+        record = history[-1]
+        if not isinstance(record, dict) or record.get("from_state") != previous["status"] or record.get("to_state") != self.status:
+            raise ValidationError({"status": "Transition evidence does not match the lifecycle change."})
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self._validate_guarded_status()
+        super().save(*args, **kwargs)
+
+
+class Connector(TimestampedModel):
+    """Platform-global connector descriptor; it never stores tenant configuration."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.SlugField(max_length=100, unique=True)
+    name = models.CharField(max_length=255)
+    connector_type = models.CharField(max_length=32, choices=ConnectorType.choices)
+    adapter_key = models.CharField(max_length=200, unique=True)
+    version = models.CharField(max_length=32)
+    schema = models.JSONField(default=dict, blank=True)
+    credential_schema = models.JSONField(default=dict, blank=True)
+    capabilities = models.JSONField(default=list, blank=True)
+    module_id = models.CharField(max_length=100, default="integration-platform")
+    required_entitlement = models.CharField(max_length=200, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
 
     class Meta:
         app_label = "integration_platform"
-        abstract = True
-        indexes = [
-            models.Index(fields=["tenant_id"]),
-            models.Index(fields=["tenant_id", "created_at"]),
-        ]
+        db_table = "integration_platform_connectors"
+        ordering = ("name", "version", "id")
+        constraints = [models.UniqueConstraint(fields=("key", "version"), name="intplat_conn_key_ver_uniq")]
+        indexes = [models.Index(fields=("connector_type", "is_active"), name="intplat_conn_type_active_idx")]
+
+    def clean(self) -> None:
+        super().clean()
+        _validate_schema(self.schema, "schema")
+        _validate_schema(self.credential_schema, "credential_schema")
+        _validate_capabilities(self.capabilities)
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.key}@{self.version})"
 
 
-class Integration(TenantBaseModel):
-    """Integration model for external system connections."""
+class Integration(GuardedStateModel, MutableTenantModel):
+    """A tenant's non-secret configuration for one connector."""
 
-    INTEGRATION_TYPE_CHOICES = [
-        ("api", "API"),
-        ("webhook", "Webhook"),
-        ("database", "Database"),
-        ("file", "File"),
-        ("message_queue", "Message Queue"),
-    ]
-
-    STATUS_CHOICES = [
-        ("active", "Active"),
-        ("inactive", "Inactive"),
-        ("error", "Error"),
-        ("testing", "Testing"),
-    ]
-
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    name = models.CharField(max_length=255, db_index=True)
-    integration_type = models.CharField(
-        max_length=50,
-        choices=INTEGRATION_TYPE_CHOICES,
-        db_index=True,
-    )
-    config = models.JSONField(
-        default=dict,
-        help_text="Integration-specific configuration",
-    )
-    status = models.CharField(
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default="inactive",
-        db_index=True,
-    )
-    created_by = models.CharField(max_length=36, db_index=True)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    connector = models.ForeignKey(Connector, on_delete=models.PROTECT, related_name="integrations")
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    integration_type = models.CharField(max_length=32, choices=ConnectorType.choices)
+    config = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=IntegrationStatus.choices, default=IntegrationStatus.INACTIVE)
+    transition_history = models.JSONField(default=list, blank=True)
+    last_tested_at = models.DateTimeField(null=True, blank=True)
+    last_test_job_id = models.UUIDField(null=True, blank=True)
+    last_sync_job_id = models.UUIDField(null=True, blank=True)
+    last_error_code = models.CharField(max_length=100, blank=True)
+    last_error_message = models.TextField(blank=True)
 
     class Meta:
         app_label = "integration_platform"
         db_table = "integration_platform_integrations"
-        indexes = [
-            models.Index(fields=["tenant_id", "status"]),
-            models.Index(fields=["tenant_id", "integration_type"]),
+        ordering = ("name", "id")
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "name"), condition=Q(is_deleted=False), name="intplat_integ_tenant_name_live_uniq"),
         ]
+        indexes = [
+            models.Index(fields=("tenant_id", "status", "created_at"), name="intplat_integ_tenant_status_idx"),
+            models.Index(fields=("tenant_id", "connector", "status"), name="intplat_integ_tenant_conn_idx"),
+            models.Index(fields=("tenant_id", "integration_type", "is_deleted"), name="intplat_integ_tenant_type_idx"),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.connector_id and self.connector.connector_type != self.integration_type:
+            raise ValidationError({"integration_type": "Must match the selected connector type."})
 
     def __str__(self) -> str:
         return f"{self.name} ({self.integration_type})"
 
 
-class IntegrationCredential(models.Model):
-    """Integration credential model for storing encrypted credentials."""
+class IntegrationCredential(GuardedStateModel, TenantScopedModel, TimestampedModel):
+    """Versioned encrypted credential material with metadata-only read surfaces."""
 
-    CREDENTIAL_TYPE_CHOICES = [
-        ("api_key", "API Key"),
-        ("oauth_token", "OAuth Token"),
-        ("username_password", "Username/Password"),
-        ("certificate", "Certificate"),
-    ]
-
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    integration = models.ForeignKey(
-        Integration,
-        on_delete=models.CASCADE,
-        related_name="credentials",
-    )
-    credential_type = models.CharField(
-        max_length=50,
-        choices=CREDENTIAL_TYPE_CHOICES,
-    )
-    encrypted_value = models.TextField(
-        help_text="Encrypted credential value (encrypted at rest)",
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    integration = models.ForeignKey(Integration, on_delete=models.CASCADE, related_name="credentials")
+    credential_type = models.CharField(max_length=32, choices=CredentialType.choices)
+    encrypted_value = models.TextField()
+    display_hint = models.CharField(max_length=100, blank=True)
+    version = models.PositiveIntegerField(default=1)
+    status = models.CharField(max_length=20, choices=CredentialStatus.choices, default=CredentialStatus.ACTIVE)
+    transition_history = models.JSONField(default=list, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    rotated_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.UUIDField()
+    revoked_by = models.UUIDField(null=True, blank=True)
 
     class Meta:
         app_label = "integration_platform"
         db_table = "integration_platform_credentials"
-        indexes = [
-            models.Index(fields=["integration"]),
+        ordering = ("credential_type", "-version", "id")
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "integration", "credential_type", "version"), name="intplat_cred_version_uniq"),
+            models.UniqueConstraint(fields=("tenant_id", "integration", "credential_type"), condition=Q(status=CredentialStatus.ACTIVE), name="intplat_cred_one_active_uniq"),
         ]
+        indexes = [models.Index(fields=("tenant_id", "integration", "status"), name="intplat_cred_tenant_int_idx")]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.integration_id and self.tenant_id != self.integration.tenant_id:
+            raise ValidationError({"integration": "Credential and integration must belong to the same tenant."})
 
     def __str__(self) -> str:
-        return f"{self.integration.name} - {self.credential_type}"
+        return f"{self.credential_type} v{self.version} ({self.status})"
 
 
-class Webhook(TenantBaseModel):
-    """Webhook model for outgoing webhook deliveries."""
+_EVENT_RE = re.compile(r"^[a-z][a-z0-9_.:-]{0,254}$")
 
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    name = models.CharField(max_length=255, db_index=True)
-    url = models.URLField(max_length=2000, help_text="Webhook URL")
-    events = models.JSONField(
-        default=list,
-        help_text="List of events to trigger webhook",
-    )
-    secret = models.CharField(
-        max_length=128,
-        help_text="Secret for HMAC-SHA256 signature",
-    )
-    is_active = models.BooleanField(default=True, db_index=True)
-    created_by = models.CharField(max_length=36, db_index=True)
+
+class Webhook(GuardedStateModel, MutableTenantModel):
+    """Signed inbound or outbound webhook configuration."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255)
+    direction = models.CharField(max_length=20, choices=WebhookDirection.choices)
+    url = models.URLField(max_length=2000, blank=True)
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    events = models.JSONField(default=list)
+    encrypted_signing_secret = models.TextField()
+    config = models.JSONField(default=dict, blank=True)
+    status = models.CharField(max_length=20, choices=WebhookStatus.choices, default=WebhookStatus.INACTIVE)
+    transition_history = models.JSONField(default=list, blank=True)
+    timeout_seconds = models.PositiveSmallIntegerField(default=10)
+    max_attempts = models.PositiveSmallIntegerField(default=5)
+    last_received_at = models.DateTimeField(null=True, blank=True)
+    last_delivered_at = models.DateTimeField(null=True, blank=True)
+    last_error_code = models.CharField(max_length=100, blank=True)
 
     class Meta:
         app_label = "integration_platform"
         db_table = "integration_platform_webhooks"
+        ordering = ("name", "id")
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "name"), condition=Q(is_deleted=False), name="intplat_hook_tenant_name_live_uniq"),
+            models.CheckConstraint(condition=Q(timeout_seconds__gte=1, timeout_seconds__lte=30), name="intplat_hook_timeout_range"),
+            models.CheckConstraint(condition=Q(max_attempts__gte=1, max_attempts__lte=10), name="intplat_hook_attempt_range"),
+        ]
         indexes = [
-            models.Index(fields=["tenant_id", "is_active"]),
+            models.Index(fields=("tenant_id", "direction", "status"), name="intplat_hook_tenant_dir_idx"),
+            models.Index(fields=("tenant_id", "public_id"), name="intplat_hook_tenant_pub_idx"),
         ]
 
+    def clean(self) -> None:
+        super().clean()
+        if self.direction == WebhookDirection.OUTBOUND and not self.url:
+            raise ValidationError({"url": "Outbound webhooks require a URL."})
+        if self.direction == WebhookDirection.INBOUND and self.url:
+            raise ValidationError({"url": "Inbound webhooks cannot define an outbound URL."})
+        if not isinstance(self.events, list) or not self.events or any(not isinstance(item, str) or not _EVENT_RE.fullmatch(item) for item in self.events):
+            raise ValidationError({"events": "A non-empty list of registered event names is required."})
+        if len(self.events) != len(set(self.events)):
+            raise ValidationError({"events": "Event names must be unique."})
+        if not 1 <= self.timeout_seconds <= 30:
+            raise ValidationError({"timeout_seconds": "Must be between 1 and 30."})
+        if not 1 <= self.max_attempts <= 10:
+            raise ValidationError({"max_attempts": "Must be between 1 and 10."})
+
     def __str__(self) -> str:
-        return f"{self.name} - {self.url}"
+        return f"{self.name} ({self.direction})"
 
 
-class WebhookDelivery(models.Model):
-    """Webhook delivery model for tracking webhook deliveries."""
+class ImmutableDeliveryError(RuntimeError):
+    """Raised when operational evidence is mutated or deleted."""
 
-    STATUS_CHOICES = [
-        ("pending", "Pending"),
-        ("delivered", "Delivered"),
-        ("failed", "Failed"),
-        ("retrying", "Retrying"),
-    ]
 
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    webhook = models.ForeignKey(
-        Webhook,
-        on_delete=models.CASCADE,
-        related_name="deliveries",
-    )
-    event = models.CharField(max_length=255, help_text="Event name")
-    payload = models.JSONField(default=dict, help_text="Webhook payload")
-    status = models.CharField(
-        max_length=20,
-        choices=STATUS_CHOICES,
-        default="pending",
-        db_index=True,
-    )
-    response_code = models.IntegerField(null=True, blank=True, help_text="HTTP response code")
-    response_body = models.TextField(blank=True, help_text="Response body (truncated)")
-    error_message = models.TextField(blank=True, help_text="Error message if failed")
+class WebhookDelivery(GuardedStateModel, TenantScopedModel, TimestampedModel):
+    """Append-preserving evidence for one durable webhook delivery."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    webhook = models.ForeignKey(Webhook, on_delete=models.PROTECT, related_name="deliveries")
+    event = models.CharField(max_length=255)
+    payload = models.JSONField(default=dict, blank=True)
+    payload_hash = models.CharField(max_length=64)
+    idempotency_key = models.CharField(max_length=255)
+    status = models.CharField(max_length=20, choices=DeliveryStatus.choices, default=DeliveryStatus.QUEUED)
+    transition_history = models.JSONField(default=list, blank=True)
+    attempt_count = models.PositiveSmallIntegerField(default=0)
+    max_attempts = models.PositiveSmallIntegerField()
+    next_attempt_at = models.DateTimeField(null=True, blank=True)
+    response_code = models.PositiveSmallIntegerField(null=True, blank=True)
+    response_body_excerpt = models.TextField(blank=True)
+    error_code = models.CharField(max_length=100, blank=True)
+    error_message = models.TextField(blank=True)
+    duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    job_id = models.UUIDField(db_index=True)
+    correlation_id = models.CharField(max_length=64, db_index=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+
+    IMMUTABLE_FIELDS = ("tenant_id", "webhook_id", "event", "payload", "payload_hash", "idempotency_key", "max_attempts", "correlation_id")
 
     class Meta:
         app_label = "integration_platform"
         db_table = "integration_platform_webhook_deliveries"
+        ordering = ("-created_at", "id")
+        constraints = [models.UniqueConstraint(fields=("tenant_id", "webhook", "idempotency_key"), name="intplat_delivery_idem_uniq")]
         indexes = [
-            models.Index(fields=["webhook", "status"]),
-            models.Index(fields=["webhook", "created_at"]),
+            models.Index(fields=("tenant_id", "webhook", "status", "created_at"), name="intplat_deliv_tenant_hook_idx"),
+            models.Index(fields=("tenant_id", "status", "next_attempt_at"), name="intplat_deliv_tenant_retry_idx"),
         ]
 
-    def __str__(self) -> str:
-        return f"{self.webhook.name} - {self.event} - {self.status}"
+    def clean(self) -> None:
+        super().clean()
+        if self.webhook_id and self.tenant_id != self.webhook.tenant_id:
+            raise ValidationError({"webhook": "Delivery and webhook must belong to the same tenant."})
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            previous = type(self)._default_manager.get(pk=self.pk)
+            if any(getattr(previous, field) != getattr(self, field) for field in self.IMMUTABLE_FIELDS):
+                raise ImmutableDeliveryError("Webhook delivery identity and payload evidence are immutable")
+        super().save(*args, **kwargs)
 
-class Connector(models.Model):
-    """Connector model for available integration connectors (platform-level)."""
-
-    CONNECTOR_TYPE_CHOICES = [
-        ("api", "API"),
-        ("database", "Database"),
-        ("file", "File"),
-        ("message_queue", "Message Queue"),
-    ]
-
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    name = models.CharField(max_length=255, unique=True, db_index=True)
-    connector_type = models.CharField(
-        max_length=50,
-        choices=CONNECTOR_TYPE_CHOICES,
-        db_index=True,
-    )
-    schema = models.JSONField(
-        default=dict,
-        help_text="Connector schema definition",
-    )
-    config = models.JSONField(
-        default=dict,
-        help_text="Connector configuration template",
-    )
-    is_active = models.BooleanField(default=True, db_index=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        app_label = "integration_platform"
-        db_table = "integration_platform_connectors"
-        indexes = [
-            models.Index(fields=["connector_type", "is_active"]),
-        ]
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise ImmutableDeliveryError("Webhook delivery evidence cannot be deleted")
 
     def __str__(self) -> str:
-        return f"{self.name} ({self.connector_type})"
+        return f"{self.event} [{self.status}] ({self.id})"
 
 
-class DataMapping(TenantBaseModel):
-    """Data mapping model for field transformations."""
+class DataMapping(MutableTenantModel):
+    """Deterministic source-to-target field transformation."""
 
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
-    integration = models.ForeignKey(
-        Integration,
-        on_delete=models.CASCADE,
-        related_name="mappings",
-    )
-    source_field = models.CharField(
-        max_length=255,
-        help_text="Source field name",
-    )
-    target_field = models.CharField(
-        max_length=255,
-        help_text="Target field name",
-    )
-    transform = models.JSONField(
-        default=dict,
-        help_text="Transformation rules",
-    )
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    integration = models.ForeignKey(Integration, on_delete=models.CASCADE, related_name="mappings")
+    name = models.CharField(max_length=255)
+    source_field = models.CharField(max_length=255)
+    target_field = models.CharField(max_length=255)
+    transform = models.JSONField(default=dict)
+    position = models.PositiveIntegerField(default=0)
+    is_required = models.BooleanField(default=False)
+    default_value = models.JSONField(null=True, blank=True)
 
     class Meta:
         app_label = "integration_platform"
         db_table = "integration_platform_data_mappings"
-        indexes = [
-            models.Index(fields=["tenant_id", "integration"]),
+        ordering = ("position", "name", "id")
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "integration", "source_field", "target_field"), condition=Q(is_deleted=False), name="intplat_map_fields_live_uniq"),
+            models.UniqueConstraint(fields=("tenant_id", "integration", "name"), condition=Q(is_deleted=False), name="intplat_map_name_live_uniq"),
         ]
-        unique_together = [["integration", "source_field", "target_field"]]
+        indexes = [models.Index(fields=("tenant_id", "integration", "position"), name="intplat_map_tenant_pos_idx")]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.integration_id and self.tenant_id != self.integration.tenant_id:
+            raise ValidationError({"integration": "Mapping and integration must belong to the same tenant."})
+        from .adapter_registry import transformation_registry
+
+        transformation_registry.validate(self.transform)
 
     def __str__(self) -> str:
-        return f"{self.integration.name}: {self.source_field} -> {self.target_field}"
+        return f"{self.name}: {self.source_field} -> {self.target_field}"
+
+
+__all__ = [
+    "Connector", "ConnectorCapability", "ConnectorType", "CredentialStatus", "CredentialType",
+    "DataMapping", "DeliveryStatus", "Integration", "IntegrationCredential", "IntegrationStatus",
+    "ImmutableDeliveryError", "Webhook", "WebhookDelivery", "WebhookDirection", "WebhookStatus", "generate_uuid",
+]
