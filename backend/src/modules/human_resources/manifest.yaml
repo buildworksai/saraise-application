@@ -1,44 +1,146 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
+# SARAISE open-source Human Resources core contract.
 name: human_resources
-version: 1.0.0
-category: core_business
-display_name: Human Resources Management
-description: |
-  Complete HRMS with payroll, attendance, leave management, recruitment,
-  performance reviews, and employee lifecycle management.
+version: 2.0.0
+description: >-
+  Tenant-isolated department hierarchy, employee lifecycle, attendance,
+  explicit leave allocation, and governed leave-request workflows.
+type: domain
+lifecycle: managed
 
-# Dependencies
-dependencies:
-  - name: master_data_management
-    version: ">=1.0.0"
-    required: false
-    purpose: Employee master data
+# Core HR is fully functional without paid adapters. Optional integrations are
+# declared as soft capabilities in signed metadata rather than hard dependencies.
+dependencies: []
 
-# Permissions
 permissions:
-  - hr.employee:create
+  - hr.department:read
+  - hr.department:create
+  - hr.department:update
+  - hr.department:delete
   - hr.employee:read
+  - hr.employee:create
   - hr.employee:update
   - hr.employee:delete
-  - hr.department:create
-  - hr.department:read
-  - hr.department:update
-  - hr.attendance:create
+  - hr.employee:transition
   - hr.attendance:read
-  - hr.leave:create
-  - hr.leave:read
-  - hr.leave:update
-  - hr.payroll:read
-  - hr.performance:read
+  - hr.attendance:create
+  - hr.attendance:update
+  - hr.attendance:delete
+  - hr.attendance:clock
+  - hr.leave_balance:read
+  - hr.leave_balance:create
+  - hr.leave_balance:adjust
+  - hr.leave_balance:delete
+  - hr.leave_request:read
+  - hr.leave_request:create
+  - hr.leave_request:update
+  - hr.leave_request:approve
+  - hr.leave_request:reject
+  - hr.leave_request:cancel
+  - hr.leave_request:delete
+  - hr.health:read
 
-# SoD (Segregation of Duties) actions
-sod_actions:
-  - [hr.employee:create, hr.payroll:create]
+sod_actions: []
+search_indexes:
+  - hr_departments
+  - hr_employees
+  - hr_attendances
+  - hr_leave_balances
+  - hr_leave_requests
+ai_tools: []
 
-# Health Checks
-health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
-    interval: 60
+metadata:
+  display_name: Human Resources
+  category: core_business
+  license_tier: open_source_core
+  entitlement: human_resources
+  api:
+    canonical_prefix: /api/v2/human-resources/
+    health_endpoint: /api/v2/human-resources/health/
+    default_page_size: 25
+    maximum_page_size: 100
+  optional_dependencies:
+    master_data_management:
+      version: ">=1.0.0"
+      interface: MasterDataEmployeePort
+      failure_policy: local_core_remains_available
+    workflow_automation:
+      version: ">=1.0.0"
+      interface: WorkflowApprovalPort
+      failure_policy: local_approval_remains_available
+  health_checks:
+    - name: database
+      critical: true
+    - name: domain_schema
+      critical: true
+    - name: required_migrations
+      critical: true
+    - name: row_level_security
+      critical: true
+    - name: state_machines
+      critical: true
+    - name: async_outbox
+      critical: true
+  state_machines:
+    human_resources.employee_lifecycle:
+      state_field: employment_status
+      history_field: transition_history
+      terminal_states: [terminated]
+      commands: [place_on_leave, return_from_leave, deactivate, activate, terminate]
+    human_resources.leave_request:
+      state_field: status
+      history_field: transition_history
+      terminal_states: [rejected, cancelled]
+      commands: [approve, reject, cancel]
+  extension_contract:
+    schema_version: "1.0"
+    replacement_policy: core_authority_cannot_be_replaced
+    interfaces:
+      - MasterDataEmployeePort
+      - WorkflowApprovalPort
+      - BusinessCalendarPort
+      - HumanResourcesEventSubscriber
+  event_contract:
+    schema_version: 1
+    compatibility: additive_within_schema_version
+    envelope_fields:
+      - event_id
+      - event_type
+      - schema_version
+      - tenant_id
+      - aggregate_type
+      - aggregate_id
+      - occurred_at
+      - actor_id
+      - correlation_id
+      - causation_id
+      - payload
+    publishes:
+      - human_resources.department.created
+      - human_resources.department.updated
+      - human_resources.department.deactivated
+      - human_resources.department.archived
+      - human_resources.employee.created
+      - human_resources.employee.updated
+      - human_resources.employee.status_changed
+      - human_resources.employee.department_changed
+      - human_resources.employee.manager_changed
+      - human_resources.employee.terminated
+      - human_resources.employee.archived
+      - human_resources.attendance.recorded
+      - human_resources.attendance.clocked_in
+      - human_resources.attendance.clocked_out
+      - human_resources.attendance.corrected
+      - human_resources.attendance.archived
+      - human_resources.leave_balance.created
+      - human_resources.leave_balance.adjusted
+      - human_resources.leave_balance.reserved
+      - human_resources.leave_balance.consumed
+      - human_resources.leave_balance.released
+      - human_resources.leave_balance.archived
+      - human_resources.leave_request.submitted
+      - human_resources.leave_request.updated
+      - human_resources.leave_request.approved
+      - human_resources.leave_request.rejected
+      - human_resources.leave_request.cancelled
+      - human_resources.leave_request.archived
+    consumes: []

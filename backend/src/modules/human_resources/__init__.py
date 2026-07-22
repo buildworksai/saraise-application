@@ -1,5 +1,1 @@
-"""
-Human Resources Module.
-
-Complete HRMS with payroll, attendance, leave management, recruitment, and performance reviews.
-"""
+"""Open-source Human Resources core domain."""

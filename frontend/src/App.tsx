@@ -410,23 +410,6 @@ const CreateInventoryWarehousePage = lazy(() =>
   }))
 );
 
-// Human Resources
-const HrEmployeeListPage = lazy(() =>
-  import("./modules/human_resources/pages/EmployeeListPage").then((m) => ({
-    default: m.EmployeeListPage,
-  }))
-);
-const HrEmployeeDetailPage = lazy(() =>
-  import("./modules/human_resources/pages/EmployeeDetailPage").then((m) => ({
-    default: m.EmployeeDetailPage,
-  }))
-);
-const CreateHrEmployeePage = lazy(() =>
-  import("./modules/human_resources/pages/CreateEmployeePage").then((m) => ({
-    default: m.CreateEmployeePage,
-  }))
-);
-
 // Project Management
 const ProjectListPage = lazy(() =>
   import("./modules/project_management/pages/ProjectListPage").then((m) => ({
@@ -1071,38 +1054,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <InventoryWarehouseDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Human Resources */}
-          <Route
-            path="/human-resources/employees"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <HrEmployeeListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/human-resources/employees/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateHrEmployeePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/human-resources/employees/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <HrEmployeeDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
