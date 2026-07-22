@@ -40,31 +40,6 @@ const Support = lazy(() =>
   }))
 );
 
-// Lazy load Foundation module pages
-const WorkflowAutomationListPage = lazy(() =>
-  import("./modules/workflow_automation/pages/WorkflowAutomationListPage").then(
-    (m) => ({
-      default: m.WorkflowAutomationListPage,
-    })
-  )
-);
-
-const WorkflowAutomationDetailPage = lazy(() =>
-  import(
-    "./modules/workflow_automation/pages/WorkflowAutomationDetailPage"
-  ).then((m) => ({
-    default: m.WorkflowAutomationDetailPage,
-  }))
-);
-
-const CreateWorkflowAutomationResourcePage = lazy(() =>
-  import(
-    "./modules/workflow_automation/pages/CreateWorkflowAutomationResourcePage"
-  ).then((m) => ({
-    default: m.CreateWorkflowAutomationResourcePage,
-  }))
-);
-
 const ApiManagementListPage = lazy(() =>
   import("./modules/api_management/pages/ApiManagementListPage").then((m) => ({
     default: m.ApiManagementListPage,
@@ -653,12 +628,10 @@ const WorkflowListPage = lazy(() =>
     default: m.WorkflowListPage,
   }))
 );
-const WorkflowBuilder = lazy(() =>
-  import("./modules/workflow_automation/components/WorkflowBuilder").then(
-    (m) => ({
-      default: m.WorkflowBuilder,
-    })
-  )
+const WorkflowCreatePage = lazy(() =>
+  import("./modules/workflow_automation/pages/WorkflowCreatePage").then((m) => ({
+    default: m.WorkflowCreatePage,
+  }))
 );
 const TaskInboxPage = lazy(() =>
   import("./modules/workflow_automation/pages/TaskInboxPage").then((m) => ({
@@ -680,6 +653,35 @@ const TenantListPage = lazy(() =>
 const TenantDetailPage = lazy(() =>
   import("./modules/tenant_management/pages/TenantDetailPage").then((m) => ({
     default: m.TenantDetailPage,
+  }))
+);
+
+// Security & Access Control Pages
+const RolesPage = lazy(() =>
+  import("./modules/security_access_control/pages/RolesPage").then((m) => ({
+    default: m.RolesPage,
+  }))
+);
+
+const PermissionsPage = lazy(() =>
+  import("./modules/security_access_control/pages/PermissionsPage").then(
+    (m) => ({
+      default: m.PermissionsPage,
+    })
+  )
+);
+
+const PermissionSetsPage = lazy(() =>
+  import("./modules/security_access_control/pages/PermissionSetsPage").then(
+    (m) => ({
+      default: m.PermissionSetsPage,
+    })
+  )
+);
+
+const SecurityAuditLogPage = lazy(() =>
+  import("./modules/security_access_control/pages/AuditLogPage").then((m) => ({
+    default: m.AuditLogPage,
   }))
 );
 
@@ -932,7 +934,7 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <WorkflowBuilder />
+                  <WorkflowCreatePage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -943,6 +945,48 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <TaskInboxPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Security & Access Control routes */}
+          <Route
+            path="/security-access-control/roles"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RolesPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/security-access-control/permissions"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <PermissionsPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/security-access-control/permission-sets"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <PermissionSetsPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/security-access-control/audit-logs"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <SecurityAuditLogPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -1462,38 +1506,6 @@ function AnimatedRoutes() {
 
           {/* 404 */}
           <Route path="*" element={<div className="p-8">Page not found</div>} />
-
-          {/* WorkflowAutomation routes */}
-          <Route
-            path="/workflow-automation"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <WorkflowAutomationListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/workflow-automation/create"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateWorkflowAutomationResourcePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/workflow-automation/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <WorkflowAutomationDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
 
           {/* ApiManagement routes */}
           <Route

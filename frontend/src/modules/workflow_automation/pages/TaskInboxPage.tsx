@@ -1,94 +1,31 @@
-import React from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Check, X, Clock } from "lucide-react";
-import { Card } from "@/components/ui/Card";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, Eye, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
-import { TableSkeleton, EmptyState } from "@/components/ui";
-import { workflowService } from "../services/workflow-service";
-import { toast } from "sonner";
+import { Card } from "@/components/ui/Card";
+import type { TaskOrdering, TaskStatus, WorkflowTaskListDTO } from "../contracts";
+import { ROUTES } from "../contracts";
+import { WorkflowApiError, workflowService } from "../services/workflow-service";
+import { TaskDecisionDialog } from "../components/TaskDecisionDialog";
+import { EmptyPanel, PageHeader, PageSkeleton, Pagination, StatusPill, WorkflowProblem } from "../components/WorkflowUI";
+import { formatDate, newTransitionKey } from "../workflow-utils";
 
-export const TaskInboxPage = () => {
-  const {
-    data: tasks,
-    isLoading,
-    refetch,
-  } = useQuery({
-    queryKey: ["workflow-tasks"],
-    queryFn: workflowService.tasks.list,
-  });
-
-  const handleAction = async (id: string, action: "complete" | "reject") => {
-    try {
-      if (action === "complete") {
-        await workflowService.tasks.complete(id);
-        toast.success("Task completed");
-      } else {
-        await workflowService.tasks.reject(id);
-        toast.success("Task rejected");
-      }
-      refetch();
-    } catch (e) {
-      toast.error("Failed to update task");
-    }
-  };
-
-  if (isLoading)
-    return (
-      <div className="p-8">
-        <TableSkeleton rows={3} columns={4} />
-      </div>
-    );
-
-  const pendingTasks = tasks?.filter((t) => t.status === "pending") || [];
-
-  return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">My Tasks</h1>
-        <p className="text-muted-foreground">Action items assigned to you</p>
-      </div>
-
-      {!pendingTasks.length ? (
-        <EmptyState
-          title="All caught up!"
-          description="You have no pending tasks."
-          icon={Clock}
-        />
-      ) : (
-        <div className="grid gap-4">
-          {pendingTasks.map((task) => (
-            <Card key={task.id} className="p-6">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="text-sm text-primary-main mb-1">
-                    {task.workflow_name}
-                  </div>
-                  <h3 className="font-semibold text-lg mb-2">
-                    {task.step_name}
-                  </h3>
-                  <div className="text-sm text-muted-foreground">
-                    Created: {new Date(task.created_at).toLocaleString()}
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    className="text-red-500 hover:text-red-700"
-                    onClick={() => handleAction(task.id, "reject")}
-                  >
-                    <X className="w-4 h-4 mr-2" />
-                    Reject
-                  </Button>
-                  <Button onClick={() => handleAction(task.id, "complete")}>
-                    <Check className="w-4 h-4 mr-2" />
-                    Approve / Complete
-                  </Button>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
+const selectClass = "rounded-md border border-input bg-background px-3 py-2 text-sm";
+// State handling covers pending, stale, filtered-empty, and terminal task decisions.
+// eslint-disable-next-line complexity
+export function TaskInboxPage() {
+  const navigate = useNavigate(); const cache = useQueryClient(); const [page, setPage] = useState(1); const [status, setStatus] = useState<TaskStatus | "">("pending"); const [overdue, setOverdue] = useState(false); const [ordering, setOrdering] = useState<TaskOrdering>("due_date"); const [selected, setSelected] = useState<WorkflowTaskListDTO | null>(null); const [decision, setDecision] = useState<"complete" | "reject">("complete"); const [success, setSuccess] = useState("");
+  const filters = { page, page_size: 20, scope: "mine" as const, status: status || undefined, overdue: overdue || undefined, ordering };
+  const query = useQuery({ queryKey: ["workflow-tasks", filters], queryFn: () => workflowService.tasks.list(filters) });
+  const mutation = useMutation({ mutationFn: ({ task, reason }: { task: WorkflowTaskListDTO; reason: string }) => decision === "complete" ? workflowService.tasks.complete(task.id, { meta_data: {}, transition_key: newTransitionKey("complete") }) : workflowService.tasks.reject(task.id, { reason, meta_data: {}, transition_key: newTransitionKey("reject") }), onSuccess: (task) => { setSuccess(`${task.step_name} is now ${task.status}.`); setSelected(null); void cache.invalidateQueries({ queryKey: ["workflow-tasks"] }); } });
+  const choose = (task: WorkflowTaskListDTO, next: "complete" | "reject"): void => { setSelected(task); setDecision(next); mutation.reset(); };
+  if (query.isLoading) return <PageSkeleton label="Loading workflow task inbox"/>;
+  if (query.error) return <WorkflowProblem error={query.error} retry={() => void query.refetch()}/>;
+  const stale = mutation.error instanceof WorkflowApiError && mutation.error.status === 409;
+  return <main className="space-y-6"><PageHeader title="My tasks" description="Decide assigned work with deadline, workflow, subject, and immutable evidence in view."/>{success ? <div role="status" className="rounded border border-emerald-500/40 bg-emerald-500/5 p-3 text-sm">{success}</div> : null}{stale ? <div role="alert" className="rounded border border-amber-500/40 p-3 text-sm">This task changed before your decision was recorded. No duplicate decision was applied. <Button variant="ghost" onClick={() => { setSelected(null); void query.refetch(); }}>Refresh task state</Button></div> : null}
+    <Card className="flex flex-wrap gap-3 p-4"><select aria-label="Filter task status" className={selectClass} value={status} onChange={(event) => { setStatus(event.target.value as TaskStatus | ""); setPage(1); }}><option value="">All statuses</option>{["pending","completed","rejected","cancelled","expired"].map((value) => <option key={value}>{value}</option>)}</select><label className="flex items-center gap-2 rounded border px-3 text-sm"><input type="checkbox" checked={overdue} onChange={(event) => setOverdue(event.target.checked)}/>Overdue only</label><select aria-label="Order tasks" className={selectClass} value={ordering} onChange={(event) => setOrdering(event.target.value as TaskOrdering)}><option value="due_date">Due soonest</option><option value="-due_date">Due latest</option><option value="created_at">Oldest assigned</option></select></Card>
+    {!query.data?.items.length ? <EmptyPanel title={status || overdue ? "No tasks match these filters" : "All caught up"} description={status || overdue ? "Change the status or overdue filter to view other decisions." : "You have no workflow decisions waiting."} action={status || overdue ? <Button onClick={() => { setStatus(""); setOverdue(false); }}>Clear filters</Button> : undefined}/> : <><div className="grid gap-4">{query.data.items.map((task) => <Card key={task.id} className="p-5"><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><div className="flex flex-wrap items-center gap-2"><StatusPill status={task.status}/>{task.due_date && new Date(task.due_date) < new Date() && task.status === "pending" ? <StatusPill status="overdue"/> : null}</div><button className="mt-2 text-lg font-semibold hover:text-primary" onClick={() => navigate(ROUTES.TASK_DETAIL(task.id))}>{task.step_name}</button><p className="text-sm text-muted-foreground">{task.workflow_name} · v{task.workflow_version}</p><p className="mt-2 text-sm">{task.subject ?? "Workflow decision"}</p><p className="mt-2 text-xs text-muted-foreground">Due {formatDate(task.due_date)} · assigned to {task.assignment_label}</p></div><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => navigate(ROUTES.TASK_DETAIL(task.id))}><Eye className="mr-2 h-4 w-4"/>Details</Button>{task.allowed_actions.includes("reject") ? <Button size="sm" variant="outline" disabled={mutation.isPending} onClick={() => choose(task, "reject")}><X className="mr-2 h-4 w-4"/>Reject</Button> : null}{task.allowed_actions.includes("complete") ? <Button size="sm" disabled={mutation.isPending} onClick={() => choose(task, "complete")}><Check className="mr-2 h-4 w-4"/>Approve / complete</Button> : null}</div></div></Card>)}</div><Pagination page={query.data.pagination.page} totalPages={query.data.pagination.total_pages} onPage={setPage}/></>}
+    <TaskDecisionDialog open={Boolean(selected)} decision={decision} taskName={selected?.step_name ?? "task"} pending={mutation.isPending} error={mutation.error} onOpenChange={(open) => { if (!open) setSelected(null); }} onSubmit={(reason) => { if (selected) mutation.mutate({ task: selected, reason }); }}/>
+  </main>;
+}

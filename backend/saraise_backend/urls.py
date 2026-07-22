@@ -33,6 +33,7 @@ urlpatterns = [
     path("api/v1/tenant-management/", include("src.modules.tenant_management.urls")),
     # Security & Access Control
     path("api/v2/security-access-control/", include("src.modules.security_access_control.urls")),
+    path("api/v2/workflow-automation/", include("src.modules.workflow_automation.urls")),
     path("api/v1/workflow-automation/", include("src.modules.workflow_automation.urls")),
     path("api/v1/api-management/", include("src.modules.api_management.urls")),
     path("api/v1/integration-platform/", include("src.modules.integration_platform.urls")),

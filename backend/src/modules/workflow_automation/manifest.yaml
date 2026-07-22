@@ -1,5 +1,77 @@
-name: workflow_automation
-version: 1.0.0
+# SARAISE tenant-safe human and business workflow foundation contract
+name: workflow-automation
+version: 2.0.0
+description: Versioned human and business workflows, guarded decisions, durable execution, and immutable evidence
 type: foundation
-dependencies: ["security_access_control"]
-description: "Core engine for defining and executing state-machine workflows including approvals and tasks."
+lifecycle: core
+dependencies:
+  - core-identity >=1.0.0
+  - security-access-control >=1.0.0
+  - notifications >=1.0.0
+permissions:
+  - workflow_automation.workflow:read
+  - workflow_automation.workflow:create
+  - workflow_automation.workflow:update
+  - workflow_automation.workflow:delete
+  - workflow_automation.workflow:publish
+  - workflow_automation.workflow:archive
+  - workflow_automation.instance:read
+  - workflow_automation.instance:start
+  - workflow_automation.instance:cancel
+  - workflow_automation.task:read
+  - workflow_automation.task:complete
+  - workflow_automation.task:reject
+  - workflow_automation.catalog:read
+  - workflow_automation.health:read
+sod_actions:
+  - workflow_automation.workflow:publish
+  - workflow_automation.workflow:delete
+search_indexes:
+  - workflow_definitions
+  - workflow_instances
+  - workflow_tasks
+ai_tools: []
+metadata:
+  api_version: v2
+  public_api_prefix: /api/v2/workflow-automation/
+  health_probe: workflow_automation.readiness
+  durable_job_commands:
+    - workflow_automation.execute_instance
+    - workflow_automation.expire_tasks
+  extension_points:
+    - name: workflow_automation.action_registry
+      spi_version: "1.0"
+      registration: app_ready
+    - name: workflow_automation.condition_registry
+      spi_version: "1.0"
+      registration: app_ready
+    - name: workflow_automation.subject_registry
+      spi_version: "1.0"
+      registration: app_ready
+    - name: workflow_automation.assignee_registry
+      spi_version: "1.0"
+      registration: app_ready
+  service_contracts:
+    - name: workflow_automation.execution
+      spi_version: "1.0"
+      tenant_first: true
+  quota_resources:
+    - name: workflow_automation.api_reads
+      default_projection: request
+      cost: 1
+    - name: workflow_automation.api_writes
+      default_projection: request
+      cost: 1
+    - name: workflow_automation.executions
+      default_projection: execution
+      cost: 1
+    - name: workflow_automation.task_decisions
+      default_projection: decision
+      cost: 1
+    - name: workflow_automation.external_actions
+      default_projection: action
+      cost: 1
+  uninstall:
+    preserve_evidence: true
+    unregister_extensions: true
+    unregister_commands: true
