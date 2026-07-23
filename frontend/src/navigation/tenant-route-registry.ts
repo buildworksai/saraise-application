@@ -256,7 +256,7 @@ export function buildTenantSidebarTree(
 
   const routesById = new Map(routes.map((route) => [route.id, route]));
   for (const route of routes) {
-    const contextualNavItem = (route.module === "process_mining" || route.module === "customization_framework") && route.navigation.type === "contextual";
+    const contextualNavItem = ["process_mining", "customization_framework", "integration_platform"].includes(route.module) && route.navigation.type === "contextual";
     if (route.navigation.type !== "sidebar" && !contextualNavItem) continue;
     if (grantedPermissions && route.requiredPermission && !grantedPermissions.has(route.requiredPermission)) continue;
     const parent = route.navigation.type === "contextual" ? routesById.get(route.navigation.parentRouteId) : undefined;

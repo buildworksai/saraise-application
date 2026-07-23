@@ -4,10 +4,11 @@ import { ENDPOINTS, INBOUND_WEBHOOK_HEADERS } from '../contracts';
 import type {
   ApiEnvelope, AsyncJobReceipt, AsyncJobState, Connector, ConnectorDetail, ConnectorFilters,
   ConnectorHealth, ConnectorSchema, CredentialCreateRequest, CredentialRevokeRequest,
+  ConfigurationAudit, ConfigurationPreview, ConfigurationVersion, ConfigurationWriteRequest,
   CredentialRotateRequest, DataMapping, DataMappingCreateRequest, DataMappingUpdateRequest,
   DeliveryFilters, DeliveryRedriveRequest, InboundWebhookReceipt, InboundWebhookRequest,
   Integration, IntegrationCreateRequest, IntegrationCredential, IntegrationDetail, IntegrationFilters,
-  IntegrationPlatformHealth, IntegrationSyncRequest, IntegrationTestRequest, IntegrationUpdateRequest,
+  IntegrationPlatformConfiguration, IntegrationPlatformHealth, IntegrationPlatformManageCapability, IntegrationSyncRequest, IntegrationTestRequest, IntegrationUpdateRequest,
   MappingFilters, MappingPreviewRequest, MappingPreviewResult, MappingValidationRequest,
   MappingValidationResult, PaginatedEnvelope, PaginatedMeta, TransitionRequest, Webhook,
   WebhookCreateRequest, WebhookDelivery, WebhookDeliveryDetail, WebhookDetail, WebhookFilters,
@@ -79,7 +80,7 @@ export class IntegrationPlatformService {
     return page(await apiClient.get<PaginatedEnvelope<WebhookDelivery>>(path));
   }
   async getDelivery(id: string): Promise<WebhookDeliveryDetail> { return data(await apiClient.get<ApiEnvelope<WebhookDeliveryDetail>>(ENDPOINTS.DELIVERIES.DETAIL(id))); }
-  async redriveDelivery(id: string, request: DeliveryRedriveRequest): Promise<AsyncJobReceipt> { return data(await apiClient.post<ApiEnvelope<AsyncJobReceipt>>(ENDPOINTS.DELIVERIES.REDRIVE(id), request)); }
+  async redriveDelivery(id: string, request: DeliveryRedriveRequest): Promise<WebhookDeliveryDetail> { return data(await apiClient.post<ApiEnvelope<WebhookDeliveryDetail>>(ENDPOINTS.DELIVERIES.REDRIVE(id), request)); }
 
   async listMappings(filters: MappingFilters = {}): Promise<PageResult<DataMapping>> {
     const path = withQuery(ENDPOINTS.MAPPINGS.LIST, [['page', filters.page], ['page_size', filters.page_size], ['search', filters.search], ['integration_id', filters.integration_id], ['source_field', filters.source_field], ['target_field', filters.target_field]]);
@@ -92,6 +93,15 @@ export class IntegrationPlatformService {
   async validateMappings(request: MappingValidationRequest): Promise<MappingValidationResult> { return data(await apiClient.post<ApiEnvelope<MappingValidationResult>>(ENDPOINTS.MAPPINGS.VALIDATE, request)); }
   async previewMappings(request: MappingPreviewRequest): Promise<MappingPreviewResult> { return data(await apiClient.post<ApiEnvelope<MappingPreviewResult>>(ENDPOINTS.MAPPINGS.PREVIEW, request)); }
   async getHealth(): Promise<IntegrationPlatformHealth> { return data(await apiClient.get<ApiEnvelope<IntegrationPlatformHealth>>(ENDPOINTS.HEALTH)); }
+  async getManageCapability(): Promise<IntegrationPlatformManageCapability> { return data(await apiClient.get<ApiEnvelope<IntegrationPlatformManageCapability>>(ENDPOINTS.CONFIGURATION.MANAGE_CAPABILITY)); }
+  async getConfiguration(): Promise<IntegrationPlatformConfiguration> { return data(await apiClient.get<ApiEnvelope<IntegrationPlatformConfiguration>>(ENDPOINTS.CONFIGURATION.CURRENT)); }
+  async saveConfiguration(request: ConfigurationWriteRequest): Promise<IntegrationPlatformConfiguration> { return data(await apiClient.post<ApiEnvelope<IntegrationPlatformConfiguration>>(ENDPOINTS.CONFIGURATION.CURRENT, request)); }
+  async previewConfiguration(request: ConfigurationWriteRequest): Promise<ConfigurationPreview> { return data(await apiClient.post<ApiEnvelope<ConfigurationPreview>>(ENDPOINTS.CONFIGURATION.PREVIEW, request)); }
+  async rollbackConfiguration(environment: string, version: number): Promise<IntegrationPlatformConfiguration> { return data(await apiClient.post<ApiEnvelope<IntegrationPlatformConfiguration>>(ENDPOINTS.CONFIGURATION.ROLLBACK, { environment, version })); }
+  async importConfiguration(request: ConfigurationWriteRequest): Promise<IntegrationPlatformConfiguration> { return data(await apiClient.post<ApiEnvelope<IntegrationPlatformConfiguration>>(ENDPOINTS.CONFIGURATION.IMPORT, request)); }
+  async exportConfiguration(): Promise<{ schema_version: number; environment: string; version: number; document: IntegrationPlatformConfiguration['document'] }> { return data(await apiClient.get<ApiEnvelope<{ schema_version: number; environment: string; version: number; document: IntegrationPlatformConfiguration['document'] }>>(ENDPOINTS.CONFIGURATION.EXPORT)); }
+  async listConfigurationVersions(): Promise<PageResult<ConfigurationVersion>> { return page(await apiClient.get<PaginatedEnvelope<ConfigurationVersion>>(ENDPOINTS.CONFIGURATION.VERSIONS)); }
+  async listConfigurationAudits(): Promise<PageResult<ConfigurationAudit>> { return page(await apiClient.get<PaginatedEnvelope<ConfigurationAudit>>(ENDPOINTS.CONFIGURATION.AUDITS)); }
 }
 
 export const integrationPlatformService = new IntegrationPlatformService();

@@ -15,7 +15,6 @@ import {
   Users,
   Database,
   Workflow,
-  Plug,
   FolderTree,
   Key,
   Bot,
@@ -38,6 +37,7 @@ import { QUERY_KEYS, type ApiManagementConfigurationSchema } from "@/modules/api
 import { api_managementService } from "@/modules/api_management/services/api_management-service";
 import { ROUTES as REGIONAL_ROUTES } from "@/modules/regional/contracts";
 import { useRuntimeConfiguration } from "@/modules/customization_framework/components/useRuntimeConfiguration";
+import { integrationPlatformService } from "@/modules/integration_platform/services/integration-platform-service";
 import type { User } from "@/stores/auth-store";
 
 interface NavItem {
@@ -76,12 +76,6 @@ const tenantItems: NavItem[] = [
     label: "Workflow Automation",
     icon: Workflow,
     module: "workflow_automation",
-  },
-  {
-    path: "/integration-platform",
-    label: "Integration Platform",
-    icon: Plug,
-    module: "integration_platform",
   },
   {
     path: "/dms",
@@ -129,6 +123,7 @@ const registryTenantItems: NavItem[] = getTenantSidebarTreeForMode(
       label: branch.label,
       icon: branch.icon,
       module: branch.module,
+      order: branch.order,
       children: branch.children.map((leaf) => ({
         routeId: leaf.routeId,
         path: leaf.path,
@@ -310,6 +305,10 @@ export const TenantSidebar = ({ user }: { user: User }) => {
     queryKey: QUERY_KEYS.CONFIGURATION_SCHEMA(),
     queryFn: () => api_managementService.getConfigurationSchema(),
   });
+  const integrationPlatformConfiguration = useQuery({
+    queryKey: ["integration-platform", "configuration"],
+    queryFn: () => integrationPlatformService.getConfiguration(),
+  });
   const runtimeRegistryItems = applyCustomizationNavigationOrder(
     applyApiManagementNavigationOrder(
       applyRuntimeNavigationOrder(
@@ -328,6 +327,17 @@ export const TenantSidebar = ({ user }: { user: User }) => {
     }))
     .map((item) => item.module === "blockchain_traceability" && traceabilityCapabilities.data
       ? { ...item, order: traceabilityCapabilities.data.document.ui.sidebar_order }
+      : item.module === "integration_platform" && integrationPlatformConfiguration.data
+        ? {
+            ...item,
+            order: integrationPlatformConfiguration.data.document.navigation.base_order,
+            children: item.children
+              ?.map((child) => ({
+                ...child,
+                order: integrationPlatformConfiguration.data!.document.navigation.route_order[child.routeId ?? ""] ?? child.order,
+              }))
+              .sort((left, right) => left.order - right.order),
+          }
       : item)
     .sort((left, right) => (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER));
 

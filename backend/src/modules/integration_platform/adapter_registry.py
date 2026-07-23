@@ -11,6 +11,10 @@ from typing import Any
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 
 from .adapters import ConnectorAdapter
+from .configuration import DEFAULT_CONFIGURATION
+
+_TRANSFORM_POLICY = DEFAULT_CONFIGURATION["transformations"]
+assert isinstance(_TRANSFORM_POLICY, Mapping)
 
 
 class DuplicateAdapterError(ImproperlyConfigured):
@@ -93,7 +97,7 @@ def _string_case(value: object, options: Mapping[str, object]) -> object:
     if value is None:
         return None
     mode = options.get("case")
-    if mode not in {"lower", "upper", "title", "casefold"}:
+    if mode not in set(_TRANSFORM_POLICY["string_case_modes"]):
         raise ValidationError({"transform": "string_case requires lower, upper, title, or casefold."})
     text = str(value)
     return getattr(text, str(mode))()
@@ -102,7 +106,7 @@ def _string_case(value: object, options: Mapping[str, object]) -> object:
 def _number(value: object, options: Mapping[str, object]) -> object:
     if value is None or value == "":
         return None
-    kind = options.get("type", "decimal")
+    kind = options.get("type", _TRANSFORM_POLICY["default_number_mode"])
     try:
         number = Decimal(str(value))
     except (InvalidOperation, ValueError) as exc:
@@ -123,7 +127,7 @@ def _date_format(value: object, options: Mapping[str, object]) -> object:
     if not isinstance(output, str) or not output:
         raise ValidationError({"transform": "date_format requires output_format."})
     try:
-        parsed = value if isinstance(value, datetime) else datetime.strptime(str(value), str(options.get("input_format") or "%Y-%m-%dT%H:%M:%S%z"))
+        parsed = value if isinstance(value, datetime) else datetime.strptime(str(value), str(options.get("input_format") or _TRANSFORM_POLICY["default_input_date_format"]))
     except (TypeError, ValueError) as exc:
         raise ValidationError({"transform": "Value does not match input_format."}) from exc
     return parsed.strftime(output)
@@ -140,7 +144,7 @@ def _enum_map(value: object, options: Mapping[str, object]) -> object:
     key = str(value)
     if key in mapping:
         return mapping[key]
-    if options.get("allow_unmapped") is True:
+    if options.get("allow_unmapped", _TRANSFORM_POLICY["allow_unmapped_enum"]) is True:
         return value
     raise ValidationError({"transform": f"No enum mapping exists for {key!r}."})
 
@@ -180,8 +184,9 @@ class TransformationRegistry:
             raise ValidationError({"transform": "Transformation must be an object or operation array."})
         if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
             raise ValidationError({"transform": "operations must be an array."})
-        if len(raw) > 20:
-            raise ValidationError({"transform": "At most 20 transformations may be chained."})
+        maximum = int(_TRANSFORM_POLICY["max_chain_length"])
+        if len(raw) > maximum:
+            raise ValidationError({"transform": f"At most {maximum} transformations may be chained."})
         steps: list[Mapping[str, object]] = []
         for step in raw:
             if not isinstance(step, Mapping):
@@ -201,11 +206,11 @@ class TransformationRegistry:
             if not isinstance(options, Mapping):
                 raise ValidationError({"transform": "Transformation options must be an object."})
             # Run option validation without depending on a real sample where possible.
-            if name == "string_case" and options.get("case") not in {"lower", "upper", "title", "casefold"}:
+            if name == "string_case" and options.get("case") not in set(_TRANSFORM_POLICY["string_case_modes"]):
                 raise ValidationError({"transform": "string_case requires a supported case."})
             if name == "date_format" and not isinstance(options.get("output_format"), str):
                 raise ValidationError({"transform": "date_format requires output_format."})
-            if name == "number" and options.get("type", "decimal") not in {"integer", "float", "decimal"}:
+            if name == "number" and options.get("type", _TRANSFORM_POLICY["default_number_mode"]) not in set(_TRANSFORM_POLICY["number_modes"]):
                 raise ValidationError({"transform": "number type is unsupported."})
             if name == "enum_map" and not isinstance(options.get("mapping"), Mapping):
                 raise ValidationError({"transform": "enum_map requires a mapping object."})
@@ -226,7 +231,7 @@ class TransformationRegistry:
 
 connector_adapter_registry = ConnectorAdapterRegistry()
 transformation_registry = TransformationRegistry()
-for _name, _operation in (
+_AVAILABLE_OPERATIONS = dict((
     ("rename", _identity),
     ("string_case", _string_case),
     ("trim", _trim),
@@ -234,8 +239,9 @@ for _name, _operation in (
     ("date_format", _date_format),
     ("default", _default),
     ("enum_map", _enum_map),
-):
-    transformation_registry.register(_name, _operation)
+))
+for _name in _TRANSFORM_POLICY["operations"]:
+    transformation_registry.register(str(_name), _AVAILABLE_OPERATIONS[str(_name)])
 
 
 __all__ = [

@@ -25,9 +25,15 @@ from src.core.api import GovernedAPIViewMixin
 from src.core.api.results import OperationResult
 from src.core.async_jobs.models import OutboxEvent, OutboxStatus
 
+from . import __version__
 from .api import CanonicalSessionAuthentication, _tenant_from_request
 from .models import Connector
 from .permissions import HEALTH_ACTIONS
+from .configuration import DEFAULT_CONFIGURATION, setting
+from .services import runtime_configuration
+
+_HEALTH_DEFAULTS = DEFAULT_CONFIGURATION["health"]
+assert isinstance(_HEALTH_DEFAULTS, Mapping)
 
 T = TypeVar("T")
 
@@ -50,7 +56,10 @@ class HealthCheck:
         }
 
 
-def _bounded_call(operation: Callable[[], T], timeout_seconds: float = 2.0) -> tuple[bool, T | None]:
+def _bounded_call(
+    operation: Callable[[], T],
+    timeout_seconds: float = float(_HEALTH_DEFAULTS["probe_timeout_seconds"]),
+) -> tuple[bool, T | None]:
     """Prevent a provider health implementation from wedging readiness."""
 
     results: queue.Queue[tuple[bool, object]] = queue.Queue(maxsize=1)
@@ -108,7 +117,10 @@ def outbox_persistence_probe(tenant_id: UUID) -> HealthCheck:
 def broker_acknowledgement_probe(tenant_id: UUID) -> HealthCheck:
     """Use durable dispatcher state, which changes only after broker ACK."""
 
-    threshold = timezone.now() - timedelta(minutes=5)
+    acknowledgement_seconds = int(
+        setting(runtime_configuration(tenant_id), "health.broker_acknowledgement_seconds")
+    )
+    threshold = timezone.now() - timedelta(seconds=acknowledgement_seconds)
     try:
         overdue = OutboxEvent.objects.filter(
             tenant_id=tenant_id,
@@ -239,7 +251,7 @@ def module_health(tenant_id: UUID) -> tuple[dict[str, object], int]:
         {
             "status": overall,
             "module": "integration-platform",
-            "version": "2.0.0",
+            "version": __version__,
             "checked_at": timezone.now().isoformat(),
             "checks": [
                 {

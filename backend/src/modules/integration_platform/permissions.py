@@ -17,6 +17,8 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 
+from .configuration import DEFAULT_CONFIGURATION
+
 MODULE_ENTITLEMENT: Final = "integration_platform"
 
 CONNECTOR_READ: Final = "integration_platform.connector:read"
@@ -47,6 +49,8 @@ MAPPING_UPDATE: Final = "integration_platform.mapping:update"
 MAPPING_DELETE: Final = "integration_platform.mapping:delete"
 MAPPING_PREVIEW: Final = "integration_platform.mapping:preview"
 HEALTH_READ: Final = "integration_platform.health:read"
+CONFIGURATION_READ: Final = INTEGRATION_READ
+CONFIGURATION_MANAGE: Final = INTEGRATION_UPDATE
 
 
 PERMISSIONS: Final[tuple[str, ...]] = (
@@ -97,6 +101,12 @@ class AccessRequirement:
     quota_cost: int
 
 
+def _quota_default(name: str) -> int:
+    quotas = DEFAULT_CONFIGURATION["quotas"]
+    assert isinstance(quotas, Mapping)
+    return int(quotas[name])
+
+
 def access(permission: str, quota_resource: str, *, cost: int = 1) -> AccessRequirement:
     """Build one explicit module access requirement."""
 
@@ -115,56 +125,68 @@ CONNECTOR_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
 INTEGRATION_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "list": access(INTEGRATION_READ, "integration_platform.integration.read"),
     "retrieve": access(INTEGRATION_READ, "integration_platform.integration.read"),
-    "create": access(INTEGRATION_CREATE, "integration_platform.integration.write", cost=2),
-    "partial_update": access(INTEGRATION_UPDATE, "integration_platform.integration.write", cost=2),
-    "destroy": access(INTEGRATION_DELETE, "integration_platform.integration.write", cost=2),
-    "activate": access(INTEGRATION_ACTIVATE, "integration_platform.integration.transition", cost=2),
-    "deactivate": access(INTEGRATION_DEACTIVATE, "integration_platform.integration.transition", cost=2),
-    "test_connection": access(INTEGRATION_TEST, "integration_platform.integration.test", cost=5),
-    "sync": access(INTEGRATION_SYNC, "integration_platform.integration.sync", cost=10),
+    "create": access(INTEGRATION_CREATE, "integration_platform.integration.write", cost=_quota_default("integration_write")),
+    "partial_update": access(INTEGRATION_UPDATE, "integration_platform.integration.write", cost=_quota_default("integration_write")),
+    "destroy": access(INTEGRATION_DELETE, "integration_platform.integration.write", cost=_quota_default("integration_write")),
+    "activate": access(INTEGRATION_ACTIVATE, "integration_platform.integration.transition", cost=_quota_default("integration_transition")),
+    "deactivate": access(INTEGRATION_DEACTIVATE, "integration_platform.integration.transition", cost=_quota_default("integration_transition")),
+    "test_connection": access(INTEGRATION_TEST, "integration_platform.integration.test", cost=_quota_default("integration_test")),
+    "sync": access(INTEGRATION_SYNC, "integration_platform.integration.sync", cost=_quota_default("integration_sync")),
     "job": access(INTEGRATION_READ, "integration_platform.integration.job.read"),
 }
 
 CREDENTIAL_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "retrieve": access(CREDENTIAL_READ, "integration_platform.credential.read"),
-    "rotate": access(CREDENTIAL_ROTATE, "integration_platform.credential.write", cost=3),
-    "revoke": access(CREDENTIAL_REVOKE, "integration_platform.credential.write", cost=2),
+    "rotate": access(CREDENTIAL_ROTATE, "integration_platform.credential.write", cost=_quota_default("credential_rotate")),
+    "revoke": access(CREDENTIAL_REVOKE, "integration_platform.credential.write", cost=_quota_default("credential_revoke")),
 }
 
 INTEGRATION_CREDENTIAL_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "list": access(CREDENTIAL_READ, "integration_platform.credential.read"),
-    "create": access(CREDENTIAL_CREATE, "integration_platform.credential.write", cost=2),
+    "create": access(CREDENTIAL_CREATE, "integration_platform.credential.write", cost=_quota_default("credential_create")),
 }
 
 WEBHOOK_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "list": access(WEBHOOK_READ, "integration_platform.webhook.read"),
     "retrieve": access(WEBHOOK_READ, "integration_platform.webhook.read"),
-    "create": access(WEBHOOK_CREATE, "integration_platform.webhook.write", cost=2),
-    "partial_update": access(WEBHOOK_UPDATE, "integration_platform.webhook.write", cost=2),
-    "destroy": access(WEBHOOK_DELETE, "integration_platform.webhook.write", cost=2),
-    "activate": access(WEBHOOK_ACTIVATE, "integration_platform.webhook.transition", cost=2),
-    "deactivate": access(WEBHOOK_DEACTIVATE, "integration_platform.webhook.transition", cost=2),
-    "rotate_secret": access(WEBHOOK_ROTATE_SECRET, "integration_platform.webhook.secret", cost=3),
+    "create": access(WEBHOOK_CREATE, "integration_platform.webhook.write", cost=_quota_default("webhook_write")),
+    "partial_update": access(WEBHOOK_UPDATE, "integration_platform.webhook.write", cost=_quota_default("webhook_write")),
+    "destroy": access(WEBHOOK_DELETE, "integration_platform.webhook.write", cost=_quota_default("webhook_write")),
+    "activate": access(WEBHOOK_ACTIVATE, "integration_platform.webhook.transition", cost=_quota_default("webhook_transition")),
+    "deactivate": access(WEBHOOK_DEACTIVATE, "integration_platform.webhook.transition", cost=_quota_default("webhook_transition")),
+    "rotate_secret": access(WEBHOOK_ROTATE_SECRET, "integration_platform.webhook.secret", cost=_quota_default("webhook_rotate_secret")),
 }
 
 DELIVERY_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "list": access(DELIVERY_READ, "integration_platform.delivery.read"),
     "retrieve": access(DELIVERY_READ, "integration_platform.delivery.read"),
-    "redrive": access(DELIVERY_REDRIVE, "integration_platform.delivery.redrive", cost=5),
+    "redrive": access(DELIVERY_REDRIVE, "integration_platform.delivery.redrive", cost=_quota_default("delivery_redrive")),
 }
 
 MAPPING_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "list": access(MAPPING_READ, "integration_platform.mapping.read"),
     "retrieve": access(MAPPING_READ, "integration_platform.mapping.read"),
-    "create": access(MAPPING_CREATE, "integration_platform.mapping.write", cost=2),
-    "partial_update": access(MAPPING_UPDATE, "integration_platform.mapping.write", cost=2),
-    "destroy": access(MAPPING_DELETE, "integration_platform.mapping.write", cost=2),
-    "validate_mappings": access(MAPPING_PREVIEW, "integration_platform.mapping.preview", cost=2),
-    "preview": access(MAPPING_PREVIEW, "integration_platform.mapping.preview", cost=3),
+    "create": access(MAPPING_CREATE, "integration_platform.mapping.write", cost=_quota_default("mapping_write")),
+    "partial_update": access(MAPPING_UPDATE, "integration_platform.mapping.write", cost=_quota_default("mapping_write")),
+    "destroy": access(MAPPING_DELETE, "integration_platform.mapping.write", cost=_quota_default("mapping_write")),
+    "validate_mappings": access(MAPPING_PREVIEW, "integration_platform.mapping.preview", cost=_quota_default("mapping_validate")),
+    "preview": access(MAPPING_PREVIEW, "integration_platform.mapping.preview", cost=_quota_default("mapping_preview")),
 }
 
 HEALTH_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "get": access(HEALTH_READ, "integration_platform.health.read"),
+}
+
+CONFIGURATION_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
+    "list": access(CONFIGURATION_READ, "integration_platform.configuration.read"),
+    "export": access(CONFIGURATION_READ, "integration_platform.configuration.read"),
+    "versions": access(CONFIGURATION_READ, "integration_platform.configuration.read"),
+    "audits": access(CONFIGURATION_READ, "integration_platform.configuration.read"),
+    "manage_capability": access(CONFIGURATION_MANAGE, "integration_platform.configuration.write"),
+    "create": access(CONFIGURATION_MANAGE, "integration_platform.configuration.write"),
+    "preview": access(CONFIGURATION_MANAGE, "integration_platform.configuration.write"),
+    "rollback": access(CONFIGURATION_MANAGE, "integration_platform.configuration.write"),
+    "import_document": access(CONFIGURATION_MANAGE, "integration_platform.configuration.write"),
 }
 
 ACTION_ACCESS_MAPS: Final[Mapping[str, Mapping[str, AccessRequirement]]] = {
@@ -222,6 +244,7 @@ __all__ = [
     "AccessRequirement",
     "CONNECTOR_ACTIONS",
     "CREDENTIAL_ACTIONS",
+    "CONFIGURATION_ACTIONS",
     "DELIVERY_ACTIONS",
     "HEALTH_ACTIONS",
     "INTEGRATION_ACTIONS",

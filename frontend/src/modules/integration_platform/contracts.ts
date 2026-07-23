@@ -88,6 +88,7 @@ export interface Connector {
   version: string;
   capabilities: ConnectorCapability[];
   module_id: string;
+  access_policy: 'public' | 'entitlement_required';
   required_entitlement: string;
   is_active: boolean;
   is_entitled: boolean;
@@ -239,9 +240,20 @@ export interface WebhookDeliveryDetail extends WebhookDelivery {
   payload: JsonObject;
   payload_hash: string;
   idempotency_key: string;
-  response_body_excerpt: string;
   error_message: string;
   transition_history: TransitionEvidence[];
+  attempts: WebhookDeliveryAttempt[];
+}
+export interface WebhookDeliveryAttempt {
+  id: string;
+  attempt_number: number;
+  outcome: 'delivered' | 'retrying' | 'dead_letter';
+  response_code: number | null;
+  error_code: string;
+  duration_ms: number | null;
+  job_id: string;
+  correlation_id: string;
+  occurred_at: string;
 }
 export type DeliveryRedriveRequest = TransitionRequest;
 
@@ -281,6 +293,42 @@ export interface MappingPreviewResult { records: JsonObject[]; failures: Mapping
 export interface HealthCheck { name: 'database' | 'outbox' | 'broker' | 'adapters' | 'dependency_circuits'; status: 'healthy' | 'degraded' | 'unavailable'; detail: string; critical: boolean; evidence: JsonObject }
 export interface IntegrationPlatformHealth { status: 'healthy' | 'degraded' | 'unavailable'; module: 'integration-platform'; version: string; checked_at: string; checks: HealthCheck[] }
 
+export interface IntegrationPlatformConfigurationDocument {
+  schema_version: number;
+  environment: string;
+  adapter: { spi_version: string; capabilities: ConnectorCapability[]; adapter_key_max_length: number; cursor_max_length: number };
+  transformations: { operations: TransformationOperation[]; string_case_modes: string[]; number_modes: string[]; default_number_mode: string; default_input_date_format: string; allow_unmapped_enum: boolean; max_chain_length: number };
+  validation: { name_max_length: number; description_max_length: number; credential_max_length: number; url_max_length: number; event_name_pattern: string; event_name_max_length: number; nonce_max_length: number; signature_max_length: number; error_code_max_length: number };
+  security: { connector_access_policy: 'explicit_entitlement'; secret_field_names: string[]; signature_window_seconds: number; payload_max_bytes: number; credential_hint_characters: number; signing_secret_bytes: number; outbound_nonce_bytes: number; diagnostic_fields: string[] };
+  webhooks: { timeout_seconds_default: number; timeout_seconds_min: number; timeout_seconds_max: number; max_attempts_default: number; max_attempts_min: number; max_attempts_max: number; success_status_min: number; success_status_max: number; retry_statuses: number[]; retry_server_error_min: number; retry_delay_max_seconds: number; connect_timeout_max_seconds: number; http_client_retries: number; inbound_rate: string };
+  synchronization: { directions: SyncDirection[]; active_statuses: IntegrationStatus[]; pull_batch_limit: number; quota_cost: number };
+  workflows: { integration_delete_statuses: IntegrationStatus[]; integration_activation_statuses: IntegrationStatus[]; activation_requires_successful_test: boolean; integration_transitions: Readonly<Record<string, string[]>>; credential_transitions: Readonly<Record<string, string[]>>; webhook_transitions: Readonly<Record<string, string[]>>; delivery_transitions: Readonly<Record<string, string[]>> };
+  jobs: { poll_after_ms: number; progress_min: number; progress_max: number; terminal_progress: number };
+  list: { page_size: number; connector_page_size: number; refresh_interval_ms: number; active_delivery_poll_ms: number; integration_poll_ms: number; integration_ordering: string; integration_ordering_fields: string[]; webhook_ordering: string; webhook_ordering_fields: string[]; delivery_ordering: string; mapping_ordering: string; mapping_ordering_fields: string[] };
+  quotas: Readonly<Record<string, number>>;
+  mapping: { default_position: number; default_required: boolean; preview_record_limit: number };
+  health: { probe_timeout_seconds: number; broker_acknowledgement_seconds: number };
+  feature_flags: Readonly<Record<string, { enabled: boolean; roles: string[]; cohorts: string[] }>>;
+  navigation: { base_order: number; route_order: Readonly<Record<string, number>>; status_positive: string[]; status_warning: string[]; status_danger: string[] };
+}
+export interface IntegrationPlatformConfiguration {
+  id: string | null;
+  tenant_id: string;
+  environment: string;
+  version: number;
+  document: IntegrationPlatformConfigurationDocument;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+export interface ConfigurationWriteRequest { environment: string; document: IntegrationPlatformConfigurationDocument }
+export interface ConfigurationPreview {
+  valid: boolean; environment: string; from_version: number; to_version: number;
+  changed_sections: string[]; before: IntegrationPlatformConfigurationDocument; after: IntegrationPlatformConfigurationDocument;
+}
+export interface ConfigurationVersion { id: string; environment: string; version: number; document: IntegrationPlatformConfigurationDocument; created_by: string; correlation_id: string; created_at: string }
+export interface ConfigurationAudit { id: string; environment: string; action: 'update' | 'import' | 'rollback'; from_version: number | null; to_version: number; before: IntegrationPlatformConfigurationDocument | null; after: IntegrationPlatformConfigurationDocument; changed_by: string; correlation_id: string; created_at: string }
+export interface IntegrationPlatformManageCapability { allowed: boolean; permission: string; reason_code: string }
+
 export interface PaginationParams { page?: number; page_size?: number }
 export interface IntegrationFilters extends PaginationParams { search?: string; status?: IntegrationStatus; integration_type?: ConnectorType; connector_id?: string; ordering?: 'name' | '-name' | 'created_at' | '-created_at' | 'updated_at' | '-updated_at' | 'status' | '-status' }
 export interface ConnectorFilters extends PaginationParams { search?: string; connector_type?: ConnectorType; module_id?: string; is_active?: boolean }
@@ -306,6 +354,7 @@ export const ENDPOINTS = {
   WEBHOOKS: { LIST: `${MODULE_API_PREFIX}/webhooks/`, CREATE: `${MODULE_API_PREFIX}/webhooks/`, DETAIL: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/`, UPDATE: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/`, DELETE: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/`, ACTIVATE: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/activate/`, DEACTIVATE: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/deactivate/`, ROTATE_SECRET: (id: string) => `${MODULE_API_PREFIX}/webhooks/${id}/rotate-secret/`, INBOUND: (publicId: string) => `${MODULE_API_PREFIX}/webhooks/inbound/${publicId}/` },
   DELIVERIES: { LIST: `${MODULE_API_PREFIX}/webhook-deliveries/`, DETAIL: (id: string) => `${MODULE_API_PREFIX}/webhook-deliveries/${id}/`, REDRIVE: (id: string) => `${MODULE_API_PREFIX}/webhook-deliveries/${id}/redrive/` },
   MAPPINGS: { LIST: `${MODULE_API_PREFIX}/data-mappings/`, CREATE: `${MODULE_API_PREFIX}/data-mappings/`, DETAIL: (id: string) => `${MODULE_API_PREFIX}/data-mappings/${id}/`, UPDATE: (id: string) => `${MODULE_API_PREFIX}/data-mappings/${id}/`, DELETE: (id: string) => `${MODULE_API_PREFIX}/data-mappings/${id}/`, VALIDATE: `${MODULE_API_PREFIX}/data-mappings/validate/`, PREVIEW: `${MODULE_API_PREFIX}/data-mappings/preview/` },
+  CONFIGURATION: { CURRENT: `${MODULE_API_PREFIX}/configuration/`, MANAGE_CAPABILITY: `${MODULE_API_PREFIX}/configuration/manage-capability/`, PREVIEW: `${MODULE_API_PREFIX}/configuration/preview/`, ROLLBACK: `${MODULE_API_PREFIX}/configuration/rollback/`, IMPORT: `${MODULE_API_PREFIX}/configuration/import/`, EXPORT: `${MODULE_API_PREFIX}/configuration/export/`, VERSIONS: `${MODULE_API_PREFIX}/configuration/versions/`, AUDITS: `${MODULE_API_PREFIX}/configuration/audits/` },
   HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
 
@@ -316,5 +365,6 @@ export const ROUTE_PATHS = {
   WEBHOOKS: '/integration-platform/webhooks', WEBHOOK_CREATE: '/integration-platform/webhooks/new', WEBHOOK_DETAIL: (id: string) => `/integration-platform/webhooks/${id}`, WEBHOOK_EDIT: (id: string) => `/integration-platform/webhooks/${id}/edit`,
   DELIVERIES: '/integration-platform/deliveries', DELIVERY_DETAIL: (id: string) => `/integration-platform/deliveries/${id}`,
   MAPPINGS: '/integration-platform/mappings', MAPPING_CREATE: '/integration-platform/mappings/new', MAPPING_DETAIL: (id: string) => `/integration-platform/mappings/${id}`, MAPPING_EDIT: (id: string) => `/integration-platform/mappings/${id}/edit`,
+  CONFIGURATION: '/integration-platform/configuration',
   MODULE_INSTALL: (moduleId: string) => `/marketplace/${moduleId}`,
 } as const;

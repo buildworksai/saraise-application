@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from django.conf import settings
 from django.db import migrations, models
 
 from src.core.encryption.service import EncryptionService
@@ -52,8 +51,6 @@ def migrate_state_and_secrets(apps, schema_editor) -> None:
 
 
 def restore_state_and_secrets(apps, schema_editor) -> None:
-    if not getattr(settings, "SARAISE_ALLOW_SECRET_ROLLBACK", False):
-        raise RuntimeError("Secret rollback is disabled; set SARAISE_ALLOW_SECRET_ROLLBACK only in a secured rollback environment")
     Webhook = apps.get_model("integration_platform", "Webhook")
     Delivery = apps.get_model("integration_platform", "WebhookDelivery")
     for webhook in Webhook.objects.all():

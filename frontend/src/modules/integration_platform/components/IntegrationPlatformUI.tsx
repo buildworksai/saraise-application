@@ -2,15 +2,22 @@
 import type { FormEvent, ReactNode } from 'react';
 import { AlertCircle, ArrowLeft, Ban, CheckCircle2, ChevronLeft, ChevronRight, FileQuestion, LoaderCircle, LockKeyhole, RefreshCw } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Skeleton, TableSkeleton } from '@/components/ui/Skeleton';
 import { ApiError as ClientApiError } from '@/services/api-client';
-import { useAuthStore } from '@/stores/auth-store';
 import type { JsonValue, PaginatedMeta } from '../contracts';
+import { integrationPlatformService } from '../services/integration-platform-service';
 
 export function useCanManageIntegrations(): boolean {
-  return useAuthStore((state) => state.user?.is_superuser === true || state.user?.is_staff === true || state.user?.tenant_role === 'tenant_admin');
+  const capability = useQuery({
+    queryKey: ['integration-platform', 'manage-capability'],
+    queryFn: () => integrationPlatformService.getManageCapability(),
+    retry: false,
+    staleTime: 60_000,
+  });
+  return capability.data?.allowed === true;
 }
 
 export function PageHeader({ title, description, actions, backTo }: { title: string; description: string; actions?: ReactNode; backTo?: { label: string; path: string } }) {
@@ -43,9 +50,14 @@ export function EmptyPanel({ filtered, title, description, action, reset }: { fi
 }
 
 export function StatusBadge({ status }: { status: string }) {
-  const positive = ['active', 'healthy', 'delivered', 'succeeded', 'closed'].includes(status);
-  const danger = ['error', 'unavailable', 'failed', 'dead_letter', 'open', 'revoked', 'expired'].includes(status);
-  return <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${positive ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : danger ? 'border-destructive/30 bg-destructive/10 text-destructive' : 'border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300'}`}>{status.replaceAll('_', ' ')}</span>;
+  const configuration = useQuery({
+    queryKey: ['integration-platform', 'configuration'],
+    queryFn: () => integrationPlatformService.getConfiguration(),
+    staleTime: 60_000,
+  });
+  const positive = configuration.data?.document.navigation.status_positive.includes(status) === true;
+  const danger = configuration.data?.document.navigation.status_danger.includes(status) === true;
+  return <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium capitalize ${positive ? 'border-primary/30 bg-primary/10 text-primary' : danger ? 'border-destructive/30 bg-destructive/10 text-destructive' : 'border-border bg-muted text-muted-foreground'}`}>{status.replaceAll('_', ' ')}</span>;
 }
 
 export function Pagination({ meta, changePage }: { meta: PaginatedMeta; changePage: (page: number) => void }) {
@@ -58,7 +70,7 @@ export function EvidenceCard({ title, children }: { title: string; children: Rea
 
 export function RedactedJsonViewer({ value, label }: { value: JsonValue; label: string }) { return <div><p className="mb-2 text-sm font-medium">{label}</p><pre className="max-h-96 overflow-auto rounded-lg border bg-muted/40 p-4 text-xs" aria-label={`${label}, redacted evidence`}>{JSON.stringify(value, null, 2)}</pre><p className="mt-2 text-xs text-muted-foreground">Sensitive fields are redacted by the server before persistence.</p></div>; }
 
-export function SuccessEvidence({ title, correlationId, detail }: { title: string; correlationId?: string; detail?: string }) { return <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm" role="status" tabIndex={-1}><div className="flex items-center gap-2 font-medium text-emerald-800 dark:text-emerald-200"><CheckCircle2 className="h-4 w-4" />{title}</div>{detail && <p className="mt-2">{detail}</p>}{correlationId && <p className="mt-2 font-mono text-xs">Correlation ID: {correlationId}</p>}</div>; }
+export function SuccessEvidence({ title, correlationId, detail }: { title: string; correlationId?: string; detail?: string }) { return <div className="rounded-lg border border-primary/30 bg-primary/10 p-4 text-sm" role="status" tabIndex={-1}><div className="flex items-center gap-2 font-medium text-primary"><CheckCircle2 className="h-4 w-4" />{title}</div>{detail && <p className="mt-2">{detail}</p>}{correlationId && <p className="mt-2 font-mono text-xs">Correlation ID: {correlationId}</p>}</div>; }
 
 export function FilterForm({ children, submit }: { children: ReactNode; submit: (form: FormData) => void }) {
   const onSubmit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); submit(new FormData(event.currentTarget)); };
