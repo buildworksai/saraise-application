@@ -53,6 +53,8 @@ DEPARTMENT_ACTION_PERMISSIONS: Final[Mapping[str, AccessRequirement]] = MappingP
         "tree": _rule("hr.department:read", "human_resources.department_reads"),
         "create": _rule("hr.department:create", "human_resources.department_writes"),
         "partial_update": _rule("hr.department:update", "human_resources.department_writes"),
+        "activate": _rule("hr.department:update", "human_resources.department_writes"),
+        "deactivate": _rule("hr.department:update", "human_resources.department_writes"),
         "destroy": _rule("hr.department:delete", "human_resources.department_writes"),
     }
 )
@@ -112,6 +114,19 @@ HEALTH_ACTION_PERMISSIONS: Final[Mapping[str, AccessRequirement]] = MappingProxy
     {"get": _rule("hr.health:read", "human_resources.health_reads")}
 )
 
+CONFIGURATION_ACTION_PERMISSIONS: Final[Mapping[str, AccessRequirement]] = MappingProxyType(
+    {
+        "list": _rule("hr.configuration:read", "human_resources.configuration_reads"),
+        "partial_update": _rule("hr.configuration:update", "human_resources.configuration_writes"),
+        "preview": _rule("hr.configuration:read", "human_resources.configuration_reads"),
+        "history": _rule("hr.configuration:read", "human_resources.configuration_reads"),
+        "audit": _rule("hr.configuration:audit", "human_resources.configuration_reads"),
+        "rollback": _rule("hr.configuration:rollback", "human_resources.configuration_writes"),
+        "import_configuration": _rule("hr.configuration:import", "human_resources.configuration_writes"),
+        "export_configuration": _rule("hr.configuration:export", "human_resources.configuration_reads"),
+    }
+)
+
 ACTION_ACCESS: Final[Mapping[str, Mapping[str, AccessRequirement]]] = MappingProxyType(
     {
         "department": DEPARTMENT_ACTION_PERMISSIONS,
@@ -119,6 +134,7 @@ ACTION_ACCESS: Final[Mapping[str, Mapping[str, AccessRequirement]]] = MappingPro
         "attendance": ATTENDANCE_ACTION_PERMISSIONS,
         "leave-balance": LEAVE_BALANCE_ACTION_PERMISSIONS,
         "leave-request": LEAVE_REQUEST_ACTION_PERMISSIONS,
+        "configuration": CONFIGURATION_ACTION_PERMISSIONS,
         "health": HEALTH_ACTION_PERMISSIONS,
     }
 )
@@ -137,6 +153,7 @@ def requirement_for(resource: str, action: str) -> AccessRequirement | None:
 __all__ = [
     "ACTION_ACCESS",
     "ATTENDANCE_ACTION_PERMISSIONS",
+    "CONFIGURATION_ACTION_PERMISSIONS",
     "AccessRequirement",
     "DEPARTMENT_ACTION_PERMISSIONS",
     "EMPLOYEE_ACTION_PERMISSIONS",

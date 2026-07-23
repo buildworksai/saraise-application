@@ -34,8 +34,13 @@ DOMAIN_TABLES: Final = (
     "hr_departments",
     "hr_employees",
     "hr_attendances",
+    "hr_attendance_revisions",
     "hr_leave_balances",
     "hr_leave_requests",
+    "hr_configurations",
+    "hr_configuration_versions",
+    "hr_configuration_audits",
+    "hr_mutation_commands",
 )
 OUTBOX_TABLES: Final = ("async_job_outbox_events",)
 STATE_MACHINES: Final = (
@@ -142,9 +147,10 @@ def _migrations() -> tuple[bool, str]:
 
 def _row_level_security() -> tuple[bool, str]:
     if connection.vendor != "postgresql":
-        # Local SQLite is a supported development/test adapter; production
-        # readiness verifies the PostgreSQL catalog below.
-        return True, "NOT_APPLICABLE"
+        # PostgreSQL row-level security is a required security dependency.
+        # A test/development adapter may exercise application behavior, but it
+        # cannot prove that the production isolation control is enforced.
+        return False, "HR_RLS_UNAVAILABLE"
     with connection.cursor() as cursor:
         cursor.execute(
             """SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
@@ -155,12 +161,21 @@ def _row_level_security() -> tuple[bool, str]:
         )
         flags = {row[0]: (row[1], row[2]) for row in cursor.fetchall()}
         cursor.execute(
-            """SELECT tablename, qual, with_check
+            """SELECT tablename, policyname, cmd, roles, qual, with_check
                FROM pg_policies
                WHERE schemaname = current_schema() AND tablename = ANY(%s)""",
             [list(DOMAIN_TABLES)],
         )
-        policy_tables = {row[0] for row in cursor.fetchall() if row[1] and row[2]}
+        canonical_expression = "(tenant_id = saraise_current_tenant_id())"
+        policy_tables = {
+            row[0]
+            for row in cursor.fetchall()
+            if row[1] == f"tenant_isolation_{row[0]}"
+            and row[2] == "ALL"
+            and set(row[3]) == {"public"}
+            and row[4] == canonical_expression
+            and row[5] == canonical_expression
+        }
     available = (
         set(flags) == set(DOMAIN_TABLES)
         and all(enabled and forced for enabled, forced in flags.values())
@@ -214,11 +229,21 @@ def readiness_probe() -> HealthCheckResult:
 def register_health_probes() -> None:
     """Register the complete HR readiness contract with the application."""
 
+    from .services import HumanResourcesConfigurationService
+
+    raw_staleness_limit = HumanResourcesConfigurationService.default_document()["operations"][
+        "health_staleness_seconds"
+    ]
+    if isinstance(raw_staleness_limit, bool) or not isinstance(raw_staleness_limit, (int, float)):
+        raise ValueError("HR health staleness configuration must be numeric")
+    staleness_limit = float(raw_staleness_limit)
+    if staleness_limit <= 0:
+        raise ValueError("HR health staleness configuration must be greater than zero")
     health_registry.register(
         "human_resources.readiness",
         readiness_probe,
         critical=True,
-        staleness_limit=30.0,
+        staleness_limit=staleness_limit,
         replace=True,
     )
 

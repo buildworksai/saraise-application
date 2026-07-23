@@ -562,8 +562,260 @@ class LeaveRequest(HRBaseModel):
         return f"{self.employee_id} - {self.leave_type} ({self.start_date} to {self.end_date})"
 
 
+class HumanResourcesConfiguration(TenantScopedModel, TimestampedModel):
+    """The active, tenant-owned HR policy document for one environment."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    environment = models.CharField(max_length=32, default="default")
+    version = models.PositiveIntegerField(default=1, editable=False)
+    document = models.JSONField()
+    updated_by = models.CharField(max_length=255, editable=False)
+    actor_identifier_max_length = models.PositiveSmallIntegerField(editable=False)
+    idempotency_key_max_length = models.PositiveSmallIntegerField(editable=False)
+    hierarchy_max_depth = models.PositiveSmallIntegerField(editable=False)
+    reporting_tree_max_depth = models.PositiveSmallIntegerField(editable=False)
+    department_tree_max_nodes = models.PositiveIntegerField(editable=False)
+    max_hours_per_day = models.DecimalField(max_digits=4, decimal_places=2, editable=False)
+
+    objects = TenantQuerySet.as_manager()
+
+    class Meta:
+        db_table = "hr_configurations"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "environment"),
+                name="hr_config_tenant_environment_uq",
+            ),
+            models.CheckConstraint(condition=Q(version__gte=1), name="hr_config_version_positive_ck"),
+            models.CheckConstraint(condition=~Q(environment=""), name="hr_config_environment_nonempty_ck"),
+            models.CheckConstraint(
+                condition=Q(actor_identifier_max_length__gte=32) & Q(actor_identifier_max_length__lte=1024),
+                name="hr_config_actor_limit_safe_ck",
+            ),
+            models.CheckConstraint(
+                condition=Q(idempotency_key_max_length__gte=16) & Q(idempotency_key_max_length__lte=1024),
+                name="hr_config_idem_limit_safe_ck",
+            ),
+            models.CheckConstraint(
+                condition=Q(hierarchy_max_depth__gte=1) & Q(hierarchy_max_depth__lte=500),
+                name="hr_config_hierarchy_depth_safe_ck",
+            ),
+            models.CheckConstraint(
+                condition=Q(reporting_tree_max_depth__gte=1) & Q(reporting_tree_max_depth__lte=100),
+                name="hr_config_reporting_depth_safe_ck",
+            ),
+            models.CheckConstraint(
+                condition=Q(department_tree_max_nodes__gte=1) & Q(department_tree_max_nodes__lte=10000),
+                name="hr_config_tree_nodes_safe_ck",
+            ),
+            models.CheckConstraint(
+                condition=Q(max_hours_per_day__gt=0) & Q(max_hours_per_day__lte=24),
+                name="hr_config_hours_safe_ck",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=("tenant_id", "environment"), name="hr_config_t_env_idx"),
+            models.Index(fields=("tenant_id", "version"), name="hr_config_t_version_idx"),
+        ]
+
+
+class HumanResourcesConfigurationVersion(TenantScopedModel):
+    """Immutable configuration snapshot used for history and rollback."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    configuration = models.ForeignKey(
+        HumanResourcesConfiguration,
+        on_delete=models.PROTECT,
+        related_name="versions",
+    )
+    environment = models.CharField(max_length=32)
+    version = models.PositiveIntegerField()
+    document = models.JSONField()
+    created_by = models.CharField(max_length=255)
+    correlation_id = models.CharField(max_length=255)
+    change_reason = models.CharField(max_length=500)
+    rolled_back_from_version = models.PositiveIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = TenantQuerySet.as_manager()
+
+    class Meta:
+        db_table = "hr_configuration_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "environment", "version"),
+                name="hr_config_version_t_env_version_uq",
+            ),
+            models.CheckConstraint(condition=Q(version__gte=1), name="hr_config_snapshot_version_positive_ck"),
+            models.CheckConstraint(
+                condition=Q(rolled_back_from_version__isnull=True) | Q(rolled_back_from_version__gte=1),
+                name="hr_config_rollback_version_positive_ck",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=("tenant_id", "environment", "-version"), name="hr_cfgver_t_env_ver_idx"),
+            models.Index(fields=("tenant_id", "created_at"), name="hr_cfgver_t_created_idx"),
+        ]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("Configuration versions are immutable.", code="immutable_configuration_version")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Configuration versions are immutable.", code="immutable_configuration_version")
+
+
+class HumanResourcesConfigurationAudit(TenantScopedModel):
+    """Append-only who/what/when record for every configuration mutation."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    configuration = models.ForeignKey(
+        HumanResourcesConfiguration,
+        on_delete=models.PROTECT,
+        related_name="audit_records",
+    )
+    environment = models.CharField(max_length=32)
+    version = models.PositiveIntegerField()
+    action = models.CharField(max_length=32)
+    actor_id = models.CharField(max_length=255)
+    correlation_id = models.CharField(max_length=255)
+    idempotency_key = models.CharField(max_length=1024)
+    request_fingerprint = models.CharField(max_length=64)
+    before_document = models.JSONField(null=True)
+    after_document = models.JSONField()
+    change_reason = models.CharField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = TenantQuerySet.as_manager()
+
+    class Meta:
+        db_table = "hr_configuration_audits"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "environment", "idempotency_key"),
+                name="hr_cfgaudit_t_env_idempotency_uq",
+            ),
+            models.CheckConstraint(condition=Q(version__gte=1), name="hr_cfgaudit_version_positive_ck"),
+            models.CheckConstraint(condition=~Q(action=""), name="hr_cfgaudit_action_nonempty_ck"),
+            models.CheckConstraint(condition=~Q(actor_id=""), name="hr_cfgaudit_actor_nonempty_ck"),
+            models.CheckConstraint(condition=~Q(correlation_id=""), name="hr_cfgaudit_correlation_nonempty_ck"),
+        ]
+        indexes = [
+            models.Index(fields=("tenant_id", "environment", "-version"), name="hr_cfgaudit_t_env_ver_idx"),
+            models.Index(fields=("tenant_id", "correlation_id"), name="hr_cfgaudit_t_corr_idx"),
+        ]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("Configuration audit records are immutable.", code="immutable_configuration_audit")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Configuration audit records are immutable.", code="immutable_configuration_audit")
+
+
+class HumanResourcesMutationCommand(TenantScopedModel):
+    """Durable tenant-scoped replay record for every successful API mutation."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    idempotency_key = models.CharField(max_length=1024)
+    request_fingerprint = models.CharField(max_length=64)
+    method = models.CharField(max_length=8)
+    path = models.CharField(max_length=512)
+    actor_id = models.CharField(max_length=255)
+    correlation_id = models.CharField(max_length=255)
+    response_status = models.PositiveSmallIntegerField(null=True, editable=False)
+    response_body = models.JSONField(null=True, editable=False)
+    completed_at = models.DateTimeField(null=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = TenantQuerySet.as_manager()
+
+    class Meta:
+        db_table = "hr_mutation_commands"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "idempotency_key"),
+                name="hr_mutcmd_tenant_idempotency_uq",
+            ),
+            models.CheckConstraint(condition=~Q(idempotency_key=""), name="hr_mutcmd_key_nonempty_ck"),
+            models.CheckConstraint(condition=~Q(request_fingerprint=""), name="hr_mutcmd_fingerprint_nonempty_ck"),
+            models.CheckConstraint(condition=~Q(actor_id=""), name="hr_mutcmd_actor_nonempty_ck"),
+            models.CheckConstraint(condition=~Q(correlation_id=""), name="hr_mutcmd_correlation_nonempty_ck"),
+            models.CheckConstraint(
+                condition=(
+                    Q(response_status__isnull=True, completed_at__isnull=True)
+                    | Q(response_status__isnull=False, completed_at__isnull=False)
+                ),
+                name="hr_mutcmd_completion_consistent_ck",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=("tenant_id", "created_at"), name="hr_mutcmd_t_created_idx"),
+            models.Index(fields=("tenant_id", "correlation_id"), name="hr_mutcmd_t_corr_idx"),
+        ]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError(
+                "Mutation command records may only be completed by the command service.",
+                code="immutable_mutation_command",
+            )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Mutation command records are immutable.", code="immutable_mutation_command")
+
+
+class AttendanceRevision(TenantScopedModel):
+    """Immutable correction evidence; the original attendance fact remains reconstructable."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    attendance = models.ForeignKey(Attendance, on_delete=models.PROTECT, related_name="revisions")
+    revision = models.PositiveIntegerField()
+    before_values = models.JSONField()
+    after_values = models.JSONField()
+    reason = models.TextField()
+    actor_id = models.CharField(max_length=255)
+    correlation_id = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = TenantQuerySet.as_manager()
+
+    class Meta:
+        db_table = "hr_attendance_revisions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "attendance", "revision"),
+                name="hr_attrev_t_att_revision_uq",
+            ),
+            models.CheckConstraint(condition=Q(revision__gte=1), name="hr_attrev_revision_positive_ck"),
+            models.CheckConstraint(condition=~Q(reason=""), name="hr_attrev_reason_nonempty_ck"),
+            models.CheckConstraint(condition=~Q(actor_id=""), name="hr_attrev_actor_nonempty_ck"),
+            models.CheckConstraint(condition=~Q(correlation_id=""), name="hr_attrev_correlation_nonempty_ck"),
+        ]
+        indexes = [
+            models.Index(fields=("tenant_id", "attendance", "-revision"), name="hr_attrev_t_att_rev_idx"),
+            models.Index(fields=("tenant_id", "correlation_id"), name="hr_attrev_t_corr_idx"),
+        ]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("Attendance revisions are immutable.", code="immutable_attendance_revision")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Attendance revisions are immutable.", code="immutable_attendance_revision")
+
+
 __all__ = [
     "Attendance",
+    "AttendanceRevision",
     "AttendanceSource",
     "AttendanceStatus",
     "Department",
@@ -571,6 +823,9 @@ __all__ = [
     "EmploymentStatus",
     "EmploymentType",
     "HRBaseModel",
+    "HumanResourcesConfiguration",
+    "HumanResourcesConfigurationAudit",
+    "HumanResourcesConfigurationVersion",
     "LeaveBalance",
     "LeaveRequest",
     "LeaveRequestStatus",

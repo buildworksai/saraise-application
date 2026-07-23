@@ -8,6 +8,7 @@ import logging
 import time
 import uuid
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -27,12 +28,17 @@ from src.core.state_machine import TransitionRecord
 from .events import publish_domain_event
 from .models import (
     Attendance,
+    AttendanceRevision,
     AttendanceSource,
     AttendanceStatus,
     Department,
     Employee,
     EmploymentStatus,
     HRBaseModel,
+    HumanResourcesConfiguration,
+    HumanResourcesConfigurationAudit,
+    HumanResourcesConfigurationVersion,
+    HumanResourcesMutationCommand,
     LeaveBalance,
     LeaveRequest,
     LeaveRequestStatus,
@@ -98,6 +104,590 @@ class HRCapabilityUnavailableError(HumanResourcesServiceError):
         )
 
 
+class HumanResourcesMutationCommandService:
+    """Reserve and complete tenant-scoped idempotent HTTP mutation commands."""
+
+    @staticmethod
+    def fingerprint(*, method: str, path: str, action: str, query: object, body: object) -> str:
+        return _fingerprint(
+            {
+                "method": method.upper(),
+                "path": path,
+                "action": action,
+                "query": query,
+                "body": body,
+            }
+        )
+
+    @staticmethod
+    def begin(
+        tenant_id: UUID,
+        *,
+        idempotency_key: str,
+        request_fingerprint: str,
+        method: str,
+        path: str,
+        actor_id: str,
+        correlation_id: str,
+    ) -> tuple[HumanResourcesMutationCommand, bool]:
+        key = _key(idempotency_key)
+        existing = (
+            HumanResourcesMutationCommand.objects.for_tenant(tenant_id)
+            .select_for_update()
+            .filter(idempotency_key=key)
+            .first()
+        )
+        if existing is not None:
+            if existing.request_fingerprint != request_fingerprint:
+                raise HRConflictError(
+                    "The idempotency key was already used for a different command.",
+                    code="HR_IDEMPOTENCY_CONFLICT",
+                )
+            if existing.completed_at is None:
+                raise HRConflictError(
+                    "The original command is still in progress.",
+                    code="HR_IDEMPOTENCY_IN_PROGRESS",
+                )
+            return existing, True
+        try:
+            command = HumanResourcesMutationCommand.objects.create(
+                tenant_id=tenant_id,
+                idempotency_key=key,
+                request_fingerprint=request_fingerprint,
+                method=method.upper(),
+                path=path,
+                actor_id=_actor(actor_id),
+                correlation_id=_correlation(correlation_id),
+            )
+        except IntegrityError as exc:
+            raise HRConflictError(
+                "The idempotency key is already being processed.",
+                code="HR_IDEMPOTENCY_IN_PROGRESS",
+            ) from exc
+        return command, False
+
+    @staticmethod
+    def complete(
+        command: HumanResourcesMutationCommand,
+        *,
+        response_status: int,
+        response_body: object,
+    ) -> None:
+        normalized_body = json.loads(json.dumps(response_body, default=str))
+        updated = HumanResourcesMutationCommand.objects.filter(
+            pk=command.pk,
+            tenant_id=command.tenant_id,
+            completed_at__isnull=True,
+        ).update(
+            response_status=response_status,
+            response_body=normalized_body,
+            completed_at=timezone.now(),
+        )
+        if updated != 1:
+            raise HRConflictError(
+                "The mutation command could not be completed exactly once.",
+                code="HR_IDEMPOTENCY_COMPLETION_CONFLICT",
+            )
+
+    @staticmethod
+    def abandon(command: HumanResourcesMutationCommand) -> None:
+        HumanResourcesMutationCommand.objects.filter(
+            pk=command.pk,
+            tenant_id=command.tenant_id,
+            completed_at__isnull=True,
+        ).delete()
+
+
+class HumanResourcesConfigurationService:
+    """Validate, version, audit, import, export, and resolve tenant HR policy."""
+
+    _DEFAULT_DOCUMENT: Mapping[str, object] = {
+        "schema_version": 1,
+        "allowed_values": {
+            "employment_types": ["full_time", "part_time", "contractor", "temporary"],
+            "employment_statuses": ["active", "on_leave", "inactive", "terminated"],
+            "attendance_statuses": ["present", "absent", "late", "half_day", "on_leave"],
+            "attendance_sources": ["manual", "clock", "import"],
+            "leave_types": ["annual", "sick", "personal", "maternity", "paternity", "unpaid"],
+            "leave_states": ["pending", "approved", "rejected", "cancelled"],
+            "leave_scopes": ["all", "self", "team", "approval_queue"],
+        },
+        "limits": {
+            "actor_identifier_max_length": 255,
+            "idempotency_key_max_length": 255,
+            "department_code_max_length": 50,
+            "department_name_max_length": 255,
+            "employee_number_max_length": 50,
+            "employee_name_max_length": 100,
+            "employee_email_max_length": 255,
+            "employee_phone_max_length": 50,
+            "employee_position_max_length": 100,
+            "hierarchy_max_depth": 100,
+            "reporting_tree_default_depth": 5,
+            "reporting_tree_max_depth": 20,
+            "department_tree_max_nodes": 500,
+            "max_hours_per_day": "24.00",
+            "leave_amount_minimum": "0.01",
+            "list_page_size": 25,
+            "lookup_page_size": 100,
+            "leave_input_minimum": "0.00",
+            "leave_input_step": "0.25",
+            "decimal_quantum": "0.01",
+        },
+        "defaults": {
+            "department_active": True,
+            "employment_type": "full_time",
+            "employment_status": "active",
+            "attendance_hours": "0.00",
+            "attendance_status": "present",
+            "attendance_source": "manual",
+            "leave_type": "annual",
+            "leave_request_status": "pending",
+            "leave_entitled_days": "0.00",
+            "leave_carried_days": "0.00",
+            "leave_adjustment_version": 1,
+            "leave_adjustment_note": "Initial allocation",
+            "leave_scope": "all",
+            "department_ordering": "department_code",
+            "event_schema_version": 1,
+        },
+        "policies": {
+            "manager_eligible_statuses": ["active", "on_leave"],
+            "employee_active_statuses": ["active", "on_leave"],
+            "attendance_eligible_statuses": ["active", "on_leave"],
+            "clock_in_eligible_statuses": ["active"],
+            "leave_eligible_statuses": ["active", "on_leave"],
+            "attendance_zero_work_statuses": ["absent", "on_leave"],
+            "leave_overlap_blocking_statuses": ["pending", "approved"],
+            "department_deactivation_blocks_active_children": True,
+            "department_deactivation_blocks_active_employees": True,
+            "employee_inactivation_requires_no_managed_departments": True,
+            "employee_archive_statuses": ["terminated"],
+            "employee_archive_blocks_pending_leave": True,
+            "leave_balance_enforce_capacity": True,
+            "leave_submission_blocks_insufficient_balance": True,
+            "allow_future_employee_transitions": False,
+            "approved_leave_cancel_before_start_only": True,
+            "leave_duration_calendar": "inclusive",
+            "one_attendance_per_employee_date": True,
+        },
+        "workflows": {
+            "employee_terminal_states": ["terminated"],
+            "employee_transitions": [
+                ["place_on_leave", "active", "on_leave"],
+                ["return_from_leave", "on_leave", "active"],
+                ["deactivate", "active", "inactive"],
+                ["deactivate", "on_leave", "inactive"],
+                ["activate", "inactive", "active"],
+                ["terminate", "active", "terminated"],
+                ["terminate", "on_leave", "terminated"],
+                ["terminate", "inactive", "terminated"],
+            ],
+            "leave_terminal_states": ["rejected", "cancelled"],
+            "leave_transitions": [
+                ["approve", "pending", "approved"],
+                ["reject", "pending", "rejected"],
+                ["cancel", "pending", "cancelled"],
+                ["cancel", "approved", "cancelled"],
+            ],
+        },
+        "feature_rollout": {
+            "enabled": True,
+            "percentage": 100,
+            "roles": [],
+            "cohorts": [],
+        },
+        "visual": {
+            "positive_status_token": "status-positive",
+            "warning_status_token": "status-warning",
+        },
+        "operations": {"health_staleness_seconds": 30.0},
+    }
+    _TOP_LEVEL = frozenset(_DEFAULT_DOCUMENT)
+
+    @classmethod
+    def default_document(cls) -> dict[str, object]:
+        return deepcopy(dict(cls._DEFAULT_DOCUMENT))
+
+    @staticmethod
+    def _mapping(document: Mapping[str, object], key: str) -> Mapping[str, object]:
+        value = document.get(key)
+        if not isinstance(value, Mapping):
+            raise HRValidationError(f"configuration.{key} must be an object.")
+        return value
+
+    @classmethod
+    def validate_document(cls, raw: object) -> dict[str, object]:
+        if not isinstance(raw, Mapping):
+            raise HRValidationError("configuration document must be an object.")
+        unknown = set(raw) - cls._TOP_LEVEL
+        missing = cls._TOP_LEVEL - set(raw)
+        if unknown or missing:
+            raise HRValidationError(
+                "configuration document fields do not match the governed schema.",
+                details={"unknown": sorted(unknown), "missing": sorted(missing)},
+            )
+        document = deepcopy(dict(raw))
+        if document.get("schema_version") != 1:
+            raise HRValidationError("configuration.schema_version must be 1.")
+        allowed = cls._mapping(document, "allowed_values")
+        limits = cls._mapping(document, "limits")
+        defaults = cls._mapping(document, "defaults")
+        policies = cls._mapping(document, "policies")
+        workflows = cls._mapping(document, "workflows")
+        rollout = cls._mapping(document, "feature_rollout")
+        visual = cls._mapping(document, "visual")
+        operations = cls._mapping(document, "operations")
+        expected_keys = {
+            section: set(cast(Mapping[str, object], cls._DEFAULT_DOCUMENT[section]))
+            for section in cls._TOP_LEVEL - {"schema_version"}
+        }
+        sections = {
+            "allowed_values": allowed,
+            "limits": limits,
+            "defaults": defaults,
+            "policies": policies,
+            "workflows": workflows,
+            "feature_rollout": rollout,
+            "visual": visual,
+            "operations": operations,
+        }
+        for name, section in sections.items():
+            if set(section) != expected_keys[name]:
+                raise HRValidationError(
+                    f"configuration.{name} fields do not match the governed schema.",
+                    details={
+                        "unknown": sorted(set(section) - expected_keys[name]),
+                        "missing": sorted(expected_keys[name] - set(section)),
+                    },
+                )
+        list_keys = (
+            "employment_types",
+            "employment_statuses",
+            "attendance_statuses",
+            "attendance_sources",
+            "leave_types",
+            "leave_states",
+            "leave_scopes",
+        )
+        for key in list_keys:
+            values = allowed[key]
+            if (
+                not isinstance(values, list)
+                or not values
+                or any(not isinstance(value, str) or not value for value in values)
+            ):
+                raise HRValidationError(f"configuration.allowed_values.{key} must be a non-empty string list.")
+            if len(values) != len(set(values)):
+                raise HRValidationError(f"configuration.allowed_values.{key} cannot contain duplicates.")
+        bounded = {
+            "actor_identifier_max_length": (32, 1024),
+            "idempotency_key_max_length": (16, 1024),
+            "department_code_max_length": (1, 50),
+            "department_name_max_length": (1, 255),
+            "employee_number_max_length": (1, 50),
+            "employee_name_max_length": (1, 100),
+            "employee_email_max_length": (3, 255),
+            "employee_phone_max_length": (1, 50),
+            "employee_position_max_length": (1, 100),
+            "hierarchy_max_depth": (1, 500),
+            "reporting_tree_default_depth": (1, 100),
+            "reporting_tree_max_depth": (1, 100),
+            "department_tree_max_nodes": (1, 10000),
+            "list_page_size": (1, 100),
+            "lookup_page_size": (1, 100),
+        }
+        for key, (minimum, maximum) in bounded.items():
+            value = limits[key]
+            if not isinstance(value, int) or isinstance(value, bool) or not minimum <= value <= maximum:
+                raise HRValidationError(f"configuration.limits.{key} must be between {minimum} and {maximum}.")
+        if cast(int, limits["reporting_tree_default_depth"]) > cast(int, limits["reporting_tree_max_depth"]):
+            raise HRValidationError("reporting_tree_default_depth cannot exceed reporting_tree_max_depth.")
+        decimal_bounds = {
+            "max_hours_per_day": (Decimal("0.01"), Decimal("24.00")),
+            "leave_amount_minimum": (Decimal("0.01"), Decimal("365.00")),
+            "leave_input_minimum": (Decimal("0.00"), Decimal("365.00")),
+            "leave_input_step": (Decimal("0.01"), Decimal("365.00")),
+            "decimal_quantum": (Decimal("0.01"), Decimal("1.00")),
+        }
+        for key, (minimum, maximum) in decimal_bounds.items():
+            value = _decimal(limits[key], f"configuration.limits.{key}")
+            if value < minimum or value > maximum:
+                raise HRValidationError(f"configuration.limits.{key} is outside its safe range.")
+            document["limits"][key] = format(value, ".2f")  # type: ignore[index]
+        default_memberships = {
+            "employment_type": "employment_types",
+            "employment_status": "employment_statuses",
+            "attendance_status": "attendance_statuses",
+            "attendance_source": "attendance_sources",
+            "leave_type": "leave_types",
+            "leave_request_status": "leave_states",
+            "leave_scope": "leave_scopes",
+        }
+        for default_key, allowed_key in default_memberships.items():
+            if defaults[default_key] not in cast(list[object], allowed[allowed_key]):
+                raise HRValidationError(f"configuration.defaults.{default_key} must be allowed.")
+        for policy_key, allowed_key in {
+            "manager_eligible_statuses": "employment_statuses",
+            "employee_active_statuses": "employment_statuses",
+            "attendance_eligible_statuses": "employment_statuses",
+            "clock_in_eligible_statuses": "employment_statuses",
+            "leave_eligible_statuses": "employment_statuses",
+            "attendance_zero_work_statuses": "attendance_statuses",
+            "leave_overlap_blocking_statuses": "leave_states",
+            "employee_archive_statuses": "employment_statuses",
+        }.items():
+            values = policies[policy_key]
+            if (
+                not isinstance(values, list)
+                or not values
+                or not set(values).issubset(set(cast(list[object], allowed[allowed_key])))
+            ):
+                raise HRValidationError(f"configuration.policies.{policy_key} contains unsupported values.")
+        boolean_policy_keys = (
+            "department_deactivation_blocks_active_children",
+            "department_deactivation_blocks_active_employees",
+            "employee_inactivation_requires_no_managed_departments",
+            "employee_archive_blocks_pending_leave",
+            "leave_balance_enforce_capacity",
+            "leave_submission_blocks_insufficient_balance",
+            "allow_future_employee_transitions",
+            "approved_leave_cancel_before_start_only",
+            "one_attendance_per_employee_date",
+        )
+        for key in boolean_policy_keys:
+            if not isinstance(policies[key], bool):
+                raise HRValidationError(f"configuration.policies.{key} must be boolean.")
+        for prefix, states_key, transitions_key in (
+            ("employee", "employment_statuses", "employee_transitions"),
+            ("leave", "leave_states", "leave_transitions"),
+        ):
+            state_values = set(cast(list[str], allowed[states_key]))
+            terminal_values = workflows[f"{prefix}_terminal_states"]
+            transitions_value = workflows[transitions_key]
+            if (
+                not isinstance(terminal_values, list)
+                or not terminal_values
+                or not set(terminal_values).issubset(state_values)
+            ):
+                raise HRValidationError(f"configuration.workflows.{prefix}_terminal_states is invalid.")
+            if not isinstance(transitions_value, list) or not transitions_value:
+                raise HRValidationError(f"configuration.workflows.{transitions_key} must be non-empty.")
+            for edge in transitions_value:
+                if (
+                    not isinstance(edge, list)
+                    or len(edge) != 3
+                    or any(not isinstance(value, str) or not value for value in edge)
+                    or edge[1] not in state_values
+                    or edge[2] not in state_values
+                ):
+                    raise HRValidationError(f"configuration.workflows.{transitions_key} contains an invalid edge.")
+        percentage = rollout["percentage"]
+        if not isinstance(percentage, int) or isinstance(percentage, bool) or not 0 <= percentage <= 100:
+            raise HRValidationError("configuration.feature_rollout.percentage must be between 0 and 100.")
+        if not isinstance(rollout["enabled"], bool):
+            raise HRValidationError("configuration.feature_rollout.enabled must be boolean.")
+        for key in ("roles", "cohorts"):
+            if not isinstance(rollout[key], list) or any(not isinstance(value, str) for value in rollout[key]):
+                raise HRValidationError(f"configuration.feature_rollout.{key} must be a string list.")
+        staleness = operations["health_staleness_seconds"]
+        if not isinstance(staleness, (int, float)) or isinstance(staleness, bool) or not 1 <= staleness <= 300:
+            raise HRValidationError("configuration.operations.health_staleness_seconds must be between 1 and 300.")
+        return document
+
+    @classmethod
+    def _config_fields(cls, document: Mapping[str, object]) -> dict[str, object]:
+        limits = cls._mapping(document, "limits")
+        return {
+            "actor_identifier_max_length": limits["actor_identifier_max_length"],
+            "idempotency_key_max_length": limits["idempotency_key_max_length"],
+            "hierarchy_max_depth": limits["hierarchy_max_depth"],
+            "reporting_tree_max_depth": limits["reporting_tree_max_depth"],
+            "department_tree_max_nodes": limits["department_tree_max_nodes"],
+            "max_hours_per_day": limits["max_hours_per_day"],
+        }
+
+    @classmethod
+    @transaction.atomic
+    def ensure_configuration(cls, tenant_id: UUID, environment: str = "default") -> HumanResourcesConfiguration:
+        tenant = _tenant(tenant_id)
+        environment_value = str(environment or "").strip()
+        if not environment_value or len(environment_value) > 32:
+            raise HRValidationError("environment must contain between 1 and 32 characters.")
+        configuration = (
+            HumanResourcesConfiguration.objects.for_tenant(tenant)
+            .select_for_update()
+            .filter(environment=environment_value)
+            .first()
+        )
+        if configuration is not None:
+            return configuration
+        document = cls.validate_document(cls.default_document())
+        configuration = HumanResourcesConfiguration.objects.create(
+            tenant_id=tenant,
+            environment=environment_value,
+            version=1,
+            document=document,
+            updated_by="system:configuration-bootstrap",
+            **cls._config_fields(document),
+        )
+        correlation = str(uuid.uuid4())
+        snapshot = HumanResourcesConfigurationVersion.objects.create(
+            tenant_id=tenant,
+            configuration=configuration,
+            environment=environment_value,
+            version=1,
+            document=document,
+            created_by=configuration.updated_by,
+            correlation_id=correlation,
+            change_reason="Defensible module defaults",
+        )
+        HumanResourcesConfigurationAudit.objects.create(
+            tenant_id=tenant,
+            configuration=configuration,
+            environment=environment_value,
+            version=snapshot.version,
+            action="bootstrap",
+            actor_id=configuration.updated_by,
+            correlation_id=correlation,
+            idempotency_key="system:configuration-bootstrap",
+            request_fingerprint=_fingerprint({"document": document, "environment": environment_value}),
+            before_document=None,
+            after_document=document,
+            change_reason=snapshot.change_reason,
+        )
+        return configuration
+
+    @classmethod
+    def get_document(cls, tenant_id: UUID, environment: str = "default") -> dict[str, object]:
+        return deepcopy(cls.ensure_configuration(tenant_id, environment).document)
+
+    @classmethod
+    def preview(cls, tenant_id: UUID, document: object, environment: str = "default") -> dict[str, object]:
+        current = cls.ensure_configuration(tenant_id, environment)
+        normalized = cls.validate_document(document)
+        changes = cls._diff(current.document, normalized)
+        return {"valid": True, "normalized_document": normalized, "changes": changes}
+
+    @classmethod
+    def _diff(cls, before: object, after: object, path: str = "") -> list[dict[str, object]]:
+        if isinstance(before, Mapping) and isinstance(after, Mapping):
+            changes: list[dict[str, object]] = []
+            for key in sorted(set(before) | set(after)):
+                child = f"{path}.{key}" if path else str(key)
+                changes.extend(cls._diff(before.get(key), after.get(key), child))
+            return changes
+        if before != after:
+            return [{"path": path, "before": before, "after": after}]
+        return []
+
+    @classmethod
+    @transaction.atomic
+    def update(
+        cls,
+        tenant_id: UUID,
+        *,
+        document: object,
+        environment: str,
+        actor_id: str,
+        correlation_id: str | None,
+        change_reason: str,
+        idempotency_key: str,
+        action: str = "update",
+        rolled_back_from_version: int | None = None,
+    ) -> HumanResourcesConfiguration:
+        tenant, actor, correlation = _tenant(tenant_id), _actor(actor_id), _correlation(correlation_id)
+        key = _key(idempotency_key)
+        reason = str(change_reason or "").strip()
+        if not reason or len(reason) > 500:
+            raise HRValidationError("change_reason must contain between 1 and 500 characters.")
+        normalized = cls.validate_document(document)
+        fingerprint = _fingerprint(
+            {"document": normalized, "environment": environment, "action": action, "rollback": rolled_back_from_version}
+        )
+        existing = (
+            HumanResourcesConfigurationAudit.objects.for_tenant(tenant)
+            .filter(environment=environment, idempotency_key=key)
+            .first()
+        )
+        if existing is not None:
+            if existing.request_fingerprint != fingerprint:
+                raise HRConflictError(
+                    "The idempotency key was already used for a different configuration command.",
+                    code="HR_IDEMPOTENCY_CONFLICT",
+                )
+            return HumanResourcesConfiguration.objects.for_tenant(tenant).get(pk=existing.configuration_id)
+        configuration = cls.ensure_configuration(tenant, environment)
+        configuration = HumanResourcesConfiguration.objects.select_for_update().get(pk=configuration.pk)
+        before = deepcopy(configuration.document)
+        configuration.version += 1
+        configuration.document = normalized
+        configuration.updated_by = actor
+        for field_name, value in cls._config_fields(normalized).items():
+            setattr(configuration, field_name, value)
+        configuration.full_clean()
+        configuration.save()
+        HumanResourcesConfigurationVersion.objects.create(
+            tenant_id=tenant,
+            configuration=configuration,
+            environment=environment,
+            version=configuration.version,
+            document=normalized,
+            created_by=actor,
+            correlation_id=correlation,
+            change_reason=reason,
+            rolled_back_from_version=rolled_back_from_version,
+        )
+        HumanResourcesConfigurationAudit.objects.create(
+            tenant_id=tenant,
+            configuration=configuration,
+            environment=environment,
+            version=configuration.version,
+            action=action,
+            actor_id=actor,
+            correlation_id=correlation,
+            idempotency_key=key,
+            request_fingerprint=fingerprint,
+            before_document=before,
+            after_document=normalized,
+            change_reason=reason,
+        )
+        return configuration
+
+    @classmethod
+    @transaction.atomic
+    def rollback(
+        cls,
+        tenant_id: UUID,
+        *,
+        environment: str,
+        version: int,
+        actor_id: str,
+        correlation_id: str | None,
+        change_reason: str,
+        idempotency_key: str,
+    ) -> HumanResourcesConfiguration:
+        tenant = _tenant(tenant_id)
+        snapshot = (
+            HumanResourcesConfigurationVersion.objects.for_tenant(tenant)
+            .filter(environment=environment, version=version)
+            .first()
+        )
+        if snapshot is None:
+            raise HRNotFoundError("configuration version")
+        return cls.update(
+            tenant,
+            document=snapshot.document,
+            environment=environment,
+            actor_id=actor_id,
+            correlation_id=correlation_id,
+            change_reason=change_reason,
+            idempotency_key=idempotency_key,
+            action="rollback",
+            rolled_back_from_version=version,
+        )
+
+
 @dataclass(slots=True)
 class DepartmentNode:
     id: UUID
@@ -135,26 +725,33 @@ def _identifier(value: UUID | str, field_name: str) -> UUID:
 
 def _actor(value: object) -> str:
     actor = str(value or "").strip()
-    if not actor or len(actor) > 255:
-        raise HRValidationError("actor_id must be a non-empty identifier of at most 255 characters.")
+    limits = cast(Mapping[str, object], HumanResourcesConfigurationService.default_document()["limits"])
+    maximum = cast(int, limits["actor_identifier_max_length"])
+    if not actor or len(actor) > maximum:
+        raise HRValidationError(f"actor_id must be a non-empty identifier of at most {maximum} characters.")
     return actor
 
 
 def _key(value: object) -> str:
     key = str(value or "").strip()
-    if not key or len(key) > 255:
-        raise HRValidationError("An idempotency key of at most 255 characters is required.")
+    limits = cast(Mapping[str, object], HumanResourcesConfigurationService.default_document()["limits"])
+    maximum = cast(int, limits["idempotency_key_max_length"])
+    if not key or len(key) > maximum:
+        raise HRValidationError(f"An idempotency key of at most {maximum} characters is required.")
     return key
 
 
 def _correlation(value: str | None) -> str:
     correlation = str(value or get_correlation_id() or uuid.uuid4()).strip()
-    return correlation[:255]
+    limits = cast(Mapping[str, object], HumanResourcesConfigurationService.default_document()["limits"])
+    return correlation[: cast(int, limits["actor_identifier_max_length"])]
 
 
 def _decimal(value: object, field_name: str) -> Decimal:
+    limits = cast(Mapping[str, object], HumanResourcesConfigurationService.default_document()["limits"])
+    quantum = Decimal(str(limits["decimal_quantum"]))
     try:
-        amount = Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        amount = Decimal(str(value)).quantize(quantum, rounding=ROUND_HALF_UP)
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise HRValidationError(f"{field_name} must be a decimal number.") from exc
     return amount
@@ -315,13 +912,21 @@ def _record_transition(
             )
         return False, existing.from_state, existing.to_state
     current = str(getattr(aggregate, machine.state_field))
-    if current in machine.terminal_states:
+    document = HumanResourcesConfigurationService.get_document(aggregate.tenant_id)
+    workflows = cast(Mapping[str, object], document["workflows"])
+    if isinstance(aggregate, Employee):
+        terminal_states = cast(list[str], workflows["employee_terminal_states"])
+        transitions = cast(list[list[str]], workflows["employee_transitions"])
+    else:
+        terminal_states = cast(list[str], workflows["leave_terminal_states"])
+        transitions = cast(list[list[str]], workflows["leave_transitions"])
+    if current in terminal_states:
         raise HRConflictError("The aggregate is in a terminal state.", code="HR_INVALID_TRANSITION")
-    edges = machine._by_command.get(command)  # StateMachine is the declarative authority.
-    if edges is None:
+    configured_edges = [edge for edge in transitions if len(edge) == 3 and edge[0] == command]
+    if not configured_edges:
         raise HRConflictError("The transition command is unsupported.", code="HR_INVALID_TRANSITION")
-    edge = next((candidate for candidate in edges if candidate.source == current), None)
-    if edge is None:
+    configured_edge = next((edge for edge in configured_edges if edge[1] == current), None)
+    if configured_edge is None:
         raise HRConflictError("The transition is not valid from the current state.", code="HR_INVALID_TRANSITION")
     metadata = {
         "actor_id": actor_id,
@@ -333,13 +938,13 @@ def _record_transition(
         transition_key=key,
         command=command,
         from_state=current,
-        to_state=edge.target,
+        to_state=configured_edge[2],
         occurred_at=timezone.now().isoformat(),
         metadata=metadata,
     )
-    setattr(aggregate, machine.state_field, edge.target)
+    setattr(aggregate, machine.state_field, configured_edge[2])
     machine.recorder.record(aggregate, record)
-    return True, current, edge.target
+    return True, current, configured_edge[2]
 
 
 class DepartmentService:
@@ -349,7 +954,9 @@ class DepartmentService:
     def validate_manager(tenant_id: UUID, manager_id: UUID) -> Employee:
         tenant = _tenant(tenant_id)
         manager = _get(Employee, tenant, manager_id, "employee")
-        if manager.employment_status not in {EmploymentStatus.ACTIVE, EmploymentStatus.ON_LEAVE}:
+        policy = HumanResourcesConfigurationService.get_document(tenant)
+        eligible = set(cast(Mapping[str, object], policy["policies"])["manager_eligible_statuses"])
+        if manager.employment_status not in eligible:
             raise HRConflictError("The department manager must be active.")
         return manager
 
@@ -367,7 +974,9 @@ class DepartmentService:
             raise HRNotFoundError("parent department")
         seen = {department}
         current: UUID | None = parent
-        for _ in range(100):
+        policy = HumanResourcesConfigurationService.get_document(tenant)
+        maximum_depth = cast(int, cast(Mapping[str, object], policy["limits"])["hierarchy_max_depth"])
+        for _ in range(maximum_depth):
             if current is None:
                 return
             if current in seen:
@@ -392,9 +1001,16 @@ class DepartmentService:
     ) -> Department:
         started = time.monotonic()
         tenant, actor, correlation = _tenant(tenant_id), _actor(actor_id), _correlation(correlation_id)
+        policy = HumanResourcesConfigurationService.get_document(tenant)
+        limits = cast(Mapping[str, object], policy["limits"])
+        defaults = cast(Mapping[str, object], policy["defaults"])
         code_value, name_value = code.strip().upper(), name.strip()
         if not code_value or not name_value:
             raise HRValidationError("Department code and name are required.")
+        if len(code_value) > cast(int, limits["department_code_max_length"]):
+            raise HRValidationError("Department code exceeds the configured safe limit.")
+        if len(name_value) > cast(int, limits["department_name_max_length"]):
+            raise HRValidationError("Department name exceeds the configured safe limit.")
         parent = _get(Department, tenant, parent_id, "parent department") if parent_id else None
         manager = cls.validate_manager(tenant, manager_id) if manager_id else None
         department = Department(
@@ -403,6 +1019,7 @@ class DepartmentService:
             department_name=name_value,
             parent_department=parent,
             manager=manager,
+            is_active=cast(bool, defaults["department_active"]),
             description=description.strip(),
             created_by=actor,
             updated_by=actor,
@@ -494,6 +1111,39 @@ class DepartmentService:
 
     @staticmethod
     @transaction.atomic
+    def activate_department(
+        tenant_id: UUID,
+        department_id: UUID,
+        *,
+        actor_id: str,
+        correlation_id: str | None = None,
+    ) -> Department:
+        started = time.monotonic()
+        tenant, actor, correlation = _tenant(tenant_id), _actor(actor_id), _correlation(correlation_id)
+        department = _lock(Department, tenant, department_id, "department")
+        if department.is_active:
+            return department
+        if department.parent_department_id:
+            parent = _get(Department, tenant, department.parent_department_id, "parent department")
+            if not parent.is_active:
+                raise HRConflictError("Activate the parent department first.")
+        department.is_active = True
+        department.updated_by = actor
+        _save(department, update_fields={"is_active", "updated_by"})
+        _event(department, "human_resources.department.activated", actor, correlation)
+        _log(
+            "activate_department",
+            department,
+            actor,
+            correlation,
+            started,
+            prior_state="inactive",
+            new_state="active",
+        )
+        return department
+
+    @staticmethod
+    @transaction.atomic
     def delete_department(
         tenant_id: UUID,
         department_id: UUID,
@@ -520,7 +1170,17 @@ class DepartmentService:
         include_inactive: bool = False,
     ) -> list[DepartmentNode]:
         tenant = _tenant(tenant_id)
+        policy = HumanResourcesConfigurationService.get_document(tenant)
+        limits = cast(Mapping[str, object], policy["limits"])
+        maximum_nodes = cast(int, limits["department_tree_max_nodes"])
+        maximum_depth = cast(int, limits["hierarchy_max_depth"])
         departments = list(Department.objects.for_tenant(tenant).select_related("manager").order_by("department_code"))
+        if len(departments) > maximum_nodes:
+            raise HRConflictError(
+                "Department hierarchy exceeds the configured node limit.",
+                code="HR_HIERARCHY_NODE_LIMIT_EXCEEDED",
+                details={"maximum_nodes": maximum_nodes},
+            )
         if not include_inactive:
             departments = [item for item in departments if item.is_active]
         by_id = {
@@ -552,7 +1212,7 @@ class DepartmentService:
             node, ancestors, depth = stack.pop()
             if node.id in ancestors:
                 raise HRConflictError("Department hierarchy contains a cycle.")
-            if depth > 100:
+            if depth > maximum_depth:
                 raise HRConflictError("Department hierarchy exceeds the supported depth.")
             stack.extend((child, ancestors | {node.id}, depth + 1) for child in node.children)
         return roots
@@ -574,12 +1234,15 @@ class EmployeeService:
         tenant = _tenant(tenant_id)
         employee = _identifier(employee_id, "employee_id")
         manager = _get(Employee, tenant, manager_id, "manager")
-        if manager.employment_status not in {EmploymentStatus.ACTIVE, EmploymentStatus.ON_LEAVE}:
+        policy = HumanResourcesConfigurationService.get_document(tenant)
+        policies = cast(Mapping[str, object], policy["policies"])
+        limits = cast(Mapping[str, object], policy["limits"])
+        if manager.employment_status not in set(cast(list[str], policies["manager_eligible_statuses"])):
             raise HRConflictError("The manager must be active.")
         links = dict(Employee.objects.for_tenant(tenant).select_for_update().values_list("id", "manager_id"))
         seen = {employee}
         current: UUID | None = manager.id
-        for _ in range(100):
+        for _ in range(cast(int, limits["hierarchy_max_depth"])):
             if current is None:
                 return manager
             if current in seen:
@@ -615,6 +1278,11 @@ class EmployeeService:
         if forbidden & set(data):
             raise HRValidationError("Client-controlled tenant, audit, and lifecycle fields are forbidden.")
         values = dict(data)
+        policy = HumanResourcesConfigurationService.get_document(tenant)
+        defaults = cast(Mapping[str, object], policy["defaults"])
+        policies = cast(Mapping[str, object], policy["policies"])
+        limits = cast(Mapping[str, object], policy["limits"])
+        allowed_values = cast(Mapping[str, object], policy["allowed_values"])
         department_id = values.pop("department_id", values.pop("department", None))
         manager_id = values.pop("manager_id", values.pop("manager", None))
         required = ("employee_number", "first_name", "last_name", "email", "hire_date")
@@ -623,6 +1291,24 @@ class EmployeeService:
             raise HRValidationError("Required employee fields are missing.", details={"fields": missing})
         employee_number = str(values.pop("employee_number")).strip().upper()
         email = str(values.pop("email")).strip().lower()
+        first_name = str(values.pop("first_name")).strip()
+        last_name = str(values.pop("last_name")).strip()
+        phone = str(values.pop("phone", "") or "").strip()
+        position = str(values.pop("position", "") or "").strip()
+        employment_type = str(values.pop("employment_type", defaults["employment_type"]))
+        bounded_values = {
+            "employee_number": (employee_number, "employee_number_max_length"),
+            "first_name": (first_name, "employee_name_max_length"),
+            "last_name": (last_name, "employee_name_max_length"),
+            "email": (email, "employee_email_max_length"),
+            "phone": (phone, "employee_phone_max_length"),
+            "position": (position, "employee_position_max_length"),
+        }
+        for field_name, (field_value, limit_name) in bounded_values.items():
+            if len(field_value) > cast(int, limits[limit_name]):
+                raise HRValidationError(f"{field_name} exceeds the configured safe limit.")
+        if employment_type not in cast(list[str], allowed_values["employment_types"]):
+            raise HRValidationError("employment_type is not enabled by tenant configuration.")
         duplicate = Employee.objects.for_tenant(tenant).filter(
             Q(employee_number=employee_number) | Q(email__iexact=email)
         )
@@ -631,13 +1317,13 @@ class EmployeeService:
         employee = Employee(
             tenant_id=tenant,
             employee_number=employee_number,
-            first_name=str(values.pop("first_name")).strip(),
-            last_name=str(values.pop("last_name")).strip(),
+            first_name=first_name,
+            last_name=last_name,
             email=email,
-            phone=str(values.pop("phone", "") or "").strip(),
-            position=str(values.pop("position", "") or "").strip(),
+            phone=phone,
+            position=position,
             hire_date=_date(values.pop("hire_date"), "hire_date"),
-            employment_type=str(values.pop("employment_type", "full_time")),
+            employment_type=employment_type,
             department=cls.validate_department(tenant, cast(UUID, department_id)) if department_id else None,
             created_by=actor,
             updated_by=actor,
@@ -646,7 +1332,7 @@ class EmployeeService:
             raise HRValidationError("Unsupported employee fields.", details={"fields": sorted(values)})
         if manager_id:
             employee.manager = _get(Employee, tenant, cast(UUID, manager_id), "manager")
-            if employee.manager.employment_status not in {EmploymentStatus.ACTIVE, EmploymentStatus.ON_LEAVE}:
+            if employee.manager.employment_status not in set(cast(list[str], policies["manager_eligible_statuses"])):
                 raise HRConflictError("The manager must be active.")
         _save(employee)
         _event(employee, "human_resources.employee.created", actor, correlation)
@@ -844,10 +1530,14 @@ class EmployeeService:
         _log("delete_employee", employee, actor, correlation, started)
 
     @staticmethod
-    def get_reporting_tree(tenant_id: UUID, employee_id: UUID, *, depth: int = 5) -> EmployeeTreeNode:
+    def get_reporting_tree(tenant_id: UUID, employee_id: UUID, *, depth: int | None = None) -> EmployeeTreeNode:
         tenant = _tenant(tenant_id)
-        if not isinstance(depth, int) or depth < 1 or depth > 20:
-            raise HRValidationError("depth must be between 1 and 20.")
+        policy = HumanResourcesConfigurationService.get_document(tenant)
+        limits = cast(Mapping[str, object], policy["limits"])
+        resolved_depth = cast(int, limits["reporting_tree_default_depth"]) if depth is None else depth
+        maximum_depth = cast(int, limits["reporting_tree_max_depth"])
+        if not isinstance(resolved_depth, int) or resolved_depth < 1 or resolved_depth > maximum_depth:
+            raise HRValidationError(f"depth must be between 1 and {maximum_depth}.")
         root_employee = _get(Employee, tenant, employee_id, "employee")
         employees = list(Employee.objects.for_tenant(tenant).order_by("employee_number"))
         by_manager: dict[UUID, list[Employee]] = {}
@@ -870,7 +1560,7 @@ class EmployeeService:
             current, current_node, level, ancestors = stack.pop()
             if current.id in ancestors:
                 raise HRConflictError("Reporting tree contains a cycle.")
-            if level >= depth:
+            if level >= resolved_depth:
                 continue
             for report in by_manager.get(current.id, []):
                 child = node(report)
@@ -892,8 +1582,13 @@ def _validate_attendance_date(attendance_date: date, *timestamps: datetime | Non
 
 def _hours(check_in: datetime | None, check_out: datetime | None) -> Decimal:
     if check_in is None or check_out is None:
-        return Decimal("0.00")
-    return Decimal(str((check_out - check_in).total_seconds() / 3600)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        defaults = cast(Mapping[str, object], HumanResourcesConfigurationService.default_document()["defaults"])
+        return Decimal(str(defaults["attendance_hours"]))
+    limits = cast(Mapping[str, object], HumanResourcesConfigurationService.default_document()["limits"])
+    return Decimal(str((check_out - check_in).total_seconds() / 3600)).quantize(
+        Decimal(str(limits["decimal_quantum"])),
+        rounding=ROUND_HALF_UP,
+    )
 
 
 class AttendanceService:
@@ -913,18 +1608,29 @@ class AttendanceService:
         forbidden = {"tenant_id", "created_by", "updated_by", "deleted_at", "deleted_by"}
         if forbidden & set(data):
             raise HRValidationError("Client-controlled tenant and audit fields are forbidden.")
+        policy = HumanResourcesConfigurationService.get_document(tenant)
+        policies = cast(Mapping[str, object], policy["policies"])
+        defaults = cast(Mapping[str, object], policy["defaults"])
+        allowed = cast(Mapping[str, object], policy["allowed_values"])
+        limits = cast(Mapping[str, object], policy["limits"])
         employee_id = data.get("employee_id", data.get("employee"))
         employee = _get(Employee, tenant, cast(UUID, employee_id), "employee")
-        if employee.employment_status not in {EmploymentStatus.ACTIVE, EmploymentStatus.ON_LEAVE}:
+        if employee.employment_status not in set(cast(list[str], policies["attendance_eligible_statuses"])):
             raise HRConflictError("Attendance can only be recorded for an active or on-leave employee.")
         attendance_date = _date(data.get("attendance_date"), "attendance_date")
         check_in = cast(datetime | None, data.get("check_in_time"))
         check_out = cast(datetime | None, data.get("check_out_time"))
         _validate_attendance_date(attendance_date, check_in, check_out)
-        source = str(data.get("source", AttendanceSource.MANUAL))
-        status_value = str(data.get("status", AttendanceStatus.PRESENT))
+        source = str(data.get("source", defaults["attendance_source"]))
+        status_value = str(data.get("status", defaults["attendance_status"]))
+        if source not in cast(list[str], allowed["attendance_sources"]):
+            raise HRValidationError("Attendance source is not enabled by tenant policy.")
+        if status_value not in cast(list[str], allowed["attendance_statuses"]):
+            raise HRValidationError("Attendance status is not enabled by tenant policy.")
         calculated = _hours(check_in, check_out)
         amount = _decimal(data.get("hours_worked", calculated), "hours_worked")
+        if amount > Decimal(str(limits["max_hours_per_day"])):
+            raise HRValidationError("hours_worked exceeds the configured daily maximum.")
         attendance = Attendance(
             tenant_id=tenant,
             employee=employee,
@@ -964,24 +1670,100 @@ class AttendanceService:
         started = time.monotonic()
         tenant, actor, correlation = _tenant(tenant_id), _actor(actor_id), _correlation(correlation_id)
         attendance = _lock(Attendance, tenant, attendance_id, "attendance")
-        allowed = {"attendance_date", "check_in_time", "check_out_time", "hours_worked", "status", "source", "notes"}
+        allowed = {
+            "attendance_date",
+            "check_in_time",
+            "check_out_time",
+            "hours_worked",
+            "status",
+            "source",
+            "notes",
+            "correction_reason",
+        }
         unknown = set(changes) - allowed
         if unknown:
             raise HRValidationError("Unsupported attendance update fields.", details={"fields": sorted(unknown)})
-        if not str(changes.get("notes", "")).strip():
+        reason = str(changes.get("correction_reason", changes.get("notes", ""))).strip()
+        if not reason:
             raise HRValidationError("A correction note is required.", code="HR_CORRECTION_NOTE_REQUIRED")
-        for name in allowed:
+        field_names = (
+            "attendance_date",
+            "check_in_time",
+            "check_out_time",
+            "hours_worked",
+            "status",
+            "source",
+            "notes",
+        )
+        persisted_before = {
+            name: (
+                getattr(attendance, name).isoformat()
+                if isinstance(getattr(attendance, name), (date, datetime))
+                else (
+                    str(getattr(attendance, name))
+                    if isinstance(getattr(attendance, name), Decimal)
+                    else getattr(attendance, name)
+                )
+            )
+            for name in field_names
+        }
+        latest_revision = (
+            AttendanceRevision.objects.for_tenant(tenant)
+            .filter(attendance=attendance)
+            .order_by("-revision")
+            .only("revision", "after_values")
+            .first()
+        )
+        before = deepcopy(latest_revision.after_values) if latest_revision is not None else persisted_before
+        effective = dict(before)
+        for name in field_names:
             if name in changes:
-                setattr(attendance, name, changes[name])
-        attendance.attendance_date = _date(attendance.attendance_date, "attendance_date")
-        _validate_attendance_date(attendance.attendance_date, attendance.check_in_time, attendance.check_out_time)
+                effective[name] = changes[name]
+        effective_date = _date(effective["attendance_date"], "attendance_date")
+        effective_check_in = cast(datetime | None, effective["check_in_time"])
+        effective_check_out = cast(datetime | None, effective["check_out_time"])
+        _validate_attendance_date(effective_date, effective_check_in, effective_check_out)
         if "hours_worked" in changes:
-            attendance.hours_worked = _decimal(changes["hours_worked"], "hours_worked")
+            effective["hours_worked"] = format(_decimal(changes["hours_worked"], "hours_worked"), ".2f")
         elif "check_in_time" in changes or "check_out_time" in changes:
-            attendance.hours_worked = _hours(attendance.check_in_time, attendance.check_out_time)
-        attendance.notes = str(attendance.notes).strip()
-        attendance.updated_by = actor
-        _save(attendance)
+            effective["hours_worked"] = format(_hours(effective_check_in, effective_check_out), ".2f")
+        effective["attendance_date"] = effective_date.isoformat()
+        policy = HumanResourcesConfigurationService.get_document(tenant)
+        limits = cast(Mapping[str, object], policy["limits"])
+        policies = cast(Mapping[str, object], policy["policies"])
+        if Decimal(str(effective["hours_worked"])) > Decimal(str(limits["max_hours_per_day"])):
+            raise HRValidationError("hours_worked exceeds the configured daily maximum.")
+        if effective["status"] in cast(list[str], policies["attendance_zero_work_statuses"]) and (
+            Decimal(str(effective["hours_worked"])) != 0
+            or effective_check_in is not None
+            or effective_check_out is not None
+        ):
+            raise HRValidationError("The configured non-work statuses cannot contain worked time.")
+        for name in ("check_in_time", "check_out_time"):
+            value = effective[name]
+            if isinstance(value, datetime):
+                effective[name] = value.isoformat()
+        effective["notes"] = str(effective["notes"]).strip()
+        previous_revision = latest_revision.revision if latest_revision is not None else 0
+        AttendanceRevision.objects.create(
+            tenant_id=tenant,
+            attendance=attendance,
+            revision=previous_revision + 1,
+            before_values=before,
+            after_values=effective,
+            reason=reason,
+            actor_id=actor,
+            correlation_id=correlation,
+        )
+        for name in field_names:
+            value = effective[name]
+            if name == "attendance_date":
+                value = effective_date
+            elif name in {"check_in_time", "check_out_time"} and isinstance(value, str):
+                value = datetime.fromisoformat(value)
+            elif name == "hours_worked":
+                value = Decimal(str(value))
+            setattr(attendance, name, value)
         _event(
             attendance,
             "human_resources.attendance.corrected",
@@ -990,6 +1772,13 @@ class AttendanceService:
             employee_id=attendance.employee_id,
             attendance_date=attendance.attendance_date.isoformat(),
             status=attendance.status,
+            attendance_revision=previous_revision + 1,
+            before_check_in_time=before["check_in_time"],
+            before_check_out_time=before["check_out_time"],
+            before_hours_worked=before["hours_worked"],
+            after_check_in_time=effective["check_in_time"],
+            after_check_out_time=effective["check_out_time"],
+            after_hours_worked=effective["hours_worked"],
         )
         _log("update_attendance", attendance, actor, correlation, started)
         return attendance
@@ -1478,7 +2267,12 @@ class LeaveRequestService:
         start, end = _date(start_date, "start_date"), _date(end_date, "end_date")
         if end < start:
             raise HRValidationError("Leave end date cannot precede start date.", code="HR_BALANCE_PERIOD_INVALID")
-        return Decimal((end - start).days + 1).quantize(Decimal("0.01"))
+        document = HumanResourcesConfigurationService.get_document(tenant)
+        policies = cast(Mapping[str, object], document["policies"])
+        limits = cast(Mapping[str, object], document["limits"])
+        if policies["leave_duration_calendar"] != "inclusive":
+            raise HRCapabilityUnavailableError("The configured leave calendar policy is unavailable.")
+        return Decimal((end - start).days + 1).quantize(Decimal(str(limits["decimal_quantum"])))
 
     @classmethod
     @transaction.atomic
@@ -1542,7 +2336,13 @@ class LeaveRequestService:
         if replay:
             return replay
         employee = cast(Employee, _lock(Employee, tenant, employee_id, "employee"))
-        if employee.employment_status not in {EmploymentStatus.ACTIVE, EmploymentStatus.ON_LEAVE}:
+        document = HumanResourcesConfigurationService.get_document(tenant)
+        policies = cast(Mapping[str, object], document["policies"])
+        allowed = cast(Mapping[str, object], document["allowed_values"])
+        defaults = cast(Mapping[str, object], document["defaults"])
+        if leave_type not in cast(list[str], allowed["leave_types"]):
+            raise HRValidationError("leave_type is not enabled by tenant configuration.")
+        if employee.employment_status not in set(cast(list[str], policies["leave_eligible_statuses"])):
             raise HRConflictError("Leave can only be requested for an active employee.")
         balance = _lock(LeaveBalance, tenant, balance_id, "leave balance")
         days = cls.calculate_days(tenant, employee_id=employee.id, start_date=start, end_date=end)
@@ -1559,13 +2359,13 @@ class LeaveRequestService:
             )
         overlap = LeaveRequest.objects.for_tenant(tenant).filter(
             employee=employee,
-            status__in=(LeaveRequestStatus.PENDING, LeaveRequestStatus.APPROVED),
+            status__in=cast(list[str], policies["leave_overlap_blocking_statuses"]),
             start_date__lte=end,
             end_date__gte=start,
         )
         if overlap.exists():
             raise HRConflictError("The leave request overlaps an existing request.", code="HR_LEAVE_OVERLAP")
-        if balance.remaining_days < days:
+        if cast(bool, policies["leave_submission_blocks_insufficient_balance"]) and balance.remaining_days < days:
             raise HRConflictError("The leave balance is insufficient.", code="HR_INSUFFICIENT_BALANCE")
         balance.pending_days += days
         _save_balance(balance, actor, "request reservation", {"pending_days"})
@@ -1578,6 +2378,7 @@ class LeaveRequestService:
             end_date=end,
             days_requested=days,
             reason=str(data.get("reason", "") or "").strip(),
+            status=str(defaults["leave_request_status"]),
             created_by=actor,
             updated_by=actor,
             transition_history=[
@@ -1585,7 +2386,7 @@ class LeaveRequestService:
                     transition_key=key,
                     command="submit",
                     from_state="",
-                    to_state=LeaveRequestStatus.PENDING,
+                    to_state=str(defaults["leave_request_status"]),
                     occurred_at=timezone.now().isoformat(),
                     metadata={"actor_id": actor, "correlation_id": correlation},
                 ).as_dict()
@@ -1956,6 +2757,7 @@ __all__ = [
     "HRNotFoundError",
     "HRValidationError",
     "HumanResourcesServiceError",
+    "HumanResourcesConfigurationService",
     "LeaveBalanceService",
     "LeaveRequestService",
 ]

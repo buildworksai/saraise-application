@@ -42,12 +42,16 @@ def test_permission_catalog_is_complete_and_has_no_paid_domain_claims() -> None:
         "hr.leave_request:reject",
         "hr.leave_request:cancel",
         "hr.leave_request:delete",
+        "hr.configuration:read",
+        "hr.configuration:update",
+        "hr.configuration:audit",
+        "hr.configuration:rollback",
+        "hr.configuration:import",
+        "hr.configuration:export",
         "hr.health:read",
     }
     assert not any(
-        fragment in permission
-        for permission in PERMISSIONS
-        for fragment in ("payroll", "recruit", "performance")
+        fragment in permission for permission in PERMISSIONS for fragment in ("payroll", "recruit", "performance")
     )
 
 

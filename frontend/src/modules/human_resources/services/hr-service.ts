@@ -6,10 +6,12 @@ import {
 } from '../contracts';
 import type {
   Attendance, AttendanceCreate, AttendanceFilters, AttendanceUpdate, ClockInPayload, ClockOutPayload,
-  Department, DepartmentCreate, DepartmentFilters, DepartmentHierarchyNode, DepartmentUpdate,
+  ConfigurationAuditRecord, ConfigurationExport, ConfigurationPreview, ConfigurationPreviewRequest,
+  ConfigurationRollbackRequest, ConfigurationVersion, ConfigurationWrite, Department,
+  DepartmentCreate, DepartmentFilters, DepartmentHierarchyNode, DepartmentLifecyclePayload, DepartmentUpdate,
   DetailResult, Employee, EmployeeCreate, EmployeeFilters, EmployeeLifecycleCommand,
   EmployeeLifecyclePayload, EmployeeReportingTreeNode, EmployeeTerminationPayload, EmployeeUpdate,
-  HumanResourcesHealth, LeaveApprovalPayload, LeaveBalance, LeaveBalanceCreate, LeaveBalanceFilters,
+  HumanResourcesConfiguration, HumanResourcesHealth, LeaveApprovalPayload, LeaveBalance, LeaveBalanceCreate, LeaveBalanceFilters,
   LeaveBalanceUpdate, LeaveCancellationPayload, LeaveRejectionPayload, LeaveRequest,
   LeaveRequestCreate, LeaveRequestFilters, LeaveRequestUpdate, PageResult,
 } from '../contracts';
@@ -43,6 +45,24 @@ const isHealth = (value: unknown): value is HumanResourcesHealth =>
   && (value.status === 'healthy' || value.status === 'unhealthy')
   && typeof value.live === 'boolean' && typeof value.ready === 'boolean'
   && typeof value.checked_at === 'string' && isObject(value.checks);
+const isConfiguration = (value: unknown): value is HumanResourcesConfiguration =>
+  isObject(value) && typeof value.id === 'string' && typeof value.environment === 'string'
+  && typeof value.version === 'number' && isObject(value.document) && typeof value.updated_at === 'string';
+const isConfigurationPreview = (value: unknown): value is ConfigurationPreview =>
+  isObject(value) && typeof value.valid === 'boolean' && isObject(value.normalized_document)
+  && Array.isArray(value.changes);
+const isConfigurationVersion = (value: unknown): value is ConfigurationVersion =>
+  isObject(value) && typeof value.version === 'number' && typeof value.environment === 'string'
+  && isObject(value.document) && typeof value.correlation_id === 'string'
+  && typeof value.created_at === 'string';
+const isConfigurationAudit = (value: unknown): value is ConfigurationAuditRecord =>
+  isObject(value) && typeof value.id === 'string' && typeof value.version === 'number'
+  && typeof value.actor_id === 'string' && typeof value.correlation_id === 'string'
+  && typeof value.created_at === 'string' && isObject(value.after_document);
+const isConfigurationExport = (value: unknown): value is ConfigurationExport =>
+  isObject(value) && value.schema === 'saraise.human_resources.configuration'
+  && typeof value.environment === 'string' && typeof value.version === 'number'
+  && isObject(value.document);
 
 function kindForStatus(status: number): HrErrorKind {
   if (status === 401) return 'authentication';
@@ -117,6 +137,10 @@ export const hrService = {
   createDepartment: (payload: DepartmentCreate) => governed(async () => decode(await apiClient.post(ENDPOINTS.DEPARTMENTS.CREATE, payload), isDepartment, 'department')),
   updateDepartment: (id: string, payload: DepartmentUpdate) => governed(async () => decode(await apiClient.patch(ENDPOINTS.DEPARTMENTS.UPDATE(id), payload), isDepartment, 'department')),
   deleteDepartment: (id: string) => governed(async () => { await apiClient.delete(ENDPOINTS.DEPARTMENTS.DELETE(id)); }),
+  activateDepartment: (id: string, payload: DepartmentLifecyclePayload) => governed(async () =>
+    decode(await apiClient.post(ENDPOINTS.DEPARTMENTS.ACTIVATE(id), payload, idempotency(payload.idempotency_key)), isDepartment, 'department activation')),
+  deactivateDepartment: (id: string, payload: DepartmentLifecyclePayload) => governed(async () =>
+    decode(await apiClient.post(ENDPOINTS.DEPARTMENTS.DEACTIVATE(id), payload, idempotency(payload.idempotency_key)), isDepartment, 'department deactivation')),
   getDepartmentHierarchy: (rootId?: string, includeInactive = false) => governed(async () =>
     decode(await apiClient.get(withQuery(ENDPOINTS.DEPARTMENTS.TREE, { root_id: rootId, include_inactive: includeInactive })), isHierarchy, 'department hierarchy')),
 
@@ -126,7 +150,7 @@ export const hrService = {
   createEmployee: (payload: EmployeeCreate) => governed(async () => decode(await apiClient.post(ENDPOINTS.EMPLOYEES.CREATE, payload), isEmployee, 'employee')),
   updateEmployee: (id: string, payload: EmployeeUpdate) => governed(async () => decode(await apiClient.patch(ENDPOINTS.EMPLOYEES.UPDATE(id), payload), isEmployee, 'employee')),
   deleteEmployee: (id: string) => governed(async () => { await apiClient.delete(ENDPOINTS.EMPLOYEES.DELETE(id)); }),
-  getReportingTree: (id: string, depth = 5) => governed(async () => decode(await apiClient.get(withQuery(ENDPOINTS.EMPLOYEES.REPORTING_TREE(id), { depth })), isReportingTree, 'reporting tree')),
+  getReportingTree: (id: string, depth: number) => governed(async () => decode(await apiClient.get(withQuery(ENDPOINTS.EMPLOYEES.REPORTING_TREE(id), { depth })), isReportingTree, 'reporting tree')),
   transitionEmployee: (id: string, command: EmployeeLifecycleCommand, payload: EmployeeLifecyclePayload | EmployeeTerminationPayload) => governed(async () =>
     decode(await apiClient.post(employeeAction(command, id), payload, idempotency(payload.transition_key)), isEmployee, 'employee transition')),
 
@@ -156,6 +180,22 @@ export const hrService = {
   rejectLeaveRequest: (id: string, payload: LeaveRejectionPayload) => governed(async () => decode(await apiClient.post(ENDPOINTS.LEAVE_REQUESTS.REJECT(id), payload, idempotency(payload.transition_key)), isLeaveRequest, 'leave rejection')),
   cancelLeaveRequest: (id: string, payload: LeaveCancellationPayload) => governed(async () => decode(await apiClient.post(ENDPOINTS.LEAVE_REQUESTS.CANCEL(id), payload, idempotency(payload.transition_key)), isLeaveRequest, 'leave cancellation')),
 
+  getConfiguration: (environment = 'default') => governed(async () =>
+    decode(await apiClient.get(withQuery(ENDPOINTS.CONFIGURATION.BASE, { environment })), isConfiguration, 'configuration')),
+  updateConfiguration: (payload: ConfigurationWrite) => governed(async () =>
+    decode(await apiClient.patch(ENDPOINTS.CONFIGURATION.BASE, payload, idempotency(payload.idempotency_key)), isConfiguration, 'configuration')),
+  previewConfiguration: (payload: ConfigurationPreviewRequest) => governed(async () =>
+    decode(await apiClient.post(ENDPOINTS.CONFIGURATION.PREVIEW, payload), isConfigurationPreview, 'configuration preview')),
+  getConfigurationHistory: (environment = 'default') => governed(async () =>
+    decodePage(await apiClient.get(withQuery(ENDPOINTS.CONFIGURATION.HISTORY, { environment })), isConfigurationVersion, 'configuration history')),
+  rollbackConfiguration: (payload: ConfigurationRollbackRequest) => governed(async () =>
+    decode(await apiClient.post(ENDPOINTS.CONFIGURATION.ROLLBACK, payload, idempotency(payload.idempotency_key)), isConfiguration, 'configuration rollback')),
+  importConfiguration: (payload: ConfigurationWrite) => governed(async () =>
+    decode(await apiClient.post(ENDPOINTS.CONFIGURATION.IMPORT, payload, idempotency(payload.idempotency_key)), isConfiguration, 'configuration import')),
+  exportConfiguration: (environment = 'default') => governed(async () =>
+    decode(await apiClient.get(withQuery(ENDPOINTS.CONFIGURATION.EXPORT, { environment })), isConfigurationExport, 'configuration export')),
+  getConfigurationAudit: (environment = 'default') => governed(async () =>
+    decodePage(await apiClient.get(withQuery(ENDPOINTS.CONFIGURATION.AUDIT, { environment })), isConfigurationAudit, 'configuration audit')),
   getHealth: () => governed(async () => decode(await apiClient.get(ENDPOINTS.HEALTH), isHealth, 'health')),
 };
 

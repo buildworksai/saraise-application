@@ -10,6 +10,9 @@ import { HrApiError } from '../services/hr-service';
 export function PageShell({ title, description, back, actions, children }: {
   title: string; description: string; back?: () => void; actions?: ReactNode; children: ReactNode;
 }) {
+  useEffect(() => {
+    document.title = `${title} · Human Resources · SARAISE`;
+  }, [title]);
   return <main className="mx-auto w-full max-w-[1500px] space-y-6 p-4 sm:p-6 lg:p-8">
     <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex min-w-0 items-start gap-2">
@@ -56,8 +59,8 @@ export function EmptyPanel({ title, description, action }: { title: string; desc
 }
 
 export function StatusChip({ status }: { status: string }) {
-  const tone = ['active', 'present', 'approved', 'ready', 'healthy'].includes(status) ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-    : ['pending', 'late', 'on_leave', 'half_day'].includes(status) ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+  const tone = ['active', 'present', 'approved', 'ready', 'healthy'].includes(status) ? 'border-primary/30 bg-primary/10 text-primary'
+    : ['pending', 'late', 'on_leave', 'half_day'].includes(status) ? 'border-accent bg-accent/50 text-accent-foreground'
       : ['rejected', 'terminated', 'not_ready', 'unhealthy'].includes(status) ? 'border-destructive/30 bg-destructive/10 text-destructive'
         : 'border-border bg-muted text-muted-foreground';
   return <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${tone}`}>{status.replaceAll('_', ' ')}</span>;

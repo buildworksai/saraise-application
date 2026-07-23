@@ -37,6 +37,12 @@ permissions:
   - hr.leave_request:reject
   - hr.leave_request:cancel
   - hr.leave_request:delete
+  - hr.configuration:read
+  - hr.configuration:update
+  - hr.configuration:audit
+  - hr.configuration:rollback
+  - hr.configuration:import
+  - hr.configuration:export
   - hr.health:read
 
 sod_actions: []
@@ -56,8 +62,116 @@ metadata:
   api:
     canonical_prefix: /api/v2/human-resources/
     health_endpoint: /api/v2/human-resources/health/
-    default_page_size: 25
-    maximum_page_size: 100
+    configuration_source: tenant_versioned_configuration
+    entity_contracts:
+      - model: Department
+        table: hr_departments
+        list_serializer: DepartmentListSerializer
+        detail_serializer: DepartmentDetailSerializer
+        create_serializer: DepartmentCreateSerializer
+        update_serializer: DepartmentUpdateSerializer
+        lifecycle: service_governed_deactivation
+      - model: Employee
+        table: hr_employees
+        list_serializer: EmployeeListSerializer
+        detail_serializer: EmployeeDetailSerializer
+        create_serializer: EmployeeCreateSerializer
+        update_serializer: EmployeeUpdateSerializer
+        lifecycle: human_resources.employee_lifecycle
+      - model: Attendance
+        table: hr_attendances
+        list_serializer: AttendanceListSerializer
+        detail_serializer: AttendanceDetailSerializer
+        create_serializer: AttendanceCreateSerializer
+        update_serializer: AttendanceUpdateSerializer
+        lifecycle: immutable_correction_revisions
+      - model: LeaveBalance
+        table: hr_leave_balances
+        list_serializer: LeaveBalanceListSerializer
+        detail_serializer: LeaveBalanceDetailSerializer
+        create_serializer: LeaveBalanceCreateSerializer
+        update_serializer: LeaveBalanceUpdateSerializer
+        lifecycle: versioned_allocation
+      - model: LeaveRequest
+        table: hr_leave_requests
+        list_serializer: LeaveRequestListSerializer
+        detail_serializer: LeaveRequestDetailSerializer
+        create_serializer: LeaveRequestCreateSerializer
+        update_serializer: LeaveRequestUpdateSerializer
+        lifecycle: human_resources.leave_request
+      - model: HumanResourcesConfiguration
+        table: hr_configurations
+        detail_serializer: HumanResourcesConfigurationSerializer
+        update_serializer: HumanResourcesConfigurationWriteSerializer
+        api_exposure: governed_configuration_viewset
+        lifecycle: versioned_tenant_configuration
+      - model: HumanResourcesConfigurationVersion
+        table: hr_configuration_versions
+        list_serializer: HumanResourcesConfigurationVersionSerializer
+        api_exposure: governed_configuration_history
+        lifecycle: immutable
+      - model: HumanResourcesConfigurationAudit
+        table: hr_configuration_audits
+        list_serializer: HumanResourcesConfigurationAuditSerializer
+        api_exposure: redacted_configuration_history
+        lifecycle: append_only
+      - model: HumanResourcesMutationCommand
+        table: hr_mutation_commands
+        api_exposure: internal_idempotency_evidence
+        lifecycle: complete_once_then_immutable
+      - model: AttendanceRevision
+        table: hr_attendance_revisions
+        api_exposure: internal_correction_evidence
+        lifecycle: append_only
+    endpoint_inventory:
+      - {method: GET, path: /api/v2/human-resources/departments/, action: list, viewset: DepartmentViewSet, serializer: DepartmentListSerializer, permission: "hr.department:read", lifecycle_action: false}
+      - {method: POST, path: /api/v2/human-resources/departments/, action: create, viewset: DepartmentViewSet, serializer: DepartmentCreateSerializer, permission: "hr.department:create", lifecycle_action: false}
+      - {method: GET, path: "/api/v2/human-resources/departments/{id}/", action: retrieve, viewset: DepartmentViewSet, serializer: DepartmentDetailSerializer, permission: "hr.department:read", lifecycle_action: false}
+      - {method: PATCH, path: "/api/v2/human-resources/departments/{id}/", action: partial_update, viewset: DepartmentViewSet, serializer: DepartmentUpdateSerializer, permission: "hr.department:update", lifecycle_action: false}
+      - {method: DELETE, path: "/api/v2/human-resources/departments/{id}/", action: destroy, viewset: DepartmentViewSet, serializer: DepartmentDetailSerializer, permission: "hr.department:delete", lifecycle_action: true}
+      - {method: POST, path: "/api/v2/human-resources/departments/{id}/activate/", action: activate, viewset: DepartmentViewSet, serializer: DepartmentDetailSerializer, permission: "hr.department:update", lifecycle_action: true}
+      - {method: POST, path: "/api/v2/human-resources/departments/{id}/deactivate/", action: deactivate, viewset: DepartmentViewSet, serializer: DepartmentDetailSerializer, permission: "hr.department:update", lifecycle_action: true}
+      - {method: GET, path: /api/v2/human-resources/departments/tree/, action: tree, viewset: DepartmentViewSet, serializer: DepartmentTreeSerializer, permission: "hr.department:read", lifecycle_action: false}
+      - {method: GET, path: /api/v2/human-resources/employees/, action: list, viewset: EmployeeViewSet, serializer: EmployeeListSerializer, permission: "hr.employee:read", lifecycle_action: false}
+      - {method: POST, path: /api/v2/human-resources/employees/, action: create, viewset: EmployeeViewSet, serializer: EmployeeCreateSerializer, permission: "hr.employee:create", lifecycle_action: false}
+      - {method: GET, path: "/api/v2/human-resources/employees/{id}/", action: retrieve, viewset: EmployeeViewSet, serializer: EmployeeDetailSerializer, permission: "hr.employee:read", lifecycle_action: false}
+      - {method: PATCH, path: "/api/v2/human-resources/employees/{id}/", action: partial_update, viewset: EmployeeViewSet, serializer: EmployeeUpdateSerializer, permission: "hr.employee:update", lifecycle_action: false}
+      - {method: DELETE, path: "/api/v2/human-resources/employees/{id}/", action: destroy, viewset: EmployeeViewSet, serializer: EmployeeDetailSerializer, permission: "hr.employee:delete", lifecycle_action: true}
+      - {method: GET, path: "/api/v2/human-resources/employees/{id}/reporting-tree/", action: reporting_tree, viewset: EmployeeViewSet, serializer: EmployeeTreeSerializer, permission: "hr.employee:read", lifecycle_action: false}
+      - {method: POST, path: "/api/v2/human-resources/employees/{id}/activate/", action: activate, viewset: EmployeeViewSet, serializer: EmployeeTransitionSerializer, permission: "hr.employee:transition", lifecycle_action: true}
+      - {method: POST, path: "/api/v2/human-resources/employees/{id}/deactivate/", action: deactivate, viewset: EmployeeViewSet, serializer: EmployeeTransitionSerializer, permission: "hr.employee:transition", lifecycle_action: true}
+      - {method: POST, path: "/api/v2/human-resources/employees/{id}/place-on-leave/", action: place_on_leave, viewset: EmployeeViewSet, serializer: EmployeeTransitionSerializer, permission: "hr.employee:transition", lifecycle_action: true}
+      - {method: POST, path: "/api/v2/human-resources/employees/{id}/return-from-leave/", action: return_from_leave, viewset: EmployeeViewSet, serializer: EmployeeTransitionSerializer, permission: "hr.employee:transition", lifecycle_action: true}
+      - {method: POST, path: "/api/v2/human-resources/employees/{id}/terminate/", action: terminate, viewset: EmployeeViewSet, serializer: EmployeeTransitionSerializer, permission: "hr.employee:transition", lifecycle_action: true}
+      - {method: GET, path: /api/v2/human-resources/attendances/, action: list, viewset: AttendanceViewSet, serializer: AttendanceListSerializer, permission: "hr.attendance:read", lifecycle_action: false}
+      - {method: POST, path: /api/v2/human-resources/attendances/, action: create, viewset: AttendanceViewSet, serializer: AttendanceCreateSerializer, permission: "hr.attendance:create", lifecycle_action: false}
+      - {method: GET, path: "/api/v2/human-resources/attendances/{id}/", action: retrieve, viewset: AttendanceViewSet, serializer: AttendanceDetailSerializer, permission: "hr.attendance:read", lifecycle_action: false}
+      - {method: PATCH, path: "/api/v2/human-resources/attendances/{id}/", action: partial_update, viewset: AttendanceViewSet, serializer: AttendanceUpdateSerializer, permission: "hr.attendance:update", lifecycle_action: false}
+      - {method: DELETE, path: "/api/v2/human-resources/attendances/{id}/", action: destroy, viewset: AttendanceViewSet, serializer: AttendanceDetailSerializer, permission: "hr.attendance:delete", lifecycle_action: true}
+      - {method: POST, path: /api/v2/human-resources/attendances/clock-in/, action: clock_in, viewset: AttendanceViewSet, serializer: ClockInSerializer, permission: "hr.attendance:clock", lifecycle_action: true}
+      - {method: POST, path: "/api/v2/human-resources/attendances/{id}/clock-out/", action: clock_out, viewset: AttendanceViewSet, serializer: ClockOutSerializer, permission: "hr.attendance:clock", lifecycle_action: true}
+      - {method: GET, path: /api/v2/human-resources/leave-balances/, action: list, viewset: LeaveBalanceViewSet, serializer: LeaveBalanceListSerializer, permission: "hr.leave_balance:read", lifecycle_action: false}
+      - {method: POST, path: /api/v2/human-resources/leave-balances/, action: create, viewset: LeaveBalanceViewSet, serializer: LeaveBalanceCreateSerializer, permission: "hr.leave_balance:create", lifecycle_action: false}
+      - {method: GET, path: "/api/v2/human-resources/leave-balances/{id}/", action: retrieve, viewset: LeaveBalanceViewSet, serializer: LeaveBalanceDetailSerializer, permission: "hr.leave_balance:read", lifecycle_action: false}
+      - {method: PATCH, path: "/api/v2/human-resources/leave-balances/{id}/", action: partial_update, viewset: LeaveBalanceViewSet, serializer: LeaveBalanceUpdateSerializer, permission: "hr.leave_balance:adjust", lifecycle_action: true}
+      - {method: DELETE, path: "/api/v2/human-resources/leave-balances/{id}/", action: destroy, viewset: LeaveBalanceViewSet, serializer: LeaveBalanceDetailSerializer, permission: "hr.leave_balance:delete", lifecycle_action: true}
+      - {method: GET, path: /api/v2/human-resources/leave-requests/, action: list, viewset: LeaveRequestViewSet, serializer: LeaveRequestListSerializer, permission: "hr.leave_request:read", lifecycle_action: false}
+      - {method: POST, path: /api/v2/human-resources/leave-requests/, action: create, viewset: LeaveRequestViewSet, serializer: LeaveRequestCreateSerializer, permission: "hr.leave_request:create", lifecycle_action: true}
+      - {method: GET, path: "/api/v2/human-resources/leave-requests/{id}/", action: retrieve, viewset: LeaveRequestViewSet, serializer: LeaveRequestDetailSerializer, permission: "hr.leave_request:read", lifecycle_action: false}
+      - {method: PATCH, path: "/api/v2/human-resources/leave-requests/{id}/", action: partial_update, viewset: LeaveRequestViewSet, serializer: LeaveRequestUpdateSerializer, permission: "hr.leave_request:update", lifecycle_action: false}
+      - {method: DELETE, path: "/api/v2/human-resources/leave-requests/{id}/", action: destroy, viewset: LeaveRequestViewSet, serializer: LeaveRequestDetailSerializer, permission: "hr.leave_request:delete", lifecycle_action: true}
+      - {method: POST, path: "/api/v2/human-resources/leave-requests/{id}/approve/", action: approve, viewset: LeaveRequestViewSet, serializer: LeaveApprovalSerializer, permission: "hr.leave_request:approve", lifecycle_action: true}
+      - {method: POST, path: "/api/v2/human-resources/leave-requests/{id}/reject/", action: reject, viewset: LeaveRequestViewSet, serializer: LeaveRejectionSerializer, permission: "hr.leave_request:reject", lifecycle_action: true}
+      - {method: POST, path: "/api/v2/human-resources/leave-requests/{id}/cancel/", action: cancel, viewset: LeaveRequestViewSet, serializer: LeaveCancellationSerializer, permission: "hr.leave_request:cancel", lifecycle_action: true}
+      - {method: GET, path: /api/v2/human-resources/configuration/, action: list, viewset: HumanResourcesConfigurationViewSet, serializer: HumanResourcesConfigurationSerializer, permission: "hr.configuration:read", lifecycle_action: false}
+      - {method: PATCH, path: /api/v2/human-resources/configuration/, action: partial_update, viewset: HumanResourcesConfigurationViewSet, serializer: HumanResourcesConfigurationWriteSerializer, permission: "hr.configuration:update", lifecycle_action: true}
+      - {method: GET, path: /api/v2/human-resources/configuration/audit/, action: audit, viewset: HumanResourcesConfigurationViewSet, serializer: HumanResourcesConfigurationAuditSerializer, permission: "hr.configuration:audit", lifecycle_action: false}
+      - {method: GET, path: /api/v2/human-resources/configuration/export/, action: export_configuration, viewset: HumanResourcesConfigurationViewSet, serializer: HumanResourcesConfigurationSerializer, permission: "hr.configuration:export", lifecycle_action: false}
+      - {method: GET, path: /api/v2/human-resources/configuration/history/, action: history, viewset: HumanResourcesConfigurationViewSet, serializer: HumanResourcesConfigurationVersionSerializer, permission: "hr.configuration:read", lifecycle_action: false}
+      - {method: POST, path: /api/v2/human-resources/configuration/import/, action: import_configuration, viewset: HumanResourcesConfigurationViewSet, serializer: HumanResourcesConfigurationWriteSerializer, permission: "hr.configuration:import", lifecycle_action: true}
+      - {method: POST, path: /api/v2/human-resources/configuration/preview/, action: preview, viewset: HumanResourcesConfigurationViewSet, serializer: HumanResourcesConfigurationPreviewSerializer, permission: "hr.configuration:read", lifecycle_action: false}
+      - {method: POST, path: /api/v2/human-resources/configuration/rollback/, action: rollback, viewset: HumanResourcesConfigurationViewSet, serializer: HumanResourcesConfigurationRollbackSerializer, permission: "hr.configuration:rollback", lifecycle_action: true}
+      - {method: GET, path: /api/v2/human-resources/health/, action: get, viewset: HumanResourcesHealthView, serializer: HumanResourcesHealthReport, permission: "hr.health:read", lifecycle_action: false}
   optional_dependencies:
     master_data_management:
       version: ">=1.0.0"
@@ -78,7 +192,7 @@ metadata:
       critical: true
     - name: state_machines
       critical: true
-    - name: async_outbox
+    - name: transactional_outbox
       critical: true
   state_machines:
     human_resources.employee_lifecycle:
@@ -117,6 +231,7 @@ metadata:
     publishes:
       - human_resources.department.created
       - human_resources.department.updated
+      - human_resources.department.activated
       - human_resources.department.deactivated
       - human_resources.department.archived
       - human_resources.employee.created

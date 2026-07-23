@@ -8,7 +8,6 @@ import pytest
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 
-
 M0001 = "0001_initial"
 M0002 = "0002_expand_and_backfill"
 M0003 = "0003_constraints_and_indexes"
@@ -181,4 +180,3 @@ def test_migration_runbook_documents_destructive_v2_export_before_rollback() -> 
         "transition",
     ):
         assert phrase.lower() in content.lower()
-

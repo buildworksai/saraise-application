@@ -8,13 +8,12 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 
-from src.core.tenancy import TenantScopedModel, TimestampedModel
 from src.core.state_machine import IdempotencyConflictError, TerminalStateError
+from src.core.tenancy import TenantScopedModel, TimestampedModel
 
 from ..models import Attendance, Department, Employee, LeaveBalance, LeaveRequest
 from ..state_machines import EMPLOYEE_LIFECYCLE_MACHINE
 from .factories import AttendanceFactory, DepartmentFactory, EmployeeFactory, LeaveBalanceFactory, LeaveRequestFactory
-
 
 pytestmark = pytest.mark.django_db
 
@@ -26,9 +25,7 @@ def test_every_aggregate_uses_canonical_tenancy_audit_and_soft_delete_contract()
         assert model._meta.get_field("tenant_id").db_index is True
         assert model._meta.get_field("tenant_id").get_internal_type() == "UUIDField"
         assert model._meta.get_field("deleted_at").db_index is True
-        assert {"created_by", "updated_by", "deleted_by"}.issubset(
-            {field.name for field in model._meta.fields}
-        )
+        assert {"created_by", "updated_by", "deleted_by"}.issubset({field.name for field in model._meta.fields})
 
 
 def test_department_defaults_normal_query_scope_and_partial_unique_constraint() -> None:

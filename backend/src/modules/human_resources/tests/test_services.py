@@ -32,16 +32,19 @@ from ..services import (
 )
 from .factories import AttendanceFactory, DepartmentFactory, EmployeeFactory, LeaveBalanceFactory
 
-
 pytestmark = pytest.mark.django_db
 ACTOR = "service-test-actor"
 
 
 def event_exists(tenant_id: object, event_type: str, aggregate_id: object) -> bool:
-    return OutboxEvent.objects.for_tenant(tenant_id).filter(
-        event_type=event_type,
-        aggregate_id=aggregate_id,
-    ).exists()
+    return (
+        OutboxEvent.objects.for_tenant(tenant_id)
+        .filter(
+            event_type=event_type,
+            aggregate_id=aggregate_id,
+        )
+        .exists()
+    )
 
 
 def test_department_service_normalizes_validates_hierarchy_and_emits_outbox() -> None:
@@ -406,9 +409,7 @@ def test_leave_insufficient_and_overlap_fail_without_partial_reservation() -> No
     assert balance.pending_days == Decimal("0.00")
     assert not LeaveRequest.objects.for_tenant(tenant_id).exists()
 
-    LeaveBalance.objects.for_tenant(tenant_id).filter(pk=balance.pk).update(
-        entitled_days=Decimal("20.00")
-    )
+    LeaveBalance.objects.for_tenant(tenant_id).filter(pk=balance.pk).update(entitled_days=Decimal("20.00"))
     first = dict(too_large, end_date=date(2026, 9, 2))
     LeaveRequestService.submit_request(
         tenant_id,
