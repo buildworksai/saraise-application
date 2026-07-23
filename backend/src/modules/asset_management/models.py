@@ -15,6 +15,8 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import F, Q
 
+from typing import Any
+
 from src.core.tenancy import TENANT_SCOPED, TenantQuerySet, TenantScopedModel, TimestampedModel, tenancy_scope
 
 
@@ -217,3 +219,124 @@ class DepreciationEntry(TenantScopedModel, TimestampedModel):
 
     def __str__(self) -> str:
         return f"{self.asset.asset_code} - {self.entry_date} - {self.depreciation_amount}"
+
+
+class AppendOnlyConfigurationQuerySet(TenantQuerySet):
+    """Block bulk mutation paths for immutable configuration evidence."""
+
+    def update(self, **kwargs: object) -> int:
+        del kwargs
+        raise ValidationError("Asset configuration evidence is immutable.", code="immutable_configuration")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Asset configuration evidence is immutable.", code="immutable_configuration")
+
+
+@tenancy_scope(TENANT_SCOPED)
+class AssetManagementConfiguration(TenantScopedModel, TimestampedModel):
+    """Versioned tenant policy document interpreted by asset services."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    document = models.JSONField()
+    version = models.PositiveIntegerField(default=1)
+    updated_by = models.UUIDField(db_index=True)
+
+    class Meta:
+        db_table = "asset_management_configurations"
+        constraints = [models.UniqueConstraint(fields=("tenant_id",), name="asset_config_one_per_tenant")]
+        indexes = [models.Index(fields=("tenant_id", "updated_at"), name="asset_config_tenant_time")]
+
+
+@tenancy_scope(TENANT_SCOPED)
+class AssetManagementConfigurationVersion(TenantScopedModel):
+    """Immutable configuration snapshot for history, export, and rollback."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    configuration = models.ForeignKey(
+        AssetManagementConfiguration, on_delete=models.PROTECT, related_name="versions"
+    )
+    version = models.PositiveIntegerField()
+    document = models.JSONField()
+    source = models.CharField(max_length=32)
+    correlation_id = models.CharField(max_length=128, db_index=True)
+    created_by = models.UUIDField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyConfigurationQuerySet.as_manager()
+
+    class Meta:
+        db_table = "asset_management_configuration_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "configuration", "version"),
+                name="asset_config_version_uniq",
+            )
+        ]
+        indexes = [models.Index(fields=("tenant_id", "configuration", "version"), name="asset_config_history")]
+
+    def clean(self) -> None:
+        if self.configuration_id and self.tenant_id and self.configuration.tenant_id != self.tenant_id:
+            raise ValidationError({"configuration": "Configuration was not found for this tenant."})
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("Asset configuration evidence is immutable.", code="immutable_configuration")
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Asset configuration evidence is immutable.", code="immutable_configuration")
+
+
+@tenancy_scope(TENANT_SCOPED)
+class AssetManagementConfigurationAudit(TenantScopedModel):
+    """Immutable who/what/when evidence for every configuration mutation."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    configuration = models.ForeignKey(AssetManagementConfiguration, on_delete=models.PROTECT, related_name="audits")
+    version = models.PositiveIntegerField()
+    action = models.CharField(max_length=32)
+    previous_document = models.JSONField(blank=True)
+    current_document = models.JSONField()
+    correlation_id = models.CharField(max_length=128, db_index=True)
+    created_by = models.UUIDField(db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyConfigurationQuerySet.as_manager()
+
+    class Meta:
+        db_table = "asset_management_configuration_audits"
+        indexes = [models.Index(fields=("tenant_id", "configuration", "created_at"), name="asset_config_audit_time")]
+
+    def clean(self) -> None:
+        if self.configuration_id and self.tenant_id and self.configuration.tenant_id != self.tenant_id:
+            raise ValidationError({"configuration": "Configuration was not found for this tenant."})
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("Asset configuration audit is immutable.", code="immutable_configuration")
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Asset configuration audit is immutable.", code="immutable_configuration")
+
+
+@tenancy_scope(TENANT_SCOPED)
+class AssetIdempotencyRecord(TenantScopedModel):
+    """Tenant-scoped replay record for mutating asset commands."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.CharField(max_length=255)
+    fingerprint = models.CharField(max_length=64)
+    operation = models.CharField(max_length=64)
+    result_model = models.CharField(max_length=64)
+    result_id = models.UUIDField()
+    status_code = models.PositiveSmallIntegerField()
+    correlation_id = models.CharField(max_length=128, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "asset_management_idempotency_records"
+        constraints = [models.UniqueConstraint(fields=("tenant_id", "key"), name="asset_idem_tenant_key_uniq")]
+        indexes = [models.Index(fields=("tenant_id", "operation", "created_at"), name="asset_idem_operation_time")]

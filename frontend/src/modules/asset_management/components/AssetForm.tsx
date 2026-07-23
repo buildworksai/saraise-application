@@ -3,11 +3,9 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Input } from '@/components/ui/Input';
-import type { Asset, AssetCreate, AssetUpdate, DepreciationMethod } from '../contracts';
+import type { Asset, AssetConfigurationDocument, AssetCreate, AssetUpdate, DepreciationMethod } from '../contracts';
 import { AssetManagementApiError } from '../services/asset-service';
 import { ProblemState, titleCase } from './AssetManagementUI';
-
-const methods: readonly DepreciationMethod[] = ['straight_line', 'declining_balance', 'none'];
 
 type FormErrors = Partial<Record<keyof AssetCreate, string>>;
 
@@ -15,38 +13,48 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function initialForm(asset?: Asset): AssetCreate {
+function initialForm(configuration: AssetConfigurationDocument, asset?: Asset): AssetCreate {
   return {
     asset_code: asset?.asset_code ?? '',
     asset_name: asset?.asset_name ?? '',
-    category: asset?.category ?? 'fixed',
+    category: asset?.category ?? configuration.default_category,
     purchase_date: asset?.purchase_date ?? today(),
     purchase_cost: asset?.purchase_cost ?? '',
-    residual_value: asset?.residual_value ?? '0.00',
-    depreciation_method: asset?.depreciation_method ?? 'straight_line',
-    useful_life_years: asset?.useful_life_years ?? 5,
+    residual_value: asset?.residual_value ?? configuration.default_residual_value,
+    depreciation_method: asset?.depreciation_method ?? configuration.default_depreciation_method,
+    useful_life_years: asset?.useful_life_years ?? configuration.default_useful_life_years,
     declining_balance_rate: asset?.declining_balance_rate ?? null,
     location: asset?.location ?? '',
-    is_active: asset?.is_active ?? true,
   };
 }
 
-function validateIdentity(form: AssetCreate): FormErrors {
+function validateIdentity(form: AssetCreate, configuration: AssetConfigurationDocument): FormErrors {
   const errors: FormErrors = {};
   if (!form.asset_code.trim()) errors.asset_code = 'Asset code is required.';
+  else if (form.asset_code.trim().length > configuration.asset_code_max_length) {
+    errors.asset_code = `Asset code cannot exceed ${configuration.asset_code_max_length} characters.`;
+  }
   else if (!/^[A-Za-z0-9._-]+$/u.test(form.asset_code)) {
     errors.asset_code = 'Use letters, numbers, periods, underscores, or hyphens.';
   }
   if (!form.asset_name.trim()) errors.asset_name = 'Asset name is required.';
+  else if (form.asset_name.trim().length > configuration.asset_name_max_length) {
+    errors.asset_name = `Asset name cannot exceed ${configuration.asset_name_max_length} characters.`;
+  }
+  if (form.location.length > configuration.location_max_length) {
+    errors.location = `Location cannot exceed ${configuration.location_max_length} characters.`;
+  }
   if (!form.purchase_date) errors.purchase_date = 'Purchase date is required.';
   return errors;
 }
 
-function validateMoney(form: AssetCreate): FormErrors {
+function validateMoney(form: AssetCreate, configuration: AssetConfigurationDocument): FormErrors {
   const errors: FormErrors = {};
   const cost = Number(form.purchase_cost);
   const residual = Number(form.residual_value);
-  if (!Number.isFinite(cost) || cost <= 0) errors.purchase_cost = 'Enter an amount greater than zero.';
+  if (!Number.isFinite(cost) || cost < Number(configuration.minimum_purchase_cost)) {
+    errors.purchase_cost = `Enter at least ${configuration.minimum_purchase_cost}.`;
+  }
   if (!Number.isFinite(residual) || residual < 0) errors.residual_value = 'Enter a non-negative amount.';
   else if (Number.isFinite(cost) && residual > cost) {
     errors.residual_value = 'Residual value cannot exceed purchase cost.';
@@ -54,26 +62,28 @@ function validateMoney(form: AssetCreate): FormErrors {
   return errors;
 }
 
-function validateDepreciation(form: AssetCreate): FormErrors {
+function validateDepreciation(form: AssetCreate, configuration: AssetConfigurationDocument): FormErrors {
   const errors: FormErrors = {};
   const rate = form.declining_balance_rate === null ? null : Number(form.declining_balance_rate);
   if (form.depreciation_method !== 'none'
-    && (!form.useful_life_years || form.useful_life_years < 1)) {
-    errors.useful_life_years = 'Useful life must be at least one year.';
+    && (!form.useful_life_years
+      || form.useful_life_years < configuration.useful_life_min_years
+      || form.useful_life_years > configuration.useful_life_max_years)) {
+    errors.useful_life_years = `Useful life must be ${configuration.useful_life_min_years}-${configuration.useful_life_max_years} years.`;
   }
   if (form.depreciation_method === 'declining_balance'
     && rate !== null
-    && (!Number.isFinite(rate) || rate <= 0 || rate > 100)) {
-    errors.declining_balance_rate = 'Enter an annual rate greater than 0 and no more than 100.';
+    && (!Number.isFinite(rate) || rate < Number(configuration.declining_rate_min) || rate > Number(configuration.declining_rate_max))) {
+    errors.declining_balance_rate = `Enter an annual rate from ${configuration.declining_rate_min} to ${configuration.declining_rate_max}.`;
   }
   return errors;
 }
 
-function validate(form: AssetCreate): FormErrors {
+function validate(form: AssetCreate, configuration: AssetConfigurationDocument): FormErrors {
   return {
-    ...validateIdentity(form),
-    ...validateMoney(form),
-    ...validateDepreciation(form),
+    ...validateIdentity(form, configuration),
+    ...validateMoney(form, configuration),
+    ...validateDepreciation(form, configuration),
   };
 }
 
@@ -110,8 +120,8 @@ function equalField<K extends keyof AssetCreate>(
 }
 
 /** Emit only changed fields so descriptive edits do not rewrite locked financial policy. */
-function changedFields(form: AssetCreate, asset: Asset): AssetUpdate {
-  const initial = initialForm(asset);
+function changedFields(form: AssetCreate, asset: Asset, configuration: AssetConfigurationDocument): AssetUpdate {
+  const initial = initialForm(configuration, asset);
   return (Object.keys(form) as (keyof AssetCreate)[]).reduce<AssetUpdate>((changes, key) => {
     if (!equalField(key, form[key], initial[key])) {
       Object.assign(changes, { [key]: form[key] });
@@ -122,25 +132,27 @@ function changedFields(form: AssetCreate, asset: Asset): AssetUpdate {
 
 export function AssetForm({
   asset,
+  configuration,
   pending,
   error,
   onCancel,
   onSubmit,
 }: {
   asset?: Asset;
+  configuration: AssetConfigurationDocument;
   pending: boolean;
   error: unknown;
   onCancel: () => void;
   onSubmit: (data: AssetCreate | AssetUpdate) => void;
 }) {
-  const [form, setForm] = useState<AssetCreate>(() => initialForm(asset));
+  const [form, setForm] = useState<AssetCreate>(() => initialForm(configuration, asset));
   const [submitted, setSubmitted] = useState(false);
-  const clientErrors = useMemo(() => submitted ? validate(form) : {}, [form, submitted]);
+  const clientErrors = useMemo(() => submitted ? validate(form, configuration) : {}, [configuration, form, submitted]);
   const serverErrors = error instanceof AssetManagementApiError ? error.fieldErrors : {};
   const preparedForm = useMemo(() => normalizedForm(form), [form]);
   const updatePayload = useMemo(
-    () => asset ? changedFields(preparedForm, asset) : preparedForm,
-    [asset, preparedForm],
+    () => asset ? changedFields(preparedForm, asset, configuration) : preparedForm,
+    [asset, configuration, preparedForm],
   );
   const isDirty = !asset || Object.keys(updatePayload).length > 0;
   const hasMappedServerError = (Object.keys(serverErrors) as (keyof AssetCreate)[])
@@ -153,7 +165,7 @@ export function AssetForm({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     setSubmitted(true);
-    if (Object.keys(validate(form)).length > 0) return;
+    if (Object.keys(validate(form, configuration)).length > 0) return;
     if (!isDirty) return;
     onSubmit(updatePayload);
   };
@@ -168,7 +180,7 @@ export function AssetForm({
           id="asset-code"
           label="Asset code"
           required
-          maxLength={50}
+          maxLength={configuration.asset_code_max_length}
           autoComplete="off"
           value={form.asset_code}
           error={fieldError('asset_code')}
@@ -178,7 +190,7 @@ export function AssetForm({
           id="asset-name"
           label="Asset name"
           required
-          maxLength={255}
+          maxLength={configuration.asset_name_max_length}
           value={form.asset_name}
           error={fieldError('asset_name')}
           onChange={(event) => update('asset_name', event.target.value)}
@@ -191,7 +203,8 @@ export function AssetForm({
             value={form.category}
             onChange={(event) => {
               const category = event.target.value as AssetCreate['category'];
-              setForm((current) => category === 'current'
+              const nonDepreciable = configuration.non_depreciable_categories.includes(category);
+              setForm((current) => nonDepreciable
                 ? {
                     ...current,
                     category,
@@ -202,9 +215,9 @@ export function AssetForm({
                 : { ...current, category });
             }}
           >
-            <option value="fixed">Fixed asset</option>
-            <option value="intangible">Intangible asset</option>
-            <option value="current">Current asset</option>
+            {configuration.allowed_categories.map((category) => (
+              <option key={category} value={category}>{titleCase(category)}</option>
+            ))}
           </select>
         </div>
         <Input
@@ -244,23 +257,23 @@ export function AssetForm({
             id="depreciation-method"
             className="h-10 w-full rounded-md border border-input bg-background px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             value={form.depreciation_method}
-            disabled={form.category === 'current'}
+            disabled={configuration.non_depreciable_categories.includes(form.category)}
             onChange={(event) => {
               const method = event.target.value as DepreciationMethod;
               setForm((current) => ({
                 ...current,
                 depreciation_method: method,
-                useful_life_years: method === 'none' ? null : current.useful_life_years ?? 5,
+                useful_life_years: method === 'none' ? null : current.useful_life_years ?? configuration.default_useful_life_years,
                 declining_balance_rate: method === 'declining_balance'
                   ? current.declining_balance_rate
                   : null,
               }));
             }}
           >
-            {methods.map((method) => <option key={method} value={method}>{titleCase(method)}</option>)}
+            {configuration.allowed_depreciation_methods.map((method) => <option key={method} value={method}>{titleCase(method)}</option>)}
           </select>
         </div>
-        {form.category === 'current' && (
+        {configuration.non_depreciable_categories.includes(form.category) && (
           <p className="text-sm text-muted-foreground md:col-span-2">
             Current assets are not depreciated. The depreciation method is fixed to “None”.
           </p>
@@ -270,7 +283,8 @@ export function AssetForm({
             id="useful-life"
             label="Useful life (years)"
             type="number"
-            min={1}
+            min={configuration.useful_life_min_years}
+            max={configuration.useful_life_max_years}
             step={1}
             required
             value={form.useful_life_years ?? ''}
@@ -292,22 +306,12 @@ export function AssetForm({
         <Input
           id="location"
           label="Location"
-          maxLength={255}
+          maxLength={configuration.location_max_length}
           placeholder="Optional physical or logical location"
           value={form.location}
           error={fieldError('location')}
           onChange={(event) => update('location', event.target.value)}
         />
-        <div className="flex items-center gap-3 md:col-span-2">
-          <input
-            id="asset-active"
-            type="checkbox"
-            className="h-4 w-4 rounded border-input"
-            checked={form.is_active}
-            onChange={(event) => update('is_active', event.target.checked)}
-          />
-          <label htmlFor="asset-active" className="text-sm font-medium">Asset is active</label>
-        </div>
       </Card>
       <p className="text-sm text-muted-foreground">
         Current value is calculated by the server from immutable depreciation history and cannot be edited here.

@@ -17,6 +17,10 @@ export const EditAssetPage = () => {
     queryFn: () => assetService.getAsset(id),
     enabled: Boolean(id),
   });
+  const configurationQuery = useQuery({
+    queryKey: assetQueryKeys.configuration(tenantId),
+    queryFn: () => assetService.getConfiguration(),
+  });
   const mutation = useMutation({
     mutationFn: (data: AssetUpdate) => assetService.updateAsset(id, data),
     onSuccess: (asset) => {
@@ -26,9 +30,12 @@ export const EditAssetPage = () => {
     },
   });
 
-  if (query.isLoading) return <PageSkeleton />;
+  if (query.isLoading || configurationQuery.isLoading) return <PageSkeleton />;
   if (query.error || !query.data) {
     return <main className="p-4 sm:p-8"><ProblemState error={query.error ?? new Error('Asset unavailable')} onRetry={() => void query.refetch()} /></main>;
+  }
+  if (configurationQuery.error || !configurationQuery.data) {
+    return <main className="p-4 sm:p-8"><ProblemState error={configurationQuery.error ?? new Error('Configuration unavailable')} onRetry={() => void configurationQuery.refetch()} /></main>;
   }
 
   return (
@@ -41,6 +48,7 @@ export const EditAssetPage = () => {
       />
       <AssetForm
         asset={query.data}
+        configuration={configurationQuery.data.document}
         pending={mutation.isPending}
         error={mutation.error}
         onCancel={() => navigate(ROUTES.ASSETS.DETAIL(id))}

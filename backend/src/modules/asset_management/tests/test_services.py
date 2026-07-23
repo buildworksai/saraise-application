@@ -6,8 +6,21 @@ import pytest
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import IntegrityError
 
-from src.modules.asset_management.models import Asset, DepreciationEntry, DepreciationMethod
-from src.modules.asset_management.services import AssetManagementError, AssetService, DepreciationService
+from src.modules.asset_management.models import (
+    Asset,
+    AssetManagementConfiguration,
+    AssetManagementConfigurationAudit,
+    AssetManagementConfigurationVersion,
+    DepreciationEntry,
+    DepreciationMethod,
+)
+from src.modules.asset_management.services import (
+    AssetConfigurationService,
+    AssetManagementError,
+    AssetService,
+    DEFAULT_CONFIGURATION,
+    DepreciationService,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -20,6 +33,7 @@ def test_create_derives_opening_book_value_and_normalizes_code(tenant_a):
         purchase_date=date(2024, 1, 1),
         purchase_cost="1234.567",
         depreciation_method=DepreciationMethod.NONE,
+        idempotency_key="service-create-normalizes",
     )
 
     assert asset.asset_code == "MAC-001"
@@ -37,12 +51,12 @@ def test_create_rejects_invalid_tenant_and_malformed_money(tenant_a):
         "depreciation_method": DepreciationMethod.NONE,
     }
     with pytest.raises(AssetManagementError) as tenant_error:
-        AssetService.create_asset("not-a-uuid", **common)
+        AssetService.create_asset("not-a-uuid", idempotency_key="service-invalid-tenant", **common)
     assert tenant_error.value.domain_code == "INVALID_TENANT"
 
     common["purchase_cost"] = "not-money"
     with pytest.raises(AssetManagementError) as money_error:
-        AssetService.create_asset(tenant_a, **common)
+        AssetService.create_asset(tenant_a, idempotency_key="service-invalid-money", **common)
     assert money_error.value.domain_code == "INVALID_MONEY"
 
 
@@ -68,7 +82,7 @@ def test_update_cannot_cross_tenants(asset_factory, tenant_a, tenant_b):
     foreign = asset_factory(tenant_b)
 
     with pytest.raises(ObjectDoesNotExist):
-        AssetService.update_asset(tenant_a, foreign.id, {"asset_name": "Stolen"})
+        AssetService.update_asset(tenant_a, foreign.id, {"asset_name": "Stolen"}, idempotency_key="update-cross-tenant")
 
     foreign.refresh_from_db()
     assert foreign.asset_name == "Test asset"
@@ -77,7 +91,7 @@ def test_update_cannot_cross_tenants(asset_factory, tenant_a, tenant_b):
 def test_update_purchase_cost_rederives_book_value_before_history(asset_factory, tenant_a):
     asset = asset_factory(tenant_a)
 
-    updated = AssetService.update_asset(tenant_a, asset.id, {"purchase_cost": "2400.00"})
+    updated = AssetService.update_asset(tenant_a, asset.id, {"purchase_cost": "2400.00"}, idempotency_key="update-cost")
 
     assert updated.purchase_cost == Decimal("2400.00")
     assert updated.current_value == Decimal("2400.00")
@@ -88,7 +102,7 @@ def test_update_rejects_duplicate_code_with_stable_error(asset_factory, tenant_a
     target = asset_factory(tenant_a, asset_code="AVAILABLE")
 
     with pytest.raises(AssetManagementError) as exc_info:
-        AssetService.update_asset(tenant_a, target.id, {"asset_code": "TAKEN"})
+        AssetService.update_asset(tenant_a, target.id, {"asset_code": "TAKEN"}, idempotency_key="update-duplicate")
 
     assert exc_info.value.domain_code == "DUPLICATE_ASSET_CODE"
 
@@ -97,7 +111,7 @@ def test_soft_delete_preserves_asset_and_financial_history(asset_factory, tenant
     asset = asset_factory(tenant_a)
     entry = DepreciationService.calculate_depreciation(tenant_a, asset.id, date(2024, 2, 1))
 
-    archived = AssetService.delete_asset(tenant_a, asset.id)
+    archived = AssetService.delete_asset(tenant_a, asset.id, idempotency_key="archive-asset")
 
     assert archived.is_deleted is True
     assert archived.is_active is False
@@ -115,7 +129,7 @@ def test_financial_terms_cannot_change_after_depreciation_history(asset_factory,
     DepreciationService.calculate_depreciation(tenant_a, asset.id, date(2024, 2, 1))
 
     with pytest.raises(AssetManagementError) as exc_info:
-        AssetService.update_asset(tenant_a, asset.id, {"purchase_cost": "900.00"})
+        AssetService.update_asset(tenant_a, asset.id, {"purchase_cost": "900.00"}, idempotency_key="update-history")
 
     assert exc_info.value.domain_code == "ASSET_HAS_DEPRECIATION_HISTORY"
 
@@ -278,3 +292,50 @@ def test_depreciation_list_and_detail_are_tenant_isolated(asset_factory, tenant_
     assert DepreciationService.get_entry(tenant_a, own.id) == own
     with pytest.raises(ObjectDoesNotExist):
         DepreciationService.get_entry(tenant_a, foreign.id)
+
+
+def test_configuration_versions_audits_and_rolls_back_per_tenant(tenant_a, tenant_b):
+    service = AssetConfigurationService()
+    actor = "00000000-0000-4000-8000-000000000123"
+    current = service.get_configuration(tenant_a, actor, "corr-config-1")
+    other = service.get_configuration(tenant_b, actor, "corr-config-2")
+    document = dict(current.document)
+    document["asset_list_page_size"] = 30
+
+    updated = service.update(tenant_a, actor, "corr-config-3", document)
+    preview = service.preview(tenant_a, current.document)
+    rolled_back = service.rollback(tenant_a, actor, "corr-config-4", 1)
+
+    assert updated.version == 2
+    assert preview["changes"]["asset_list_page_size"]["from"] == 30
+    assert rolled_back.version == 3
+    assert rolled_back.document["asset_list_page_size"] == DEFAULT_CONFIGURATION["asset_list_page_size"]
+    assert AssetManagementConfiguration.objects.for_tenant(tenant_a).count() == 1
+    assert AssetManagementConfiguration.objects.for_tenant(tenant_b).get().id == other.id
+    assert AssetManagementConfigurationVersion.objects.for_tenant(tenant_a).count() == 3
+    assert AssetManagementConfigurationAudit.objects.for_tenant(tenant_a).filter(correlation_id="corr-config-3").exists()
+
+
+def test_configuration_rejects_unsafe_policy_document(tenant_a):
+    document = dict(DEFAULT_CONFIGURATION)
+    document["asset_list_page_size"] = 1000
+
+    with pytest.raises(ValidationError):
+        AssetConfigurationService().update(tenant_a, "00000000-0000-4000-8000-000000000123", "corr-config", document)
+
+
+def test_create_asset_idempotency_replays_original_result(tenant_a):
+    payload = {
+        "asset_code": "IDEMP-1",
+        "asset_name": "Idempotent asset",
+        "purchase_date": date(2024, 1, 1),
+        "purchase_cost": "100.00",
+        "depreciation_method": DepreciationMethod.NONE,
+        "idempotency_key": "asset-create-1",
+    }
+
+    first = AssetService.create_asset(tenant_a, correlation_id="corr-idem-1", **payload)
+    repeated = AssetService.create_asset(tenant_a, correlation_id="corr-idem-2", **payload)
+
+    assert repeated.id == first.id
+    assert Asset.objects.for_tenant(tenant_a).filter(asset_code="IDEMP-1").count() == 1

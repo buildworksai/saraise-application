@@ -23,8 +23,6 @@ import {
 } from '../components/AssetManagementUI';
 import { assetQueryKeys, assetService } from '../services/asset-service';
 
-const PAGE_SIZE = 12;
-
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -44,17 +42,27 @@ export const AssetDetailPage = () => {
   const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const [calculateOpen, setCalculateOpen] = useState(false);
   const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10));
+  const configurationQuery = useQuery({
+    queryKey: assetQueryKeys.configuration(tenantId),
+    queryFn: () => assetService.getConfiguration(),
+  });
+  const configuration = configurationQuery.data?.document;
 
   const assetQuery = useQuery({
     queryKey: assetQueryKeys.asset(tenantId, id),
     queryFn: () => assetService.getAsset(id),
     enabled: Boolean(id),
   });
-  const historyFilters = { asset_id: id, ordering: '-entry_date', page: historyPage, page_size: PAGE_SIZE };
+  const historyFilters = {
+    asset_id: id,
+    ordering: '-entry_date',
+    page: historyPage,
+    page_size: configuration?.asset_detail_history_page_size ?? 1,
+  };
   const historyQuery = useQuery({
     queryKey: assetQueryKeys.depreciation(tenantId, historyFilters),
     queryFn: () => assetService.listDepreciationEntries(historyFilters),
-    enabled: Boolean(id),
+    enabled: Boolean(id && configuration),
   });
   const deleteMutation = useMutation({
     mutationFn: () => assetService.deleteAsset(id),
@@ -74,15 +82,19 @@ export const AssetDetailPage = () => {
     },
   });
 
-  if (assetQuery.isLoading) return <PageSkeleton />;
+  if (assetQuery.isLoading || configurationQuery.isLoading) return <PageSkeleton />;
+  if (configurationQuery.error || !configuration) {
+    return <main className="p-4 sm:p-8"><ProblemState error={configurationQuery.error ?? new Error('Configuration unavailable')} onRetry={() => void configurationQuery.refetch()} /></main>;
+  }
   if (assetQuery.error || !assetQuery.data) {
     return <main className="p-4 sm:p-8"><ProblemState error={assetQuery.error ?? new Error('Asset unavailable')} onRetry={() => void assetQuery.refetch()} /></main>;
   }
 
   const asset = assetQuery.data;
-  const canDepreciate = asset.is_active
+  const canDepreciate = !configuration.non_depreciable_categories.includes(asset.category)
+    && (configuration.inactive_assets_depreciable || asset.is_active)
     && asset.depreciation_method !== 'none'
-    && asset.useful_life_years !== null
+    && (!configuration.require_useful_life_for_depreciation || asset.useful_life_years !== null)
     && Number(asset.current_value) > Number(asset.residual_value);
   const depreciationUnavailableReason = !asset.is_active
     ? 'Inactive assets cannot receive new depreciation entries.'
@@ -134,15 +146,15 @@ export const AssetDetailPage = () => {
       <section className="grid gap-4 sm:grid-cols-3" aria-label="Asset value summary">
         <Card className="p-5">
           <p className="text-sm text-muted-foreground">Purchase cost</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums">{formatAmount(asset.purchase_cost)}</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums">{formatAmount(asset.purchase_cost, configuration.monetary_decimal_places)}</p>
         </Card>
         <Card className="p-5">
           <p className="text-sm text-muted-foreground">Current value</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums">{formatAmount(asset.current_value)}</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums">{formatAmount(asset.current_value, configuration.monetary_decimal_places)}</p>
         </Card>
         <Card className="p-5">
           <p className="text-sm text-muted-foreground">Residual value</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums">{formatAmount(asset.residual_value)}</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums">{formatAmount(asset.residual_value, configuration.monetary_decimal_places)}</p>
         </Card>
       </section>
 
@@ -157,7 +169,7 @@ export const AssetDetailPage = () => {
           <Field label="Useful life" value={asset.useful_life_years ? `${asset.useful_life_years} years` : 'Not applicable'} />
           <Field
             label="Declining balance rate"
-            value={asset.declining_balance_rate ? `${formatAmount(asset.declining_balance_rate)}% annually` : 'Not applicable'}
+            value={asset.declining_balance_rate ? `${formatAmount(asset.declining_balance_rate, configuration.monetary_decimal_places)}% annually` : 'Not applicable'}
           />
           <Field label="Last updated" value={new Date(asset.updated_at).toLocaleString()} />
         </dl>
@@ -208,9 +220,9 @@ export const AssetDetailPage = () => {
                   {historyQuery.data.items.map((entry) => (
                     <tr key={entry.id} className="border-t">
                       <td className="px-4 py-3 font-medium">{formatDate(entry.entry_date)}</td>
-                      <td className="px-4 py-3 tabular-nums">{formatAmount(entry.depreciation_amount)}</td>
-                      <td className="px-4 py-3 tabular-nums">{formatAmount(entry.accumulated_depreciation)}</td>
-                      <td className="px-4 py-3 font-medium tabular-nums">{formatAmount(entry.book_value)}</td>
+                      <td className="px-4 py-3 tabular-nums">{formatAmount(entry.depreciation_amount, configuration.monetary_decimal_places)}</td>
+                      <td className="px-4 py-3 tabular-nums">{formatAmount(entry.accumulated_depreciation, configuration.monetary_decimal_places)}</td>
+                      <td className="px-4 py-3 font-medium tabular-nums">{formatAmount(entry.book_value, configuration.monetary_decimal_places)}</td>
                       <td className="px-4 py-3 text-muted-foreground">{new Date(entry.created_at).toLocaleString()}</td>
                     </tr>
                   ))}
@@ -272,7 +284,7 @@ export const AssetDetailPage = () => {
         <div className="space-y-4">
           <Input
             id="delete-asset-confirmation"
-            label={`Type ${asset.asset_code} to confirm`}
+            label={`Type ${configuration.archive_confirmation === 'asset_name' ? asset.asset_name : asset.asset_code} to confirm`}
             autoComplete="off"
             value={deleteConfirmation}
             onChange={(event) => setDeleteConfirmation(event.target.value)}
@@ -282,7 +294,7 @@ export const AssetDetailPage = () => {
             <Button variant="secondary" onClick={() => setDeleteOpen(false)}>Cancel</Button>
             <Button
               variant="danger"
-              disabled={deleteConfirmation !== asset.asset_code || deleteMutation.isPending}
+              disabled={deleteConfirmation !== (configuration.archive_confirmation === 'asset_name' ? asset.asset_name : asset.asset_code) || deleteMutation.isPending}
               onClick={() => deleteMutation.mutate()}
             >
               {deleteMutation.isPending ? 'Archiving…' : 'Archive asset'}

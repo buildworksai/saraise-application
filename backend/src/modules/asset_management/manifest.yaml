@@ -13,8 +13,9 @@ description: |
 bounded_context:
   owns:
     - operational_asset_register
-    - asset_location
+    - asset.location
     - depreciation_preview_history
+    - tenant_asset_configuration
   delegates_to_fixed_assets:
     - capitalization
     - depreciation_posting
@@ -38,13 +39,92 @@ permissions:
   - asset.asset:read
   - asset.asset:update
   - asset.asset:delete
+  - asset.asset:activate
+  - asset.asset:deactivate
   - asset.depreciation:read
+  - asset.configuration:read
+  - asset.configuration:update
+  - asset.configuration:rollback
+  - asset.configuration:import
+  - asset.configuration:export
+  - asset.health:read
+
+endpoints:
+  - path: /api/v1/asset-management/assets/
+    methods: [GET, POST]
+    permissions:
+      GET: asset.asset:read
+      POST: asset.asset:create
+  - path: /api/v1/asset-management/assets/{id}/
+    methods: [GET, PUT, PATCH, DELETE]
+    permissions:
+      GET: asset.asset:read
+      PUT: asset.asset:update
+      PATCH: asset.asset:update
+      DELETE: asset.asset:delete
+  - path: /api/v1/asset-management/assets/{id}/activate/
+    methods: [POST]
+    permissions:
+      POST: asset.asset:activate
+  - path: /api/v1/asset-management/assets/{id}/deactivate/
+    methods: [POST]
+    permissions:
+      POST: asset.asset:deactivate
+  - path: /api/v1/asset-management/assets/{id}/calculate-depreciation/
+    methods: [POST]
+    permissions:
+      POST: asset.asset:update
+  - path: /api/v1/asset-management/depreciation-entries/
+    methods: [GET]
+    permissions:
+      GET: asset.depreciation:read
+  - path: /api/v1/asset-management/depreciation-entries/{id}/
+    methods: [GET]
+    permissions:
+      GET: asset.depreciation:read
+  - path: /api/v1/asset-management/configuration/
+    methods: [GET]
+    permissions:
+      GET: asset.configuration:read
+  - path: /api/v1/asset-management/configuration/current/
+    methods: [GET]
+    permissions:
+      GET: asset.configuration:read
+  - path: /api/v1/asset-management/configuration/update/
+    methods: [PUT, PATCH]
+    permissions:
+      PUT: asset.configuration:update
+      PATCH: asset.configuration:update
+  - path: /api/v1/asset-management/configuration/preview/
+    methods: [POST]
+    permissions:
+      POST: asset.configuration:update
+  - path: /api/v1/asset-management/configuration/history/
+    methods: [GET]
+    permissions:
+      GET: asset.configuration:read
+  - path: /api/v1/asset-management/configuration/rollback/
+    methods: [POST]
+    permissions:
+      POST: asset.configuration:rollback
+  - path: /api/v1/asset-management/configuration/import/
+    methods: [POST]
+    permissions:
+      POST: asset.configuration:import
+  - path: /api/v1/asset-management/configuration/export/
+    methods: [GET]
+    permissions:
+      GET: asset.configuration:export
+  - path: /api/v1/asset-management/health/
+    methods: [GET]
+    permissions:
+      GET: asset.health:read
 
 # Health Checks
 health_checks:
   - name: database_connectivity
     endpoint: /api/v1/asset-management/health/
-    interval: 60
+    interval_config_key: health_interval_seconds
 
 extension_contract:
   spi_version: "1.0.0"
