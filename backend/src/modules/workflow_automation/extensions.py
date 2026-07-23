@@ -22,7 +22,7 @@ from typing import Any, Generic, Protocol, TypeAlias, TypeVar, runtime_checkable
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.core.mail import send_mail
+from django.db import connection
 from django.utils import timezone
 from jsonschema import Draft202012Validator, SchemaError, ValidationError as JsonSchemaValidationError
 
@@ -338,14 +338,14 @@ class SubjectResolutionInvocation:
 @dataclass(frozen=True, slots=True)
 class AssigneeSearchInvocation:
     tenant_id: uuid.UUID
+    limit: int
     query: str = ""
-    limit: int = 25
 
     def __post_init__(self) -> None:
         if not isinstance(self.tenant_id, uuid.UUID):
             raise WorkflowExtensionContractError("tenant_id must be a UUID")
-        if self.limit < 1 or self.limit > 100:
-            raise WorkflowExtensionContractError("limit must be between 1 and 100")
+        if self.limit < 1:
+            raise WorkflowExtensionContractError("limit must be positive")
 
 
 @runtime_checkable
@@ -513,7 +513,12 @@ class _ActionBase:
         _validate(config, self.descriptor.configuration_schema, "config")
 
     def health(self) -> HealthCheckResult:
-        return HealthCheckResult(True, "ready", timezone.now(), {"code": "ready"})
+        return HealthCheckResult(
+            False,
+            "handler_readiness_probe_not_implemented",
+            timezone.now(),
+            {"code": "provider_unavailable"},
+        )
 
 
 _OBJECT_SCHEMA: JsonMapping = {"type": "object", "additionalProperties": True}
@@ -529,7 +534,8 @@ class InAppNotificationAction(_ActionBase):
         required_permission="workflow_automation.instance:start",
         required_entitlement=CORE_ENTITLEMENT,
         quota_resource="workflow_automation.external_actions",
-        quota_cost=Decimal("0"),
+        # Tenant policy supplies the effective quota cost at runtime.
+        quota_cost=Decimal(),
         configuration_schema={
             "type": "object",
             "properties": {"notification_type": {"enum": ["workflow", "approval", "info", "warning"]}},
@@ -556,6 +562,20 @@ class InAppNotificationAction(_ActionBase):
         icon_key="bell",
         lookup_descriptors=(LookupDescriptor("recipient_id", "core.users.v1", "Recipient"),),
     )
+
+    def health(self) -> HealthCheckResult:
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+                ready = cursor.fetchone() == (1,)
+        except Exception:
+            ready = False
+        return HealthCheckResult(
+            ready,
+            "ready" if ready else "notification_store_unavailable",
+            timezone.now(),
+            {"code": "ready" if ready else "provider_unavailable"},
+        )
 
     def execute(self, invocation: WorkflowActionInvocation) -> OperationResult[JsonObject]:
         if invocation.cancellation_probe():
@@ -615,18 +635,19 @@ class EmailNotificationAction(_ActionBase):
         required_permission="workflow_automation.instance:start",
         required_entitlement=CORE_ENTITLEMENT,
         quota_resource="workflow_automation.external_actions",
-        quota_cost=Decimal("1"),
+        # Tenant policy supplies the effective quota cost at runtime.
+        quota_cost=Decimal(),
         configuration_schema={
             "type": "object",
             "required": ["template_key"],
-            "properties": {"template_key": {"type": "string", "pattern": "^[a-z0-9_.-]+$", "maxLength": 100}},
+            "properties": {"template_key": {"type": "string", "pattern": "^[a-z0-9_.-]+$"}},
             "additionalProperties": False,
         },
         input_schema={
             "type": "object",
             "required": ["recipient_email", "template_context"],
             "properties": {
-                "recipient_email": {"type": "string", "format": "email", "maxLength": 254},
+                "recipient_email": {"type": "string", "format": "email"},
                 "template_context": {
                     "type": "object",
                     "additionalProperties": {"type": ["string", "number", "boolean", "null"]},
@@ -640,73 +661,28 @@ class EmailNotificationAction(_ActionBase):
             "properties": {"accepted": {"type": "boolean"}},
             "additionalProperties": False,
         },
-        idempotency_supported=True,
+        idempotency_supported=False,
         outbound_network_required=True,
         icon_key="mail",
         lookup_descriptors=(LookupDescriptor("recipient_email", "core.users.v1", "Recipient"),),
     )
 
     def health(self) -> HealthCheckResult:
-        templates = getattr(
-            settings,
-            "WORKFLOW_EMAIL_TEMPLATES",
-            getattr(settings, "WORKFLOW_NOTIFICATION_TEMPLATES", {}),
-        )
-        configured = bool(getattr(settings, "EMAIL_BACKEND", "")) and bool(templates)
         return HealthCheckResult(
-            configured,
-            "ready" if configured else "email_delivery_not_configured",
+            False,
+            "durable_email_provider_adapter_required",
             timezone.now(),
-            {"code": "ready" if configured else "provider_unavailable"},
+            {"code": "provider_unavailable"},
         )
 
     def execute(self, invocation: WorkflowActionInvocation) -> OperationResult[JsonObject]:
-        if invocation.cancellation_probe():
-            return OperationResult.failed(code="EXECUTION_CANCELLED", message="Execution was cancelled")
-        self.validate_config(invocation.config)
-        _validate(invocation.input, self.descriptor.input_schema, "input")
-        templates = getattr(
-            settings,
-            "WORKFLOW_EMAIL_TEMPLATES",
-            getattr(settings, "WORKFLOW_NOTIFICATION_TEMPLATES", {}),
-        )
-        template_key = str(invocation.config["template_key"])
-        template = templates.get(template_key) if isinstance(templates, Mapping) else None
-        if not isinstance(template, Mapping):
-            return OperationResult.unavailable(
-                capability=self.key,
-                message="The configured email template is unavailable.",
-            )
-        subject = template.get("subject")
-        body = template.get("body")
-        if not isinstance(subject, str) or not isinstance(body, str):
-            return OperationResult.unavailable(
-                capability=self.key,
-                message="The configured email template is invalid.",
-            )
-        context = dict(invocation.input["template_context"])  # type: ignore[arg-type]
-        try:
-            rendered_subject = subject.format_map(context)
-            rendered_body = body.format_map(context)
-            delivered = send_mail(
-                subject=rendered_subject,
-                message=rendered_body,
-                from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
-                recipient_list=[str(invocation.input["recipient_email"])],
-                fail_silently=False,
-            )
-        except (KeyError, ValueError):
-            return OperationResult.failed(
-                code="EMAIL_TEMPLATE_RENDER_FAILED", message="Email template rendering failed"
-            )
-        except Exception:
-            return OperationResult.unavailable(capability=self.key, message="Email delivery is unavailable.")
-        if delivered != 1:
-            return OperationResult.failed(code="EMAIL_NOT_ACCEPTED", message="Email delivery was not accepted")
-        return OperationResult.succeeded(
-            {"accepted": True},
-            evidence={"accepted_count": delivered, "idempotency_key": invocation.idempotency_key},
-            provider="django-email",
+        del invocation
+        return OperationResult.unavailable(
+            capability=self.key,
+            message=(
+                "Email delivery is disabled until a durable provider adapter supplies "
+                "timeouts, bounded jittered retries, circuit breaking, idempotency, and reconciliation."
+            ),
         )
 
 
@@ -729,7 +705,7 @@ class ContextProjectionAction(_ActionBase):
         required_permission="workflow_automation.instance:start",
         required_entitlement=CORE_ENTITLEMENT,
         quota_resource="workflow_automation.executions",
-        quota_cost=Decimal("0"),
+        quota_cost=Decimal(),
         configuration_schema={
             "type": "object",
             "required": ["input_mapping"],
@@ -747,6 +723,19 @@ class ContextProjectionAction(_ActionBase):
         outbound_network_required=False,
         icon_key="brackets",
     )
+
+    def health(self) -> HealthCheckResult:
+        try:
+            Draft202012Validator.check_schema(dict(self.descriptor.configuration_schema))
+            ready = True
+        except SchemaError:
+            ready = False
+        return HealthCheckResult(
+            ready,
+            "ready" if ready else "handler_schema_invalid",
+            timezone.now(),
+            {"code": "ready" if ready else "provider_unavailable"},
+        )
 
     def execute(self, invocation: WorkflowActionInvocation) -> OperationResult[JsonObject]:
         self.validate_config(invocation.config)
@@ -778,7 +767,7 @@ class TerminalCompletionAction(_ActionBase):
         required_permission="workflow_automation.instance:start",
         required_entitlement=CORE_ENTITLEMENT,
         quota_resource="workflow_automation.executions",
-        quota_cost=Decimal("0"),
+        quota_cost=Decimal(),
         configuration_schema={"type": "object", "properties": {}, "additionalProperties": False},
         input_schema=_OBJECT_SCHEMA,
         output_schema={
@@ -791,6 +780,19 @@ class TerminalCompletionAction(_ActionBase):
         outbound_network_required=False,
         icon_key="check-circle",
     )
+
+    def health(self) -> HealthCheckResult:
+        try:
+            Draft202012Validator.check_schema(dict(self.descriptor.output_schema))
+            ready = True
+        except SchemaError:
+            ready = False
+        return HealthCheckResult(
+            ready,
+            "ready" if ready else "handler_schema_invalid",
+            timezone.now(),
+            {"code": "ready" if ready else "provider_unavailable"},
+        )
 
     def execute(self, invocation: WorkflowActionInvocation) -> OperationResult[JsonObject]:
         self.validate_config(invocation.config)

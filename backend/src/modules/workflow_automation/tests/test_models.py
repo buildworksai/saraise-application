@@ -147,7 +147,12 @@ def test_archived_definition_is_terminal_and_immutable() -> None:
         "publish",
         tenant_id=workflow.tenant_id,
         transition_key="publish",
-        context={"definition_valid": True},
+        context={
+            "definition_valid": True,
+            "handlers_registered": True,
+            "terminal_path_reachable": True,
+            "references_resolved": True,
+        },
     )
     workflow = WORKFLOW_DEFINITION_MACHINE.apply(
         workflow,

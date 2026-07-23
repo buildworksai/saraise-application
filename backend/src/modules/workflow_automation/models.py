@@ -150,6 +150,16 @@ class HistoricalTenantQuerySet(TenantQuerySet):
     def update(self, **kwargs: Any) -> int:
         model_name = self.model._meta.model_name
         state_field = "status" if model_name == "workflowtask" else "state"
+        protected = {
+            "transition_history",
+            "context_data",
+            "result_data",
+            "output_evidence",
+            "provider_evidence",
+            "correlation_id",
+        }
+        if protected.intersection(kwargs):
+            raise ValidationError("Workflow execution evidence cannot be replaced by a bulk update.")
         if model_name in {"workflowinstance", "workflowtask"} and state_field in kwargs:
             raise ValidationError("Lifecycle state changes must use the registered state machine.")
         terminal_states = getattr(self.model, "TERMINAL_STATES", frozenset())
@@ -160,11 +170,30 @@ class HistoricalTenantQuerySet(TenantQuerySet):
     def delete(self) -> tuple[int, dict[str, int]]:
         raise ValidationError("Workflow execution history cannot be deleted.")
 
+    def lifecycle_update(self, **kwargs: Any) -> int:
+        """Narrow internal update path for evidence finalized by the service layer."""
+
+        allowed = {
+            "state",
+            "result_data",
+            "output_evidence",
+            "provider_evidence",
+            "completed_at",
+            "duration_ms",
+            "failure_code",
+            "failure_message",
+        }
+        if not kwargs or set(kwargs) - allowed:
+            raise ValidationError("Unsupported lifecycle evidence update.")
+        return super().update(**kwargs)
+
 
 class WorkflowQuerySet(TenantQuerySet):
     """Keep definition lifecycle and retention behind guarded services."""
 
     def update(self, **kwargs: Any) -> int:
+        if "transition_history" in kwargs:
+            raise ValidationError("Definition transition history is append-only.")
         if "status" in kwargs or self.filter(status__in=("published", "archived")).exists():
             raise ValidationError("Published/archived definitions and lifecycle state are immutable.")
         return super().update(**kwargs)
@@ -195,6 +224,176 @@ class HistoricalRecordMixin:
         raise ValidationError("Workflow execution history cannot be deleted.")
 
 
+class ImmutableAuditQuerySet(TenantQuerySet):
+    """Audit evidence is insert-only; mutation is tampering."""
+
+    def update(self, **kwargs: Any) -> int:
+        del kwargs
+        raise ValidationError("Workflow audit records are immutable.")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Workflow audit records cannot be deleted.")
+
+
+class WorkflowAutomationConfiguration(TenantScopedModel, TimestampedModel):
+    """Current, tenant and environment scoped workflow runtime configuration."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    environment = models.CharField(max_length=32, default="production")
+    version = models.PositiveIntegerField()
+    document = models.JSONField(default=dict)
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_workflow_automation_configurations",
+    )
+
+    objects = TenantQuerySet.as_manager()
+
+    class Meta:
+        db_table = "workflow_automation_configurations"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "environment"),
+                name="wf_config_tenant_environment_uniq",
+            ),
+            models.CheckConstraint(condition=models.Q(version__gte=1), name="wf_config_version_gte_1"),
+        ]
+        indexes = [
+            models.Index(fields=("tenant_id", "environment"), name="wf_config_tenant_env_idx"),
+            models.Index(fields=("tenant_id", "-version"), name="wf_config_tenant_ver_idx"),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_object(self.document, "document")
+        _validate_immutable(self, ("tenant_id", "environment"))
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Workflow configuration cannot be deleted; restore a prior version.")
+
+
+class WorkflowAutomationConfigurationRevision(HistoricalRecordMixin, TenantScopedModel):
+    """Immutable before/after evidence for one configuration version."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    configuration = models.ForeignKey(
+        WorkflowAutomationConfiguration,
+        on_delete=models.PROTECT,
+        related_name="revisions",
+    )
+    version = models.PositiveIntegerField()
+    previous_document = models.JSONField(default=dict, blank=True)
+    document = models.JSONField(default=dict)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="workflow_automation_configuration_revisions",
+    )
+    correlation_id = models.CharField(max_length=64, db_index=True)
+    change_reason = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ImmutableAuditQuerySet.as_manager()
+
+    class Meta:
+        db_table = "workflow_automation_configuration_revisions"
+        ordering = ("-version",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "configuration", "version"),
+                name="wf_config_revision_version_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=("tenant_id", "configuration", "-version"), name="wf_config_rev_tenant_ver_idx"),
+            models.Index(fields=("tenant_id", "correlation_id"), name="wf_config_rev_tenant_corr_idx"),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_object(self.previous_document, "previous_document")
+        _require_object(self.document, "document")
+        _validate_immutable(
+            self,
+            (
+                "tenant_id",
+                "configuration_id",
+                "version",
+                "previous_document",
+                "document",
+                "actor_id",
+                "correlation_id",
+                "change_reason",
+                "created_at",
+            ),
+        )
+        _related_belongs_to_tenant(self, "configuration")
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Configuration revision evidence is immutable.")
+
+
+class WorkflowTransitionAudit(HistoricalRecordMixin, TenantScopedModel):
+    """Immutable lifecycle transition evidence independent of mutable aggregates."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workflow = models.ForeignKey("Workflow", on_delete=models.PROTECT, related_name="transition_audits")
+    transition_key = models.CharField(max_length=255)
+    command = models.CharField(max_length=64)
+    from_state = models.CharField(max_length=32)
+    to_state = models.CharField(max_length=32)
+    # User primary keys are deployment-defined. Store their canonical text so
+    # immutable evidence works with integer and UUID-backed user models.
+    actor_id = models.CharField(max_length=128, null=True, blank=True)
+    correlation_id = models.CharField(max_length=64, db_index=True)
+    occurred_at = models.DateTimeField()
+
+    objects = ImmutableAuditQuerySet.as_manager()
+
+    class Meta:
+        db_table = "workflow_transition_audits"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "workflow", "transition_key", "command"),
+                name="wf_transition_audit_idempotency_uniq",
+            )
+        ]
+        indexes = [
+            models.Index(fields=("tenant_id", "workflow", "-occurred_at"), name="wf_trans_audit_tenant_idx")
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        _validate_immutable(
+            self,
+            tuple(field.attname for field in self._meta.concrete_fields),
+        )
+        _related_belongs_to_tenant(self, "workflow")
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Workflow transition evidence is immutable.")
+
+
 class Workflow(TenantScopedModel, TimestampedModel):
     """One immutable version of a logical workflow definition."""
 
@@ -206,15 +405,13 @@ class Workflow(TenantScopedModel, TimestampedModel):
     workflow_type = models.CharField(
         max_length=32,
         choices=WorkflowType.choices,
-        default=WorkflowType.SEQUENTIAL,
     )
     trigger_type = models.CharField(
         max_length=20,
         choices=WorkflowTriggerType.choices,
-        default=WorkflowTriggerType.MANUAL,
     )
     trigger_config = models.JSONField(default=dict, blank=True)
-    status = models.CharField(max_length=20, choices=WorkflowStatus.choices, default=WorkflowStatus.DRAFT)
+    status = models.CharField(max_length=20, choices=WorkflowStatus.choices)
     required_context_schema = models.JSONField(default=dict, blank=True)
     transition_history = models.JSONField(default=list, blank=True, editable=False)
     created_by = models.ForeignKey(
@@ -430,7 +627,7 @@ class WorkflowInstance(HistoricalRecordMixin, TenantScopedModel, TimestampedMode
     result_data = models.JSONField(default=dict, blank=True)
     entity_type = models.CharField(max_length=100, blank=True, default="")
     entity_id = models.UUIDField(null=True, blank=True)
-    priority = models.PositiveSmallIntegerField(default=5)
+    priority = models.PositiveSmallIntegerField()
     idempotency_key = models.CharField(max_length=255)
     transition_history = models.JSONField(default=list, blank=True, editable=False)
     correlation_id = models.CharField(max_length=64, db_index=True)
@@ -679,7 +876,7 @@ class WorkflowStepExecution(HistoricalRecordMixin, TenantScopedModel, Timestampe
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     instance = models.ForeignKey(WorkflowInstance, on_delete=models.PROTECT, related_name="step_executions")
     step = models.ForeignKey(WorkflowStep, on_delete=models.PROTECT, related_name="executions")
-    attempt = models.PositiveSmallIntegerField(default=1)
+    attempt = models.PositiveSmallIntegerField()
     operation_key = models.CharField(max_length=255)
     state = models.CharField(max_length=20, choices=StepExecutionState.choices, default=StepExecutionState.PENDING)
     handler_key = models.CharField(max_length=150)
@@ -793,6 +990,8 @@ __all__ = [
     "StepExecutionState",
     "Workflow",
     "WorkflowAssignmentKind",
+    "WorkflowAutomationConfiguration",
+    "WorkflowAutomationConfigurationRevision",
     "WorkflowInstance",
     "WorkflowInstanceState",
     "WorkflowStatus",
@@ -802,6 +1001,7 @@ __all__ = [
     "WorkflowTask",
     "WorkflowTaskStatus",
     "WorkflowTimeoutAction",
+    "WorkflowTransitionAudit",
     "WorkflowTriggerType",
     "WorkflowType",
 ]

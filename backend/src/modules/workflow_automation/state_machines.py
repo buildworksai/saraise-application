@@ -72,7 +72,9 @@ class _InstanceTransitionRecorder(JSONFieldTransitionRecorder[WorkflowInstance])
                 raise ValueError("A fail transition requires a stable failure_code in metadata")
             aggregate.failure_code = code.strip()[:64]
             message = record.metadata.get("failure_message") or record.metadata.get("message") or ""
-            aggregate.failure_message = str(message).strip()[:2000]
+            # The service layer has already applied the tenant-configured
+            # redaction and length policy before entering the state primitive.
+            aggregate.failure_message = str(message).strip()
 
     def aggregate_update_fields(self) -> Collection[str]:
         return (
@@ -106,9 +108,9 @@ def _definition_is_publishable(aggregate: Workflow, context: Mapping[str, Any]) 
     """Require service validation evidence; state transitions never infer it."""
     return (
         context.get("definition_valid") is True
-        and context.get("handlers_registered", True) is True
-        and context.get("terminal_path_reachable", True) is True
-        and context.get("references_resolved", True) is True
+        and context.get("handlers_registered") is True
+        and context.get("terminal_path_reachable") is True
+        and context.get("references_resolved") is True
         and aggregate.deleted_at is None
     )
 

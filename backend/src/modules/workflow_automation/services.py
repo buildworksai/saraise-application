@@ -43,7 +43,16 @@ from .extensions import (
     condition_registry,
     execute_registered_action,
 )
-from .models import Workflow, WorkflowInstance, WorkflowStep, WorkflowStepExecution, WorkflowTask
+from .models import (
+    Workflow,
+    WorkflowAutomationConfiguration,
+    WorkflowAutomationConfigurationRevision,
+    WorkflowInstance,
+    WorkflowStep,
+    WorkflowStepExecution,
+    WorkflowTask,
+    WorkflowTransitionAudit,
+)
 from .serializers import validate_json_value, validate_step_config
 from .state_machines import WORKFLOW_DEFINITION_MACHINE, WORKFLOW_INSTANCE_MACHINE, WORKFLOW_TASK_MACHINE
 
@@ -54,6 +63,642 @@ EXECUTE_INSTANCE_COMMAND = "workflow_automation.execute_instance"
 EXPIRE_TASKS_COMMAND = "workflow_automation.expire_tasks"
 TERMINAL_INSTANCE_STATES = frozenset({"completed", "failed", "cancelled"})
 TERMINAL_TASK_STATES = frozenset({"completed", "rejected", "cancelled", "expired"})
+
+
+def default_configuration_document() -> dict[str, Any]:
+    """Return the complete, portable default policy document for a new tenant."""
+
+    return {
+        "defaults": {
+            "workflow_version": 1,
+            "workflow_type": "sequential",
+            "trigger_type": "manual",
+            "definition_status": "draft",
+            "execution_priority": 5,
+            "step_execution_attempt": 1,
+            "approval_assignment_kind": "user",
+            "approval_due_seconds": 86400,
+            "approval_rejection_behavior": "fail",
+            "approval_completion_rule": "any",
+            "timeout_action": "fail",
+            "cancellation_reason": "Workflow instance cancelled",
+            "task_status": "pending",
+            "task_ordering": "due_date",
+            "task_scope": "mine",
+        },
+        "limits": {
+            "execution_priority_min": 1,
+            "execution_priority_max": 9,
+            "json_max_depth": 12,
+            "json_max_items": 2000,
+            "json_max_string_length": 32768,
+            "reject_reason_max_length": 2000,
+            "duration_max_seconds": 31536000,
+            "transition_key_max_length": 255,
+            "failure_message_max_length": 2000,
+            "cancellation_reason_max_length": 500,
+            "catalog_default_limit": 25,
+            "catalog_max_limit": 100,
+            "catalog_search_max_length": 200,
+            "assignee_result_limit": 100,
+            "email_template_key_max_length": 100,
+            "email_recipient_max_length": 254,
+            "generated_step_key_max_length": 64,
+            "workflow_page_size": 20,
+            "execution_step_multiplier": 2,
+        },
+        "allowed_values": {
+            "workflow_types": ["approval", "state_machine", "sequential", "conditional"],
+            "trigger_types": ["manual"],
+            "definition_statuses": ["draft", "published", "archived"],
+            "step_types": ["action", "approval", "notification", "decision"],
+            "timeout_actions": ["fail", "cancel"],
+            "approval_rejection_behaviors": ["fail", "goto", "cancel"],
+            "approval_completion_rules": ["any", "all"],
+            "notification_channels": ["in_app", "email"],
+            "catalog_orderings": ["key", "display_name"],
+        },
+        "trigger_schemas": {
+            "manual": {"required": [], "allowed": []},
+        },
+        "step_schemas": {
+            "action": {
+                "required": ["handler", "schema_version", "input_mapping"],
+                "optional": ["configuration", "public_output_keys"],
+            },
+            "approval": {
+                "required": ["assignment_kind", "assignee_id", "rejection_behavior"],
+                "optional": [
+                    "due_in_seconds",
+                    "reject_step_key",
+                    "completion_rule",
+                    "display_context_keys",
+                ],
+            },
+            "notification": {
+                "required": ["channel", "recipient_mapping", "template_key"],
+                "optional": ["public_output_keys"],
+            },
+            "decision": {
+                "required": ["condition", "true_step_key", "false_step_key"],
+                "optional": ["schema_version"],
+            },
+        },
+        "notification_handlers": {
+            "in_app": {"handler": "core.in_app_notification.v1", "schema_version": "1"},
+            "email": {"handler": "core.email_notification.v1", "schema_version": "1"},
+        },
+        "step_handlers": {
+            "action": "registered_action",
+            "approval": "approval_task",
+            "notification": "registered_action",
+            "decision": "registered_condition",
+        },
+        "condition_input_mappings": {
+            "core.equals.v1": {
+                "left": {"source": "context_path", "field": "left_path"},
+                "right": {"source": "literal", "field": "right_value"},
+            },
+            "core.truthy.v1": {
+                "value": {"source": "context_path", "field": "value_path"},
+            },
+        },
+        "lifecycle": {
+            "definition": {
+                "draft": ["published", "draft"],
+                "published": ["archived"],
+                "archived": [],
+            },
+            "instance": {
+                "pending": ["running", "cancelled"],
+                "running": ["waiting", "completed", "failed", "cancelled"],
+                "waiting": ["running", "failed", "cancelled"],
+                "completed": [],
+                "failed": [],
+                "cancelled": [],
+            },
+            "task": {
+                "pending": ["completed", "rejected", "cancelled", "expired"],
+                "completed": [],
+                "rejected": [],
+                "cancelled": [],
+                "expired": [],
+            },
+        },
+        "allowed_actions": {
+            "workflow": {
+                "draft": ["view", "edit", "publish", "delete"],
+                "published": ["view", "clone", "archive", "start"],
+                "archived": ["view", "clone"],
+            },
+            "instance": {
+                "pending": ["view", "cancel"],
+                "running": ["view", "cancel"],
+                "waiting": ["view", "cancel"],
+                "completed": ["view"],
+                "failed": ["view"],
+                "cancelled": ["view"],
+            },
+            "task": {
+                "pending": ["view", "complete", "reject"],
+                "completed": ["view"],
+                "rejected": ["view"],
+                "cancelled": ["view"],
+                "expired": ["view"],
+            },
+        },
+        "action_quota_costs": {
+            "core.in_app_notification.v1": 0,
+            "core.email_notification.v1": 1,
+            "core.context_projection.v1": 0,
+            "core.terminal_completion.v1": 0,
+        },
+        "operational": {
+            "api_quota_cost": 1,
+            "v1_sunset": "Thu, 31 Dec 2026 23:59:59 GMT",
+            "outbox_stale_seconds": 300,
+            "health_staleness_seconds": 30,
+            "email_timeout_seconds": 10,
+            "email_retry_attempts": 3,
+            "email_retry_base_ms": 250,
+            "email_circuit_failure_threshold": 5,
+            "email_circuit_reset_seconds": 60,
+            "execution_poll_interval_ms": 15000,
+            "execution_detail_poll_interval_ms": 5000,
+        },
+        "ui": {
+            "sidebar_orders": {"workflows": 80, "instances": 81, "tasks": 82, "configuration": 83},
+            "duration_display_threshold_ms": 60000,
+            "due_time_unit_seconds": 3600,
+            "minimum_due_time_units": 1,
+            "reject_reason_max_length": 1000,
+        },
+        "feature_flags": {
+            "event_triggers": {"enabled": False, "roles": [], "cohorts": []},
+            "scheduled_triggers": {"enabled": False, "roles": [], "cohorts": []},
+            "parallel_workflows": {"enabled": False, "roles": [], "cohorts": []},
+            "timeout_notifications": {"enabled": False, "roles": [], "cohorts": []},
+        },
+    }
+
+
+class WorkflowConfigurationService:
+    """Tenant-safe configuration command/query service and validation authority."""
+
+    ENVIRONMENTS = frozenset({"development", "test", "staging", "production"})
+
+    @staticmethod
+    def _environment(value: object) -> str:
+        environment = str(value or "production").strip().lower()
+        if environment not in WorkflowConfigurationService.ENVIRONMENTS:
+            raise ValidationError({"environment": ["Unsupported environment."]})
+        return environment
+
+    @staticmethod
+    def validate_document(document: Mapping[str, Any]) -> dict[str, Any]:
+        if not isinstance(document, Mapping):
+            raise ValidationError({"document": ["Must be a JSON object."]})
+        candidate = dict(document)
+        expected = set(default_configuration_document())
+        if set(candidate) != expected:
+            raise ValidationError({"document": [f"Configuration sections must be exactly: {sorted(expected)}."]})
+        defaults = candidate.get("defaults")
+        limits = candidate.get("limits")
+        allowed = candidate.get("allowed_values")
+        operational = candidate.get("operational")
+        ui = candidate.get("ui")
+        flags = candidate.get("feature_flags")
+        if not all(isinstance(value, Mapping) for value in (defaults, limits, allowed, operational, ui, flags)):
+            raise ValidationError({"document": ["Configuration sections must be JSON objects."]})
+
+        baseline = default_configuration_document()
+        errors: dict[str, list[str]] = {}
+        for section in ("defaults", "limits", "allowed_values", "operational", "ui", "feature_flags"):
+            configured = candidate.get(section)
+            expected_keys = set(baseline[section])
+            if not isinstance(configured, Mapping) or set(configured) != expected_keys:
+                errors[section] = [f"Must contain exactly these fields: {sorted(expected_keys)}."]
+
+        integer_bounds = {
+            "execution_priority_min": (1, 9),
+            "execution_priority_max": (1, 9),
+            "json_max_depth": (1, 32),
+            "json_max_items": (1, 10000),
+            "json_max_string_length": (1, 1048576),
+            "reject_reason_max_length": (1, 10000),
+            "duration_max_seconds": (1, 31536000),
+            "transition_key_max_length": (32, 255),
+            "failure_message_max_length": (128, 10000),
+            "cancellation_reason_max_length": (1, 5000),
+            "catalog_default_limit": (1, 500),
+            "catalog_max_limit": (1, 500),
+            "catalog_search_max_length": (1, 1000),
+            "assignee_result_limit": (1, 500),
+            "email_template_key_max_length": (1, 255),
+            "email_recipient_max_length": (64, 320),
+            "generated_step_key_max_length": (8, 128),
+            "workflow_page_size": (1, 100),
+            "execution_step_multiplier": (1, 10),
+        }
+        for name, (minimum, maximum) in integer_bounds.items():
+            value = limits.get(name)  # type: ignore[union-attr]
+            if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+                errors[f"limits.{name}"] = [f"Must be an integer from {minimum} through {maximum}."]
+        if (
+            isinstance(limits.get("catalog_default_limit"), int)  # type: ignore[union-attr]
+            and isinstance(limits.get("catalog_max_limit"), int)  # type: ignore[union-attr]
+            and limits["catalog_default_limit"] > limits["catalog_max_limit"]  # type: ignore[index]
+        ):
+            errors["limits.catalog_default_limit"] = ["Must not exceed catalog_max_limit."]
+        if (
+            isinstance(limits.get("execution_priority_min"), int)  # type: ignore[union-attr]
+            and isinstance(limits.get("execution_priority_max"), int)  # type: ignore[union-attr]
+            and limits["execution_priority_min"] > limits["execution_priority_max"]  # type: ignore[index]
+        ):
+            errors["limits.execution_priority_min"] = ["Must not exceed execution_priority_max."]
+
+        allowlist_contract = {
+            "workflow_types": {"approval", "state_machine", "sequential", "conditional"},
+            "trigger_types": {"manual"},
+            "definition_statuses": {"draft", "published", "archived"},
+            "step_types": {"action", "approval", "notification", "decision"},
+            "timeout_actions": {"fail", "cancel"},
+            "approval_rejection_behaviors": {"fail", "goto", "cancel"},
+            "approval_completion_rules": {"any", "all"},
+            "notification_channels": {"in_app", "email"},
+            "catalog_orderings": {"key", "display_name"},
+        }
+        for name, safe_values in allowlist_contract.items():
+            values = allowed.get(name)  # type: ignore[union-attr]
+            if not isinstance(values, list) or not values or not set(values).issubset(safe_values):
+                errors[f"allowed_values.{name}"] = [f"Must be a non-empty subset of {sorted(safe_values)}."]
+        default_dependencies = {
+            "workflow_type": "workflow_types",
+            "trigger_type": "trigger_types",
+            "definition_status": "definition_statuses",
+            "approval_rejection_behavior": "approval_rejection_behaviors",
+            "approval_completion_rule": "approval_completion_rules",
+            "timeout_action": "timeout_actions",
+        }
+        for default_name, allowlist_name in default_dependencies.items():
+            if defaults.get(default_name) not in allowed.get(allowlist_name, []):  # type: ignore[union-attr]
+                errors[f"defaults.{default_name}"] = [
+                    f"Must be enabled by allowed_values.{allowlist_name}."
+                ]
+        for default_name, limit_name in {
+            "approval_due_seconds": "duration_max_seconds",
+        }.items():
+            value = defaults.get(default_name)  # type: ignore[union-attr]
+            maximum = limits.get(limit_name)  # type: ignore[union-attr]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 1
+                or not isinstance(maximum, int)
+                or value > maximum
+            ):
+                errors[f"defaults.{default_name}"] = [f"Must be within limits.{limit_name}."]
+        priority = defaults.get("execution_priority")  # type: ignore[union-attr]
+        priority_min = limits.get("execution_priority_min")  # type: ignore[union-attr]
+        priority_max = limits.get("execution_priority_max")  # type: ignore[union-attr]
+        if (
+            isinstance(priority, bool)
+            or not isinstance(priority, int)
+            or not isinstance(priority_min, int)
+            or not isinstance(priority_max, int)
+            or not priority_min <= priority <= priority_max
+        ):
+            errors["defaults.execution_priority"] = ["Must be within the configured priority limits."]
+        if (
+            not isinstance(defaults.get("workflow_version"), int)  # type: ignore[union-attr]
+            or defaults["workflow_version"] < 1  # type: ignore[index]
+        ):
+            errors["defaults.workflow_version"] = ["Must be a positive integer."]
+        if (
+            not isinstance(defaults.get("step_execution_attempt"), int)  # type: ignore[union-attr]
+            or defaults["step_execution_attempt"] < 1  # type: ignore[index]
+        ):
+            errors["defaults.step_execution_attempt"] = ["Must be a positive integer."]
+        cancellation_reason = defaults.get("cancellation_reason")  # type: ignore[union-attr]
+        cancellation_maximum = limits.get("cancellation_reason_max_length")  # type: ignore[union-attr]
+        if (
+            not isinstance(cancellation_reason, str)
+            or not cancellation_reason.strip()
+            or not isinstance(cancellation_maximum, int)
+            or len(cancellation_reason) > cancellation_maximum
+        ):
+            errors["defaults.cancellation_reason"] = [
+                "Must be nonblank and within limits.cancellation_reason_max_length."
+            ]
+        step_handlers = candidate.get("step_handlers")
+        supported_step_handlers = {
+            "action": "registered_action",
+            "approval": "approval_task",
+            "notification": "registered_action",
+            "decision": "registered_condition",
+        }
+        if not isinstance(step_handlers, Mapping) or dict(step_handlers) != supported_step_handlers:
+            errors["step_handlers"] = [
+                "Must map each supported step type to its fixed, safe execution primitive."
+            ]
+        lifecycle = candidate.get("lifecycle")
+        safe_lifecycle = default_configuration_document()["lifecycle"]
+        if not isinstance(lifecycle, Mapping):
+            errors["lifecycle"] = ["Must be an object."]
+        else:
+            for domain, safe_graph in safe_lifecycle.items():
+                configured_graph = lifecycle.get(domain)
+                if not isinstance(configured_graph, Mapping) or set(configured_graph) != set(safe_graph):
+                    errors[f"lifecycle.{domain}"] = ["Must declare every lifecycle state."]
+                    continue
+                for source, targets in configured_graph.items():
+                    if (
+                        not isinstance(targets, list)
+                        or not set(targets).issubset(set(safe_graph[source]))
+                    ):
+                        errors[f"lifecycle.{domain}.{source}"] = [
+                            "May only enable transitions supported by the fixed state-machine engine."
+                        ]
+        action_quota_costs = candidate.get("action_quota_costs")
+        safe_quota_keys = set(baseline["action_quota_costs"])
+        if (
+            not isinstance(action_quota_costs, Mapping)
+            or set(action_quota_costs) != safe_quota_keys
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 0 <= value <= 100
+                for value in action_quota_costs.values()
+            )
+        ):
+            errors["action_quota_costs"] = [
+                "Must assign every built-in action an integer quota cost from 0 through 100."
+            ]
+
+        for name, bounds in {
+            "api_quota_cost": (1, 100),
+            "outbox_stale_seconds": (30, 86400),
+            "health_staleness_seconds": (5, 3600),
+            "email_timeout_seconds": (1, 60),
+            "email_retry_attempts": (1, 10),
+            "email_retry_base_ms": (10, 10000),
+            "email_circuit_failure_threshold": (1, 100),
+            "email_circuit_reset_seconds": (1, 3600),
+            "execution_poll_interval_ms": (1000, 300000),
+            "execution_detail_poll_interval_ms": (1000, 300000),
+        }.items():
+            value = operational.get(name)  # type: ignore[union-attr]
+            if isinstance(value, bool) or not isinstance(value, int) or not bounds[0] <= value <= bounds[1]:
+                errors[f"operational.{name}"] = [f"Must be an integer from {bounds[0]} through {bounds[1]}."]
+        if not isinstance(operational.get("v1_sunset"), str) or not operational["v1_sunset"]:  # type: ignore[index,union-attr]
+            errors["operational.v1_sunset"] = ["Must be a non-empty HTTP-date."]
+
+        if not isinstance(ui.get("sidebar_orders"), Mapping):  # type: ignore[union-attr]
+            errors["ui.sidebar_orders"] = ["Must be an object."]
+        else:
+            sidebar_orders = ui["sidebar_orders"]  # type: ignore[index]
+            expected_sidebar_keys = set(baseline["ui"]["sidebar_orders"])
+            values = list(sidebar_orders.values())
+            if (
+                set(sidebar_orders) != expected_sidebar_keys
+                or any(isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 1000 for value in values)
+                or len(values) != len(set(values))
+            ):
+                errors["ui.sidebar_orders"] = [
+                    "Must assign each navigation item a unique integer from 0 through 1000."
+                ]
+        for name, bounds in {
+            "duration_display_threshold_ms": (1, 86400000),
+            "due_time_unit_seconds": (60, 86400),
+            "minimum_due_time_units": (1, 365),
+            "reject_reason_max_length": (1, 10000),
+        }.items():
+            value = ui.get(name)  # type: ignore[union-attr]
+            if isinstance(value, bool) or not isinstance(value, int) or not bounds[0] <= value <= bounds[1]:
+                errors[f"ui.{name}"] = [f"Must be an integer from {bounds[0]} through {bounds[1]}."]
+        if (
+            isinstance(ui.get("reject_reason_max_length"), int)  # type: ignore[union-attr]
+            and isinstance(limits.get("reject_reason_max_length"), int)  # type: ignore[union-attr]
+            and ui["reject_reason_max_length"] > limits["reject_reason_max_length"]  # type: ignore[index]
+        ):
+            errors["ui.reject_reason_max_length"] = [
+                "Must not exceed limits.reject_reason_max_length."
+            ]
+        for flag_name, rollout in flags.items():  # type: ignore[union-attr]
+            if (
+                not isinstance(rollout, Mapping)
+                or not isinstance(rollout.get("enabled"), bool)
+                or not isinstance(rollout.get("roles"), list)
+                or not isinstance(rollout.get("cohorts"), list)
+            ):
+                errors[f"feature_flags.{flag_name}"] = [
+                    "Must contain enabled (boolean), roles (array), and cohorts (array)."
+                ]
+                continue
+            for field in ("roles", "cohorts"):
+                values = rollout[field]
+                if (
+                    any(not isinstance(value, str) or not value.strip() or len(value) > 128 for value in values)
+                    or len(values) != len(set(values))
+                ):
+                    errors[f"feature_flags.{flag_name}.{field}"] = [
+                        "Must contain unique, nonblank identifiers no longer than 128 characters."
+                    ]
+        unavailable_dependencies = {
+            "event_triggers": "event",
+            "scheduled_triggers": "scheduled",
+            "parallel_workflows": "parallel",
+            "timeout_notifications": "notify",
+        }
+        for flag_name, required_value in unavailable_dependencies.items():
+            rollout = flags.get(flag_name)  # type: ignore[union-attr]
+            enabled = isinstance(rollout, Mapping) and rollout.get("enabled") is True
+            enabled_values = (
+                allowed.get("timeout_actions", [])
+                if flag_name == "timeout_notifications"
+                else allowed.get(
+                    "workflow_types" if flag_name == "parallel_workflows" else "trigger_types",
+                    [],
+                )
+            )
+            if enabled and required_value not in enabled_values:
+                errors[f"feature_flags.{flag_name}.enabled"] = [
+                    "Cannot be enabled until its end-to-end adapter is present in the safe allow-list."
+                ]
+        if errors:
+            raise ValidationError(errors)
+        validate_json_value(
+            candidate,
+            max_depth=int(limits["json_max_depth"]),  # type: ignore[index]
+            max_items=int(limits["json_max_items"]),  # type: ignore[index]
+            max_string_length=int(limits["json_max_string_length"]),  # type: ignore[index]
+        )
+        return candidate
+
+    @staticmethod
+    def get_configuration(
+        tenant_id: uuid.UUID | str,
+        environment: str = "production",
+        *,
+        create: bool = True,
+    ) -> WorkflowAutomationConfiguration:
+        tenant_uuid = _as_uuid(tenant_id, "tenant_id")
+        environment = WorkflowConfigurationService._environment(environment)
+        queryset = WorkflowAutomationConfiguration.objects.for_tenant(tenant_uuid)
+        try:
+            return queryset.get(environment=environment)
+        except WorkflowAutomationConfiguration.DoesNotExist:
+            if not create:
+                raise NotFound("Workflow automation configuration is not initialized.")
+        with transaction.atomic():
+            configuration, created = queryset.select_for_update().get_or_create(
+                tenant_id=tenant_uuid,
+                environment=environment,
+                defaults={"document": default_configuration_document(), "version": 1},
+            )
+            if created:
+                WorkflowAutomationConfigurationRevision.objects.for_tenant(tenant_uuid).create(
+                    tenant_id=tenant_uuid,
+                    configuration=configuration,
+                    version=1,
+                    previous_document={},
+                    document=configuration.document,
+                    actor=None,
+                    correlation_id=_correlation_id(),
+                    change_reason="initial-defaults",
+                )
+            return configuration
+
+    @staticmethod
+    def value(tenant_id: uuid.UUID | str, path: str, environment: str = "production") -> Any:
+        value: Any = WorkflowConfigurationService.get_configuration(tenant_id, environment).document
+        components = path.split(".")
+        index = 0
+        while index < len(components):
+            component = components[index]
+            if not isinstance(value, Mapping) or component not in value:
+                if isinstance(value, Mapping):
+                    dotted_key = next(
+                        (
+                            ".".join(components[index:end])
+                            for end in range(len(components), index, -1)
+                            if ".".join(components[index:end]) in value
+                        ),
+                        None,
+                    )
+                    if dotted_key is not None:
+                        value = value[dotted_key]
+                        index += len(dotted_key.split("."))
+                        continue
+                raise OperationFailed(
+                    error_code="WORKFLOW_CONFIGURATION_INVALID",
+                    message="Required workflow configuration is missing.",
+                    http_status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            value = value[component]
+            index += 1
+        return value
+
+    @staticmethod
+    def update_configuration(
+        tenant_id: uuid.UUID | str,
+        actor: object,
+        document: Mapping[str, Any],
+        *,
+        environment: str = "production",
+        expected_version: int,
+        change_reason: str,
+    ) -> WorkflowAutomationConfiguration:
+        tenant_uuid = _as_uuid(tenant_id, "tenant_id")
+        actor_id = _actor_id(actor)
+        clean = WorkflowConfigurationService.validate_document(document)
+        if not change_reason.strip():
+            raise ValidationError({"change_reason": ["This field may not be blank."]})
+        correlation_id = _correlation_id()
+        with transaction.atomic():
+            configuration = WorkflowConfigurationService.get_configuration(tenant_uuid, environment)
+            configuration = WorkflowAutomationConfiguration.objects.for_tenant(tenant_uuid).select_for_update().get(
+                id=configuration.id
+            )
+            if configuration.version != expected_version:
+                raise _conflict("CONFIGURATION_VERSION_CONFLICT", "The configuration changed; reload before saving.")
+            previous = dict(configuration.document)
+            if previous == clean:
+                return configuration
+            configuration.version += 1
+            configuration.document = clean
+            configuration.updated_by_id = actor_id
+            configuration.save(update_fields=("version", "document", "updated_by", "updated_at"))
+            WorkflowAutomationConfigurationRevision.objects.for_tenant(tenant_uuid).create(
+                tenant_id=tenant_uuid,
+                configuration=configuration,
+                version=configuration.version,
+                previous_document=previous,
+                document=clean,
+                actor_id=actor_id,
+                correlation_id=correlation_id,
+                change_reason=change_reason.strip(),
+            )
+            _emit_event(
+                tenant_uuid,
+                aggregate_type="workflow_automation_configuration",
+                aggregate_id=configuration.id,
+                event_type="workflow.configuration.changed",
+                payload={"version": configuration.version, "correlation_id": correlation_id},
+            )
+            return configuration
+
+    @staticmethod
+    def preview(
+        tenant_id: uuid.UUID | str,
+        document: Mapping[str, Any],
+        environment: str = "production",
+    ) -> dict[str, Any]:
+        clean = WorkflowConfigurationService.validate_document(document)
+        current = WorkflowConfigurationService.get_configuration(tenant_id, environment)
+        changed = sorted(key for key in clean if clean[key] != current.document.get(key))
+        return {
+            "valid": True,
+            "current_version": current.version,
+            "changed_sections": changed,
+            "restart_required": False,
+        }
+
+    @staticmethod
+    def history(
+        tenant_id: uuid.UUID | str,
+        environment: str = "production",
+    ) -> QuerySet[WorkflowAutomationConfigurationRevision]:
+        configuration = WorkflowConfigurationService.get_configuration(tenant_id, environment)
+        return WorkflowAutomationConfigurationRevision.objects.for_tenant(configuration.tenant_id).filter(
+            configuration=configuration
+        )
+
+    @staticmethod
+    def rollback(
+        tenant_id: uuid.UUID | str,
+        actor: object,
+        target_version: int,
+        *,
+        environment: str = "production",
+        expected_version: int,
+    ) -> WorkflowAutomationConfiguration:
+        configuration = WorkflowConfigurationService.get_configuration(tenant_id, environment)
+        try:
+            revision = WorkflowAutomationConfigurationRevision.objects.for_tenant(configuration.tenant_id).get(
+                configuration=configuration,
+                version=target_version,
+            )
+        except WorkflowAutomationConfigurationRevision.DoesNotExist as exc:
+            raise NotFound("Configuration version not found.") from exc
+        return WorkflowConfigurationService.update_configuration(
+            configuration.tenant_id,
+            actor,
+            revision.document,
+            environment=environment,
+            expected_version=expected_version,
+            change_reason=f"rollback-to-version-{target_version}",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,11 +755,16 @@ def _actor_id(actor: object | None) -> str:
     return str(actor_id)
 
 
-def _transition_key(value: str, field_name: str = "transition_key") -> str:
+def _transition_key(
+    tenant_id: uuid.UUID | str,
+    value: str,
+    field_name: str = "transition_key",
+) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValidationError({field_name: ["This field may not be blank."]})
-    if len(value.strip()) > 255:
-        raise ValidationError({field_name: ["Must not exceed 255 characters."]})
+    maximum = int(WorkflowConfigurationService.value(tenant_id, "limits.transition_key_max_length"))
+    if len(value.strip()) > maximum:
+        raise ValidationError({field_name: [f"Must not exceed {maximum} characters."]})
     return value.strip()
 
 
@@ -156,9 +806,26 @@ def _emit_event(
     )
 
 
-def _safe_failure_message(message: object) -> str:
+def _safe_failure_message(tenant_id: uuid.UUID | str, message: object) -> str:
     sanitized = redact_text(str(message or "Workflow execution failed."))
-    return sanitized[:2_000]
+    maximum = int(WorkflowConfigurationService.value(tenant_id, "limits.failure_message_max_length"))
+    return sanitized[:maximum]
+
+
+def _validate_tenant_json(
+    tenant_id: uuid.UUID | str,
+    value: Any,
+    *,
+    path: str,
+) -> Any:
+    limits = WorkflowConfigurationService.get_configuration(tenant_id).document["limits"]
+    return validate_json_value(
+        value,
+        path=path,
+        max_depth=int(limits["json_max_depth"]),
+        max_items=int(limits["json_max_items"]),
+        max_string_length=int(limits["json_max_string_length"]),
+    )
 
 
 def _history_has(aggregate: object, transition_key: str, command: str) -> bool:
@@ -170,8 +837,45 @@ def _history_has(aggregate: object, transition_key: str, command: str) -> bool:
 
 
 def _apply_machine(machine: object, aggregate: object, command: str, **kwargs: Any) -> Any:
+    correlation_id = str(kwargs.pop("correlation_id", "") or _correlation_id())
+    metadata = dict(kwargs.pop("metadata", {}) or {})
+    metadata["correlation_id"] = correlation_id
+    kwargs["metadata"] = metadata
+    from_state = str(getattr(aggregate, getattr(machine, "state_field", "status"), ""))
+    transition_key = str(kwargs.get("transition_key", ""))
+    tenant_id = getattr(aggregate, "tenant_id", kwargs.get("tenant_id"))
+    if tenant_id is not None and not _history_has(aggregate, transition_key, command):
+        domain = {
+            WORKFLOW_DEFINITION_MACHINE: "definition",
+            WORKFLOW_INSTANCE_MACHINE: "instance",
+            WORKFLOW_TASK_MACHINE: "task",
+        }.get(machine)
+        if domain is None:
+            raise OperationFailed(
+                error_code="STATE_MACHINE_UNCONFIGURED",
+                message="The lifecycle engine is not governed by tenant configuration.",
+                http_status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        edge = next(
+            (
+                candidate
+                for candidate in getattr(machine, "transitions", ())
+                if candidate.command == command and candidate.source == from_state
+            ),
+            None,
+        )
+        if edge is not None:
+            configured_targets = WorkflowConfigurationService.value(
+                tenant_id,
+                f"lifecycle.{domain}.{from_state}",
+            )
+            if edge.target not in configured_targets:
+                raise _conflict(
+                    "TRANSITION_DISABLED",
+                    "This lifecycle transition is disabled by tenant configuration.",
+                )
     try:
-        return machine.apply(aggregate, command, **kwargs)  # type: ignore[attr-defined]
+        result = machine.apply(aggregate, command, **kwargs)  # type: ignore[attr-defined]
     except IdempotencyConflictError as exc:
         raise _conflict("IDEMPOTENCY_CONFLICT", "The idempotency key was already used for another command.") from exc
     except (IllegalTransitionError, TerminalStateError) as exc:
@@ -182,6 +886,21 @@ def _apply_machine(machine: object, aggregate: object, command: str, **kwargs: A
             message="The lifecycle transition could not be applied.",
             http_status=status.HTTP_422_UNPROCESSABLE_ENTITY,
         ) from exc
+    if isinstance(result, Workflow):
+        WorkflowTransitionAudit.objects.for_tenant(result.tenant_id).get_or_create(
+            tenant_id=result.tenant_id,
+            workflow=result,
+            transition_key=transition_key,
+            command=command,
+            defaults={
+                "from_state": from_state,
+                "to_state": result.status,
+                "actor_id": metadata.get("actor_id"),
+                "correlation_id": correlation_id,
+                "occurred_at": timezone.now(),
+            },
+        )
+    return result
 
 
 def _handler_from_registry(registry: object, key: str, schema_version: str | None = None) -> Any:
@@ -199,18 +918,21 @@ def _handler_from_registry(registry: object, key: str, schema_version: str | Non
         ) from exc
 
 
-def _handler_key_for_step(step: WorkflowStep) -> tuple[str, str | None]:
+def _handler_key_for_step(
+    tenant_id: uuid.UUID | str,
+    step: WorkflowStep,
+) -> tuple[str, str | None]:
     if step.step_type == "action":
         return str(step.config["handler"]), str(step.config.get("schema_version") or "") or None
     if step.step_type == "notification":
         channel = str(step.config.get("channel", ""))
-        keys = {
-            "in_app": "core.in_app_notification.v1",
-            "email": "core.email_notification.v1",
-        }
-        if channel not in keys:
+        configured = WorkflowConfigurationService.value(
+            tenant_id,
+            f"notification_handlers.{channel}",
+        )
+        if not isinstance(configured, Mapping):
             raise CapabilityUnavailable(capability=f"notification:{channel}")
-        return keys[channel], "1"
+        return str(configured["handler"]), str(configured["schema_version"])
     raise ValueError("Only action and notification steps use action handlers")
 
 
@@ -356,14 +1078,17 @@ class WorkflowDefinitionService:
         clean.pop("expected_updated_at", None)
         clean["key"] = str(clean["key"]).strip()
         clean["name"] = str(clean["name"]).strip()
+        configuration = WorkflowConfigurationService.get_configuration(tenant_uuid).document
+        clean.setdefault("workflow_type", configuration["defaults"]["workflow_type"])
+        clean.setdefault("trigger_type", configuration["defaults"]["trigger_type"])
 
         with transaction.atomic():
             if Workflow.objects.for_tenant(tenant_uuid).filter(key=clean["key"]).exists():
                 raise _conflict("WORKFLOW_KEY_EXISTS", "A workflow with this key already exists.")
             workflow = Workflow(
                 tenant_id=tenant_uuid,
-                version=1,
-                status="draft",
+                version=int(configuration["defaults"]["workflow_version"]),
+                status=str(configuration["defaults"]["definition_status"]),
                 created_by=actor,
                 **clean,
             )
@@ -548,7 +1273,7 @@ class WorkflowDefinitionService:
         for step in WorkflowStep.objects.for_tenant(tenant_id).filter(workflow=workflow).order_by("order"):
             descriptor: object | None = None
             if step.step_type in {"action", "notification"}:
-                handler_key, schema_version = _handler_key_for_step(step)
+                handler_key, schema_version = _handler_key_for_step(workflow.tenant_id, step)
                 descriptor = _handler_from_registry(action_registry, handler_key, schema_version).descriptor
             elif step.step_type == "decision":
                 condition = step.config["condition"]
@@ -572,7 +1297,8 @@ class WorkflowDefinitionService:
         tenant_id: uuid.UUID | str,
         payload: Mapping[str, Any],
     ) -> DefinitionValidationResult:
-        _as_uuid(tenant_id, "tenant_id")
+        tenant_uuid = _as_uuid(tenant_id, "tenant_id")
+        configuration = WorkflowConfigurationService.get_configuration(tenant_uuid).document
         errors: list[DefinitionValidationIssue] = []
         warnings: list[DefinitionValidationIssue] = []
         steps = payload.get("steps")
@@ -588,7 +1314,16 @@ class WorkflowDefinitionService:
         if not name:
             errors.append(DefinitionValidationIssue("NAME_REQUIRED", "Workflow name must not be blank.", "name"))
 
-        trigger_type = payload.get("trigger_type", "manual")
+        workflow_type = str(payload.get("workflow_type", configuration["defaults"]["workflow_type"]))
+        if workflow_type not in configuration["allowed_values"]["workflow_types"]:
+            errors.append(
+                DefinitionValidationIssue(
+                    "WORKFLOW_TYPE_UNAVAILABLE",
+                    "This workflow type is not enabled for the tenant.",
+                    "workflow_type",
+                )
+            )
+        trigger_type = payload.get("trigger_type", configuration["defaults"]["trigger_type"])
         trigger_config = payload.get("trigger_config", {})
         if not isinstance(trigger_config, Mapping):
             errors.append(
@@ -596,32 +1331,35 @@ class WorkflowDefinitionService:
                     "TRIGGER_CONFIG_INVALID", "Trigger config must be an object.", "trigger_config"
                 )
             )
-        elif trigger_type == "manual" and trigger_config:
+        elif trigger_type not in configuration["allowed_values"]["trigger_types"]:
             errors.append(
                 DefinitionValidationIssue(
-                    "MANUAL_TRIGGER_CONFIG", "Manual workflows do not accept trigger config.", "trigger_config"
+                    "TRIGGER_TYPE_UNAVAILABLE",
+                    "This trigger type has no enabled end-to-end adapter.",
+                    "trigger_type",
                 )
             )
-        elif trigger_type == "event":
-            if set(trigger_config) - {"event_key", "idempotency_path"} or not trigger_config.get("event_key"):
+        else:
+            trigger_schema = configuration["trigger_schemas"].get(str(trigger_type))
+            if not isinstance(trigger_schema, Mapping):
                 errors.append(
                     DefinitionValidationIssue(
-                        "EVENT_TRIGGER_INVALID",
-                        "Event triggers require event_key and only support idempotency_path as an optional field.",
+                        "TRIGGER_SCHEMA_UNAVAILABLE",
+                        "The configured trigger schema is unavailable.",
                         "trigger_config",
                     )
                 )
-        elif trigger_type == "scheduled":
-            if (
-                set(trigger_config) - {"cron", "timezone"}
-                or not trigger_config.get("cron")
-                or not trigger_config.get("timezone")
-            ):
-                errors.append(
-                    DefinitionValidationIssue(
-                        "SCHEDULE_TRIGGER_INVALID", "Scheduled triggers require cron and timezone.", "trigger_config"
+            else:
+                allowed_fields = set(trigger_schema.get("allowed", []))
+                required_fields = set(trigger_schema.get("required", []))
+                if set(trigger_config) - allowed_fields or required_fields - set(trigger_config):
+                    errors.append(
+                        DefinitionValidationIssue(
+                            "TRIGGER_CONFIG_INVALID",
+                            "Trigger configuration does not match the tenant schema.",
+                            "trigger_config",
+                        )
                     )
-                )
 
         schema = payload.get("required_context_schema", {})
         if not isinstance(schema, Mapping):
@@ -659,7 +1397,11 @@ class WorkflowDefinitionService:
                     )
                 )
             try:
-                validate_step_config(str(raw_step.get("step_type", "")), raw_step.get("config", {}))
+                validate_step_config(
+                    str(raw_step.get("step_type", "")),
+                    raw_step.get("config", {}),
+                    policy=configuration,
+                )
             except ValidationError as exc:
                 errors.append(
                     DefinitionValidationIssue("STEP_CONFIG_INVALID", str(exc.detail), f"steps.{index}.config", step_key)
@@ -675,12 +1417,22 @@ class WorkflowDefinitionService:
                         step_key,
                     )
                 )
-            if timeout_action in {"notify", "escalate"}:
+            if isinstance(timeout, int) and (
+                timeout < 1 or timeout > int(configuration["limits"]["duration_max_seconds"])
+            ):
+                errors.append(
+                    DefinitionValidationIssue(
+                        "STEP_TIMEOUT_INVALID",
+                        "timeout_seconds is outside the tenant safe limits.",
+                        f"steps.{index}.timeout_seconds",
+                        step_key,
+                    )
+                )
+            if timeout_action is not None and timeout_action not in configuration["allowed_values"]["timeout_actions"]:
                 errors.append(
                     DefinitionValidationIssue(
                         "TIMEOUT_ACTION_UNCONFIGURED",
-                        "Notify and escalate timeouts require a registered target "
-                        "contract that this step does not declare.",
+                        "This timeout action is not enabled for the tenant.",
                         f"steps.{index}.timeout_action",
                         step_key,
                     )
@@ -742,7 +1494,10 @@ class WorkflowDefinitionService:
             if step["step_type"] in {"action", "notification"}:
                 proxy = type("StepProxy", (), {"step_type": step["step_type"], "config": config})()
                 try:
-                    handler_key, schema_version = _handler_key_for_step(proxy)  # type: ignore[arg-type]
+                    handler_key, schema_version = _handler_key_for_step(
+                        tenant_uuid,
+                        proxy,  # type: ignore[arg-type]
+                    )
                     handler = _handler_from_registry(action_registry, handler_key, schema_version)
                     handler.validate_config(_action_configuration(str(step["step_type"]), config))
                     healthy, _ = _descriptor_health(handler)
@@ -835,7 +1590,7 @@ class WorkflowDefinitionService:
     ) -> Workflow:
         tenant_uuid = _as_uuid(tenant_id, "tenant_id")
         workflow_uuid = _as_uuid(workflow_id, "workflow_id")
-        key = _transition_key(transition_key)
+        key = _transition_key(tenant_uuid, transition_key)
         with transaction.atomic():
             try:
                 workflow = (
@@ -924,7 +1679,7 @@ class WorkflowDefinitionService:
     ) -> Workflow:
         tenant_uuid = _as_uuid(tenant_id, "tenant_id")
         workflow_uuid = _as_uuid(workflow_id, "workflow_id")
-        key = _transition_key(transition_key)
+        key = _transition_key(tenant_uuid, transition_key)
         with transaction.atomic():
             try:
                 workflow = (
@@ -972,7 +1727,12 @@ class WorkflowDefinitionService:
                 workflow_type=source.workflow_type,
                 trigger_type=source.trigger_type,
                 trigger_config=getattr(source, "trigger_config", {}),
-                status="draft",
+                status=str(
+                    WorkflowConfigurationService.value(
+                        tenant_uuid,
+                        "defaults.definition_status",
+                    )
+                ),
                 required_context_schema=source.required_context_schema,
                 created_by=actor,
             )
@@ -1030,6 +1790,49 @@ class WorkflowDefinitionService:
 
 class WorkflowExecutionService:
     @staticmethod
+    def public_projection(instance: WorkflowInstance) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Project only definition-authorized context and result fields."""
+
+        schema = instance.workflow.required_context_schema
+        properties = schema.get("properties", {}) if isinstance(schema, Mapping) else {}
+        public_context = {
+            str(key): instance.context_data[key]
+            for key, definition in properties.items()
+            if (
+                key in instance.context_data
+                and isinstance(definition, Mapping)
+                and definition.get("x-public") is True
+            )
+        }
+        raw_steps = instance.result_data.get("steps", {})
+        public_steps: dict[str, Any] = {}
+        if isinstance(raw_steps, Mapping):
+            steps = {
+                step.key: step
+                for step in WorkflowStep.objects.for_tenant(instance.tenant_id).filter(workflow=instance.workflow)
+            }
+            for step_key, raw_result in raw_steps.items():
+                step = steps.get(str(step_key))
+                if step is None or not isinstance(raw_result, Mapping):
+                    continue
+                output = raw_result.get("output", {})
+                allowed = step.config.get("public_output_keys", [])
+                projected_output = (
+                    {
+                        key: output[key]
+                        for key in allowed
+                        if isinstance(key, str) and isinstance(output, Mapping) and key in output
+                    }
+                    if isinstance(allowed, list)
+                    else {}
+                )
+                public_steps[str(step_key)] = {
+                    "status": str(raw_result.get("status", "")),
+                    "output": projected_output,
+                }
+        return public_context, {"steps": public_steps}
+
+    @staticmethod
     def start_workflow(
         tenant_id: uuid.UUID | str,
         workflow_id: uuid.UUID | str,
@@ -1038,16 +1841,25 @@ class WorkflowExecutionService:
         idempotency_key: str,
         entity_type: str | None = None,
         entity_id: uuid.UUID | str | None = None,
-        priority: int = 5,
+        priority: int | None = None,
     ) -> WorkflowInstance:
         tenant_uuid = _as_uuid(tenant_id, "tenant_id")
+        configuration = WorkflowConfigurationService.get_configuration(tenant_uuid).document
         workflow_uuid = _as_uuid(workflow_id, "workflow_id")
-        idem = _transition_key(idempotency_key, "idempotency_key")
+        idem = _transition_key(tenant_uuid, idempotency_key, "idempotency_key")
         if not isinstance(context, Mapping):
             raise ValidationError({"context": ["Must be an object."]})
-        clean_context = validate_json_value(dict(context), path="context")
-        if isinstance(priority, bool) or not 1 <= int(priority) <= 9:
-            raise ValidationError({"priority": ["Must be between 1 and 9."]})
+        clean_context = _validate_tenant_json(
+            tenant_uuid,
+            dict(context),
+            path="context",
+        )
+        if priority is None:
+            priority = int(configuration["defaults"]["execution_priority"])
+        priority_min = int(configuration["limits"]["execution_priority_min"])
+        priority_max = int(configuration["limits"]["execution_priority_max"])
+        if isinstance(priority, bool) or not priority_min <= int(priority) <= priority_max:
+            raise ValidationError({"priority": [f"Must be between {priority_min} and {priority_max}."]})
         entity_uuid = _as_uuid(entity_id, "entity_id") if entity_id else None
         with transaction.atomic():
             existing = WorkflowInstance.objects.for_tenant(tenant_uuid).filter(idempotency_key=idem).first()
@@ -1068,6 +1880,16 @@ class WorkflowExecutionService:
                 raise NotFound("Workflow not found.") from exc
             if workflow.status != "published":
                 raise _conflict("WORKFLOW_NOT_PUBLISHED", "Only published workflows can be started.")
+            if workflow.trigger_type != configuration["defaults"]["trigger_type"]:
+                raise CapabilityUnavailable(
+                    capability=f"workflow_trigger:{workflow.trigger_type}",
+                    message="This trigger requires a registered adapter and cannot start through the manual API.",
+                )
+            if workflow.workflow_type == "parallel":
+                raise CapabilityUnavailable(
+                    capability="parallel_workflow_execution",
+                    message="Parallel execution is unavailable until durable fan-out and join support is configured.",
+                )
             result = WorkflowDefinitionService.validate_definition(
                 tenant_uuid,
                 {
@@ -1182,11 +2004,32 @@ class WorkflowExecutionService:
 
     @staticmethod
     def cancel_instance(
-        tenant_id: uuid.UUID | str, instance_id: uuid.UUID | str, actor: object, transition_key: str
+        tenant_id: uuid.UUID | str,
+        instance_id: uuid.UUID | str,
+        actor: object,
+        transition_key: str,
+        reason: str | None = None,
     ) -> WorkflowInstance:
         tenant_uuid = _as_uuid(tenant_id, "tenant_id")
         instance = WorkflowExecutionService.get_instance(tenant_uuid, instance_id)
-        key = _transition_key(transition_key)
+        key = _transition_key(tenant_uuid, transition_key)
+        configured_reason = str(
+            reason
+            or WorkflowConfigurationService.value(
+                tenant_uuid,
+                "defaults.cancellation_reason",
+            )
+        ).strip()
+        maximum = int(
+            WorkflowConfigurationService.value(
+                tenant_uuid,
+                "limits.cancellation_reason_max_length",
+            )
+        )
+        if not configured_reason or len(configured_reason) > maximum:
+            raise ValidationError(
+                {"reason": [f"Must contain between 1 and {maximum} characters."]}
+            )
         with transaction.atomic():
             instance = _apply_machine(
                 WORKFLOW_INSTANCE_MACHINE,
@@ -1194,9 +2037,14 @@ class WorkflowExecutionService:
                 "cancel",
                 transition_key=key,
                 tenant_id=tenant_uuid,
-                metadata={"actor_id": _actor_id(actor)},
+                metadata={"actor_id": _actor_id(actor), "reason": redact_text(configured_reason)},
             )
-            WorkflowTaskService.cancel_open_tasks(tenant_uuid, instance.id, actor, "Workflow instance cancelled")
+            WorkflowTaskService.cancel_open_tasks(
+                tenant_uuid,
+                instance.id,
+                actor,
+                configured_reason,
+            )
             if instance.async_job_id:
                 job = AsyncJob.objects.for_tenant(tenant_uuid).filter(id=instance.async_job_id).first()
                 if job and job.status not in {
@@ -1211,7 +2059,7 @@ class WorkflowExecutionService:
                         JobStatus.CANCELLED,
                         expected_status=job.status,
                         actor_id=_actor_id(actor),
-                        reason="Workflow instance cancelled",
+                        reason=redact_text(configured_reason),
                     )
             _emit_event(
                 tenant_uuid,
@@ -1252,7 +2100,8 @@ class WorkflowExecutionService:
                 },
             )
         max_steps = max(
-            WorkflowStep.objects.for_tenant(tenant_uuid).filter(workflow=instance.workflow).count() * 2,
+            WorkflowStep.objects.for_tenant(tenant_uuid).filter(workflow=instance.workflow).count()
+            * int(WorkflowConfigurationService.value(tenant_uuid, "limits.execution_step_multiplier")),
             1,
         )
         for _ in range(max_steps):
@@ -1305,11 +2154,15 @@ class WorkflowExecutionService:
                 instance.current_step = step
         started = monotonic()
         try:
-            if step.step_type in {"action", "notification"}:
+            execution_primitive = WorkflowConfigurationService.value(
+                tenant_uuid,
+                f"step_handlers.{step.step_type}",
+            )
+            if execution_primitive == "registered_action":
                 WorkflowExecutionService._execute_action_step(tenant_uuid, instance, step, job_id)
                 next_step = WorkflowExecutionService._next_step(tenant_uuid, instance, step)
                 return WorkflowExecutionService._advance_or_complete(tenant_uuid, instance, step, next_step, job_id)
-            if step.step_type == "approval":
+            if execution_primitive == "approval_task":
                 WorkflowExecutionService._create_approval_task(tenant_uuid, instance, step)
                 return _apply_machine(
                     WORKFLOW_INSTANCE_MACHINE,
@@ -1319,7 +2172,7 @@ class WorkflowExecutionService:
                     tenant_id=tenant_uuid,
                     metadata={"step_id": str(step.id), "job_id": str(job_id or "")},
                 )
-            if step.step_type == "decision":
+            if execution_primitive == "registered_condition":
                 next_step = WorkflowExecutionService._evaluate_decision(tenant_uuid, instance, step)
                 with transaction.atomic():
                     locked_instance = (
@@ -1369,7 +2222,7 @@ class WorkflowExecutionService:
     def _execute_action_step(
         tenant_id: uuid.UUID, instance: WorkflowInstance, step: WorkflowStep, job_id: uuid.UUID | None
     ) -> None:
-        key, schema_version = _handler_key_for_step(step)
+        key, schema_version = _handler_key_for_step(tenant_id, step)
         handler = _handler_from_registry(action_registry, key, schema_version)
         healthy, _ = _descriptor_health(handler)
         if not healthy:
@@ -1407,7 +2260,7 @@ class WorkflowExecutionService:
                 WorkflowStepExecution.objects.for_tenant(tenant_id).filter(
                     id=execution.id,
                     state="running",
-                ).update(
+                ).lifecycle_update(
                     state="failed",
                     completed_at=now,
                     duration_ms=0,
@@ -1431,7 +2284,11 @@ class WorkflowExecutionService:
                     tenant_id=tenant_id,
                     instance=instance,
                     step=step,
-                    attempt=1,
+                    attempt=int(
+                        WorkflowConfigurationService.value(
+                            tenant_id, "defaults.step_execution_attempt"
+                        )
+                    ),
                     operation_key=operation_key,
                     state="running",
                     handler_key=key,
@@ -1469,12 +2326,12 @@ class WorkflowExecutionService:
             WorkflowStepExecution.objects.for_tenant(tenant_id).filter(
                 id=execution.id,
                 state="running",
-            ).update(
+            ).lifecycle_update(
                 state="failed",
                 completed_at=completed_at,
                 duration_ms=elapsed_ms,
                 failure_code=str(result.error_code or "ACTION_FAILED")[:64],
-                failure_message=_safe_failure_message(result.message),
+                failure_message=_safe_failure_message(tenant_id, result.message),
                 provider_evidence=dict(result.evidence),
             )
             result.unwrap()
@@ -1496,11 +2353,11 @@ class WorkflowExecutionService:
             WorkflowInstance.objects.for_tenant(tenant_id).filter(
                 id=locked_instance.id,
                 state="running",
-            ).update(result_data=result_data)
+            ).lifecycle_update(result_data=result_data)
             WorkflowStepExecution.objects.for_tenant(tenant_id).filter(
                 id=execution.id,
                 state="running",
-            ).update(
+            ).lifecycle_update(
                 state="succeeded",
                 completed_at=completed_at,
                 duration_ms=elapsed_ms,
@@ -1525,7 +2382,7 @@ class WorkflowExecutionService:
             "step": step,
             "assignment_kind": assignment_kind,
             "assignment_key": f"{assignment_kind}:{assignee_key}",
-            "status": "pending",
+            "status": WorkflowConfigurationService.value(tenant_id, "defaults.task_status"),
             "due_date": due_date,
             "correlation_id": instance.correlation_id,
         }
@@ -1570,17 +2427,33 @@ class WorkflowExecutionService:
         condition = step.config["condition"]
         condition_key = condition.get("handler")
         handler = _handler_from_registry(condition_registry, str(condition_key), step.config.get("schema_version"))
-        if condition_key == "core.equals.v1":
-            evaluation_context = {
-                "left": _read_context_path(instance.context_data, str(condition["left_path"])),
-                "right": condition["right_value"],
-            }
-        elif condition_key == "core.truthy.v1":
-            evaluation_context = {
-                "value": _read_context_path(instance.context_data, str(condition["value_path"])),
-            }
-        else:
+        mapping = WorkflowConfigurationService.value(
+            tenant_id,
+            f"condition_input_mappings.{condition_key}",
+        )
+        if not isinstance(mapping, Mapping):
             evaluation_context = dict(instance.context_data)
+        else:
+            evaluation_context: dict[str, Any] = {}
+            for target, rule in mapping.items():
+                if not isinstance(rule, Mapping):
+                    raise OperationFailed(
+                        error_code="CONDITION_MAPPING_INVALID",
+                        message="The configured condition mapping is invalid.",
+                    )
+                field = str(rule.get("field", ""))
+                if rule.get("source") == "context_path":
+                    evaluation_context[str(target)] = _read_context_path(
+                        instance.context_data,
+                        str(condition[field]),
+                    )
+                elif rule.get("source") == "literal":
+                    evaluation_context[str(target)] = condition[field]
+                else:
+                    raise OperationFailed(
+                        error_code="CONDITION_MAPPING_INVALID",
+                        message="The configured condition mapping source is invalid.",
+                    )
         branch = bool(handler.evaluate(evaluation_context))
         target_key = step.config["true_step_key"] if branch else step.config["false_step_key"]
         try:
@@ -1665,7 +2538,10 @@ class WorkflowExecutionService:
             pending = WorkflowTask.objects.for_tenant(tenant_uuid).filter(
                 instance=instance, step=task.step, status="pending"
             )
-            if task.step.config.get("completion_rule", "any") == "all" and pending.exists():
+            completion_default = WorkflowConfigurationService.value(
+                tenant_uuid, "defaults.approval_completion_rule"
+            )
+            if task.step.config.get("completion_rule", completion_default) == "all" and pending.exists():
                 return instance
             next_step = WorkflowExecutionService._next_step(tenant_uuid, instance, task.step)
             if next_step is None or task.step.is_terminal:
@@ -1679,7 +2555,12 @@ class WorkflowExecutionService:
                 )
                 return WorkflowExecutionService._advance_or_complete(tenant_uuid, instance, task.step, None, None)
         elif task.status == "rejected":
-            behavior = task.step.config.get("rejection_behavior", "fail")
+            behavior = task.step.config.get(
+                "rejection_behavior",
+                WorkflowConfigurationService.value(
+                    tenant_uuid, "defaults.approval_rejection_behavior"
+                ),
+            )
             if behavior == "cancel":
                 return WorkflowExecutionService.cancel_instance(
                     tenant_uuid, instance.id, actor, f"{transition_key}:cancel"
@@ -1746,9 +2627,12 @@ class WorkflowExecutionService:
             WORKFLOW_INSTANCE_MACHINE,
             instance,
             "fail",
-            transition_key=_transition_key(transition_key),
+            transition_key=_transition_key(tenant_uuid, transition_key),
             tenant_id=tenant_uuid,
-            metadata={"failure_code": str(code)[:64], "failure_message": _safe_failure_message(message)},
+            metadata={
+                "failure_code": str(code)[:64],
+                "failure_message": _safe_failure_message(tenant_uuid, message),
+            },
         )
         _emit_event(
             tenant_uuid,
@@ -1938,8 +2822,10 @@ class WorkflowTaskService:
     ) -> WorkflowTask:
         if not isinstance(reason, str) or not reason.strip():
             raise ValidationError({"reason": ["A rejection reason is required."]})
-        if len(reason.strip()) > 2_000:
-            raise ValidationError({"reason": ["Must not exceed 2000 characters."]})
+        tenant_uuid = _as_uuid(tenant_id, "tenant_id")
+        maximum = int(WorkflowConfigurationService.value(tenant_uuid, "limits.reject_reason_max_length"))
+        if len(reason.strip()) > maximum:
+            raise ValidationError({"reason": [f"Must not exceed {maximum} characters."]})
         evidence = dict(meta_data)
         evidence["reason"] = reason.strip()
         return WorkflowTaskService._decide(tenant_id, task_id, actor, "reject", evidence, transition_key)
@@ -1954,8 +2840,12 @@ class WorkflowTaskService:
         transition_key: str,
     ) -> WorkflowTask:
         tenant_uuid = _as_uuid(tenant_id, "tenant_id")
-        key = _transition_key(transition_key)
-        clean_meta = validate_json_value(dict(meta_data), path="meta_data")
+        key = _transition_key(tenant_uuid, transition_key)
+        clean_meta = _validate_tenant_json(
+            tenant_uuid,
+            dict(meta_data),
+            path="meta_data",
+        )
         with transaction.atomic():
             task = WorkflowTaskService._get_task_row(tenant_uuid, task_id, lock=True)
             WorkflowTaskService._verify_assignment(tenant_uuid, task, actor, for_decision=True)
@@ -2006,7 +2896,9 @@ class WorkflowTaskService:
                     tenant_id=tenant_uuid,
                     metadata={"actor_id": "system"},
                 )
-                action = task.step.timeout_action or "fail"
+                action = task.step.timeout_action or WorkflowConfigurationService.value(
+                    tenant_uuid, "defaults.timeout_action"
+                )
                 if action == "cancel":
                     WorkflowExecutionService.cancel_instance(
                         tenant_uuid, task.instance_id, _SystemActor(), f"{key}:cancel"
@@ -2045,7 +2937,10 @@ class WorkflowTaskService:
                 task = WorkflowTaskService._get_task_row(tenant_uuid, task_id, lock=True)
                 if task.status != "pending":
                     continue
-                task.meta_data = {**task.meta_data, "cancellation_reason": _safe_failure_message(reason)}
+                task.meta_data = {
+                    **task.meta_data,
+                    "cancellation_reason": _safe_failure_message(tenant_uuid, reason),
+                }
                 task.save(update_fields=("meta_data", "updated_at"))
                 _apply_machine(
                     WORKFLOW_TASK_MACHINE,

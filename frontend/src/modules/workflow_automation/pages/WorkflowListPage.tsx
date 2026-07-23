@@ -11,17 +11,20 @@ import { ROUTES } from "../contracts";
 import { workflowService } from "../services/workflow-service";
 import { EmptyPanel, PageHeader, PageSkeleton, Pagination, StatusPill, WorkflowProblem } from "../components/WorkflowUI";
 import { newTransitionKey } from "../workflow-utils";
+import { useWorkflowConfiguration } from "../hooks/use-workflow-configuration";
 
 const selectClass = "rounded-md border border-input bg-background px-3 py-2 text-sm";
 // Lifecycle affordances are independently permission-gated for every row.
 // eslint-disable-next-line complexity
 export function WorkflowListPage() {
   const navigate = useNavigate(); const cache = useQueryClient();
+  const configuration = useWorkflowConfiguration();
   const [page, setPage] = useState(1); const [search, setSearch] = useState(""); const deferredSearch = useDeferredValue(search);
   const [status, setStatus] = useState<WorkflowStatus | "">(""); const [type, setType] = useState<WorkflowType | "">(""); const [ordering, setOrdering] = useState<WorkflowOrdering>("-updated_at");
   const [deleting, setDeleting] = useState<WorkflowListDTO | null>(null);
-  const filters = { page, page_size: 20, search: deferredSearch || undefined, status: status || undefined, workflow_type: type || undefined, ordering };
-  const query = useQuery({ queryKey: ["workflow-definitions", filters], queryFn: () => workflowService.workflows.list(filters) });
+  const pageSize = configuration.data?.document.limits.workflow_page_size;
+  const filters = { page, page_size: pageSize, search: deferredSearch || undefined, status: status || undefined, workflow_type: type || undefined, ordering };
+  const query = useQuery({ queryKey: ["workflow-definitions", filters], queryFn: () => workflowService.workflows.list(filters), enabled: Boolean(pageSize) });
   const refresh = (): void => { void cache.invalidateQueries({ queryKey: ["workflow-definitions"] }); };
   const publish = useMutation({ mutationFn: (id: string) => workflowService.workflows.publish(id, { transition_key: newTransitionKey("publish") }), onSuccess: refresh });
   const archive = useMutation({ mutationFn: (id: string) => workflowService.workflows.archive(id, { transition_key: newTransitionKey("archive") }), onSuccess: refresh });

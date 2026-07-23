@@ -8,7 +8,7 @@ import type { PaginatedResult, WorkflowListDTO } from "../../contracts";
 import { WorkflowApiError, workflowService } from "../../services/workflow-service";
 import { WorkflowListPage } from "../WorkflowListPage";
 
-const workflow: WorkflowListDTO = { id: "workflow-1", key: "purchase_approval", version: 2, name: "Purchase approval", description: "Govern purchasing", workflow_type: "approval", trigger_type: "manual", status: "published", step_count: 2, created_by_name: "Asha", published_at: "2026-07-22T00:00:00Z", created_at: "2026-07-21T00:00:00Z", updated_at: "2026-07-22T00:00:00Z", allowed_actions: ["view", "clone", "start"] };
+const workflow: WorkflowListDTO = { id: "workflow-1", key: "purchase_approval", version: 2, name: "Purchase approval", description: "Govern purchasing", workflow_type: "approval", trigger_type: "manual", trigger_config: {}, status: "published", step_count: 2, created_by_name: "Asha", published_at: "2026-07-22T00:00:00Z", created_at: "2026-07-21T00:00:00Z", updated_at: "2026-07-22T00:00:00Z", allowed_actions: ["view", "clone", "start"] };
 function result(items: readonly WorkflowListDTO[]): PaginatedResult<WorkflowListDTO> { return { items, correlationId: "corr-list", receivedAt: "2026-07-22T00:00:00Z", pagination: { count: items.length, page: 1, page_size: 20, total_pages: items.length ? 1 : 0, has_next: false, has_previous: false } }; }
 function renderPage() { const client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); return render(<QueryClientProvider client={client}><MemoryRouter><WorkflowListPage/></MemoryRouter></QueryClientProvider>); }
 

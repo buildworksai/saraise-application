@@ -14,11 +14,6 @@ from rest_framework import serializers
 
 from .models import Workflow, WorkflowInstance, WorkflowStep, WorkflowTask
 
-MAX_JSON_DEPTH = 12
-MAX_JSON_ITEMS = 2_000
-MAX_JSON_STRING = 32_768
-REJECT_REASON_MAX_LENGTH = 2_000
-
 _SAFE_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
 _FORBIDDEN_KEY = re.compile(
     r"(?:password|passwd|secret|credential|authorization|api[_-]?key|private[_-]?key|"
@@ -50,20 +45,27 @@ def validate_json_value(
     path: str = "value",
     depth: int = 0,
     counter: list[int] | None = None,
+    max_depth: int | None = None,
+    max_items: int | None = None,
+    max_string_length: int | None = None,
 ) -> Any:
-    """Validate a bounded recursive JSON value and reject secret-like input."""
+    """Validate JSON structure and reject secret-like or arbitrary-URL input.
 
-    if depth > MAX_JSON_DEPTH:
+    Tenant-specific bounds are supplied by the service layer.  HTTP DTO
+    serializers deliberately do not own business policy.
+    """
+
+    if max_depth is not None and depth > max_depth:
         raise serializers.ValidationError(f"{path} exceeds the maximum nesting depth.")
     count = counter if counter is not None else [0]
     count[0] += 1
-    if count[0] > MAX_JSON_ITEMS:
+    if max_items is not None and count[0] > max_items:
         raise serializers.ValidationError(f"{path} contains too many values.")
 
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, str):
-        if len(value) > MAX_JSON_STRING:
+        if max_string_length is not None and len(value) > max_string_length:
             raise serializers.ValidationError(f"{path} contains an oversized string.")
         if _URL_VALUE.match(value.strip()):
             raise serializers.ValidationError(f"{path} must not contain an arbitrary URL.")
@@ -80,11 +82,22 @@ def validate_json_value(
                 path=f"{path}.{key}",
                 depth=depth + 1,
                 counter=count,
+                max_depth=max_depth,
+                max_items=max_items,
+                max_string_length=max_string_length,
             )
         return output
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return [
-            validate_json_value(item, path=f"{path}[{index}]", depth=depth + 1, counter=count)
+            validate_json_value(
+                item,
+                path=f"{path}[{index}]",
+                depth=depth + 1,
+                counter=count,
+                max_depth=max_depth,
+                max_items=max_items,
+                max_string_length=max_string_length,
+            )
             for index, item in enumerate(value)
         ]
     raise serializers.ValidationError(f"{path} contains a non-JSON value.")
@@ -112,25 +125,40 @@ def _require_exact_keys(config: Mapping[str, Any], *, required: set[str], option
         raise serializers.ValidationError(errors)
 
 
-def _positive_int(value: Any, field: str, *, maximum: int = 31_536_000) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0 or value > maximum:
-        raise serializers.ValidationError({field: [f"Must be between 1 and {maximum}."]})
+def _positive_int(value: Any, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise serializers.ValidationError({field: ["Must be a positive integer."]})
     return value
 
 
-def validate_step_config(step_type: str, config: Any) -> dict[str, Any]:
+def validate_step_config(
+    step_type: str,
+    config: Any,
+    *,
+    policy: Mapping[str, Any],
+) -> dict[str, Any]:
     """Apply the discriminated configuration contract for a workflow step."""
 
     if not isinstance(config, Mapping):
         raise serializers.ValidationError("Step config must be an object.")
-    clean = validate_json_value(dict(config), path="config")
+    limits = policy["limits"]
+    clean = validate_json_value(
+        dict(config),
+        path="config",
+        max_depth=int(limits["json_max_depth"]),
+        max_items=int(limits["json_max_items"]),
+        max_string_length=int(limits["json_max_string_length"]),
+    )
+    schema = policy["step_schemas"].get(step_type)
+    if not isinstance(schema, Mapping):
+        raise serializers.ValidationError("Unsupported step type.")
+    _require_exact_keys(
+        clean,
+        required=set(schema.get("required", [])),
+        optional=set(schema.get("optional", [])),
+    )
 
     if step_type == "action":
-        _require_exact_keys(
-            clean,
-            required={"handler", "schema_version", "input_mapping"},
-            optional={"configuration"},
-        )
         if not isinstance(clean["handler"], str) or not _SAFE_KEY.fullmatch(clean["handler"]):
             raise serializers.ValidationError({"handler": ["Use a registered handler key."]})
         if not isinstance(clean["schema_version"], str) or not clean["schema_version"].strip():
@@ -140,44 +168,34 @@ def validate_step_config(step_type: str, config: Any) -> dict[str, Any]:
         if "configuration" in clean and not isinstance(clean["configuration"], dict):
             raise serializers.ValidationError({"configuration": ["Must be an object."]})
     elif step_type == "approval":
-        _require_exact_keys(
-            clean,
-            required={"assignment_kind", "assignee_id", "rejection_behavior"},
-            optional={"due_in_seconds", "reject_step_key", "completion_rule"},
-        )
         if clean["assignment_kind"] not in {"user", "role"}:
             raise serializers.ValidationError({"assignment_kind": ["Must be user or role."]})
         if not isinstance(clean["assignee_id"], (str, int)) or not str(clean["assignee_id"]).strip():
             raise serializers.ValidationError({"assignee_id": ["Must identify a selected assignee."]})
         if "due_in_seconds" in clean:
-            _positive_int(clean["due_in_seconds"], "due_in_seconds")
-        if clean["rejection_behavior"] not in {"fail", "goto", "cancel"}:
-            raise serializers.ValidationError({"rejection_behavior": ["Must be fail, goto, or cancel."]})
+            due = _positive_int(clean["due_in_seconds"], "due_in_seconds")
+            if due > int(policy["limits"]["duration_max_seconds"]):
+                raise serializers.ValidationError({"due_in_seconds": ["Exceeds the tenant duration limit."]})
+        if clean["rejection_behavior"] not in policy["allowed_values"]["approval_rejection_behaviors"]:
+            raise serializers.ValidationError({"rejection_behavior": ["Not enabled for this tenant."]})
         if clean["rejection_behavior"] == "goto" and not clean.get("reject_step_key"):
             raise serializers.ValidationError({"reject_step_key": ["Required when rejection_behavior is goto."]})
-        if clean.get("completion_rule", "any") not in {"any", "all"}:
-            raise serializers.ValidationError({"completion_rule": ["Must be any or all."]})
+        completion_rule = clean.get("completion_rule", policy["defaults"]["approval_completion_rule"])
+        if completion_rule not in policy["allowed_values"]["approval_completion_rules"]:
+            raise serializers.ValidationError({"completion_rule": ["Not enabled for this tenant."]})
     elif step_type == "notification":
-        _require_exact_keys(clean, required={"channel", "recipient_mapping", "template_key"}, optional=set())
-        if clean["channel"] not in {"in_app", "email"}:
-            raise serializers.ValidationError({"channel": ["Must be in_app or email."]})
+        if clean["channel"] not in policy["allowed_values"]["notification_channels"]:
+            raise serializers.ValidationError({"channel": ["Not enabled for this tenant."]})
         if not isinstance(clean["recipient_mapping"], dict) or not clean["recipient_mapping"]:
             raise serializers.ValidationError({"recipient_mapping": ["Must be a non-empty object."]})
         if not isinstance(clean["template_key"], str) or not _SAFE_KEY.fullmatch(clean["template_key"]):
             raise serializers.ValidationError({"template_key": ["Use a registered notification template key."]})
     elif step_type == "decision":
-        _require_exact_keys(
-            clean,
-            required={"condition", "true_step_key", "false_step_key"},
-            optional={"schema_version"},
-        )
         if not isinstance(clean["condition"], dict) or not isinstance(clean["condition"].get("handler"), str):
             raise serializers.ValidationError({"condition": ["Must be a registered condition object."]})
         for key in ("true_step_key", "false_step_key"):
             if not isinstance(clean[key], str) or not _SAFE_KEY.fullmatch(clean[key]):
                 raise serializers.ValidationError({key: ["Must reference a valid step key."]})
-    else:
-        raise serializers.ValidationError("Unsupported step type.")
     return clean
 
 
@@ -187,10 +205,8 @@ class WorkflowStepWriteSerializer(StrictSerializer):
     step_type = serializers.ChoiceField(choices=("action", "approval", "notification", "decision"))
     order = serializers.IntegerField(min_value=1)
     config = JsonObjectField()
-    timeout_seconds = serializers.IntegerField(min_value=1, max_value=31_536_000, allow_null=True, required=False)
-    timeout_action = serializers.ChoiceField(
-        choices=("fail", "notify", "escalate", "cancel"), allow_null=True, required=False
-    )
+    timeout_seconds = serializers.IntegerField(min_value=1, allow_null=True, required=False)
+    timeout_action = serializers.CharField(allow_null=True, required=False)
     is_terminal = serializers.BooleanField(default=False, required=False)
     next_step_keys = serializers.ListField(
         child=serializers.RegexField(_SAFE_KEY, max_length=64),
@@ -207,7 +223,6 @@ class WorkflowStepWriteSerializer(StrictSerializer):
             raise serializers.ValidationError({"timeout_action": ["Requires timeout_seconds."]})
         if timeout_seconds is not None and timeout_action is None:
             raise serializers.ValidationError({"timeout_action": ["Required when timeout_seconds is set."]})
-        attrs["config"] = validate_step_config(attrs["step_type"], attrs["config"])
         return attrs
 
 
@@ -249,14 +264,13 @@ class WorkflowListSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_allowed_actions(obj: Workflow) -> list[str]:
-        actions = ["view"]
-        if obj.status == "draft":
-            actions.extend(("edit", "publish", "delete"))
-        elif obj.status == "published":
-            actions.extend(("clone", "archive", "start"))
-        elif obj.status == "archived":
-            actions.append("clone")
-        return actions
+        from .services import WorkflowConfigurationService
+
+        actions = WorkflowConfigurationService.value(
+            obj.tenant_id,
+            f"allowed_actions.workflow.{obj.status}",
+        )
+        return [str(action) for action in actions]
 
     class Meta:
         model = Workflow
@@ -336,18 +350,26 @@ class WorkflowDetailSerializer(WorkflowListSerializer):
     @staticmethod
     def get_handler_health(obj: Workflow) -> list[dict[str, Any]]:
         from .extensions import action_registry, condition_registry
+        from .services import WorkflowConfigurationService
 
         results: list[dict[str, Any]] = []
+        notification_handlers = WorkflowConfigurationService.value(
+            obj.tenant_id,
+            "notification_handlers",
+        )
         for step in WorkflowStep.objects.for_tenant(obj.tenant_id).filter(workflow=obj):
             key = ""
             registry = action_registry
             if step.step_type == "action":
                 key = str(step.config.get("handler", ""))
             elif step.step_type == "notification":
-                key = {
-                    "in_app": "core.in_app_notification.v1",
-                    "email": "core.email_notification.v1",
-                }.get(str(step.config.get("channel", "")), "")
+                channel = str(step.config.get("channel", ""))
+                configured = (
+                    notification_handlers.get(channel)
+                    if isinstance(notification_handlers, Mapping)
+                    else None
+                )
+                key = str(configured.get("handler", "")) if isinstance(configured, Mapping) else ""
             elif step.step_type == "decision":
                 condition = step.config.get("condition", {})
                 key = str(condition.get("handler", "")) if isinstance(condition, Mapping) else ""
@@ -388,7 +410,7 @@ class WorkflowDefinitionShapeSerializer(StrictSerializer):
     workflow_type = serializers.ChoiceField(
         choices=("approval", "state_machine", "sequential", "parallel", "conditional")
     )
-    trigger_type = serializers.ChoiceField(choices=("manual", "event", "scheduled"), default="manual")
+    trigger_type = serializers.CharField(required=False)
     trigger_config = JsonObjectField(required=False, default=dict)
     required_context_schema = JsonObjectField(required=False, default=dict)
     steps = WorkflowStepWriteSerializer(many=True, allow_empty=False)
@@ -416,7 +438,7 @@ class WorkflowDefinitionValidationSerializer(WorkflowDefinitionShapeSerializer):
 
 
 class WorkflowPublishSerializer(StrictSerializer):
-    transition_key = serializers.CharField(max_length=255, trim_whitespace=True, allow_blank=False)
+    transition_key = serializers.CharField(trim_whitespace=True, allow_blank=False)
 
 
 class WorkflowCloneSerializer(StrictSerializer):
@@ -441,7 +463,15 @@ class WorkflowTaskSummarySerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_allowed_actions(obj: WorkflowTask) -> list[str]:
-        return ["view", "complete", "reject"] if obj.status == "pending" else ["view"]
+        from .services import WorkflowConfigurationService
+
+        return [
+            str(action)
+            for action in WorkflowConfigurationService.value(
+                obj.tenant_id,
+                f"allowed_actions.task.{obj.status}",
+            )
+        ]
 
     class Meta:
         model = WorkflowTask
@@ -488,7 +518,15 @@ class WorkflowInstanceListSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_allowed_actions(obj: WorkflowInstance) -> list[str]:
-        return ["view"] if obj.state in {"completed", "failed", "cancelled"} else ["view", "cancel"]
+        from .services import WorkflowConfigurationService
+
+        return [
+            str(action)
+            for action in WorkflowConfigurationService.value(
+                obj.tenant_id,
+                f"allowed_actions.instance.{obj.state}",
+            )
+        ]
 
     class Meta:
         model = WorkflowInstance
@@ -522,6 +560,20 @@ class WorkflowInstanceDetailSerializer(WorkflowInstanceListSerializer):
     tasks = WorkflowTaskSummarySerializer(many=True, read_only=True)
     current_step = WorkflowStepReadSerializer(read_only=True)
     transition_history = serializers.SerializerMethodField()
+    context_data = serializers.SerializerMethodField()
+    result_data = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_context_data(obj: WorkflowInstance) -> dict[str, Any]:
+        from .services import WorkflowExecutionService
+
+        return WorkflowExecutionService.public_projection(obj)[0]
+
+    @staticmethod
+    def get_result_data(obj: WorkflowInstance) -> dict[str, Any]:
+        from .services import WorkflowExecutionService
+
+        return WorkflowExecutionService.public_projection(obj)[1]
 
     @staticmethod
     def get_transition_history(obj: WorkflowInstance) -> list[dict[str, Any]]:
@@ -539,8 +591,6 @@ class WorkflowInstanceDetailSerializer(WorkflowInstanceListSerializer):
             "context_data",
             "result_data",
             "transition_history",
-            "async_job_id",
-            "active_step_keys",
             "tasks",
         )
         read_only_fields = fields
@@ -552,12 +602,12 @@ class WorkflowInstanceStartSerializer(StrictSerializer):
     idempotency_key = serializers.CharField(max_length=255, trim_whitespace=True, allow_blank=False)
     entity_type = serializers.RegexField(r"^[A-Za-z][A-Za-z0-9_.-]{0,99}$", required=False, allow_blank=True)
     entity_id = serializers.UUIDField(required=False, allow_null=True)
-    priority = serializers.IntegerField(min_value=1, max_value=9, default=5)
+    priority = serializers.IntegerField(required=False)
 
 
 class WorkflowInstanceCancelSerializer(StrictSerializer):
-    transition_key = serializers.CharField(max_length=255, trim_whitespace=True, allow_blank=False)
-    reason = serializers.CharField(max_length=500, trim_whitespace=True, allow_blank=False, required=False)
+    transition_key = serializers.CharField(trim_whitespace=True, allow_blank=False)
+    reason = serializers.CharField(trim_whitespace=True, allow_blank=False, required=False)
 
 
 class WorkflowTaskListSerializer(serializers.ModelSerializer):
@@ -587,7 +637,15 @@ class WorkflowTaskListSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_allowed_actions(obj: WorkflowTask) -> list[str]:
-        return ["view", "complete", "reject"] if obj.status == "pending" else ["view"]
+        from .services import WorkflowConfigurationService
+
+        return [
+            str(action)
+            for action in WorkflowConfigurationService.value(
+                obj.tenant_id,
+                f"allowed_actions.task.{obj.status}",
+            )
+        ]
 
     class Meta:
         model = WorkflowTask
@@ -600,7 +658,6 @@ class WorkflowTaskListSerializer(serializers.ModelSerializer):
             "step_id",
             "step_name",
             "assignment_kind",
-            "assignment_key",
             "assignment_label",
             "subject",
             "status",
@@ -664,15 +721,11 @@ class WorkflowTaskDetailSerializer(WorkflowTaskListSerializer):
 
 class WorkflowTaskCompleteSerializer(StrictSerializer):
     meta_data = JsonObjectField(required=False, default=dict)
-    transition_key = serializers.CharField(max_length=255, trim_whitespace=True, allow_blank=False)
+    transition_key = serializers.CharField(trim_whitespace=True, allow_blank=False)
 
 
 class WorkflowTaskRejectSerializer(WorkflowTaskCompleteSerializer):
-    reason = serializers.CharField(
-        max_length=REJECT_REASON_MAX_LENGTH,
-        trim_whitespace=True,
-        allow_blank=False,
-    )
+    reason = serializers.CharField(trim_whitespace=True, allow_blank=False)
 
 
 class CatalogDescriptorSerializer(StrictSerializer):
@@ -700,6 +753,37 @@ class AssigneeCatalogSerializer(StrictSerializer):
     kind = serializers.ChoiceField(choices=("user", "role"), read_only=True)
     display_name = serializers.CharField(read_only=True)
     availability = serializers.ChoiceField(choices=("available", "locked"), read_only=True)
+
+
+class WorkflowConfigurationWriteSerializer(StrictSerializer):
+    environment = serializers.ChoiceField(
+        choices=("development", "test", "staging", "production"),
+        default="production",
+    )
+    expected_version = serializers.IntegerField(min_value=1)
+    change_reason = serializers.CharField(max_length=255, trim_whitespace=True, allow_blank=False)
+    document = JsonObjectField()
+
+
+class WorkflowConfigurationPreviewSerializer(StrictSerializer):
+    environment = serializers.ChoiceField(
+        choices=("development", "test", "staging", "production"),
+        default="production",
+    )
+    document = JsonObjectField()
+
+
+class WorkflowConfigurationRollbackSerializer(StrictSerializer):
+    environment = serializers.ChoiceField(
+        choices=("development", "test", "staging", "production"),
+        default="production",
+    )
+    expected_version = serializers.IntegerField(min_value=1)
+    target_version = serializers.IntegerField(min_value=1)
+
+
+class WorkflowConfigurationImportSerializer(WorkflowConfigurationWriteSerializer):
+    pass
 
 
 # Compatibility aliases retained for integrations during the v1 sunset window.

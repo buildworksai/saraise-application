@@ -6,7 +6,7 @@ import { WorkflowApiError, workflowService } from "./workflow-service";
 
 vi.mock("@/services/api-client", () => ({ ApiError: class ApiError extends Error { constructor(message: string, readonly status: number, readonly details?: unknown, readonly code?: string, readonly correlationId?: string) { super(message); } }, apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() } }));
 
-const workflow: WorkflowListDTO = { id: "workflow-1", key: "purchase_approval", version: 2, name: "Purchase approval", description: "Govern purchasing", workflow_type: "approval", trigger_type: "manual", status: "published", step_count: 2, created_by_name: "Asha", published_at: "2026-07-22T00:00:00Z", created_at: "2026-07-21T00:00:00Z", updated_at: "2026-07-22T00:00:00Z", allowed_actions: ["view", "clone", "start"] };
+const workflow: WorkflowListDTO = { id: "workflow-1", key: "purchase_approval", version: 2, name: "Purchase approval", description: "Govern purchasing", workflow_type: "approval", trigger_type: "manual", trigger_config: {}, status: "published", step_count: 2, created_by_name: "Asha", published_at: "2026-07-22T00:00:00Z", created_at: "2026-07-21T00:00:00Z", updated_at: "2026-07-22T00:00:00Z", allowed_actions: ["view", "clone", "start"] };
 const envelope: GovernedEnvelope<readonly WorkflowListDTO[]> = { data: [workflow], meta: { correlation_id: "corr-list", timestamp: "2026-07-22T00:00:00Z", pagination: { count: 1, page: 1, page_size: 20, total_pages: 1, has_next: false, has_previous: false } } };
 
 describe("workflow service governed contract", () => {

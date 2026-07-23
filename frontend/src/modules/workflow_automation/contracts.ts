@@ -82,6 +82,7 @@ export interface WorkflowListDTO {
   readonly description: string;
   readonly workflow_type: WorkflowType;
   readonly trigger_type: TriggerType;
+  readonly trigger_config: JsonObject;
   readonly status: WorkflowStatus;
   readonly step_count: number;
   readonly created_by_name: string | null;
@@ -131,6 +132,7 @@ export interface WorkflowCreateDTO {
   readonly description?: string;
   readonly workflow_type: WorkflowType;
   readonly trigger_type: TriggerType;
+  readonly trigger_config: JsonObject;
   readonly required_context_schema?: JsonObject;
   readonly steps: readonly WorkflowStepWriteDTO[];
 }
@@ -242,6 +244,135 @@ export interface StableApiErrorBody {
   readonly error: { readonly code: string; readonly message: string; readonly detail: { readonly field_errors?: readonly ApiFieldError[]; readonly retryable?: boolean; }; readonly correlation_id: string; };
 }
 
+export interface WorkflowConfigurationDocument {
+  readonly defaults: {
+    readonly workflow_version: number;
+    readonly workflow_type: WorkflowType;
+    readonly trigger_type: TriggerType;
+    readonly definition_status: WorkflowStatus;
+    readonly execution_priority: number;
+    readonly step_execution_attempt: number;
+    readonly approval_assignment_kind: AssignmentKind;
+    readonly approval_due_seconds: number;
+    readonly approval_rejection_behavior: "fail" | "goto" | "cancel";
+    readonly approval_completion_rule: "any" | "all";
+    readonly timeout_action: TimeoutAction;
+    readonly cancellation_reason: string;
+    readonly task_status: TaskStatus;
+    readonly task_ordering: TaskOrdering;
+    readonly task_scope: "mine" | "all";
+  };
+  readonly limits: {
+    readonly execution_priority_min: number;
+    readonly execution_priority_max: number;
+    readonly json_max_depth: number;
+    readonly json_max_items: number;
+    readonly json_max_string_length: number;
+    readonly reject_reason_max_length: number;
+    readonly duration_max_seconds: number;
+    readonly transition_key_max_length: number;
+    readonly failure_message_max_length: number;
+    readonly cancellation_reason_max_length: number;
+    readonly catalog_default_limit: number;
+    readonly catalog_max_limit: number;
+    readonly catalog_search_max_length: number;
+    readonly assignee_result_limit: number;
+    readonly email_template_key_max_length: number;
+    readonly email_recipient_max_length: number;
+    readonly generated_step_key_max_length: number;
+    readonly workflow_page_size: number;
+    readonly execution_step_multiplier: number;
+  };
+  readonly allowed_values: {
+    readonly workflow_types: readonly WorkflowType[];
+    readonly trigger_types: readonly TriggerType[];
+    readonly definition_statuses: readonly WorkflowStatus[];
+    readonly step_types: readonly StepType[];
+    readonly timeout_actions: readonly TimeoutAction[];
+    readonly approval_rejection_behaviors: readonly ("fail" | "goto" | "cancel")[];
+    readonly approval_completion_rules: readonly ("any" | "all")[];
+    readonly notification_channels: readonly ("in_app" | "email")[];
+    readonly catalog_orderings: readonly ("key" | "display_name")[];
+  };
+  readonly trigger_schemas: JsonObject;
+  readonly step_schemas: JsonObject;
+  readonly notification_handlers: JsonObject;
+  readonly step_handlers: JsonObject;
+  readonly condition_input_mappings: JsonObject;
+  readonly lifecycle: JsonObject;
+  readonly allowed_actions: JsonObject;
+  readonly action_quota_costs: JsonObject;
+  readonly operational: {
+    readonly api_quota_cost: number;
+    readonly v1_sunset: string;
+    readonly outbox_stale_seconds: number;
+    readonly health_staleness_seconds: number;
+    readonly email_timeout_seconds: number;
+    readonly email_retry_attempts: number;
+    readonly email_retry_base_ms: number;
+    readonly email_circuit_failure_threshold: number;
+    readonly email_circuit_reset_seconds: number;
+    readonly execution_poll_interval_ms: number;
+    readonly execution_detail_poll_interval_ms: number;
+  };
+  readonly ui: {
+    readonly sidebar_orders: {
+      readonly workflows: number;
+      readonly instances: number;
+      readonly tasks: number;
+      readonly configuration: number;
+    };
+    readonly duration_display_threshold_ms: number;
+    readonly due_time_unit_seconds: number;
+    readonly minimum_due_time_units: number;
+    readonly reject_reason_max_length: number;
+  };
+  readonly feature_flags: Readonly<Record<string, {
+    readonly enabled: boolean;
+    readonly roles: readonly string[];
+    readonly cohorts: readonly string[];
+  }>>;
+}
+
+export interface WorkflowConfigurationDTO {
+  readonly id: UUID;
+  readonly tenant_id: UUID;
+  readonly environment: "development" | "test" | "staging" | "production";
+  readonly version: number;
+  readonly document: WorkflowConfigurationDocument;
+  readonly updated_by: UUID | null;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+}
+export interface WorkflowConfigurationRevisionDTO {
+  readonly id: UUID;
+  readonly version: number;
+  readonly previous_document: WorkflowConfigurationDocument | JsonObject;
+  readonly document: WorkflowConfigurationDocument;
+  readonly actor_id: UUID | null;
+  readonly correlation_id: string;
+  readonly change_reason: string;
+  readonly created_at: ISODateTime;
+}
+export interface WorkflowConfigurationPreviewDTO {
+  readonly valid: boolean;
+  readonly current_version: number;
+  readonly changed_sections: readonly string[];
+  readonly restart_required: boolean;
+}
+export interface WorkflowConfigurationWriteDTO {
+  readonly environment: WorkflowConfigurationDTO["environment"];
+  readonly expected_version: number;
+  readonly change_reason: string;
+  readonly document: WorkflowConfigurationDocument;
+}
+export interface WorkflowConfigurationExportDTO {
+  readonly schema: "saraise.workflow-automation.configuration/v1";
+  readonly environment: WorkflowConfigurationDTO["environment"];
+  readonly version: number;
+  readonly document: WorkflowConfigurationDocument;
+}
+
 export interface PageFilters { readonly page?: number; readonly page_size?: number; readonly search?: string; }
 export type WorkflowOrdering = "name" | "-name" | "version" | "-version" | "created_at" | "-created_at" | "updated_at" | "-updated_at";
 export interface WorkflowFilters extends PageFilters { readonly status?: WorkflowStatus; readonly workflow_type?: WorkflowType; readonly trigger_type?: TriggerType; readonly key?: string; readonly created_by?: UUID; readonly updated_after?: ISODateTime; readonly ordering?: WorkflowOrdering; }
@@ -291,10 +422,20 @@ export const ENDPOINTS = {
   INSTANCES: { LIST: `${MODULE_API_PREFIX}/instances/`, START: `${MODULE_API_PREFIX}/instances/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/instances/${id}/` as const, CANCEL: (id: UUID) => `${MODULE_API_PREFIX}/instances/${id}/cancel/` as const },
   TASKS: { LIST: `${MODULE_API_PREFIX}/tasks/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/tasks/${id}/` as const, COMPLETE: (id: UUID) => `${MODULE_API_PREFIX}/tasks/${id}/complete/` as const, REJECT: (id: UUID) => `${MODULE_API_PREFIX}/tasks/${id}/reject/` as const },
   CATALOG: { ACTIONS: `${MODULE_API_PREFIX}/catalog/actions/`, CONDITIONS: `${MODULE_API_PREFIX}/catalog/conditions/`, SUBJECTS: `${MODULE_API_PREFIX}/catalog/subjects/`, ASSIGNEES: `${MODULE_API_PREFIX}/catalog/assignees/`, LOOKUP: (key: string) => `${MODULE_API_PREFIX}/catalog/lookups/${encodeURIComponent(key)}/` as const },
+  CONFIGURATION: {
+    GET: `${MODULE_API_PREFIX}/configuration/`,
+    UPDATE: `${MODULE_API_PREFIX}/configuration/current/`,
+    PREVIEW: `${MODULE_API_PREFIX}/configuration/preview/`,
+    HISTORY: `${MODULE_API_PREFIX}/configuration/history/`,
+    ROLLBACK: `${MODULE_API_PREFIX}/configuration/rollback/`,
+    IMPORT: `${MODULE_API_PREFIX}/configuration/import/`,
+    EXPORT: `${MODULE_API_PREFIX}/configuration/export/`,
+  },
 } as const;
 
 export const ROUTES = {
   WORKFLOWS: "/workflow-automation/workflows", WORKFLOW_CREATE: "/workflow-automation/workflows/new", WORKFLOW_DETAIL: (id: string) => `/workflow-automation/workflows/${id}` as const, WORKFLOW_EDIT: (id: string) => `/workflow-automation/workflows/${id}/edit` as const,
   INSTANCES: "/workflow-automation/instances", INSTANCE_DETAIL: (id: string) => `/workflow-automation/instances/${id}` as const,
   TASKS: "/workflow-automation/tasks", TASK_DETAIL: (id: string) => `/workflow-automation/tasks/${id}` as const,
+  CONFIGURATION: "/workflow-automation/configuration",
 } as const;

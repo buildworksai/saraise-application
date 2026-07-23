@@ -360,23 +360,6 @@ const CreateComplianceRiskPage = lazy(() =>
   }))
 );
 
-// Workflow Automation Components
-const WorkflowListPage = lazy(() =>
-  import("./modules/workflow_automation/pages/WorkflowListPage").then((m) => ({
-    default: m.WorkflowListPage,
-  }))
-);
-const WorkflowCreatePage = lazy(() =>
-  import("./modules/workflow_automation/pages/WorkflowCreatePage").then((m) => ({
-    default: m.WorkflowCreatePage,
-  }))
-);
-const TaskInboxPage = lazy(() =>
-  import("./modules/workflow_automation/pages/TaskInboxPage").then((m) => ({
-    default: m.TaskInboxPage,
-  }))
-);
-
 // Control Plane dashboards, settings, and feature flags are intentionally absent.
 // Self-hosted license management remains as a runtime-plane exception.
 
@@ -586,38 +569,6 @@ function AnimatedRoutes() {
               }
             />
           )}
-
-          {/* Workflow Automation Routes */}
-          <Route
-            path="/workflow-automation/workflows"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <WorkflowListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/workflow-automation/workflows/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <WorkflowCreatePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/workflow-automation/tasks"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <TaskInboxPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
 
           {/* Security & Access Control routes */}
           <Route

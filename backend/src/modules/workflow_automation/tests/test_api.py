@@ -12,7 +12,7 @@ from src.core.access.decision import AccessDecision, AccessReasonCode
 from src.core.async_jobs.services import execute
 from src.core.testing.factories import TenantUserFactory
 
-from ..models import Workflow
+from ..models import Workflow, WorkflowInstance
 from ..services import WorkflowDefinitionService, WorkflowExecutionService
 from .test_services import action_payload, approval_payload
 
@@ -100,7 +100,7 @@ def test_workflow_endpoints_envelope_filters_etag_and_lifecycle(tenant_a_client)
         {"transition_key": "api-publish"},
         format="json",
     )
-    assert published.status_code == status.HTTP_200_OK
+    assert published.status_code == status.HTTP_200_OK, published.json()
     assert data(published)["status"] == "published"
 
     clone = tenant_a_client.post(f"/api/v2/workflow-automation/workflows/{created['id']}/clone/", {}, format="json")
@@ -152,7 +152,9 @@ def test_instance_and_task_endpoints(tenant_a, tenant_a_user, tenant_a_client) -
     )
     assert started.status_code == status.HTTP_202_ACCEPTED
     instance = data(started)
-    execute(instance["async_job_id"], tenant_a.id)
+    assert "async_job_id" not in instance
+    instance_evidence = WorkflowInstance.objects.for_tenant(tenant_a.id).get(id=instance["id"])
+    execute(instance_evidence.async_job_id, tenant_a.id)
 
     instances = tenant_a_client.get(
         f"/api/v2/workflow-automation/instances/?workflow_id={workflow.id}&state=waiting&ordering=-created_at"

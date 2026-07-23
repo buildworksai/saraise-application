@@ -13,6 +13,11 @@ import {
   type TaskFilters,
   type UUID,
   type WorkflowCloneDTO,
+  type WorkflowConfigurationDTO,
+  type WorkflowConfigurationExportDTO,
+  type WorkflowConfigurationPreviewDTO,
+  type WorkflowConfigurationRevisionDTO,
+  type WorkflowConfigurationWriteDTO,
   type WorkflowCreateDTO,
   type WorkflowDetailDTO,
   type WorkflowFilters,
@@ -111,5 +116,21 @@ export const workflowService = {
     subjects: () => data(() => apiClient.get<GovernedEnvelope<readonly SubjectResolverDescriptorDTO[]>>(ENDPOINTS.CATALOG.SUBJECTS)),
     assignees: (search = "") => data(() => apiClient.get<GovernedEnvelope<readonly LookupOptionDTO[]>>(withQuery(ENDPOINTS.CATALOG.ASSIGNEES, { search }))),
     lookup: (key: string, search = "") => data(() => apiClient.get<GovernedEnvelope<readonly LookupOptionDTO[]>>(withQuery(ENDPOINTS.CATALOG.LOOKUP(key), { search }))),
+  },
+  configuration: {
+    get: (environment: WorkflowConfigurationDTO["environment"] = "production") =>
+      data(() => apiClient.get<GovernedEnvelope<WorkflowConfigurationDTO>>(withQuery(ENDPOINTS.CONFIGURATION.GET, { environment }))),
+    update: (request: WorkflowConfigurationWriteDTO) =>
+      data(() => apiClient.put<GovernedEnvelope<WorkflowConfigurationDTO>>(ENDPOINTS.CONFIGURATION.UPDATE, request)),
+    preview: (request: Pick<WorkflowConfigurationWriteDTO, "environment" | "document">) =>
+      data(() => apiClient.post<GovernedEnvelope<WorkflowConfigurationPreviewDTO>>(ENDPOINTS.CONFIGURATION.PREVIEW, request)),
+    history: (environment: WorkflowConfigurationDTO["environment"] = "production") =>
+      data(() => apiClient.get<GovernedEnvelope<readonly WorkflowConfigurationRevisionDTO[]>>(withQuery(ENDPOINTS.CONFIGURATION.HISTORY, { environment }))),
+    rollback: (environment: WorkflowConfigurationDTO["environment"], expected_version: number, target_version: number) =>
+      data(() => apiClient.post<GovernedEnvelope<WorkflowConfigurationDTO>>(ENDPOINTS.CONFIGURATION.ROLLBACK, { environment, expected_version, target_version })),
+    importDocument: (request: WorkflowConfigurationWriteDTO) =>
+      data(() => apiClient.post<GovernedEnvelope<WorkflowConfigurationDTO>>(ENDPOINTS.CONFIGURATION.IMPORT, request)),
+    exportDocument: (environment: WorkflowConfigurationDTO["environment"] = "production") =>
+      data(() => apiClient.get<GovernedEnvelope<WorkflowConfigurationExportDTO>>(withQuery(ENDPOINTS.CONFIGURATION.EXPORT, { environment }))),
   },
 };
