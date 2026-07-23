@@ -17,18 +17,16 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO, Final, Protocol, runtime_checkable
+from typing import BinaryIO, Final, Mapping, Protocol, runtime_checkable
 
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import Storage, default_storage
 from django.utils import timezone
 
-logger = logging.getLogger("saraise.dms.storage")
+from src.core.observability import get_correlation_id
 
-DEFAULT_MAX_UPLOAD_BYTES: Final[int] = 100 * 1024 * 1024
-STREAM_CHUNK_BYTES: Final[int] = 64 * 1024
-INSPECTION_BYTES: Final[int] = 8192
+logger = logging.getLogger("saraise.dms.storage")
 
 
 class StorageError(RuntimeError):
@@ -125,8 +123,23 @@ def _uuid(value: object, field: str) -> uuid.UUID:
         raise ValueError(f"{field} must be a valid UUID") from exc
 
 
-def _validate_key(key: str) -> str:
-    if not isinstance(key, str) or not key or len(key) > 2000:
+def _policy_for_key(key: str | None = None) -> dict[str, object]:
+    from .services import DEFAULT_DMS_CONFIGURATION, DmsConfigurationService
+
+    if key and key.startswith("tenants/"):
+        parts = key.split("/", maxsplit=2)
+        try:
+            tenant_id = uuid.UUID(parts[1])
+        except (IndexError, ValueError):
+            tenant_id = None
+        if tenant_id is not None:
+            return DmsConfigurationService.runtime_values(tenant_id)
+    return DmsConfigurationService._copy(DEFAULT_DMS_CONFIGURATION)
+
+
+def _validate_key(key: str, policy: Mapping[str, object] | None = None) -> str:
+    effective = policy or _policy_for_key(key)
+    if not isinstance(key, str) or not key or len(key) > effective["storage_key_max_length"]:
         raise StorageValidationError("Storage key must be a non-empty bounded string.")
     path = PurePosixPath(key)
     raw_parts = key.split("/")
@@ -134,17 +147,6 @@ def _validate_key(key: str) -> str:
         raise StorageValidationError("Storage key is not a valid opaque relative key.")
     return key
 
-
-_EXECUTABLE_SIGNATURES: Final[tuple[bytes, ...]] = (
-    b"MZ",  # PE/DOS
-    b"\x7fELF",
-    b"\xca\xfe\xba\xbe",  # Java class / universal Mach-O
-    b"\xfe\xed\xfa\xce",
-    b"\xfe\xed\xfa\xcf",
-    b"\xce\xfa\xed\xfe",
-    b"\xcf\xfa\xed\xfe",
-    b"#!",
-)
 
 _OFFICE_MIME_BY_EXTENSION: Final[dict[str, str]] = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -157,23 +159,6 @@ _OFFICE_ARCHIVE_MARKER: Final[dict[str, bytes]] = {
     ".pptx": b"ppt/",
 }
 
-_ALLOWED_INSPECTED_MIME_TYPES: Final[frozenset[str]] = frozenset(
-    {
-        "application/pdf",
-        "application/json",
-        "application/xml",
-        "image/gif",
-        "image/jpeg",
-        "image/png",
-        "image/tiff",
-        "text/csv",
-        "text/markdown",
-        "text/plain",
-        "text/xml",
-        *_OFFICE_MIME_BY_EXTENSION.values(),
-    }
-)
-
 
 def _normalized_declared_mime(value: object | None) -> str | None:
     if value in (None, ""):
@@ -184,7 +169,7 @@ def _normalized_declared_mime(value: object | None) -> str | None:
     return normalized
 
 
-def _looks_like_text(sample: bytes) -> bool:
+def _looks_like_text(sample: bytes, policy: Mapping[str, object]) -> bool:
     if not sample or b"\x00" in sample:
         return False
     try:
@@ -192,15 +177,24 @@ def _looks_like_text(sample: bytes) -> bool:
     except UnicodeDecodeError:
         return False
     disallowed = sum(1 for character in decoded if ord(character) < 32 and character not in "\n\r\t\f\b")
-    return disallowed <= max(1, len(decoded) // 100)
+    ratio_limit = (len(decoded) * policy["max_control_character_ratio_percent"]) // 100
+    return disallowed <= max(policy["min_control_characters"], ratio_limit)
 
 
-def inspect_content(sample: bytes, *, filename: str = "", declared_mime_type: str | None = None) -> str:
+def inspect_content(
+    sample: bytes,
+    *,
+    filename: str = "",
+    declared_mime_type: str | None = None,
+    policy: Mapping[str, object] | None = None,
+) -> str:
     """Return a server-inspected MIME type or reject unsafe/ambiguous bytes."""
 
     if not isinstance(sample, bytes) or not sample:
         raise StorageValidationError("Empty files are not accepted.")
-    if any(sample.startswith(signature) for signature in _EXECUTABLE_SIGNATURES):
+    effective = policy or _policy_for_key()
+    signatures = tuple(bytes.fromhex(value) for value in effective["blocked_file_signatures"])
+    if any(sample.startswith(signature) for signature in signatures):
         raise StorageValidationError("Executable content is not accepted.")
 
     declared = _normalized_declared_mime(declared_mime_type)
@@ -220,7 +214,7 @@ def inspect_content(sample: bytes, *, filename: str = "", declared_mime_type: st
         marker = _OFFICE_ARCHIVE_MARKER.get(suffix, b"")
         if not observed or declared != observed or b"[Content_Types].xml" not in sample or marker not in sample:
             raise StorageValidationError("Ambiguous archive content is not accepted.")
-    elif _looks_like_text(sample):
+    elif _looks_like_text(sample, effective):
         declared_is_text = bool(
             declared and (declared.startswith("text/") or declared in {"application/json", "application/xml"})
         )
@@ -233,8 +227,9 @@ def inspect_content(sample: bytes, *, filename: str = "", declared_mime_type: st
     else:
         raise StorageValidationError("The server could not identify a permitted content type.")
 
-    configured = getattr(settings, "DMS_ALLOWED_MIME_TYPES", None)
-    allowed = frozenset(str(item).lower() for item in configured) if configured else _ALLOWED_INSPECTED_MIME_TYPES
+    allowed = frozenset(str(item).lower() for item in effective["permitted_mime_types"])
+    if not allowed:
+        raise StorageUnavailableError("Permitted MIME policy is unavailable.")
     if observed not in allowed:
         raise StorageValidationError("This content type is not permitted.")
     if declared and declared != observed:
@@ -255,11 +250,13 @@ class _ValidatedHashingUpload:
         declared_size: int | None,
         max_size_bytes: int,
         declared_mime_type: str | None,
+        policy: Mapping[str, object] | None = None,
     ) -> None:
         self._stream = stream
         self._declared_size = declared_size
         self._maximum = max_size_bytes
         self._declared_mime = declared_mime_type
+        self._policy = policy or _policy_for_key()
         self._hash = hashlib.sha256()
         self._size = 0
         self._consumed = False
@@ -279,7 +276,8 @@ class _ValidatedHashingUpload:
         if self._consumed:
             raise StorageValidationError("Upload streams may only be consumed once.")
         self._consumed = True
-        size = min(chunk_size or STREAM_CHUNK_BYTES, STREAM_CHUNK_BYTES)
+        configured_chunk = int(self._policy["storage_stream_chunk_size"])
+        size = min(chunk_size or configured_chunk, configured_chunk)
         inspection_buffer = bytearray()
         iterator = self._source_chunks(size)
         try:
@@ -290,15 +288,17 @@ class _ValidatedHashingUpload:
                 if not chunk:
                     continue
                 if self.mime_type is None:
-                    needed = INSPECTION_BYTES - len(inspection_buffer)
+                    inspection_bytes = int(self._policy["content_inspection_window_bytes"])
+                    needed = inspection_bytes - len(inspection_buffer)
                     inspection_buffer.extend(chunk[:needed])
                     remainder = chunk[needed:]
-                    if len(inspection_buffer) < INSPECTION_BYTES:
+                    if len(inspection_buffer) < inspection_bytes:
                         continue
                     self.mime_type = inspect_content(
                         bytes(inspection_buffer),
                         filename=self.name,
                         declared_mime_type=self._declared_mime,
+                        policy=self._policy,
                     )
                     yield self._measure(bytes(inspection_buffer))
                     inspection_buffer.clear()
@@ -315,6 +315,7 @@ class _ValidatedHashingUpload:
                 bytes(inspection_buffer),
                 filename=self.name,
                 declared_mime_type=self._declared_mime,
+                policy=self._policy,
             )
             yield self._measure(bytes(inspection_buffer))
         if self._size == 0:
@@ -361,13 +362,16 @@ class DjangoStorageAdapter:
         max_size_bytes: int | None = None,
         declared_mime_type: str | None = None,
     ) -> StoredObject:
-        key = _validate_key(key)
-        try:
-            configured_limit = int(getattr(settings, "DMS_MAX_UPLOAD_BYTES", DEFAULT_MAX_UPLOAD_BYTES))
-        except (TypeError, ValueError) as exc:
-            raise StorageUnavailableError("DMS upload limit is not configured correctly.") from exc
-        if configured_limit <= 0 or configured_limit > DEFAULT_MAX_UPLOAD_BYTES:
-            configured_limit = DEFAULT_MAX_UPLOAD_BYTES
+        policy = _policy_for_key(key)
+        key = _validate_key(key, policy)
+        configured_limit = int(policy["max_upload_bytes"])
+        if not key.startswith("tenants/") and hasattr(settings, "DMS_MAX_UPLOAD_BYTES"):
+            try:
+                configured_limit = int(settings.DMS_MAX_UPLOAD_BYTES)
+            except (TypeError, ValueError) as exc:
+                raise StorageUnavailableError("DMS upload limit is not configured correctly.") from exc
+            if configured_limit <= 0 or configured_limit > int(policy["max_upload_bytes"]):
+                raise StorageUnavailableError("DMS upload limit is outside the governed safe range.")
         if max_size_bytes is not None:
             if isinstance(max_size_bytes, bool) or max_size_bytes <= 0:
                 raise StorageValidationError("Upload quota must be a positive byte count.")
@@ -385,6 +389,7 @@ class DjangoStorageAdapter:
             declared_size=declared_size,
             max_size_bytes=configured_limit,
             declared_mime_type=declared_mime,
+            policy=policy,
         )
         saved_key: str | None = None
         try:
@@ -413,7 +418,12 @@ class DjangoStorageAdapter:
         except Exception:
             logger.error(
                 "DMS storage compensation failed",
-                extra={"event": "dms.storage.compensation", "outcome": "failed", "duration_ms": 0},
+                extra={
+                    "event": "dms.storage.compensation",
+                    "outcome": "failed",
+                    "duration_ms": 0,
+                    "correlation_id": get_correlation_id(),
+                },
                 exc_info=False,
             )
 
@@ -445,7 +455,8 @@ class DjangoStorageAdapter:
             if saved_key != key:
                 raise StorageIntegrityError("Storage backend changed the randomized health key.")
             with self._storage.open(saved_key, mode="rb") as handle:
-                valid = handle.read(STREAM_CHUNK_BYTES) == b"dms-storage-ready" and handle.read(1) == b""
+                chunk_size = int(_policy_for_key()["storage_stream_chunk_size"])
+                valid = handle.read(chunk_size) == b"dms-storage-ready" and handle.read(1) == b""
             if not valid:
                 raise StorageIntegrityError("Storage roundtrip integrity check failed.")
         except Exception:
@@ -477,7 +488,12 @@ class DjangoStorageAdapter:
         except Exception:
             logger.error(
                 "DMS storage health cleanup failed",
-                extra={"event": "dms.storage.health_cleanup", "outcome": "failed", "duration_ms": 0},
+                extra={
+                    "event": "dms.storage.health_cleanup",
+                    "outcome": "failed",
+                    "duration_ms": 0,
+                    "correlation_id": get_correlation_id(),
+                },
                 exc_info=False,
             )
             return False
@@ -497,7 +513,8 @@ def register_storage_backend(
     """Register a provider-qualified adapter without invalidating old versions."""
 
     normalized = name.strip().lower() if isinstance(name, str) else ""
-    if not normalized or len(normalized) > 64 or not normalized.replace("_", "").replace("-", "").isalnum():
+    maximum_length = int(_policy_for_key()["storage_backend_name_max_length"])
+    if not normalized or len(normalized) > maximum_length or not normalized.replace("_", "").replace("-", "").isalnum():
         raise ValueError("Storage backend name must be a bounded slug.")
     if not isinstance(adapter, DocumentStoragePort):
         raise TypeError("adapter must implement DocumentStoragePort")
@@ -533,7 +550,6 @@ def get_document_storage(name: str | None = None) -> DocumentStoragePort:
 
 
 __all__ = [
-    "DEFAULT_MAX_UPLOAD_BYTES",
     "DjangoStorageAdapter",
     "DocumentStoragePort",
     "StorageError",

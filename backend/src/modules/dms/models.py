@@ -27,12 +27,10 @@ from src.core.tenancy import TenantScopedModel, TimestampedModel
 
 from .managers import DmsManager, DocumentVersionManager, ImmutableVersionError
 
-MAX_FOLDER_DEPTH = 10
-MAX_DOCUMENT_TAGS = 50
-MAX_TAG_LENGTH = 64
-MAX_METADATA_BYTES = 32 * 1024
-MAX_SHARE_LIFETIME = timedelta(days=30)
-MAX_SHARE_ACCESS_COUNT = 10_000
+# Database constraints are deliberately broader safety ceilings.  Tenant
+# policy is resolved by DmsConfigurationService and may only narrow them.
+SAFE_MAX_FOLDER_DEPTH = 10
+SAFE_MAX_SHARE_ACCESS_COUNT = 10_000
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 
 
@@ -98,7 +96,7 @@ class Folder(MutableDmsModel):
         db_table = "dms_folders"
         constraints = [
             models.CheckConstraint(
-                condition=Q(depth__gte=0, depth__lte=MAX_FOLDER_DEPTH),
+                condition=Q(depth__gte=0, depth__lte=SAFE_MAX_FOLDER_DEPTH),
                 name="dms_folder_depth_range",
             ),
             models.CheckConstraint(
@@ -135,9 +133,12 @@ class Folder(MutableDmsModel):
         self.path = unicodedata.normalize("NFC", self.path).strip("/")
         if self.parent_id == self.id:
             raise ValidationError({"parent": "A folder cannot parent itself."}, code="self_parent")
-        if not 0 <= self.depth <= MAX_FOLDER_DEPTH:
+        from .services import DmsConfigurationService
+
+        maximum_depth = DmsConfigurationService.runtime_values(self.tenant_id)["max_folder_depth"]
+        if not 0 <= self.depth <= maximum_depth:
             raise ValidationError(
-                {"depth": f"Folder depth must be between 0 and {MAX_FOLDER_DEPTH}."},
+                {"depth": f"Folder depth must be between 0 and {maximum_depth}."},
                 code="folder_depth",
             )
         _relation_belongs_to_tenant(self, "parent")
@@ -207,15 +208,21 @@ class Document(MutableDmsModel):
 
         if not isinstance(self.tags, list):
             raise ValidationError({"tags": "Tags must be an array."}, code="invalid_tags")
-        if len(self.tags) > MAX_DOCUMENT_TAGS:
-            raise ValidationError({"tags": f"At most {MAX_DOCUMENT_TAGS} tags are allowed."}, code="too_many_tags")
+        from .services import DmsConfigurationService
+
+        policy = DmsConfigurationService.runtime_values(self.tenant_id)
+        if len(self.tags) > policy["max_document_tags"]:
+            raise ValidationError(
+                {"tags": f"At most {policy['max_document_tags']} tags are allowed."},
+                code="too_many_tags",
+            )
         normalized_tags: list[str] = []
         seen: set[str] = set()
         for tag in self.tags:
             normalized = _normalized_text(tag, field="tags")
-            if len(normalized) > MAX_TAG_LENGTH:
+            if len(normalized) > policy["max_tag_length"]:
                 raise ValidationError(
-                    {"tags": f"Each tag must be at most {MAX_TAG_LENGTH} characters."},
+                    {"tags": f"Each tag must be at most {policy['max_tag_length']} characters."},
                     code="tag_too_long",
                 )
             key = normalized.casefold()
@@ -239,9 +246,9 @@ class Document(MutableDmsModel):
                 {"metadata": "Metadata must contain JSON-compatible values only."},
                 code="invalid_metadata",
             ) from exc
-        if len(encoded_metadata) > MAX_METADATA_BYTES:
+        if len(encoded_metadata) > policy["max_metadata_bytes"]:
             raise ValidationError(
-                {"metadata": f"Metadata must not exceed {MAX_METADATA_BYTES} UTF-8 bytes."},
+                {"metadata": f"Metadata must not exceed {policy['max_metadata_bytes']} UTF-8 bytes."},
                 code="metadata_too_large",
             )
 
@@ -371,15 +378,6 @@ class PermissionLevel(models.TextChoices):
     MANAGE = "manage", "Manage"
 
 
-PERMISSION_IMPLICATIONS: dict[str, frozenset[str]] = {
-    PermissionLevel.READ: frozenset({PermissionLevel.READ}),
-    PermissionLevel.WRITE: frozenset({PermissionLevel.WRITE, PermissionLevel.READ}),
-    PermissionLevel.DELETE: frozenset({PermissionLevel.DELETE, PermissionLevel.WRITE, PermissionLevel.READ}),
-    PermissionLevel.SHARE: frozenset({PermissionLevel.SHARE, PermissionLevel.READ}),
-    PermissionLevel.MANAGE: frozenset(PermissionLevel.values),
-}
-
-
 class DocumentPermission(MutableDmsModel):
     """Auditable, soft-revocable document ACL grant."""
 
@@ -418,7 +416,10 @@ class DocumentPermission(MutableDmsModel):
 
     @property
     def implied_permissions(self) -> frozenset[str]:
-        return PERMISSION_IMPLICATIONS.get(self.permission, frozenset())
+        from .services import DmsConfigurationService
+
+        implications = DmsConfigurationService.runtime_values(self.tenant_id)["permission_implications"]
+        return frozenset(implications.get(self.permission, ()))
 
     def grants(self, permission: str) -> bool:
         return not self.is_deleted and permission in self.implied_permissions
@@ -466,7 +467,7 @@ class DocumentShare(MutableDmsModel):
         constraints = [
             models.CheckConstraint(
                 condition=Q(max_access_count__isnull=True)
-                | Q(max_access_count__gte=1, max_access_count__lte=MAX_SHARE_ACCESS_COUNT),
+                | Q(max_access_count__gte=1, max_access_count__lte=SAFE_MAX_SHARE_ACCESS_COUNT),
                 name="dms_share_max_access_range",
             ),
             models.CheckConstraint(
@@ -496,19 +497,22 @@ class DocumentShare(MutableDmsModel):
                 {"version": "A share must target a version of its document."},
                 code="share_version_mismatch",
             )
-        if len(self.token_prefix) != 12:
-            raise ValidationError({"token_prefix": "Token prefix must contain exactly 12 characters."})
+        from .services import DmsConfigurationService
+
+        policy = DmsConfigurationService.runtime_values(self.tenant_id)
+        if len(self.token_prefix) != policy["share_token_prefix_length"]:
+            raise ValidationError({"token_prefix": "Token prefix length does not match tenant policy."})
         baseline = self.created_at if self.created_at else timezone.now()
         if self.expires_at <= baseline:
             raise ValidationError({"expires_at": "Share expiry must be in the future."}, code="expired_share")
-        if self.expires_at > baseline + MAX_SHARE_LIFETIME:
+        if self.expires_at > baseline + timedelta(days=policy["max_share_lifetime_days"]):
             raise ValidationError(
-                {"expires_at": "Share expiry cannot be more than 30 days after creation."},
+                {"expires_at": "Share expiry exceeds the tenant policy."},
                 code="share_expiry_too_long",
             )
-        if self.max_access_count is not None and not 1 <= self.max_access_count <= MAX_SHARE_ACCESS_COUNT:
+        if self.max_access_count is not None and not 1 <= self.max_access_count <= policy["max_share_access_count"]:
             raise ValidationError(
-                {"max_access_count": f"Access limit must be between 1 and {MAX_SHARE_ACCESS_COUNT}."},
+                {"max_access_count": f"Access limit must be between 1 and {policy['max_share_access_count']}."},
                 code="share_access_limit",
             )
         if self.max_access_count is not None and self.access_count > self.max_access_count:
@@ -540,15 +544,112 @@ class DocumentShare(MutableDmsModel):
         return f"Share {self.id} for version {self.version_id}"
 
 
+class DmsConfiguration(TenantScopedModel, TimestampedModel):
+    """Current tenant/environment policy document."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    environment = models.CharField(max_length=64, default="default")
+    values = models.JSONField(default=dict)
+    version = models.PositiveIntegerField(default=1)
+    updated_by = models.UUIDField()
+
+    class Meta:
+        db_table = "dms_configurations"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "environment"],
+                name="dms_config_tenant_env_uq",
+            ),
+            models.CheckConstraint(condition=Q(version__gte=1), name="dms_config_version_gte1"),
+        ]
+        indexes = [models.Index(fields=["tenant_id", "environment"], name="dms_config_tenant_env_idx")]
+
+
+class ImmutableDmsEvidence(TenantScopedModel):
+    """Append-only base for configuration and authorization evidence."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = DocumentVersionManager()
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ImmutableVersionError("DMS evidence is append-only.", code="immutable_evidence")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ImmutableVersionError("DMS evidence is retained.", code="immutable_evidence")
+
+
+class DmsConfigurationVersion(ImmutableDmsEvidence):
+    configuration = models.ForeignKey(DmsConfiguration, on_delete=models.PROTECT, related_name="versions")
+    version = models.PositiveIntegerField()
+    environment = models.CharField(max_length=64)
+    values = models.JSONField()
+    created_by = models.UUIDField()
+    correlation_id = models.UUIDField()
+
+    class Meta:
+        db_table = "dms_configuration_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "configuration", "version"],
+                name="dms_config_version_uq",
+            )
+        ]
+        indexes = [models.Index(fields=["tenant_id", "configuration", "-version"], name="dms_cfg_ver_history_idx")]
+
+
+class DmsConfigurationAudit(ImmutableDmsEvidence):
+    configuration = models.ForeignKey(DmsConfiguration, on_delete=models.PROTECT, related_name="audit_records")
+    action = models.CharField(max_length=32)
+    actor_id = models.UUIDField()
+    correlation_id = models.UUIDField()
+    from_version = models.PositiveIntegerField(null=True)
+    to_version = models.PositiveIntegerField()
+    before = models.JSONField()
+    after = models.JSONField()
+
+    class Meta:
+        db_table = "dms_configuration_audit"
+        indexes = [models.Index(fields=["tenant_id", "configuration", "-created_at"], name="dms_cfg_audit_idx")]
+
+
+class DmsUploadIdempotency(TenantScopedModel, TimestampedModel):
+    """Tenant-bounded identity for retry-safe document uploads."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key_digest = models.CharField(max_length=64)
+    request_fingerprint = models.CharField(max_length=64)
+    document = models.ForeignKey(Document, on_delete=models.PROTECT, null=True)
+    version = models.ForeignKey(DocumentVersion, on_delete=models.PROTECT, null=True)
+    state = models.CharField(max_length=16, default="pending")
+
+    class Meta:
+        db_table = "dms_upload_idempotency"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "key_digest"], name="dms_upload_idem_tenant_key_uq")
+        ]
+        indexes = [models.Index(fields=["tenant_id", "key_digest"], name="dms_upload_idem_lookup_idx")]
+
+
 __all__ = [
     "Document",
     "DocumentPermission",
     "DocumentShare",
     "DocumentVersion",
+    "DmsConfiguration",
+    "DmsConfigurationAudit",
+    "DmsConfigurationVersion",
+    "DmsUploadIdempotency",
     "Folder",
     "ImmutableVersionError",
     "MutableDmsModel",
-    "PERMISSION_IMPLICATIONS",
     "PermissionLevel",
     "PrincipalType",
     "generate_uuid",

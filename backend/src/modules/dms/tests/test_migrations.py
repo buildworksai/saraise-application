@@ -6,14 +6,15 @@ import importlib
 import uuid
 
 import pytest
-from django.db import connection
+from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.db.migrations.operations.special import SeparateDatabaseAndState
+from django.db.utils import NotSupportedError
 
 pytest_plugins = ["src.core.testing"]
 
 LEGACY = ("dms", "0002_add_document_models")
-LATEST = ("dms", "0006_enable_dms_rls")
+LATEST = ("dms", "0007_dms_configuration")
 CANONICAL_TABLES = {
     "dms_folders",
     "dms_documents",
@@ -27,6 +28,7 @@ LEGACY_TABLES = {f"{table}_legacy" for table in CANONICAL_TABLES} | {"dms_resour
 class _Connection:
     def __init__(self, vendor: str) -> None:
         self.vendor = vendor
+        self.settings_dict = {"NAME": ":memory:"}
 
 
 class _SchemaEditor:
@@ -87,7 +89,7 @@ def test_copy_and_swap_are_reversible_and_never_use_noop() -> None:
     }
 
 
-def test_rls_migration_is_typed_postgresql_only_and_fully_reversible() -> None:
+def test_rls_migration_enforces_each_supported_backend_and_is_fully_reversible() -> None:
     module = importlib.import_module("src.modules.dms.migrations.0006_enable_dms_rls")
     assert set(module.TENANT_TABLES) == CANONICAL_TABLES
     assert ("core", "0011_apply_typed_rls_to_notifications") in module.Migration.dependencies
@@ -104,7 +106,36 @@ def test_rls_migration_is_typed_postgresql_only_and_fully_reversible() -> None:
 
     sqlite = _SchemaEditor("sqlite")
     module.enable_dms_rls(None, sqlite)
+    forward_sql = "\n".join(sqlite.statements)
+    assert forward_sql.count("tenant_id_immutable") == 5
+    assert forward_sql.count("same_tenant_insert") == len(module.SQLITE_RELATIONSHIPS)
+    assert forward_sql.count("same_tenant_update") == len(module.SQLITE_RELATIONSHIPS)
     module.disable_dms_rls(None, sqlite)
+    reverse_start = 5 + (2 * len(module.SQLITE_RELATIONSHIPS))
+    reverse_sql = "\n".join(sqlite.statements[reverse_start:])
+    assert reverse_sql.count("DROP TRIGGER IF EXISTS") == 5 + (2 * len(module.SQLITE_RELATIONSHIPS))
+
+
+def test_rls_migration_fails_closed_for_unsupported_database_backends() -> None:
+    module = importlib.import_module("src.modules.dms.migrations.0006_enable_dms_rls")
+
+    unsupported = _SchemaEditor("mysql")
+    with pytest.raises(NotSupportedError, match="requires PostgreSQL"):
+        module.enable_dms_rls(None, unsupported)
+    with pytest.raises(NotSupportedError, match="requires PostgreSQL"):
+        module.disable_dms_rls(None, unsupported)
+    assert unsupported.statements == []
+
+
+def test_sqlite_isolation_guards_require_the_explicit_in_memory_test_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = importlib.import_module("src.modules.dms.migrations.0006_enable_dms_rls")
+    monkeypatch.delenv(module.SQLITE_TEST_ENVIRONMENT, raising=False)
+
+    sqlite = _SchemaEditor("sqlite")
+    with pytest.raises(NotSupportedError, match="requires PostgreSQL"):
+        module.enable_dms_rls(None, sqlite)
     assert sqlite.statements == []
 
 
@@ -123,7 +154,40 @@ def test_empty_schema_reverses_to_v1_and_forwards_again() -> None:
     latest_tables = set(connection.introspection.table_names())
     assert CANONICAL_TABLES | LEGACY_TABLES <= latest_tables
     final_apps = executor.loader.project_state([LATEST]).apps
+    Folder = final_apps.get_model("dms", "Folder")
     assert final_apps.get_model("dms", "Document")._meta.get_field("tenant_id").get_internal_type() == "UUIDField"
+
+    if connection.vendor == "sqlite":
+        tenant_a = uuid.uuid4()
+        tenant_b = uuid.uuid4()
+        actor_id = uuid.uuid4()
+        folder_a = Folder.objects.create(
+            tenant_id=tenant_a,
+            name="Tenant A",
+            path="tenant-a",
+            created_by=actor_id,
+        )
+        folder_b = Folder.objects.create(
+            tenant_id=tenant_b,
+            name="Tenant B",
+            path="tenant-b",
+            created_by=actor_id,
+        )
+        with pytest.raises(IntegrityError, match="tenant ownership is immutable"), transaction.atomic():
+            Folder.objects.filter(pk=folder_a.pk).update(tenant_id=tenant_b)
+        folder_a.refresh_from_db()
+        assert folder_a.tenant_id == tenant_a
+
+        with pytest.raises(IntegrityError, match="crosses tenant boundary"), transaction.atomic():
+            Folder.objects.create(
+                tenant_id=tenant_a,
+                name="Forbidden child",
+                parent=folder_b,
+                path="tenant-b/forbidden",
+                depth=1,
+                created_by=actor_id,
+            )
+        assert not Folder.objects.filter(tenant_id=tenant_a, parent=folder_b).exists()
 
 
 @pytest.mark.postgresql

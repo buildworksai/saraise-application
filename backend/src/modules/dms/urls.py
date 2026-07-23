@@ -5,6 +5,7 @@ from rest_framework.routers import DefaultRouter
 
 from .api import (
     DmsHealthAPIView,
+    DmsConfigurationViewSet,
     DocumentPermissionViewSet,
     DocumentShareViewSet,
     DocumentVersionViewSet,
@@ -22,6 +23,7 @@ router.register("documents", DocumentViewSet, basename="document")
 router.register("document-versions", DocumentVersionViewSet, basename="document-version")
 router.register("document-permissions", DocumentPermissionViewSet, basename="document-permission")
 router.register("document-shares", DocumentShareViewSet, basename="document-share")
+router.register("configuration", DmsConfigurationViewSet, basename="configuration")
 
 urlpatterns = [
     path("", include(router.urls)),

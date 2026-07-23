@@ -450,6 +450,38 @@ def test_version_list_detail_create_restore_and_download_are_tenant_scoped(
     assert foreign_version.status_code == status.HTTP_404_NOT_FOUND
 
 
+def test_document_version_cross_tenant_update_is_denied_and_row_is_unchanged(
+    authenticated_tenant_a_client: APIClient,
+    graph_pair: tuple[DocumentGraph, DocumentGraph],
+) -> None:
+    """Immutable version history exposes no update verb to a foreign tenant."""
+
+    _graph_a, graph_b = graph_pair
+    before = _snapshot(graph_b.version)
+    response = authenticated_tenant_a_client.patch(
+        f"{BASE}/document-versions/{graph_b.version.id}/",
+        {"change_note": "Forbidden cross-tenant rewrite"},
+        format="json",
+    )
+
+    assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert _snapshot(graph_b.version) == before
+
+
+def test_document_version_cross_tenant_delete_is_denied_and_row_is_unchanged(
+    authenticated_tenant_a_client: APIClient,
+    graph_pair: tuple[DocumentGraph, DocumentGraph],
+) -> None:
+    """Immutable version history exposes no delete verb to a foreign tenant."""
+
+    _graph_a, graph_b = graph_pair
+    before = _snapshot(graph_b.version)
+    response = authenticated_tenant_a_client.delete(f"{BASE}/document-versions/{graph_b.version.id}/")
+
+    assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert _snapshot(graph_b.version) == before
+
+
 def test_permission_grant_cannot_target_foreign_document(
     authenticated_tenant_a_client: APIClient,
     graph_pair: tuple[DocumentGraph, DocumentGraph],

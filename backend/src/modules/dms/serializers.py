@@ -10,7 +10,16 @@ from __future__ import annotations
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Document, DocumentPermission, DocumentShare, DocumentVersion, Folder
+from .models import (
+    DmsConfiguration,
+    DmsConfigurationAudit,
+    DmsConfigurationVersion,
+    Document,
+    DocumentPermission,
+    DocumentShare,
+    DocumentVersion,
+    Folder,
+)
 
 
 class AllowedActionsField(serializers.Field):
@@ -128,10 +137,9 @@ class DocumentUploadSerializer(serializers.Serializer[dict[str, object]]):
     folder_id = serializers.UUIDField(required=False, allow_null=True, default=None)
     description = serializers.CharField(required=False, allow_blank=True, default="")
     tags = serializers.ListField(
-        child=serializers.CharField(max_length=64, trim_whitespace=True),
+        child=serializers.CharField(trim_whitespace=True),
         required=False,
         default=list,
-        max_length=50,
     )
     metadata = serializers.JSONField(required=False, default=dict)
 
@@ -140,9 +148,8 @@ class DocumentUpdateSerializer(serializers.Serializer[dict[str, object]]):
     name = serializers.CharField(max_length=255, trim_whitespace=True, required=False)
     description = serializers.CharField(required=False, allow_blank=True)
     tags = serializers.ListField(
-        child=serializers.CharField(max_length=64, trim_whitespace=True),
+        child=serializers.CharField(trim_whitespace=True),
         required=False,
-        max_length=50,
     )
     metadata = serializers.JSONField(required=False)
     expected_updated_at = serializers.DateTimeField(required=True)
@@ -186,11 +193,11 @@ class DocumentVersionDetailSerializer(DocumentVersionListSerializer):
 class DocumentVersionCreateSerializer(serializers.Serializer[dict[str, object]]):
     document_id = serializers.UUIDField()
     file = serializers.FileField(allow_empty_file=False)
-    change_note = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+    change_note = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class DocumentVersionRestoreSerializer(serializers.Serializer[dict[str, object]]):
-    change_note = serializers.CharField(max_length=1000, required=False, allow_blank=True, default="")
+    change_note = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class DocumentPermissionReadSerializer(serializers.ModelSerializer[DocumentPermission]):
@@ -258,7 +265,7 @@ class DocumentShareCreateSerializer(serializers.Serializer[dict[str, object]]):
     document_id = serializers.UUIDField()
     version_id = serializers.UUIDField(required=False, allow_null=True, default=None)
     expires_at = serializers.DateTimeField()
-    max_access_count = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=10_000)
+    max_access_count = serializers.IntegerField(required=False, allow_null=True, min_value=1)
 
 
 class ShareCreatedSerializer(serializers.Serializer[dict[str, object]]):
@@ -286,8 +293,71 @@ class DmsHealthSerializer(serializers.Serializer[dict[str, object]]):
     checks = serializers.DictField(child=serializers.DictField(), read_only=True)
 
 
+class DmsConfigurationSerializer(serializers.ModelSerializer[DmsConfiguration]):
+    class Meta:
+        model = DmsConfiguration
+        fields = (
+            "id",
+            "tenant_id",
+            "environment",
+            "version",
+            "values",
+            "updated_by",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class DmsConfigurationWriteSerializer(serializers.Serializer[dict[str, object]]):
+    environment = serializers.CharField(max_length=64, default="default")
+    values = serializers.JSONField()
+
+
+class DmsConfigurationRollbackSerializer(serializers.Serializer[dict[str, object]]):
+    version = serializers.IntegerField(min_value=1)
+    environment = serializers.CharField(max_length=64, default="default")
+
+
+class DmsConfigurationVersionSerializer(serializers.ModelSerializer[DmsConfigurationVersion]):
+    class Meta:
+        model = DmsConfigurationVersion
+        fields = (
+            "id",
+            "version",
+            "environment",
+            "values",
+            "created_by",
+            "correlation_id",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class DmsConfigurationAuditSerializer(serializers.ModelSerializer[DmsConfigurationAudit]):
+    class Meta:
+        model = DmsConfigurationAudit
+        fields = (
+            "id",
+            "action",
+            "actor_id",
+            "correlation_id",
+            "from_version",
+            "to_version",
+            "before",
+            "after",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
 __all__ = [
     "DmsHealthSerializer",
+    "DmsConfigurationAuditSerializer",
+    "DmsConfigurationRollbackSerializer",
+    "DmsConfigurationSerializer",
+    "DmsConfigurationVersionSerializer",
+    "DmsConfigurationWriteSerializer",
     "DocumentDetailSerializer",
     "DocumentListSerializer",
     "DocumentMoveSerializer",

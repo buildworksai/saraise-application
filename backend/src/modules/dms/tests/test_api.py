@@ -12,7 +12,13 @@ from rest_framework.test import APIClient
 
 from src.core.access.permissions import RequiresAccess
 from src.modules.dms import api
-from src.modules.dms.services import DocumentService, PermissionService, ShareService, VersionService
+from src.modules.dms.services import (
+    DEFAULT_DMS_CONFIGURATION,
+    DocumentService,
+    PermissionService,
+    ShareService,
+    VersionService,
+)
 from src.modules.dms.tests.test_services import AllowQuota, Directory, MemoryStorage
 
 pytest_plugins = ["src.core.testing"]
@@ -89,6 +95,61 @@ def test_folder_endpoint_matrix_envelopes_pagination_and_put_rejection(
     contents = client.get(f"/api/v2/dms/folders/{folder['id']}/contents/")
     assert data(contents)["folder"]["id"] == folder["id"]
     assert client.delete(f"/api/v2/dms/folders/{folder['id']}/").status_code == 204
+
+
+@pytest.mark.django_db
+def test_configuration_api_is_versioned_reversible_and_cross_tenant_isolated(
+    authenticated_tenant_a_client,
+    authenticated_tenant_b_client,
+) -> None:
+    tenant_a = authenticated_tenant_a_client
+    tenant_b = authenticated_tenant_b_client
+    endpoint = "/api/v2/dms/configuration"
+
+    initial_a = data(tenant_a.get(f"{endpoint}/current/?environment=staging"))
+    assert initial_a["environment"] == "staging"
+    assert initial_a["values"] == DEFAULT_DMS_CONFIGURATION
+
+    changed = dict(initial_a["values"])
+    changed["max_document_tags"] = 75
+    preview = tenant_a.post(
+        f"{endpoint}/preview/",
+        {"environment": "staging", "values": changed},
+        format="json",
+    )
+    assert preview.status_code == 200
+    assert data(preview)["changes"] == [{"field": "max_document_tags", "before": 50, "after": 75}]
+    updated = tenant_a.put(
+        f"{endpoint}/current/",
+        {"environment": "staging", "values": changed},
+        format="json",
+    )
+    assert updated.status_code == 200
+    assert data(updated)["version"] == 2
+
+    isolated_b = data(tenant_b.get(f"{endpoint}/current/?environment=staging"))
+    assert isolated_b["version"] == 1
+    assert isolated_b["values"]["max_document_tags"] == 50
+
+    history = tenant_a.get(f"{endpoint}/history/?environment=staging")
+    audit = tenant_a.get(f"{endpoint}/audit/?environment=staging")
+    assert [row["version"] for row in data(history)] == [2, 1]
+    assert all(row["correlation_id"] for row in data(history))
+    assert [row["action"] for row in data(audit)] == ["updated", "created"]
+    assert all(row["correlation_id"] for row in data(audit))
+
+    rolled_back = tenant_a.post(
+        f"{endpoint}/rollback/",
+        {"environment": "staging", "version": 1},
+        format="json",
+    )
+    assert rolled_back.status_code == 200
+    assert data(rolled_back)["version"] == 3
+    assert data(rolled_back)["values"]["max_document_tags"] == 50
+
+    exported = tenant_a.get(f"{endpoint}/export/?environment=staging")
+    assert data(exported)["environment"] == "staging"
+    assert data(exported)["version"] == 3
 
 
 @pytest.mark.django_db
