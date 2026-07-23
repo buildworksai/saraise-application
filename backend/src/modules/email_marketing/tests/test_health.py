@@ -35,20 +35,46 @@ def test_outbox_freshness_is_tenant_scoped(tenant_a, tenant_b) -> None:
 
 @pytest.mark.parametrize(
     "failed_probe",
-    ["database", "schema", "migrations", "rls", "state", "handlers", "outbox", "renderer", "gateway"],
+    [
+        "database",
+        "schema",
+        "migrations",
+        "rls",
+        "state",
+        "handlers",
+        "outbox",
+        "renderer",
+        "gateway",
+    ],
 )
 def test_each_critical_failure_returns_sanitized_503(failed_probe: str, tenant_a) -> None:
     values = {
         name: True
-        for name in ("database", "schema", "migrations", "rls", "state", "handlers", "outbox", "renderer", "gateway")
+        for name in (
+            "database",
+            "schema",
+            "migrations",
+            "rls",
+            "state",
+            "handlers",
+            "outbox",
+            "renderer",
+            "gateway",
+        )
     }
     values[failed_probe] = False
-    basic = lambda name: (values[name], "ready" if values[name] else "dependency_unavailable")
-    gateway = lambda: (
-        values["gateway"],
-        "ready" if values["gateway"] else "dependency_unavailable",
-        "closed" if values["gateway"] else "open",
-    )
+
+    def basic(name: str) -> tuple[bool, str]:
+        return values[name], ("ready" if values[name] else "dependency_unavailable")
+
+    def gateway(tenant_id=None) -> tuple[bool, str, str]:
+        del tenant_id
+        return (
+            values["gateway"],
+            "ready" if values["gateway"] else "dependency_unavailable",
+            "closed" if values["gateway"] else "open",
+        )
+
     with (
         patch.object(health, "_database", side_effect=lambda: basic("database")),
         patch.object(health, "_schema", side_effect=lambda: basic("schema")),
@@ -81,7 +107,11 @@ def test_optional_resolver_failure_is_degraded_with_http_200(tenant_a) -> None:
         patch.object(health, "_outbox", return_value=_healthy("fresh")),
         patch.object(health, "_renderer", return_value=_healthy()),
         patch.object(health, "_gateway", return_value=(True, "ready", "closed")),
-        patch.object(health, "_audience_resolver", return_value=(False, "resolver_not_registered")),
+        patch.object(
+            health,
+            "_audience_resolver",
+            return_value=(False, "resolver_not_registered"),
+        ),
     ):
         report = health.get_module_health(tenant_a.id)
     assert report.status == "degraded"
@@ -89,7 +119,11 @@ def test_optional_resolver_failure_is_degraded_with_http_200(tenant_a) -> None:
 
 
 def test_probe_exception_text_is_never_returned(tenant_a) -> None:
-    with patch.object(health, "_database", side_effect=RuntimeError("postgres://user:password@secret")):
+    with patch.object(
+        health,
+        "_database",
+        side_effect=RuntimeError("postgres://user:password@secret"),
+    ):
         report = health.get_module_health(tenant_a.id)
     rendered = repr(report.as_dict()).lower()
     assert "postgres" not in rendered

@@ -12,8 +12,16 @@ from rest_framework.test import APIClient
 
 from src.core.user_models import UserProfile
 from src.modules.email_marketing import api
-from src.modules.email_marketing.models import ConsentRecord, EmailCampaign, EmailTemplate, SuppressionEntry
-from src.modules.email_marketing.serializers import CampaignCreateSerializer, CampaignUpdateSerializer
+from src.modules.email_marketing.models import (
+    ConsentRecord,
+    EmailCampaign,
+    EmailTemplate,
+    SuppressionEntry,
+)
+from src.modules.email_marketing.serializers import (
+    CampaignCreateSerializer,
+    CampaignUpdateSerializer,
+)
 
 pytestmark = pytest.mark.django_db
 User = get_user_model()
@@ -21,10 +29,16 @@ BASE = "/api/v2/email-marketing"
 
 
 @pytest.fixture(autouse=True)
-def isolate_controller_from_external_policy(monkeypatch: pytest.MonkeyPatch) -> None:
+def isolate_controller_from_external_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Authorization branches are tested separately; controller tests retain auth."""
 
-    monkeypatch.setattr(api.EmailMarketingAccessMixin, "get_permissions", lambda self: [IsAuthenticated()])
+    monkeypatch.setattr(
+        api.EmailMarketingAccessMixin,
+        "get_permissions",
+        lambda self: [IsAuthenticated()],
+    )
 
 
 @pytest.fixture
@@ -36,7 +50,11 @@ def identity() -> tuple[object, uuid.UUID, uuid.UUID]:
             user=user,
             defaults={"tenant_id": str(tenant), "tenant_role": "tenant_admin"},
         )
-    return User.objects.get(pk=user.pk), tenant, uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:user:{user.pk}")
+    return (
+        User.objects.get(pk=user.pk),
+        tenant,
+        uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:user:{user.pk}"),
+    )
 
 
 @pytest.fixture
@@ -57,7 +75,11 @@ def create_template(tenant: uuid.UUID, code: str = "WELCOME") -> EmailTemplate:
     )
 
 
-def create_campaign(tenant: uuid.UUID, template: EmailTemplate | None = None, code: str = "LAUNCH") -> EmailCampaign:
+def create_campaign(
+    tenant: uuid.UUID,
+    template: EmailTemplate | None = None,
+    code: str = "LAUNCH",
+) -> EmailCampaign:
     return EmailCampaign.objects.create(
         tenant_id=tenant,
         campaign_code=code,
@@ -65,7 +87,11 @@ def create_campaign(tenant: uuid.UUID, template: EmailTemplate | None = None, co
         subject="Launch",
         from_name="SARAISE",
         from_email="sender@example.com",
-        audience_definition={"version": 1, "resolver": "manual", "recipients": []},
+        audience_definition={
+            "version": 1,
+            "resolver": "manual",
+            "recipients": [],
+        },
         template=template,
     )
 
@@ -78,7 +104,11 @@ def campaign_payload(template: EmailTemplate) -> dict[str, object]:
         "subject": "Monthly news",
         "from_name": "SARAISE",
         "from_email": "news@example.com",
-        "audience_definition": {"version": 1, "resolver": "manual", "recipients": []},
+        "audience_definition": {
+            "version": 1,
+            "resolver": "manual",
+            "recipients": [],
+        },
         "timezone": "UTC",
     }
 
@@ -91,7 +121,13 @@ def test_campaign_mutation_serializers_reject_owned_and_lifecycle_fields() -> No
         "from_name": "Sender",
         "from_email": "sender@example.com",
     }
-    for forbidden in ("tenant_id", "status", "sent_count", "transition_history", "legacy_template_id"):
+    for forbidden in (
+        "tenant_id",
+        "status",
+        "sent_count",
+        "transition_history",
+        "legacy_template_id",
+    ):
         serializer = CampaignCreateSerializer(data={**base, forbidden: "spoofed"})
         assert not serializer.is_valid()
         assert forbidden in serializer.errors
@@ -126,7 +162,11 @@ def test_campaign_create_ignores_tenant_spoof_and_is_always_draft(
 ) -> None:
     _, tenant, _ = identity
     template = create_template(tenant)
-    payload = {**campaign_payload(template), "tenant_id": str(uuid.uuid4()), "status": "sent"}
+    payload = {
+        **campaign_payload(template),
+        "tenant_id": str(uuid.uuid4()),
+        "status": "sent",
+    }
     response = client.post(f"{BASE}/campaigns/", payload, format="json")
     assert response.status_code == 400  # unknown ownership/lifecycle input is rejected
     payload.pop("tenant_id")
@@ -143,7 +183,9 @@ def test_campaign_patch_delegates_and_put_is_not_supported(
     _, tenant, _ = identity
     campaign = create_campaign(tenant)
     response = client.patch(
-        f"{BASE}/campaigns/{campaign.id}/", {"campaign_name": "Updated"}, format="json"
+        f"{BASE}/campaigns/{campaign.id}/",
+        {"campaign_name": "Updated"},
+        format="json",
     )
     assert response.status_code == 200
     campaign.refresh_from_db()
@@ -183,16 +225,22 @@ def test_template_crud_preview_and_lifecycle_routes_exist(
     assert response.status_code == 201
     template = EmailTemplate.objects.get(tenant_id=tenant, template_code="WELCOME")
     preview = client.post(
-        f"{BASE}/templates/{template.id}/preview/", {"sample_data": {"name": "Ada"}}, format="json"
+        f"{BASE}/templates/{template.id}/preview/",
+        {"sample_data": {"name": "Ada"}},
+        format="json",
     )
     assert preview.status_code == 200
     assert preview.json()["data"]["subject"] == "Hello Ada"
     activate = client.post(
-        f"{BASE}/templates/{template.id}/activate/", {"idempotency_key": "activate-welcome"}, format="json"
+        f"{BASE}/templates/{template.id}/activate/",
+        {"idempotency_key": "activate-welcome"},
+        format="json",
     )
     assert activate.status_code == 200
     archive = client.post(
-        f"{BASE}/templates/{template.id}/archive/", {"idempotency_key": "archive-welcome"}, format="json"
+        f"{BASE}/templates/{template.id}/archive/",
+        {"idempotency_key": "archive-welcome"},
+        format="json",
     )
     assert archive.status_code == 200
 
@@ -230,7 +278,9 @@ def test_compliance_collections_are_real_and_lifecycle_controlled(
     assert suppression.status_code == 201
     entry = SuppressionEntry.objects.get(tenant_id=tenant)
     deactivated = client.post(
-        f"{BASE}/suppressions/{entry.id}/deactivate/", {"reason": "Correction approved"}, format="json"
+        f"{BASE}/suppressions/{entry.id}/deactivate/",
+        {"reason": "Correction approved"},
+        format="json",
     )
     assert deactivated.status_code == 200
     entry.refresh_from_db()
@@ -241,4 +291,7 @@ def test_unauthenticated_private_mutation_denies() -> None:
     anonymous = APIClient(enforce_csrf_checks=True)
     response = anonymous.post(f"{BASE}/campaigns/", {}, format="json")
     assert response.status_code in {401, 403}
-    assert response.json()["error"]["code"] in {"AUTHENTICATION_REQUIRED", "POLICY_DENIED"}
+    assert response.json()["error"]["code"] in {
+        "AUTHENTICATION_REQUIRED",
+        "POLICY_DENIED",
+    }

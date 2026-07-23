@@ -201,7 +201,7 @@ export function getTenantRouteValidationIssues(
     } else if (parent.module !== route.module) {
       addIssue(issues, route, "contextual parent must belong to the same module");
     }
-    if (route.module === "document_intelligence") {
+    if (route.module === "document_intelligence" || route.module === "email_marketing") {
       if (!route.navigation.label?.trim()) addIssue(issues, route, "contextual NavItem label must not be empty");
       if (!route.navigation.icon) addIssue(issues, route, "contextual NavItem icon is required");
       if (!Number.isFinite(route.navigation.order)) addIssue(issues, route, "contextual NavItem order must be finite");
@@ -256,7 +256,7 @@ export function buildTenantSidebarTree(
 
   const routesById = new Map(routes.map((route) => [route.id, route]));
   for (const route of routes) {
-    const contextualNavItem = ["process_mining", "customization_framework", "integration_platform"].includes(route.module) && route.navigation.type === "contextual";
+    const contextualNavItem = ["process_mining", "customization_framework", "integration_platform", "email_marketing"].includes(route.module) && route.navigation.type === "contextual";
     if (route.navigation.type !== "sidebar" && !contextualNavItem) continue;
     if (grantedPermissions && route.requiredPermission && !grantedPermissions.has(route.requiredPermission)) continue;
     const parent = route.navigation.type === "contextual" ? routesById.get(route.navigation.parentRouteId) : undefined;

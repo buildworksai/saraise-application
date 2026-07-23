@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -10,13 +12,16 @@ from django.http import HttpResponse, HttpResponseRedirect
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import (
+    NotFound,
+    PermissionDenied,
+    ValidationError,
+)
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 
 from src.core.api import GovernedAPIViewMixin
-from src.core.async_jobs.services import enqueue
 from src.core.auth_utils import get_user_tenant_id
 
 from .adapters import AdapterNotRegistered, get_provider_event_verifier
@@ -28,7 +33,15 @@ from .filters import (
     SuppressionFilterSet,
     TemplateFilterSet,
 )
-from .models import CampaignRecipient, ConsentRecord, DeliveryAttempt, EmailCampaign, EmailTemplate, SuppressionEntry
+from .models import (
+    CampaignRecipient,
+    ConsentRecord,
+    DeliveryAttempt,
+    EmailCampaign,
+    EmailMarketingConfiguration,
+    EmailTemplate,
+    SuppressionEntry,
+)
 from .permissions import EmailMarketingAccessMixin, ProviderWebhookPermission
 from .serializers import (
     AsyncJobSummarySerializer,
@@ -41,12 +54,18 @@ from .serializers import (
     CampaignSendSerializer,
     CampaignTransitionSerializer,
     CampaignUpdateSerializer,
+    ConfigurationPreviewSerializer,
+    ConfigurationRollbackSerializer,
+    ConfigurationSerializer,
+    ConfigurationUpdateSerializer,
+    ConfigurationVersionSerializer,
     ConsentCreateSerializer,
     ConsentDetailSerializer,
     ConsentListSerializer,
     ConsentRevokeSerializer,
     DeliveryAttemptDetailSerializer,
     DeliveryAttemptListSerializer,
+    PublicUnsubscribeResponseSerializer,
     RecipientDetailSerializer,
     RecipientListSerializer,
     RecipientRetrySerializer,
@@ -62,12 +81,27 @@ from .serializers import (
     TemplatePreviewSerializer,
     TemplateUpdateSerializer,
 )
-from .services import CampaignService, ComplianceService, DeliveryService, TemplateService
+from .services import (
+    CampaignService,
+    ComplianceService,
+    ConfigurationService,
+    DeliveryService,
+    TemplateService,
+    get_runtime_configuration,
+)
 
 
 class PublicEmailThrottle(SimpleRateThrottle):
-    rate = "30/min"
     scope = "email_marketing_public"
+
+    def allow_request(self, request: object, view: object) -> bool:
+        tenant_id = getattr(request, "tenant_id", None)
+        if tenant_id is None:
+            return False
+        per_minute = get_runtime_configuration(tenant_id).document["rate_limits"]["public_per_minute"]
+        self.rate = f"{per_minute}/min"
+        self.num_requests, self.duration = self.parse_rate(self.rate)
+        return super().allow_request(request, view)
 
     def get_cache_key(self, request: object, view: object) -> str:
         del view
@@ -75,19 +109,38 @@ class PublicEmailThrottle(SimpleRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
-class EmailMarketingViewSet(GovernedAPIViewMixin, EmailMarketingAccessMixin, viewsets.GenericViewSet[Any]):
+class EmailMarketingViewSet(
+    GovernedAPIViewMixin,
+    EmailMarketingAccessMixin,
+    viewsets.GenericViewSet[Any],
+):
     """Canonical tenant identity and common governed pagination helpers."""
 
     filterset_class: type | None = None
-    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+    http_method_names = [
+        "get",
+        "post",
+        "put",
+        "patch",
+        "delete",
+        "head",
+        "options",
+    ]
 
-    def tenant_id(self) -> UUID:
+    def resolved_tenant_id(self) -> UUID | None:
         value = get_user_tenant_id(self.request.user)
         try:
             tenant = UUID(str(value))
-        except (TypeError, ValueError, AttributeError) as exc:
-            raise PermissionDenied("Authenticated identity has no valid tenant.") from exc
+        except (TypeError, ValueError, AttributeError):
+            self.request.tenant_id = None
+            return None
         self.request.tenant_id = tenant
+        return tenant
+
+    def tenant_id(self) -> UUID:
+        tenant = self.resolved_tenant_id()
+        if tenant is None:
+            raise PermissionDenied("Authenticated identity has no valid tenant.")
         return tenant
 
     def actor_id(self) -> UUID:
@@ -99,15 +152,39 @@ class EmailMarketingViewSet(GovernedAPIViewMixin, EmailMarketingAccessMixin, vie
         except (TypeError, ValueError, AttributeError):
             return uuid5(NAMESPACE_URL, f"saraise:user:{value}")
 
+    def mutation_idempotency_key(self) -> str:
+        value = str(self.request.headers.get("Idempotency-Key", "")).strip()
+        if not value:
+            canonical = json.dumps(
+                self.request.data,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+            value = f"request:{hashlib.sha256(canonical.encode()).hexdigest()}"
+        if len(value) > 255:
+            raise ValidationError({"Idempotency-Key": "Must not exceed 255 characters."})
+        return value
+
     def filtered(self, queryset: Any) -> Any:
         if self.filterset_class is None:
             return queryset
-        filters = self.filterset_class(self.request.query_params, queryset=queryset)
+        filters = self.filterset_class(
+            self.request.query_params,
+            queryset=queryset,
+            tenant_id=self.tenant_id(),
+        )
         if not filters.is_valid():
             raise ValidationError(filters.errors)
         return filters.qs
 
     def paginated(self, queryset: Any, serializer_class: type) -> Response:
+        pagination = get_runtime_configuration(self.tenant_id()).document["pagination"]
+        paginator = self.paginator
+        if paginator is None:
+            raise RuntimeError("Governed pagination is required.")
+        paginator.page_size = pagination["default_page_size"]
+        paginator.max_page_size = pagination["max_page_size"]
         page = self.paginate_queryset(queryset)
         if page is None:
             raise RuntimeError("Governed pagination is required.")
@@ -136,7 +213,10 @@ class EmailCampaignViewSet(EmailMarketingViewSet):
     action_quotas = {"resolve_audience": "email_marketing.audience_resolutions"}
 
     def get_queryset(self) -> Any:
-        return EmailCampaign.objects.for_tenant(self.tenant_id()).filter(is_deleted=False).select_related("template")
+        tenant = self.resolved_tenant_id()
+        if tenant is None:
+            return EmailCampaign.objects.none()
+        return EmailCampaign.objects.for_tenant(tenant).filter(is_deleted=False).select_related("template")
 
     def get_serializer_class(self) -> type:
         return {
@@ -165,8 +245,16 @@ class EmailCampaignViewSet(EmailMarketingViewSet):
         del request, args, kwargs
         serializer = CampaignCreateSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
-        campaign = self.service_class.create_campaign(self.tenant_id(), self.actor_id(), serializer.validated_data)
-        return Response(CampaignDetailSerializer(campaign).data, status=status.HTTP_201_CREATED)
+        campaign = self.service_class.create_campaign(
+            self.tenant_id(),
+            self.actor_id(),
+            serializer.validated_data,
+            self.mutation_idempotency_key(),
+        )
+        return Response(
+            CampaignDetailSerializer(campaign).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     def partial_update(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -174,7 +262,10 @@ class EmailCampaignViewSet(EmailMarketingViewSet):
         serializer = CampaignUpdateSerializer(data=self.request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         campaign = self.service_class.update_campaign(
-            self.tenant_id(), self.kwargs["pk"], self.actor_id(), serializer.validated_data
+            self.tenant_id(),
+            self.kwargs["pk"],
+            self.actor_id(),
+            serializer.validated_data,
         )
         return Response(CampaignDetailSerializer(campaign).data)
 
@@ -191,9 +282,15 @@ class EmailCampaignViewSet(EmailMarketingViewSet):
         serializer = CampaignAudienceResolutionSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         job = self.service_class.request_audience_resolution(
-            self.tenant_id(), self.kwargs["pk"], self.actor_id(), serializer.validated_data["idempotency_key"]
+            self.tenant_id(),
+            self.kwargs["pk"],
+            self.actor_id(),
+            serializer.validated_data["idempotency_key"],
         )
-        return Response(AsyncJobSummarySerializer(job).data, status=status.HTTP_202_ACCEPTED)
+        return Response(
+            AsyncJobSummarySerializer(job).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
 
     @action(detail=True, methods=["get"])
     def preflight(self, request: object, pk: str | None = None) -> Response:
@@ -208,9 +305,13 @@ class EmailCampaignViewSet(EmailMarketingViewSet):
         serializer = CampaignScheduleSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        method = self.service_class.reschedule_campaign if campaign.status == "scheduled" else self.service_class.schedule_campaign
-        result = method(
-            self.tenant_id(), campaign.id, self.actor_id(), data["scheduled_at"], data["timezone"], data["idempotency_key"]
+        result = self.service_class.set_schedule(
+            self.tenant_id(),
+            campaign.id,
+            self.actor_id(),
+            data["scheduled_at"],
+            data["timezone"],
+            data["idempotency_key"],
         )
         return Response(CampaignDetailSerializer(result).data)
 
@@ -221,7 +322,10 @@ class EmailCampaignViewSet(EmailMarketingViewSet):
         serializer = CampaignTransitionSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         campaign = self.service_class.unschedule_campaign(
-            self.tenant_id(), self.kwargs["pk"], self.actor_id(), serializer.validated_data["idempotency_key"]
+            self.tenant_id(),
+            self.kwargs["pk"],
+            self.actor_id(),
+            serializer.validated_data["idempotency_key"],
         )
         return Response(CampaignDetailSerializer(campaign).data)
 
@@ -233,20 +337,33 @@ class EmailCampaignViewSet(EmailMarketingViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         job = self.service_class.request_send(
-            self.tenant_id(), self.kwargs["pk"], self.actor_id(), data["idempotency_key"], data.get("preflight_receipt")
+            self.tenant_id(),
+            self.kwargs["pk"],
+            self.actor_id(),
+            data["idempotency_key"],
+            data.get("preflight_receipt"),
         )
-        return Response(AsyncJobSummarySerializer(job).data, status=status.HTTP_202_ACCEPTED)
+        return Response(
+            AsyncJobSummarySerializer(job).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
 
     def _transition_action(self, name: str) -> Response:
         self.get_object()
         serializer = CampaignTransitionSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         value = getattr(self.service_class, f"{name}_campaign")(
-            self.tenant_id(), self.kwargs["pk"], self.actor_id(), serializer.validated_data["idempotency_key"]
+            self.tenant_id(),
+            self.kwargs["pk"],
+            self.actor_id(),
+            serializer.validated_data["idempotency_key"],
         )
         if isinstance(value, EmailCampaign):
             return Response(CampaignDetailSerializer(value).data)
-        return Response(AsyncJobSummarySerializer(value).data, status=status.HTTP_202_ACCEPTED)
+        return Response(
+            AsyncJobSummarySerializer(value).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
 
     @action(detail=True, methods=["post"])
     def pause(self, request: object, pk: str | None = None) -> Response:
@@ -317,7 +434,10 @@ class EmailTemplateViewSet(EmailMarketingViewSet):
     }
 
     def get_queryset(self) -> Any:
-        return EmailTemplate.objects.for_tenant(self.tenant_id()).filter(is_deleted=False)
+        tenant = self.resolved_tenant_id()
+        if tenant is None:
+            return EmailTemplate.objects.none()
+        return EmailTemplate.objects.for_tenant(tenant).filter(is_deleted=False)
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -331,8 +451,16 @@ class EmailTemplateViewSet(EmailMarketingViewSet):
         del request, args, kwargs
         serializer = TemplateCreateSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
-        value = self.service_class.create_template(self.tenant_id(), self.actor_id(), serializer.validated_data)
-        return Response(TemplateDetailSerializer(value).data, status=status.HTTP_201_CREATED)
+        value = self.service_class.create_template(
+            self.tenant_id(),
+            self.actor_id(),
+            serializer.validated_data,
+            self.mutation_idempotency_key(),
+        )
+        return Response(
+            TemplateDetailSerializer(value).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     def partial_update(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -340,7 +468,10 @@ class EmailTemplateViewSet(EmailMarketingViewSet):
         serializer = TemplateUpdateSerializer(data=self.request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         value = self.service_class.update_template(
-            self.tenant_id(), self.kwargs["pk"], self.actor_id(), serializer.validated_data
+            self.tenant_id(),
+            self.kwargs["pk"],
+            self.actor_id(),
+            serializer.validated_data,
         )
         return Response(TemplateDetailSerializer(value).data)
 
@@ -355,7 +486,10 @@ class EmailTemplateViewSet(EmailMarketingViewSet):
         serializer = CampaignTransitionSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         value = getattr(self.service_class, f"{command}_template")(
-            self.tenant_id(), self.kwargs["pk"], self.actor_id(), serializer.validated_data["idempotency_key"]
+            self.tenant_id(),
+            self.kwargs["pk"],
+            self.actor_id(),
+            serializer.validated_data["idempotency_key"],
         )
         return Response(TemplateDetailSerializer(value).data)
 
@@ -376,9 +510,15 @@ class EmailTemplateViewSet(EmailMarketingViewSet):
         serializer = TemplateCloneSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         value = self.service_class.clone_template(
-            self.tenant_id(), self.kwargs["pk"], self.actor_id(), serializer.validated_data["new_code"]
+            self.tenant_id(),
+            self.kwargs["pk"],
+            self.actor_id(),
+            serializer.validated_data["new_code"],
         )
-        return Response(TemplateDetailSerializer(value).data, status=status.HTTP_201_CREATED)
+        return Response(
+            TemplateDetailSerializer(value).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["post"])
     def preview(self, request: object, pk: str | None = None) -> Response:
@@ -387,7 +527,9 @@ class EmailTemplateViewSet(EmailMarketingViewSet):
         serializer = TemplatePreviewSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         rendered = self.service_class.render_preview(
-            self.tenant_id(), self.kwargs["pk"], serializer.validated_data["sample_data"]
+            self.tenant_id(),
+            self.kwargs["pk"],
+            serializer.validated_data["sample_data"],
         )
         return Response(RenderedEmailSerializer(rendered).data)
 
@@ -401,7 +543,10 @@ class CampaignRecipientViewSet(EmailMarketingViewSet):
     }
 
     def get_queryset(self) -> Any:
-        return CampaignRecipient.objects.for_tenant(self.tenant_id()).select_related("campaign", "consent_record")
+        tenant = self.resolved_tenant_id()
+        if tenant is None:
+            return CampaignRecipient.objects.none()
+        return CampaignRecipient.objects.for_tenant(tenant).select_related("campaign", "consent_record")
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -418,17 +563,29 @@ class CampaignRecipientViewSet(EmailMarketingViewSet):
         serializer = RecipientRetrySerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         job = DeliveryService.retry_recipient(
-            self.tenant_id(), self.kwargs["pk"], self.actor_id(), serializer.validated_data["idempotency_key"]
+            self.tenant_id(),
+            self.kwargs["pk"],
+            self.actor_id(),
+            serializer.validated_data["idempotency_key"],
         )
-        return Response(AsyncJobSummarySerializer(job).data, status=status.HTTP_202_ACCEPTED)
+        return Response(
+            AsyncJobSummarySerializer(job).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
 
 
 class DeliveryAttemptViewSet(EmailMarketingViewSet):
     filterset_class = DeliveryFilterSet
-    action_permissions = {"list": "email_marketing.delivery:read", "retrieve": "email_marketing.delivery:read"}
+    action_permissions = {
+        "list": "email_marketing.delivery:read",
+        "retrieve": "email_marketing.delivery:read",
+    }
 
     def get_queryset(self) -> Any:
-        return DeliveryAttempt.objects.for_tenant(self.tenant_id()).select_related("recipient", "recipient__campaign")
+        tenant = self.resolved_tenant_id()
+        if tenant is None:
+            return DeliveryAttempt.objects.none()
+        return DeliveryAttempt.objects.for_tenant(tenant).select_related("recipient", "recipient__campaign")
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -449,7 +606,10 @@ class SuppressionEntryViewSet(EmailMarketingViewSet):
     }
 
     def get_queryset(self) -> Any:
-        return SuppressionEntry.objects.for_tenant(self.tenant_id()).select_related("evidence_event")
+        tenant = self.resolved_tenant_id()
+        if tenant is None:
+            return SuppressionEntry.objects.none()
+        return SuppressionEntry.objects.for_tenant(tenant).select_related("evidence_event")
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -463,8 +623,16 @@ class SuppressionEntryViewSet(EmailMarketingViewSet):
         del request, args, kwargs
         serializer = SuppressionCreateSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
-        value = ComplianceService.suppress(self.tenant_id(), self.actor_id(), serializer.validated_data)
-        return Response(SuppressionDetailSerializer(value).data, status=status.HTTP_201_CREATED)
+        value = ComplianceService.suppress(
+            self.tenant_id(),
+            self.actor_id(),
+            serializer.validated_data,
+            self.mutation_idempotency_key(),
+        )
+        return Response(
+            SuppressionDetailSerializer(value).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["post"])
     def deactivate(self, request: object, pk: str | None = None) -> Response:
@@ -473,7 +641,10 @@ class SuppressionEntryViewSet(EmailMarketingViewSet):
         serializer = SuppressionDeactivateSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         value = ComplianceService.deactivate_suppression(
-            self.tenant_id(), self.kwargs["pk"], self.actor_id(), serializer.validated_data["reason"]
+            self.tenant_id(),
+            self.kwargs["pk"],
+            self.actor_id(),
+            serializer.validated_data["reason"],
         )
         return Response(SuppressionDetailSerializer(value).data)
 
@@ -488,7 +659,10 @@ class ConsentRecordViewSet(EmailMarketingViewSet):
     }
 
     def get_queryset(self) -> Any:
-        return ConsentRecord.objects.for_tenant(self.tenant_id()).select_related("supersedes")
+        tenant = self.resolved_tenant_id()
+        if tenant is None:
+            return ConsentRecord.objects.none()
+        return ConsentRecord.objects.for_tenant(tenant).select_related("supersedes")
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -502,7 +676,16 @@ class ConsentRecordViewSet(EmailMarketingViewSet):
         del request, args, kwargs
         serializer = ConsentCreateSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
-        value = ComplianceService.record_consent(self.tenant_id(), self.actor_id(), serializer.validated_data)
+        value = ComplianceService.record_consent(
+            self.tenant_id(),
+            self.actor_id(),
+            serializer.validated_data,
+            {
+                "remote_addr": str(self.request.META.get("REMOTE_ADDR", "")),
+                "user_agent": str(self.request.META.get("HTTP_USER_AGENT", "")),
+            },
+            self.mutation_idempotency_key(),
+        )
         return Response(ConsentDetailSerializer(value).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["post"])
@@ -512,9 +695,100 @@ class ConsentRecordViewSet(EmailMarketingViewSet):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         value = ComplianceService.revoke_consent(
-            self.tenant_id(), self.actor_id(), data["email"], data["purpose"], data["source"]
+            self.tenant_id(),
+            self.actor_id(),
+            data["email"],
+            data["purpose"],
+            data["source"],
         )
         return Response(ConsentDetailSerializer(value).data, status=status.HTTP_201_CREATED)
+
+
+class ConfigurationViewSet(EmailMarketingViewSet):
+    """RBAC-gated singleton configuration and immutable history surface."""
+
+    action_permissions = {
+        "current": "email_marketing.configuration:read",
+        "preview": "email_marketing.configuration:read",
+        "history": "email_marketing.configuration:read",
+        "export_document": "email_marketing.configuration:export",
+        "rollback": "email_marketing.configuration:manage",
+        "import_document": "email_marketing.configuration:manage",
+    }
+
+    def get_permissions(self) -> list:
+        if self.action == "current" and self.request.method == "PUT":
+            self.action_permissions = {
+                **self.action_permissions,
+                "current": "email_marketing.configuration:manage",
+            }
+        return super().get_permissions()
+
+    def get_queryset(self) -> Any:
+        tenant = self.resolved_tenant_id()
+        if tenant is None:
+            return EmailMarketingConfiguration.objects.none()
+        return EmailMarketingConfiguration.objects.for_tenant(tenant)
+
+    @action(detail=False, methods=["get", "put"])
+    def current(self, request: object) -> Response:
+        if self.request.method == "GET":
+            return Response(ConfigurationSerializer(ConfigurationService.current(self.tenant_id())).data)
+        serializer = ConfigurationUpdateSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        value = ConfigurationService.update(
+            self.tenant_id(),
+            self.actor_id(),
+            serializer.validated_data["document"],
+            serializer.validated_data["expected_version"],
+        )
+        return Response(ConfigurationSerializer(value).data)
+
+    @action(detail=False, methods=["post"])
+    def preview(self, request: object) -> Response:
+        del request
+        serializer = ConfigurationPreviewSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(ConfigurationService.preview(self.tenant_id(), serializer.validated_data["document"]))
+
+    @action(detail=False, methods=["get"])
+    def history(self, request: object) -> Response:
+        del request
+        versions = ConfigurationService.history(self.tenant_id())
+        return Response(ConfigurationVersionSerializer(versions, many=True).data)
+
+    @action(detail=False, methods=["post"])
+    def rollback(self, request: object) -> Response:
+        del request
+        serializer = ConfigurationRollbackSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        value = ConfigurationService.rollback(
+            self.tenant_id(),
+            self.actor_id(),
+            serializer.validated_data["target_version"],
+            serializer.validated_data["expected_version"],
+        )
+        return Response(ConfigurationSerializer(value).data)
+
+    @action(detail=False, methods=["post"], url_path="import-document")
+    def import_document(self, request: object) -> Response:
+        del request
+        serializer = ConfigurationUpdateSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        value = ConfigurationService.update(
+            self.tenant_id(),
+            self.actor_id(),
+            serializer.validated_data["document"],
+            serializer.validated_data["expected_version"],
+            change_type="imported",
+        )
+        return Response(ConfigurationSerializer(value).data)
+
+    @action(detail=False, methods=["get"], url_path="export-document")
+    def export_document(self, request: object) -> Response:
+        del request
+        value = ConfigurationService.current(self.tenant_id())
+        return Response(ConfigurationSerializer(value).data)
 
 
 class ProviderEventAPIView(GovernedAPIViewMixin, APIView):
@@ -528,20 +802,32 @@ class ProviderEventAPIView(GovernedAPIViewMixin, APIView):
         except AdapterNotRegistered as exc:
             raise PermissionDenied("No verifier is registered for this provider account.") from exc
         verified = verifier.verify(dict(self.request.headers), bytes(self.request.body))
-        job = enqueue(
+        job = DeliveryService.enqueue_verified_provider_event(
             self.request.tenant_id,
-            f"provider:{gateway_key}",
-            "email_marketing.process_provider_event",
-            {"gateway_key": gateway_key, "event": verified.as_mapping()},
-            f"provider-event:{gateway_key}:{verified.provider_event_id}",
+            gateway_key,
+            verified,
         )
-        return Response(AsyncJobSummarySerializer(job).data, status=status.HTTP_202_ACCEPTED)
+        return Response(
+            AsyncJobSummarySerializer(job).data,
+            status=status.HTTP_202_ACCEPTED,
+        )
 
 
-def _signed_tenant(token: str, salt: str, max_age: int) -> UUID:
+def _signed_tenant(token: str, salt: str, token_kind: str) -> UUID:
     try:
-        payload = signing.loads(token, salt=salt, max_age=max_age)
-        return UUID(str(payload["tenant_id"]))
+        unsigned_age_payload = signing.loads(token, salt=salt)
+        tenant = UUID(str(unsigned_age_payload["tenant_id"]))
+        token_config = get_runtime_configuration(tenant).document["tokens"]
+        configured_age = (
+            token_config["unsubscribe_token_days"]
+            if token_kind == "unsubscribe"
+            else token_config["tracking_token_days"]
+        )
+        payload = signing.loads(token, salt=salt, max_age=configured_age * 86_400)
+        verified_tenant = UUID(str(payload["tenant_id"]))
+        if verified_tenant != tenant:
+            raise signing.BadSignature("Tenant mismatch.")
+        return tenant
     except (signing.BadSignature, KeyError, TypeError, ValueError) as exc:
         raise NotFound("The signed token is invalid or expired.") from exc
 
@@ -551,11 +837,17 @@ class PublicUnsubscribeAPIView(GovernedAPIViewMixin, APIView):
     permission_classes: tuple = ()
     throttle_classes = (PublicEmailThrottle,)
 
+    def initial(self, request: object, *args: object, **kwargs: object) -> None:
+        token = str(getattr(request, "data", {}).get("token", ""))
+        request.tenant_id = _signed_tenant(token, "email_marketing.unsubscribe", "unsubscribe")
+        super().initial(request, *args, **kwargs)
+
     def post(self, request: object) -> Response:
         token = str(self.request.data.get("token", ""))
-        tenant = _signed_tenant(token, "email_marketing.unsubscribe", 60 * 60 * 24 * 365)
+        tenant = _signed_tenant(token, "email_marketing.unsubscribe", "unsubscribe")
         value = DeliveryService.unsubscribe(tenant, token, timezone.now())
-        return Response({"suppression_id": str(value.id), "status": "unsubscribed"})
+        response = PublicUnsubscribeResponseSerializer({"suppression_id": value.id, "status": "unsubscribed"})
+        return Response(response.data)
 
 
 class TrackingOpenAPIView(APIView):
@@ -563,11 +855,20 @@ class TrackingOpenAPIView(APIView):
     permission_classes: tuple = ()
     throttle_classes = (PublicEmailThrottle,)
     renderer_classes: tuple = ()
-    pixel = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+    pixel = (
+        b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff"
+        b"!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01"
+        b"\x00\x00\x02\x02D\x01\x00;"
+    )
+
+    def initial(self, request: object, *args: object, **kwargs: object) -> None:
+        token = str(kwargs.get("token", ""))
+        request.tenant_id = _signed_tenant(token, "email_marketing.tracking", "tracking")
+        super().initial(request, *args, **kwargs)
 
     def get(self, request: object, token: str) -> HttpResponse:
         del request
-        tenant = _signed_tenant(token, "email_marketing.tracking", 60 * 60 * 24 * 90)
+        tenant = _signed_tenant(token, "email_marketing.tracking", "tracking")
         DeliveryService.record_open(tenant, token)
         response = HttpResponse(self.pixel, content_type="image/gif")
         response["Cache-Control"] = "no-store, private"
@@ -579,8 +880,13 @@ class TrackingClickAPIView(APIView):
     permission_classes: tuple = ()
     throttle_classes = (PublicEmailThrottle,)
 
+    def initial(self, request: object, *args: object, **kwargs: object) -> None:
+        token = str(kwargs.get("token", ""))
+        request.tenant_id = _signed_tenant(token, "email_marketing.tracking", "tracking")
+        super().initial(request, *args, **kwargs)
+
     def get(self, request: object, token: str) -> HttpResponseRedirect:
-        tenant = _signed_tenant(token, "email_marketing.tracking", 60 * 60 * 24 * 90)
+        tenant = _signed_tenant(token, "email_marketing.tracking", "tracking")
         destination = str(self.request.query_params.get("destination", ""))
         _, url = DeliveryService.record_click(tenant, token, destination)
         return HttpResponseRedirect(url)
@@ -588,6 +894,7 @@ class TrackingClickAPIView(APIView):
 
 __all__ = [
     "CampaignRecipientViewSet",
+    "ConfigurationViewSet",
     "ConsentRecordViewSet",
     "DeliveryAttemptViewSet",
     "EmailCampaignViewSet",
