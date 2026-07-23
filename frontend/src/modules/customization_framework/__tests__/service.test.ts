@@ -23,14 +23,14 @@ describe("customization framework service", () => {
   it("uses PATCH with optimistic-lock payloads", async () => {
     vi.mocked(apiClient.patch).mockResolvedValue({ data: field, meta: envelope.meta });
     await service.updateField(field.id, { label: "Dispatch note", expected_lock_version: 3 });
-    expect(apiClient.patch).toHaveBeenCalledWith(ENDPOINTS.FIELD_DEFINITIONS.UPDATE(field.id), { label: "Dispatch note", expected_lock_version: 3 });
+    expect(apiClient.patch).toHaveBeenCalledWith(ENDPOINTS.FIELD_DEFINITIONS.UPDATE(field.id), { label: "Dispatch note", expected_lock_version: 3 }, expect.objectContaining({ headers: expect.objectContaining({ "Idempotency-Key": expect.any(String) }) }));
   });
 
   it("targets exact lifecycle and non-persisting validation endpoints", async () => {
     vi.mocked(apiClient.post).mockResolvedValue({ data: field, meta: envelope.meta });
     await service.transitionField(field.id, "deprecate", { transition_key: "transition-1" });
     await service.validateValue(field.id, { value: "safe" });
-    expect(apiClient.post).toHaveBeenNthCalledWith(1, ENDPOINTS.FIELD_DEFINITIONS.DEPRECATE(field.id), { transition_key: "transition-1" });
+    expect(apiClient.post).toHaveBeenNthCalledWith(1, ENDPOINTS.FIELD_DEFINITIONS.DEPRECATE(field.id), { transition_key: "transition-1" }, expect.any(Object));
     expect(apiClient.post).toHaveBeenNthCalledWith(2, ENDPOINTS.FIELD_DEFINITIONS.VALIDATE_VALUE(field.id), { value: "safe" });
   });
 

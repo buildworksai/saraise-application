@@ -1,10 +1,15 @@
-"""Immutable, fail-closed access declarations for customization API v2."""
+"""Fail-closed access policy loaded from the authoritative module manifest."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
-from typing import Final, Mapping
+from typing import Final
+
+import yaml
+from django.core.exceptions import ImproperlyConfigured
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,89 +22,91 @@ class AccessRequirement:
     quota_cost: int = 1
 
 
-def _access(permission: str, quota: str, *, cost: int = 1) -> AccessRequirement:
-    qualified = f"customization_framework.{permission}"
-    return AccessRequirement(
-        permission=qualified,
-        entitlement=f"customization_framework.{permission.split(':', 1)[0]}",
-        quota_resource=f"customization_framework.{quota}",
-        quota_cost=cost,
-    )
+def _load_manifest() -> Mapping[str, object]:
+    path = Path(__file__).with_name("manifest.yaml")
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise ImproperlyConfigured("Customization framework manifest could not be loaded.") from exc
+    if not isinstance(document, Mapping):
+        raise ImproperlyConfigured("Customization framework manifest must be a YAML object.")
+    return document
 
 
-READ = "api_reads"
-WRITE = "api_writes"
+def _load_access_policy(
+    manifest: Mapping[str, object],
+) -> tuple[Mapping[str, AccessRequirement], tuple[str, ...], tuple[tuple[str, str], ...]]:
+    raw_permissions = manifest.get("permissions")
+    metadata = manifest.get("metadata")
+    if not isinstance(raw_permissions, list) or any(not isinstance(item, str) for item in raw_permissions):
+        raise ImproperlyConfigured("Manifest permissions must be a list of strings.")
+    if len(raw_permissions) != len(set(raw_permissions)):
+        raise ImproperlyConfigured("Manifest permissions contain duplicate declarations.")
+    if not isinstance(metadata, Mapping):
+        raise ImproperlyConfigured("Manifest metadata must be an object.")
 
-# Keys are ``<ViewSet basename>.<DRF action>``. Method-qualified keys are used
-# where one custom DRF action intentionally serves both GET and POST.
-_ACTION_ACCESS = {
-    "resource-contract.list": _access("field_definition:read", READ),
-    "field-definition.list": _access("field_definition:read", READ),
-    "field-definition.retrieve": _access("field_definition:read", READ),
-    "field-definition.create": _access("field_definition:create", WRITE),
-    "field-definition.partial_update": _access("field_definition:update", WRITE),
-    "field-definition.destroy": _access("field_definition:delete", WRITE),
-    "field-definition.activate": _access("field_definition:publish", WRITE),
-    "field-definition.deprecate": _access("field_definition:publish", WRITE),
-    "field-definition.retire": _access("field_definition:publish", WRITE),
-    "field-definition.impact": _access("impact:read", READ),
-    "field-definition.validate_value": _access("field_value:validate", "validations"),
-    "field-value.list": _access("field_value:read", READ),
-    "field-value.retrieve": _access("field_value:read", READ),
-    "field-value.create": _access("field_value:write", WRITE),
-    "field-value.partial_update": _access("field_value:write", WRITE),
-    "field-value.destroy": _access("field_value:delete", WRITE),
-    "form.list": _access("form:read", READ),
-    "form.retrieve": _access("form:read", READ),
-    "form.create": _access("form:create", WRITE),
-    "form.partial_update": _access("form:update", WRITE),
-    "form.destroy": _access("form:delete", WRITE),
-    "form.layout_versions:get": _access("form:read", READ),
-    "form.layout_versions:post": _access("form:update", WRITE),
-    "form.validate_layout": _access("form:update", "validations"),
-    "form.publish": _access("form:publish", WRITE),
-    "form.archive": _access("form:archive", WRITE),
-    "form.render_schema": _access("form:read", READ),
-    "form.impact": _access("impact:read", READ),
-    "form-layout.list": _access("form:read", READ),
-    "form-layout.retrieve": _access("form:read", READ),
-    "rule.list": _access("rule:read", READ),
-    "rule.retrieve": _access("rule:read", READ),
-    "rule.create": _access("rule:create", WRITE),
-    "rule.partial_update": _access("rule:update", WRITE),
-    "rule.destroy": _access("rule:delete", WRITE),
-    "rule.versions:get": _access("rule:read", READ),
-    "rule.versions:post": _access("rule:update", WRITE),
-    "rule.validate_version": _access("rule:update", "validations"),
-    "rule.publish": _access("rule:publish", WRITE),
-    "rule.pause": _access("rule:publish", WRITE),
-    "rule.resume": _access("rule:publish", WRITE),
-    "rule.retire": _access("rule:publish", WRITE),
-    "rule.evaluate": _access("rule:evaluate", "rule_evaluations", cost=1),
-    "rule.impact": _access("impact:read", READ),
-    "rule-version.list": _access("rule:read", READ),
-    "rule-version.retrieve": _access("rule:read", READ),
-    "rule-execution.list": _access("execution:read", READ),
-    "rule-execution.retrieve": _access("execution:read", READ),
-    "health.get": _access("health:read", READ),
-}
+    raw_policy = metadata.get("access_policy")
+    if not isinstance(raw_policy, Mapping) or not raw_policy:
+        raise ImproperlyConfigured("Manifest metadata.access_policy must be a non-empty object.")
+    policy: dict[str, AccessRequirement] = {}
+    for action_key, declaration in raw_policy.items():
+        if not isinstance(action_key, str) or not action_key or not isinstance(declaration, Mapping):
+            raise ImproperlyConfigured("Every access policy entry must map an action key to an object.")
+        permission = declaration.get("permission")
+        entitlement = declaration.get("entitlement")
+        quota_resource = declaration.get("quota_resource")
+        quota_cost = declaration.get("quota_cost")
+        if (
+            not isinstance(permission, str)
+            or permission not in raw_permissions
+            or not isinstance(entitlement, str)
+            or not entitlement
+            or not isinstance(quota_resource, str)
+            or not quota_resource
+            or not isinstance(quota_cost, int)
+            or isinstance(quota_cost, bool)
+            or quota_cost < 1
+        ):
+            raise ImproperlyConfigured(f"Manifest access policy entry '{action_key}' is invalid.")
+        policy[action_key] = AccessRequirement(permission, entitlement, quota_resource, quota_cost)
 
-ACTION_ACCESS: Final[Mapping[str, AccessRequirement]] = MappingProxyType(_ACTION_ACCESS)
-PERMISSIONS: Final[tuple[str, ...]] = tuple(sorted({item.permission for item in ACTION_ACCESS.values()}))
-SOD_ACTIONS: Final[tuple[tuple[str, str], ...]] = (
-    (
-        "customization_framework.field_definition:create",
-        "customization_framework.field_definition:publish",
-    ),
-    ("customization_framework.form:create", "customization_framework.form:publish"),
-    ("customization_framework.rule:create", "customization_framework.rule:publish"),
-    ("customization_framework.field_definition:update", "customization_framework.field_definition:delete"),
-    ("customization_framework.rule:update", "customization_framework.rule:publish"),
-)
+    used_permissions = {requirement.permission for requirement in policy.values()}
+    if used_permissions != set(raw_permissions):
+        raise ImproperlyConfigured("Every manifest permission must be used by the access policy.")
+
+    raw_pairs = metadata.get("sod_pairs")
+    if not isinstance(raw_pairs, list):
+        raise ImproperlyConfigured("Manifest metadata.sod_pairs must be a list.")
+    pairs: list[tuple[str, str]] = []
+    for declaration in raw_pairs:
+        actions = declaration.get("actions") if isinstance(declaration, Mapping) else None
+        if (
+            not isinstance(actions, Sequence)
+            or isinstance(actions, (str, bytes))
+            or len(actions) != 2
+            or any(not isinstance(action, str) or action not in raw_permissions for action in actions)
+            or actions[0] == actions[1]
+        ):
+            raise ImproperlyConfigured("Every SoD declaration must contain two distinct manifest permissions.")
+        pairs.append((actions[0], actions[1]))
+    if len(pairs) != len(set(pairs)):
+        raise ImproperlyConfigured("Manifest metadata.sod_pairs contains duplicate declarations.")
+
+    flattened = [action for pair in pairs for action in pair]
+    if manifest.get("sod_actions") != flattened:
+        raise ImproperlyConfigured("Manifest sod_actions must be the ordered flattening of metadata.sod_pairs.")
+    return MappingProxyType(policy), tuple(raw_permissions), tuple(pairs)
+
+
+_MANIFEST = _load_manifest()
+ACTION_ACCESS, PERMISSIONS, SOD_ACTIONS = _load_access_policy(_MANIFEST)
+ACTION_ACCESS: Final[Mapping[str, AccessRequirement]]
+PERMISSIONS: Final[tuple[str, ...]]
+SOD_ACTIONS: Final[tuple[tuple[str, str], ...]]
 
 
 def requirement_for(viewset: str, action: str, method: str | None = None) -> AccessRequirement | None:
-    """Return a declaration or ``None``; callers must deny on ``None``."""
+    """Return a manifest declaration or ``None`` so callers deny unknown actions."""
 
     if method is not None:
         qualified = ACTION_ACCESS.get(f"{viewset}.{action}:{method.lower()}")

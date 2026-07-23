@@ -47,6 +47,80 @@ export interface ResourceContract {
   readonly entitlement_keys: readonly string[]; readonly available: boolean; readonly discovery: JSONObject;
 }
 
+export interface RuntimeConfigurationLimits {
+  readonly json_bytes: number; readonly ast_nodes: number; readonly ast_depth: number; readonly evaluation_ms: number;
+  readonly field_key_length: number; readonly field_label_length: number; readonly resource_key_length: number;
+  readonly contract_version_length: number; readonly form_key_length: number; readonly form_name_length: number;
+  readonly change_summary_length: number; readonly idempotency_key_length: number;
+  readonly rule_priority_min: number; readonly rule_priority_max: number;
+}
+export interface RuntimeConfigurationPolicies {
+  readonly slug_pattern: string; readonly field_types: readonly FieldDataType[]; readonly rule_triggers: readonly RuleTrigger[];
+  readonly condition_operators: readonly RuleOperator[]; readonly action_types: readonly RuleActionType[];
+  readonly value_sources: readonly Exclude<FieldValueSource, "rule">[]; readonly value_allowed_statuses: readonly FieldStatus[];
+  readonly field_delete_statuses: readonly FieldStatus[]; readonly form_delete_statuses: readonly FormStatus[];
+  readonly field_transitions: JSONObject; readonly form_transitions: JSONObject; readonly rule_transitions: JSONObject;
+}
+export interface RuntimeConfigurationDefaults {
+  readonly field_required: boolean; readonly field_searchable: boolean; readonly field_status: FieldStatus;
+  readonly form_status: FormStatus; readonly layout_schema_version: number; readonly layout_status: LayoutVersionStatus;
+  readonly form_surface: string; readonly form_layout: FormLayout; readonly rule_priority: number;
+  readonly rule_stop_on_match: boolean; readonly rule_status: RuleStatus; readonly rule_language_version: number;
+  readonly rule_version_status: RuleVersionStatus; readonly contract_version: string;
+}
+export interface RuntimeListPreferences {
+  readonly page_size: number; readonly field_ordering: FieldOrdering; readonly form_ordering: FormOrdering;
+  readonly rule_ordering: RuleOrdering; readonly execution_ordering: ExecutionOrdering;
+}
+export interface RuntimeNavigationConfiguration {
+  readonly fields_order: number; readonly field_values_order: number; readonly forms_order: number;
+  readonly rules_order: number; readonly executions_order: number; readonly configuration_order: number;
+}
+export interface RuntimeRolloutConfiguration {
+  readonly enabled: boolean; readonly roles: readonly string[]; readonly cohorts: readonly string[];
+}
+export interface RuntimeRbacConfiguration {
+  readonly action_access: JSONValue; readonly sod_actions: JSONValue;
+}
+export interface RuntimeConfigurationDocument {
+  readonly limits: RuntimeConfigurationLimits; readonly policies: RuntimeConfigurationPolicies;
+  readonly defaults: RuntimeConfigurationDefaults; readonly list_preferences: RuntimeListPreferences;
+  readonly navigation: RuntimeNavigationConfiguration; readonly rollout: RuntimeRolloutConfiguration;
+  readonly rbac: RuntimeRbacConfiguration;
+}
+export interface RuntimeConfiguration {
+  readonly id: UUID | null; readonly tenant_id: UUID; readonly version: number; readonly environment: string;
+  readonly document: RuntimeConfigurationDocument; readonly updated_by: UUID | null; readonly created_at: string | null; readonly updated_at: string | null;
+}
+export interface RuntimeConfigurationVersion {
+  readonly id: UUID; readonly version: number; readonly environment: string; readonly document: RuntimeConfigurationDocument;
+  readonly actor_id: UUID; readonly correlation_id: UUID; readonly created_at: string;
+}
+export interface ConfigurationAuditRecord {
+  readonly id: UUID; readonly action: string; readonly version: number; readonly before: RuntimeConfigurationDocument | null;
+  readonly after: RuntimeConfigurationDocument | null; readonly actor_id: UUID; readonly correlation_id: UUID; readonly created_at: string;
+}
+export interface ConfigurationCommand {
+  readonly expected_version: number;
+}
+export interface ConfigurationUpdateRequest extends ConfigurationCommand {
+  readonly environment: string; readonly document: RuntimeConfigurationDocument;
+}
+export interface ConfigurationPreviewRequest {
+  readonly document: RuntimeConfigurationDocument;
+}
+export interface ConfigurationPreview {
+  readonly valid: boolean; readonly document: RuntimeConfigurationDocument; readonly changes: JSONObject; readonly requires_restart: boolean;
+}
+export interface ConfigurationRollbackRequest extends ConfigurationCommand { readonly target_version: number }
+export interface ConfigurationExportDocument {
+  readonly schema: string; readonly tenant_id: UUID; readonly version: number; readonly environment: string;
+  readonly document: RuntimeConfigurationDocument;
+}
+export interface ConfigurationImportRequest extends ConfigurationCommand {
+  readonly payload: ConfigurationExportDocument;
+}
+
 export interface TransitionEvidence { readonly command: string; readonly from: string; readonly to: string; readonly actor_id: UUID; readonly occurred_at: string; readonly correlation_id?: UUID }
 export interface ValidationDiagnostic { readonly code: string; readonly message: string; readonly severity: DiagnosticSeverity; readonly field?: string; readonly pointer?: string; readonly remediation?: string }
 export interface DependencyReference { readonly entity_type: "field" | "form" | "layout" | "rule" | "module"; readonly entity_id: UUID | null; readonly label: string; readonly module: string; readonly blocking: boolean; readonly capability_state: CapabilityState }
@@ -81,6 +155,8 @@ export interface FieldDefinitionCreateRequest {
   readonly validation_schema?: JSONObject; readonly presentation_schema?: JSONObject;
 }
 export interface FieldDefinitionUpdateRequest { readonly label?: string; readonly description?: string; readonly required?: boolean; readonly searchable?: boolean; readonly default_value?: JSONValue | null; readonly validation_schema?: JSONObject; readonly presentation_schema?: JSONObject; readonly expected_lock_version: number }
+export interface FieldDefinitionVersion { readonly id: UUID; readonly definition_id: UUID; readonly version: number; readonly document: JSONObject; readonly content_hash: string; readonly actor_id: UUID; readonly correlation_id: UUID; readonly created_at: string }
+export interface FieldDefinitionRollbackRequest { readonly target_version: number; readonly expected_lock_version: number }
 export interface LifecycleRequest { readonly transition_key: string }
 export interface ValueValidationRequest { readonly value: JSONValue }
 export interface ValidationResult { readonly valid: boolean; readonly normalized_value?: JSONValue; readonly diagnostics: readonly ValidationDiagnostic[] }
@@ -100,7 +176,7 @@ export interface FormCreateRequest { readonly key: string; readonly name: string
 export interface FormUpdateRequest { readonly name?: string; readonly description?: string; readonly expected_lock_version: number }
 export interface LayoutComponent { readonly id: string; readonly type: "field" | "heading" | "help_text" | "divider"; readonly field_key?: string; readonly label: string; readonly accessibility_label: string; readonly width: 3 | 4 | 6 | 8 | 9 | 12 }
 export interface LayoutSection { readonly id: string; readonly title: string; readonly components: readonly LayoutComponent[] }
-export interface FormLayout { readonly schema_version: 1; readonly sections: readonly LayoutSection[] }
+export interface FormLayout { readonly schema_version: number; readonly sections: readonly LayoutSection[] }
 export interface FormLayoutVersion { readonly id: UUID; readonly tenant_id?: UUID; readonly form: UUID; readonly version: number; readonly schema_version: number; readonly layout: FormLayout; readonly content_hash: string; readonly change_summary: string; readonly status: LayoutVersionStatus; readonly validation_errors: readonly ValidationDiagnostic[]; readonly created_by: UUID; readonly created_at: string; readonly published_at: string | null; readonly published_by: UUID | null }
 export interface LayoutVersionCreateRequest { readonly layout: FormLayout; readonly change_summary: string }
 export interface FormPublishRequest extends LifecycleRequest { readonly layout_version_id: UUID }
@@ -122,7 +198,7 @@ export interface RuleVersionCreateRequest { readonly condition_ast: RuleConditio
 export interface RulePublishRequest extends LifecycleRequest { readonly version_id: UUID }
 export interface RuleEvaluateRequest { readonly record: JSONObject; readonly changed_fields: readonly string[]; readonly target_record_id?: UUID; readonly idempotency_key: string }
 export interface EvaluationResult { readonly matched?: boolean; readonly rejected?: boolean; readonly mutations?: JSONObject; readonly actions?: readonly RuleActionNode[]; readonly diagnostics: readonly ValidationDiagnostic[]; readonly execution_id?: UUID; readonly duration_ms: number; readonly correlation_id: UUID }
-export interface RuleExecution { readonly id: UUID; readonly tenant_id?: UUID; readonly rule: UUID; readonly rule_name?: string; readonly rule_version: UUID; readonly target_record_id: UUID | null; readonly trigger: RuleTrigger; readonly idempotency_key: string; readonly status: RuleExecutionStatus; readonly input_fingerprint: string; readonly result: JSONObject; readonly diagnostics: readonly ValidationDiagnostic[]; readonly duration_ms: number; readonly correlation_id: UUID; readonly executed_by: UUID; readonly executed_at: string }
+export interface RuleExecution { readonly id: UUID; readonly rule_id: UUID; readonly rule_name: string; readonly rule_version_id: UUID; readonly target_record_id: UUID | null; readonly trigger: RuleTrigger; readonly status: RuleExecutionStatus; readonly result: JSONObject; readonly diagnostics: readonly ValidationDiagnostic[]; readonly duration_ms: number; readonly correlation_id: UUID; readonly executed_at: string }
 
 export interface HealthCheck { readonly name: string; readonly status: "healthy" | "degraded" | "unhealthy"; readonly critical: boolean; readonly message: string }
 export interface CustomizationHealth { readonly status: "healthy" | "degraded" | "unhealthy"; readonly checks: readonly HealthCheck[] }
@@ -143,19 +219,31 @@ export interface ExecutionFilters extends PageQuery { readonly rule_id?: UUID; r
 export const MODULE_API_PREFIX = "/api/v2/customization-framework";
 export const ENDPOINTS = {
   RESOURCE_CONTRACTS: `${MODULE_API_PREFIX}/resource-contracts/`,
-  FIELD_DEFINITIONS: { LIST: `${MODULE_API_PREFIX}/field-definitions/`, CREATE: `${MODULE_API_PREFIX}/field-definitions/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/` as const, UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/` as const, DELETE: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/` as const, ACTIVATE: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/activate/` as const, DEPRECATE: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/deprecate/` as const, RETIRE: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/retire/` as const, IMPACT: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/impact/` as const, VALIDATE_VALUE: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/validate-value/` as const },
+  FIELD_DEFINITIONS: { LIST: `${MODULE_API_PREFIX}/field-definitions/`, CREATE: `${MODULE_API_PREFIX}/field-definitions/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/` as const, UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/` as const, DELETE: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/` as const, ACTIVATE: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/activate/` as const, DEPRECATE: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/deprecate/` as const, RETIRE: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/retire/` as const, IMPACT: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/impact/` as const, VERSIONS: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/versions/` as const, ROLLBACK: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/rollback/` as const, VALIDATE_VALUE: (id: UUID) => `${MODULE_API_PREFIX}/field-definitions/${id}/validate-value/` as const },
   FIELD_VALUES: { LIST: `${MODULE_API_PREFIX}/field-values/`, CREATE: `${MODULE_API_PREFIX}/field-values/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/field-values/${id}/` as const, UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/field-values/${id}/` as const, DELETE: (id: UUID) => `${MODULE_API_PREFIX}/field-values/${id}/` as const },
   FORMS: { LIST: `${MODULE_API_PREFIX}/forms/`, CREATE: `${MODULE_API_PREFIX}/forms/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/forms/${id}/` as const, UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/forms/${id}/` as const, DELETE: (id: UUID) => `${MODULE_API_PREFIX}/forms/${id}/` as const, LAYOUT_VERSIONS: (id: UUID) => `${MODULE_API_PREFIX}/forms/${id}/layout-versions/` as const, PUBLISH: (id: UUID) => `${MODULE_API_PREFIX}/forms/${id}/publish/` as const, ARCHIVE: (id: UUID) => `${MODULE_API_PREFIX}/forms/${id}/archive/` as const, RENDER_SCHEMA: (id: UUID) => `${MODULE_API_PREFIX}/forms/${id}/render-schema/` as const, IMPACT: (id: UUID) => `${MODULE_API_PREFIX}/forms/${id}/impact/` as const },
   FORM_LAYOUTS: { LIST: `${MODULE_API_PREFIX}/form-layouts/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/form-layouts/${id}/` as const },
   RULES: { LIST: `${MODULE_API_PREFIX}/rules/`, CREATE: `${MODULE_API_PREFIX}/rules/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/rules/${id}/` as const, UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/rules/${id}/` as const, DELETE: (id: UUID) => `${MODULE_API_PREFIX}/rules/${id}/` as const, VERSIONS: (id: UUID) => `${MODULE_API_PREFIX}/rules/${id}/versions/` as const, PUBLISH: (id: UUID) => `${MODULE_API_PREFIX}/rules/${id}/publish/` as const, PAUSE: (id: UUID) => `${MODULE_API_PREFIX}/rules/${id}/pause/` as const, RESUME: (id: UUID) => `${MODULE_API_PREFIX}/rules/${id}/resume/` as const, RETIRE: (id: UUID) => `${MODULE_API_PREFIX}/rules/${id}/retire/` as const, EVALUATE: (id: UUID) => `${MODULE_API_PREFIX}/rules/${id}/evaluate/` as const, IMPACT: (id: UUID) => `${MODULE_API_PREFIX}/rules/${id}/impact/` as const },
   RULE_VERSIONS: { LIST: `${MODULE_API_PREFIX}/rule-versions/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/rule-versions/${id}/` as const },
   RULE_EXECUTIONS: { LIST: `${MODULE_API_PREFIX}/rule-executions/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/rule-executions/${id}/` as const },
+  CONFIGURATION: {
+    DETAIL: `${MODULE_API_PREFIX}/configuration/`,
+    UPDATE: `${MODULE_API_PREFIX}/configuration/update/`,
+    PREVIEW: `${MODULE_API_PREFIX}/configuration/preview/`,
+    VERSIONS: `${MODULE_API_PREFIX}/configuration/versions/`,
+    ROLLBACK: `${MODULE_API_PREFIX}/configuration/rollback/`,
+    AUDIT: `${MODULE_API_PREFIX}/configuration/history/`,
+    IMPORT: `${MODULE_API_PREFIX}/configuration/import/`,
+    EXPORT: `${MODULE_API_PREFIX}/configuration/export/`,
+  },
   HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
 
 export const ROUTES = {
   FIELDS: "/customization-framework/fields", FIELD_CREATE: "/customization-framework/fields/new", FIELD_DETAIL: (id: UUID) => `/customization-framework/fields/${id}` as const, FIELD_EDIT: (id: UUID) => `/customization-framework/fields/${id}/edit` as const, FIELD_IMPACT: (id: UUID) => `/customization-framework/fields/${id}/impact` as const,
+  FIELD_VALUES: "/customization-framework/field-values", FIELD_VALUE_CREATE: "/customization-framework/field-values/new", FIELD_VALUE_DETAIL: (id: UUID) => `/customization-framework/field-values/${id}` as const, FIELD_VALUE_EDIT: (id: UUID) => `/customization-framework/field-values/${id}/edit` as const,
   FORMS: "/customization-framework/forms", FORM_CREATE: "/customization-framework/forms/new", FORM_DETAIL: (id: UUID) => `/customization-framework/forms/${id}` as const, FORM_EDIT: (id: UUID) => `/customization-framework/forms/${id}/designer` as const, FORM_VERSION: (formId: UUID, versionId: UUID) => `/customization-framework/forms/${formId}/versions/${versionId}` as const, FORM_IMPACT: (id: UUID) => `/customization-framework/forms/${id}/impact` as const,
   RULES: "/customization-framework/rules", RULE_CREATE: "/customization-framework/rules/new", RULE_DETAIL: (id: UUID) => `/customization-framework/rules/${id}` as const, RULE_EDIT: (id: UUID) => `/customization-framework/rules/${id}/edit` as const, RULE_VERSION: (ruleId: UUID, versionId: UUID) => `/customization-framework/rules/${ruleId}/versions/${versionId}` as const, RULE_IMPACT: (id: UUID) => `/customization-framework/rules/${id}/impact` as const,
   EXECUTIONS: "/customization-framework/executions", EXECUTION_DETAIL: (id: UUID) => `/customization-framework/executions/${id}` as const,
+  CONFIGURATION: "/customization-framework/configuration",
 } as const;

@@ -5,15 +5,16 @@ description: Tenant-safe custom fields, versioned forms, declarative rules, and 
 type: foundation
 lifecycle: core
 dependencies:
-  - core-identity >=1.0
-  - metadata-modeling >=1.0
-  - security-access-control >=1.0
+  - core-identity >=1.0.0
+  - metadata-modeling >=1.0.0
+  - security-access-control >=1.0.0
 permissions:
   - customization_framework.field_definition:read
   - customization_framework.field_definition:create
   - customization_framework.field_definition:update
   - customization_framework.field_definition:delete
   - customization_framework.field_definition:publish
+  - customization_framework.field_definition:rollback
   - customization_framework.field_value:read
   - customization_framework.field_value:write
   - customization_framework.field_value:delete
@@ -33,10 +34,24 @@ permissions:
   - customization_framework.execution:read
   - customization_framework.impact:read
   - customization_framework.health:read
+  - customization_framework.configuration:read
+  - customization_framework.configuration:update
+  - customization_framework.configuration:rollback
+  - customization_framework.configuration:import
+  - customization_framework.configuration:export
 sod_actions:
-  - ["customization_framework.field_definition:create", "customization_framework.field_definition:publish"]
-  - ["customization_framework.form:create", "customization_framework.form:publish"]
-  - ["customization_framework.rule:create", "customization_framework.rule:publish"]
+  - customization_framework.field_definition:create
+  - customization_framework.field_definition:publish
+  - customization_framework.form:create
+  - customization_framework.form:publish
+  - customization_framework.rule:create
+  - customization_framework.rule:publish
+  - customization_framework.field_definition:update
+  - customization_framework.field_definition:delete
+  - customization_framework.rule:update
+  - customization_framework.rule:publish
+  - customization_framework.configuration:update
+  - customization_framework.configuration:rollback
 search_indexes:
   - customization_field_definitions
   - customization_form_definitions
@@ -44,17 +59,111 @@ search_indexes:
 ai_tools: []
 metadata:
   api_version: v2
+  public_api_prefix: /api/v2/customization-framework/
   extension_surface: customization-registry-v1
-  entitlement_keys:
-    - customization_framework.fields
-    - customization_framework.forms
-    - customization_framework.rules
-    - customization_framework.execution_evidence
+  entities:
+    - customization_field_definitions
+    - customization_field_definition_versions
+    - customization_field_values
+    - customization_form_definitions
+    - customization_form_layout_versions
+    - customization_business_rules
+    - customization_business_rule_versions
+    - customization_rule_executions
+    - customization_runtime_configurations
+    - customization_runtime_configuration_versions
+    - customization_configuration_audit_records
+    - customization_idempotent_commands
+    - customization_lifecycle_transition_records
+    - customization_publication_records
+  endpoints:
+    - {registration: router, prefix: resource-contracts, basename: resource-contract, viewset: ResourceContractViewSet}
+    - {registration: router, prefix: field-definitions, basename: field-definition, viewset: FieldDefinitionViewSet}
+    - {registration: router, prefix: field-values, basename: field-value, viewset: FieldValueViewSet}
+    - {registration: router, prefix: forms, basename: form, viewset: FormDefinitionViewSet}
+    - {registration: router, prefix: form-layouts, basename: form-layout, viewset: FormLayoutVersionViewSet}
+    - {registration: router, prefix: rules, basename: rule, viewset: BusinessRuleViewSet}
+    - {registration: router, prefix: rule-versions, basename: rule-version, viewset: BusinessRuleVersionViewSet}
+    - {registration: router, prefix: rule-executions, basename: rule-execution, viewset: RuleExecutionViewSet}
+    - {registration: router, prefix: configuration, basename: configuration, viewset: RuntimeConfigurationViewSet}
+    - {registration: path, route: health/, name: health, view: ModuleHealthAPIView}
+  sod_pairs:
+    - actions: [customization_framework.field_definition:create, customization_framework.field_definition:publish]
+    - actions: [customization_framework.form:create, customization_framework.form:publish]
+    - actions: [customization_framework.rule:create, customization_framework.rule:publish]
+    - actions: [customization_framework.field_definition:update, customization_framework.field_definition:delete]
+    - actions: [customization_framework.rule:update, customization_framework.rule:publish]
+    - actions: [customization_framework.configuration:update, customization_framework.configuration:rollback]
+  access_policy:
+    resource-contract.list: &field_read {permission: customization_framework.field_definition:read, entitlement: customization_framework.field_definition, quota_resource: customization_framework.api_reads, quota_cost: 1}
+    field-definition.list: *field_read
+    field-definition.retrieve: *field_read
+    field-definition.create: &field_create {permission: customization_framework.field_definition:create, entitlement: customization_framework.field_definition, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    field-definition.partial_update: &field_update {permission: customization_framework.field_definition:update, entitlement: customization_framework.field_definition, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    field-definition.destroy: &field_delete {permission: customization_framework.field_definition:delete, entitlement: customization_framework.field_definition, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    field-definition.activate: &field_publish {permission: customization_framework.field_definition:publish, entitlement: customization_framework.field_definition, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    field-definition.deprecate: *field_publish
+    field-definition.retire: *field_publish
+    field-definition.impact: &impact_read {permission: customization_framework.impact:read, entitlement: customization_framework.impact, quota_resource: customization_framework.api_reads, quota_cost: 1}
+    field-definition.versions: *field_read
+    field-definition.rollback: {permission: customization_framework.field_definition:rollback, entitlement: customization_framework.field_definition, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    field-definition.validate_value: {permission: customization_framework.field_value:validate, entitlement: customization_framework.field_value, quota_resource: customization_framework.validations, quota_cost: 1}
+    field-value.list: &value_read {permission: customization_framework.field_value:read, entitlement: customization_framework.field_value, quota_resource: customization_framework.api_reads, quota_cost: 1}
+    field-value.retrieve: *value_read
+    field-value.create: &value_write {permission: customization_framework.field_value:write, entitlement: customization_framework.field_value, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    field-value.partial_update: *value_write
+    field-value.destroy: {permission: customization_framework.field_value:delete, entitlement: customization_framework.field_value, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    form.list: &form_read {permission: customization_framework.form:read, entitlement: customization_framework.form, quota_resource: customization_framework.api_reads, quota_cost: 1}
+    form.retrieve: *form_read
+    form.create: {permission: customization_framework.form:create, entitlement: customization_framework.form, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    form.partial_update: &form_update {permission: customization_framework.form:update, entitlement: customization_framework.form, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    form.destroy: {permission: customization_framework.form:delete, entitlement: customization_framework.form, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    form.layout_versions:get: *form_read
+    form.layout_versions:post: *form_update
+    form.validate_layout: *form_update
+    form.publish: {permission: customization_framework.form:publish, entitlement: customization_framework.form, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    form.archive: {permission: customization_framework.form:archive, entitlement: customization_framework.form, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    form.render_schema: *form_read
+    form.impact: *impact_read
+    form-layout.list: *form_read
+    form-layout.retrieve: *form_read
+    rule.list: &rule_read {permission: customization_framework.rule:read, entitlement: customization_framework.rule, quota_resource: customization_framework.api_reads, quota_cost: 1}
+    rule.retrieve: *rule_read
+    rule.create: {permission: customization_framework.rule:create, entitlement: customization_framework.rule, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    rule.partial_update: &rule_update {permission: customization_framework.rule:update, entitlement: customization_framework.rule, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    rule.destroy: {permission: customization_framework.rule:delete, entitlement: customization_framework.rule, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    rule.versions:get: *rule_read
+    rule.versions:post: *rule_update
+    rule.validate_version: *rule_update
+    rule.publish: &rule_publish {permission: customization_framework.rule:publish, entitlement: customization_framework.rule, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    rule.pause: *rule_publish
+    rule.resume: *rule_publish
+    rule.retire: *rule_publish
+    rule.evaluate: {permission: customization_framework.rule:evaluate, entitlement: customization_framework.rule, quota_resource: customization_framework.rule_evaluations, quota_cost: 1}
+    rule.impact: *impact_read
+    rule-version.list: *rule_read
+    rule-version.retrieve: *rule_read
+    rule-execution.list: &execution_read {permission: customization_framework.execution:read, entitlement: customization_framework.execution, quota_resource: customization_framework.api_reads, quota_cost: 1}
+    rule-execution.retrieve: *execution_read
+    health.get: {permission: customization_framework.health:read, entitlement: customization_framework.health, quota_resource: customization_framework.api_reads, quota_cost: 1}
+    configuration.list: &configuration_read {permission: customization_framework.configuration:read, entitlement: customization_framework.configuration, quota_resource: customization_framework.api_reads, quota_cost: 1}
+    configuration.update_configuration: {permission: customization_framework.configuration:update, entitlement: customization_framework.configuration, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    configuration.preview: {permission: customization_framework.configuration:update, entitlement: customization_framework.configuration, quota_resource: customization_framework.api_reads, quota_cost: 1}
+    configuration.history: *configuration_read
+    configuration.versions: *configuration_read
+    configuration.rollback: {permission: customization_framework.configuration:rollback, entitlement: customization_framework.configuration, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    configuration.import_document: {permission: customization_framework.configuration:import, entitlement: customization_framework.configuration, quota_resource: customization_framework.api_writes, quota_cost: 1}
+    configuration.export_document: {permission: customization_framework.configuration:export, entitlement: customization_framework.configuration, quota_resource: customization_framework.api_reads, quota_cost: 1}
+  configuration:
+    tenant_scoped: true
+    versioned: true
+    immutable_audit: true
+    rollback: any_prior_version
+    import_export_schema: customization_framework.configuration.v1
+    preview: true
+    feature_rollout: [tenant, role, cohort]
   quota_resources:
     - customization_framework.api_reads
     - customization_framework.api_writes
+    - customization_framework.validations
     - customization_framework.rule_evaluations
-  sod_command_conflicts:
-    - [field_definition.update, field_definition.retire]
-    - [form.update, form.archive]
-    - [rule.update, rule.retire]

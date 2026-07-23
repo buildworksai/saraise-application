@@ -11,8 +11,9 @@ from .api import (
     FormDefinitionViewSet,
     FormLayoutVersionViewSet,
     ModuleHealthAPIView,
-    RuleExecutionViewSet,
     ResourceContractViewSet,
+    RuleExecutionViewSet,
+    RuntimeConfigurationViewSet,
 )
 
 app_name = "customization_framework"
@@ -25,5 +26,6 @@ router.register("form-layouts", FormLayoutVersionViewSet, basename="form-layout"
 router.register("rules", BusinessRuleViewSet, basename="rule")
 router.register("rule-versions", BusinessRuleVersionViewSet, basename="rule-version")
 router.register("rule-executions", RuleExecutionViewSet, basename="rule-execution")
+router.register("configuration", RuntimeConfigurationViewSet, basename="configuration")
 
 urlpatterns = [path("", include(router.urls)), path("health/", ModuleHealthAPIView.as_view(), name="health")]

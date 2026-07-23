@@ -9,7 +9,6 @@ from uuid import UUID
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q, QuerySet
-from django.utils.dateparse import parse_datetime
 from rest_framework import mixins, viewsets
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
@@ -20,8 +19,9 @@ from rest_framework.views import APIView
 
 from src.core.access import RequiresAccess
 from src.core.api import GovernedAPIViewMixin, OperationFailed
-from src.core.tenancy import get_current_tenant_id
+from src.core.api.envelope import correlation_id_for_request, utc_timestamp
 from src.core.state_machine import IdempotencyConflictError
+from src.core.tenancy import get_current_tenant_id
 
 from .health import get_module_health
 from .models import (
@@ -35,10 +35,17 @@ from .models import (
 )
 from .permissions import requirement_for
 from .serializers import (
+    ConfigurationAuditRecordSerializer,
+    ConfigurationImportSerializer,
+    ConfigurationPreviewSerializer,
+    ConfigurationRollbackSerializer,
+    ConfigurationUpdateSerializer,
     FieldDefinitionCreateSerializer,
     FieldDefinitionDetailSerializer,
     FieldDefinitionListSerializer,
+    FieldDefinitionRollbackSerializer,
     FieldDefinitionUpdateSerializer,
+    FieldDefinitionVersionSerializer,
     FieldTransitionSerializer,
     FieldValueCreateSerializer,
     FieldValueDetailSerializer,
@@ -51,9 +58,10 @@ from .serializers import (
     FormUpdateSerializer,
     HealthSerializer,
     ImpactReportSerializer,
+    LayoutValidationSerializer,
     LayoutVersionCreateSerializer,
     LayoutVersionDetailSerializer,
-    LayoutValidationSerializer,
+    ResourceContractSerializer,
     RuleCreateSerializer,
     RuleDetailSerializer,
     RuleEvaluateSerializer,
@@ -65,18 +73,22 @@ from .serializers import (
     RuleVersionCreateSerializer,
     RuleVersionDetailSerializer,
     RuleVersionValidationSerializer,
-    ResourceContractSerializer,
+    RuntimeConfigurationSerializer,
+    RuntimeConfigurationVersionSerializer,
     ValueValidationSerializer,
 )
 from .services import (
+    PLATFORM_CEILINGS,
     BusinessRuleService,
     CustomFieldService,
+    CustomizationConfigurationService,
     CustomizationNotFound,
     CustomizationRegistry,
     CustomizationValidationError,
     EvaluationIdempotencyConflict,
     FormService,
     OptimisticLockConflict,
+    effective_configuration,
 )
 
 
@@ -137,6 +149,26 @@ def _expected_lock(raw: object) -> int:
     return value
 
 
+def _command_idempotency_key(request: Any) -> str:
+    raw = request.headers.get("Idempotency-Key")
+    if raw is None:
+        return str(_request_correlation_id(request))
+    value = str(raw).strip()
+    if not value:
+        raise ValidationError({"Idempotency-Key": ["This header cannot be blank."]})
+    if len(value) > PLATFORM_CEILINGS["idempotency_key_length"]:
+        raise ValidationError({"Idempotency-Key": ["This header exceeds the platform limit."]})
+    return value
+
+
+def _request_correlation_id(request: Any) -> UUID:
+    raw = getattr(request, "correlation_id", None)
+    try:
+        return raw if isinstance(raw, UUID) else UUID(str(raw))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValidationError({"correlation_id": ["A valid request correlation ID is required."]}) from exc
+
+
 def _validate_choice(value: str | None, field: str, choices: set[str]) -> str | None:
     if value is not None and value not in choices:
         raise ValidationError({field: ["Unsupported value."]})
@@ -183,6 +215,14 @@ class GovernedTenantViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
     def actor_id(self) -> UUID:
         return _actor(self.request)
 
+    def tenant_or_none(self) -> UUID | None:
+        """Resolve tenant context without ever widening a queryset."""
+
+        try:
+            return self.tenant_id
+        except PermissionDenied:
+            return None
+
     def searched(self, queryset: QuerySet[Any]) -> QuerySet[Any]:
         term = self.request.query_params.get("search", "").strip()
         if not term or not self.search_fields:
@@ -209,9 +249,7 @@ class ResourceContractViewSet(GovernedTenantViewSet):
         include_unavailable = self.request.query_params.get("include_unavailable", "true").lower()
         if include_unavailable not in {"true", "false"}:
             raise ValidationError({"include_unavailable": ["Must be true or false."]})
-        contracts = CustomizationRegistry.list_resource_contracts(
-            include_unavailable=include_unavailable == "true"
-        )
+        contracts = CustomizationRegistry.list_resource_contracts(include_unavailable=include_unavailable == "true")
         return self.paginated(contracts, ResourceContractSerializer)
 
 
@@ -221,6 +259,9 @@ class FieldDefinitionViewSet(GovernedTenantViewSet):
     search_fields = ("key", "label", "description")
 
     def get_queryset(self) -> QuerySet[CustomFieldDefinition]:
+        tenant_id = self.tenant_or_none()
+        if tenant_id is None:
+            return CustomFieldDefinition.objects.none()
         filters = {
             key: self.request.query_params[key]
             for key in ("owner_module", "target_resource", "data_type", "status")
@@ -245,7 +286,7 @@ class FieldDefinitionViewSet(GovernedTenantViewSet):
         )
         _validate_choice(filters.get("status"), "status", {"draft", "active", "deprecated", "retired"})
         return self.service.list_definitions(
-            self.tenant_id, filters=filters, ordering=self.request.query_params.get("ordering", "key")
+            tenant_id, filters=filters, ordering=self.request.query_params.get("ordering", "key")
         )
 
     def get_serializer_class(self) -> type:
@@ -269,7 +310,11 @@ class FieldDefinitionViewSet(GovernedTenantViewSet):
         serializer = FieldDefinitionCreateSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         value = _call(
-            self.service.create_definition, self.tenant_id, actor_id=self.actor_id, data=serializer.validated_data
+            self.service.create_definition,
+            self.tenant_id,
+            actor_id=self.actor_id,
+            data=serializer.validated_data,
+            command_idempotency_key=_command_idempotency_key(self.request),
         )
         return Response(FieldDefinitionDetailSerializer(value).data, status=201)
 
@@ -287,6 +332,7 @@ class FieldDefinitionViewSet(GovernedTenantViewSet):
             expected_lock_version=lock,
             actor_id=self.actor_id,
             data=data,
+            command_idempotency_key=_command_idempotency_key(self.request),
         )
         return Response(FieldDefinitionDetailSerializer(value).data)
 
@@ -300,6 +346,7 @@ class FieldDefinitionViewSet(GovernedTenantViewSet):
             definition_id=self.kwargs["pk"],
             expected_lock_version=_expected_lock(lock),
             actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
         )
         return Response(FieldDefinitionDetailSerializer(value).data)
 
@@ -314,6 +361,7 @@ class FieldDefinitionViewSet(GovernedTenantViewSet):
             command=command,
             transition_key=serializer.validated_data["transition_key"],
             actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
         )
         return Response(FieldDefinitionDetailSerializer(value).data)
 
@@ -339,6 +387,34 @@ class FieldDefinitionViewSet(GovernedTenantViewSet):
         value = _call(self.service.get_definition_impact, self.tenant_id, definition_id=self.kwargs["pk"])
         return Response(ImpactReportSerializer(value).data)
 
+    @action(detail=True, methods=["get"])
+    def versions(self, request: object, pk: str | None = None) -> Response:
+        del request, pk
+        self.get_object()
+        return self.paginated(
+            self.service.list_definition_versions(
+                self.tenant_id,
+                definition_id=self.kwargs["pk"],
+            ),
+            FieldDefinitionVersionSerializer,
+        )
+
+    @action(detail=True, methods=["post"])
+    def rollback(self, request: object, pk: str | None = None) -> Response:
+        del request, pk
+        self.get_object()
+        serializer = FieldDefinitionRollbackSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        value = _call(
+            self.service.rollback_definition,
+            self.tenant_id,
+            definition_id=self.kwargs["pk"],
+            actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
+            **serializer.validated_data,
+        )
+        return Response(FieldDefinitionDetailSerializer(value).data)
+
     @action(detail=True, methods=["post"], url_path="validate-value")
     def validate_value(self, request: object, pk: str | None = None) -> Response:
         del request, pk
@@ -356,26 +432,31 @@ class FieldValueViewSet(GovernedTenantViewSet):
     service = CustomFieldService()
 
     def get_queryset(self) -> QuerySet[CustomFieldValue]:
+        tenant_id = self.tenant_or_none()
+        if tenant_id is None:
+            return CustomFieldValue.objects.none()
         if getattr(self, "action", "") != "list":
-            return CustomFieldValue.objects.filter(tenant_id=self.tenant_id, deleted_at__isnull=True).select_related(
-                "definition"
+            return self.service.list_values(
+                tenant_id,
+                filters={},
+                require_scope=False,
             )
-        definition = self.request.query_params.get("definition_id")
-        target = self.request.query_params.get("target_record_id")
-        queryset = self.service.list_values(self.tenant_id, target_record_id=target, definition_id=definition)
-        if source := self.request.query_params.get("source"):
-            _validate_choice(source, "source", {"ui", "api", "import", "rule"})
-            queryset = queryset.filter(source=source)
-        for key, lookup in (("updated_at_after", "updated_at__gte"), ("updated_at_before", "updated_at__lte")):
-            if raw := self.request.query_params.get(key):
-                parsed = parse_datetime(raw)
-                if parsed is None:
-                    raise ValidationError({key: ["Must be an ISO-8601 datetime."]})
-                queryset = queryset.filter(**{lookup: parsed})
-        ordering = self.request.query_params.get("ordering", "-updated_at")
-        if ordering.lstrip("-") not in {"updated_at", "created_at"}:
-            raise ValidationError({"ordering": ["Unsupported ordering field."]})
-        return queryset.order_by(ordering)
+        filters = {
+            key: self.request.query_params[key]
+            for key in (
+                "definition_id",
+                "target_record_id",
+                "source",
+                "updated_at_after",
+                "updated_at_before",
+            )
+            if key in self.request.query_params
+        }
+        return self.service.list_values(
+            tenant_id,
+            filters=filters,
+            ordering=self.request.query_params.get("ordering", "-updated_at"),
+        )
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -394,6 +475,7 @@ class FieldValueViewSet(GovernedTenantViewSet):
             self.tenant_id,
             actor_id=self.actor_id,
             expected_lock_version=None,
+            command_idempotency_key=_command_idempotency_key(self.request),
             **serializer.validated_data,
         )
         return Response(FieldValueDetailSerializer(value).data, status=201)
@@ -409,6 +491,7 @@ class FieldValueViewSet(GovernedTenantViewSet):
             definition_id=current.definition_id,
             target_record_id=current.target_record_id,
             actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
             **serializer.validated_data,
         )
         return Response(FieldValueDetailSerializer(value).data)
@@ -423,6 +506,7 @@ class FieldValueViewSet(GovernedTenantViewSet):
             value_id=current.id,
             expected_lock_version=_expected_lock(raw),
             actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
         )
         return Response(FieldValueDetailSerializer(value).data)
 
@@ -433,6 +517,9 @@ class FormDefinitionViewSet(GovernedTenantViewSet):
     search_fields = ("key", "name", "description")
 
     def get_queryset(self) -> QuerySet[FormDefinition]:
+        tenant_id = self.tenant_or_none()
+        if tenant_id is None:
+            return FormDefinition.objects.none()
         filters = {
             key: self.request.query_params[key]
             for key in ("owner_module", "target_resource", "status")
@@ -440,7 +527,7 @@ class FormDefinitionViewSet(GovernedTenantViewSet):
         }
         _validate_choice(filters.get("status"), "status", {"draft", "published", "archived"})
         return self.service.list_forms(
-            self.tenant_id, filters=filters, ordering=self.request.query_params.get("ordering", "key")
+            tenant_id, filters=filters, ordering=self.request.query_params.get("ordering", "key")
         )
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -457,7 +544,13 @@ class FormDefinitionViewSet(GovernedTenantViewSet):
         del request, args, kwargs
         serializer = FormCreateSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
-        value = _call(self.service.create_form, self.tenant_id, actor_id=self.actor_id, data=serializer.validated_data)
+        value = _call(
+            self.service.create_form,
+            self.tenant_id,
+            actor_id=self.actor_id,
+            data=serializer.validated_data,
+            command_idempotency_key=_command_idempotency_key(self.request),
+        )
         return Response(FormDetailSerializer(value).data, status=201)
 
     def partial_update(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -474,6 +567,7 @@ class FormDefinitionViewSet(GovernedTenantViewSet):
             expected_lock_version=lock,
             actor_id=self.actor_id,
             data=data,
+            command_idempotency_key=_command_idempotency_key(self.request),
         )
         return Response(FormDetailSerializer(value).data)
 
@@ -487,6 +581,7 @@ class FormDefinitionViewSet(GovernedTenantViewSet):
             form_id=self.kwargs["pk"],
             expected_lock_version=_expected_lock(raw),
             actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
         )
         return Response(FormDetailSerializer(value).data)
 
@@ -496,7 +591,11 @@ class FormDefinitionViewSet(GovernedTenantViewSet):
         form = self.get_object()
         if self.request.method == "GET":
             return self.paginated(
-                FormLayoutVersion.objects.filter(tenant_id=self.tenant_id, form_id=form.id).order_by("-version"),
+                self.service.list_layout_versions(
+                    self.tenant_id,
+                    filters={"form_id": form.id},
+                    ordering="-version",
+                ),
                 LayoutVersionDetailSerializer,
             )
         serializer = LayoutVersionCreateSerializer(data=self.request.data)
@@ -506,6 +605,7 @@ class FormDefinitionViewSet(GovernedTenantViewSet):
             self.tenant_id,
             form_id=form.id,
             actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
             **serializer.validated_data,
         )
         return Response(LayoutVersionDetailSerializer(value).data, status=201)
@@ -536,6 +636,7 @@ class FormDefinitionViewSet(GovernedTenantViewSet):
             self.tenant_id,
             form_id=self.kwargs["pk"],
             actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
             **serializer.validated_data,
         )
         return Response(LayoutVersionDetailSerializer(value).data)
@@ -551,6 +652,7 @@ class FormDefinitionViewSet(GovernedTenantViewSet):
             self.tenant_id,
             form_id=self.kwargs["pk"],
             actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
             **serializer.validated_data,
         )
         return Response(FormDetailSerializer(value).data)
@@ -573,15 +675,23 @@ class FormDefinitionViewSet(GovernedTenantViewSet):
 class FormLayoutVersionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTenantViewSet):
     access_name = "form-layout"
     serializer_class = LayoutVersionDetailSerializer
+    service = FormService()
 
     def get_queryset(self) -> QuerySet[FormLayoutVersion]:
-        queryset = FormLayoutVersion.objects.filter(tenant_id=self.tenant_id).select_related("form")
-        for key, lookup in (("form_id", "form_id"), ("status", "status"), ("version", "version")):
-            if value := self.request.query_params.get(key):
-                if key == "status":
-                    _validate_choice(value, key, {"candidate", "published", "superseded", "rejected"})
-                queryset = queryset.filter(**{lookup: value})
-        return queryset.order_by("-version")
+        tenant_id = self.tenant_or_none()
+        if tenant_id is None:
+            return FormLayoutVersion.objects.none()
+        filters = {
+            key: self.request.query_params[key]
+            for key in ("form_id", "status", "version")
+            if key in self.request.query_params
+        }
+        _validate_choice(filters.get("status"), "status", {"candidate", "published", "superseded", "rejected"})
+        return self.service.list_layout_versions(
+            tenant_id,
+            filters=filters,
+            ordering=self.request.query_params.get("ordering", "-version"),
+        )
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -594,6 +704,9 @@ class BusinessRuleViewSet(GovernedTenantViewSet):
     search_fields = ("key", "name", "description")
 
     def get_queryset(self) -> QuerySet[BusinessRule]:
+        tenant_id = self.tenant_or_none()
+        if tenant_id is None:
+            return BusinessRule.objects.none()
         filters = {
             key: self.request.query_params[key]
             for key in ("owner_module", "target_resource", "trigger", "status")
@@ -604,7 +717,7 @@ class BusinessRuleViewSet(GovernedTenantViewSet):
         )
         _validate_choice(filters.get("status"), "status", {"draft", "published", "paused", "retired"})
         return self.service.list_rules(
-            self.tenant_id, filters=filters, ordering=self.request.query_params.get("ordering", "priority")
+            tenant_id, filters=filters, ordering=self.request.query_params.get("ordering", "priority")
         )
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -621,7 +734,13 @@ class BusinessRuleViewSet(GovernedTenantViewSet):
         del request, args, kwargs
         serializer = RuleCreateSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
-        value = _call(self.service.create_rule, self.tenant_id, actor_id=self.actor_id, data=serializer.validated_data)
+        value = _call(
+            self.service.create_rule,
+            self.tenant_id,
+            actor_id=self.actor_id,
+            data=serializer.validated_data,
+            command_idempotency_key=_command_idempotency_key(self.request),
+        )
         return Response(RuleDetailSerializer(value).data, status=201)
 
     def partial_update(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -638,6 +757,7 @@ class BusinessRuleViewSet(GovernedTenantViewSet):
             expected_lock_version=lock,
             actor_id=self.actor_id,
             data=data,
+            command_idempotency_key=_command_idempotency_key(self.request),
         )
         return Response(RuleDetailSerializer(value).data)
 
@@ -651,6 +771,7 @@ class BusinessRuleViewSet(GovernedTenantViewSet):
             rule_id=self.kwargs["pk"],
             expected_lock_version=_expected_lock(raw),
             actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
         )
         return Response(RuleDetailSerializer(value).data)
 
@@ -660,7 +781,11 @@ class BusinessRuleViewSet(GovernedTenantViewSet):
         rule = self.get_object()
         if self.request.method == "GET":
             return self.paginated(
-                BusinessRuleVersion.objects.filter(tenant_id=self.tenant_id, rule_id=rule.id).order_by("-version"),
+                self.service.list_rule_versions(
+                    self.tenant_id,
+                    filters={"rule_id": rule.id},
+                    ordering="-version",
+                ),
                 RuleVersionDetailSerializer,
             )
         serializer = RuleVersionCreateSerializer(data=self.request.data)
@@ -670,6 +795,7 @@ class BusinessRuleViewSet(GovernedTenantViewSet):
             self.tenant_id,
             rule_id=rule.id,
             actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
             **serializer.validated_data,
         )
         return Response(RuleVersionDetailSerializer(value).data, status=201)
@@ -700,6 +826,7 @@ class BusinessRuleViewSet(GovernedTenantViewSet):
             self.tenant_id,
             rule_id=self.kwargs["pk"],
             actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
             **serializer.validated_data,
         )
         return Response(RuleVersionDetailSerializer(value).data)
@@ -714,6 +841,7 @@ class BusinessRuleViewSet(GovernedTenantViewSet):
             rule_id=self.kwargs["pk"],
             command=command,
             actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
             **serializer.validated_data,
         )
         return Response(RuleDetailSerializer(value).data)
@@ -746,6 +874,7 @@ class BusinessRuleViewSet(GovernedTenantViewSet):
             self.tenant_id,
             rule_id=self.kwargs["pk"],
             actor_id=self.actor_id,
+            command_idempotency_key=_command_idempotency_key(self.request),
             **evaluation,
         )
         return Response(RuleExecutionDetailSerializer(value).data)
@@ -762,15 +891,23 @@ class BusinessRuleViewSet(GovernedTenantViewSet):
 class BusinessRuleVersionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTenantViewSet):
     access_name = "rule-version"
     serializer_class = RuleVersionDetailSerializer
+    service = BusinessRuleService()
 
     def get_queryset(self) -> QuerySet[BusinessRuleVersion]:
-        queryset = BusinessRuleVersion.objects.filter(tenant_id=self.tenant_id).select_related("rule")
-        for key, lookup in (("rule_id", "rule_id"), ("status", "status"), ("version", "version")):
-            if value := self.request.query_params.get(key):
-                if key == "status":
-                    _validate_choice(value, key, {"candidate", "published", "superseded", "rejected"})
-                queryset = queryset.filter(**{lookup: value})
-        return queryset.order_by("-version")
+        tenant_id = self.tenant_or_none()
+        if tenant_id is None:
+            return BusinessRuleVersion.objects.none()
+        filters = {
+            key: self.request.query_params[key]
+            for key in ("rule_id", "status", "version")
+            if key in self.request.query_params
+        }
+        _validate_choice(filters.get("status"), "status", {"candidate", "published", "superseded", "rejected"})
+        return self.service.list_rule_versions(
+            tenant_id,
+            filters=filters,
+            ordering=self.request.query_params.get("ordering", "-version"),
+        )
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -782,6 +919,9 @@ class RuleExecutionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Gov
     service = BusinessRuleService()
 
     def get_queryset(self) -> QuerySet[RuleExecution]:
+        tenant_id = self.tenant_or_none()
+        if tenant_id is None:
+            return RuleExecution.objects.none()
         filters = {
             key: self.request.query_params[key]
             for key in (
@@ -796,7 +936,7 @@ class RuleExecutionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Gov
             if key in self.request.query_params
         }
         return self.service.list_executions(
-            self.tenant_id, filters=filters, ordering=self.request.query_params.get("ordering", "-executed_at")
+            tenant_id, filters=filters, ordering=self.request.query_params.get("ordering", "-executed_at")
         )
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -810,6 +950,115 @@ class RuleExecutionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Gov
                 _call(self.service.get_execution, self.tenant_id, execution_id=self.kwargs["pk"])
             ).data
         )
+
+
+class RuntimeConfigurationViewSet(GovernedTenantViewSet):
+    """Tenant configuration transport; all behavior remains service-owned."""
+
+    access_name = "configuration"
+    service = CustomizationConfigurationService()
+
+    def _current_payload(self) -> object:
+        current = self.service.get(self.tenant_id)
+        if current is not None:
+            return current
+        return {
+            "id": None,
+            "tenant_id": self.tenant_id,
+            "version": 0,
+            "environment": "default",
+            "document": effective_configuration(self.tenant_id),
+            "updated_by": None,
+            "created_at": None,
+            "updated_at": None,
+        }
+
+    def list(self, request: object, *args: object, **kwargs: object) -> Response:
+        del request, args, kwargs
+        return Response(RuntimeConfigurationSerializer(self._current_payload()).data)
+
+    @action(detail=False, methods=["put", "patch"], url_path="update")
+    def update_configuration(self, request: object) -> Response:
+        del request
+        serializer = ConfigurationUpdateSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        value = _call(
+            self.service.update,
+            self.tenant_id,
+            actor_id=self.actor_id,
+            correlation_id=_request_correlation_id(self.request),
+            idempotency_key=_command_idempotency_key(self.request),
+            document=serializer.validated_data["document"],
+            environment=serializer.validated_data["environment"],
+            expected_version=serializer.validated_data["expected_version"],
+        )
+        return Response(RuntimeConfigurationSerializer(value).data)
+
+    @action(detail=False, methods=["post"])
+    def preview(self, request: object) -> Response:
+        del request
+        serializer = ConfigurationPreviewSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            _call(
+                self.service.preview,
+                self.tenant_id,
+                **serializer.validated_data,
+            )
+        )
+
+    @action(detail=False, methods=["get"])
+    def history(self, request: object) -> Response:
+        del request
+        return self.paginated(
+            self.service.list_audit(self.tenant_id),
+            ConfigurationAuditRecordSerializer,
+        )
+
+    @action(detail=False, methods=["get"])
+    def versions(self, request: object) -> Response:
+        del request
+        return self.paginated(
+            self.service.list_versions(self.tenant_id),
+            RuntimeConfigurationVersionSerializer,
+        )
+
+    @action(detail=False, methods=["post"])
+    def rollback(self, request: object) -> Response:
+        del request
+        serializer = ConfigurationRollbackSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        value = _call(
+            self.service.rollback,
+            self.tenant_id,
+            actor_id=self.actor_id,
+            correlation_id=_request_correlation_id(self.request),
+            idempotency_key=_command_idempotency_key(self.request),
+            target_version=serializer.validated_data["target_version"],
+            expected_version=serializer.validated_data["expected_version"],
+        )
+        return Response(RuntimeConfigurationSerializer(value).data)
+
+    @action(detail=False, methods=["post"], url_path="import")
+    def import_document(self, request: object) -> Response:
+        del request
+        serializer = ConfigurationImportSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        value = _call(
+            self.service.import_document,
+            self.tenant_id,
+            actor_id=self.actor_id,
+            correlation_id=_request_correlation_id(self.request),
+            idempotency_key=_command_idempotency_key(self.request),
+            payload=serializer.validated_data["payload"],
+            expected_version=serializer.validated_data["expected_version"],
+        )
+        return Response(RuntimeConfigurationSerializer(value).data)
+
+    @action(detail=False, methods=["get"], url_path="export")
+    def export_document(self, request: object) -> Response:
+        del request
+        return Response(_call(self.service.export_document, self.tenant_id))
 
 
 class ModuleHealthAPIView(GovernedAPIViewMixin, APIView):
@@ -829,9 +1078,17 @@ class ModuleHealthAPIView(GovernedAPIViewMixin, APIView):
         return super().get_permissions()
 
     def get(self, request: object) -> Response:
-        del request
         report = get_module_health()
-        return Response(HealthSerializer(report.payload).data, status=report.status_code)
+        payload = HealthSerializer(report.payload).data
+        if report.status_code >= 400:
+            payload = {
+                "data": payload,
+                "meta": {
+                    "correlation_id": correlation_id_for_request(request),
+                    "timestamp": utc_timestamp(),
+                },
+            }
+        return Response(payload, status=report.status_code)
 
 
 __all__ = [name for name in globals() if name.endswith("ViewSet") or name.endswith("APIView")]

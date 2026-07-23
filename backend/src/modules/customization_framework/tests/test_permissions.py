@@ -36,6 +36,7 @@ def test_every_required_permission_family_is_declared() -> None:
         "field_definition:update",
         "field_definition:delete",
         "field_definition:publish",
+        "field_definition:rollback",
         "field_value:read",
         "field_value:write",
         "field_value:delete",
@@ -55,10 +56,13 @@ def test_every_required_permission_family_is_declared() -> None:
         "execution:read",
         "impact:read",
         "health:read",
+        "configuration:read",
+        "configuration:update",
+        "configuration:rollback",
+        "configuration:import",
+        "configuration:export",
     }
-    assert {
-        permission.removeprefix("customization_framework.") for permission in PERMISSIONS
-    } == expected
+    assert {permission.removeprefix("customization_framework.") for permission in PERMISSIONS} == expected
 
 
 def test_method_qualified_actions_resolve_distinct_read_and_write_access() -> None:

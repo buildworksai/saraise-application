@@ -6,19 +6,24 @@ import json
 from collections.abc import Mapping
 
 from rest_framework import serializers
+
 from src.core.api import CapabilityUnavailable
 
 from .models import (
     BusinessRule,
     BusinessRuleVersion,
+    ConfigurationAuditRecord,
     CustomFieldDefinition,
+    CustomFieldDefinitionVersion,
     CustomFieldValue,
     FormDefinition,
     FormLayoutVersion,
+    LifecycleTransitionRecord,
     RuleExecution,
+    RuntimeConfigurationVersion,
 )
 from .services import (
-    MAX_JSON_BYTES,
+    PLATFORM_CEILINGS,
     CustomFieldService,
     CustomizationRegistry,
     FormService,
@@ -42,8 +47,9 @@ def _bounded_json(value: object, label: str) -> object:
         size = len(json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode())
     except (TypeError, ValueError) as exc:
         raise serializers.ValidationError(f"{label} must be valid JSON.") from exc
-    if size > MAX_JSON_BYTES:
-        raise serializers.ValidationError(f"{label} exceeds the {MAX_JSON_BYTES}-byte limit.")
+    platform_limit = PLATFORM_CEILINGS["json_bytes"]
+    if size > platform_limit:
+        raise serializers.ValidationError(f"{label} exceeds the {platform_limit}-byte platform limit.")
     return value
 
 
@@ -61,22 +67,31 @@ def _capability_state(obj: object) -> str:
 
 
 class StrictModelSerializer(StrictSerializerMixin, serializers.ModelSerializer):
-    def to_representation(self, instance: object) -> dict[str, object]:
-        data = super().to_representation(instance)
-        history = data.get("transition_history")
-        if isinstance(history, list):
-            data["transition_history"] = [
-                {
-                    "command": item.get("command"),
-                    "from": item.get("from_state"),
-                    "to": item.get("to_state"),
-                    "actor_id": (item.get("metadata") or {}).get("actor_id"),
-                    "occurred_at": item.get("occurred_at"),
-                    "correlation_id": (item.get("metadata") or {}).get("correlation_id"),
-                }
-                for item in history
-            ]
-        return data
+    pass
+
+
+def _transitions(obj: object) -> list[dict[str, object]]:
+    aggregate_type = {
+        CustomFieldDefinition: "field_definition",
+        FormDefinition: "form",
+        BusinessRule: "rule",
+    }[type(obj)]
+    records = LifecycleTransitionRecord.objects.filter(
+        tenant_id=getattr(obj, "tenant_id"),
+        aggregate_type=aggregate_type,
+        aggregate_id=getattr(obj, "id"),
+    ).order_by("version")
+    return [
+        {
+            "command": record.command,
+            "from": record.from_state,
+            "to": record.to_state,
+            "actor_id": record.actor_id,
+            "occurred_at": record.occurred_at,
+            "correlation_id": record.correlation_id,
+        }
+        for record in records
+    ]
 
 
 class ResourceContractSerializer(StrictSerializerMixin, serializers.Serializer):
@@ -127,7 +142,7 @@ FIELD_READ = (
     "activated_at",
     "deprecated_at",
     "retired_at",
-    "transition_history",
+    "transitions",
     "lock_version",
     "created_by",
     "updated_by",
@@ -178,6 +193,7 @@ class FieldDefinitionListSerializer(StrictModelSerializer):
 
 
 class FieldDefinitionDetailSerializer(StrictModelSerializer):
+    transitions = serializers.SerializerMethodField()
     dependency_count = serializers.SerializerMethodField()
     value_count = serializers.SerializerMethodField()
     capability_state = serializers.SerializerMethodField()
@@ -197,6 +213,9 @@ class FieldDefinitionDetailSerializer(StrictModelSerializer):
 
     def get_capability_state(self, obj: CustomFieldDefinition) -> str:
         return _capability_state(obj)
+
+    def get_transitions(self, obj: CustomFieldDefinition) -> list[dict[str, object]]:
+        return _transitions(obj)
 
 
 class FieldDefinitionCreateSerializer(StrictModelSerializer):
@@ -246,6 +265,29 @@ class FieldDefinitionUpdateSerializer(FieldDefinitionCreateSerializer):
 
 class FieldTransitionSerializer(StrictSerializerMixin, serializers.Serializer):
     transition_key = serializers.CharField(min_length=1, max_length=128, trim_whitespace=True)
+
+
+class FieldDefinitionRollbackSerializer(StrictSerializerMixin, serializers.Serializer):
+    target_version = serializers.IntegerField(min_value=1)
+    expected_lock_version = serializers.IntegerField(min_value=1)
+
+
+class FieldDefinitionVersionSerializer(StrictModelSerializer):
+    definition_id = serializers.UUIDField(read_only=True)
+
+    class Meta:
+        model = CustomFieldDefinitionVersion
+        fields = (
+            "id",
+            "definition_id",
+            "version",
+            "document",
+            "content_hash",
+            "actor_id",
+            "correlation_id",
+            "created_at",
+        )
+        read_only_fields = fields
 
 
 class ValueValidationSerializer(StrictSerializerMixin, serializers.Serializer):
@@ -340,7 +382,7 @@ FORM_READ = (
     "published_at",
     "published_by",
     "archived_at",
-    "transition_history",
+    "transitions",
     "lock_version",
     "created_by",
     "updated_by",
@@ -384,6 +426,7 @@ class FormListSerializer(StrictModelSerializer):
 
 
 class FormDetailSerializer(StrictModelSerializer):
+    transitions = serializers.SerializerMethodField()
     dependency_count = serializers.SerializerMethodField()
     capability_state = serializers.SerializerMethodField()
 
@@ -399,6 +442,9 @@ class FormDetailSerializer(StrictModelSerializer):
 
     def get_capability_state(self, obj: FormDefinition) -> str:
         return _capability_state(obj)
+
+    def get_transitions(self, obj: FormDefinition) -> list[dict[str, object]]:
+        return _transitions(obj)
 
 
 class FormCreateSerializer(StrictModelSerializer):
@@ -484,7 +530,7 @@ RULE_READ = (
     "published_version",
     "published_at",
     "published_by",
-    "transition_history",
+    "transitions",
     "lock_version",
     "created_by",
     "updated_by",
@@ -537,6 +583,7 @@ class RuleListSerializer(StrictModelSerializer):
 
 
 class RuleDetailSerializer(StrictModelSerializer):
+    transitions = serializers.SerializerMethodField()
     execution_count = serializers.SerializerMethodField()
     diagnostic_count = serializers.SerializerMethodField()
     capability_state = serializers.SerializerMethodField()
@@ -557,6 +604,9 @@ class RuleDetailSerializer(StrictModelSerializer):
 
     def get_capability_state(self, obj: BusinessRule) -> str:
         return _capability_state(obj)
+
+    def get_transitions(self, obj: BusinessRule) -> list[dict[str, object]]:
+        return _transitions(obj)
 
 
 class RuleCreateSerializer(StrictModelSerializer):
@@ -660,23 +710,21 @@ class RuleEvaluateSerializer(StrictSerializerMixin, serializers.Serializer):
 
 class RuleExecutionListSerializer(StrictModelSerializer):
     rule_id = serializers.UUIDField(read_only=True)
+    rule_name = serializers.CharField(source="rule.name", read_only=True)
     rule_version_id = serializers.UUIDField(read_only=True)
 
     class Meta:
         model = RuleExecution
         fields = (
             "id",
-            "tenant_id",
-            "rule",
             "rule_id",
-            "rule_version",
+            "rule_name",
             "rule_version_id",
             "target_record_id",
             "trigger",
             "status",
             "duration_ms",
             "correlation_id",
-            "executed_by",
             "executed_at",
         )
         read_only_fields = fields
@@ -684,27 +732,23 @@ class RuleExecutionListSerializer(StrictModelSerializer):
 
 class RuleExecutionDetailSerializer(StrictModelSerializer):
     rule_id = serializers.UUIDField(read_only=True)
+    rule_name = serializers.CharField(source="rule.name", read_only=True)
     rule_version_id = serializers.UUIDField(read_only=True)
 
     class Meta:
         model = RuleExecution
         fields = (
             "id",
-            "tenant_id",
-            "rule",
             "rule_id",
-            "rule_version",
+            "rule_name",
             "rule_version_id",
             "target_record_id",
             "trigger",
-            "idempotency_key",
             "status",
-            "input_fingerprint",
             "result",
             "diagnostics",
             "duration_ms",
             "correlation_id",
-            "executed_by",
             "executed_at",
         )
         read_only_fields = fields
@@ -723,6 +767,82 @@ class ImpactReportSerializer(StrictSerializerMixin, serializers.Serializer):
     field_references = serializers.ListField(child=serializers.CharField(), read_only=True, required=False)
     forms = serializers.ListField(child=serializers.DictField(), read_only=True, required=False)
     rules = serializers.ListField(child=serializers.DictField(), read_only=True, required=False)
+
+
+class RuntimeConfigurationSerializer(StrictSerializerMixin, serializers.Serializer):
+    id = serializers.UUIDField(read_only=True, allow_null=True)
+    tenant_id = serializers.UUIDField(read_only=True)
+    version = serializers.IntegerField(read_only=True, min_value=0)
+    environment = serializers.CharField(read_only=True)
+    document = serializers.JSONField(read_only=True)
+    updated_by = serializers.UUIDField(read_only=True, allow_null=True)
+    created_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    updated_at = serializers.DateTimeField(read_only=True, allow_null=True)
+
+
+class ConfigurationUpdateSerializer(StrictSerializerMixin, serializers.Serializer):
+    document = serializers.JSONField()
+    environment = serializers.CharField(
+        min_length=1,
+        max_length=32,
+        trim_whitespace=True,
+        default="default",
+    )
+    expected_version = serializers.IntegerField(min_value=0)
+
+    def validate_document(self, value: object) -> object:
+        return _bounded_json(value, "document")
+
+
+class ConfigurationPreviewSerializer(StrictSerializerMixin, serializers.Serializer):
+    document = serializers.JSONField()
+
+    def validate_document(self, value: object) -> object:
+        return _bounded_json(value, "document")
+
+
+class ConfigurationRollbackSerializer(StrictSerializerMixin, serializers.Serializer):
+    target_version = serializers.IntegerField(min_value=1)
+    expected_version = serializers.IntegerField(min_value=1)
+
+
+class ConfigurationImportSerializer(StrictSerializerMixin, serializers.Serializer):
+    payload = serializers.JSONField()
+    expected_version = serializers.IntegerField(min_value=0)
+
+    def validate_payload(self, value: object) -> object:
+        return _bounded_json(value, "payload")
+
+
+class RuntimeConfigurationVersionSerializer(StrictModelSerializer):
+    class Meta:
+        model = RuntimeConfigurationVersion
+        fields = (
+            "id",
+            "version",
+            "document",
+            "environment",
+            "actor_id",
+            "correlation_id",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class ConfigurationAuditRecordSerializer(StrictModelSerializer):
+    class Meta:
+        model = ConfigurationAuditRecord
+        fields = (
+            "id",
+            "version",
+            "action",
+            "before",
+            "after",
+            "actor_id",
+            "correlation_id",
+            "created_at",
+        )
+        read_only_fields = fields
 
 
 class HealthSerializer(StrictSerializerMixin, serializers.Serializer):

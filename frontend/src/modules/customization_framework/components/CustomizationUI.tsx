@@ -34,11 +34,11 @@ export function EmptyPanel({ filtered, noun, create }: { readonly filtered: bool
 export function StatusChip({ status }: { readonly status: string }) {
   const positive = ["active", "published", "matched", "healthy"].includes(status);
   const warning = ["draft", "paused", "deprecated", "candidate", "degraded"].includes(status);
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${positive ? "bg-emerald-100 text-emerald-800" : warning ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-700"}`}>{status.replaceAll("_", " ")}</span>;
+  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${positive ? "bg-primary/10 text-primary" : warning ? "bg-accent text-accent-foreground" : "bg-muted text-muted-foreground"}`}>{status.replaceAll("_", " ")}</span>;
 }
 
 export function CapabilityNotice({ state }: { readonly state?: CapabilityState }) {
-  return state === "capability_unavailable" ? <div role="status" className="flex gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"><Ban className="h-5 w-5 shrink-0"/><p>The owning module is unavailable. You can inspect this configuration, but publishing and evaluation are disabled until capability is restored.</p></div> : null;
+  return state === "capability_unavailable" ? <div role="status" className="flex gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-foreground"><Ban className="h-5 w-5 shrink-0 text-destructive"/><p>The owning module is unavailable. You can inspect this configuration, but publishing and evaluation are disabled until capability is restored.</p></div> : null;
 }
 
 export function Pagination({ meta, onPage }: { readonly meta?: ApiV2PageMeta; readonly onPage: (page: number) => void }) {
