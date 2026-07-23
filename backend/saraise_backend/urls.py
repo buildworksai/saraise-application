@@ -23,7 +23,10 @@ urlpatterns = [
     path("api/v1/auth/", include("src.core.auth_urls")),
     path("api/v1/licensing/", include("src.core.licensing.urls")),
     # ===== Core Services =====
-    path("api/v1/notifications/", include("src.core.notifications.urls")),
+    # Notifications v2 is canonical. The v1 path is a compatibility projection
+    # onto the same module services and contains no independent write path.
+    path("api/v2/notifications/", include("src.modules.notifications.urls")),
+    path("api/v1/notifications/", include("src.modules.notifications.legacy_urls")),
     # ===== Module Routes =====
     # AI Agent Management
     path("api/v1/ai-agents/", include("src.modules.ai_agent_management.urls")),
@@ -81,5 +84,5 @@ urlpatterns = [
     path("api/v2/fixed-assets/", include("src.modules.fixed_assets.v2_urls")),
     # ===== Foundation Modules =====
     path("api/v1/communication-hub/", include("src.modules.communication_hub.urls")),
-    # Note: notifications is already registered in Core Services section above
+    # Note: notifications v1/v2 are registered in Core Services above.
 ]

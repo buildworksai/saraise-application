@@ -17,7 +17,6 @@ import {
   Plug,
   FolderTree,
   Key,
-  Bell,
   Bot,
   BarChart3,
   TrendingUp,
@@ -26,7 +25,6 @@ import {
   CheckSquare,
   ChevronDown,
   ChevronRight,
-  Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTenantSidebarTreeForMode } from "@/navigation/tenant-route-registry";
@@ -87,12 +85,6 @@ const tenantItems: NavItem[] = [
         icon: Key,
       },
     ],
-  },
-  {
-    path: "/notifications",
-    label: "Notifications",
-    icon: Bell,
-    module: "notifications",
   },
   // CRM Module - Collapsible Group
   {

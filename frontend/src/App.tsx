@@ -72,12 +72,6 @@ const SecretManagementPage = lazy(() =>
   )
 );
 
-const NotificationCenterPage = lazy(() =>
-  import("./modules/notifications/pages/NotificationCenterPage").then((m) => ({
-    default: m.NotificationCenterPage,
-  }))
-);
-
 const MetadataModelingListPage = lazy(() =>
   import("./modules/metadata_modeling/pages/MetadataModelingListPage").then(
     (m) => ({
@@ -1035,17 +1029,6 @@ function AnimatedRoutes() {
               </ProtectedRoute>
             }
           />
-          <Route
-            path="/notifications"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <NotificationCenterPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
           {/* MetadataModeling routes */}
           <Route
             path="/metadata-modeling"

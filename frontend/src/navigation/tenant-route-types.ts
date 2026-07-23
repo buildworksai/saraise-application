@@ -43,6 +43,8 @@ export interface TenantRoute {
   /** Human-readable browser title applied by the shared route renderer. */
   title?: string;
   sourceFile: string;
+  /** Server policy capability required by this destination; navigation remains advisory. */
+  requiredPermission?: string;
   Page: LazyExoticComponent<ComponentType>;
   modes?: readonly TenantApplicationMode[];
   navigation: TenantRouteNavigation;

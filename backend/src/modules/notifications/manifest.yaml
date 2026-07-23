@@ -1,25 +1,153 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
+# SARAISE open-source notification foundation contract
 name: notifications
-version: 1.0.0
+version: 2.0.0
 category: foundation
+type: foundation
+lifecycle: platform
 display_name: Notifications
-description: |
-  System-wide notification management for users and tenants.
+description: Tenant-safe inboxes, versioned templates, durable multi-channel delivery, preferences, endpoints, and governed configuration.
 
-# Dependencies
-dependencies: []
+dependencies:
+  - name: core_identity
+    version: ">=1.0.0"
+    required: true
+    purpose: Tenant-bound authenticated actors and user identity
+  - name: core_async_jobs
+    version: ">=1.0.0"
+    required: true
+    purpose: Durable jobs, transactional outbox, retry, and recovery
+  - name: core_resilience
+    version: ">=1.0.0"
+    required: true
+    purpose: Egress allowlists, bounded timeouts, backoff, and circuit breakers
 
-# Permissions
 permissions:
-  - notifications.notification:read
-  - notifications.notification:update
+  - notifications.inbox:read
+  - notifications.inbox:update
+  - notifications.template:read
+  - notifications.template:create
+  - notifications.template:update
+  - notifications.template:activate
+  - notifications.template:archive
+  - notifications.delivery:read
+  - notifications.delivery:dispatch
+  - notifications.delivery:dispatch_bulk
+  - notifications.delivery:dispatch_urgent
+  - notifications.delivery:retry
+  - notifications.delivery:cancel
   - notifications.preference:read
   - notifications.preference:update
+  - notifications.endpoint:read
+  - notifications.endpoint:create
+  - notifications.endpoint:verify
+  - notifications.endpoint:update
+  - notifications.endpoint:delete
+  - notifications.configuration:read
+  - notifications.configuration:update
+  - notifications.configuration:import
+  - notifications.configuration:export
+  - notifications.configuration:rollback
+  - notifications.health:read
 
-# Health Checks
 health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
-    interval: 60
+  - name: notifications_liveness
+    endpoint: /api/v2/notifications/health/live/
+    interval: 30
+    critical: false
+  - name: notifications_readiness
+    endpoint: /api/v2/notifications/health/ready/
+    interval: 30
+    critical: true
+
+sod_actions: []
+search_indexes:
+  - notifications_templates
+  - notifications_inbox
+ai_tools: []
+
+metadata:
+  api_version: v2
+  api_prefix: /api/v2/notifications/
+  compatibility_api_prefix: /api/v1/notifications/
+  signed_callback_prefix: /api/v2/notifications/callbacks/
+  extension_surface: notifications-channel-spi-1.0
+  adapter_spi_version: "1.0"
+  durable_commands:
+    - notifications.delivery.execute
+    - notifications.delivery.process_due
+    - notifications.delivery.confirm
+    - notifications.retention.purge
+    - notifications.endpoint.verify
+  installation_projections:
+    entitlement:
+      module: notifications
+      edition: free
+      enabled: true
+      required: true
+      capabilities:
+        - notifications.inbox:read
+        - notifications.inbox:update
+        - notifications.template:read
+        - notifications.template:create
+        - notifications.template:update
+        - notifications.template:activate
+        - notifications.template:archive
+        - notifications.delivery
+        - notifications.delivery:read
+        - notifications.delivery:dispatch
+        - notifications.delivery:dispatch_bulk
+        - notifications.delivery:dispatch_urgent
+        - notifications.delivery:retry
+        - notifications.delivery:cancel
+        - notifications.preference:read
+        - notifications.preference:update
+        - notifications.endpoint:read
+        - notifications.endpoint:create
+        - notifications.endpoint:verify
+        - notifications.endpoint:update
+        - notifications.endpoint:delete
+        - notifications.configuration:read
+        - notifications.configuration:update
+        - notifications.configuration:import
+        - notifications.configuration:export
+        - notifications.configuration:rollback
+        - notifications.health:read
+    quotas:
+      - resource: notifications.api_reads
+        required: true
+        limit: 100000
+        period: month
+      - resource: notifications.api_writes
+        required: true
+        limit: 10000
+        period: month
+      - resource: notifications.delivery.dispatch_bulk
+        required: true
+        limit: 10000
+        period: month
+      - resource: notifications.delivery.dispatch_urgent
+        required: true
+        limit: 1000
+        period: month
+  emitted_events:
+    - notification.template.created
+    - notification.template.versioned
+    - notification.template.activated
+    - notification.template.archived
+    - notification.template.rolled_back
+    - notification.delivery.queued
+    - notification.delivery.sending
+    - notification.delivery.sent
+    - notification.delivery.delivered
+    - notification.delivery.retrying
+    - notification.delivery.failed
+    - notification.delivery.cancelled
+    - notification.delivery.skipped
+    - notification.preference.updated
+    - notification.preference.reset
+    - notification.endpoint.registered
+    - notification.endpoint.verified
+    - notification.endpoint.revoked
+    - notification.configuration.updated
+    - notification.configuration.imported
+    - notification.configuration.rolled_back
