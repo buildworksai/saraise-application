@@ -1,48 +1,179 @@
-# Rule: SARAISE-00001 (Module Manifest Required)
-# Status: Implemented - v1.0.0
-
 name: sales_management
-version: 1.0.0
-category: core_business
-display_name: Sales Management
-description: |
-  Comprehensive order-to-cash workflow from quotations to delivery, invoicing, and revenue analytics.
+version: 2.0.0
+description: >-
+  Tenant-safe, configuration-driven customer, quotation, sales-order, and
+  delivery-note funnel with stable paid-module extension contracts.
+type: core
+lifecycle: core
 
-# Dependencies
 dependencies:
   - name: crm
     version: ">=1.0.0"
     required: false
-    purpose: Won opportunities create quotations
+    purpose: Optional opportunity-to-quotation source
   - name: inventory_management
     version: ">=1.0.0"
     required: false
-    purpose: Delivery note reduces stock
+    purpose: Optional availability validation when tenant policy requires it
   - name: accounting_finance
     version: ">=1.0.0"
     required: false
-    purpose: Sales order triggers AR invoice creation
+    purpose: Optional invoice generation after delivery
+  - name: tax
+    version: ">=1.0.0"
+    required: false
+    purpose: Optional explainable tax calculation
+  - name: shipping
+    version: ">=1.0.0"
+    required: false
+    purpose: Optional carrier booking and tracking
+  - name: document_management
+    version: ">=1.0.0"
+    required: false
+    purpose: Optional rendering and dispatch of customer-facing documents
 
-# Permissions
 permissions:
   - sales.customer:create
   - sales.customer:read
   - sales.customer:update
+  - sales.customer:delete
   - sales.quotation:create
   - sales.quotation:read
   - sales.quotation:update
+  - sales.quotation:delete
+  - sales.quotation:send
+  - sales.quotation:accept
+  - sales.quotation:reject
+  - sales.quotation:convert
   - sales.sales_order:create
   - sales.sales_order:read
   - sales.sales_order:update
+  - sales.sales_order:delete
+  - sales.sales_order:confirm
+  - sales.sales_order:fulfill
+  - sales.sales_order:cancel
+  - sales.sales_order:invoice
   - sales.delivery_note:create
   - sales.delivery_note:read
+  - sales.delivery_note:update
+  - sales.delivery_note:delete
+  - sales.delivery_note:complete
+  - sales.delivery_note:cancel
+  - sales.pricing:override
+  - sales.configuration:read
+  - sales.configuration:update
+  - sales.configuration:rollback
+  - sales.configuration:import
+  - sales.configuration:export
 
-# SoD (Segregation of Duties) actions
+# The current foundation schema accepts flat action strings here.  Pair
+# semantics and the explicit creator/deliverer conflict live in metadata below.
 sod_actions:
-  - [sales.sales_order:create, sales.delivery_note:create]
+  - sales.sales_order:create
+  - sales.delivery_note:create
 
-# Health Checks
-health_checks:
-  - name: database_connectivity
-    endpoint: /health/db
-    interval: 60
+search_indexes:
+  - sales_customers
+  - sales_quotations
+  - sales_orders
+  - sales_delivery_notes
+ai_tools: []
+
+metadata:
+  category: core_business
+  api:
+    base_path: /api/v2/sales-management/
+    envelope: governed-v2
+  diagnostic_exceptions:
+    - name: module_readiness
+      method: GET
+      path: /api/v2/sales-management/health/
+      public: true
+      response_classification: non_sensitive
+      reason: Orchestrator readiness requires an unauthenticated minimal probe
+  health_checks:
+    - name: readiness
+      path: /api/v2/sales-management/health/
+      public: true
+      diagnostic_exception: true
+      critical: true
+  health:
+    critical_components:
+      - database_rls
+      - durable_outbox
+    optional_component_states:
+      - available
+      - degraded
+      - not_configured
+  segregation_of_duties:
+    - id: order_creator_cannot_create_delivery
+      conflicting_actions:
+        - sales.sales_order:create
+        - sales.delivery_note:create
+      enforcement: server_authoritative
+  configuration:
+    tenant_scoped: true
+    environment_selected_server_side: true
+    versioned: true
+    append_only_audit: true
+    rollback: true
+    import_export: true
+  events:
+    schema_version: 1
+    delivery: transactional_outbox
+    names:
+      - sales_management.customer.created.v1
+      - sales_management.quotation.created.v1
+      - sales_management.quotation.sent.v1
+      - sales_management.quotation.accepted.v1
+      - sales_management.quotation.converted.v1
+      - sales_management.order.created.v1
+      - sales_management.order.confirmed.v1
+      - sales_management.order.status_changed.v1
+      - sales_management.order.cancelled.v1
+      - sales_management.delivery.created.v1
+      - sales_management.delivery.completed.v1
+      - sales_management.delivery.cancelled.v1
+      - sales_management.configuration.changed.v1
+    payload_policy:
+      versioned: true
+      stable_idempotency_identifier: true
+      excludes_customer_pii: true
+  extension_contract:
+    name: sales-management-spi
+    version: 1.0.0
+    registration:
+      collision_policy: reject
+      selection: priority_then_provider_id
+      unregister_supported: true
+      entitlement_checked_per_tenant: true
+      phased_availability_hook: true
+    gateways:
+      - protocol: CRMOpportunityGateway
+        capabilities: [crm_opportunity]
+      - protocol: InventoryAvailabilityGateway
+        capabilities: [inventory_availability]
+      - protocol: AccountingInvoiceGateway
+        capabilities: [accounting_invoice]
+      - protocol: TaxCalculationGateway
+        capabilities: [tax_calculation]
+      - protocol: ShippingGateway
+        capabilities: [shipping]
+      - protocol: DocumentGateway
+        capabilities: [document_rendering, document_dispatch]
+    capability_states:
+      - available
+      - not_installed
+      - not_entitled
+      - not_configured
+      - temporarily_unavailable
+    frontend_contribution_slots:
+      - sales.dashboard.catalogue
+      - sales.quotation.actions
+      - sales.order.actions
+      - sales.delivery.actions
+    boundary_rules:
+      - DTOs and public services only
+      - no direct sales model imports
+      - no core table mutation
+      - no permission replacement

@@ -67,6 +67,8 @@ urlpatterns = [
     path("api/v2/inventory-management/", include("src.modules.inventory_management.urls")),
     path("api/v2/human-resources/", include("src.modules.human_resources.urls")),
     path("api/v1/purchase-management/", include("src.modules.purchase_management.urls")),
+    # v2 is authoritative; v1 remains a compatibility route during migration.
+    path("api/v2/sales-management/", include("src.modules.sales_management.urls")),
     path("api/v1/sales-management/", include("src.modules.sales_management.urls")),
     path("api/v1/project-management/", include("src.modules.project_management.urls")),
     path("api/v2/master-data-management/", include("src.modules.master_data_management.urls")),

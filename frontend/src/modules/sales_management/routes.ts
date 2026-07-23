@@ -1,50 +1,27 @@
-import { lazy } from "react";
-import { Users } from "lucide-react";
-import type { TenantRoute } from "@/navigation/tenant-route-types";
+import { lazy } from 'react';
+import { FileCheck2, FileText, LayoutDashboard, Settings2, ShoppingCart, Users } from 'lucide-react';
+import type { TenantApplicationMode, TenantRoute } from '@/navigation/tenant-route-types';
 
-export const tenantRoutes = [
-  {
-    id: "sales-management.customers.list",
-    module: "sales_management",
-    path: "/sales-management/customers",
-    sourceFile: "modules/sales_management/pages/CustomerListPage.tsx",
-    Page: lazy(() =>
-      import("./pages/CustomerListPage").then(({ CustomerListPage }) => ({
-        default: CustomerListPage,
-      })),
-    ),
-    navigation: { type: "sidebar", label: "Customers", icon: Users, order: 200 },
-  },
-  {
-    id: "sales-management.customers.create",
-    module: "sales_management",
-    path: "/sales-management/customers/new",
-    sourceFile: "modules/sales_management/pages/CreateCustomerPage.tsx",
-    Page: lazy(() =>
-      import("./pages/CreateCustomerPage").then(({ CreateCustomerPage }) => ({
-        default: CreateCustomerPage,
-      })),
-    ),
-    navigation: {
-      type: "contextual",
-      parentRouteId: "sales-management.customers.list",
-    },
-  },
-  {
-    id: "sales-management.customers.detail",
-    module: "sales_management",
-    path: "/sales-management/customers/:id",
-    sourceFile: "modules/sales_management/pages/CustomerDetailPage.tsx",
-    Page: lazy(() =>
-      import("./pages/CustomerDetailPage").then(({ CustomerDetailPage }) => ({
-        default: CustomerDetailPage,
-      })),
-    ),
-    navigation: {
-      type: "contextual",
-      parentRouteId: "sales-management.customers.list",
-    },
-  },
+const modes:readonly TenantApplicationMode[]=['development','self-hosted','saas'];
+const contextual=(parentRouteId:string)=>({type:'contextual' as const,parentRouteId});
+export const tenantRoutes=[
+ {id:'sales-management.overview',module:'sales_management',path:'/sales-management',title:'Sales overview',sourceFile:'modules/sales_management/pages/SalesDashboardPage.tsx',Page:lazy(()=>import('./pages/SalesDashboardPage').then(({SalesDashboardPage})=>({default:SalesDashboardPage}))),modes,navigation:{type:'sidebar',label:'Sales Overview',icon:LayoutDashboard,order:200}},
+ {id:'sales-management.configuration',module:'sales_management',path:'/sales-management/configuration',title:'Sales configuration',sourceFile:'modules/sales_management/pages/SalesConfigurationPage.tsx',Page:lazy(()=>import('./pages/SalesConfigurationPage').then(({SalesConfigurationPage})=>({default:SalesConfigurationPage}))),modes,navigation:{type:'sidebar',label:'Sales Configuration',icon:Settings2,order:205}},
+ {id:'sales-management.customers.list',module:'sales_management',path:'/sales-management/customers',title:'Customers',sourceFile:'modules/sales_management/pages/CustomerListPage.tsx',Page:lazy(()=>import('./pages/CustomerListPage').then(({CustomerListPage})=>({default:CustomerListPage}))),modes,navigation:{type:'sidebar',label:'Customers',icon:Users,order:201}},
+ {id:'sales-management.customers.create',module:'sales_management',path:'/sales-management/customers/new',title:'Create customer',sourceFile:'modules/sales_management/pages/CreateCustomerPage.tsx',Page:lazy(()=>import('./pages/CreateCustomerPage').then(({CreateCustomerPage})=>({default:CreateCustomerPage}))),modes,navigation:contextual('sales-management.customers.list')},
+ {id:'sales-management.customers.detail',module:'sales_management',path:'/sales-management/customers/:id',title:'Customer details',sourceFile:'modules/sales_management/pages/CustomerDetailPage.tsx',Page:lazy(()=>import('./pages/CustomerDetailPage').then(({CustomerDetailPage})=>({default:CustomerDetailPage}))),modes,navigation:contextual('sales-management.customers.list')},
+ {id:'sales-management.customers.edit',module:'sales_management',path:'/sales-management/customers/:id/edit',title:'Edit customer',sourceFile:'modules/sales_management/pages/EditCustomerPage.tsx',Page:lazy(()=>import('./pages/EditCustomerPage').then(({EditCustomerPage})=>({default:EditCustomerPage}))),modes,navigation:contextual('sales-management.customers.list')},
+ {id:'sales-management.quotations.list',module:'sales_management',path:'/sales-management/quotations',title:'Quotations',sourceFile:'modules/sales_management/pages/QuotationListPage.tsx',Page:lazy(()=>import('./pages/QuotationListPage').then(({QuotationListPage})=>({default:QuotationListPage}))),modes,navigation:{type:'sidebar',label:'Quotations',icon:FileText,order:202}},
+ {id:'sales-management.quotations.create',module:'sales_management',path:'/sales-management/quotations/new',title:'Create quotation',sourceFile:'modules/sales_management/pages/CreateQuotationPage.tsx',Page:lazy(()=>import('./pages/CreateQuotationPage').then(({CreateQuotationPage})=>({default:CreateQuotationPage}))),modes,navigation:contextual('sales-management.quotations.list')},
+ {id:'sales-management.quotations.detail',module:'sales_management',path:'/sales-management/quotations/:id',title:'Quotation details',sourceFile:'modules/sales_management/pages/QuotationDetailPage.tsx',Page:lazy(()=>import('./pages/QuotationDetailPage').then(({QuotationDetailPage})=>({default:QuotationDetailPage}))),modes,navigation:contextual('sales-management.quotations.list')},
+ {id:'sales-management.quotations.edit',module:'sales_management',path:'/sales-management/quotations/:id/edit',title:'Edit quotation',sourceFile:'modules/sales_management/pages/EditQuotationPage.tsx',Page:lazy(()=>import('./pages/EditQuotationPage').then(({EditQuotationPage})=>({default:EditQuotationPage}))),modes,navigation:contextual('sales-management.quotations.list')},
+ {id:'sales-management.orders.list',module:'sales_management',path:'/sales-management/sales-orders',title:'Sales orders',sourceFile:'modules/sales_management/pages/SalesOrderListPage.tsx',Page:lazy(()=>import('./pages/SalesOrderListPage').then(({SalesOrderListPage})=>({default:SalesOrderListPage}))),modes,navigation:{type:'sidebar',label:'Sales Orders',icon:ShoppingCart,order:203}},
+ {id:'sales-management.orders.create',module:'sales_management',path:'/sales-management/sales-orders/new',title:'Create sales order',sourceFile:'modules/sales_management/pages/CreateSalesOrderPage.tsx',Page:lazy(()=>import('./pages/CreateSalesOrderPage').then(({CreateSalesOrderPage})=>({default:CreateSalesOrderPage}))),modes,navigation:contextual('sales-management.orders.list')},
+ {id:'sales-management.orders.detail',module:'sales_management',path:'/sales-management/sales-orders/:id',title:'Sales order details',sourceFile:'modules/sales_management/pages/SalesOrderDetailPage.tsx',Page:lazy(()=>import('./pages/SalesOrderDetailPage').then(({SalesOrderDetailPage})=>({default:SalesOrderDetailPage}))),modes,navigation:contextual('sales-management.orders.list')},
+ {id:'sales-management.orders.edit',module:'sales_management',path:'/sales-management/sales-orders/:id/edit',title:'Edit sales order',sourceFile:'modules/sales_management/pages/EditSalesOrderPage.tsx',Page:lazy(()=>import('./pages/EditSalesOrderPage').then(({EditSalesOrderPage})=>({default:EditSalesOrderPage}))),modes,navigation:contextual('sales-management.orders.list')},
+ {id:'sales-management.deliveries.list',module:'sales_management',path:'/sales-management/deliveries',title:'Deliveries',sourceFile:'modules/sales_management/pages/DeliveryNoteListPage.tsx',Page:lazy(()=>import('./pages/DeliveryNoteListPage').then(({DeliveryNoteListPage})=>({default:DeliveryNoteListPage}))),modes,navigation:{type:'sidebar',label:'Deliveries',icon:FileCheck2,order:204}},
+ {id:'sales-management.deliveries.create',module:'sales_management',path:'/sales-management/deliveries/new',title:'Create delivery note',sourceFile:'modules/sales_management/pages/CreateDeliveryNotePage.tsx',Page:lazy(()=>import('./pages/CreateDeliveryNotePage').then(({CreateDeliveryNotePage})=>({default:CreateDeliveryNotePage}))),modes,navigation:contextual('sales-management.deliveries.list')},
+ {id:'sales-management.deliveries.detail',module:'sales_management',path:'/sales-management/deliveries/:id',title:'Delivery note details',sourceFile:'modules/sales_management/pages/DeliveryNoteDetailPage.tsx',Page:lazy(()=>import('./pages/DeliveryNoteDetailPage').then(({DeliveryNoteDetailPage})=>({default:DeliveryNoteDetailPage}))),modes,navigation:contextual('sales-management.deliveries.list')},
+ {id:'sales-management.deliveries.edit',module:'sales_management',path:'/sales-management/deliveries/:id/edit',title:'Edit delivery note',sourceFile:'modules/sales_management/pages/EditDeliveryNotePage.tsx',Page:lazy(()=>import('./pages/EditDeliveryNotePage').then(({EditDeliveryNotePage})=>({default:EditDeliveryNotePage}))),modes,navigation:contextual('sales-management.deliveries.list')},
 ] satisfies readonly TenantRoute[];
-
 export default tenantRoutes;

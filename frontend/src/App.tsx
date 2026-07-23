@@ -246,23 +246,6 @@ const CreateAccountingAccountPage = lazy(() =>
   }))
 );
 
-// Sales Management
-const SalesCustomerListPage = lazy(() =>
-  import("./modules/sales_management/pages/CustomerListPage").then((m) => ({
-    default: m.CustomerListPage,
-  }))
-);
-const SalesCustomerDetailPage = lazy(() =>
-  import("./modules/sales_management/pages/CustomerDetailPage").then((m) => ({
-    default: m.CustomerDetailPage,
-  }))
-);
-const CreateSalesCustomerPage = lazy(() =>
-  import("./modules/sales_management/pages/CreateCustomerPage").then((m) => ({
-    default: m.CreateCustomerPage,
-  }))
-);
-
 // Purchase Management
 const PurchaseSupplierListPage = lazy(() =>
   import("./modules/purchase_management/pages/SupplierListPage").then((m) => ({
@@ -727,38 +710,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <AccountingAccountDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Sales Management */}
-          <Route
-            path="/sales-management/customers"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <SalesCustomerListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/sales-management/customers/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateSalesCustomerPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/sales-management/customers/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <SalesCustomerDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
