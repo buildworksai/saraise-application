@@ -73,9 +73,18 @@ describe("tenant route registry parity", () => {
     for (const leaf of leaves) {
       const route = routesById.get(leaf.routeId);
       expect(route).toBeDefined();
-      expect(route?.navigation.type).toBe("sidebar");
       if (route?.navigation.type === "sidebar") {
         expect(route.navigation.path ?? route.path).toBe(leaf.path);
+      } else if (route?.navigation.type === "contextual") {
+        expect(route.module).toBe("process_mining");
+        const parent = routesById.get(route.navigation.parentRouteId);
+        expect(parent?.navigation.type).toBe("sidebar");
+        const expectedPath = route.path
+          .split("/")
+          .some((segment) => segment.startsWith(":"))
+          ? parent?.path
+          : route.path;
+        expect(leaf.path).toBe(expectedPath);
       }
       expect(route?.module).toBe(leaf.module);
     }
