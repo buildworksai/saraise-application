@@ -14,7 +14,17 @@ from rest_framework import serializers
 
 from src.core.async_jobs.models import AsyncJob
 
-from .models import Connector, DataMapping, Integration, IntegrationCredential, Webhook, WebhookDelivery
+from .models import (
+    Connector,
+    DataMapping,
+    Integration,
+    IntegrationCredential,
+    IntegrationPlatformConfigurationAudit,
+    IntegrationPlatformConfigurationVersion,
+    Webhook,
+    WebhookDelivery,
+    WebhookDeliveryAttempt,
+)
 
 PROTECTED_INPUT_FIELDS = frozenset(
     {
@@ -170,6 +180,7 @@ class ConnectorListSerializer(serializers.Serializer):
     version = serializers.CharField(read_only=True, source="connector.version")
     capabilities = serializers.ListField(child=serializers.CharField(), read_only=True, source="connector.capabilities")
     module_id = serializers.CharField(read_only=True, source="connector.module_id")
+    access_policy = serializers.CharField(read_only=True, source="connector.access_policy")
     required_entitlement = serializers.CharField(
         read_only=True, allow_blank=True, source="connector.required_entitlement"
     )
@@ -548,21 +559,90 @@ class WebhookDeliveryListSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class WebhookDeliveryAttemptSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WebhookDeliveryAttempt
+        fields = (
+            "id",
+            "attempt_number",
+            "outcome",
+            "response_code",
+            "error_code",
+            "duration_ms",
+            "job_id",
+            "correlation_id",
+            "occurred_at",
+        )
+        read_only_fields = fields
+
+
 class WebhookDeliveryDetailSerializer(WebhookDeliveryListSerializer):
+    attempts = WebhookDeliveryAttemptSerializer(many=True, read_only=True)
+
     class Meta(WebhookDeliveryListSerializer.Meta):
         fields = WebhookDeliveryListSerializer.Meta.fields + (
             "payload",
             "payload_hash",
             "idempotency_key",
             "transition_history",
-            "response_body_excerpt",
             "error_message",
+            "attempts",
         )
         read_only_fields = fields
 
 
 class DeliveryRedriveSerializer(TransitionRequestSerializer):
     pass
+
+
+class ConfigurationDocumentSerializer(StrictInputMixin, serializers.Serializer):
+    environment = serializers.CharField(max_length=64, default="default")
+    document = serializers.JSONField()
+
+
+class ConfigurationRollbackSerializer(StrictInputMixin, serializers.Serializer):
+    environment = serializers.CharField(max_length=64, default="default")
+    version = serializers.IntegerField(min_value=1)
+
+
+class ConfigurationSerializer(serializers.Serializer):
+    id = serializers.UUIDField(read_only=True, allow_null=True)
+    tenant_id = serializers.UUIDField(read_only=True)
+    environment = serializers.CharField(read_only=True)
+    version = serializers.IntegerField(read_only=True)
+    document = serializers.JSONField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    updated_by = serializers.UUIDField(read_only=True, allow_null=True)
+
+
+class ConfigurationPreviewSerializer(serializers.Serializer):
+    valid = serializers.BooleanField(read_only=True)
+    environment = serializers.CharField(read_only=True)
+    from_version = serializers.IntegerField(read_only=True)
+    to_version = serializers.IntegerField(read_only=True)
+    changed_sections = serializers.ListField(child=serializers.CharField(), read_only=True)
+    before = serializers.JSONField(read_only=True)
+    after = serializers.JSONField(read_only=True)
+
+
+class ConfigurationVersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IntegrationPlatformConfigurationVersion
+        fields = (
+            "id", "environment", "version", "document", "created_by",
+            "correlation_id", "created_at",
+        )
+        read_only_fields = fields
+
+
+class ConfigurationAuditSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IntegrationPlatformConfigurationAudit
+        fields = (
+            "id", "environment", "action", "from_version", "to_version",
+            "before", "after", "changed_by", "correlation_id", "created_at",
+        )
+        read_only_fields = fields
 
 
 class DataMappingListSerializer(serializers.ModelSerializer):

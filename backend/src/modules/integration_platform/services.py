@@ -36,8 +36,10 @@ from src.core.state_machine import IdempotencyConflictError, IllegalTransitionEr
 
 from .adapter_registry import AdapterUnavailableError, connector_adapter_registry, transformation_registry
 from .adapters import ConnectorAdapter, CredentialBundle, RecordBatch, RecordCursor
+from .configuration import default_configuration, setting, validate_configuration
 from .models import (
     Connector,
+    ConnectorAccessPolicy,
     ConnectorCapability,
     CredentialStatus,
     CredentialType,
@@ -46,8 +48,12 @@ from .models import (
     Integration,
     IntegrationCredential,
     IntegrationStatus,
+    IntegrationPlatformConfiguration,
+    IntegrationPlatformConfigurationAudit,
+    IntegrationPlatformConfigurationVersion,
     Webhook,
     WebhookDelivery,
+    WebhookDeliveryAttempt,
     WebhookDirection,
     WebhookStatus,
 )
@@ -59,13 +65,10 @@ from .state_machines import (
 )
 
 logger = logging.getLogger("saraise.integration_platform")
-SECRET_KEYS = frozenset({"password", "secret", "token", "authorization", "api_key", "apikey", "credential", "private_key"})
 INBOUND_TIMESTAMP_HEADER = "X-SARAISE-Webhook-Timestamp"
 INBOUND_NONCE_HEADER = "X-SARAISE-Webhook-Nonce"
 INBOUND_SIGNATURE_HEADER = "X-SARAISE-Webhook-Signature"
 INBOUND_SIGNATURE_VERSION = "v1"
-INBOUND_WINDOW_SECONDS = 300
-MAX_BODY_BYTES = 1024 * 1024
 
 
 class IntegrationPlatformError(OperationFailed):
@@ -104,13 +107,22 @@ def _uuid(value: UUID | str, field: str) -> UUID:
         raise IntegrationPlatformError("invalid_uuid", f"{field} must be a valid UUID.", status_code=400) from exc
 
 
-def _text(value: object, field: str, maximum: int = 255) -> str:
+def _text(value: object, field: str, maximum: int) -> str:
     if not isinstance(value, str) or not value.strip():
         raise IntegrationPlatformError("validation_error", f"{field} is required.", status_code=400)
     normalized = value.strip()
     if len(normalized) > maximum:
         raise IntegrationPlatformError("validation_error", f"{field} exceeds {maximum} characters.", status_code=400)
     return normalized
+
+
+def _configured_text(
+    tenant_id: UUID,
+    value: object,
+    field: str,
+    setting_path: str = "validation.name_max_length",
+) -> str:
+    return _text(value, field, int(setting(runtime_configuration(tenant_id), setting_path)))
 
 
 def _encrypt_secret(value: str, capability: str) -> str:
@@ -120,40 +132,43 @@ def _encrypt_secret(value: str, capability: str) -> str:
         raise CapabilityUnavailable(capability=capability) from exc
 
 
-def _safe_mapping(value: object, field: str) -> dict[str, object]:
+def _safe_mapping(tenant_id: UUID, value: object, field: str) -> dict[str, object]:
     if not isinstance(value, Mapping):
         raise IntegrationPlatformError("validation_error", f"{field} must be an object.", status_code=400)
     result = dict(value)
-    _reject_secrets(result, field)
+    policy = runtime_configuration(tenant_id)
+    secret_keys = frozenset(str(item) for item in setting(policy, "security.secret_field_names"))
+    _reject_secrets(result, field, secret_keys)
     try:
         encoded = json.dumps(result, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     except (TypeError, ValueError) as exc:
         raise IntegrationPlatformError("validation_error", f"{field} must contain JSON values.", status_code=400) from exc
-    if len(encoded.encode("utf-8")) > MAX_BODY_BYTES:
-        raise IntegrationPlatformError("payload_too_large", f"{field} exceeds 1 MiB.", status_code=413)
+    maximum = int(setting(policy, "security.payload_max_bytes"))
+    if len(encoded.encode("utf-8")) > maximum:
+        raise IntegrationPlatformError("payload_too_large", f"{field} exceeds {maximum} bytes.", status_code=413)
     return result
 
 
-def _reject_secrets(value: object, field: str) -> None:
+def _reject_secrets(value: object, field: str, secret_keys: frozenset[str]) -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
             normalized = str(key).lower().replace("-", "_")
-            if normalized in SECRET_KEYS or any(part in normalized for part in ("password", "secret", "authorization")):
+            if normalized in secret_keys:
                 raise IntegrationPlatformError("secret_in_config", f"{field} cannot contain credential-like keys.", status_code=400)
-            _reject_secrets(child, field)
+            _reject_secrets(child, field, secret_keys)
     elif isinstance(value, list):
         for child in value:
-            _reject_secrets(child, field)
+            _reject_secrets(child, field, secret_keys)
 
 
-def _redact(value: object) -> object:
+def _redact(value: object, secret_keys: frozenset[str]) -> object:
     if isinstance(value, Mapping):
         return {
-            str(key): "[REDACTED]" if str(key).lower().replace("-", "_") in SECRET_KEYS else _redact(child)
+            str(key): "[REDACTED]" if str(key).lower().replace("-", "_") in secret_keys else _redact(child, secret_keys)
             for key, child in value.items()
         }
     if isinstance(value, list):
-        return [_redact(child) for child in value]
+        return [_redact(child, secret_keys) for child in value]
     return value
 
 
@@ -167,7 +182,8 @@ def _transition_metadata(actor_id: UUID | None, reason: str, **evidence: object)
 
 
 def _publish(tenant_id: UUID, aggregate_type: str, aggregate_id: UUID, event_type: str, payload: Mapping[str, object]) -> OutboxEvent:
-    safe = _redact(dict(payload))
+    secret_keys = frozenset(str(value) for value in setting(runtime_configuration(tenant_id), "security.secret_field_names"))
+    safe = _redact(dict(payload), secret_keys)
     assert isinstance(safe, dict)
     safe["correlation_id"] = _correlation_id()
     return OutboxEvent.objects.create(
@@ -213,13 +229,333 @@ def _unwrap(result: OperationResult[Any]) -> Any:
     return result.unwrap()
 
 
+def runtime_configuration(tenant_id: UUID, environment: str = "default") -> dict[str, object]:
+    """Return tenant policy or the reviewed safe default document.
+
+    The default contains an explicit fail-closed connector access policy and
+    disables capabilities that have no governed data source, so absence never
+    bypasses a security decision.
+    """
+
+    tenant_id = _uuid(tenant_id, "tenant_id")
+    record = (
+        IntegrationPlatformConfiguration.objects.for_tenant(tenant_id)
+        .filter(environment=environment)
+        .only("document")
+        .first()
+    )
+    return validate_configuration(record.document if record is not None else default_configuration())
+
+
+def durable_job_receipt(job: object) -> dict[str, object]:
+    """Prove durable acceptance and expose only the public polling contract."""
+
+    if not isinstance(job, AsyncJob) or job.pk is None:
+        raise OperationFailed(
+            error_code="DURABLE_JOB_UNAVAILABLE",
+            message="The operation was not durably accepted.",
+            http_status=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    durable = AsyncJob.objects.filter(pk=job.pk, tenant_id=job.tenant_id).exists()
+    outbox = OutboxEvent.objects.filter(
+        tenant_id=job.tenant_id,
+        aggregate_type="async_job",
+        aggregate_id=job.pk,
+    ).exists()
+    if not durable or not outbox:
+        raise OperationFailed(
+            error_code="DURABLE_JOB_UNAVAILABLE",
+            message="The operation was not durably accepted.",
+            http_status=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "correlation_id": job.correlation_id,
+        "accepted_at": job.created_at,
+        "poll_after_ms": int(setting(runtime_configuration(job.tenant_id), "jobs.poll_after_ms")),
+    }
+
+
+def durable_job_state(job: object) -> dict[str, object]:
+    """Interpret durable worker state as the stable public evidence contract."""
+
+    payload = durable_job_receipt(job)
+    assert isinstance(job, AsyncJob)
+    operations = {
+        "integration_platform.test": "integration_test",
+        "integration_platform.integration_test": "integration_test",
+        "integration_platform.sync": "integration_sync",
+        "integration_platform.integration_sync": "integration_sync",
+        "integration_platform.webhook_delivery": "webhook_delivery",
+        "integration_platform.deliver_webhook": "webhook_delivery",
+    }
+    operation = getattr(job, "operation", None) or operations.get(str(job.command))
+    if operation is None:
+        raise OperationFailed(
+            error_code="JOB_STATE_UNAVAILABLE",
+            message="The durable job operation cannot be represented safely.",
+            http_status=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+    result = job.result if isinstance(job.result, Mapping) else {}
+    policy = runtime_configuration(job.tenant_id)
+    progress_min = int(setting(policy, "jobs.progress_min"))
+    progress_max = int(setting(policy, "jobs.progress_max"))
+    raw_progress = result.get("progress_percent")
+    progress = raw_progress if isinstance(raw_progress, int) and progress_min <= raw_progress <= progress_max else None
+    terminal = {"succeeded", "failed", "cancelled", "timed_out"}
+    if progress is None:
+        progress = int(setting(policy, "jobs.terminal_progress")) if job.status in terminal else progress_min
+    evidence_keys = {
+        "outcome",
+        "occurred_at",
+        "correlation_id",
+        "job_id",
+        "duration_ms",
+        "error_code",
+        "error_message",
+        "records_read",
+        "records_written",
+        "records_failed",
+        "zero_source_proven",
+    }
+    evidence = {key: result[key] for key in evidence_keys if key in result}
+    payload.update(
+        {
+            "operation": operation,
+            "started_at": job.started_at,
+            "completed_at": job.completed_at,
+            "progress_percent": progress,
+            "evidence": evidence or None,
+        }
+    )
+    return payload
+
+
+def _apply_transition(
+    machine: Any,
+    workflow_key: str,
+    instance: Any,
+    command: str,
+    *,
+    tenant_id: UUID,
+    **kwargs: object,
+) -> Any:
+    """Interpret the configured tenant graph before invoking the core engine."""
+
+    current = str(instance.status)
+    edge = next(
+        (
+            transition
+            for transition in machine.transitions
+            if transition.command == command and transition.source == current
+        ),
+        None,
+    )
+    if edge is None:
+        raise IntegrationPlatformError("invalid_transition", "The lifecycle command is not available.", status_code=409)
+    graph = setting(runtime_configuration(tenant_id), f"workflows.{workflow_key}")
+    allowed = graph.get(current, []) if isinstance(graph, Mapping) else []
+    if edge.target not in allowed:
+        raise IntegrationPlatformError(
+            "workflow_policy_denied",
+            "The tenant workflow configuration denies this lifecycle transition.",
+            status_code=409,
+        )
+    return machine.apply(instance, command, tenant_id=tenant_id, **kwargs)
+
+
+class ConfigurationService:
+    """Transactional authority for tenant configuration and its evidence."""
+
+    def get(self, tenant_id: UUID, environment: str = "default") -> dict[str, object]:
+        tenant_id = _uuid(tenant_id, "tenant_id")
+        record = (
+            IntegrationPlatformConfiguration.objects.for_tenant(tenant_id)
+            .filter(environment=_text(environment, "environment", 64))
+            .first()
+        )
+        if record is None:
+            return {
+                "id": None,
+                "tenant_id": tenant_id,
+                "environment": environment,
+                "version": 0,
+                "document": default_configuration(),
+                "updated_at": None,
+                "updated_by": None,
+            }
+        return self._payload(record)
+
+    @staticmethod
+    def _payload(record: IntegrationPlatformConfiguration) -> dict[str, object]:
+        return {
+            "id": record.id,
+            "tenant_id": record.tenant_id,
+            "environment": record.environment,
+            "version": record.version,
+            "document": record.document,
+            "updated_at": record.updated_at,
+            "updated_by": record.updated_by,
+        }
+
+    @staticmethod
+    def _correlation(correlation_id: str | None) -> str:
+        value = correlation_id or _correlation_id()
+        if not value or value == "correlation-unavailable":
+            raise IntegrationPlatformError(
+                "correlation_unavailable",
+                "A correlation identifier is required for configuration changes.",
+                status_code=503,
+            )
+        return _text(value, "correlation_id", 64)
+
+    def preview(
+        self,
+        tenant_id: UUID,
+        document: object,
+        environment: str = "default",
+    ) -> dict[str, object]:
+        current = self.get(tenant_id, environment)
+        validated = validate_configuration(document)
+        before = current["document"]
+        assert isinstance(before, Mapping)
+        changed = sorted(
+            key for key in validated if before.get(key) != validated.get(key)
+        )
+        return {
+            "valid": True,
+            "environment": environment,
+            "from_version": current["version"],
+            "to_version": int(current["version"]) + 1,
+            "changed_sections": changed,
+            "before": dict(before),
+            "after": validated,
+        }
+
+    def save(
+        self,
+        tenant_id: UUID,
+        actor_id: UUID,
+        document: object,
+        *,
+        environment: str = "default",
+        correlation_id: str | None = None,
+        action: str = "update",
+    ) -> dict[str, object]:
+        tenant_id, actor_id = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        environment = _text(environment, "environment", 64)
+        validated = validate_configuration(document)
+        correlation = self._correlation(correlation_id)
+        with transaction.atomic():
+            record = (
+                IntegrationPlatformConfiguration.objects.select_for_update()
+                .for_tenant(tenant_id)
+                .filter(environment=environment)
+                .first()
+            )
+            before = None if record is None else dict(record.document)
+            from_version = None if record is None else record.version
+            if record is None:
+                record = IntegrationPlatformConfiguration(
+                    tenant_id=tenant_id,
+                    environment=environment,
+                    version=1,
+                    document=validated,
+                    updated_by=actor_id,
+                )
+            else:
+                record.version += 1
+                record.document = validated
+                record.updated_by = actor_id
+            _model_validation(record)
+            record.save()
+            IntegrationPlatformConfigurationVersion.objects.create(
+                tenant_id=tenant_id,
+                configuration=record,
+                environment=environment,
+                version=record.version,
+                document=validated,
+                created_by=actor_id,
+                correlation_id=correlation,
+            )
+            IntegrationPlatformConfigurationAudit.objects.create(
+                tenant_id=tenant_id,
+                configuration=record,
+                environment=environment,
+                action=action,
+                from_version=from_version,
+                to_version=record.version,
+                before=before,
+                after=validated,
+                changed_by=actor_id,
+                correlation_id=correlation,
+            )
+            _publish(
+                tenant_id,
+                "integration_platform_configuration",
+                record.id,
+                f"configuration.{action}",
+                {
+                    "actor_id": str(actor_id),
+                    "environment": environment,
+                    "from_version": from_version,
+                    "to_version": record.version,
+                    "correlation_id": correlation,
+                },
+            )
+        return self._payload(record)
+
+    def rollback(
+        self,
+        tenant_id: UUID,
+        actor_id: UUID,
+        version: int,
+        *,
+        environment: str = "default",
+        correlation_id: str | None = None,
+    ) -> dict[str, object]:
+        tenant_id = _uuid(tenant_id, "tenant_id")
+        snapshot = (
+            IntegrationPlatformConfigurationVersion.objects.for_tenant(tenant_id)
+            .filter(environment=environment, version=version)
+            .only("document")
+            .first()
+        )
+        if snapshot is None:
+            raise NotFound()
+        return self.save(
+            tenant_id,
+            actor_id,
+            snapshot.document,
+            environment=environment,
+            correlation_id=correlation_id,
+            action="rollback",
+        )
+
+    def versions(self, tenant_id: UUID, environment: str = "default") -> QuerySet[IntegrationPlatformConfigurationVersion]:
+        return IntegrationPlatformConfigurationVersion.objects.for_tenant(
+            _uuid(tenant_id, "tenant_id")
+        ).filter(environment=environment).order_by("-version")
+
+    def audits(self, tenant_id: UUID, environment: str = "default") -> QuerySet[IntegrationPlatformConfigurationAudit]:
+        return IntegrationPlatformConfigurationAudit.objects.for_tenant(
+            _uuid(tenant_id, "tenant_id")
+        ).filter(environment=environment).order_by("-created_at", "-to_version")
+
+
 class ConnectorService:
     def __init__(self, *, entitlements: EntitlementService | None = None) -> None:
         self.entitlements = entitlements or EntitlementService()
 
     def _entitled(self, tenant_id: UUID, connector: Connector) -> bool:
-        if not connector.required_entitlement:
+        if connector.access_policy == ConnectorAccessPolicy.PUBLIC:
             return True
+        if connector.access_policy != ConnectorAccessPolicy.ENTITLEMENT_REQUIRED or not connector.required_entitlement:
+            raise CapabilityUnavailable(
+                capability="connector_access_policy",
+                message="Connector entitlement policy is unavailable.",
+            )
         try:
             return self.entitlements.check(tenant_id, connector.required_entitlement).entitled
         except Exception as exc:
@@ -299,19 +635,24 @@ class ConnectorService:
 
 class CredentialService:
     @staticmethod
-    def _plaintext(value: object) -> str:
+    def _plaintext(value: object, maximum: int) -> str:
         if isinstance(value, str):
             if not value:
                 raise IntegrationPlatformError("validation_error", "Credential plaintext is required.", status_code=400)
-            return value
-        try:
-            return json.dumps(value, sort_keys=True, separators=(",", ":"))
-        except (TypeError, ValueError) as exc:
-            raise IntegrationPlatformError("validation_error", "Credential plaintext must be text or JSON.", status_code=400) from exc
+            raw = value
+        else:
+            try:
+                raw = json.dumps(value, sort_keys=True, separators=(",", ":"))
+            except (TypeError, ValueError) as exc:
+                raise IntegrationPlatformError("validation_error", "Credential plaintext must be text or JSON.", status_code=400) from exc
+        if len(raw) > maximum:
+            raise IntegrationPlatformError("validation_error", f"Credential plaintext exceeds {maximum} characters.", status_code=400)
+        return raw
 
     @staticmethod
-    def _hint(plaintext: str) -> str:
-        return f"••••{plaintext[-4:]}" if len(plaintext) >= 4 else "••••"
+    def _hint(tenant_id: UUID, plaintext: str) -> str:
+        visible = int(setting(runtime_configuration(tenant_id), "security.credential_hint_characters"))
+        return f"••••{plaintext[-visible:]}" if visible and len(plaintext) >= visible else "••••"
 
     def create(
         self,
@@ -326,7 +667,7 @@ class CredentialService:
         integration = _active(Integration, tenant_id, integration_id)
         if credential_type not in CredentialType.values:
             raise IntegrationPlatformError("validation_error", "Unsupported credential type.", status_code=400)
-        raw = self._plaintext(plaintext)
+        raw = self._plaintext(plaintext, int(setting(runtime_configuration(tenant_id), "validation.credential_max_length")))
         with transaction.atomic():
             if IntegrationCredential.objects.for_tenant(tenant_id).filter(integration=integration, credential_type=credential_type, status=CredentialStatus.ACTIVE).exists():
                 raise IntegrationPlatformError("active_credential_exists", "Rotate the active credential instead.", status_code=409)
@@ -335,7 +676,7 @@ class CredentialService:
                 integration=integration,
                 credential_type=credential_type,
                 encrypted_value=_encrypt_secret(raw, "credential_encryption"),
-                display_hint=self._hint(raw),
+                display_hint=self._hint(tenant_id, raw),
                 expires_at=expires_at,
                 created_by=actor_id,
             )
@@ -359,8 +700,8 @@ class CredentialService:
         expires_at: datetime | None = None,
     ) -> IntegrationCredential:
         tenant_id, actor_id = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
-        raw = self._plaintext(plaintext)
-        key = _text(idempotency_key, "idempotency_key")
+        raw = self._plaintext(plaintext, int(setting(runtime_configuration(tenant_id), "validation.credential_max_length")))
+        key = _configured_text(tenant_id, idempotency_key, "idempotency_key")
         with transaction.atomic():
             old = IntegrationCredential.objects.select_for_update().for_tenant(tenant_id).filter(pk=credential_id).first()
             if old is None:
@@ -381,13 +722,13 @@ class CredentialService:
             old.revoked_at = old.rotated_at
             old.revoked_by = actor_id
             old.save(update_fields=("rotated_at", "revoked_at", "revoked_by", "updated_at"))
-            CREDENTIAL_STATE_MACHINE.apply(old, "rotate", tenant_id=tenant_id, transition_key=key, metadata=_transition_metadata(actor_id, "Credential rotated"))
+            _apply_transition(CREDENTIAL_STATE_MACHINE, "credential_transitions", old, "rotate", tenant_id=tenant_id, transition_key=key, metadata=_transition_metadata(actor_id, "Credential rotated"))
             new = IntegrationCredential(
                 tenant_id=tenant_id,
                 integration=old.integration,
                 credential_type=old.credential_type,
                 encrypted_value=_encrypt_secret(raw, "credential_encryption"),
-                display_hint=self._hint(raw),
+                display_hint=self._hint(tenant_id, raw),
                 version=old.version + 1,
                 expires_at=expires_at if expires_at is not None else old.expires_at,
                 created_by=actor_id,
@@ -405,7 +746,7 @@ class CredentialService:
         with transaction.atomic():
             credential.revoked_at, credential.revoked_by = timezone.now(), actor_id
             credential.save(update_fields=("revoked_at", "revoked_by", "updated_at"))
-            credential = CREDENTIAL_STATE_MACHINE.apply(credential, "revoke", tenant_id=tenant_id, transition_key=_text(transition_key, "transition_key"), metadata=_transition_metadata(actor_id, "Credential revoked"))
+            credential = _apply_transition(CREDENTIAL_STATE_MACHINE, "credential_transitions", credential, "revoke", tenant_id=tenant_id, transition_key=_configured_text(tenant_id, transition_key, "transition_key"), metadata=_transition_metadata(actor_id, "Credential revoked"))
             _publish(tenant_id, "integration_credential", credential.id, "credential.revoked", {"actor_id": str(actor_id), "integration_id": str(credential.integration_id), "credential_type": credential.credential_type})
             return credential
 
@@ -419,7 +760,7 @@ class CredentialService:
         if credential is None:
             raise IntegrationPlatformError("credential_missing", "An active credential is required.", status_code=422)
         if credential.expires_at and credential.expires_at <= timezone.now():
-            CREDENTIAL_STATE_MACHINE.apply(credential, "expire", tenant_id=tenant_id, transition_key=f"expire:{credential.id}:{credential.expires_at.isoformat()}", metadata=_transition_metadata(None, "Credential expired"))
+            _apply_transition(CREDENTIAL_STATE_MACHINE, "credential_transitions", credential, "expire", tenant_id=tenant_id, transition_key=f"expire:{credential.id}:{credential.expires_at.isoformat()}", metadata=_transition_metadata(None, "Credential expired"))
             raise IntegrationPlatformError("credential_expired", "The active credential has expired.", status_code=422)
         try:
             plaintext = EncryptionService.decrypt(credential.encrypted_value)
@@ -451,13 +792,16 @@ class IntegrationService:
         connector = Connector.objects.filter(pk=connector_id, is_active=True).first()
         if connector is None:
             raise NotFound()
-        if connector.required_entitlement:
-            try:
-                entitled = self.entitlements.check(tenant_id, connector.required_entitlement).entitled
-            except Exception as exc:
-                raise CapabilityUnavailable(capability="entitlement_state") from exc
-            if not entitled:
-                raise IntegrationPlatformError("entitlement_required", "The connector requires an entitlement.", status_code=403)
+        if connector.access_policy == ConnectorAccessPolicy.PUBLIC:
+            return connector
+        if connector.access_policy != ConnectorAccessPolicy.ENTITLEMENT_REQUIRED or not connector.required_entitlement:
+            raise CapabilityUnavailable(capability="connector_access_policy")
+        try:
+            entitled = self.entitlements.check(tenant_id, connector.required_entitlement).entitled
+        except Exception as exc:
+            raise CapabilityUnavailable(capability="entitlement_state") from exc
+        if not entitled:
+            raise IntegrationPlatformError("entitlement_required", "The connector requires an entitlement.", status_code=403)
         return connector
 
     @staticmethod
@@ -475,7 +819,7 @@ class IntegrationService:
         connector_input = data.get("connector_id", data.get("connector"))
         connector_id = connector_input.id if isinstance(connector_input, Connector) else connector_input
         connector = self._connector(tenant_id, _uuid(connector_id, "connector_id"))
-        config = _safe_mapping(data.get("config", {}), "config")
+        config = _safe_mapping(tenant_id, data.get("config", {}), "config")
         _validate_schema(config, connector.schema)
         if data.get("integration_type", connector.connector_type) != connector.connector_type:
             raise IntegrationPlatformError("connector_type_mismatch", "Integration type must match the connector.", status_code=400)
@@ -488,7 +832,7 @@ class IntegrationService:
             integration = Integration(
                 tenant_id=tenant_id,
                 connector=connector,
-                name=_text(data.get("name"), "name"),
+                name=_configured_text(tenant_id, data.get("name"), "name"),
                 description=str(data.get("description") or ""),
                 integration_type=connector.connector_type,
                 config=dict(normalized),
@@ -509,11 +853,11 @@ class IntegrationService:
             if integration is None:
                 raise NotFound()
             if "name" in data:
-                integration.name = _text(data["name"], "name")
+                integration.name = _configured_text(tenant_id, data["name"], "name")
             if "description" in data:
                 integration.description = str(data["description"] or "")
             if "config" in data:
-                config = _safe_mapping(data["config"], "config")
+                config = _safe_mapping(tenant_id, data["config"], "config")
                 _validate_schema(config, integration.connector.schema)
                 normalized = _unwrap(self._adapter(integration.connector, ConnectorCapability.TEST).validate_config(config))
                 if not isinstance(normalized, Mapping):
@@ -552,7 +896,7 @@ class IntegrationService:
         tenant_id, actor_id = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
         integration = _active(Integration, tenant_id, integration_id)
         with transaction.atomic():
-            integration = INTEGRATION_STATE_MACHINE.apply(integration, "deactivate", tenant_id=tenant_id, transition_key=_text(transition_key, "transition_key"), metadata=_transition_metadata(actor_id, "Integration deactivated"))
+            integration = _apply_transition(INTEGRATION_STATE_MACHINE, "integration_transitions", integration, "deactivate", tenant_id=tenant_id, transition_key=_configured_text(tenant_id, transition_key, "transition_key"), metadata=_transition_metadata(actor_id, "Integration deactivated"))
             _publish(tenant_id, "integration", integration.id, "integration.updated", {"actor_id": str(actor_id), "action": "deactivate", "adapter_key": integration.connector.adapter_key})
             return integration
 
@@ -560,9 +904,9 @@ class IntegrationService:
         tenant_id, actor_id = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
         integration = _active(Integration, tenant_id, integration_id)
         self._adapter(integration.connector, ConnectorCapability.TEST)
-        key = _text(idempotency_key, "idempotency_key")
+        key = _configured_text(tenant_id, idempotency_key, "idempotency_key")
         with transaction.atomic():
-            integration = INTEGRATION_STATE_MACHINE.apply(integration, "request_test", tenant_id=tenant_id, transition_key=key, metadata=_transition_metadata(actor_id, "Connection test requested"))
+            integration = _apply_transition(INTEGRATION_STATE_MACHINE, "integration_transitions", integration, "request_test", tenant_id=tenant_id, transition_key=key, metadata=_transition_metadata(actor_id, "Connection test requested"))
             try:
                 job = enqueue(tenant_id, actor_id, self.TEST_COMMAND, {"integration_id": str(integration.id)}, f"{self.TEST_COMMAND}:{key}")
             except Exception as exc:
@@ -588,7 +932,16 @@ class IntegrationService:
                 raise IntegrationPlatformError("invalid_adapter_result", "The adapter returned invalid test evidence.", status_code=503)
         except Exception as exc:
             result = OperationResult.failed(code="dependency_failure", message="The connector test failed.", provider=integration.connector.adapter_key, http_status=422)
-            logger.warning("integration.test.failed", extra={"tenant_id": str(tenant_id), "aggregate_id": str(integration.id), "job_id": str(job.id), "error_code": type(exc).__name__})
+            logger.warning(
+                "integration.test.failed",
+                extra={
+                    "correlation_id": job.correlation_id or _correlation_id(),
+                    "tenant_id": str(tenant_id),
+                    "aggregate_id": str(integration.id),
+                    "job_id": str(job.id),
+                    "error_code": type(exc).__name__,
+                },
+            )
         duration_ms = max(0, round((time.monotonic() - started) * 1000))
         with transaction.atomic():
             integration.last_tested_at = timezone.now()
@@ -596,7 +949,7 @@ class IntegrationService:
             integration.last_error_message = result.message or ""
             integration.save(update_fields=("last_tested_at", "last_error_code", "last_error_message", "updated_at"))
             command = "test_succeeded" if result.status == "succeeded" else "test_failed"
-            integration = INTEGRATION_STATE_MACHINE.apply(integration, command, tenant_id=tenant_id, transition_key=f"job:{job.id}:{command}", metadata=_transition_metadata(None, "Connection test completed", job_id=str(job.id), duration_ms=duration_ms, outcome=result.status))
+            integration = _apply_transition(INTEGRATION_STATE_MACHINE, "integration_transitions", integration, command, tenant_id=tenant_id, transition_key=f"job:{job.id}:{command}", metadata=_transition_metadata(None, "Connection test completed", job_id=str(job.id), duration_ms=duration_ms, outcome=result.status))
             event = "integration.test.succeeded" if result.status == "succeeded" else "integration.test.failed"
             _publish(tenant_id, "integration", integration.id, event, {"job_id": str(job.id), "adapter_key": integration.connector.adapter_key, "duration_ms": duration_ms, "outcome": result.status, "error_code": result.error_code or ""})
         if result.status != "succeeded":
@@ -608,8 +961,9 @@ class IntegrationService:
         integration = _active(Integration, tenant_id, integration_id)
         if integration.status != IntegrationStatus.ACTIVE:
             raise IntegrationPlatformError("invalid_state", "Only active integrations can synchronize.", status_code=409)
-        if direction not in {"pull", "push"}:
-            raise IntegrationPlatformError("validation_error", "direction must be pull or push.", status_code=400)
+        allowed_directions = setting(runtime_configuration(tenant_id), "synchronization.directions")
+        if not isinstance(allowed_directions, list) or direction not in allowed_directions:
+            raise CapabilityUnavailable(capability=f"synchronization_{direction}")
         self._adapter(integration.connector, direction)
         ids = [_uuid(value, "mapping_id") for value in mapping_ids]
         if len(ids) != len(set(ids)):
@@ -618,12 +972,13 @@ class IntegrationService:
         if found != set(ids):
             raise NotFound()
         try:
-            quota = self.quotas.consume(tenant_id, "integration_platform.integration:sync", cost=1)
+            quota_cost = int(setting(runtime_configuration(tenant_id), "synchronization.quota_cost"))
+            quota = self.quotas.consume(tenant_id, "integration_platform.integration:sync", cost=quota_cost)
         except Exception as exc:
             raise CapabilityUnavailable(capability="sync_quota") from exc
         if not quota.allowed:
             raise IntegrationPlatformError("quota_exceeded", "The synchronization quota is exhausted.", status_code=429)
-        key = _text(idempotency_key, "idempotency_key")
+        key = _configured_text(tenant_id, idempotency_key, "idempotency_key")
         try:
             job = enqueue(tenant_id, actor_id, self.SYNC_COMMAND, {"integration_id": str(integration.id), "direction": direction, "mapping_ids": [str(value) for value in ids]}, f"{self.SYNC_COMMAND}:{key}")
         except Exception as exc:
@@ -632,6 +987,26 @@ class IntegrationService:
         integration.save(update_fields=("last_sync_job_id", "updated_at"))
         _publish(tenant_id, "integration", integration.id, "integration.sync.requested", {"actor_id": str(actor_id), "job_id": str(job.id), "adapter_key": integration.connector.adapter_key, "direction": direction})
         return job
+
+    def request_sync_governed(
+        self,
+        tenant_id: UUID,
+        actor_id: UUID,
+        integration_id: UUID,
+        direction: str,
+        mapping_ids: Sequence[UUID],
+        idempotency_key: str,
+    ) -> AsyncJob:
+        """Public preflight that rejects unavailable capabilities before enqueue."""
+
+        policy = runtime_configuration(_uuid(tenant_id, "tenant_id"))
+        if direction == "push":
+            flags = setting(policy, "feature_flags.push_synchronization")
+            if not isinstance(flags, Mapping) or flags.get("enabled") is not True:
+                raise CapabilityUnavailable(capability="governed_push_source")
+        return self.request_sync(
+            tenant_id, actor_id, integration_id, direction, mapping_ids, idempotency_key
+        )
 
     def execute_sync(self, tenant_id: UUID, job: AsyncJob) -> OperationResult[dict[str, object]]:
         tenant_id = _uuid(tenant_id, "tenant_id")
@@ -648,10 +1023,17 @@ class IntegrationService:
         if len(mappings) != len(mapping_ids):
             raise NotFound()
         if direction == "push":
-            failure = OperationResult.failed(code="sync_source_unavailable", message="No governed source contract supplied records for this push job.", evidence={"job_id": str(job.id)}, provider=integration.connector.adapter_key, http_status=422)
+            failure = OperationResult.failed(
+                code="sync_source_unavailable",
+                message="No governed source contract supplied records for this push job.",
+                evidence={"job_id": str(job.id)},
+                provider=integration.connector.adapter_key,
+                http_status=503,
+            )
             _publish(tenant_id, "integration", integration.id, "integration.sync.failed", {"job_id": str(job.id), "adapter_key": integration.connector.adapter_key, "error_code": failure.error_code or ""})
             return failure
-        result = adapter.pull(integration.config, credential, RecordCursor(), 1000)
+        batch_limit = int(setting(runtime_configuration(tenant_id), "synchronization.pull_batch_limit"))
+        result = adapter.pull(integration.config, credential, RecordCursor(), batch_limit)
         if not isinstance(result, OperationResult) or result.status != "succeeded" or not isinstance(result.value, RecordBatch):
             if isinstance(result, OperationResult):
                 return OperationResult.failed(code=result.error_code or "sync_pull_failed", message=result.message or "The connector pull failed.", evidence={"job_id": str(job.id)}, provider=integration.connector.adapter_key, http_status=result.http_status or 422)
@@ -697,24 +1079,25 @@ class WebhookService:
     RECEIVE_COMMAND = "integration_platform.webhook.receive"
 
     @staticmethod
-    def _new_secret() -> str:
-        return secrets.token_urlsafe(48)
+    def _new_secret(tenant_id: UUID) -> str:
+        return secrets.token_urlsafe(int(setting(runtime_configuration(tenant_id), "security.signing_secret_bytes")))
 
     def create(self, tenant_id: UUID, actor_id: UUID, data: Mapping[str, object]) -> SecretOnce:
         tenant_id, actor_id = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
-        secret = self._new_secret()
+        policy = runtime_configuration(tenant_id)
+        secret = self._new_secret(tenant_id)
         with transaction.atomic():
             webhook = Webhook(
                 tenant_id=tenant_id,
                 created_by=actor_id,
-                name=_text(data.get("name"), "name"),
+                name=_configured_text(tenant_id, data.get("name"), "name"),
                 direction=str(data.get("direction") or ""),
                 url=str(data.get("url") or ""),
                 events=list(data.get("events") or []),
                 encrypted_signing_secret=_encrypt_secret(secret, "webhook_secret_encryption"),
-                config=_safe_mapping(data.get("config", {}), "config"),
-                timeout_seconds=int(data.get("timeout_seconds", 10)),
-                max_attempts=int(data.get("max_attempts", 5)),
+                config=_safe_mapping(tenant_id, data.get("config", {}), "config"),
+                timeout_seconds=int(data.get("timeout_seconds", setting(policy, "webhooks.timeout_seconds_default"))),
+                max_attempts=int(data.get("max_attempts", setting(policy, "webhooks.max_attempts_default"))),
             )
             _model_validation(webhook)
             webhook.save()
@@ -734,7 +1117,7 @@ class WebhookService:
                 if field in data:
                     setattr(webhook, field, data[field])
             if "config" in data:
-                webhook.config = _safe_mapping(data["config"], "config")
+                webhook.config = _safe_mapping(tenant_id, data["config"], "config")
             webhook.updated_by = actor_id
             _model_validation(webhook)
             webhook.save()
@@ -762,14 +1145,14 @@ class WebhookService:
         tenant_id, actor_id = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
         webhook = _active(Webhook, tenant_id, webhook_id)
         with transaction.atomic():
-            webhook = WEBHOOK_STATE_MACHINE.apply(webhook, command, tenant_id=tenant_id, transition_key=_text(transition_key, "transition_key"), metadata=_transition_metadata(actor_id, f"Webhook {command}d"))
+            webhook = _apply_transition(WEBHOOK_STATE_MACHINE, "webhook_transitions", webhook, command, tenant_id=tenant_id, transition_key=_configured_text(tenant_id, transition_key, "transition_key"), metadata=_transition_metadata(actor_id, f"Webhook {command}d"))
             _publish(tenant_id, "webhook", webhook.id, "webhook.updated", {"actor_id": str(actor_id), "action": command, "direction": webhook.direction})
             return webhook
 
     def rotate_secret(self, tenant_id: UUID, actor_id: UUID, webhook_id: UUID, transition_key: str) -> SecretOnce:
         tenant_id, actor_id = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
-        key = _text(transition_key, "transition_key")
-        secret = self._new_secret()
+        key = _configured_text(tenant_id, transition_key, "transition_key")
+        secret = self._new_secret(tenant_id)
         with transaction.atomic():
             webhook = Webhook.objects.select_for_update().for_tenant(tenant_id).filter(pk=webhook_id, is_deleted=False).first()
             if webhook is None:
@@ -788,16 +1171,18 @@ class WebhookService:
         webhook = Webhook.objects.filter(public_id=public_id, direction=WebhookDirection.INBOUND, status=WebhookStatus.ACTIVE, is_deleted=False).first()
         if webhook is None:
             raise NotFound()
-        if not isinstance(raw_body, bytes) or len(raw_body) > MAX_BODY_BYTES:
+        policy = runtime_configuration(webhook.tenant_id)
+        payload_max = int(setting(policy, "security.payload_max_bytes"))
+        if not isinstance(raw_body, bytes) or len(raw_body) > payload_max:
             raise IntegrationPlatformError("invalid_payload", "Webhook body is invalid or too large.", status_code=400)
         try:
             issued_at = datetime.fromtimestamp(int(timestamp), tz=datetime_timezone.utc)
         except (TypeError, ValueError, OSError) as exc:
             raise IntegrationPlatformError("invalid_timestamp", "Webhook timestamp is invalid.", status_code=401) from exc
-        if abs((timezone.now() - issued_at).total_seconds()) > INBOUND_WINDOW_SECONDS:
+        if abs((timezone.now() - issued_at).total_seconds()) > int(setting(policy, "security.signature_window_seconds")):
             raise IntegrationPlatformError("stale_signature", "Webhook signature timestamp is outside the allowed window.", status_code=401)
-        nonce = _text(nonce, "nonce", 128)
-        signature = _text(signature, "signature", 128)
+        nonce = _text(nonce, "nonce", int(setting(policy, "validation.nonce_max_length")))
+        signature = _text(signature, "signature", int(setting(policy, "validation.signature_max_length")))
         try:
             secret = EncryptionService.decrypt(webhook.encrypted_signing_secret)
         except Exception as exc:
@@ -808,7 +1193,7 @@ class WebhookService:
             raise IntegrationPlatformError("invalid_signature", "Webhook signature verification failed.", status_code=401)
         nonce_key = f"integration-platform:webhook-nonce:{webhook.public_id}:{hashlib.sha256(nonce.encode()).hexdigest()}"
         try:
-            accepted = cache.add(nonce_key, "used", timeout=INBOUND_WINDOW_SECONDS)
+            accepted = cache.add(nonce_key, "used", timeout=int(setting(policy, "security.signature_window_seconds")))
         except Exception as exc:
             raise CapabilityUnavailable(capability="webhook_replay_protection") from exc
         if not accepted:
@@ -827,7 +1212,8 @@ class WebhookService:
             parsed: object = json.loads(raw_body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise IntegrationPlatformError("invalid_json", "Webhook body must be valid UTF-8 JSON.", status_code=400) from exc
-        payload = _redact(parsed)
+        secret_keys = frozenset(str(value) for value in setting(runtime_configuration(webhook.tenant_id), "security.secret_field_names"))
+        payload = _redact(parsed, secret_keys)
         body_hash = hashlib.sha256(raw_body).hexdigest()
         with transaction.atomic():
             try:
@@ -844,12 +1230,13 @@ class WebhookService:
         webhook = _active(Webhook, tenant_id, webhook_id)
         if webhook.direction != WebhookDirection.OUTBOUND or webhook.status != WebhookStatus.ACTIVE:
             raise IntegrationPlatformError("invalid_state", "An active outbound webhook is required.", status_code=409)
-        event = _text(event, "event")
+        event = _configured_text(tenant_id, event, "event", "validation.event_name_max_length")
         if event not in webhook.events:
             raise IntegrationPlatformError("event_not_subscribed", "The webhook does not subscribe to this event.", status_code=400)
-        safe_payload = _redact(dict(payload))
+        secret_keys = frozenset(str(value) for value in setting(runtime_configuration(tenant_id), "security.secret_field_names"))
+        safe_payload = _redact(dict(payload), secret_keys)
         canonical = json.dumps(safe_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-        key = _text(idempotency_key, "idempotency_key")
+        key = _configured_text(tenant_id, idempotency_key, "idempotency_key")
         with transaction.atomic():
             existing = WebhookDelivery.objects.for_tenant(tenant_id).filter(webhook=webhook, idempotency_key=key).first()
             if existing is not None:
@@ -882,7 +1269,7 @@ class WebhookService:
         if delivery is None:
             raise NotFound()
         with transaction.atomic():
-            delivery = DELIVERY_STATE_MACHINE.apply(delivery, "redrive", tenant_id=tenant_id, transition_key=_text(transition_key, "transition_key"), metadata=_transition_metadata(actor_id, "Delivery redriven"))
+            delivery = _apply_transition(DELIVERY_STATE_MACHINE, "delivery_transitions", delivery, "redrive", tenant_id=tenant_id, transition_key=_configured_text(tenant_id, transition_key, "transition_key"), metadata=_transition_metadata(actor_id, "Delivery redriven"))
             job = enqueue(tenant_id, actor_id, self.DELIVERY_COMMAND, {"delivery_id": str(delivery.id)}, f"{self.DELIVERY_COMMAND}:redrive:{transition_key}")
             delivery.job_id, delivery.next_attempt_at = job.id, None
             delivery.save(update_fields=("job_id", "next_attempt_at", "updated_at"))
@@ -897,7 +1284,12 @@ class WebhookDeliveryWorker:
     def _client(self, webhook: Webhook) -> ResilientHttpClient:
         if self.http_client is not None:
             return self.http_client
-        return ResilientHttpClient(connect_timeout=min(5, webhook.timeout_seconds), read_timeout=webhook.timeout_seconds, max_retries=0)
+        policy = runtime_configuration(webhook.tenant_id)
+        return ResilientHttpClient(
+            connect_timeout=min(int(setting(policy, "webhooks.connect_timeout_max_seconds")), webhook.timeout_seconds),
+            read_timeout=webhook.timeout_seconds,
+            max_retries=int(setting(policy, "webhooks.http_client_retries")),
+        )
 
     def execute(self, tenant_id: UUID, job: AsyncJob) -> OperationResult[dict[str, object]]:
         tenant_id = _uuid(tenant_id, "tenant_id")
@@ -914,13 +1306,13 @@ class WebhookDeliveryWorker:
                     "The delivery retry is not due yet.",
                     status_code=409,
                 )
-            delivery = DELIVERY_STATE_MACHINE.apply(delivery, "requeue", tenant_id=tenant_id, transition_key=f"job:{job.id}:requeue", metadata=_transition_metadata(None, "Retry became due"))
-        delivery = DELIVERY_STATE_MACHINE.apply(delivery, "start", tenant_id=tenant_id, transition_key=f"job:{job.id}:start", metadata=_transition_metadata(None, "Delivery attempt started"))
+            delivery = _apply_transition(DELIVERY_STATE_MACHINE, "delivery_transitions", delivery, "requeue", tenant_id=tenant_id, transition_key=f"job:{job.id}:requeue", metadata=_transition_metadata(None, "Retry became due"))
+        delivery = _apply_transition(DELIVERY_STATE_MACHINE, "delivery_transitions", delivery, "start", tenant_id=tenant_id, transition_key=f"job:{job.id}:start", metadata=_transition_metadata(None, "Delivery attempt started"))
         delivery.attempt_count += 1
         delivery.save(update_fields=("attempt_count", "updated_at"))
         canonical = json.dumps(delivery.payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         timestamp = str(int(timezone.now().timestamp()))
-        nonce = secrets.token_urlsafe(24)
+        nonce = secrets.token_urlsafe(int(setting(runtime_configuration(tenant_id), "security.outbound_nonce_bytes")))
         try:
             secret = EncryptionService.decrypt(webhook.encrypted_signing_secret)
         except Exception as exc:
@@ -945,25 +1337,27 @@ class WebhookDeliveryWorker:
                 },
                 correlation_id=delivery.correlation_id,
             )
-            code, excerpt = response.status_code, _safe_excerpt(response.text)
+            code = response.status_code
         except Exception as exc:
             if delivery.attempt_count < delivery.max_attempts:
                 return self.schedule_retry(tenant_id, delivery.id, exc)
             return self.move_to_dead_letter(tenant_id, delivery.id, exc)
         duration = max(0, round((time.monotonic() - started) * 1000))
-        delivery.response_code, delivery.response_body_excerpt, delivery.duration_ms = code, excerpt, duration
-        delivery.save(update_fields=("response_code", "response_body_excerpt", "duration_ms", "updated_at"))
-        if 200 <= code < 300:
+        delivery.response_code, delivery.duration_ms = code, duration
+        delivery.save(update_fields=("response_code", "duration_ms", "updated_at"))
+        policy = runtime_configuration(tenant_id)
+        if int(setting(policy, "webhooks.success_status_min")) <= code <= int(setting(policy, "webhooks.success_status_max")):
+            self._record_attempt(delivery, "delivered")
             delivery.delivered_at = timezone.now()
             delivery.save(update_fields=("delivered_at", "updated_at"))
-            delivery = DELIVERY_STATE_MACHINE.apply(delivery, "succeed", tenant_id=tenant_id, transition_key=f"job:{job.id}:succeed", metadata=_transition_metadata(None, "Provider acknowledged delivery", response_code=code, duration_ms=duration))
+            delivery = _apply_transition(DELIVERY_STATE_MACHINE, "delivery_transitions", delivery, "succeed", tenant_id=tenant_id, transition_key=f"job:{job.id}:succeed", metadata=_transition_metadata(None, "Provider acknowledged delivery", response_code=code, duration_ms=duration))
             webhook.last_delivered_at = delivery.delivered_at
             webhook.save(update_fields=("last_delivered_at", "updated_at"))
             evidence = {"delivery_id": str(delivery.id), "attempt_count": delivery.attempt_count, "response_code": code, "duration_ms": duration}
             _publish(tenant_id, "webhook_delivery", delivery.id, "webhook.delivery.succeeded", {"job_id": str(job.id), "webhook_id": str(webhook.id), **evidence})
             return OperationResult.succeeded(evidence, evidence=evidence, provider=webhook.url.split("/", 3)[2])
         error = RuntimeError(f"HTTP {code}")
-        if code in {408, 429} or code >= 500:
+        if code in set(setting(policy, "webhooks.retry_statuses")) or code >= int(setting(policy, "webhooks.retry_server_error_min")):
             return self.schedule_retry(tenant_id, delivery.id, error) if delivery.attempt_count < delivery.max_attempts else self.move_to_dead_letter(tenant_id, delivery.id, error)
         return self.move_to_dead_letter(tenant_id, delivery.id, error)
 
@@ -974,14 +1368,16 @@ class WebhookDeliveryWorker:
             raise NotFound()
         if delivery.attempt_count >= delivery.max_attempts:
             return self.move_to_dead_letter(tenant_id, delivery.id, error)
-        base = min(3600, 2 ** max(0, delivery.attempt_count - 1))
+        retry_max = int(setting(runtime_configuration(tenant_id), "webhooks.retry_delay_max_seconds"))
+        base = min(retry_max, 2 ** max(0, delivery.attempt_count - 1))
         jitter = int.from_bytes(hashlib.sha256(f"{delivery.id}:{delivery.attempt_count}".encode()).digest()[:2], "big") % max(1, base)
-        delay = min(3600, base + jitter)
+        delay = min(retry_max, base + jitter)
         with transaction.atomic():
-            delivery.error_code, delivery.error_message = _error_code(error), "The delivery dependency failed transiently."
+            delivery.error_code, delivery.error_message = _error_code(tenant_id, error), "The delivery dependency failed transiently."
+            self._record_attempt(delivery, "retrying", error_code=delivery.error_code)
             delivery.next_attempt_at = timezone.now() + timedelta(seconds=delay)
             delivery.save(update_fields=("error_code", "error_message", "next_attempt_at", "updated_at"))
-            delivery = DELIVERY_STATE_MACHINE.apply(delivery, "retry", tenant_id=tenant_id, transition_key=f"attempt:{delivery.attempt_count}:retry", metadata=_transition_metadata(None, "Transient delivery failure", delay_seconds=delay, error_code=delivery.error_code))
+            delivery = _apply_transition(DELIVERY_STATE_MACHINE, "delivery_transitions", delivery, "retry", tenant_id=tenant_id, transition_key=f"attempt:{delivery.attempt_count}:retry", metadata=_transition_metadata(None, "Transient delivery failure", delay_seconds=delay, error_code=delivery.error_code))
             retry_job = enqueue(
                 tenant_id,
                 delivery.webhook.created_by,
@@ -1004,30 +1400,64 @@ class WebhookDeliveryWorker:
         delivery = WebhookDelivery.objects.for_tenant(tenant_id).filter(pk=delivery_id).first()
         if delivery is None:
             raise NotFound()
-        delivery.error_code, delivery.error_message = _error_code(error), "The delivery could not be completed."
+        delivery.error_code, delivery.error_message = _error_code(tenant_id, error), "The delivery could not be completed."
+        self._record_attempt(delivery, "dead_letter", error_code=delivery.error_code)
         delivery.next_attempt_at = None
         delivery.save(update_fields=("error_code", "error_message", "next_attempt_at", "updated_at"))
-        delivery = DELIVERY_STATE_MACHINE.apply(delivery, "exhaust", tenant_id=tenant_id, transition_key=f"attempt:{delivery.attempt_count}:exhaust", metadata=_transition_metadata(None, "Delivery moved to dead letter", error_code=delivery.error_code))
+        delivery = _apply_transition(DELIVERY_STATE_MACHINE, "delivery_transitions", delivery, "exhaust", tenant_id=tenant_id, transition_key=f"attempt:{delivery.attempt_count}:exhaust", metadata=_transition_metadata(None, "Delivery moved to dead letter", error_code=delivery.error_code))
         if delivery.webhook.status == WebhookStatus.ACTIVE:
-            WEBHOOK_STATE_MACHINE.apply(delivery.webhook, "delivery_failed", tenant_id=tenant_id, transition_key=f"delivery:{delivery.id}:failed", metadata=_transition_metadata(None, "Delivery exhausted retry policy"))
+            _apply_transition(WEBHOOK_STATE_MACHINE, "webhook_transitions", delivery.webhook, "delivery_failed", tenant_id=tenant_id, transition_key=f"delivery:{delivery.id}:failed", metadata=_transition_metadata(None, "Delivery exhausted retry policy"))
         _publish(tenant_id, "webhook_delivery", delivery.id, "webhook.delivery.dead_lettered", {"job_id": str(delivery.job_id), "webhook_id": str(delivery.webhook_id), "attempt_count": delivery.attempt_count, "error_code": delivery.error_code})
         return OperationResult.failed(code="delivery_dead_lettered", message="Delivery moved to the dead-letter queue.", evidence={"delivery_id": str(delivery.id), "attempt_count": delivery.attempt_count}, provider="webhook", http_status=422)
+
+    @staticmethod
+    def _record_attempt(
+        delivery: WebhookDelivery,
+        outcome: str,
+        *,
+        error_code: str = "",
+    ) -> WebhookDeliveryAttempt:
+        """Idempotently append the immutable evidence behind the projection."""
+
+        attempt_number = max(1, delivery.attempt_count)
+        values = {
+            "outcome": outcome,
+            "response_code": delivery.response_code,
+            "error_code": error_code,
+            "duration_ms": delivery.duration_ms,
+            "job_id": delivery.job_id,
+            "correlation_id": delivery.correlation_id,
+        }
+        existing = WebhookDeliveryAttempt.objects.for_tenant(delivery.tenant_id).filter(
+            delivery=delivery,
+            attempt_number=attempt_number,
+        ).first()
+        if existing is not None:
+            if any(getattr(existing, field) != value for field, value in values.items()):
+                raise IntegrationPlatformError(
+                    "delivery_attempt_conflict",
+                    "Immutable delivery attempt evidence conflicts with the requested outcome.",
+                    status_code=409,
+                )
+            return existing
+        attempt = WebhookDeliveryAttempt(
+            tenant_id=delivery.tenant_id,
+            delivery=delivery,
+            attempt_number=attempt_number,
+            **values,
+        )
+        _model_validation(attempt)
+        attempt.save()
+        return attempt
 
     def recover_stale(self, tenant_id: UUID, stale_before: datetime) -> list[AsyncJob]:
         return recover_stale_jobs(_uuid(tenant_id, "tenant_id"), stale_before=stale_before)
 
 
-def _error_code(error: Exception) -> str:
+def _error_code(tenant_id: UUID, error: Exception) -> str:
     name = type(error).__name__.lower()
-    return name[:100] if name else "dependency_failure"
-
-
-def _safe_excerpt(value: object) -> str:
-    text = str(value)[:2048]
-    for marker in ("authorization", "password", "secret", "token", "api_key"):
-        if marker in text.lower():
-            return "[REDACTED]"
-    return text
+    maximum = int(setting(runtime_configuration(tenant_id), "validation.error_code_max_length"))
+    return name[:maximum] if name else "dependency_failure"
 
 
 class DataMappingService:
@@ -1041,12 +1471,12 @@ class DataMappingService:
                 tenant_id=tenant_id,
                 integration=integration,
                 created_by=actor_id,
-                name=_text(data.get("name"), "name"),
-                source_field=_text(data.get("source_field"), "source_field"),
-                target_field=_text(data.get("target_field"), "target_field"),
+                name=_configured_text(tenant_id, data.get("name"), "name"),
+                source_field=_configured_text(tenant_id, data.get("source_field"), "source_field"),
+                target_field=_configured_text(tenant_id, data.get("target_field"), "target_field"),
                 transform=dict(data.get("transform") or {}),
-                position=int(data.get("position", 0)),
-                is_required=bool(data.get("is_required", False)),
+                position=int(data.get("position", setting(runtime_configuration(tenant_id), "mapping.default_position"))),
+                is_required=bool(data.get("is_required", setting(runtime_configuration(tenant_id), "mapping.default_required"))),
                 default_value=data.get("default_value"),
             )
             _model_validation(mapping)
@@ -1113,10 +1543,11 @@ class DataMappingService:
         sample: Mapping[str, object] | Sequence[Mapping[str, object]],
     ) -> TransformResult:
         records = (sample,) if isinstance(sample, Mapping) else tuple(sample)
-        if not records or len(records) > 100 or any(not isinstance(record, Mapping) for record in records):
+        limit = int(setting(runtime_configuration(_uuid(tenant_id, "tenant_id")), "mapping.preview_record_limit"))
+        if not records or len(records) > limit or any(not isinstance(record, Mapping) for record in records):
             raise IntegrationPlatformError(
                 "validation_error",
-                "sample must contain between 1 and 100 JSON objects.",
+                f"sample must contain between 1 and {limit} JSON objects.",
                 status_code=400,
             )
         return self.transform(tenant_id, integration_id, mapping_ids, records)
@@ -1152,6 +1583,7 @@ class DataMappingService:
 # Stable instances are convenient for controllers while constructors remain
 # public for dependency-injected tests and paid extensions.
 connector_service = ConnectorService()
+configuration_service = ConfigurationService()
 credential_service = CredentialService()
 integration_service = IntegrationService(credentials=credential_service)
 webhook_service = WebhookService()
@@ -1160,8 +1592,9 @@ mapping_service = DataMappingService()
 
 
 __all__ = [
-    "ConnectorService", "CredentialService", "DataMappingService", "IntegrationPlatformError",
+    "ConfigurationService", "ConnectorService", "CredentialService", "DataMappingService", "IntegrationPlatformError",
     "IntegrationService", "MappingFailure", "SecretOnce", "TransformResult", "WebhookDeliveryWorker",
-    "WebhookService", "connector_service", "credential_service", "delivery_worker", "integration_service",
-    "mapping_service", "webhook_service", "EncryptionService",
+    "WebhookService", "configuration_service", "connector_service", "credential_service", "delivery_worker",
+    "durable_job_receipt", "durable_job_state", "integration_service", "mapping_service",
+    "runtime_configuration", "webhook_service", "EncryptionService",
 ]

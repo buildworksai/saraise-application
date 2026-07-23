@@ -8,13 +8,13 @@
  */
 import { NavLink, useLocation } from "react-router-dom";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   Shield,
   Users,
   Database,
   Workflow,
-  Plug,
   FolderTree,
   Key,
   Bot,
@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { getTenantSidebarTreeForMode } from "@/navigation/tenant-route-registry";
 import { useDocumentIntelligenceConfiguration } from "@/modules/document_intelligence/hooks/use-document-intelligence-configuration";
 import { useTraceabilityCapabilities } from "@/modules/blockchain_traceability/hooks/use-traceability-configuration";
+import { integrationPlatformService } from "@/modules/integration_platform/services/integration-platform-service";
 import type { User } from "@/stores/auth-store";
 
 interface NavItem {
@@ -50,12 +51,6 @@ const tenantItems: NavItem[] = [
     label: "Workflow Automation",
     icon: Workflow,
     module: "workflow_automation",
-  },
-  {
-    path: "/integration-platform",
-    label: "Integration Platform",
-    icon: Plug,
-    module: "integration_platform",
   },
   {
     path: "/dms",
@@ -156,6 +151,7 @@ const registryTenantItems: NavItem[] = getTenantSidebarTreeForMode(
       label: branch.label,
       icon: branch.icon,
       module: branch.module,
+      order: branch.order,
       children: branch.children.map((leaf) => ({
         routeId: leaf.routeId,
         path: leaf.path,
@@ -281,6 +277,10 @@ export const TenantSidebar = ({ user }: { user: User }) => {
   const isAdmin = user.tenant_role === "tenant_admin";
   const documentIntelligenceConfiguration = useDocumentIntelligenceConfiguration();
   const traceabilityCapabilities = useTraceabilityCapabilities();
+  const integrationPlatformConfiguration = useQuery({
+    queryKey: ["integration-platform", "configuration"],
+    queryFn: () => integrationPlatformService.getConfiguration(),
+  });
   const runtimeRegistryItems = applyRuntimeNavigationOrder(
     registryTenantItems,
     documentIntelligenceConfiguration.data?.document.ui.navigation_order,
@@ -288,6 +288,17 @@ export const TenantSidebar = ({ user }: { user: User }) => {
   const renderedTenantItems = [...tenantItems, ...runtimeRegistryItems]
     .map((item) => item.module === "blockchain_traceability" && traceabilityCapabilities.data
       ? { ...item, order: traceabilityCapabilities.data.document.ui.sidebar_order }
+      : item.module === "integration_platform" && integrationPlatformConfiguration.data
+        ? {
+            ...item,
+            order: integrationPlatformConfiguration.data.document.navigation.base_order,
+            children: item.children
+              ?.map((child) => ({
+                ...child,
+                order: integrationPlatformConfiguration.data!.document.navigation.route_order[child.routeId ?? ""] ?? child.order,
+              }))
+              .sort((left, right) => left.order - right.order),
+          }
       : item)
     .sort((left, right) => (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER));
 

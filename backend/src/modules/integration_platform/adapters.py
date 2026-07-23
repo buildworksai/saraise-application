@@ -18,8 +18,14 @@ from uuid import UUID
 
 from src.core.api.results import OperationResult
 
-SPI_VERSION: Final = "1.0"
-SUPPORTED_CAPABILITIES: Final = frozenset({"test", "pull", "push", "receive", "deliver"})
+from .configuration import DEFAULT_CONFIGURATION
+
+_ADAPTER_POLICY = DEFAULT_CONFIGURATION["adapter"]
+assert isinstance(_ADAPTER_POLICY, Mapping)
+SPI_VERSION: Final = str(_ADAPTER_POLICY["spi_version"])
+SUPPORTED_CAPABILITIES: Final = frozenset(str(value) for value in _ADAPTER_POLICY["capabilities"])
+ADAPTER_KEY_MAX_LENGTH: Final = int(_ADAPTER_POLICY["adapter_key_max_length"])
+CURSOR_MAX_LENGTH: Final = int(_ADAPTER_POLICY["cursor_max_length"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,7 +39,7 @@ class AdapterDescriptor:
     description: str = ""
 
     def __post_init__(self) -> None:
-        if not self.key or len(self.key) > 200 or any(character.isspace() for character in self.key):
+        if not self.key or len(self.key) > ADAPTER_KEY_MAX_LENGTH or any(character.isspace() for character in self.key):
             raise ValueError("Adapter key must be a non-empty, whitespace-free identifier")
         if self.spi_version != SPI_VERSION:
             raise ValueError(f"Unsupported connector SPI version {self.spi_version!r}")
@@ -86,8 +92,8 @@ class RecordCursor:
     value: str = ""
 
     def __post_init__(self) -> None:
-        if len(self.value) > 4096:
-            raise ValueError("Cursor exceeds 4096 characters")
+        if len(self.value) > CURSOR_MAX_LENGTH:
+            raise ValueError(f"Cursor exceeds {CURSOR_MAX_LENGTH} characters")
 
 
 @dataclass(frozen=True, slots=True)

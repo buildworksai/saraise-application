@@ -40,3 +40,39 @@ sod_actions:
   - [integration_platform.credential:create, integration_platform.credential:revoke]
 search_indexes: []
 ai_tools: []
+entities:
+  - {name: Connector, scope: platform, exposure: public}
+  - {name: Integration, scope: tenant, exposure: private}
+  - {name: IntegrationCredential, scope: tenant, exposure: metadata-only}
+  - {name: Webhook, scope: tenant, exposure: private}
+  - {name: WebhookDelivery, scope: tenant, exposure: evidence}
+  - {name: WebhookDeliveryAttempt, scope: tenant, exposure: immutable-evidence}
+  - {name: DataMapping, scope: tenant, exposure: private}
+  - {name: IntegrationPlatformConfiguration, scope: tenant, exposure: private}
+  - {name: IntegrationPlatformConfigurationVersion, scope: tenant, exposure: immutable-evidence}
+  - {name: IntegrationPlatformConfigurationAudit, scope: tenant, exposure: immutable-evidence}
+endpoints:
+  - {path: "/connectors/", methods: [GET], permission: integration_platform.connector:read, exposure: tenant-authenticated}
+  - {path: "/integrations/", methods: [GET, POST], permission: integration_platform.integration:read|create, exposure: tenant-authenticated}
+  - {path: "/integrations/{id}/", methods: [GET, PATCH, DELETE], permission: integration_platform.integration:read|update|delete, exposure: tenant-authenticated}
+  - {path: "/integrations/{id}/activate/", methods: [POST], permission: integration_platform.integration:activate, exposure: tenant-authenticated}
+  - {path: "/integrations/{id}/deactivate/", methods: [POST], permission: integration_platform.integration:deactivate, exposure: tenant-authenticated}
+  - {path: "/integrations/{id}/test/", methods: [POST], permission: integration_platform.integration:test, exposure: tenant-authenticated}
+  - {path: "/integrations/{id}/sync/", methods: [POST], permission: integration_platform.integration:sync, exposure: tenant-authenticated}
+  - {path: "/integration-credentials/", methods: [GET, POST], permission: integration_platform.credential:read|create, exposure: tenant-authenticated}
+  - {path: "/webhooks/", methods: [GET, POST], permission: integration_platform.webhook:read|create, exposure: tenant-authenticated}
+  - {path: "/webhooks/{id}/", methods: [GET, PATCH, DELETE], permission: integration_platform.webhook:read|update|delete, exposure: tenant-authenticated}
+  - {path: "/webhooks/inbound/{public_id}/", methods: [POST], permission: signed-webhook, exposure: public-signed}
+  - {path: "/webhook-deliveries/", methods: [GET], permission: integration_platform.delivery:read, exposure: tenant-authenticated}
+  - {path: "/webhook-deliveries/{id}/redrive/", methods: [POST], permission: integration_platform.delivery:redrive, exposure: tenant-authenticated}
+  - {path: "/data-mappings/", methods: [GET, POST], permission: integration_platform.mapping:read|create, exposure: tenant-authenticated}
+  - {path: "/data-mappings/{id}/", methods: [GET, PATCH, DELETE], permission: integration_platform.mapping:read|update|delete, exposure: tenant-authenticated}
+  - {path: "/configuration/", methods: [GET, POST], permission: integration_platform.integration:read|update, exposure: tenant-authenticated}
+  - {path: "/configuration/manage-capability/", methods: [GET], permission: integration_platform.integration:update, exposure: tenant-authenticated}
+  - {path: "/configuration/preview/", methods: [POST], permission: integration_platform.integration:update, exposure: tenant-authenticated}
+  - {path: "/configuration/rollback/", methods: [POST], permission: integration_platform.integration:update, exposure: tenant-authenticated}
+  - {path: "/configuration/import/", methods: [POST], permission: integration_platform.integration:update, exposure: tenant-authenticated}
+  - {path: "/configuration/export/", methods: [GET], permission: integration_platform.integration:read, exposure: tenant-authenticated}
+  - {path: "/configuration/versions/", methods: [GET], permission: integration_platform.integration:read, exposure: tenant-authenticated}
+  - {path: "/configuration/audits/", methods: [GET], permission: integration_platform.integration:read, exposure: tenant-authenticated}
+  - {path: "/health/", methods: [GET], permission: integration_platform.health:read, exposure: tenant-authenticated}

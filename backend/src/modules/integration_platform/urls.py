@@ -8,6 +8,7 @@ from .api import (
     DataMappingViewSet,
     InboundWebhookView,
     IntegrationCredentialViewSet,
+    IntegrationPlatformConfigurationViewSet,
     IntegrationViewSet,
     NestedCredentialViewSet,
     WebhookDeliveryViewSet,
@@ -33,6 +34,11 @@ router.register(
 router.register("webhooks", WebhookViewSet, basename="webhook")
 router.register("webhook-deliveries", WebhookDeliveryViewSet, basename="webhook-delivery")
 router.register("data-mappings", DataMappingViewSet, basename="data-mapping")
+router.register(
+    "configuration",
+    IntegrationPlatformConfigurationViewSet,
+    basename="configuration",
+)
 
 inbound_webhook = InboundWebhookView.as_view({"post": "create"})
 

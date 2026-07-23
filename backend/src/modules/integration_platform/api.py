@@ -25,11 +25,11 @@ from rest_framework.throttling import SimpleRateThrottle
 
 from src.core.access import RequiresAccess
 from src.core.api import GovernedAPIViewMixin, GovernedPageNumberPagination, OperationFailed, OperationResult
-from src.core.async_jobs.models import AsyncJob, OutboxEvent
 from src.core.views.tenant_scoped import TenantScopedModelViewSet, TenantScopedReadOnlyModelViewSet
 
 from .models import DataMapping, Integration, IntegrationCredential, Webhook, WebhookDelivery
 from .permissions import (
+    CONFIGURATION_ACTIONS,
     CONNECTOR_ACTIONS,
     CREDENTIAL_ACTIONS,
     DELIVERY_ACTIONS,
@@ -46,6 +46,12 @@ from .serializers import (
     ConnectorDetailSerializer,
     ConnectorListSerializer,
     ConnectorSchemaSerializer,
+    ConfigurationAuditSerializer,
+    ConfigurationDocumentSerializer,
+    ConfigurationPreviewSerializer,
+    ConfigurationRollbackSerializer,
+    ConfigurationSerializer,
+    ConfigurationVersionSerializer,
     CredentialCreateSerializer,
     CredentialMetadataSerializer,
     CredentialRotateSerializer,
@@ -76,12 +82,17 @@ from .services import (
     INBOUND_NONCE_HEADER,
     INBOUND_SIGNATURE_HEADER,
     INBOUND_TIMESTAMP_HEADER,
+    ConfigurationService,
     ConnectorService,
     CredentialService,
     DataMappingService,
     IntegrationService,
     WebhookService,
+    durable_job_receipt,
+    durable_job_state,
+    runtime_configuration,
 )
+from .configuration import setting
 
 
 class CanonicalSessionAuthentication(SessionAuthentication):
@@ -95,7 +106,21 @@ class CanonicalSessionAuthentication(SessionAuthentication):
 class InboundWebhookThrottle(SimpleRateThrottle):
     """Bound public webhook transport requests by source and public endpoint."""
 
-    rate = "60/min"
+    rate = None
+    view: object | None = None
+
+    def allow_request(self, request: Request, view: object) -> bool:
+        self.view = view
+        self.rate = self.get_rate()
+        self.num_requests, self.duration = self.parse_rate(self.rate)
+        return super().allow_request(request, view)
+
+    def get_rate(self) -> str | None:
+        public_id = getattr(getattr(self, "view", None), "kwargs", {}).get("public_id")
+        webhook = Webhook.objects.filter(public_id=public_id, is_deleted=False).only("tenant_id").first()
+        if webhook is None:
+            return None
+        return str(setting(runtime_configuration(webhook.tenant_id), "webhooks.inbound_rate"))
 
     def get_cache_key(self, request: Request, view: object) -> str:
         ident = self.get_ident(request)
@@ -159,84 +184,11 @@ def _service_call(operation: Any) -> Any:
 
 
 def _job_payload(job: object) -> dict[str, object]:
-    """Normalize a durable job without exposing its command payload."""
-
-    if not isinstance(job, AsyncJob) or job.pk is None:
-        raise OperationFailed(
-            error_code="DURABLE_JOB_UNAVAILABLE",
-            message="The operation was not durably accepted.",
-            http_status=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-    durable = AsyncJob.objects.filter(pk=job.pk, tenant_id=job.tenant_id).exists()
-    outbox = OutboxEvent.objects.filter(
-        tenant_id=job.tenant_id,
-        aggregate_type="async_job",
-        aggregate_id=job.pk,
-    ).exists()
-    if not durable or not outbox:
-        raise OperationFailed(
-            error_code="DURABLE_JOB_UNAVAILABLE",
-            message="The operation was not durably accepted.",
-            http_status=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-    return {
-        "job_id": job.id,
-        "status": job.status,
-        "correlation_id": job.correlation_id,
-        "accepted_at": job.created_at,
-        "poll_after_ms": 1000,
-    }
+    return durable_job_receipt(job)
 
 
 def _job_state_payload(job: object) -> dict[str, object]:
-    payload = _job_payload(job)
-    command = str(getattr(job, "command", ""))
-    operations = {
-        "integration_platform.test": "integration_test",
-        "integration_platform.integration_test": "integration_test",
-        "integration_platform.sync": "integration_sync",
-        "integration_platform.integration_sync": "integration_sync",
-        "integration_platform.webhook_delivery": "webhook_delivery",
-        "integration_platform.deliver_webhook": "webhook_delivery",
-    }
-    operation = getattr(job, "operation", None) or operations.get(command)
-    if operation is None:
-        raise OperationFailed(
-            error_code="JOB_STATE_UNAVAILABLE",
-            message="The durable job operation cannot be represented safely.",
-            http_status=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-    job_status = str(getattr(job, "status", ""))
-    raw_result = getattr(job, "result", None)
-    result = raw_result if isinstance(raw_result, Mapping) else {}
-    raw_progress = result.get("progress_percent")
-    progress = raw_progress if isinstance(raw_progress, int) and 0 <= raw_progress <= 100 else None
-    if progress is None:
-        progress = 100 if job_status in {"succeeded", "failed", "cancelled", "timed_out"} else 0
-    evidence_keys = {
-        "outcome",
-        "occurred_at",
-        "correlation_id",
-        "job_id",
-        "duration_ms",
-        "error_code",
-        "error_message",
-        "records_read",
-        "records_written",
-        "records_failed",
-        "zero_source_proven",
-    }
-    evidence = {key: result[key] for key in evidence_keys if key in result}
-    payload.update(
-        {
-            "operation": operation,
-            "started_at": getattr(job, "started_at", None),
-            "completed_at": getattr(job, "completed_at", None),
-            "progress_percent": progress,
-            "evidence": evidence or None,
-        }
-    )
-    return payload
+    return durable_job_state(job)
 
 
 def _parse_datetime_filter(value: str | None, field: str) -> datetime | None:
@@ -406,6 +358,122 @@ class GovernedTenantReadOnlyViewSet(GovernedAccessMixin, GovernedAPIViewMixin, T
     http_method_names = ("get", "post", "head", "options")
 
 
+class IntegrationPlatformConfigurationViewSet(
+    GovernedAccessMixin,
+    GovernedAPIViewMixin,
+    viewsets.ViewSet,
+):
+    """Singleton-style tenant configuration API with immutable evidence."""
+
+    http_method_names = ("get", "post", "head", "options")
+    access_by_action = CONFIGURATION_ACTIONS
+    service = ConfigurationService()
+
+    def _environment(self, request: Request) -> str:
+        return request.query_params.get("environment", "default")
+
+    def list(self, request: Request) -> Response:
+        payload = _service_call(lambda: self.service.get(self.tenant_id, self._environment(request)))
+        return Response(ConfigurationSerializer(payload).data)
+
+    @action(detail=False, methods=("get",), url_path="manage-capability")
+    def manage_capability(self, request: Request) -> Response:
+        """Return the RBAC decision proven by this action's access gate."""
+
+        decision = getattr(request, "access_decision", None)
+        return Response(
+            {
+                "allowed": bool(getattr(decision, "allowed", False)),
+                "permission": CONFIGURATION_ACTIONS["manage_capability"].permission,
+                "reason_code": str(getattr(decision, "reason_code", "DENY_DEFAULT")),
+            }
+        )
+
+    def create(self, request: Request) -> Response:
+        serializer = ConfigurationDocumentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = _service_call(
+            lambda: self.service.save(
+                self.tenant_id,
+                self.actor_id,
+                serializer.validated_data["document"],
+                environment=serializer.validated_data["environment"],
+                correlation_id=getattr(request, "correlation_id", None),
+            )
+        )
+        return Response(ConfigurationSerializer(payload).data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=("post",))
+    def preview(self, request: Request) -> Response:
+        serializer = ConfigurationDocumentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = _service_call(
+            lambda: self.service.preview(
+                self.tenant_id,
+                serializer.validated_data["document"],
+                serializer.validated_data["environment"],
+            )
+        )
+        return Response(ConfigurationPreviewSerializer(payload).data)
+
+    @action(detail=False, methods=("post",))
+    def rollback(self, request: Request) -> Response:
+        serializer = ConfigurationRollbackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = _service_call(
+            lambda: self.service.rollback(
+                self.tenant_id,
+                self.actor_id,
+                serializer.validated_data["version"],
+                environment=serializer.validated_data["environment"],
+                correlation_id=getattr(request, "correlation_id", None),
+            )
+        )
+        return Response(ConfigurationSerializer(payload).data)
+
+    @action(detail=False, methods=("post",), url_path="import")
+    def import_document(self, request: Request) -> Response:
+        serializer = ConfigurationDocumentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = _service_call(
+            lambda: self.service.save(
+                self.tenant_id,
+                self.actor_id,
+                serializer.validated_data["document"],
+                environment=serializer.validated_data["environment"],
+                correlation_id=getattr(request, "correlation_id", None),
+                action="import",
+            )
+        )
+        return Response(ConfigurationSerializer(payload).data)
+
+    @action(detail=False, methods=("get",))
+    def export(self, request: Request) -> Response:
+        payload = _service_call(lambda: self.service.get(self.tenant_id, self._environment(request)))
+        return Response(
+            {
+                "schema_version": payload["document"]["schema_version"],
+                "environment": payload["environment"],
+                "version": payload["version"],
+                "document": payload["document"],
+            }
+        )
+
+    @action(detail=False, methods=("get",))
+    def versions(self, request: Request) -> Response:
+        values = _service_call(
+            lambda: self.service.versions(self.tenant_id, self._environment(request))
+        )
+        return self._paginate(values, ConfigurationVersionSerializer)
+
+    @action(detail=False, methods=("get",))
+    def audits(self, request: Request) -> Response:
+        values = _service_call(
+            lambda: self.service.audits(self.tenant_id, self._environment(request))
+        )
+        return self._paginate(values, ConfigurationAuditSerializer)
+
+
 class IntegrationViewSet(GovernedTenantModelViewSet):
     queryset = Integration.objects.filter(is_deleted=False)
     serializer_class = IntegrationDetailSerializer
@@ -428,9 +496,10 @@ class IntegrationViewSet(GovernedTenantModelViewSet):
             queryset = queryset.filter(connector_id=_uuid(value, "connector_id"))
         if value := self.request.query_params.get("search", "").strip():
             queryset = queryset.filter(Q(name__icontains=value) | Q(description__icontains=value))
-        ordering = self.request.query_params.get("ordering", "-created_at")
+        policy = runtime_configuration(self.tenant_id)
+        ordering = self.request.query_params.get("ordering", str(setting(policy, "list.integration_ordering")))
         fields = ordering.split(",")
-        allowed = {"name", "created_at", "updated_at", "status"}
+        allowed = set(setting(policy, "list.integration_ordering_fields"))
         if any(field.lstrip("-") not in allowed for field in fields):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         return queryset.order_by(*fields, "id")
@@ -509,7 +578,7 @@ class IntegrationViewSet(GovernedTenantModelViewSet):
         serializer = IntegrationSyncRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         job = _service_call(
-            lambda: self.service.request_sync(
+            lambda: self.service.request_sync_governed(
                 self.tenant_id,
                 self.actor_id,
                 _uuid(pk, "id"),
@@ -684,9 +753,10 @@ class WebhookViewSet(GovernedTenantModelViewSet):
             queryset = queryset.filter(events__contains=[value])
         if value := self.request.query_params.get("search", "").strip():
             queryset = queryset.filter(Q(name__icontains=value) | Q(url__icontains=value))
-        ordering = self.request.query_params.get("ordering", "-created_at")
+        policy = runtime_configuration(self.tenant_id)
+        ordering = self.request.query_params.get("ordering", str(setting(policy, "list.webhook_ordering")))
         fields = ordering.split(",")
-        if any(field.lstrip("-") not in {"name", "created_at", "updated_at", "status"} for field in fields):
+        if any(field.lstrip("-") not in set(setting(policy, "list.webhook_ordering_fields")) for field in fields):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         return queryset.order_by(*fields, "id")
 
@@ -792,7 +862,8 @@ class WebhookDeliveryViewSet(GovernedTenantReadOnlyViewSet):
             queryset = queryset.filter(created_at__gte=value)
         if value := _parse_datetime_filter(self.request.query_params.get("created_before"), "created_before"):
             queryset = queryset.filter(created_at__lte=value)
-        return queryset.order_by("-created_at", "-id")
+        ordering = str(setting(runtime_configuration(self.tenant_id), "list.delivery_ordering")).split(",")
+        return queryset.order_by(*ordering)
 
     def get_serializer_class(self) -> type[Any]:
         return WebhookDeliveryListSerializer if self.action == "list" else WebhookDeliveryDetailSerializer
@@ -829,9 +900,10 @@ class DataMappingViewSet(GovernedTenantModelViewSet):
             queryset = queryset.filter(
                 Q(name__icontains=value) | Q(source_field__icontains=value) | Q(target_field__icontains=value)
             )
-        ordering = self.request.query_params.get("ordering", "position")
+        policy = runtime_configuration(self.tenant_id)
+        ordering = self.request.query_params.get("ordering", str(setting(policy, "list.mapping_ordering")))
         fields = ordering.split(",")
-        if any(field.lstrip("-") not in {"name", "position", "created_at", "updated_at"} for field in fields):
+        if any(field.lstrip("-") not in set(setting(policy, "list.mapping_ordering_fields")) for field in fields):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         return queryset.order_by(*fields, "id")
 
@@ -935,6 +1007,7 @@ __all__ = [
     "InboundWebhookThrottle",
     "InboundWebhookView",
     "IntegrationCredentialViewSet",
+    "IntegrationPlatformConfigurationViewSet",
     "IntegrationViewSet",
     "NestedCredentialViewSet",
     "WebhookDeliveryViewSet",

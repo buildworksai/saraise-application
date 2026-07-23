@@ -26,9 +26,8 @@ def execute_integration_sync(job: AsyncJob) -> dict[str, object]:
 
 def execute_webhook_delivery(job: AsyncJob) -> dict[str, object]:
     result = WebhookDeliveryWorker().execute(job.tenant_id, job)
-    # A retry/dead-letter transition is a completed orchestration command with
-    # durable failure evidence; returning it prevents core from overwriting the
-    # module's richer lifecycle state with an unclassified exception.
+    if result.status != "succeeded":
+        raise result.to_exception()
     return {
         "status": result.status,
         "delivery": dict(result.value or {}),

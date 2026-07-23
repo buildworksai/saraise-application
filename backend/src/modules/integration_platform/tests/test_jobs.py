@@ -10,7 +10,7 @@ from django.utils import timezone
 from src.core.async_jobs.models import AsyncJob, OutboxEvent
 from src.core.async_jobs.services import enqueue
 
-from ..models import DeliveryStatus
+from ..models import DeliveryStatus, ImmutableRecordError, WebhookDeliveryAttempt
 from ..services import WebhookDeliveryWorker
 from ..state_machines import DELIVERY_STATE_MACHINE
 from .factories import delivery_factory
@@ -35,6 +35,17 @@ def test_retry_creates_a_future_durable_job_and_outbox():
     retry_job = AsyncJob.objects.get(id=delivery.job_id)
     event = OutboxEvent.objects.get(aggregate_id=retry_job.id, event_type="async_job.enqueued")
     assert event.available_at == delivery.next_attempt_at
+    attempt = WebhookDeliveryAttempt.objects.get(
+        tenant_id=delivery.tenant_id,
+        delivery=delivery,
+        attempt_number=1,
+    )
+    assert attempt.outcome == "retrying"
+    attempt.outcome = "tampered"
+    with pytest.raises(ImmutableRecordError):
+        attempt.save()
+    with pytest.raises(ImmutableRecordError):
+        WebhookDeliveryAttempt.objects.filter(pk=attempt.pk).delete()
 
 
 def test_recover_stale_is_tenant_scoped():

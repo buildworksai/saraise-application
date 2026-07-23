@@ -22,8 +22,9 @@ function positive(value: string | null): number {
 // eslint-disable-next-line complexity
 export function DeliveryListPage() {
   const [params, setParams] = useSearchParams();
+  const configuration = useQuery({ queryKey: ['integration-platform', 'configuration'], queryFn: () => service.getConfiguration() });
   const filters: DeliveryFilters = {
-    page: positive(params.get('page')), page_size: 25,
+    page: positive(params.get('page')), page_size: configuration.data?.document.list.page_size,
     webhook_id: params.get('webhook') ?? undefined,
     status: (params.get('status') ?? undefined) as DeliveryStatus | undefined,
     event: params.get('event') ?? undefined, created_after: params.get('after') ?? undefined,
@@ -31,7 +32,7 @@ export function DeliveryListPage() {
   };
   const query = useQuery({
     queryKey: ['integration-platform', 'deliveries', params.toString()],
-    queryFn: () => service.listDeliveries(filters), placeholderData: keepPreviousData, refetchInterval: 10000,
+    queryFn: () => service.listDeliveries(filters), placeholderData: keepPreviousData, refetchInterval: configuration.data?.document.list.refresh_interval_ms,
   });
   const update = (key: string, value: string) => {
     const next = new URLSearchParams(params);
@@ -65,9 +66,10 @@ export function DeliveryDetailPage() {
   const id = useParams().id;
   if (!id) throw new Error('Delivery route requires an identifier.');
   const canManage = useCanManageIntegrations();
+  const configuration = useQuery({ queryKey: ['integration-platform', 'configuration'], queryFn: () => service.getConfiguration() });
   const query = useQuery({
     queryKey: ['integration-platform', 'delivery', id], queryFn: () => service.getDelivery(id),
-    refetchInterval: (state) => ['queued', 'delivering', 'retrying'].includes(state.state.data?.status ?? '') ? 5000 : false,
+    refetchInterval: (state) => ['queued', 'delivering', 'retrying'].includes(state.state.data?.status ?? '') ? configuration.data?.document.list.active_delivery_poll_ms : false,
   });
   const redrive = useMutation({
     mutationFn: () => service.redriveDelivery(id, { transition_key: newOperationKey('redrive') }),
@@ -83,7 +85,7 @@ export function DeliveryDetailPage() {
     <EvidenceCard title="Delivery lifecycle"><DefinitionGrid><Definition label="Status"><StatusBadge status={delivery.status} /></Definition><Definition label="Attempt">{delivery.attempt_count} of {delivery.max_attempts}</Definition><Definition label="Next attempt">{formatDate(delivery.next_attempt_at)}</Definition><Definition label="Response code">{delivery.response_code ?? '—'}</Definition><Definition label="Duration">{delivery.duration_ms === null ? '—' : `${delivery.duration_ms} ms`}</Definition><Definition label="Delivered">{formatDate(delivery.delivered_at)}</Definition></DefinitionGrid></EvidenceCard>
     <EvidenceCard title="Traceability"><DefinitionGrid><Definition label="Correlation ID"><span className="font-mono text-xs">{delivery.correlation_id}</span></Definition><Definition label="Job ID"><span className="font-mono text-xs">{delivery.job_id}</span></Definition><Definition label="Idempotency key"><span className="font-mono text-xs">{delivery.idempotency_key}</span></Definition><Definition label="Payload SHA-256"><span className="font-mono text-xs">{delivery.payload_hash}</span></Definition><Definition label="Created">{formatDate(delivery.created_at)}</Definition><Definition label="Updated">{formatDate(delivery.updated_at)}</Definition></DefinitionGrid></EvidenceCard>
     {delivery.error_code && <EvidenceCard title="Failure evidence"><DefinitionGrid><Definition label="Error code">{delivery.error_code}</Definition><Definition label="Error message">{delivery.error_message}</Definition></DefinitionGrid></EvidenceCard>}
-    <div className="grid gap-6 lg:grid-cols-2"><EvidenceCard title="Redacted payload"><RedactedJsonViewer label="Payload" value={delivery.payload} /></EvidenceCard><EvidenceCard title="Redacted provider response"><pre className="max-h-96 overflow-auto rounded-lg border bg-muted/40 p-4 text-xs">{delivery.response_body_excerpt || 'No response evidence.'}</pre><p className="mt-2 text-xs text-muted-foreground">Stored excerpts are bounded and redacted before persistence.</p></EvidenceCard></div>
+    <EvidenceCard title="Redacted payload"><RedactedJsonViewer label="Payload" value={delivery.payload} /><p className="mt-3 text-xs text-muted-foreground">Raw provider response bodies are never persisted or exposed. Only allow-listed status and error diagnostics appear above.</p></EvidenceCard>
     <EvidenceCard title="Transition history"><ol className="space-y-3">{delivery.transition_history.map((transition) => <li key={transition.transition_key} className="rounded-lg border p-3 text-sm"><strong>{transition.transition}</strong> · {transition.from_status} → {transition.to_status}<span className="float-right text-xs text-muted-foreground">{formatDate(transition.occurred_at)}</span></li>)}</ol></EvidenceCard>
   </main>;
 }

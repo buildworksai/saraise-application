@@ -9,6 +9,7 @@ import uuid
 import django.db.models.deletion
 from django.db import migrations, models
 from django.utils import timezone
+from src.core.encryption.service import EncryptionService
 
 
 def _uuid(value: object, label: str) -> uuid.UUID:
@@ -147,9 +148,63 @@ def safe_excerpt(value: object) -> str:
 
 
 def reverse_backfill(apps, schema_editor) -> None:
-    # Columns removed by reverse migration carry the derived data away.  The
-    # retained legacy fields need no lossy rewrite here.
-    del apps, schema_editor
+    del apps
+    tables = schema_editor.connection.introspection.table_names()
+    if "integration_platform_legacy_rollback" not in tables:
+        raise RuntimeError("Encrypted legacy rollback staging is unavailable")
+
+
+def stage_legacy_values(apps, schema_editor) -> None:
+    Connector = apps.get_model("integration_platform", "Connector")
+    Delivery = apps.get_model("integration_platform", "WebhookDelivery")
+    schema_editor.execute(
+        """
+        CREATE TABLE integration_platform_legacy_rollback (
+            record_type varchar(32) NOT NULL,
+            record_id varchar(64) NOT NULL,
+            field_name varchar(64) NOT NULL,
+            encrypted_value text NOT NULL,
+            PRIMARY KEY (record_type, record_id, field_name)
+        )
+        """
+    )
+    rows = []
+    for connector in Connector.objects.all():
+        rows.append(("connector", str(connector.pk), "config", EncryptionService.encrypt(json_text(connector.config))))
+    for delivery in Delivery.objects.all():
+        for field in ("payload", "response_body_excerpt", "error_message"):
+            rows.append(("delivery", str(delivery.pk), field, EncryptionService.encrypt(json_text(getattr(delivery, field)))))
+    if rows:
+        with schema_editor.connection.cursor() as cursor:
+            cursor.executemany(
+                "INSERT INTO integration_platform_legacy_rollback "
+                "(record_type, record_id, field_name, encrypted_value) VALUES (%s, %s, %s, %s)",
+                rows,
+            )
+
+
+def restore_legacy_values(apps, schema_editor) -> None:
+    import json
+
+    Connector = apps.get_model("integration_platform", "Connector")
+    Delivery = apps.get_model("integration_platform", "WebhookDelivery")
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT record_type, record_id, field_name, encrypted_value "
+            "FROM integration_platform_legacy_rollback"
+        )
+        rows = cursor.fetchall()
+    for record_type, record_id, field_name, encrypted_value in rows:
+        value = json.loads(EncryptionService.decrypt(encrypted_value))
+        model = Connector if record_type == "connector" else Delivery
+        model.objects.filter(pk=record_id).update(**{field_name: value})
+    schema_editor.execute("DROP TABLE integration_platform_legacy_rollback")
+
+
+def json_text(value: object) -> str:
+    import json
+
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 class Migration(migrations.Migration):
@@ -181,6 +236,7 @@ class Migration(migrations.Migration):
         migrations.AddField("connector", "capabilities", models.JSONField(default=list)),
         migrations.AddField("connector", "module_id", models.CharField(default="integration-platform", max_length=100)),
         migrations.AddField("connector", "required_entitlement", models.CharField(blank=True, max_length=200)),
+        migrations.RunPython(stage_legacy_values, restore_legacy_values),
         migrations.RemoveField("connector", "config"),
 
         migrations.AddField("integration", "connector", models.ForeignKey(null=True, on_delete=django.db.models.deletion.PROTECT, related_name="integrations", to="integration_platform.connector")),

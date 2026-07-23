@@ -19,6 +19,14 @@ from jsonschema.exceptions import SchemaError
 
 from src.core.tenancy import TenantScopedModel, TimestampedModel
 
+from .configuration import DEFAULT_CONFIGURATION
+
+_WEBHOOK_POLICY = DEFAULT_CONFIGURATION["webhooks"]
+_VALIDATION_POLICY = DEFAULT_CONFIGURATION["validation"]
+_MAPPING_POLICY = DEFAULT_CONFIGURATION["mapping"]
+assert isinstance(_WEBHOOK_POLICY, dict)
+assert isinstance(_VALIDATION_POLICY, dict)
+assert isinstance(_MAPPING_POLICY, dict)
 
 def generate_uuid() -> str:
     """Compatibility callable retained for the immutable 0001/0002 migrations."""
@@ -39,6 +47,11 @@ class ConnectorCapability(models.TextChoices):
     PUSH = "push", "Push"
     RECEIVE = "receive", "Receive"
     DELIVER = "deliver", "Deliver"
+
+
+class ConnectorAccessPolicy(models.TextChoices):
+    PUBLIC = "public", "Public"
+    ENTITLEMENT_REQUIRED = "entitlement_required", "Entitlement required"
 
 
 class IntegrationStatus(models.TextChoices):
@@ -153,6 +166,11 @@ class Connector(TimestampedModel):
     credential_schema = models.JSONField(default=dict, blank=True)
     capabilities = models.JSONField(default=list, blank=True)
     module_id = models.CharField(max_length=100, default="integration-platform")
+    access_policy = models.CharField(
+        max_length=32,
+        choices=ConnectorAccessPolicy.choices,
+        default=ConnectorAccessPolicy.PUBLIC,
+    )
     required_entitlement = models.CharField(max_length=200, blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
 
@@ -168,6 +186,10 @@ class Connector(TimestampedModel):
         _validate_schema(self.schema, "schema")
         _validate_schema(self.credential_schema, "credential_schema")
         _validate_capabilities(self.capabilities)
+        if self.access_policy == ConnectorAccessPolicy.ENTITLEMENT_REQUIRED and not self.required_entitlement:
+            raise ValidationError({"required_entitlement": "An entitlement is required by this access policy."})
+        if self.access_policy == ConnectorAccessPolicy.PUBLIC and self.required_entitlement:
+            raise ValidationError({"required_entitlement": "Public connectors cannot declare an entitlement."})
 
     def __str__(self) -> str:
         return f"{self.name} ({self.key}@{self.version})"
@@ -248,7 +270,7 @@ class IntegrationCredential(GuardedStateModel, TenantScopedModel, TimestampedMod
         return f"{self.credential_type} v{self.version} ({self.status})"
 
 
-_EVENT_RE = re.compile(r"^[a-z][a-z0-9_.:-]{0,254}$")
+_EVENT_RE = re.compile(str(_VALIDATION_POLICY["event_name_pattern"]))
 
 
 class Webhook(GuardedStateModel, MutableTenantModel):
@@ -264,8 +286,8 @@ class Webhook(GuardedStateModel, MutableTenantModel):
     config = models.JSONField(default=dict, blank=True)
     status = models.CharField(max_length=20, choices=WebhookStatus.choices, default=WebhookStatus.INACTIVE)
     transition_history = models.JSONField(default=list, blank=True)
-    timeout_seconds = models.PositiveSmallIntegerField(default=10)
-    max_attempts = models.PositiveSmallIntegerField(default=5)
+    timeout_seconds = models.PositiveSmallIntegerField(default=int(_WEBHOOK_POLICY["timeout_seconds_default"]))
+    max_attempts = models.PositiveSmallIntegerField(default=int(_WEBHOOK_POLICY["max_attempts_default"]))
     last_received_at = models.DateTimeField(null=True, blank=True)
     last_delivered_at = models.DateTimeField(null=True, blank=True)
     last_error_code = models.CharField(max_length=100, blank=True)
@@ -294,10 +316,12 @@ class Webhook(GuardedStateModel, MutableTenantModel):
             raise ValidationError({"events": "A non-empty list of registered event names is required."})
         if len(self.events) != len(set(self.events)):
             raise ValidationError({"events": "Event names must be unique."})
-        if not 1 <= self.timeout_seconds <= 30:
-            raise ValidationError({"timeout_seconds": "Must be between 1 and 30."})
-        if not 1 <= self.max_attempts <= 10:
-            raise ValidationError({"max_attempts": "Must be between 1 and 10."})
+        timeout_min, timeout_max = int(_WEBHOOK_POLICY["timeout_seconds_min"]), int(_WEBHOOK_POLICY["timeout_seconds_max"])
+        attempts_min, attempts_max = int(_WEBHOOK_POLICY["max_attempts_min"]), int(_WEBHOOK_POLICY["max_attempts_max"])
+        if not timeout_min <= self.timeout_seconds <= timeout_max:
+            raise ValidationError({"timeout_seconds": f"Must be between {timeout_min} and {timeout_max}."})
+        if not attempts_min <= self.max_attempts <= attempts_max:
+            raise ValidationError({"max_attempts": f"Must be between {attempts_min} and {attempts_max}."})
 
     def __str__(self) -> str:
         return f"{self.name} ({self.direction})"
@@ -307,8 +331,133 @@ class ImmutableDeliveryError(RuntimeError):
     """Raised when operational evidence is mutated or deleted."""
 
 
+class ImmutableRecordError(RuntimeError):
+    """Raised when an append-only evidence row is tampered with."""
+
+
+class ImmutableEvidenceQuerySet(models.QuerySet[Any]):
+    """Block bulk tampering that would bypass model save/delete guards."""
+
+    def for_tenant(self, tenant_id: uuid.UUID) -> "ImmutableEvidenceQuerySet":
+        return self.filter(tenant_id=tenant_id)
+
+    def update(self, **kwargs: Any) -> int:
+        del kwargs
+        raise ImmutableRecordError("Evidence cannot be updated")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ImmutableRecordError("Evidence cannot be deleted")
+
+
+class IntegrationPlatformConfiguration(TenantScopedModel, TimestampedModel):
+    """Current tenant/environment configuration pointer."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    environment = models.CharField(max_length=64, default="default")
+    version = models.PositiveIntegerField(default=1)
+    document = models.JSONField()
+    updated_by = models.UUIDField()
+
+    class Meta:
+        app_label = "integration_platform"
+        db_table = "integration_platform_configuration"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "environment"),
+                name="intplat_config_tenant_env_uniq",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "environment", "version"),
+                name="intplat_config_tenant_ver_idx",
+            )
+        ]
+
+
+class _ImmutableEvidence(TenantScopedModel):
+    """Shared append-only model protection for operational evidence."""
+
+    objects = ImmutableEvidenceQuerySet.as_manager()
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ImmutableRecordError("Evidence is immutable")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise ImmutableRecordError("Evidence cannot be deleted")
+
+
+class IntegrationPlatformConfigurationVersion(_ImmutableEvidence):
+    """Immutable complete snapshot enabling deterministic rollback."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    configuration = models.ForeignKey(
+        IntegrationPlatformConfiguration,
+        on_delete=models.PROTECT,
+        related_name="versions",
+    )
+    environment = models.CharField(max_length=64)
+    version = models.PositiveIntegerField()
+    document = models.JSONField()
+    created_by = models.UUIDField()
+    correlation_id = models.CharField(max_length=64, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "integration_platform"
+        db_table = "integration_platform_configuration_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "environment", "version"),
+                name="intplat_config_version_uniq",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "configuration", "-version"),
+                name="intplat_config_version_idx",
+            )
+        ]
+
+
+class IntegrationPlatformConfigurationAudit(_ImmutableEvidence):
+    """Immutable who/what/when evidence for each configuration mutation."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    configuration = models.ForeignKey(
+        IntegrationPlatformConfiguration,
+        on_delete=models.PROTECT,
+        related_name="audits",
+    )
+    environment = models.CharField(max_length=64)
+    action = models.CharField(max_length=32)
+    from_version = models.PositiveIntegerField(null=True)
+    to_version = models.PositiveIntegerField()
+    before = models.JSONField(null=True)
+    after = models.JSONField()
+    changed_by = models.UUIDField()
+    correlation_id = models.CharField(max_length=64, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "integration_platform"
+        db_table = "integration_platform_configuration_audits"
+        ordering = ("-created_at", "-to_version", "id")
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "configuration", "-created_at"),
+                name="intplat_config_audit_idx",
+            )
+        ]
+
+
 class WebhookDelivery(GuardedStateModel, TenantScopedModel, TimestampedModel):
-    """Append-preserving evidence for one durable webhook delivery."""
+    """Current delivery projection backed by immutable attempt evidence."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     webhook = models.ForeignKey(Webhook, on_delete=models.PROTECT, related_name="deliveries")
@@ -322,7 +471,6 @@ class WebhookDelivery(GuardedStateModel, TenantScopedModel, TimestampedModel):
     max_attempts = models.PositiveSmallIntegerField()
     next_attempt_at = models.DateTimeField(null=True, blank=True)
     response_code = models.PositiveSmallIntegerField(null=True, blank=True)
-    response_body_excerpt = models.TextField(blank=True)
     error_code = models.CharField(max_length=100, blank=True)
     error_message = models.TextField(blank=True)
     duration_ms = models.PositiveIntegerField(null=True, blank=True)
@@ -361,6 +509,43 @@ class WebhookDelivery(GuardedStateModel, TenantScopedModel, TimestampedModel):
         return f"{self.event} [{self.status}] ({self.id})"
 
 
+class WebhookDeliveryAttempt(_ImmutableEvidence):
+    """Append-only outcome evidence for exactly one provider call attempt."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    delivery = models.ForeignKey(WebhookDelivery, on_delete=models.PROTECT, related_name="attempts")
+    attempt_number = models.PositiveSmallIntegerField()
+    outcome = models.CharField(max_length=32)
+    response_code = models.PositiveSmallIntegerField(null=True, blank=True)
+    error_code = models.CharField(max_length=100, blank=True)
+    duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    job_id = models.UUIDField(db_index=True)
+    correlation_id = models.CharField(max_length=64, db_index=True)
+    occurred_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "integration_platform"
+        db_table = "integration_platform_webhook_delivery_attempts"
+        ordering = ("attempt_number", "occurred_at", "id")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "delivery", "attempt_number"),
+                name="intplat_delivery_attempt_uniq",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "delivery", "attempt_number"),
+                name="intplat_delivery_attempt_idx",
+            )
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        if self.delivery_id and self.tenant_id != self.delivery.tenant_id:
+            raise ValidationError({"delivery": "Attempt and delivery must belong to the same tenant."})
+
+
 class DataMapping(MutableTenantModel):
     """Deterministic source-to-target field transformation."""
 
@@ -370,8 +555,8 @@ class DataMapping(MutableTenantModel):
     source_field = models.CharField(max_length=255)
     target_field = models.CharField(max_length=255)
     transform = models.JSONField(default=dict)
-    position = models.PositiveIntegerField(default=0)
-    is_required = models.BooleanField(default=False)
+    position = models.PositiveIntegerField(default=int(_MAPPING_POLICY["default_position"]))
+    is_required = models.BooleanField(default=bool(_MAPPING_POLICY["default_required"]))
     default_value = models.JSONField(null=True, blank=True)
 
     class Meta:
@@ -397,7 +582,9 @@ class DataMapping(MutableTenantModel):
 
 
 __all__ = [
-    "Connector", "ConnectorCapability", "ConnectorType", "CredentialStatus", "CredentialType",
+    "Connector", "ConnectorAccessPolicy", "ConnectorCapability", "ConnectorType", "CredentialStatus", "CredentialType",
     "DataMapping", "DeliveryStatus", "Integration", "IntegrationCredential", "IntegrationStatus",
-    "ImmutableDeliveryError", "Webhook", "WebhookDelivery", "WebhookDirection", "WebhookStatus", "generate_uuid",
+    "ImmutableDeliveryError", "ImmutableRecordError", "IntegrationPlatformConfiguration",
+    "IntegrationPlatformConfigurationAudit", "IntegrationPlatformConfigurationVersion",
+    "Webhook", "WebhookDelivery", "WebhookDeliveryAttempt", "WebhookDirection", "WebhookStatus", "generate_uuid",
 ]
