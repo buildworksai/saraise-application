@@ -62,7 +62,9 @@ def campaign_data(template: EmailTemplate, code: str = "launch") -> dict[str, ob
     }
 
 
-def test_campaign_create_normalizes_and_rejects_spoofed_state(identity: tuple[uuid.UUID, uuid.UUID]) -> None:
+def test_campaign_create_normalizes_and_rejects_spoofed_state(
+    identity: tuple[uuid.UUID, uuid.UUID],
+) -> None:
     tenant, actor = identity
     template = TemplateService.create_template(tenant, actor, template_data())
     data = campaign_data(template)
@@ -73,11 +75,15 @@ def test_campaign_create_normalizes_and_rejects_spoofed_state(identity: tuple[uu
     assert campaign.campaign_code == "LAUNCH"
     assert campaign.from_email == "Marketing@example.com"
     assert OutboxEvent.objects.filter(
-        tenant_id=tenant, aggregate_id=campaign.id, event_type="email_marketing.campaign.created.v1"
+        tenant_id=tenant,
+        aggregate_id=campaign.id,
+        event_type="email_marketing.campaign.created.v1",
     ).exists()
 
 
-def test_campaign_template_lookup_is_tenant_bound(identity: tuple[uuid.UUID, uuid.UUID]) -> None:
+def test_campaign_template_lookup_is_tenant_bound(
+    identity: tuple[uuid.UUID, uuid.UUID],
+) -> None:
     tenant, actor = identity
     foreign_tenant = uuid.uuid4()
     foreign = TemplateService.create_template(foreign_tenant, actor, template_data())
@@ -85,7 +91,9 @@ def test_campaign_template_lookup_is_tenant_bound(identity: tuple[uuid.UUID, uui
         CampaignService.create_campaign(tenant, actor, campaign_data(foreign))
 
 
-def test_template_lifecycle_version_clone_and_immutability(identity: tuple[uuid.UUID, uuid.UUID]) -> None:
+def test_template_lifecycle_version_clone_and_immutability(
+    identity: tuple[uuid.UUID, uuid.UUID],
+) -> None:
     tenant, actor = identity
     template = TemplateService.create_template(tenant, actor, template_data())
     updated = TemplateService.update_template(tenant, template.id, actor, {"template_name": "Updated"})
@@ -101,7 +109,9 @@ def test_template_lifecycle_version_clone_and_immutability(identity: tuple[uuid.
     assert clone.template_code == "WELCOME-V2"
 
 
-def test_consent_history_and_suppression_precedence(identity: tuple[uuid.UUID, uuid.UUID]) -> None:
+def test_consent_history_and_suppression_precedence(
+    identity: tuple[uuid.UUID, uuid.UUID],
+) -> None:
     tenant, actor = identity
     granted = ComplianceService.record_consent(
         tenant,
@@ -146,7 +156,10 @@ def test_manual_audience_resolution_deduplicates_and_persists_eligibility(
     data = campaign_data(template)
     recipients = data["audience_definition"]["recipients"]  # type: ignore[index]
     recipients.append(  # type: ignore[union-attr]
-        {"email": "Customer@example.com", "personalization": {"name": "Duplicate"}}
+        {
+            "email": "Customer@example.com",
+            "personalization": {"name": "Duplicate"},
+        }
     )
     campaign = CampaignService.create_campaign(tenant, actor, data)
     ComplianceService.record_consent(
@@ -173,7 +186,9 @@ def test_manual_audience_resolution_deduplicates_and_persists_eligibility(
     assert campaign.resolved_recipient_count == 1
 
 
-def test_audience_request_is_durable_and_idempotent(identity: tuple[uuid.UUID, uuid.UUID]) -> None:
+def test_audience_request_is_durable_and_idempotent(
+    identity: tuple[uuid.UUID, uuid.UUID],
+) -> None:
     tenant, actor = identity
     template = TemplateService.create_template(tenant, actor, template_data())
     campaign = CampaignService.create_campaign(tenant, actor, campaign_data(template))
@@ -191,17 +206,29 @@ def test_schedule_requires_future_aware_time_and_tenant_lookup(identity: tuple[u
     settings.EMAIL_MARKETING_VERIFIED_SENDERS = {str(tenant): [campaign.from_email]}
     with pytest.raises(ValidationError):
         CampaignService.schedule_campaign(
-            tenant, campaign.id, actor, timezone.now() - timedelta(minutes=1), "UTC", "schedule-past"
+            tenant,
+            campaign.id,
+            actor,
+            timezone.now() - timedelta(minutes=1),
+            "UTC",
+            "schedule-past",
         )
     scheduled = CampaignService.schedule_campaign(
-        tenant, campaign.id, actor, timezone.now() + timedelta(hours=1), "UTC", "schedule-future"
+        tenant,
+        campaign.id,
+        actor,
+        timezone.now() + timedelta(hours=1),
+        "UTC",
+        "schedule-future",
     )
     assert scheduled.status == "scheduled"
     with pytest.raises(NotFound):
         CampaignService.update_campaign(uuid.uuid4(), campaign.id, actor, {"campaign_name": "Cross tenant"})
 
 
-def test_archive_is_soft_and_code_can_be_reused(identity: tuple[uuid.UUID, uuid.UUID]) -> None:
+def test_archive_is_soft_and_code_can_be_reused(
+    identity: tuple[uuid.UUID, uuid.UUID],
+) -> None:
     tenant, actor = identity
     template = TemplateService.create_template(tenant, actor, template_data())
     campaign = CampaignService.create_campaign(tenant, actor, campaign_data(template))
@@ -212,9 +239,7 @@ def test_archive_is_soft_and_code_can_be_reused(identity: tuple[uuid.UUID, uuid.
     assert replacement.id != campaign.id
 
 
-def test_update_rejects_ownership_counters_and_non_draft(
-    identity: tuple[uuid.UUID, uuid.UUID], settings
-) -> None:
+def test_update_rejects_ownership_counters_and_non_draft(identity: tuple[uuid.UUID, uuid.UUID], settings) -> None:
     tenant, actor = identity
     template = TemplateService.create_template(tenant, actor, template_data())
     campaign = CampaignService.create_campaign(tenant, actor, campaign_data(template))

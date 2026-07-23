@@ -62,8 +62,8 @@ export interface CampaignAnalytics { readonly campaign_id: UUID; readonly resolv
 
 export interface CampaignRecipientSummary { readonly id: UUID; readonly campaign_id: UUID; readonly recipient_key: string | null; readonly email: string; readonly display_name: string; readonly status: RecipientStatus; readonly suppression_reason: string; readonly created_at: ISODateTime }
 export interface CampaignRecipientDetail extends CampaignRecipientSummary { readonly personalization_data: Readonly<Record<string, unknown>>; readonly consent_record_id: UUID | null; readonly resolved_at: ISODateTime | null; readonly queued_at: ISODateTime | null; readonly accepted_at: ISODateTime | null; readonly delivered_at: ISODateTime | null; readonly failed_at: ISODateTime | null; readonly last_error_code: string; readonly transition_history: readonly TransitionEvidence[]; readonly delivery_attempts: readonly DeliveryAttemptSummary[]; readonly events: readonly DeliveryEvent[] }
-export interface DeliveryAttemptSummary { readonly id: UUID; readonly recipient_id: UUID; readonly attempt_number: number; readonly job_id: UUID; readonly gateway_key: string; readonly status: DeliveryAttemptStatus; readonly provider_message_id: string; readonly error_code: string; readonly created_at: ISODateTime; readonly completed_at: ISODateTime | null }
-export interface DeliveryAttemptDetail extends DeliveryAttemptSummary { readonly idempotency_key: string; readonly provider_status_code: string; readonly response_evidence: Readonly<Record<string, unknown>>; readonly error_detail: string; readonly started_at: ISODateTime | null; readonly accepted_at: ISODateTime | null; readonly updated_at: ISODateTime; readonly events: readonly DeliveryEvent[] }
+export interface DeliveryAttemptSummary { readonly id: UUID; readonly recipient_id: UUID; readonly attempt_number: number; readonly status: DeliveryAttemptStatus; readonly error_code: string; readonly started_at: ISODateTime | null; readonly accepted_at: ISODateTime | null; readonly created_at: ISODateTime; readonly completed_at: ISODateTime | null }
+export interface DeliveryAttemptDetail extends DeliveryAttemptSummary { readonly updated_at: ISODateTime; readonly events: readonly DeliveryEvent[] }
 export interface DeliveryEvent { readonly id: UUID; readonly recipient_id: UUID; readonly attempt_id: UUID | null; readonly gateway_key: string; readonly provider_event_id: string; readonly event_type: DeliveryEventType; readonly occurred_at: ISODateTime; readonly link_url_hash: string; readonly bounce_class: '' | 'hard' | 'soft' | 'block'; readonly metadata: Readonly<Record<string, unknown>>; readonly correlation_id: string; readonly created_at: ISODateTime }
 
 export interface SuppressionEntrySummary { readonly id: UUID; readonly email: string; readonly scope: SuppressionScope; readonly reason: SuppressionReason; readonly source: SuppressionSource; readonly active: boolean; readonly suppressed_at: ISODateTime; readonly expires_at: ISODateTime | null }
@@ -72,11 +72,182 @@ export interface SuppressionCreateInput { readonly email: string; readonly scope
 export interface SuppressionDeactivateInput { readonly reason: string }
 
 export interface ConsentRecordSummary { readonly id: UUID; readonly email: string; readonly purpose: string; readonly status: ConsentStatus; readonly lawful_basis: ConsentLawfulBasis; readonly source: ConsentSource; readonly notice_version: string; readonly captured_at: ISODateTime; readonly created_at: ISODateTime }
-export interface ConsentRecordDetail extends ConsentRecordSummary { readonly actor_id: UUID | null; readonly ip_hash: string; readonly user_agent_hash: string; readonly supersedes_id: UUID | null; readonly evidence: Readonly<Record<string, unknown>> }
-export interface ConsentCreateInput { readonly email: string; readonly purpose: string; readonly status: ConsentStatus; readonly lawful_basis: ConsentLawfulBasis; readonly source: ConsentSource; readonly notice_version: string; readonly captured_at: ISODateTime; readonly evidence?: Readonly<Record<string, unknown>> }
+export interface ConsentRecordDetail extends ConsentRecordSummary { readonly actor_id: UUID | null; readonly supersedes_id: UUID | null }
+export interface ConsentCreateInput { readonly email: string; readonly purpose?: string; readonly status: ConsentStatus; readonly lawful_basis: ConsentLawfulBasis; readonly source: ConsentSource; readonly notice_version: string }
 export interface ConsentRevokeInput { readonly email: string; readonly purpose: string; readonly source: ConsentSource; readonly notice_version?: string }
-export interface ProviderEventIngestInput { readonly gateway_key: string; readonly headers: Readonly<Record<string, string>>; readonly body: string }
 export interface PublicUnsubscribeInput { readonly token: string; readonly occurred_at: ISODateTime }
+export interface PublicUnsubscribeResponse { readonly suppression_id: UUID; readonly status: 'unsubscribed' }
+
+export type ConfigurationStatusTone = 'success' | 'error' | 'warning' | 'neutral';
+export interface EmailMarketingDefaultsConfiguration {
+  readonly campaign_type: string;
+  readonly audience_resolver: string;
+  readonly delivery_gateway: string;
+  readonly timezone: string;
+  readonly template_category: string;
+  readonly consent_purpose: string;
+  readonly audience_schema_version: number;
+}
+export interface EmailMarketingLimitsConfiguration {
+  readonly json_max_depth: number;
+  readonly json_max_keys: number;
+  readonly evidence_json_max_bytes: number;
+  readonly evidence_json_max_depth: number;
+  readonly evidence_json_max_keys: number;
+  readonly template_design_max_bytes: number;
+  readonly audience_definition_max_bytes: number;
+  readonly consent_evidence_max_bytes: number;
+  readonly personalization_max_bytes: number;
+  readonly serializer_json_max_bytes: number;
+  readonly serializer_json_max_depth: number;
+  readonly serializer_json_max_keys: number;
+  readonly json_key_max_length: number;
+  readonly personalization_max_keys: number;
+  readonly recipient_count_max: number;
+  readonly recipient_key_max_length: number;
+  readonly display_name_max_length: number;
+  readonly subject_max_length: number;
+  readonly preview_text_max_length: number;
+  readonly search_max_length: number;
+  readonly max_recipients: number;
+}
+export interface EmailMarketingPaginationConfiguration {
+  readonly default_page_size: number;
+  readonly max_page_size: number;
+  readonly page_size_options: readonly number[];
+}
+export interface EmailMarketingTransitionsConfiguration {
+  readonly campaign: readonly string[];
+  readonly template: readonly string[];
+  readonly recipient: readonly string[];
+}
+export interface EmailMarketingWorkflowConfiguration {
+  readonly campaign_types: readonly string[];
+  readonly audience_resolver_keys: readonly string[];
+  readonly audience_schema_versions: readonly number[];
+  readonly campaign_editable_states: readonly CampaignStatus[];
+  readonly campaign_archivable_states: readonly CampaignStatus[];
+  readonly campaign_physical_delete_protected_states: readonly CampaignStatus[];
+  readonly campaign_archive_blocking_recipient_states: readonly RecipientStatus[];
+  readonly template_editable_states: readonly TemplateStatus[];
+  readonly recipient_initial_states: readonly RecipientStatus[];
+  readonly terminal_recipient_states: readonly RecipientStatus[];
+  readonly preflight_blocking_codes: readonly string[];
+  readonly provider_acknowledgement_mapping: Readonly<Record<string, RecipientStatus>>;
+  readonly provider_event_recipient_mapping: Readonly<Record<string, RecipientStatus>>;
+  readonly provider_event_command_mapping: Readonly<Record<string, string>>;
+  readonly transitions: EmailMarketingTransitionsConfiguration;
+}
+export interface EmailMarketingComplianceConfiguration {
+  readonly permanent_suppression_reasons: readonly SuppressionReason[];
+  readonly protected_overwrite_reasons: readonly SuppressionReason[];
+  readonly suppression_scopes: readonly SuppressionScope[];
+  readonly suppression_reasons: readonly SuppressionReason[];
+  readonly suppression_sources: readonly SuppressionSource[];
+  readonly automatic_suppression_events: readonly DeliveryEventType[];
+  readonly automatic_suppression_reasons: Readonly<Record<string, SuppressionReason>>;
+  readonly consent_sources: readonly ConsentSource[];
+  readonly consent_lawful_bases: readonly ConsentLawfulBasis[];
+  readonly consent_required_status: ConsentStatus;
+  readonly suppression_scopes_by_purpose: Readonly<Record<string, readonly SuppressionScope[]>>;
+}
+export interface EmailMarketingResilienceConfiguration {
+  readonly delivery_timeout_seconds: number;
+  readonly retry_max_attempts: number;
+  readonly retry_base_delay_seconds: number;
+  readonly retry_max_delay_seconds: number;
+  readonly retry_jitter_seconds: number;
+  readonly circuit_failure_threshold: number;
+  readonly circuit_reset_seconds: number;
+  readonly webhook_replay_window_seconds: number;
+}
+export interface EmailMarketingTokenConfiguration {
+  readonly preflight_receipt_seconds: number;
+  readonly tracking_token_days: number;
+  readonly unsubscribe_token_days: number;
+}
+export interface EmailMarketingIntegrationConfiguration {
+  readonly allowed_delivery_backends: readonly string[];
+  readonly simulated_delivery_backends: readonly string[];
+  readonly gateway_keys: readonly string[];
+}
+export interface EmailMarketingFilterConfiguration {
+  readonly default_ordering_by_resource: Readonly<Record<string, string>>;
+  readonly search_fields_by_resource: Readonly<Record<string, readonly string[]>>;
+}
+export interface EmailMarketingHealthConfiguration {
+  readonly outbox_freshness_seconds: number;
+  readonly probe_staleness_seconds: number;
+}
+export interface EmailMarketingRateLimitConfiguration {
+  readonly public_per_minute: number;
+}
+export interface EmailMarketingQuotaConfiguration {
+  readonly api_reads: number;
+  readonly api_writes: number;
+  readonly audience_resolutions: number;
+  readonly monthly_recipients: number;
+}
+export interface EmailMarketingFeatureFlagConfiguration {
+  readonly enabled: boolean;
+  readonly rollout_percentage: number;
+  readonly roles: readonly string[];
+  readonly cohorts: readonly string[];
+}
+export interface EmailMarketingDisplayConfiguration {
+  readonly status_semantics: Readonly<Record<string, ConfigurationStatusTone>>;
+}
+export interface EmailMarketingConfigurationDocument {
+  readonly schema_version: number;
+  readonly defaults: EmailMarketingDefaultsConfiguration;
+  readonly limits: EmailMarketingLimitsConfiguration;
+  readonly pagination: EmailMarketingPaginationConfiguration;
+  readonly workflows: EmailMarketingWorkflowConfiguration;
+  readonly compliance: EmailMarketingComplianceConfiguration;
+  readonly resilience: EmailMarketingResilienceConfiguration;
+  readonly tokens: EmailMarketingTokenConfiguration;
+  readonly integrations: EmailMarketingIntegrationConfiguration;
+  readonly filters: EmailMarketingFilterConfiguration;
+  readonly health: EmailMarketingHealthConfiguration;
+  readonly rate_limits: EmailMarketingRateLimitConfiguration;
+  readonly quotas: EmailMarketingQuotaConfiguration;
+  readonly feature_flags: EmailMarketingFeatureFlagConfiguration;
+  readonly display: EmailMarketingDisplayConfiguration;
+}
+export interface EmailMarketingConfiguration {
+  readonly id: UUID;
+  readonly environment: string;
+  readonly version: number;
+  readonly document: EmailMarketingConfigurationDocument;
+  readonly updated_at: ISODateTime;
+  readonly updated_by: UUID | null;
+}
+export interface EmailMarketingConfigurationChange {
+  readonly path: string;
+  readonly before: unknown;
+  readonly after: unknown;
+}
+export interface EmailMarketingConfigurationPreview {
+  readonly valid: true;
+  readonly normalized_document: EmailMarketingConfigurationDocument;
+  readonly changes: readonly EmailMarketingConfigurationChange[];
+  readonly warnings: readonly string[];
+}
+export interface EmailMarketingConfigurationVersion {
+  readonly id: UUID;
+  readonly version: number;
+  readonly previous_version: number | null;
+  readonly change_type: 'materialized' | 'updated' | 'imported' | 'rollback';
+  readonly actor_id: UUID | null;
+  readonly correlation_id: string;
+  readonly previous_document: EmailMarketingConfigurationDocument | null;
+  readonly document: EmailMarketingConfigurationDocument;
+  readonly created_at: ISODateTime;
+  readonly rollback_source_version: number | null;
+}
+export interface ConfigurationWriteInput { readonly document: EmailMarketingConfigurationDocument; readonly expected_version: number }
+export interface ConfigurationPreviewInput { readonly document: EmailMarketingConfigurationDocument }
+export interface ConfigurationRollbackInput { readonly target_version: number; readonly expected_version: number }
 
 export interface DependencyHealth { readonly name: string; readonly status: HealthState; readonly detail: string; readonly checked_at: ISODateTime }
 export interface ModuleHealth { readonly status: HealthState; readonly ready: boolean; readonly checks: readonly DependencyHealth[]; readonly migration: string; readonly checked_at: ISODateTime }
@@ -100,10 +271,18 @@ export const ENDPOINTS = {
   DELIVERIES: { LIST: resource('deliveries'), DETAIL: (id: UUID) => `${resource('deliveries')}${id}/` as const },
   SUPPRESSIONS: { LIST: resource('suppressions'), CREATE: resource('suppressions'), DETAIL: (id: UUID) => `${resource('suppressions')}${id}/` as const, DEACTIVATE: (id: UUID) => `${resource('suppressions')}${id}/deactivate/` as const },
   CONSENTS: { LIST: resource('consents'), CREATE: resource('consents'), DETAIL: (id: UUID) => `${resource('consents')}${id}/` as const, REVOKE: `${resource('consents')}revoke/` },
-  PROVIDER_EVENTS: resource('provider-events'), PUBLIC_UNSUBSCRIBE: `${MODULE_API_PREFIX}/public/unsubscribe/`, TRACK_OPEN: (token: string) => `${MODULE_API_PREFIX}/t/${encodeURIComponent(token)}/open.gif` as const, TRACK_CLICK: (token: string) => `${MODULE_API_PREFIX}/t/${encodeURIComponent(token)}/click/` as const, HEALTH: resource('health'),
+  CONFIGURATION: {
+    CURRENT: `${resource('configuration')}current/`,
+    PREVIEW: `${resource('configuration')}preview/`,
+    HISTORY: `${resource('configuration')}history/`,
+    ROLLBACK: `${resource('configuration')}rollback/`,
+    IMPORT: `${resource('configuration')}import-document/`,
+    EXPORT: `${resource('configuration')}export-document/`,
+  },
+  PUBLIC_UNSUBSCRIBE: `${MODULE_API_PREFIX}/public/unsubscribe/`, TRACK_OPEN: (token: string) => `${MODULE_API_PREFIX}/t/${encodeURIComponent(token)}/open.gif` as const, TRACK_CLICK: (token: string) => `${MODULE_API_PREFIX}/t/${encodeURIComponent(token)}/click/` as const, HEALTH: resource('health'),
 } as const;
 
-export const ROUTES = { CAMPAIGNS: '/email-marketing/campaigns', CAMPAIGN_CREATE: '/email-marketing/campaigns/new', CAMPAIGN_DETAIL: (id: UUID) => `/email-marketing/campaigns/${id}` as const, CAMPAIGN_EDIT: (id: UUID) => `/email-marketing/campaigns/${id}/edit` as const, TEMPLATES: '/email-marketing/templates', TEMPLATE_CREATE: '/email-marketing/templates/new', TEMPLATE_DETAIL: (id: UUID) => `/email-marketing/templates/${id}` as const, TEMPLATE_EDIT: (id: UUID) => `/email-marketing/templates/${id}/edit` as const, DELIVERY: '/email-marketing/delivery', RECIPIENT_DETAIL: (id: UUID) => `/email-marketing/delivery/recipients/${id}` as const, DELIVERY_DETAIL: (id: UUID) => `/email-marketing/delivery/attempts/${id}` as const, SUPPRESSIONS: '/email-marketing/suppressions', SUPPRESSION_CREATE: '/email-marketing/suppressions/new', SUPPRESSION_DETAIL: (id: UUID) => `/email-marketing/suppressions/${id}` as const, CONSENTS: '/email-marketing/consents', CONSENT_CREATE: '/email-marketing/consents/new', CONSENT_DETAIL: (id: UUID) => `/email-marketing/consents/${id}` as const } as const;
+export const ROUTES = { CAMPAIGNS: '/email-marketing/campaigns', CAMPAIGN_CREATE: '/email-marketing/campaigns/new', CAMPAIGN_DETAIL: (id: UUID) => `/email-marketing/campaigns/${id}` as const, CAMPAIGN_EDIT: (id: UUID) => `/email-marketing/campaigns/${id}/edit` as const, TEMPLATES: '/email-marketing/templates', TEMPLATE_CREATE: '/email-marketing/templates/new', TEMPLATE_DETAIL: (id: UUID) => `/email-marketing/templates/${id}` as const, TEMPLATE_EDIT: (id: UUID) => `/email-marketing/templates/${id}/edit` as const, DELIVERY: '/email-marketing/delivery', RECIPIENT_DETAIL: (id: UUID) => `/email-marketing/delivery/recipients/${id}` as const, DELIVERY_DETAIL: (id: UUID) => `/email-marketing/delivery/attempts/${id}` as const, SUPPRESSIONS: '/email-marketing/suppressions', SUPPRESSION_CREATE: '/email-marketing/suppressions/new', SUPPRESSION_DETAIL: (id: UUID) => `/email-marketing/suppressions/${id}` as const, CONSENTS: '/email-marketing/consents', CONSENT_CREATE: '/email-marketing/consents/new', CONSENT_DETAIL: (id: UUID) => `/email-marketing/consents/${id}` as const, CONFIGURATION: '/email-marketing/configuration' } as const;
 
 export const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 export function isPaginationMeta(value: unknown): value is ApiV2PaginationMeta { return isRecord(value) && ['count', 'page', 'page_size', 'total_pages'].every((key) => Number.isInteger(value[key])) && typeof value.has_next === 'boolean' && typeof value.has_previous === 'boolean'; }
@@ -117,13 +296,18 @@ export const isTemplateSummary = (value: unknown): value is EmailTemplateSummary
 export const isTemplateDetail = (value: unknown): value is EmailTemplateDetail => isRecord(value) && isTemplateSummary(value) && hasStrings(value, ['body_html', 'body_text', 'description']) && isRecord(value.design_json);
 export const isRecipientSummary = (value: unknown): value is CampaignRecipientSummary => isRecord(value) && hasStrings(value, ['id', 'campaign_id', 'email', 'display_name', 'status', 'created_at']);
 export const isRecipientDetail = (value: unknown): value is CampaignRecipientDetail => isRecord(value) && isRecipientSummary(value) && Array.isArray(value.delivery_attempts) && Array.isArray(value.events);
-export const isDeliverySummary = (value: unknown): value is DeliveryAttemptSummary => isRecord(value) && hasStrings(value, ['id', 'recipient_id', 'job_id', 'gateway_key', 'status', 'created_at']) && typeof value.attempt_number === 'number';
-export const isDeliveryDetail = (value: unknown): value is DeliveryAttemptDetail => isRecord(value) && isDeliverySummary(value) && isRecord(value.response_evidence) && Array.isArray(value.events);
+export const isDeliverySummary = (value: unknown): value is DeliveryAttemptSummary => isRecord(value) && hasStrings(value, ['id', 'recipient_id', 'status', 'error_code', 'created_at']) && typeof value.attempt_number === 'number';
+export const isDeliveryDetail = (value: unknown): value is DeliveryAttemptDetail => isRecord(value) && isDeliverySummary(value) && typeof value.updated_at === 'string' && Array.isArray(value.events);
 export const isSuppressionSummary = (value: unknown): value is SuppressionEntrySummary => isRecord(value) && hasStrings(value, ['id', 'email', 'scope', 'reason', 'source', 'suppressed_at']) && typeof value.active === 'boolean';
 export const isSuppressionDetail = (value: unknown): value is SuppressionEntryDetail => isRecord(value) && isSuppressionSummary(value) && hasStrings(value, ['notes', 'created_at', 'updated_at']);
 export const isConsentSummary = (value: unknown): value is ConsentRecordSummary => isRecord(value) && hasStrings(value, ['id', 'email', 'purpose', 'status', 'lawful_basis', 'source', 'notice_version', 'captured_at', 'created_at']);
-export const isConsentDetail = (value: unknown): value is ConsentRecordDetail => isRecord(value) && isConsentSummary(value) && isRecord(value.evidence);
+export const isConsentDetail = (value: unknown): value is ConsentRecordDetail => isRecord(value) && isConsentSummary(value) && (value.actor_id === null || typeof value.actor_id === 'string') && (value.supersedes_id === null || typeof value.supersedes_id === 'string');
 export const isAsyncJob = (value: unknown): value is AsyncJobSummary => isRecord(value) && hasStrings(value, ['id', 'job_type', 'status', 'idempotency_key', 'created_at', 'correlation_id']);
 export const isCampaignAnalytics = (value: unknown): value is CampaignAnalytics => isRecord(value) && typeof value.delivery_rate === 'number' && isRecord(value.preflight);
 export const isRenderedEmail = (value: unknown): value is RenderedEmail => isRecord(value) && hasStrings(value, ['subject', 'html', 'text']) && Array.isArray(value.warnings);
 export const isHealth = (value: unknown): value is ModuleHealth => isRecord(value) && typeof value.ready === 'boolean' && ['ready', 'degraded', 'unhealthy'].includes(String(value.status)) && Array.isArray(value.checks);
+export const isPublicUnsubscribeResponse = (value: unknown): value is PublicUnsubscribeResponse => isRecord(value) && typeof value.suppression_id === 'string' && value.status === 'unsubscribed';
+export const isEmailMarketingConfigurationDocument = (value: unknown): value is EmailMarketingConfigurationDocument => isRecord(value) && Number.isInteger(value.schema_version) && ['defaults', 'limits', 'pagination', 'workflows', 'compliance', 'resilience', 'tokens', 'integrations', 'filters', 'health', 'rate_limits', 'quotas', 'feature_flags', 'display'].every((key) => isRecord(value[key]));
+export const isEmailMarketingConfiguration = (value: unknown): value is EmailMarketingConfiguration => isRecord(value) && hasStrings(value, ['id', 'environment', 'updated_at']) && Number.isInteger(value.version) && isEmailMarketingConfigurationDocument(value.document);
+export const isEmailMarketingConfigurationPreview = (value: unknown): value is EmailMarketingConfigurationPreview => isRecord(value) && value.valid === true && isEmailMarketingConfigurationDocument(value.normalized_document) && Array.isArray(value.changes) && Array.isArray(value.warnings);
+export const isEmailMarketingConfigurationVersion = (value: unknown): value is EmailMarketingConfigurationVersion => isRecord(value) && hasStrings(value, ['id', 'change_type', 'correlation_id', 'created_at']) && Number.isInteger(value.version) && isEmailMarketingConfigurationDocument(value.document);

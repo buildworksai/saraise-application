@@ -15,8 +15,17 @@ from rest_framework.test import APIClient
 
 from src.core.user_models import UserProfile
 from src.modules.email_marketing import api
-from src.modules.email_marketing.models import CampaignRecipient, ConsentRecord, DeliveryAttempt, EmailCampaign, EmailTemplate
-from src.modules.email_marketing.services import ComplianceService, DeliveryService
+from src.modules.email_marketing.models import (
+    CampaignRecipient,
+    ConsentRecord,
+    DeliveryAttempt,
+    EmailCampaign,
+    EmailTemplate,
+)
+from src.modules.email_marketing.services import (
+    ComplianceService,
+    DeliveryService,
+)
 
 pytestmark = pytest.mark.django_db
 User = get_user_model()
@@ -25,7 +34,11 @@ BASE = "/api/v2/email-marketing"
 
 @pytest.fixture(autouse=True)
 def isolate_external_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(api.EmailMarketingAccessMixin, "get_permissions", lambda self: [IsAuthenticated()])
+    monkeypatch.setattr(
+        api.EmailMarketingAccessMixin,
+        "get_permissions",
+        lambda self: [IsAuthenticated()],
+    )
 
 
 def user_for(tenant: uuid.UUID, suffix: str) -> object:
@@ -57,7 +70,11 @@ def campaign_for(tenant: uuid.UUID, code: str, template: EmailTemplate | None = 
         subject="Subject",
         from_name="Sender",
         from_email="sender@example.com",
-        audience_definition={"version": 1, "resolver": "manual", "recipients": []},
+        audience_definition={
+            "version": 1,
+            "resolver": "manual",
+            "recipients": [],
+        },
         template=template,
     )
 
@@ -72,7 +89,7 @@ def tenants() -> tuple[uuid.UUID, uuid.UUID, APIClient]:
 
 
 def test_campaign_list_detail_update_delete_and_actions_hide_foreign_rows(
-    tenants: tuple[uuid.UUID, uuid.UUID, APIClient]
+    tenants: tuple[uuid.UUID, uuid.UUID, APIClient],
 ) -> None:
     tenant_a, tenant_b, client = tenants
     own = campaign_for(tenant_a, "OWN")
@@ -80,7 +97,14 @@ def test_campaign_list_detail_update_delete_and_actions_hide_foreign_rows(
     listed = client.get(f"{BASE}/campaigns/").json()["data"]
     assert {row["id"] for row in listed} == {str(own.id)}
     assert client.get(f"{BASE}/campaigns/{foreign.id}/").status_code == 404
-    assert client.patch(f"{BASE}/campaigns/{foreign.id}/", {"campaign_name": "stolen"}, format="json").status_code == 404
+    assert (
+        client.patch(
+            f"{BASE}/campaigns/{foreign.id}/",
+            {"campaign_name": "stolen"},
+            format="json",
+        ).status_code
+        == 404
+    )
     assert client.delete(f"{BASE}/campaigns/{foreign.id}/").status_code == 404
     for route, method in (
         ("analytics", "get"),
@@ -103,7 +127,7 @@ def test_campaign_list_detail_update_delete_and_actions_hide_foreign_rows(
 
 
 def test_template_reference_and_template_mutations_are_tenant_safe(
-    tenants: tuple[uuid.UUID, uuid.UUID, APIClient]
+    tenants: tuple[uuid.UUID, uuid.UUID, APIClient],
 ) -> None:
     tenant_a, tenant_b, client = tenants
     foreign = template_for(tenant_b, "FOREIGN")
@@ -114,13 +138,138 @@ def test_template_reference_and_template_mutations_are_tenant_safe(
         "subject": "Subject",
         "from_name": "Sender",
         "from_email": "sender@example.com",
-        "audience_definition": {"version": 1, "resolver": "manual", "recipients": []},
+        "audience_definition": {
+            "version": 1,
+            "resolver": "manual",
+            "recipients": [],
+        },
     }
     assert client.post(f"{BASE}/campaigns/", payload, format="json").status_code == 400
     assert not EmailCampaign.objects.filter(tenant_id=tenant_a, campaign_code="SPOOF").exists()
     assert client.get(f"{BASE}/templates/{foreign.id}/").status_code == 404
-    assert client.patch(f"{BASE}/templates/{foreign.id}/", {"template_name": "stolen"}, format="json").status_code == 404
+    assert (
+        client.patch(
+            f"{BASE}/templates/{foreign.id}/",
+            {"template_name": "stolen"},
+            format="json",
+        ).status_code
+        == 404
+    )
     assert client.delete(f"{BASE}/templates/{foreign.id}/").status_code == 404
+
+
+def test_every_resource_collection_and_detail_are_tenant_isolated(
+    tenants: tuple[uuid.UUID, uuid.UUID, APIClient],
+) -> None:
+    tenant_a, tenant_b, client = tenants
+    own_template = template_for(tenant_a, "OWN-TEMPLATE")
+    foreign_template = template_for(tenant_b, "FOREIGN-TEMPLATE")
+    foreign_campaign = campaign_for(tenant_b, "FOREIGN-RESOURCE", foreign_template)
+    foreign_recipient = CampaignRecipient.objects.create(
+        tenant_id=tenant_b,
+        campaign=foreign_campaign,
+        email="foreign@example.com",
+        personalization_data={},
+    )
+    foreign_attempt = DeliveryAttempt.objects.create(
+        tenant_id=tenant_b,
+        recipient=foreign_recipient,
+        attempt_number=1,
+        job_id=uuid.uuid4(),
+        idempotency_key="foreign-attempt",
+        gateway_key="django",
+    )
+    foreign_suppression = ComplianceService.suppress(
+        tenant_b,
+        uuid.uuid4(),
+        {
+            "email": "foreign@example.com",
+            "scope": "marketing",
+            "reason": "manual",
+            "source": "administrator",
+        },
+    )
+    foreign_consent = ConsentRecord.objects.create(
+        tenant_id=tenant_b,
+        email="foreign@example.com",
+        purpose="marketing",
+        status="granted",
+        lawful_basis="consent",
+        source="api",
+        notice_version="v1",
+        captured_at=timezone.now(),
+        evidence={},
+    )
+
+    expected_visible = {
+        "campaigns": set(),
+        "templates": {str(own_template.id)},
+        "recipients": set(),
+        "deliveries": set(),
+        "suppressions": set(),
+        "consents": set(),
+    }
+    foreign_ids = {
+        "campaigns": foreign_campaign.id,
+        "templates": foreign_template.id,
+        "recipients": foreign_recipient.id,
+        "deliveries": foreign_attempt.id,
+        "suppressions": foreign_suppression.id,
+        "consents": foreign_consent.id,
+    }
+    for resource, expected_ids in expected_visible.items():
+        response = client.get(f"{BASE}/{resource}/")
+        assert response.status_code == 200
+        assert {row["id"] for row in response.json()["data"]} == expected_ids
+        assert client.get(f"{BASE}/{resource}/{foreign_ids[resource]}/").status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("resource", "payload"),
+    (
+        (
+            "templates",
+            {
+                "template_code": "TENANT-SPOOF",
+                "template_name": "Tenant spoof",
+                "subject": "Subject",
+                "body_html": "<p>Body</p>",
+            },
+        ),
+        (
+            "suppressions",
+            {
+                "email": "spoof@example.com",
+                "scope": "marketing",
+                "reason": "manual",
+                "source": "administrator",
+            },
+        ),
+        (
+            "consents",
+            {
+                "email": "spoof@example.com",
+                "purpose": "marketing",
+                "status": "granted",
+                "lawful_basis": "consent",
+                "source": "api",
+                "notice_version": "v1",
+            },
+        ),
+    ),
+)
+def test_create_rejects_client_supplied_tenant_id(
+    tenants: tuple[uuid.UUID, uuid.UUID, APIClient],
+    resource: str,
+    payload: dict[str, object],
+) -> None:
+    _, tenant_b, client = tenants
+    response = client.post(
+        f"{BASE}/{resource}/",
+        {**payload, "tenant_id": str(tenant_b)},
+        format="json",
+    )
+    assert response.status_code == 400
 
 
 def test_recipient_attempt_and_append_only_consent_relationships_reject_cross_tenant() -> None:
@@ -166,7 +315,7 @@ def test_recipient_attempt_and_append_only_consent_relationships_reject_cross_te
 
 
 def test_suppression_deactivate_and_recipient_retry_cannot_cross_tenants(
-    tenants: tuple[uuid.UUID, uuid.UUID, APIClient]
+    tenants: tuple[uuid.UUID, uuid.UUID, APIClient],
 ) -> None:
     tenant_a, tenant_b, client = tenants
     suppression = ComplianceService.suppress(
@@ -180,7 +329,9 @@ def test_suppression_deactivate_and_recipient_retry_cannot_cross_tenants(
         },
     )
     response = client.post(
-        f"{BASE}/suppressions/{suppression.id}/deactivate/", {"reason": "cross tenant"}, format="json"
+        f"{BASE}/suppressions/{suppression.id}/deactivate/",
+        {"reason": "cross tenant"},
+        format="json",
     )
     assert response.status_code == 404
     suppression.refresh_from_db()
@@ -192,9 +343,14 @@ def test_suppression_deactivate_and_recipient_retry_cannot_cross_tenants(
         email="customer@example.com",
         personalization_data={},
     )
-    assert client.post(
-        f"{BASE}/recipients/{recipient.id}/retry/", {"idempotency_key": "cross-retry"}, format="json"
-    ).status_code == 404
+    assert (
+        client.post(
+            f"{BASE}/recipients/{recipient.id}/retry/",
+            {"idempotency_key": "cross-retry"},
+            format="json",
+        ).status_code
+        == 404
+    )
 
 
 def test_unsubscribe_token_is_cryptographically_tenant_bound() -> None:

@@ -33,6 +33,9 @@ permissions:
   - email_marketing.consent:revoke
   - email_marketing.health:read
   - email_marketing.provider_event:ingest
+  - email_marketing.configuration:read
+  - email_marketing.configuration:manage
+  - email_marketing.configuration:export
 
 sod_actions:
   - email_marketing.campaign:send
@@ -44,6 +47,70 @@ search_indexes:
   - email_campaign_recipients
   - email_suppression_entries
 
+entities:
+  - {name: email_templates, model: EmailTemplate, tenancy: tenant_id, mutability: lifecycle_controlled}
+  - {name: email_campaigns, model: EmailCampaign, tenancy: tenant_id, mutability: lifecycle_controlled}
+  - {name: email_consent_records, model: ConsentRecord, tenancy: tenant_id, mutability: append_only}
+  - {name: email_campaign_recipients, model: CampaignRecipient, tenancy: tenant_id, mutability: lifecycle_controlled}
+  - {name: email_delivery_attempts, model: DeliveryAttempt, tenancy: tenant_id, mutability: revision_controlled}
+  - {name: email_delivery_attempt_revisions, model: DeliveryAttemptRevision, tenancy: tenant_id, mutability: append_only}
+  - {name: email_delivery_events, model: DeliveryEvent, tenancy: tenant_id, mutability: append_only}
+  - {name: email_suppression_entries, model: SuppressionEntry, tenancy: tenant_id, mutability: lifecycle_controlled}
+  - {name: email_marketing_configurations, model: EmailMarketingConfiguration, tenancy: tenant_id, mutability: versioned}
+  - {name: email_marketing_configuration_versions, model: EmailMarketingConfigurationVersion, tenancy: tenant_id, mutability: append_only}
+  - {name: email_marketing_lifecycle_transitions, model: LifecycleTransitionAudit, tenancy: tenant_id, mutability: append_only}
+  - {name: email_marketing_mutation_idempotency, model: MutationIdempotencyRecord, tenancy: tenant_id, mutability: append_only}
+
+endpoints:
+  - {path: campaigns/, methods: [GET], permission: "email_marketing.campaign:read", tenancy: required, pagination: configured, mutability: read_only}
+  - {path: campaigns/, methods: [POST], permission: "email_marketing.campaign:create", tenancy: required, pagination: none, mutability: creates}
+  - {path: "campaigns/{id}/", methods: [GET], permission: "email_marketing.campaign:read", tenancy: required, pagination: none, mutability: read_only}
+  - {path: "campaigns/{id}/", methods: [PATCH], permission: "email_marketing.campaign:update", tenancy: required, pagination: none, mutability: updates}
+  - {path: "campaigns/{id}/", methods: [DELETE], permission: "email_marketing.campaign:delete", tenancy: required, pagination: none, mutability: archives}
+  - {path: "campaigns/{id}/resolve-audience/", methods: [POST], permission: "email_marketing.campaign:resolve_audience", tenancy: required, pagination: none, mutability: enqueues_idempotently}
+  - {path: "campaigns/{id}/preflight/", methods: [GET], permission: "email_marketing.campaign:read", tenancy: required, pagination: none, mutability: read_only}
+  - {path: "campaigns/{id}/schedule/", methods: [POST], permission: "email_marketing.campaign:schedule", tenancy: required, pagination: none, mutability: transitions_idempotently}
+  - {path: "campaigns/{id}/unschedule/", methods: [POST], permission: "email_marketing.campaign:schedule", tenancy: required, pagination: none, mutability: transitions_idempotently}
+  - {path: "campaigns/{id}/send/", methods: [POST], permission: "email_marketing.campaign:send", tenancy: required, pagination: none, mutability: enqueues_idempotently}
+  - {path: "campaigns/{id}/pause/", methods: [POST], permission: "email_marketing.campaign:pause", tenancy: required, pagination: none, mutability: transitions_idempotently}
+  - {path: "campaigns/{id}/resume/", methods: [POST], permission: "email_marketing.campaign:send", tenancy: required, pagination: none, mutability: transitions_idempotently}
+  - {path: "campaigns/{id}/cancel/", methods: [POST], permission: "email_marketing.campaign:cancel", tenancy: required, pagination: none, mutability: transitions_idempotently}
+  - {path: "campaigns/{id}/analytics/", methods: [GET], permission: "email_marketing.analytics:read", tenancy: required, pagination: none, mutability: read_only}
+  - {path: templates/, methods: [GET], permission: "email_marketing.template:read", tenancy: required, pagination: configured, mutability: read_only}
+  - {path: templates/, methods: [POST], permission: "email_marketing.template:create", tenancy: required, pagination: none, mutability: creates}
+  - {path: "templates/{id}/", methods: [GET], permission: "email_marketing.template:read", tenancy: required, pagination: none, mutability: read_only}
+  - {path: "templates/{id}/", methods: [PATCH], permission: "email_marketing.template:update", tenancy: required, pagination: none, mutability: updates}
+  - {path: "templates/{id}/", methods: [DELETE], permission: "email_marketing.template:delete", tenancy: required, pagination: none, mutability: archives}
+  - {path: "templates/{id}/activate/", methods: [POST], permission: "email_marketing.template:activate", tenancy: required, pagination: none, mutability: transitions_idempotently}
+  - {path: "templates/{id}/archive/", methods: [POST], permission: "email_marketing.template:activate", tenancy: required, pagination: none, mutability: transitions_idempotently}
+  - {path: "templates/{id}/clone/", methods: [POST], permission: "email_marketing.template:create", tenancy: required, pagination: none, mutability: creates}
+  - {path: "templates/{id}/preview/", methods: [POST], permission: "email_marketing.template:read", tenancy: required, pagination: none, mutability: simulation_only}
+  - {path: recipients/, methods: [GET], permission: "email_marketing.recipient:read", tenancy: required, pagination: configured, mutability: read_only}
+  - {path: "recipients/{id}/", methods: [GET], permission: "email_marketing.recipient:read", tenancy: required, pagination: none, mutability: read_only}
+  - {path: "recipients/{id}/retry/", methods: [POST], permission: "email_marketing.recipient:retry", tenancy: required, pagination: none, mutability: enqueues_idempotently}
+  - {path: deliveries/, methods: [GET], permission: "email_marketing.delivery:read", tenancy: required, pagination: configured, mutability: read_only}
+  - {path: "deliveries/{id}/", methods: [GET], permission: "email_marketing.delivery:read", tenancy: required, pagination: none, mutability: read_only}
+  - {path: suppressions/, methods: [GET], permission: "email_marketing.suppression:read", tenancy: required, pagination: configured, mutability: read_only}
+  - {path: suppressions/, methods: [POST], permission: "email_marketing.suppression:manage", tenancy: required, pagination: none, mutability: creates}
+  - {path: "suppressions/{id}/", methods: [GET], permission: "email_marketing.suppression:read", tenancy: required, pagination: none, mutability: read_only}
+  - {path: "suppressions/{id}/deactivate/", methods: [POST], permission: "email_marketing.suppression:manage", tenancy: required, pagination: none, mutability: transitions}
+  - {path: consents/, methods: [GET], permission: "email_marketing.consent:read", tenancy: required, pagination: configured, mutability: read_only}
+  - {path: consents/, methods: [POST], permission: "email_marketing.consent:record", tenancy: required, pagination: none, mutability: appends}
+  - {path: "consents/{id}/", methods: [GET], permission: "email_marketing.consent:read", tenancy: required, pagination: none, mutability: read_only}
+  - {path: consents/revoke/, methods: [POST], permission: "email_marketing.consent:revoke", tenancy: required, pagination: none, mutability: appends}
+  - {path: configuration/current/, methods: [GET], permission: "email_marketing.configuration:read", tenancy: required, pagination: none, mutability: read_only}
+  - {path: configuration/current/, methods: [PUT], permission: "email_marketing.configuration:manage", tenancy: required, pagination: none, mutability: versioned_update}
+  - {path: configuration/preview/, methods: [POST], permission: "email_marketing.configuration:read", tenancy: required, pagination: none, mutability: simulation_only}
+  - {path: configuration/history/, methods: [GET], permission: "email_marketing.configuration:read", tenancy: required, pagination: none, mutability: read_only}
+  - {path: configuration/rollback/, methods: [POST], permission: "email_marketing.configuration:manage", tenancy: required, pagination: none, mutability: versioned_update}
+  - {path: configuration/import-document/, methods: [POST], permission: "email_marketing.configuration:manage", tenancy: required, pagination: none, mutability: versioned_update}
+  - {path: configuration/export-document/, methods: [GET], permission: "email_marketing.configuration:export", tenancy: required, pagination: none, mutability: read_only}
+  - {path: provider-events/, methods: [POST], permission: "email_marketing.provider_event:ingest", tenancy: trusted_provider_binding, pagination: none, mutability: appends_and_enqueues}
+  - {path: public/unsubscribe/, methods: [POST], permission: signed_unsubscribe_token, tenancy: signed_token, pagination: none, mutability: creates_suppression}
+  - {path: "t/{token}/open.gif", methods: [GET], permission: signed_tracking_token, tenancy: signed_token, pagination: none, mutability: appends_tracking_event}
+  - {path: "t/{token}/click/", methods: [GET], permission: signed_tracking_token, tenancy: signed_token, pagination: none, mutability: appends_tracking_event}
+  - {path: health/, methods: [GET], permission: "email_marketing.health:read", tenancy: required, pagination: none, mutability: read_only}
+
 ai_tools: []
 
 metadata:
@@ -53,21 +120,20 @@ metadata:
   api:
     canonical_prefix: /api/v2/email-marketing/
     health_endpoint: /api/v2/email-marketing/health/
-    default_page_size: 25
-    maximum_page_size: 100
+    pagination_configuration: pagination
   quota_resources:
     - name: email_marketing.api_reads
       cost: 1
-      open_source_monthly_default: 100000
+      configuration_key: quotas.api_reads
     - name: email_marketing.api_writes
       cost: 1
-      open_source_monthly_default: 10000
+      configuration_key: quotas.api_writes
     - name: email_marketing.audience_resolutions
       cost: 1
-      open_source_monthly_default: 1000
+      configuration_key: quotas.audience_resolutions
     - name: email_marketing.monthly_recipients
       cost_projection: eligible_recipient
-      open_source_monthly_default: 10000
+      configuration_key: quotas.monthly_recipients
   state_machines:
     email_marketing.campaign:
       state_field: status

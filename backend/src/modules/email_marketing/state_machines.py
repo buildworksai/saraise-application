@@ -39,9 +39,7 @@ class AuditedStateMachine(StateMachine[ModelT]):
         if "correlation_id" in audit and not audit.get("correlation_id"):
             missing.append("correlation_id")
         if missing:
-            raise StateMachineConfigurationError(
-                f"Transition audit metadata is missing: {', '.join(missing)}"
-            )
+            raise StateMachineConfigurationError(f"Transition audit metadata is missing: {', '.join(missing)}")
         audit["actor_id"] = str(audit["actor_id"]) if audit["actor_id"] is not None else None
         audit["correlation_id"] = str(audit["correlation_id"])
         if "causation_id" in audit and audit["causation_id"] is not None:

@@ -6,6 +6,9 @@ import {
   isDeliveryDetail, isDeliverySummary, isHealth, isRecipientDetail,
   isRecipientSummary, isRenderedEmail, isSuppressionDetail, isSuppressionSummary,
   isTemplateDetail, isTemplateSummary,
+  isEmailMarketingConfiguration,
+  isEmailMarketingConfigurationPreview, isEmailMarketingConfigurationVersion,
+  isPublicUnsubscribeResponse,
   type AsyncJobSummary, type CampaignAnalytics, type CampaignCreateInput,
   type CampaignFilters, type CampaignRecipientDetail, type CampaignRecipientSummary,
   type CampaignUpdateInput, type CloneTemplateInput, type ConsentCreateInput,
@@ -15,12 +18,15 @@ import {
   type EmailTemplateDetail, type EmailTemplateSummary, type GovernedResult,
   type IdempotentActionInput, type ModuleHealth, type PaginatedResult,
   type RecipientFilters, type RenderedEmail, type ScheduleCampaignInput,
-  type SendCampaignInput,
-  type ProviderEventIngestInput, type PublicUnsubscribeInput,
+  type SendCampaignInput, type PublicUnsubscribeInput, type PublicUnsubscribeResponse,
   type SuppressionCreateInput, type SuppressionDeactivateInput,
   type SuppressionEntryDetail, type SuppressionEntrySummary, type SuppressionFilters,
   type TemplateCreateInput, type TemplateFilters, type TemplatePreviewInput,
   type TemplateUpdateInput, type TransitionInput,
+  type ConfigurationPreviewInput, type ConfigurationRollbackInput,
+  type ConfigurationWriteInput, type EmailMarketingConfiguration,
+  type EmailMarketingConfigurationDocument, type EmailMarketingConfigurationPreview,
+  type EmailMarketingConfigurationVersion,
 } from '../contracts';
 
 type Guard<T> = (value: unknown) => value is T;
@@ -50,6 +56,11 @@ export function buildQuery(path: string, filters: object): string {
 const getOne = async <T>(path: string, guard: Guard<T>) => unwrapEnvelope(await apiClient.get<unknown>(path), guard);
 const getPage = async <T>(path: string, filters: object, guard: Guard<T>) => unwrapPage(await apiClient.get<unknown>(buildQuery(path, filters)), guard);
 const postOne = async <T>(path: string, input: unknown, guard: Guard<T>) => unwrapEnvelope(await apiClient.post<unknown>(path, input), guard);
+const postIdempotentCreate = async <T>(path: string, input: unknown, guard: Guard<T>) => unwrapEnvelope(
+  await apiClient.post<unknown>(path, input, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
+  guard,
+);
+const putOne = async <T>(path: string, input: unknown, guard: Guard<T>) => unwrapEnvelope(await apiClient.put<unknown>(path, input), guard);
 const patchOne = async <T>(path: string, input: unknown, guard: Guard<T>) => unwrapEnvelope(await apiClient.patch<unknown>(path, input), guard);
 
 export const EMAIL_MARKETING_QUERY_KEYS = {
@@ -67,6 +78,8 @@ export const EMAIL_MARKETING_QUERY_KEYS = {
   suppression: (id: string) => ['email-marketing', 'suppression', id] as const,
   consents: (filters: ConsentFilters = {}) => ['email-marketing', 'consents', filters] as const,
   consent: (id: string) => ['email-marketing', 'consent', id] as const,
+  configuration: ['email-marketing', 'configuration'] as const,
+  configurationHistory: ['email-marketing', 'configuration', 'history'] as const,
   health: ['email-marketing', 'health'] as const,
 };
 
@@ -74,7 +87,7 @@ export const emailMarketingService = {
   campaigns: {
     list: (filters: CampaignFilters = {}): Promise<PaginatedResult<EmailCampaignSummary>> => getPage(ENDPOINTS.CAMPAIGNS.LIST, filters, isCampaignSummary),
     get: (id: string): Promise<GovernedResult<EmailCampaignDetail>> => getOne(ENDPOINTS.CAMPAIGNS.DETAIL(id), isCampaignDetail),
-    create: (input: CampaignCreateInput): Promise<GovernedResult<EmailCampaignDetail>> => postOne(ENDPOINTS.CAMPAIGNS.CREATE, input, isCampaignDetail),
+    create: (input: CampaignCreateInput): Promise<GovernedResult<EmailCampaignDetail>> => postIdempotentCreate(ENDPOINTS.CAMPAIGNS.CREATE, input, isCampaignDetail),
     update: (id: string, input: CampaignUpdateInput): Promise<GovernedResult<EmailCampaignDetail>> => patchOne(ENDPOINTS.CAMPAIGNS.UPDATE(id), input, isCampaignDetail),
     delete: (id: string): Promise<void> => apiClient.delete<void>(ENDPOINTS.CAMPAIGNS.DELETE(id)),
     resolveAudience: (id: string, input: IdempotentActionInput): Promise<GovernedResult<AsyncJobSummary>> => postOne(ENDPOINTS.CAMPAIGNS.RESOLVE_AUDIENCE(id), input, isAsyncJob),
@@ -89,7 +102,7 @@ export const emailMarketingService = {
   templates: {
     list: (filters: TemplateFilters = {}): Promise<PaginatedResult<EmailTemplateSummary>> => getPage(ENDPOINTS.TEMPLATES.LIST, filters, isTemplateSummary),
     get: (id: string): Promise<GovernedResult<EmailTemplateDetail>> => getOne(ENDPOINTS.TEMPLATES.DETAIL(id), isTemplateDetail),
-    create: (input: TemplateCreateInput): Promise<GovernedResult<EmailTemplateDetail>> => postOne(ENDPOINTS.TEMPLATES.CREATE, input, isTemplateDetail),
+    create: (input: TemplateCreateInput): Promise<GovernedResult<EmailTemplateDetail>> => postIdempotentCreate(ENDPOINTS.TEMPLATES.CREATE, input, isTemplateDetail),
     update: (id: string, input: TemplateUpdateInput): Promise<GovernedResult<EmailTemplateDetail>> => patchOne(ENDPOINTS.TEMPLATES.UPDATE(id), input, isTemplateDetail),
     delete: (id: string): Promise<void> => apiClient.delete<void>(ENDPOINTS.TEMPLATES.DELETE(id)),
     activate: (id: string, input: IdempotentActionInput): Promise<GovernedResult<EmailTemplateDetail>> => postOne(ENDPOINTS.TEMPLATES.ACTIVATE(id), input, isTemplateDetail),
@@ -109,20 +122,29 @@ export const emailMarketingService = {
   suppressions: {
     list: (filters: SuppressionFilters = {}): Promise<PaginatedResult<SuppressionEntrySummary>> => getPage(ENDPOINTS.SUPPRESSIONS.LIST, filters, isSuppressionSummary),
     get: (id: string): Promise<GovernedResult<SuppressionEntryDetail>> => getOne(ENDPOINTS.SUPPRESSIONS.DETAIL(id), isSuppressionDetail),
-    create: (input: SuppressionCreateInput): Promise<GovernedResult<SuppressionEntryDetail>> => postOne(ENDPOINTS.SUPPRESSIONS.CREATE, input, isSuppressionDetail),
+    create: (input: SuppressionCreateInput): Promise<GovernedResult<SuppressionEntryDetail>> => postIdempotentCreate(ENDPOINTS.SUPPRESSIONS.CREATE, input, isSuppressionDetail),
     deactivate: (id: string, input: SuppressionDeactivateInput): Promise<GovernedResult<SuppressionEntryDetail>> => postOne(ENDPOINTS.SUPPRESSIONS.DEACTIVATE(id), input, isSuppressionDetail),
   },
   consents: {
     list: (filters: ConsentFilters = {}): Promise<PaginatedResult<ConsentRecordSummary>> => getPage(ENDPOINTS.CONSENTS.LIST, filters, isConsentSummary),
     get: (id: string): Promise<GovernedResult<ConsentRecordDetail>> => getOne(ENDPOINTS.CONSENTS.DETAIL(id), isConsentDetail),
-    create: (input: ConsentCreateInput): Promise<GovernedResult<ConsentRecordDetail>> => postOne(ENDPOINTS.CONSENTS.CREATE, input, isConsentDetail),
+    create: (input: ConsentCreateInput): Promise<GovernedResult<ConsentRecordDetail>> => postIdempotentCreate(ENDPOINTS.CONSENTS.CREATE, input, isConsentDetail),
     revoke: (input: ConsentRevokeInput): Promise<GovernedResult<ConsentRecordDetail>> => postOne(ENDPOINTS.CONSENTS.REVOKE, input, isConsentDetail),
   },
-  providerEvents: {
-    ingest: (input: ProviderEventIngestInput): Promise<GovernedResult<AsyncJobSummary>> => postOne(ENDPOINTS.PROVIDER_EVENTS, input, isAsyncJob),
+  configuration: {
+    current: (): Promise<GovernedResult<EmailMarketingConfiguration>> => getOne(ENDPOINTS.CONFIGURATION.CURRENT, isEmailMarketingConfiguration),
+    update: (input: ConfigurationWriteInput): Promise<GovernedResult<EmailMarketingConfiguration>> => putOne(ENDPOINTS.CONFIGURATION.CURRENT, input, isEmailMarketingConfiguration),
+    preview: (input: ConfigurationPreviewInput): Promise<GovernedResult<EmailMarketingConfigurationPreview>> => postOne(ENDPOINTS.CONFIGURATION.PREVIEW, input, isEmailMarketingConfigurationPreview),
+    history: (): Promise<GovernedResult<readonly EmailMarketingConfigurationVersion[]>> => getOne(
+      ENDPOINTS.CONFIGURATION.HISTORY,
+      (value): value is readonly EmailMarketingConfigurationVersion[] => Array.isArray(value) && value.every(isEmailMarketingConfigurationVersion),
+    ),
+    rollback: (input: ConfigurationRollbackInput): Promise<GovernedResult<EmailMarketingConfiguration>> => postOne(ENDPOINTS.CONFIGURATION.ROLLBACK, input, isEmailMarketingConfiguration),
+    importDocument: (input: ConfigurationWriteInput): Promise<GovernedResult<EmailMarketingConfiguration>> => postOne(ENDPOINTS.CONFIGURATION.IMPORT, input, isEmailMarketingConfiguration),
+    exportDocument: (): Promise<GovernedResult<EmailMarketingConfiguration>> => getOne(ENDPOINTS.CONFIGURATION.EXPORT, isEmailMarketingConfiguration),
   },
   public: {
-    unsubscribe: (input: PublicUnsubscribeInput): Promise<GovernedResult<SuppressionEntryDetail>> => postOne(ENDPOINTS.PUBLIC_UNSUBSCRIBE, input, isSuppressionDetail),
+    unsubscribe: (input: PublicUnsubscribeInput): Promise<GovernedResult<PublicUnsubscribeResponse>> => postOne(ENDPOINTS.PUBLIC_UNSUBSCRIBE, input, isPublicUnsubscribeResponse),
     openUrl: (token: string): string => ENDPOINTS.TRACK_OPEN(token),
     clickUrl: (token: string): string => ENDPOINTS.TRACK_CLICK(token),
   },

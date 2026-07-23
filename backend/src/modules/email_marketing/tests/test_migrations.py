@@ -11,7 +11,7 @@ from django.db.migrations.executor import MigrationExecutor
 from django.utils import timezone
 
 INITIAL = ("email_marketing", "0001_initial")
-LATEST = ("email_marketing", "0005_register_email_marketing_contract")
+LATEST = ("email_marketing", "0007_tenant_configured_model_defaults")
 
 
 def _migrate(target: tuple[str, str]):
@@ -142,9 +142,12 @@ def test_legacy_data_survives_forward_reverse_and_forward_again() -> None:
         ForwardAgainCampaign = forward_again_apps.get_model("email_marketing", "EmailCampaign")
         assert ForwardAgainCampaign.objects.get(pk=completed_campaign_id).status == "sent"
         assert ForwardAgainCampaign.objects.get(pk=completed_campaign_id).template_id == same_template_id
-        assert forward_again_apps.get_model("core", "ModuleRegistryEntry").objects.filter(
-            name="email_marketing", version="2.0.0"
-        ).count() == 1
+        assert (
+            forward_again_apps.get_model("core", "ModuleRegistryEntry")
+            .objects.filter(name="email_marketing", version="2.0.0")
+            .count()
+            == 1
+        )
     finally:
         _migrate(LATEST)
 
@@ -168,9 +171,7 @@ class _RecordingSchemaEditor:
 
 
 def test_rls_and_composite_fk_paths_are_explicit_sqlite_noops() -> None:
-    migration = importlib.import_module(
-        "src.modules.email_marketing.migrations.0004_constraints_indexes_and_rls"
-    )
+    migration = importlib.import_module("src.modules.email_marketing.migrations.0004_constraints_indexes_and_rls")
     editor = _RecordingSchemaEditor("sqlite")
     migration.add_composite_foreign_keys(None, editor)
     migration.drop_composite_foreign_keys(None, editor)
@@ -180,9 +181,7 @@ def test_rls_and_composite_fk_paths_are_explicit_sqlite_noops() -> None:
 
 
 def test_rls_installs_all_tenant_tables_and_reverses_in_dependency_order() -> None:
-    migration = importlib.import_module(
-        "src.modules.email_marketing.migrations.0004_constraints_indexes_and_rls"
-    )
+    migration = importlib.import_module("src.modules.email_marketing.migrations.0004_constraints_indexes_and_rls")
     editor = _RecordingSchemaEditor("postgresql")
     migration.enable_rls(None, editor)
     assert len(editor.statements) == 7
@@ -200,9 +199,7 @@ def test_rls_installs_all_tenant_tables_and_reverses_in_dependency_order() -> No
 
 
 def test_postgresql_composite_foreign_keys_cover_every_relationship() -> None:
-    migration = importlib.import_module(
-        "src.modules.email_marketing.migrations.0004_constraints_indexes_and_rls"
-    )
+    migration = importlib.import_module("src.modules.email_marketing.migrations.0004_constraints_indexes_and_rls")
     editor = _RecordingSchemaEditor("postgresql")
     migration.add_composite_foreign_keys(None, editor)
     additions = [statement for statement in editor.statements if "FOREIGN KEY" in statement]
@@ -236,7 +233,10 @@ def test_postgresql_17_rls_blocks_cross_tenant_crud_for_non_bypass_role() -> Non
     with connection.cursor() as cursor:
         cursor.execute(f"CREATE ROLE {quoted_role} NOSUPERUSER NOBYPASSRLS NOLOGIN")
         try:
-            cursor.execute("SELECT set_config('app.tenant_id', %s, false)", [str(tenant_a)])
+            cursor.execute(
+                "SELECT set_config('app.tenant_id', %s, false)",
+                [str(tenant_a)],
+            )
             cursor.execute(
                 """
                 INSERT INTO email_templates
@@ -249,7 +249,10 @@ def test_postgresql_17_rls_blocks_cross_tenant_crud_for_non_bypass_role() -> Non
                 """,
                 [row_a, tenant_a, now, now],
             )
-            cursor.execute("SELECT set_config('app.tenant_id', %s, false)", [str(tenant_b)])
+            cursor.execute(
+                "SELECT set_config('app.tenant_id', %s, false)",
+                [str(tenant_b)],
+            )
             cursor.execute(
                 """
                 INSERT INTO email_templates
@@ -265,7 +268,10 @@ def test_postgresql_17_rls_blocks_cross_tenant_crud_for_non_bypass_role() -> Non
             cursor.execute(f"GRANT USAGE ON SCHEMA public TO {quoted_role}")
             cursor.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON email_templates TO {quoted_role}")
             cursor.execute(f"SET ROLE {quoted_role}")
-            cursor.execute("SELECT set_config('app.tenant_id', %s, false)", [str(tenant_a)])
+            cursor.execute(
+                "SELECT set_config('app.tenant_id', %s, false)",
+                [str(tenant_a)],
+            )
             cursor.execute("SELECT id FROM email_templates ORDER BY id")
             assert [row[0] for row in cursor.fetchall()] == [row_a]
 
@@ -282,7 +288,10 @@ def test_postgresql_17_rls_blocks_cross_tenant_crud_for_non_bypass_role() -> Non
                     """,
                     [uuid.uuid4(), tenant_b, now, now],
                 )
-            cursor.execute("UPDATE email_templates SET template_name = 'Changed' WHERE id = %s", [row_b])
+            cursor.execute(
+                "UPDATE email_templates SET template_name = 'Changed' WHERE id = %s",
+                [row_b],
+            )
             assert cursor.rowcount == 0
             cursor.execute("DELETE FROM email_templates WHERE id = %s", [row_b])
             assert cursor.rowcount == 0
