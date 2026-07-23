@@ -57,9 +57,7 @@ def _schema_check() -> tuple[bool, str]:
 
 def _rls_check() -> tuple[bool, str]:
     if connection.vendor != "postgresql":
-        # SQLite is test/development-only and has no RLS catalog. Production
-        # readiness still fails closed on PostgreSQL checks below.
-        return True, "not_applicable"
+        return False, "rls_unverifiable"
     try:
         with connection.cursor() as cursor:
             cursor.execute(

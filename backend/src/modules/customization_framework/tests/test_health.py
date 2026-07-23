@@ -65,6 +65,15 @@ def test_absent_or_invalid_rls_is_unavailable(monkeypatch: pytest.MonkeyPatch) -
     assert health._rls_check() == (False, "rls_missing")
 
 
+def test_non_postgresql_backend_cannot_claim_rls_readiness(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        health,
+        "connection",
+        SimpleNamespace(vendor="sqlite"),
+    )
+    assert health._rls_check() == (False, "rls_unverifiable")
+
+
 def test_valid_forced_rls_and_typed_policies_are_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     class CatalogCursor:
         call = 0

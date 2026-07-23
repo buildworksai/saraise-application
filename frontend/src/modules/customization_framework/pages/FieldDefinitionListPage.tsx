@@ -6,15 +6,18 @@ import { Input } from "@/components/ui/Input";
 import { ROUTES, type FieldDataType, type FieldOrdering, type FieldStatus } from "../contracts";
 import { customizationFrameworkService as service } from "../services/customization-framework-service";
 import { EmptyPanel, GovernedError, PageHeader, PageSkeleton, Pagination, StatusChip } from "../components/CustomizationUI";
+import { useRuntimeConfiguration } from "../components/useRuntimeConfiguration";
 
 export function FieldDefinitionListPage() {
   const navigate = useNavigate(); const [params, setParams] = useSearchParams();
   const page = Number(params.get("page") ?? "1"); const search = params.get("search") ?? "";
   const status = (params.get("status") ?? "") as FieldStatus | ""; const dataType = (params.get("data_type") ?? "") as FieldDataType | "";
-  const ordering = (params.get("ordering") ?? "-updated_at") as FieldOrdering;
-  const query = useQuery({ queryKey: ["customization", "fields", page, search, status, dataType, ordering], queryFn: () => service.listFields({ page, page_size: 25, search: search || undefined, status: status || undefined, data_type: dataType || undefined, ordering }) });
+  const configuration = useRuntimeConfiguration();
+  const ordering = (params.get("ordering") ?? configuration.data?.document.list_preferences.field_ordering ?? "") as FieldOrdering | "";
+  const pageSize = configuration.data?.document.list_preferences.page_size;
+  const query = useQuery({ queryKey: ["customization", "fields", page, search, status, dataType, ordering, pageSize], queryFn: () => service.listFields({ page, page_size: pageSize, search: search || undefined, status: status || undefined, data_type: dataType || undefined, ordering: ordering || undefined }), enabled: pageSize !== undefined && Boolean(ordering) });
   const update = (key: string, value: string) => { const next = new URLSearchParams(params); if (value) next.set(key, value); else next.delete(key); if (key !== "page") next.delete("page"); setParams(next); };
-  if (query.isLoading) return <PageSkeleton rows={7}/>; if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()}/>;
+  if (configuration.isLoading || query.isLoading) return <PageSkeleton rows={7}/>; if (configuration.error) return <GovernedError error={configuration.error} retry={() => void configuration.refetch()}/>; if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()}/>;
   const envelope = query.data; if (!envelope) return <GovernedError error={new Error("No governed field response was received.")} retry={() => void query.refetch()}/>;
   const filtered = Boolean(search || status || dataType);
   return <main className="space-y-6"><PageHeader title="Custom fields" description="Extend registered resources with tenant-owned, schema-validated fields—without executable code." actions={<Button onClick={() => navigate(ROUTES.FIELD_CREATE)}><Plus className="mr-2 h-4 w-4"/>Create field</Button>}/>

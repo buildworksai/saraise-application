@@ -94,6 +94,13 @@ class RuleExecutionStatus(models.TextChoices):
     FAILED = "failed", "Failed"
 
 
+class PublicationEventType(models.TextChoices):
+    """Append-only publication decisions for immutable snapshots."""
+
+    PUBLISHED = "published", "Published"
+    SUPERSEDED = "superseded", "Superseded"
+
+
 class SoftDeleteOnlyMixin:
     """Prevent application code from bypassing service-level soft deletion."""
 
@@ -108,8 +115,8 @@ class SoftDeleteOnlyMixin:
 class ImmutableVersionMixin:
     """Reject direct mutation/deletion of immutable version snapshots.
 
-    Publication services may atomically update lifecycle metadata with a
-    tenant-filtered queryset; persisted content is never rewritten.
+    Publication state is recorded in :class:`PublicationRecord`; a snapshot
+    row itself is never rewritten.
     """
 
     def save(self, *args: Any, **kwargs: Any) -> None:
@@ -126,25 +133,40 @@ class ImmutableVersionMixin:
 
     def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
         del args, kwargs
-        raise ValidationError(
-            "Version snapshots cannot be deleted.", code="immutable_version"
-        )
+        raise ValidationError("Version snapshots cannot be deleted.", code="immutable_version")
 
 
-class AppendOnlyExecutionQuerySet(TenantQuerySet):
-    """Block bulk mutation paths for execution evidence."""
+class AppendOnlyTenantQuerySet(TenantQuerySet):
+    """Block bulk mutation paths for tenant-owned immutable evidence."""
 
     def update(self, **kwargs: Any) -> int:
         del kwargs
-        raise ValidationError("Rule executions are append-only.", code="append_only")
+        raise ValidationError("Evidence records are append-only.", code="append_only")
 
     def delete(self) -> tuple[int, dict[str, int]]:
-        raise ValidationError("Rule executions are append-only.", code="append_only")
+        raise ValidationError("Evidence records are append-only.", code="append_only")
 
 
-class MutableCustomizationModel(
-    SoftDeleteOnlyMixin, TenantScopedModel, TimestampedModel
-):
+class AppendOnlyTenantRecord(TenantScopedModel):
+    """Defense-in-depth ORM guard shared by every immutable evidence table."""
+
+    objects = AppendOnlyTenantQuerySet.as_manager()
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("Evidence records are append-only.", code="append_only")
+        self.full_clean(validate_constraints=False)
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("Evidence records are append-only.", code="append_only")
+
+
+class MutableCustomizationModel(SoftDeleteOnlyMixin, TenantScopedModel, TimestampedModel):
     """Shared audit, lifecycle-history, and optimistic-lock columns."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -152,7 +174,6 @@ class MutableCustomizationModel(
     updated_by = models.UUIDField(editable=False)
     deleted_at = models.DateTimeField(null=True, blank=True, editable=False)
     deleted_by = models.UUIDField(null=True, blank=True, editable=False)
-    transition_history = models.JSONField(default=list, blank=True, editable=False)
     lock_version = models.PositiveIntegerField(default=1, editable=False)
 
     class Meta:
@@ -261,13 +282,47 @@ class CustomFieldDefinition(MutableCustomizationModel):
         return f"{self.owner_module}.{self.target_resource}.{self.key}"
 
 
+class CustomFieldDefinitionVersion(AppendOnlyTenantRecord):
+    """Immutable snapshot supporting field rollback to any prior version."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    definition = models.ForeignKey(CustomFieldDefinition, models.PROTECT, related_name="versions")
+    version = models.PositiveIntegerField(editable=False)
+    document = models.JSONField(editable=False)
+    content_hash = models.CharField(max_length=64, editable=False)
+    actor_id = models.UUIDField(editable=False)
+    correlation_id = models.UUIDField(editable=False)
+    created_at = models.DateTimeField(auto_now_add=True, editable=False)
+
+    class Meta:
+        db_table = "customization_field_definition_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "definition", "version"),
+                name="cust_fdver_tenant_def_ver_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "definition", "version"),
+                name="cust_fdver_def_ver_idx",
+            ),
+            models.Index(
+                fields=("tenant_id", "correlation_id"),
+                name="cust_fdver_corr_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_same_tenant(self, "definition")
+
+
 class CustomFieldValue(SoftDeleteOnlyMixin, TenantScopedModel, TimestampedModel):
     """One validated field value attached to a host record UUID."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    definition = models.ForeignKey(
-        CustomFieldDefinition, models.PROTECT, related_name="values"
-    )
+    definition = models.ForeignKey(CustomFieldDefinition, models.PROTECT, related_name="values")
     target_record_id = models.UUIDField()
     value = models.JSONField()
     definition_revision = models.PositiveIntegerField(editable=False)
@@ -322,9 +377,7 @@ class FormDefinition(MutableCustomizationModel):
         default=FormDefinitionStatus.DRAFT,
         editable=False,
     )
-    published_version = models.PositiveIntegerField(
-        null=True, blank=True, editable=False
-    )
+    published_version = models.PositiveIntegerField(null=True, blank=True, editable=False)
     published_at = models.DateTimeField(null=True, blank=True, editable=False)
     published_by = models.UUIDField(null=True, blank=True, editable=False)
     archived_at = models.DateTimeField(null=True, blank=True, editable=False)
@@ -369,9 +422,7 @@ class FormLayoutVersion(ImmutableVersionMixin, TenantScopedModel):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
-    form = models.ForeignKey(
-        FormDefinition, models.PROTECT, related_name="layout_versions"
-    )
+    form = models.ForeignKey(FormDefinition, models.PROTECT, related_name="layout_versions")
     version = models.PositiveIntegerField(editable=False)
     schema_version = models.PositiveSmallIntegerField(default=1, editable=False)
     layout = models.JSONField()
@@ -388,6 +439,8 @@ class FormLayoutVersion(ImmutableVersionMixin, TenantScopedModel):
     published_at = models.DateTimeField(null=True, blank=True, editable=False)
     published_by = models.UUIDField(null=True, blank=True, editable=False)
 
+    objects = AppendOnlyTenantQuerySet.as_manager()
+
     class Meta:
         db_table = "customization_form_layout_versions"
         constraints = [
@@ -398,11 +451,6 @@ class FormLayoutVersion(ImmutableVersionMixin, TenantScopedModel):
             models.UniqueConstraint(
                 fields=("tenant_id", "form", "content_hash"),
                 name="cust_layout_tenant_form_hash_uniq",
-            ),
-            models.UniqueConstraint(
-                fields=("tenant_id", "form"),
-                condition=models.Q(status=FormLayoutVersionStatus.PUBLISHED),
-                name="cust_layout_one_published_uniq",
             ),
         ]
         indexes = [
@@ -435,9 +483,7 @@ class BusinessRule(MutableCustomizationModel):
         default=BusinessRuleStatus.DRAFT,
         editable=False,
     )
-    published_version = models.PositiveIntegerField(
-        null=True, blank=True, editable=False
-    )
+    published_version = models.PositiveIntegerField(null=True, blank=True, editable=False)
     published_at = models.DateTimeField(null=True, blank=True, editable=False)
     published_by = models.UUIDField(null=True, blank=True, editable=False)
 
@@ -512,6 +558,8 @@ class BusinessRuleVersion(ImmutableVersionMixin, TenantScopedModel):
     published_at = models.DateTimeField(null=True, blank=True, editable=False)
     published_by = models.UUIDField(null=True, blank=True, editable=False)
 
+    objects = AppendOnlyTenantQuerySet.as_manager()
+
     class Meta:
         db_table = "customization_business_rule_versions"
         constraints = [
@@ -522,11 +570,6 @@ class BusinessRuleVersion(ImmutableVersionMixin, TenantScopedModel):
             models.UniqueConstraint(
                 fields=("tenant_id", "rule", "content_hash"),
                 name="cust_rulever_tenant_rule_hash_uniq",
-            ),
-            models.UniqueConstraint(
-                fields=("tenant_id", "rule"),
-                condition=models.Q(status=BusinessRuleVersionStatus.PUBLISHED),
-                name="cust_rulever_one_published_uniq",
             ),
         ]
         indexes = [
@@ -541,14 +584,12 @@ class BusinessRuleVersion(ImmutableVersionMixin, TenantScopedModel):
         _require_same_tenant(self, "rule")
 
 
-class RuleExecution(TenantScopedModel):
+class RuleExecution(AppendOnlyTenantRecord):
     """Append-only, redacted evidence for one published rule evaluation."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     rule = models.ForeignKey(BusinessRule, models.PROTECT, related_name="executions")
-    rule_version = models.ForeignKey(
-        BusinessRuleVersion, models.PROTECT, related_name="executions"
-    )
+    rule_version = models.ForeignKey(BusinessRuleVersion, models.PROTECT, related_name="executions")
     target_record_id = models.UUIDField(null=True, blank=True)
     trigger = models.CharField(max_length=20, choices=BusinessRuleTrigger.choices)
     idempotency_key = models.CharField(max_length=128)
@@ -560,8 +601,6 @@ class RuleExecution(TenantScopedModel):
     correlation_id = models.UUIDField()
     executed_by = models.UUIDField()
     executed_at = models.DateTimeField(auto_now_add=True)
-
-    objects = AppendOnlyExecutionQuerySet.as_manager()
 
     class Meta:
         db_table = "customization_rule_executions"
@@ -599,32 +638,252 @@ class RuleExecution(TenantScopedModel):
             )
             if version_rule_id is not None and version_rule_id != self.rule_id:
                 raise ValidationError(
-                    {
-                        "rule_version": "The rule version must belong to the execution rule."
-                    },
+                    {"rule_version": "The rule version must belong to the execution rule."},
                     code="rule_version_mismatch",
                 )
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        if not self._state.adding:
-            raise ValidationError(
-                "Rule executions are append-only.", code="append_only"
-            )
+        super().save(*args, **kwargs)
+
+
+class RuntimeConfiguration(TenantScopedModel, TimestampedModel):
+    """Current validated configuration document for one tenant."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tenant_id = models.UUIDField(unique=True, db_index=True)
+    document = models.JSONField()
+    version = models.PositiveIntegerField(editable=False)
+    environment = models.CharField(max_length=32)
+    updated_by = models.UUIDField(editable=False)
+
+    class Meta:
+        db_table = "customization_runtime_configurations"
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "environment"),
+                name="cust_runtime_tenant_env_idx",
+            ),
+        ]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
         self.full_clean(validate_constraints=False)
         super().save(*args, **kwargs)
 
-    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
-        del args, kwargs
-        raise ValidationError("Rule executions are append-only.", code="append_only")
+
+class RuntimeConfigurationVersion(AppendOnlyTenantRecord):
+    """Immutable, actor-attributed runtime configuration snapshot."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    configuration = models.ForeignKey(RuntimeConfiguration, models.PROTECT, related_name="versions")
+    version = models.PositiveIntegerField(editable=False)
+    document = models.JSONField(editable=False)
+    environment = models.CharField(max_length=32, editable=False)
+    actor_id = models.UUIDField(editable=False)
+    correlation_id = models.UUIDField(editable=False)
+    created_at = models.DateTimeField(auto_now_add=True, editable=False)
+
+    class Meta:
+        db_table = "customization_runtime_configuration_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "configuration", "version"),
+                name="cust_runtime_ver_tenant_cfg_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "configuration", "version"),
+                name="cust_runtime_ver_cfg_idx",
+            ),
+            models.Index(
+                fields=("tenant_id", "correlation_id"),
+                name="cust_runtime_ver_corr_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_same_tenant(self, "configuration")
+
+
+class ConfigurationAuditRecord(AppendOnlyTenantRecord):
+    """Immutable before/after evidence for a runtime configuration command."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    configuration = models.ForeignKey(RuntimeConfiguration, models.PROTECT, related_name="audit_records")
+    version = models.PositiveIntegerField(editable=False)
+    action = models.CharField(max_length=32, editable=False)
+    before = models.JSONField(null=True, blank=True, editable=False)
+    after = models.JSONField(editable=False)
+    actor_id = models.UUIDField(editable=False)
+    correlation_id = models.UUIDField(editable=False)
+    created_at = models.DateTimeField(auto_now_add=True, editable=False)
+
+    class Meta:
+        db_table = "customization_configuration_audit_records"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "configuration", "version"),
+                name="cust_cfg_audit_tenant_ver_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "configuration", "version"),
+                name="cust_cfg_audit_cfg_ver_idx",
+            ),
+            models.Index(
+                fields=("tenant_id", "correlation_id"),
+                name="cust_cfg_audit_corr_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_same_tenant(self, "configuration")
+
+
+class IdempotentCommand(AppendOnlyTenantRecord):
+    """Persisted mutation result used to replay safe tenant-scoped retries."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    idempotency_key = models.CharField(max_length=128, editable=False)
+    command_type = models.CharField(max_length=96, editable=False)
+    request_fingerprint = models.CharField(max_length=64, editable=False)
+    response_payload = models.JSONField(editable=False)
+    response_status = models.PositiveSmallIntegerField(editable=False)
+    resource_type = models.CharField(max_length=64, editable=False)
+    resource_id = models.UUIDField(null=True, blank=True, editable=False)
+    actor_id = models.UUIDField(editable=False)
+    correlation_id = models.UUIDField(editable=False)
+    created_at = models.DateTimeField(auto_now_add=True, editable=False)
+
+    class Meta:
+        db_table = "customization_idempotent_commands"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "idempotency_key"),
+                name="cust_idem_tenant_key_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "command_type", "created_at"),
+                name="cust_idem_command_time_idx",
+            ),
+            models.Index(
+                fields=("tenant_id", "correlation_id"),
+                name="cust_idem_corr_idx",
+            ),
+        ]
+
+
+class LifecycleTransitionRecord(AppendOnlyTenantRecord):
+    """Append-only replacement for mutable aggregate transition history."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    aggregate_type = models.CharField(max_length=64, editable=False)
+    aggregate_id = models.UUIDField(editable=False)
+    version = models.PositiveIntegerField(editable=False)
+    transition_key = models.CharField(max_length=128, editable=False)
+    command = models.CharField(max_length=64, editable=False)
+    from_state = models.CharField(max_length=32, null=True, blank=True, editable=False)
+    to_state = models.CharField(max_length=32, editable=False)
+    metadata = models.JSONField(default=dict, blank=True, editable=False)
+    actor_id = models.UUIDField(editable=False)
+    correlation_id = models.UUIDField(editable=False)
+    occurred_at = models.DateTimeField(editable=False)
+
+    class Meta:
+        db_table = "customization_lifecycle_transition_records"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "aggregate_type", "aggregate_id", "version"),
+                name="cust_lifecycle_aggregate_ver_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=(
+                    "tenant_id",
+                    "aggregate_type",
+                    "aggregate_id",
+                    "transition_key",
+                ),
+                name="cust_lifecycle_transition_key_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "aggregate_type", "aggregate_id", "version"),
+                name="cust_lifecycle_aggregate_idx",
+            ),
+            models.Index(
+                fields=("tenant_id", "correlation_id"),
+                name="cust_lifecycle_corr_idx",
+            ),
+        ]
+
+
+class PublicationRecord(AppendOnlyTenantRecord):
+    """Immutable publication/supersession decision for a snapshot."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    aggregate_type = models.CharField(max_length=64, editable=False)
+    aggregate_id = models.UUIDField(editable=False)
+    snapshot_id = models.UUIDField(editable=False)
+    version = models.PositiveIntegerField(editable=False)
+    event_type = models.CharField(max_length=16, choices=PublicationEventType.choices, editable=False)
+    publication_key = models.CharField(max_length=128, editable=False)
+    supersedes_snapshot_id = models.UUIDField(null=True, blank=True, editable=False)
+    actor_id = models.UUIDField(editable=False)
+    correlation_id = models.UUIDField(editable=False)
+    occurred_at = models.DateTimeField(editable=False)
+
+    class Meta:
+        db_table = "customization_publication_records"
+        constraints = [
+            models.UniqueConstraint(
+                fields=(
+                    "tenant_id",
+                    "aggregate_type",
+                    "aggregate_id",
+                    "publication_key",
+                    "event_type",
+                ),
+                name="cust_publication_key_event_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=(
+                    "tenant_id",
+                    "aggregate_type",
+                    "aggregate_id",
+                    "occurred_at",
+                ),
+                name="cust_publication_aggregate_idx",
+            ),
+            models.Index(
+                fields=("tenant_id", "snapshot_id"),
+                name="cust_publication_snapshot_idx",
+            ),
+            models.Index(
+                fields=("tenant_id", "correlation_id"),
+                name="cust_publication_corr_idx",
+            ),
+        ]
 
 
 __all__ = [
+    "AppendOnlyTenantQuerySet",
+    "AppendOnlyTenantRecord",
     "BusinessRule",
     "BusinessRuleStatus",
     "BusinessRuleTrigger",
     "BusinessRuleVersion",
     "BusinessRuleVersionStatus",
+    "ConfigurationAuditRecord",
     "CustomFieldDefinition",
+    "CustomFieldDefinitionVersion",
     "CustomFieldValue",
     "FieldDataType",
     "FieldDefinitionStatus",
@@ -633,7 +892,13 @@ __all__ = [
     "FormDefinitionStatus",
     "FormLayoutVersion",
     "FormLayoutVersionStatus",
+    "IdempotentCommand",
+    "LifecycleTransitionRecord",
+    "PublicationEventType",
+    "PublicationRecord",
     "RuleExecution",
     "RuleExecutionStatus",
+    "RuntimeConfiguration",
+    "RuntimeConfigurationVersion",
     "generate_uuid",
 ]

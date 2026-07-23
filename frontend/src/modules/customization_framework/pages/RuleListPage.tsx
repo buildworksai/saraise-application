@@ -1,3 +1,48 @@
-/* eslint-disable @typescript-eslint/no-unused-expressions -- compact URL state setter uses a conditional mutation. */
-import { useQuery } from "@tanstack/react-query"; import { Plus,Search } from "lucide-react"; import { useNavigate,useSearchParams } from "react-router-dom"; import { Button } from "@/components/ui/Button"; import { Input } from "@/components/ui/Input"; import { EmptyPanel,GovernedError,PageHeader,PageSkeleton,Pagination,StatusChip } from "../components/CustomizationUI"; import { ROUTES,type RuleOrdering,type RuleStatus,type RuleTrigger } from "../contracts"; import { customizationFrameworkService as service } from "../services/customization-framework-service";
-export function RuleListPage(){const navigate=useNavigate();const[params,setParams]=useSearchParams();const search=params.get("search")??"";const status=(params.get("status")??"") as RuleStatus|"";const trigger=(params.get("trigger")??"") as RuleTrigger|"";const ordering=(params.get("ordering")??"priority") as RuleOrdering;const page=Number(params.get("page")??"1");const update=(key:string,value:string)=>{const next=new URLSearchParams(params);value?next.set(key,value):next.delete(key);if(key!=="page")next.delete("page");setParams(next)};const query=useQuery({queryKey:["customization","rules",search,status,trigger,ordering,page],queryFn:()=>service.listRules({search:search||undefined,status:status||undefined,trigger:trigger||undefined,ordering,page,page_size:25})});if(query.isLoading)return <PageSkeleton/>;if(query.error)return <GovernedError error={query.error} retry={()=>void query.refetch()}/>;if(!query.data)return <GovernedError error={new Error("No governed rule response was received.")}/>;const filtered=Boolean(search||status||trigger);return <main className="space-y-6"><PageHeader title="Business rules" description="Build bounded, deterministic validation and presentation rules—never tenant-authored code." actions={<Button onClick={()=>navigate(ROUTES.RULE_CREATE)}><Plus className="mr-2 h-4 w-4"/>Create rule</Button>}/><section aria-label="Rule filters" className="grid gap-3 rounded-xl border bg-card p-4 md:grid-cols-[1fr_170px_190px_190px]"><div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground"/><Input aria-label="Search rules" className="pl-9" value={search} onChange={event=>update("search",event.target.value)} placeholder="Search key, name, description"/></div><select aria-label="Filter rule status" className="rounded-md border bg-background px-3" value={status} onChange={event=>update("status",event.target.value)}><option value="">All statuses</option>{["draft","published","paused","retired"].map(item=><option key={item}>{item}</option>)}</select><select aria-label="Filter rule trigger" className="rounded-md border bg-background px-3" value={trigger} onChange={event=>update("trigger",event.target.value)}><option value="">All triggers</option>{["validate","before_create","before_update","form_change"].map(item=><option key={item}>{item}</option>)}</select><select aria-label="Order rules" className="rounded-md border bg-background px-3" value={ordering} onChange={event=>update("ordering",event.target.value)}><option value="priority">Priority ascending</option><option value="-updated_at">Recently updated</option><option value="key">Key A–Z</option></select></section>{query.data.data.length===0?<EmptyPanel filtered={filtered} noun="rules" create={()=>navigate(ROUTES.RULE_CREATE)}/>:<section className="overflow-hidden rounded-xl border bg-card"><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-4 py-3">Rule</th><th className="px-4 py-3">Target</th><th className="px-4 py-3">Trigger</th><th className="px-4 py-3">Priority</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Diagnostics</th></tr></thead><tbody className="divide-y">{query.data.data.map(rule=><tr key={rule.id}><td className="px-4 py-4"><button className="font-medium text-primary hover:underline" onClick={()=>navigate(ROUTES.RULE_DETAIL(rule.id))}>{rule.name}</button><p className="font-mono text-xs text-muted-foreground">{rule.key}</p></td><td className="px-4 py-4">{rule.owner_module} · {rule.target_resource}</td><td className="px-4 py-4">{rule.trigger.replaceAll("_"," ")}</td><td className="px-4 py-4">{rule.priority}</td><td className="px-4 py-4"><StatusChip status={rule.status}/></td><td className="px-4 py-4">{rule.diagnostic_count}</td></tr>)}</tbody></table></div><Pagination meta={query.data.meta.pagination} onPage={next=>update("page",String(next))}/></section>}</main>}
+import { useQuery } from "@tanstack/react-query";
+import { Plus, Search } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { EmptyPanel, GovernedError, PageHeader, PageSkeleton, Pagination, StatusChip } from "../components/CustomizationUI";
+import { useRuntimeConfiguration } from "../components/useRuntimeConfiguration";
+import { ROUTES, type RuleOrdering, type RuleStatus, type RuleTrigger } from "../contracts";
+import { customizationFrameworkService as service } from "../services/customization-framework-service";
+
+export function RuleListPage() {
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const configuration = useRuntimeConfiguration();
+  const search = params.get("search") ?? "";
+  const status = (params.get("status") ?? "") as RuleStatus | "";
+  const trigger = (params.get("trigger") ?? "") as RuleTrigger | "";
+  const ordering = (params.get("ordering") ?? configuration.data?.document.list_preferences.rule_ordering ?? "") as RuleOrdering | "";
+  const page = Number(params.get("page") ?? "1");
+  const pageSize = configuration.data?.document.list_preferences.page_size;
+  const update = (key: string, value: string) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value); else next.delete(key);
+    if (key !== "page") next.delete("page");
+    setParams(next);
+  };
+  const query = useQuery({
+    queryKey: ["customization", "rules", search, status, trigger, ordering, page, pageSize],
+    queryFn: () => service.listRules({ search: search || undefined, status: status || undefined, trigger: trigger || undefined, ordering: ordering || undefined, page, page_size: pageSize }),
+    enabled: pageSize !== undefined && Boolean(ordering),
+  });
+  if (configuration.isLoading || query.isLoading) return <PageSkeleton/>;
+  if (configuration.error) return <GovernedError error={configuration.error} retry={() => void configuration.refetch()}/>;
+  if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()}/>;
+  if (!query.data || !configuration.data) return <GovernedError error={new Error("No governed rule response was received.")}/>;
+  const filtered = Boolean(search || status || trigger);
+  const runtime = configuration.data.document;
+  return <main className="space-y-6">
+    <PageHeader title="Business rules" description="Build bounded, deterministic validation and presentation rules—never tenant-authored code." actions={<Button onClick={() => navigate(ROUTES.RULE_CREATE)}><Plus className="mr-2 h-4 w-4"/>Create rule</Button>}/>
+    <section aria-label="Rule filters" className="grid gap-3 rounded-xl border bg-card p-4 md:grid-cols-[1fr_170px_190px_190px]">
+      <div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground"/><Input aria-label="Search rules" className="pl-9" value={search} onChange={event => update("search", event.target.value)} placeholder="Search key, name, description"/></div>
+      <select aria-label="Filter rule status" className="rounded-md border bg-background px-3" value={status} onChange={event => update("status", event.target.value)}><option value="">All statuses</option>{["draft", "published", "paused", "retired"].map(item => <option key={item}>{item}</option>)}</select>
+      <select aria-label="Filter rule trigger" className="rounded-md border bg-background px-3" value={trigger} onChange={event => update("trigger", event.target.value)}><option value="">All triggers</option>{runtime.policies.rule_triggers.map(item => <option key={item}>{item}</option>)}</select>
+      <select aria-label="Order rules" className="rounded-md border bg-background px-3" value={ordering} onChange={event => update("ordering", event.target.value)}><option value="priority">Priority ascending</option><option value="-updated_at">Recently updated</option><option value="key">Key A–Z</option></select>
+    </section>
+    {query.data.data.length === 0 ? <EmptyPanel filtered={filtered} noun="rules" create={() => navigate(ROUTES.RULE_CREATE)}/> : <section className="overflow-hidden rounded-xl border bg-card"><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground"><tr><th className="px-4 py-3">Rule</th><th className="px-4 py-3">Target</th><th className="px-4 py-3">Trigger</th><th className="px-4 py-3">Priority</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Diagnostics</th></tr></thead><tbody className="divide-y">{query.data.data.map(rule => <tr key={rule.id}><td className="px-4 py-4"><button className="font-medium text-primary hover:underline" onClick={() => navigate(ROUTES.RULE_DETAIL(rule.id))}>{rule.name}</button><p className="font-mono text-xs text-muted-foreground">{rule.key}</p></td><td className="px-4 py-4">{rule.owner_module} · {rule.target_resource}</td><td className="px-4 py-4">{rule.trigger.replaceAll("_", " ")}</td><td className="px-4 py-4">{rule.priority}</td><td className="px-4 py-4"><StatusChip status={rule.status}/></td><td className="px-4 py-4">{rule.diagnostic_count}</td></tr>)}</tbody></table></div><Pagination meta={query.data.meta.pagination} onPage={next => update("page", String(next))}/></section>}
+  </main>;
+}

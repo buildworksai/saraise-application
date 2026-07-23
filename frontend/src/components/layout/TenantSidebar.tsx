@@ -37,6 +37,7 @@ import { useTraceabilityCapabilities } from "@/modules/blockchain_traceability/h
 import { QUERY_KEYS, type ApiManagementConfigurationSchema } from "@/modules/api_management/contracts";
 import { api_managementService } from "@/modules/api_management/services/api_management-service";
 import { ROUTES as REGIONAL_ROUTES } from "@/modules/regional/contracts";
+import { useRuntimeConfiguration } from "@/modules/customization_framework/components/useRuntimeConfiguration";
 import type { User } from "@/stores/auth-store";
 
 interface NavItem {
@@ -196,6 +197,38 @@ function applyApiManagementNavigationOrder(
   });
 }
 
+function applyCustomizationNavigationOrder(
+  items: readonly NavItem[],
+  order: {
+    readonly fields_order: number;
+    readonly field_values_order: number;
+    readonly forms_order: number;
+    readonly rules_order: number;
+    readonly executions_order: number;
+    readonly configuration_order: number;
+  } | undefined,
+): NavItem[] {
+  const configured = new Map<string, number>(order ? [
+    ["fields", order.fields_order],
+    ["field-values", order.field_values_order],
+    ["forms", order.forms_order],
+    ["rules", order.rules_order],
+    ["executions", order.executions_order],
+    ["configuration", order.configuration_order],
+  ] : []);
+  return items.map((item) => {
+    if (item.module !== "customization_framework" || !item.children || !order) return item;
+    return {
+      ...item,
+      children: [...item.children].sort((left, right) => {
+        const leftSection = left.routeId?.split(".")[1] ?? "";
+        const rightSection = right.routeId?.split(".")[1] ?? "";
+        return (configured.get(leftSection) ?? Number.MAX_SAFE_INTEGER) - (configured.get(rightSection) ?? Number.MAX_SAFE_INTEGER) || left.label.localeCompare(right.label);
+      }),
+    };
+  });
+}
+
 const NavGroup = ({ item, user }: { item: NavItem; user: User }) => {
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(() => {
@@ -271,15 +304,22 @@ const NavItem = ({ item }: { item: NavItem }) => {
 export const TenantSidebar = ({ user }: { user: User }) => {
   const isAdmin = user.tenant_role === "tenant_admin";
   const documentIntelligenceConfiguration = useDocumentIntelligenceConfiguration();
+  const customizationConfiguration = useRuntimeConfiguration();
   const traceabilityCapabilities = useTraceabilityCapabilities();
   const apiManagementSchema = useQuery({
     queryKey: QUERY_KEYS.CONFIGURATION_SCHEMA(),
     queryFn: () => api_managementService.getConfigurationSchema(),
   });
-  const runtimeRegistryItems = applyApiManagementNavigationOrder(applyRuntimeNavigationOrder(
-    registryTenantItems,
-    documentIntelligenceConfiguration.data?.document.ui.navigation_order,
-  ), apiManagementSchema.data);
+  const runtimeRegistryItems = applyCustomizationNavigationOrder(
+    applyApiManagementNavigationOrder(
+      applyRuntimeNavigationOrder(
+        registryTenantItems,
+        documentIntelligenceConfiguration.data?.document.ui.navigation_order,
+      ),
+      apiManagementSchema.data,
+    ),
+    customizationConfiguration.data?.document.navigation,
+  );
   const renderedTenantItems = [...tenantItems, ...runtimeRegistryItems]
     .filter((item) => !item.adminOnly || isAdmin)
     .map((item) => ({
