@@ -1,6 +1,3 @@
-"""
-Purchase Management Module.
+"""Open-source procure-to-receipt domain and paid-extension boundary."""
 
-Comprehensive procure-to-pay workflow from purchase requisitions to supplier invoices,
-payments, and supplier performance analytics.
-"""
+default_app_config = "src.modules.purchase_management.apps.PurchaseManagementConfig"

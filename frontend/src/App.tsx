@@ -263,23 +263,6 @@ const CreateSalesCustomerPage = lazy(() =>
   }))
 );
 
-// Purchase Management
-const PurchaseSupplierListPage = lazy(() =>
-  import("./modules/purchase_management/pages/SupplierListPage").then((m) => ({
-    default: m.SupplierListPage,
-  }))
-);
-const PurchaseSupplierDetailPage = lazy(() =>
-  import("./modules/purchase_management/pages/SupplierDetailPage").then((m) => ({
-    default: m.SupplierDetailPage,
-  }))
-);
-const CreatePurchaseSupplierPage = lazy(() =>
-  import("./modules/purchase_management/pages/CreateSupplierPage").then((m) => ({
-    default: m.CreateSupplierPage,
-  }))
-);
-
 // Inventory Management
 const InventoryWarehouseListPage = lazy(() =>
   import("./modules/inventory_management/pages/WarehouseListPage").then((m) => ({
@@ -759,38 +742,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <SalesCustomerDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Purchase Management */}
-          <Route
-            path="/purchase-management/suppliers"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <PurchaseSupplierListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/purchase-management/suppliers/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreatePurchaseSupplierPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/purchase-management/suppliers/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <PurchaseSupplierDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }

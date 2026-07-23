@@ -3,10 +3,11 @@ Service tests for Purchase Management module.
 """
 
 import uuid
-import pytest
 from datetime import date
 
-from src.modules.purchase_management.models import PurchaseOrder, Supplier
+import pytest
+
+from src.modules.purchase_management.models import Supplier
 from src.modules.purchase_management.services import PurchaseOrderService, SupplierService
 
 
