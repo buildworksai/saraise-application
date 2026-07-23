@@ -336,7 +336,7 @@ export const TenantSidebar = ({ user }: { user: User }) => {
                 ...child,
                 order: integrationPlatformConfiguration.data!.document.navigation.route_order[child.routeId ?? ""] ?? child.order,
               }))
-              .sort((left, right) => left.order - right.order),
+              .sort((left, right) => (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER)),
           }
       : item)
     .sort((left, right) => (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER));
