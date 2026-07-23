@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
 from typing import Any
 
 from rest_framework import serializers
 
-from .models import Asset, AssetCategory, DepreciationEntry, DepreciationMethod
+from .models import (
+    Asset,
+    AssetCategory,
+    AssetManagementConfiguration,
+    AssetManagementConfigurationAudit,
+    AssetManagementConfigurationVersion,
+    DepreciationEntry,
+    DepreciationMethod,
+)
+from .services import DECIMAL_LIMITS, INTEGER_LIMITS
 
 SERVER_OWNED_FIELDS = frozenset(
-    {"id", "tenant_id", "current_value", "created_at", "updated_at", "deleted_at", "is_deleted"}
+    {"id", "tenant_id", "current_value", "created_at", "updated_at", "deleted_at", "is_deleted", "is_active"}
 )
 
 
@@ -30,7 +38,6 @@ class StrictInputFieldsMixin:
 
 ASSET_READ_FIELDS = (
     "id",
-    "tenant_id",
     "asset_code",
     "asset_name",
     "category",
@@ -60,79 +67,29 @@ class AssetDetailSerializer(AssetListSerializer):
 
 
 class AssetWriteSerializer(StrictInputFieldsMixin, serializers.Serializer):
-    asset_code = serializers.CharField(max_length=50)
-    asset_name = serializers.CharField(max_length=255)
-    category = serializers.ChoiceField(choices=AssetCategory.choices, default=AssetCategory.FIXED)
+    asset_code = serializers.CharField()
+    asset_name = serializers.CharField()
+    category = serializers.ChoiceField(choices=AssetCategory.choices, required=False)
     purchase_date = serializers.DateField()
-    purchase_cost = serializers.DecimalField(max_digits=15, decimal_places=2, min_value=Decimal("0.01"))
-    residual_value = serializers.DecimalField(
-        max_digits=15,
-        decimal_places=2,
-        min_value=Decimal("0.00"),
-        default=Decimal("0.00"),
-    )
-    depreciation_method = serializers.ChoiceField(
-        choices=DepreciationMethod.choices,
-        default=DepreciationMethod.NONE,
-    )
-    useful_life_years = serializers.IntegerField(min_value=1, max_value=100, allow_null=True, required=False)
-    declining_balance_rate = serializers.DecimalField(
-        max_digits=7,
-        decimal_places=4,
-        min_value=Decimal("0.0001"),
-        max_value=Decimal("100.0000"),
-        allow_null=True,
-        required=False,
-    )
-    location = serializers.CharField(max_length=255, allow_blank=True, required=False, default="")
-    is_active = serializers.BooleanField(required=False, default=True)
-
-    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        attrs = super().validate(attrs)
-        method = attrs.get("depreciation_method")
-        category = attrs.get("category")
-        if method != DepreciationMethod.NONE and not attrs.get("useful_life_years"):
-            raise serializers.ValidationError({"useful_life_years": "This field is required for depreciation."})
-        if method != DepreciationMethod.DECLINING_BALANCE and attrs.get("declining_balance_rate") is not None:
-            raise serializers.ValidationError(
-                {"declining_balance_rate": "This field is only valid for declining balance."}
-            )
-        if category == AssetCategory.CURRENT and method != DepreciationMethod.NONE:
-            raise serializers.ValidationError({"depreciation_method": "Current assets are not depreciated."})
-        if attrs["residual_value"] > attrs["purchase_cost"]:
-            raise serializers.ValidationError({"residual_value": "Cannot exceed purchase cost."})
-        return attrs
+    purchase_cost = serializers.CharField()
+    residual_value = serializers.CharField(required=False)
+    depreciation_method = serializers.ChoiceField(choices=DepreciationMethod.choices, required=False)
+    useful_life_years = serializers.IntegerField(allow_null=True, required=False)
+    declining_balance_rate = serializers.CharField(allow_null=True, required=False)
+    location = serializers.CharField(allow_blank=True, required=False)
 
 
 class AssetUpdateSerializer(StrictInputFieldsMixin, serializers.Serializer):
-    asset_code = serializers.CharField(max_length=50, required=False)
-    asset_name = serializers.CharField(max_length=255, required=False)
+    asset_code = serializers.CharField(required=False)
+    asset_name = serializers.CharField(required=False)
     category = serializers.ChoiceField(choices=AssetCategory.choices, required=False)
     purchase_date = serializers.DateField(required=False)
-    purchase_cost = serializers.DecimalField(
-        max_digits=15,
-        decimal_places=2,
-        min_value=Decimal("0.01"),
-        required=False,
-    )
-    residual_value = serializers.DecimalField(
-        max_digits=15,
-        decimal_places=2,
-        min_value=Decimal("0.00"),
-        required=False,
-    )
+    purchase_cost = serializers.CharField(required=False)
+    residual_value = serializers.CharField(required=False)
     depreciation_method = serializers.ChoiceField(choices=DepreciationMethod.choices, required=False)
-    useful_life_years = serializers.IntegerField(min_value=1, max_value=100, allow_null=True, required=False)
-    declining_balance_rate = serializers.DecimalField(
-        max_digits=7,
-        decimal_places=4,
-        min_value=Decimal("0.0001"),
-        max_value=Decimal("100.0000"),
-        allow_null=True,
-        required=False,
-    )
-    location = serializers.CharField(max_length=255, allow_blank=True, required=False)
-    is_active = serializers.BooleanField(required=False)
+    useful_life_years = serializers.IntegerField(allow_null=True, required=False)
+    declining_balance_rate = serializers.CharField(allow_null=True, required=False)
+    location = serializers.CharField(allow_blank=True, required=False)
 
 
 class DepreciationCalculationSerializer(StrictInputFieldsMixin, serializers.Serializer):
@@ -147,7 +104,6 @@ class DepreciationEntrySerializer(serializers.ModelSerializer):
         model = DepreciationEntry
         fields = (
             "id",
-            "tenant_id",
             "asset",
             "asset_code",
             "asset_name",
@@ -160,6 +116,45 @@ class DepreciationEntrySerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class AssetConfigurationSerializer(serializers.ModelSerializer):
+    limits = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AssetManagementConfiguration
+        fields = ("id", "version", "document", "limits", "updated_at")
+        read_only_fields = fields
+
+    def get_limits(self, instance: AssetManagementConfiguration) -> dict[str, tuple[object, object]]:
+        del instance
+        return {**INTEGER_LIMITS, **DECIMAL_LIMITS}
+
+
+class AssetConfigurationVersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AssetManagementConfigurationVersion
+        fields = ("id", "version", "document", "source", "correlation_id", "created_at")
+        read_only_fields = fields
+
+
+class AssetConfigurationAuditSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AssetManagementConfigurationAudit
+        fields = ("id", "version", "action", "previous_document", "current_document", "correlation_id", "created_at")
+        read_only_fields = fields
+
+
+class ConfigurationDocumentSerializer(StrictInputFieldsMixin, serializers.Serializer):
+    document = serializers.JSONField()
+
+
+class ConfigurationImportSerializer(StrictInputFieldsMixin, serializers.Serializer):
+    configuration = serializers.JSONField()
+
+
+class ConfigurationRollbackSerializer(StrictInputFieldsMixin, serializers.Serializer):
+    version = serializers.IntegerField(min_value=1)
+
+
 # Backward-compatible public import used by existing module consumers.
 AssetSerializer = AssetDetailSerializer
 
@@ -170,6 +165,12 @@ __all__ = [
     "AssetSerializer",
     "AssetUpdateSerializer",
     "AssetWriteSerializer",
+    "AssetConfigurationAuditSerializer",
+    "AssetConfigurationSerializer",
+    "AssetConfigurationVersionSerializer",
+    "ConfigurationDocumentSerializer",
+    "ConfigurationImportSerializer",
+    "ConfigurationRollbackSerializer",
     "DepreciationCalculationSerializer",
     "DepreciationEntrySerializer",
 ]

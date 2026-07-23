@@ -21,7 +21,6 @@ vi.mock('@/services/api-client', () => ({
 
 const asset: Asset = {
   id: '00000000-0000-4000-8000-000000000001',
-  tenant_id: '00000000-0000-4000-8000-000000000010',
   asset_code: 'LAP-001',
   asset_name: 'Design laptop',
   category: 'fixed',
@@ -40,7 +39,6 @@ const asset: Asset = {
 
 const entry: DepreciationEntry = {
   id: '00000000-0000-4000-8000-000000000002',
-  tenant_id: asset.tenant_id,
   asset: asset.id,
   asset_code: asset.asset_code,
   asset_name: asset.asset_name,

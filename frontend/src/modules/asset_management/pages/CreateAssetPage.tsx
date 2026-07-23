@@ -1,16 +1,20 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/auth-store';
 import { ROUTES, type AssetCreate } from '../contracts';
 import { AssetForm } from '../components/AssetForm';
-import { PageHeader } from '../components/AssetManagementUI';
+import { PageHeader, PageSkeleton, ProblemState } from '../components/AssetManagementUI';
 import { assetQueryKeys, assetService } from '../services/asset-service';
 
 export const CreateAssetPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const tenantId = useAuthStore((state) => state.user?.tenant_id ?? null);
+  const configurationQuery = useQuery({
+    queryKey: assetQueryKeys.configuration(tenantId),
+    queryFn: () => assetService.getConfiguration(),
+  });
   const mutation = useMutation({
     mutationFn: (data: AssetCreate) => assetService.createAsset(data),
     onSuccess: (asset) => {
@@ -19,6 +23,11 @@ export const CreateAssetPage = () => {
       navigate(ROUTES.ASSETS.DETAIL(asset.id));
     },
   });
+
+  if (configurationQuery.isLoading) return <PageSkeleton />;
+  if (configurationQuery.error || !configurationQuery.data) {
+    return <main className="p-4 sm:p-8"><ProblemState error={configurationQuery.error ?? new Error('Configuration unavailable')} onRetry={() => void configurationQuery.refetch()} /></main>;
+  }
 
   return (
     <main className="space-y-6 p-4 sm:p-8">
@@ -29,6 +38,7 @@ export const CreateAssetPage = () => {
         onBack={() => navigate(ROUTES.ASSETS.LIST)}
       />
       <AssetForm
+        configuration={configurationQuery.data.document}
         pending={mutation.isPending}
         error={mutation.error}
         onCancel={() => navigate(ROUTES.ASSETS.LIST)}

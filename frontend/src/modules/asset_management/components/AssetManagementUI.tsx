@@ -11,10 +11,10 @@ export function titleCase(value: string): string {
   return value.replaceAll('_', ' ').replace(/\b\w/gu, (letter) => letter.toUpperCase());
 }
 
-export function formatAmount(value: string): string {
+export function formatAmount(value: string, decimalPlaces: number): string {
   const parsed = Number(value);
   return Number.isFinite(parsed)
-    ? parsed.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    ? parsed.toLocaleString(undefined, { minimumFractionDigits: decimalPlaces, maximumFractionDigits: decimalPlaces })
     : value;
 }
 
@@ -151,7 +151,7 @@ export function StatusPill({ active }: { active: boolean }) {
   return (
     <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
       active
-        ? 'border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-300'
+        ? 'border-success/30 bg-success/10 text-success'
         : 'border-border bg-muted text-muted-foreground'
     }`}>
       {active ? 'Active' : 'Inactive'}

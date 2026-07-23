@@ -4,6 +4,11 @@ import {
   ENDPOINTS,
   type ApiEnvelope,
   type Asset,
+  type AssetConfiguration,
+  type AssetConfigurationDocument,
+  type AssetConfigurationExport,
+  type AssetConfigurationPreview,
+  type AssetConfigurationVersion,
   type AssetCreate,
   type AssetFilters,
   type AssetUpdate,
@@ -74,7 +79,6 @@ function isAsset(value: unknown): value is Asset {
   if (!isRecord(value)) return false;
   const stringFields = [
     'id',
-    'tenant_id',
     'asset_code',
     'asset_name',
     'purchase_date',
@@ -96,7 +100,6 @@ function isAsset(value: unknown): value is Asset {
 function isDepreciationEntry(value: unknown): value is DepreciationEntry {
   if (!isRecord(value)) return false;
   return typeof value.id === 'string'
-    && typeof value.tenant_id === 'string'
     && typeof value.asset === 'string'
     && typeof value.asset_code === 'string'
     && typeof value.asset_name === 'string'
@@ -105,6 +108,55 @@ function isDepreciationEntry(value: unknown): value is DepreciationEntry {
     && typeof value.accumulated_depreciation === 'string'
     && typeof value.book_value === 'string'
     && typeof value.created_at === 'string';
+}
+
+function isConfigurationDocument(value: unknown): value is AssetConfigurationDocument {
+  if (!isRecord(value)) return false;
+  return typeof value.environment === 'string'
+    && typeof value.enabled === 'boolean'
+    && Array.isArray(value.allowed_categories)
+    && Array.isArray(value.allowed_depreciation_methods)
+    && typeof value.asset_code_max_length === 'number'
+    && typeof value.asset_list_page_size === 'number'
+    && typeof value.asset_list_max_page_size === 'number'
+    && typeof value.default_category === 'string'
+    && typeof value.default_depreciation_method === 'string'
+    && typeof value.archive_confirmation === 'string';
+}
+
+function isConfiguration(value: unknown): value is AssetConfiguration {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.version === 'number'
+    && isConfigurationDocument(value.document)
+    && isRecord(value.limits)
+    && typeof value.updated_at === 'string';
+}
+
+function isConfigurationVersion(value: unknown): value is AssetConfigurationVersion {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.version === 'number'
+    && isConfigurationDocument(value.document)
+    && typeof value.source === 'string'
+    && typeof value.correlation_id === 'string'
+    && typeof value.created_at === 'string';
+}
+
+function isConfigurationExport(value: unknown): value is AssetConfigurationExport {
+  return isRecord(value)
+    && value.schema_version === '1.0'
+    && value.module === 'asset_management'
+    && typeof value.version === 'number'
+    && isConfigurationDocument(value.document);
+}
+
+function isConfigurationPreview(value: unknown): value is AssetConfigurationPreview {
+  return isRecord(value)
+    && value.valid === true
+    && typeof value.current_version === 'number'
+    && isRecord(value.changes)
+    && isConfigurationDocument(value.document);
 }
 
 function unwrapDetail<T>(response: unknown, guard: (value: unknown) => value is T): T {
@@ -154,7 +206,18 @@ export const assetQueryKeys = {
     [...assetQueryKeys.root(tenantId), 'asset', id] as const,
   depreciation: (tenantId: string | null, filters: DepreciationFilters = {}) =>
     [...assetQueryKeys.root(tenantId), 'depreciation', filters] as const,
+  configuration: (tenantId: string | null) =>
+    [...assetQueryKeys.root(tenantId), 'configuration'] as const,
+  configurationHistory: (tenantId: string | null) =>
+    [...assetQueryKeys.root(tenantId), 'configuration-history'] as const,
 };
+
+function idempotencyHeaders(operation: string): RequestInit {
+  const randomId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return { headers: { 'Idempotency-Key': `${operation}-${randomId}` } };
+}
 
 export const assetService = {
   listAssets: async (filters: AssetFilters = {}): Promise<ListResult<Asset>> => {
@@ -175,6 +238,7 @@ export const assetService = {
     const response = await translate(apiClient.post<Asset | ApiEnvelope<Asset>>(
       ENDPOINTS.ASSETS.CREATE,
       data,
+      idempotencyHeaders('asset-create'),
     ));
     return unwrapDetail(response, isAsset);
   },
@@ -183,12 +247,13 @@ export const assetService = {
     const response = await translate(apiClient.patch<Asset | ApiEnvelope<Asset>>(
       ENDPOINTS.ASSETS.UPDATE(id),
       data,
+      idempotencyHeaders(`asset-update-${id}`),
     ));
     return unwrapDetail(response, isAsset);
   },
 
   deleteAsset: async (id: string): Promise<void> =>
-    translate(apiClient.delete<void>(ENDPOINTS.ASSETS.DELETE(id))),
+    translate(apiClient.delete<void>(ENDPOINTS.ASSETS.DELETE(id), idempotencyHeaders(`asset-delete-${id}`))),
 
   listDepreciationEntries: async (
     filters: DepreciationFilters = {},
@@ -208,5 +273,56 @@ export const assetService = {
       data,
     ));
     return unwrapDetail(response, isDepreciationEntry);
+  },
+
+  getConfiguration: async (): Promise<AssetConfiguration> => {
+    const response = await translate(apiClient.get<AssetConfiguration | ApiEnvelope<AssetConfiguration>>(
+      ENDPOINTS.CONFIGURATION.CURRENT,
+    ));
+    return unwrapDetail(response, isConfiguration);
+  },
+
+  updateConfiguration: async (document: AssetConfigurationDocument): Promise<AssetConfiguration> => {
+    const response = await translate(apiClient.patch<AssetConfiguration | ApiEnvelope<AssetConfiguration>>(
+      ENDPOINTS.CONFIGURATION.UPDATE,
+      { document },
+    ));
+    return unwrapDetail(response, isConfiguration);
+  },
+
+  previewConfiguration: async (document: AssetConfigurationDocument): Promise<AssetConfigurationPreview> => {
+    const response = await translate(apiClient.post<AssetConfigurationPreview>(
+      ENDPOINTS.CONFIGURATION.PREVIEW,
+      { document },
+    ));
+    return unwrapDetail(response, isConfigurationPreview);
+  },
+
+  listConfigurationHistory: async (): Promise<ListResult<AssetConfigurationVersion>> => {
+    const response = await translate(apiClient.get<
+      PaginatedResponse<AssetConfigurationVersion> | AssetConfigurationVersion[]
+    >(ENDPOINTS.CONFIGURATION.HISTORY));
+    return unwrapList(response, isConfigurationVersion);
+  },
+
+  rollbackConfiguration: async (version: number): Promise<AssetConfiguration> => {
+    const response = await translate(apiClient.post<AssetConfiguration>(
+      ENDPOINTS.CONFIGURATION.ROLLBACK,
+      { version },
+    ));
+    return unwrapDetail(response, isConfiguration);
+  },
+
+  importConfiguration: async (configuration: AssetConfigurationExport): Promise<AssetConfiguration> => {
+    const response = await translate(apiClient.post<AssetConfiguration>(
+      ENDPOINTS.CONFIGURATION.IMPORT,
+      { configuration },
+    ));
+    return unwrapDetail(response, isConfiguration);
+  },
+
+  exportConfiguration: async (): Promise<AssetConfigurationExport> => {
+    const response = await translate(apiClient.get<AssetConfigurationExport>(ENDPOINTS.CONFIGURATION.EXPORT));
+    return unwrapDetail(response, isConfigurationExport);
   },
 };

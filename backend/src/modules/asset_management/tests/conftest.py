@@ -11,6 +11,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
 
+from src.core.access import AccessDecision, AccessDecisionPipeline, AccessReasonCode
 from src.core.user_models import UserProfile
 from src.modules.asset_management.models import DepreciationMethod
 from src.modules.asset_management.services import AssetService
@@ -21,6 +22,23 @@ def development_mode(settings):
     """Keep licensing local while exercising real authentication and policy checks."""
 
     settings.SARAISE_MODE = "development"
+
+
+@pytest.fixture(autouse=True)
+def authorize_declared_access(monkeypatch):
+    """Replace external access dependencies while preserving route metadata checks."""
+
+    def decide(self, tenant_id, identity, required_permission, **kwargs):
+        del self, required_permission, kwargs
+        try:
+            tenant = tenant_id if isinstance(tenant_id, UUID) else UUID(str(tenant_id))
+        except (TypeError, ValueError):
+            return AccessDecision(False, AccessReasonCode.POLICY_DENIED, "missing tenant", tenant_id=None)
+        if getattr(getattr(identity, "profile", None), "tenant_role", "") == "tenant_user":
+            return AccessDecision(False, AccessReasonCode.POLICY_DENIED, "test policy deny", tenant_id=tenant)
+        return AccessDecision(True, AccessReasonCode.ALLOW, "test policy allow", tenant_id=tenant)
+
+    monkeypatch.setattr(AccessDecisionPipeline, "decide", decide)
 
 
 @pytest.fixture
@@ -101,6 +119,7 @@ def asset_factory(db):
             residual_value=residual_value,
             depreciation_method=depreciation_method,
             useful_life_years=useful_life_years,
+            idempotency_key=f"asset-factory-{tenant_id}-{serial}",
             **kwargs,
         )
 

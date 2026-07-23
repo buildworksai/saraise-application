@@ -54,7 +54,7 @@ def test_asset_detail_cross_tenant_is_404(api_client, tenant_a_user, asset_facto
 def test_asset_create_injects_authenticated_tenant(api_client, tenant_a_user, tenant_a):
     api_client.force_authenticate(user=tenant_a_user)
 
-    response = api_client.post(ASSETS_URL, create_payload(), format="json")
+    response = api_client.post(ASSETS_URL, create_payload(), format="json", HTTP_IDEMPOTENCY_KEY="isolation-create")
 
     assert response.status_code == status.HTTP_201_CREATED
     created = Asset.objects.get(pk=response.data["id"])

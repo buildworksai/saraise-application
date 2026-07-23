@@ -20,8 +20,6 @@ import {
 } from '../components/AssetManagementUI';
 import { assetQueryKeys, assetService } from '../services/asset-service';
 
-const PAGE_SIZE = 20;
-
 function positivePage(value: string | null): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
@@ -32,17 +30,17 @@ function optionalParam(params: URLSearchParams, key: string): string | undefined
   return value === null || value === '' ? undefined : value;
 }
 
-function parseFilters(params: URLSearchParams): AssetFilters {
+function parseFilters(params: URLSearchParams, pageSize: number, defaultOrdering: string): AssetFilters {
   const active = params.get('is_active');
   return {
     page: positivePage(params.get('page')),
-    page_size: PAGE_SIZE,
+    page_size: pageSize,
     search: optionalParam(params, 'search'),
     category: (params.get('category') as AssetCategory | null) ?? undefined,
     is_active: active === null ? undefined : active === 'true',
     purchase_date_after: optionalParam(params, 'purchase_date_after'),
     purchase_date_before: optionalParam(params, 'purchase_date_before'),
-    ordering: optionalParam(params, 'ordering') ?? 'asset_code',
+    ordering: optionalParam(params, 'ordering') ?? defaultOrdering,
   };
 }
 
@@ -50,11 +48,21 @@ export const AssetListPage = () => {
   const navigate = useNavigate();
   const tenantId = useAuthStore((state) => state.user?.tenant_id ?? null);
   const [params, setParams] = useSearchParams();
-  const filters = parseFilters(params);
+  const configurationQuery = useQuery({
+    queryKey: assetQueryKeys.configuration(tenantId),
+    queryFn: () => assetService.getConfiguration(),
+  });
+  const configuration = configurationQuery.data?.document;
+  const filters = parseFilters(
+    params,
+    configuration?.asset_list_page_size ?? 1,
+    configuration?.asset_list_default_ordering ?? 'asset_code',
+  );
   const [search, setSearch] = useState(filters.search ?? '');
   const query = useQuery({
     queryKey: assetQueryKeys.assets(tenantId, filters),
     queryFn: () => assetService.listAssets(filters),
+    enabled: Boolean(configuration),
   });
 
   const update = (key: string, value: string) => {
@@ -80,7 +88,10 @@ export const AssetListPage = () => {
     filters.purchase_date_before,
   ].some((value) => value !== undefined);
 
-  if (query.isLoading) return <PageSkeleton table />;
+  if (query.isLoading || configurationQuery.isLoading) return <PageSkeleton table />;
+  if (configurationQuery.error || !configuration) {
+    return <main className="p-4 sm:p-8"><ProblemState error={configurationQuery.error ?? new Error('Configuration unavailable')} onRetry={() => void configurationQuery.refetch()} /></main>;
+  }
   if (query.error) {
     return <main className="p-4 sm:p-8"><ProblemState error={query.error} onRetry={() => void query.refetch()} /></main>;
   }
@@ -120,9 +131,9 @@ export const AssetListPage = () => {
             onChange={(event) => update('category', event.target.value)}
           >
             <option value="">All categories</option>
-            <option value="fixed">Fixed assets</option>
-            <option value="intangible">Intangible assets</option>
-            <option value="current">Current assets</option>
+            {configuration.allowed_categories.map((category) => (
+              <option key={category} value={category}>{titleCase(category)}</option>
+            ))}
           </select>
           <select
             aria-label="Status filter"
@@ -154,11 +165,9 @@ export const AssetListPage = () => {
             value={filters.ordering}
             onChange={(event) => update('ordering', event.target.value)}
           >
-            <option value="asset_code">Code A–Z</option>
-            <option value="-created_at">Newest first</option>
-            <option value="-purchase_date">Latest purchase date</option>
-            <option value="-purchase_cost">Highest purchase cost</option>
-            <option value="-current_value">Highest current value</option>
+            {configuration.asset_ordering_fields.map((field) => (
+              <option key={field} value={field}>{titleCase(field)}</option>
+            ))}
           </select>
         </div>
         {hasFilters && (
@@ -205,8 +214,8 @@ export const AssetListPage = () => {
                     <td className="px-4 py-3">{asset.asset_name}</td>
                     <td className="px-4 py-3">{titleCase(asset.category)}</td>
                     <td className="px-4 py-3">{formatDate(asset.purchase_date)}</td>
-                    <td className="px-4 py-3 tabular-nums">{formatAmount(asset.purchase_cost)}</td>
-                    <td className="px-4 py-3 font-medium tabular-nums">{formatAmount(asset.current_value)}</td>
+                    <td className="px-4 py-3 tabular-nums">{formatAmount(asset.purchase_cost, configuration.monetary_decimal_places)}</td>
+                    <td className="px-4 py-3 font-medium tabular-nums">{formatAmount(asset.current_value, configuration.monetary_decimal_places)}</td>
                     <td className="px-4 py-3">{titleCase(asset.depreciation_method)}</td>
                     <td className="px-4 py-3"><StatusPill active={asset.is_active} /></td>
                   </tr>
