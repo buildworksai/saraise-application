@@ -81,8 +81,9 @@ export function ConfigurationPage() {
     update: (value: number) => void,
     guidance: string,
   ) => <label className="space-y-2"><span className="text-sm font-medium" title={guidance}>{label}</span><Input type="number" min={minimum} max={maximum} value={value} onChange={(event) => update(Number(event.target.value))}/><span className="block text-xs text-muted-foreground">{guidance}</span></label>;
-  if (current.isLoading || !draft) return <PageSkeleton/>;
   if (current.error) return <GovernedError error={current.error} retry={() => void current.refetch()}/>;
+  if (current.isLoading || !current.data) return <PageSkeleton/>;
+  if (!draft) return <PageSkeleton/>;
   return <main className="space-y-6">
     <PageHeader title="Runtime configuration" description="Tenant-owned policy for provider resilience, execution, governance, evaluation, health, rollout, and presentation. Changes apply without a service restart." actions={<select aria-label="Environment" className="rounded-md border bg-background px-3 py-2 text-sm" value={environment} onChange={(event) => setEnvironment(event.target.value as ConfigurationEnvironment)}><option value="development">Development</option><option value="staging">Staging</option><option value="production">Production</option></select>}/>
     <Card><CardHeader><CardTitle>Preview</CardTitle></CardHeader><CardContent><p className="text-sm">{changed ? `Validate the proposed replacement for version ${current.data.version} before applying it.` : "No unapplied differences."}</p>{problem ? <p role="alert" className="mt-2 text-sm text-destructive">{problem}</p> : null}{preview.data?.fingerprint === draftFingerprint ? <div className="mt-3 rounded-lg border bg-muted/30 p-3 text-sm"><p>Server validation passed. Proposed version: {preview.data.result.proposed_version}.</p><ul className="mt-2 list-disc pl-5">{preview.data.result.changes.map((change) => <li key={change.path}>{change.path}</li>)}</ul></div> : null}<div className="mt-4 flex gap-2"><Button variant="outline" disabled={!changed || Boolean(problem) || preview.isPending} onClick={() => preview.mutate()}>Validate preview</Button><Button disabled={!changed || Boolean(problem) || save.isPending || preview.data?.fingerprint !== draftFingerprint} onClick={() => save.mutate()}>Apply configuration</Button><Button variant="outline" disabled={!changed} onClick={() => setDraft(clone(current.data.document))}>Discard</Button></div>{preview.error ? <MutationError error={preview.error}/> : null}{save.error ? <MutationError error={save.error}/> : null}</CardContent></Card>
@@ -92,13 +93,13 @@ export function ConfigurationPage() {
         {numberField("Temperature", draft.provider.temperature, 0, 2, (value) => setDraft({ ...draft, provider: { ...draft.provider, temperature: value } }), "Sampling variability accepted by provider adapters.")}
         {numberField("Timeout (seconds)", draft.provider.timeout_seconds, 1, 600, (value) => setDraft({ ...draft, provider: { ...draft.provider, timeout_seconds: value } }), "Each external provider attempt is cancelled at this boundary.")}
         {numberField("Maximum retries", draft.provider.max_retries, 0, 20, (value) => setDraft({ ...draft, provider: { ...draft.provider, max_retries: value } }), "Retries use exponential backoff with jitter.")}
-      </Card>
+      </CardContent></Card>
       <Card><CardHeader><CardTitle>Execution and scheduling</CardTitle></CardHeader><CardContent className="grid gap-4 sm:grid-cols-2">
         {numberField("Maximum messages", draft.runner.maximum_messages, 1, 10_000, (value) => setDraft({ ...draft, runner: { ...draft.runner, maximum_messages: value } }), "Maximum messages accepted by the published runner.")}
         {numberField("Default priority", draft.schedule.default_priority, draft.schedule.priority_minimum, draft.schedule.priority_maximum, (value) => setDraft({ ...draft, schedule: { ...draft.schedule, default_priority: value } }), "Priority assigned when a caller omits it.")}
         {numberField("Default retries", draft.schedule.default_maximum_retries, 0, draft.schedule.maximum_retries_limit, (value) => setDraft({ ...draft, schedule: { ...draft.schedule, default_maximum_retries: value } }), "Retry budget assigned to new schedules.")}
         {numberField("Dispatch batch maximum", draft.schedule.dispatch_batch_maximum, draft.schedule.dispatch_batch_minimum, 1000, (value) => setDraft({ ...draft, schedule: { ...draft.schedule, dispatch_batch_maximum: value } }), "Maximum work claimed by one dispatcher transaction.")}
-      </Card>
+      </CardContent></Card>
     </section>
     <Card><CardHeader><CardTitle>Complete configuration document</CardTitle></CardHeader><CardContent className="space-y-3"><p className="text-sm text-muted-foreground">Every module setting is portable here. The API validates exact fields, safe bounds, allow-lists, and dependent thresholds before any version can be saved.</p><Textarea className="min-h-[28rem] font-mono text-xs" aria-label="Complete configuration JSON" value={JSON.stringify(draft, null, 2)} onChange={(event) => { try { setDraft(JSON.parse(event.target.value) as AgentManagementConfigurationDocument); } catch { /* Keep the last structurally valid document unsaved. */ } }}/></CardContent></Card>
     <section className="grid gap-6 xl:grid-cols-2">

@@ -27,6 +27,10 @@ function resultStatus(value: JSONValue | null | undefined): string | null {
   return typeof value.status === "string" ? value.status : null;
 }
 
+function jobEvidence(value: unknown): { readonly result?: JSONValue | null; readonly error_message?: string | null } {
+  return value !== null && typeof value === "object" ? value as { readonly result?: JSONValue | null; readonly error_message?: string | null } : {};
+}
+
 export const EvaluationPage = () => {
   const { id = "" } = useParams();
   const [suite, setSuite] = useState("");
@@ -54,7 +58,8 @@ export const EvaluationPage = () => {
   if (!agent.data) return <GovernedError error={new Error("Agent not found.")}/>;
 
   const durableJob = job.data ?? start.data;
-  const evaluationStatus = resultStatus(durableJob?.result);
+  const evidence = jobEvidence(durableJob);
+  const evaluationStatus = resultStatus(evidence.result);
 
   return <main className="space-y-6">
     <PageHeader
@@ -84,8 +89,8 @@ export const EvaluationPage = () => {
         <StatusPill status={durableJob.status}/>
       </div>
       <p className="text-sm text-muted-foreground">Attempt {durableJob.attempts} · correlation {durableJob.correlation_id}</p>
-      {durableJob.error_message ? <Unavailable title="Evaluation did not complete" detail={durableJob.error_message}/> : null}
-      {durableJob.result !== null ? <JsonEvidence label="Evaluation metric and regression evidence" value={durableJob.result}/> : <p role="status" className="text-sm text-muted-foreground">Waiting for the registered suite to publish metric evidence…</p>}
+      {evidence.error_message ? <Unavailable title="Evaluation did not complete" detail={evidence.error_message}/> : null}
+      {evidence.result !== undefined && evidence.result !== null ? <JsonEvidence label="Evaluation metric and regression evidence" value={evidence.result}/> : <p role="status" className="text-sm text-muted-foreground">Waiting for the registered suite to publish metric evidence…</p>}
       {evaluationStatus ? <p className="text-sm">Suite outcome: <StatusPill status={evaluationStatus}/></p> : null}
     </CardContent></Card> : null}
   </main>;
