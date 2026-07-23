@@ -33,6 +33,7 @@ from .permissions import (
     RESOURCE_DELETE,
     RESOURCE_READ,
     RESOURCE_RESTORE,
+    RESOURCE_ROLLBACK,
     RESOURCE_UPDATE,
     ActionAccessMixin,
 )
@@ -41,13 +42,16 @@ from .serializers import (
     ApiManagementConfigurationVersionSerializer,
     ApiManagementResourceInputSerializer,
     ApiManagementResourceSerializer,
+    ApiManagementResourceVersionSerializer,
     ConfigurationDocumentSerializer,
     ConfigurationRollbackSerializer,
+    ResourceRollbackSerializer,
 )
 from .services import (
     ApiManagementService,
     ConfigurationValidationError,
     IdempotencyConflictError,
+    runtime_environment,
 )
 
 
@@ -78,6 +82,13 @@ def _idempotency_key(request: Request, body_value: object | None = None) -> uuid
         return raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw))
     except (TypeError, ValueError, AttributeError) as exc:
         raise ValidationError({"idempotency_key": "A valid UUID idempotency key is required."}) from exc
+
+
+def _environment(request: Request) -> str:
+    value = request.query_params.get("environment", runtime_environment())
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError({"environment": "A valid environment is required."})
+    return value.strip().lower()
 
 
 def _audience(request: Request) -> tuple[tuple[str, ...], tuple[str, ...]]:
@@ -134,25 +145,36 @@ class ApiManagementResourceViewSet(ActionAccessMixin, viewsets.ViewSet):
         "activate": RESOURCE_ACTIVATE,
         "deactivate": RESOURCE_DEACTIVATE,
         "restore": RESOURCE_RESTORE,
+        "rollback": RESOURCE_ROLLBACK,
+        "versions": RESOURCE_READ,
     }
     pagination_class = TenantConfiguredPagination
     service = ApiManagementService()
 
     def get_queryset(self):
-        tenant = _tenant(self.request)
+        raw_tenant = getattr(self.request, "tenant_id", None) or get_user_tenant_id(self.request.user)
+        try:
+            tenant = raw_tenant if isinstance(raw_tenant, uuid.UUID) else uuid.UUID(str(raw_tenant))
+        except (TypeError, ValueError, AttributeError):
+            return ApiManagementResource.objects.none()
         actor = _actor(self.request)
         correlation = correlation_id_for_request(self.request)
-        configuration = self.service.get_configuration(tenant, actor_id=actor, correlation_id=correlation)
+        environment = runtime_environment()
+        configuration = self.service.get_configuration(
+            tenant, environment=environment, actor_id=actor, correlation_id=correlation
+        )
         self.configuration_document = configuration.document
         roles, cohorts = _audience(self.request)
+        resource_query = {key: value for key, value in self.request.query_params.items() if key != "environment"}
         return _service(
             lambda: self.service.query_resources(
                 tenant,
-                self.request.query_params,
+                resource_query,
                 actor_id=actor,
                 correlation_id=correlation,
                 audience_roles=roles,
                 audience_cohorts=cohorts,
+                environment=environment,
             )
         )
 
@@ -169,6 +191,7 @@ class ApiManagementResourceViewSet(ActionAccessMixin, viewsets.ViewSet):
                 correlation_id=correlation,
                 audience_roles=roles,
                 audience_cohorts=cohorts,
+                environment=runtime_environment(),
             )
         )
         resource = queryset.filter(pk=self.kwargs.get("pk")).first()
@@ -204,6 +227,7 @@ class ApiManagementResourceViewSet(ActionAccessMixin, viewsets.ViewSet):
                 idempotency_key=_idempotency_key(request),
                 audience_roles=roles,
                 audience_cohorts=cohorts,
+                environment=runtime_environment(),
             )
         )
         return Response(ApiManagementResourceSerializer(resource).data, status=status.HTTP_201_CREATED)
@@ -223,6 +247,7 @@ class ApiManagementResourceViewSet(ActionAccessMixin, viewsets.ViewSet):
                 updates=serializer.validated_data,
                 audience_roles=roles,
                 audience_cohorts=cohorts,
+                environment=runtime_environment(),
             )
         )
         if updated is None:
@@ -249,6 +274,7 @@ class ApiManagementResourceViewSet(ActionAccessMixin, viewsets.ViewSet):
                 idempotency_key=_idempotency_key(request),
                 audience_roles=roles,
                 audience_cohorts=cohorts,
+                environment=runtime_environment(),
             )
         )
         if not deleted:
@@ -267,6 +293,7 @@ class ApiManagementResourceViewSet(ActionAccessMixin, viewsets.ViewSet):
                 idempotency_key=_idempotency_key(request),
                 audience_roles=roles,
                 audience_cohorts=cohorts,
+                environment=runtime_environment(),
             )
         )
         if result is None:
@@ -297,11 +324,63 @@ class ApiManagementResourceViewSet(ActionAccessMixin, viewsets.ViewSet):
                 idempotency_key=_idempotency_key(request),
                 audience_roles=roles,
                 audience_cohorts=cohorts,
+                environment=runtime_environment(),
             )
         )
         if result is None:
             raise NotFound("Archived resource was not found.")
         return Response(ApiManagementResourceSerializer(result).data)
+
+    @action(detail=True, methods=["post"])
+    def rollback(self, request: Request, pk: str | None = None) -> Response:
+        serializer = ResourceRollbackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        roles, cohorts = _audience(request)
+        result = _service(
+            lambda: self.service.rollback_resource(
+                pk,
+                _tenant(request),
+                serializer.validated_data["version"],
+                actor_id=_actor(request),
+                correlation_id=correlation_id_for_request(request),
+                idempotency_key=_idempotency_key(request),
+                audience_roles=roles,
+                audience_cohorts=cohorts,
+                environment=runtime_environment(),
+            )
+        )
+        if result is None:
+            raise NotFound("Resource was not found.")
+        return Response(ApiManagementResourceSerializer(result).data)
+
+    @action(detail=True, methods=["get"])
+    def versions(self, request: Request, pk: str | None = None) -> Response:
+        resource = self.get_object()
+        try:
+            page = int(request.query_params.get("page", 1))
+            page_size_raw = request.query_params.get("page_size")
+            page_size = int(page_size_raw) if page_size_raw is not None else None
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"pagination": "page and page_size must be integers."}) from exc
+        versions, count, resolved_page, resolved_size = _service(
+            lambda: self.service.resource_history(
+                resource.id,
+                _tenant(request),
+                actor_id=_actor(request),
+                correlation_id=correlation_id_for_request(request),
+                page=page,
+                page_size=page_size,
+            )
+        )
+        results = ApiManagementResourceVersionSerializer(versions, many=True).data
+        return Response(
+            {
+                "count": count,
+                "next": resolved_page + 1 if resolved_page * resolved_size < count else None,
+                "previous": resolved_page - 1 if resolved_page > 1 else None,
+                "results": results,
+            }
+        )
 
 
 class GovernedConfigurationView(ActionAccessMixin, APIView):
@@ -322,7 +401,10 @@ class ConfigurationView(GovernedConfigurationView):
     def get(self, request: Request) -> Response:
         configuration = _service(
             lambda: self.service.get_configuration(
-                _tenant(request), actor_id=_actor(request), correlation_id=correlation_id_for_request(request)
+                _tenant(request),
+                actor_id=_actor(request),
+                correlation_id=correlation_id_for_request(request),
+                environment=_environment(request),
             )
         )
         return Response(ApiManagementConfigurationSerializer(configuration).data)
@@ -337,6 +419,7 @@ class ConfigurationView(GovernedConfigurationView):
                 actor_id=_actor(request),
                 correlation_id=correlation_id_for_request(request),
                 idempotency_key=_idempotency_key(request, serializer.validated_data.get("idempotency_key")),
+                environment=_environment(request),
             )
         )
         return Response(ApiManagementConfigurationSerializer(configuration).data)
@@ -349,7 +432,9 @@ class ConfigurationPreviewView(GovernedConfigurationView):
         serializer = ConfigurationDocumentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         result = _service(
-            lambda: self.service.preview_configuration(_tenant(request), serializer.validated_data["document"])
+            lambda: self.service.preview_configuration(
+                _tenant(request), serializer.validated_data["document"], environment=_environment(request)
+            )
         )
         return Response(result)
 
@@ -358,8 +443,32 @@ class ConfigurationHistoryView(GovernedConfigurationView):
     action_permissions = {"get": CONFIG_READ}
 
     def get(self, request: Request) -> Response:
-        versions = _service(lambda: self.service.configuration_history(_tenant(request)))
-        return Response(ApiManagementConfigurationVersionSerializer(versions, many=True).data)
+        page = request.query_params.get("page", 1)
+        page_size = request.query_params.get("page_size")
+        try:
+            page_value = int(page)
+            page_size_value = int(page_size) if page_size is not None else None
+        except (TypeError, ValueError) as exc:
+            raise ValidationError({"pagination": "page and page_size must be integers."}) from exc
+        versions, count, resolved_page, resolved_size = _service(
+            lambda: self.service.configuration_history(
+                _tenant(request),
+                environment=_environment(request),
+                page=page_value,
+                page_size=page_size_value,
+                actor_id=_actor(request),
+                correlation_id=correlation_id_for_request(request),
+            )
+        )
+        results = ApiManagementConfigurationVersionSerializer(versions, many=True).data
+        return Response(
+            {
+                "count": count,
+                "next": resolved_page + 1 if resolved_page * resolved_size < count else None,
+                "previous": resolved_page - 1 if resolved_page > 1 else None,
+                "results": results,
+            }
+        )
 
 
 class ConfigurationRollbackView(GovernedConfigurationView):
@@ -375,6 +484,7 @@ class ConfigurationRollbackView(GovernedConfigurationView):
                 actor_id=_actor(request),
                 correlation_id=correlation_id_for_request(request),
                 idempotency_key=_idempotency_key(request, serializer.validated_data.get("idempotency_key")),
+                environment=_environment(request),
             )
         )
         return Response(ApiManagementConfigurationSerializer(configuration).data)
@@ -393,6 +503,7 @@ class ConfigurationImportView(GovernedConfigurationView):
                 actor_id=_actor(request),
                 correlation_id=correlation_id_for_request(request),
                 idempotency_key=_idempotency_key(request, serializer.validated_data.get("idempotency_key")),
+                environment=_environment(request),
             )
         )
         return Response(ApiManagementConfigurationSerializer(configuration).data)
@@ -404,7 +515,10 @@ class ConfigurationExportView(GovernedConfigurationView):
     def get(self, request: Request) -> Response:
         result = _service(
             lambda: self.service.export_configuration(
-                _tenant(request), actor_id=_actor(request), correlation_id=correlation_id_for_request(request)
+                _tenant(request),
+                actor_id=_actor(request),
+                correlation_id=correlation_id_for_request(request),
+                environment=_environment(request),
             )
         )
         return Response(result)
@@ -416,14 +530,33 @@ class HealthView(GovernedConfigurationView):
     def get(self, request: Request) -> Response:
         configuration = _service(
             lambda: self.service.get_configuration(
-                _tenant(request), actor_id=_actor(request), correlation_id=correlation_id_for_request(request)
+                _tenant(request),
+                actor_id=_actor(request),
+                correlation_id=correlation_id_for_request(request),
+                environment=runtime_environment(),
             )
         )
         payload, http_status = module_health(
             tenant_id=_tenant(request),
+            correlation_id=correlation_id_for_request(request),
             cache_ttl_seconds=configuration.document["health_cache_ttl_seconds"],
         )
         return Response(payload, status=http_status)
+
+
+class ConfigurationSchemaView(GovernedConfigurationView):
+    action_permissions = {"get": CONFIG_READ}
+
+    def get(self, request: Request) -> Response:
+        schema = _service(
+            lambda: self.service.configuration_schema(
+                _tenant(request),
+                environment=_environment(request),
+                actor_id=_actor(request),
+                correlation_id=correlation_id_for_request(request),
+            )
+        )
+        return Response(schema)
 
 
 __all__ = [
@@ -433,6 +566,7 @@ __all__ = [
     "ConfigurationImportView",
     "ConfigurationPreviewView",
     "ConfigurationRollbackView",
+    "ConfigurationSchemaView",
     "ConfigurationView",
     "HealthView",
 ]

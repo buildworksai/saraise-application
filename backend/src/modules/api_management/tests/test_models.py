@@ -6,7 +6,11 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError, connection, transaction
 
-from src.modules.api_management.models import ApiManagementAuditRecord, TenantBaseModel
+from src.modules.api_management.models import (
+    ApiManagementAuditRecord,
+    ApiManagementResourceVersion,
+    TenantBaseModel,
+)
 
 
 @pytest.mark.django_db
@@ -99,3 +103,26 @@ class TestTenantBaseModelModel:
         with pytest.raises(DatabaseError), transaction.atomic():
             with connection.cursor() as cursor:
                 cursor.execute("DELETE FROM api_management_audit_records WHERE id = %s", [record.id.hex])
+
+    def test_resource_versions_are_append_only_at_model_and_database_boundaries(self):
+        evidence = ApiManagementResourceVersion.objects.create(
+            tenant_id=uuid.uuid4(),
+            resource_id=uuid.uuid4(),
+            version=1,
+            snapshot={"name": "version one"},
+            actor_id="actor",
+            correlation_id="req_resource_version",
+            idempotency_key=uuid.uuid4(),
+            reason="create",
+        )
+        evidence.reason = "tampered"
+        with pytest.raises(ValidationError):
+            evidence.save()
+        with pytest.raises(ValidationError):
+            evidence.delete()
+        with pytest.raises(DatabaseError), transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE api_management_resource_versions SET reason = %s WHERE id = %s",
+                    ["tampered", evidence.id.hex],
+                )

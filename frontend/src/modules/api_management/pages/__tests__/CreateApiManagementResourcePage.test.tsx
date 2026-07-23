@@ -18,7 +18,7 @@ function renderPage() {
 }
 
 describe('CreateApiManagementResourcePage', () => {
-  beforeEach(() => { vi.clearAllMocks(); vi.mocked(api_managementService.getConfiguration).mockResolvedValue(configuration); });
+  beforeEach(() => { vi.clearAllMocks(); vi.mocked(api_managementService.getRuntimeConfiguration).mockResolvedValue(configuration); });
 
   it('loads configured defaults and limits', async () => {
     renderPage();

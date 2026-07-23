@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from rest_framework import serializers
 
-from .models import ApiManagementConfiguration, ApiManagementConfigurationVersion, ApiManagementResource
+from .models import (
+    ApiManagementConfiguration,
+    ApiManagementConfigurationVersion,
+    ApiManagementResource,
+    ApiManagementResourceVersion,
+)
 
 
 class ApiManagementResourceInputSerializer(serializers.Serializer):
@@ -54,17 +59,36 @@ class ConfigurationRollbackSerializer(serializers.Serializer):
     idempotency_key = serializers.UUIDField(required=False)
 
 
+class ResourceRollbackSerializer(serializers.Serializer):
+    version = serializers.IntegerField(min_value=1)
+
+
 class ApiManagementConfigurationSerializer(serializers.ModelSerializer):
     class Meta:
         model = ApiManagementConfiguration
-        fields = ["version", "document", "updated_at"]
+        fields = ["environment", "version", "document", "updated_at"]
         read_only_fields = fields
 
 
 class ApiManagementConfigurationVersionSerializer(serializers.ModelSerializer):
     class Meta:
         model = ApiManagementConfigurationVersion
-        fields = ["version", "document", "actor_id", "correlation_id", "created_at"]
+        fields = ["environment", "version", "document", "actor_id", "correlation_id", "created_at"]
+        read_only_fields = fields
+
+
+class ApiManagementResourceVersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ApiManagementResourceVersion
+        fields = [
+            "version",
+            "snapshot",
+            "actor_id",
+            "correlation_id",
+            "reason",
+            "source_version",
+            "created_at",
+        ]
         read_only_fields = fields
 
 
@@ -83,8 +107,10 @@ __all__ = [
     "ApiManagementConfigurationVersionSerializer",
     "ApiManagementResourceInputSerializer",
     "ApiManagementResourceSerializer",
+    "ApiManagementResourceVersionSerializer",
     "ConfigurationDocumentSerializer",
     "ConfigurationPreviewSerializer",
     "ConfigurationRollbackSerializer",
+    "ResourceRollbackSerializer",
     "TenantBaseModelSerializer",
 ]

@@ -75,6 +75,7 @@ class ApiManagementConfiguration(_TenantBaseModel):
     """The current validated configuration document for one tenant."""
 
     id = models.UUIDField(primary_key=True, default=generate_uuid, editable=False)
+    environment = models.CharField(max_length=64)
     document = models.JSONField()
     version = models.PositiveIntegerField()
     updated_by = models.CharField(max_length=255)
@@ -83,7 +84,10 @@ class ApiManagementConfiguration(_TenantBaseModel):
         app_label = "api_management"
         db_table = "api_management_configurations"
         constraints = [
-            models.UniqueConstraint(fields=["tenant_id"], name="api_mgmt_config_tenant_uniq"),
+            models.UniqueConstraint(
+                fields=["tenant_id", "environment"],
+                name="api_mgmt_config_tenant_env_uniq",
+            ),
         ]
 
 
@@ -123,11 +127,14 @@ class ApiManagementConfigurationVersion(_AppendOnlyTenantModel):
     """Immutable snapshot enabling rollback to any prior configuration."""
 
     id = models.UUIDField(primary_key=True, default=generate_uuid, editable=False)
+    environment = models.CharField(max_length=64)
     version = models.PositiveIntegerField()
     document = models.JSONField()
     actor_id = models.CharField(max_length=255)
     correlation_id = models.CharField(max_length=255, db_index=True)
     idempotency_key = models.UUIDField()
+    # Database storage ceiling; the tenant's lower governed constraint and
+    # allow-list are enforced by ApiManagementService.
     reason = models.CharField(max_length=64)
 
     class Meta:
@@ -135,21 +142,54 @@ class ApiManagementConfigurationVersion(_AppendOnlyTenantModel):
         db_table = "api_management_configuration_versions"
         constraints = [
             models.UniqueConstraint(
-                fields=["tenant_id", "version"],
-                name="api_mgmt_config_version_uniq",
+                fields=["tenant_id", "environment", "version"],
+                name="api_mgmt_config_env_version_uniq",
             ),
             models.UniqueConstraint(
-                fields=["tenant_id", "idempotency_key"],
-                name="api_mgmt_config_idempotency_uniq",
+                fields=["tenant_id", "environment", "idempotency_key"],
+                name="api_mgmt_config_env_idem_uniq",
             ),
         ]
         ordering = ["-version"]
+
+
+class ApiManagementResourceVersion(_AppendOnlyTenantModel):
+    """Immutable resource snapshot used for executable compensation."""
+
+    id = models.UUIDField(primary_key=True, default=generate_uuid, editable=False)
+    resource_id = models.UUIDField(db_index=True)
+    version = models.PositiveIntegerField()
+    snapshot = models.JSONField()
+    actor_id = models.CharField(max_length=255)
+    correlation_id = models.CharField(max_length=255, db_index=True)
+    idempotency_key = models.UUIDField()
+    # Database storage ceiling; the tenant's lower governed constraint and
+    # allow-list are enforced by ApiManagementService.
+    reason = models.CharField(max_length=64)
+    source_version = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        app_label = "api_management"
+        db_table = "api_management_resource_versions"
+        ordering = ["-version"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "resource_id", "version"],
+                name="api_mgmt_res_version_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=["tenant_id", "idempotency_key"],
+                name="api_mgmt_res_version_idem_uniq",
+            ),
+        ]
 
 
 class ApiManagementAuditRecord(_AppendOnlyTenantModel):
     """Immutable evidence for every configuration and resource mutation."""
 
     id = models.UUIDField(primary_key=True, default=generate_uuid, editable=False)
+    # These are storage ceilings. Tenant-governed allow-lists and effective
+    # length limits are enforced before append-only evidence is written.
     target_type = models.CharField(max_length=32)
     target_id = models.UUIDField(null=True, blank=True)
     action = models.CharField(max_length=64)
@@ -187,6 +227,7 @@ __all__ = [
     "ApiManagementConfiguration",
     "ApiManagementConfigurationVersion",
     "ApiManagementResource",
+    "ApiManagementResourceVersion",
     "TenantBaseModel",
     "generate_uuid",
 ]

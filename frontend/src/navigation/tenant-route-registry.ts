@@ -13,7 +13,8 @@ export interface TenantSidebarLeaf {
   path: string;
   label: string;
   icon: TenantRouteIcon;
-  order: number;
+  order?: number;
+  runtimeOrderKey?: string;
 }
 
 /** Module branch consumed by the tenant sidebar migration shim. */
@@ -22,7 +23,7 @@ export interface TenantSidebarBranch {
   module: string;
   label: string;
   icon: TenantRouteIcon;
-  order: number;
+  order?: number;
   children: readonly TenantSidebarLeaf[];
 }
 
@@ -62,6 +63,12 @@ function hasRouteParameter(path: string): boolean {
   return path
     .split("/")
     .some((segment) => segment.startsWith(":") || segment === "*");
+}
+
+function compareOptionalOrder(left: number | undefined, right: number | undefined): number {
+  if (left === undefined) return right === undefined ? 0 : 1;
+  if (right === undefined) return -1;
+  return left - right;
 }
 
 function formatModuleLabel(moduleName: string): string {
@@ -133,7 +140,9 @@ function validateSidebarRoute(
   if (!route.navigation.label.trim()) {
     addIssue(issues, route, "sidebar label must not be empty");
   }
-  if (!Number.isFinite(route.navigation.order)) {
+  if (route.navigation.order === undefined && !route.navigation.runtimeOrderKey?.trim()) {
+    addIssue(issues, route, "sidebar order or runtimeOrderKey is required");
+  } else if (route.navigation.order !== undefined && !Number.isFinite(route.navigation.order)) {
     addIssue(issues, route, "sidebar order must be finite");
   }
   const navigationPath = route.navigation.path ?? route.path;
@@ -237,6 +246,7 @@ export function validateTenantSidebarTree(
 }
 
 /** Build stable, module-grouped sidebar branches from validated route descriptors. */
+// eslint-disable-next-line complexity -- registry construction validates and derives both static and governed leaves.
 export function buildTenantSidebarTree(
   routes: readonly TenantRoute[],
   grantedPermissions?: ReadonlySet<string>,
@@ -261,6 +271,7 @@ export function buildTenantSidebarTree(
       label: route.navigation.type === "sidebar" ? route.navigation.label : route.navigation.label ?? derivedLabel,
       icon: route.navigation.type === "sidebar" ? route.navigation.icon : route.navigation.icon ?? parentNavigation!.icon,
       order: route.navigation.type === "sidebar" ? route.navigation.order : route.navigation.order ?? (parentNavigation?.order ?? 0) + (leaves.length + 1) / 100,
+      runtimeOrderKey: route.navigation.type === "sidebar" ? route.navigation.runtimeOrderKey : undefined,
     });
     leavesByModule.set(route.module, leaves);
   }
@@ -268,7 +279,9 @@ export function buildTenantSidebarTree(
   const tree = Array.from(leavesByModule.entries())
     .map(([module, leaves]) => {
       const sortedLeaves = leaves.sort(
-        (left, right) => left.order - right.order || left.label.localeCompare(right.label),
+        (left, right) =>
+          compareOptionalOrder(left.order, right.order) ||
+          left.label.localeCompare(right.label),
       );
       const firstLeaf = sortedLeaves[0];
       if (!firstLeaf) throw new Error(`Sidebar module ${module} has no routes.`);
@@ -281,7 +294,11 @@ export function buildTenantSidebarTree(
         children: sortedLeaves,
       };
     })
-    .sort((left, right) => left.order - right.order || left.label.localeCompare(right.label));
+    .sort(
+      (left, right) =>
+        compareOptionalOrder(left.order, right.order) ||
+        left.label.localeCompare(right.label),
+    );
 
   validateTenantSidebarTree(routes, tree);
   return tree;

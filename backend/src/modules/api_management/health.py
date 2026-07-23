@@ -14,9 +14,12 @@ from .models import ApiManagementResource
 logger = logging.getLogger(__name__)
 
 
-def module_health(*, tenant_id: uuid.UUID, cache_ttl_seconds: int) -> tuple[dict[str, Any], int]:
+def module_health(*, tenant_id: uuid.UUID, cache_ttl_seconds: int, correlation_id: str) -> tuple[dict[str, Any], int]:
     """Return operational status without counts or exception disclosure."""
 
+    if not isinstance(correlation_id, str) or not correlation_id.strip():
+        raise ValueError("correlation_id is required for health diagnostics.")
+    correlation_id = correlation_id.strip()
     checks: dict[str, str] = {}
     overall = "healthy"
     try:
@@ -24,7 +27,10 @@ def module_health(*, tenant_id: uuid.UUID, cache_ttl_seconds: int) -> tuple[dict
             cursor.execute("SELECT 1")
         checks["database"] = "ok"
     except Exception:
-        logger.exception("api_management database health probe failed", extra={"tenant_id": str(tenant_id)})
+        logger.exception(
+            "api_management database health probe failed",
+            extra={"tenant_id": str(tenant_id), "correlation_id": correlation_id},
+        )
         checks["database"] = "dependency_unavailable"
         overall = "unhealthy"
 
@@ -37,7 +43,10 @@ def module_health(*, tenant_id: uuid.UUID, cache_ttl_seconds: int) -> tuple[dict
             checks["cache"] = "invalid_response"
             overall = "degraded" if overall == "healthy" else overall
     except Exception:
-        logger.exception("api_management cache health probe failed", extra={"tenant_id": str(tenant_id)})
+        logger.exception(
+            "api_management cache health probe failed",
+            extra={"tenant_id": str(tenant_id), "correlation_id": correlation_id},
+        )
         checks["cache"] = "dependency_unavailable"
         overall = "unhealthy"
 
@@ -45,7 +54,10 @@ def module_health(*, tenant_id: uuid.UUID, cache_ttl_seconds: int) -> tuple[dict
         ApiManagementResource.objects.filter(tenant_id=tenant_id).exists()
         checks["module_model"] = "ok"
     except Exception:
-        logger.exception("api_management model health probe failed", extra={"tenant_id": str(tenant_id)})
+        logger.exception(
+            "api_management model health probe failed",
+            extra={"tenant_id": str(tenant_id), "correlation_id": correlation_id},
+        )
         checks["module_model"] = "dependency_unavailable"
         overall = "unhealthy"
 

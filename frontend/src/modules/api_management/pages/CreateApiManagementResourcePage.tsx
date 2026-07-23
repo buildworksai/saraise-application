@@ -13,7 +13,7 @@ import { api_managementService } from '../services/api_management-service';
 export function CreateApiManagementResourcePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const configuration = useQuery({ queryKey: QUERY_KEYS.CONFIGURATION, queryFn: api_managementService.getConfiguration });
+  const configuration = useQuery({ queryKey: QUERY_KEYS.RUNTIME_CONFIGURATION, queryFn: api_managementService.getRuntimeConfiguration });
   const policy = configuration.data?.document;
   const [name, setName] = useState('');
   const [description, setDescription] = useState<string | null>(null);

@@ -1,9 +1,7 @@
 import { lazy } from 'react';
-import { Boxes, Settings } from 'lucide-react';
+import { Boxes, FileSearch, Plus, Settings } from 'lucide-react';
 import type { TenantRoute } from '@/navigation/tenant-route-types';
 import { ROUTES } from './contracts';
-
-const contextual = (parentRouteId: string) => ({ type: 'contextual' as const, parentRouteId });
 
 export const tenantRoutes = [
   {
@@ -13,7 +11,7 @@ export const tenantRoutes = [
     title: 'API Management resources · SARAISE',
     sourceFile: 'modules/api_management/pages/ApiManagementListPage.tsx',
     Page: lazy(() => import('./pages/ApiManagementListPage').then(({ ApiManagementListPage }) => ({ default: ApiManagementListPage }))),
-    navigation: { type: 'sidebar', label: 'Resources', icon: Boxes, order: 340 },
+    navigation: { type: 'sidebar', label: 'Resources', icon: Boxes, runtimeOrderKey: 'resources_list' },
   },
   {
     id: 'api-management.resources.create',
@@ -22,7 +20,7 @@ export const tenantRoutes = [
     title: 'Create API Management resource · SARAISE',
     sourceFile: 'modules/api_management/pages/CreateApiManagementResourcePage.tsx',
     Page: lazy(() => import('./pages/CreateApiManagementResourcePage').then(({ CreateApiManagementResourcePage }) => ({ default: CreateApiManagementResourcePage }))),
-    navigation: contextual('api-management.resources.list'),
+    navigation: { type: 'sidebar', label: 'Create resource', icon: Plus, runtimeOrderKey: 'resources_create' },
   },
   {
     id: 'api-management.resources.detail',
@@ -31,7 +29,7 @@ export const tenantRoutes = [
     title: 'API Management resource · SARAISE',
     sourceFile: 'modules/api_management/pages/ApiManagementDetailPage.tsx',
     Page: lazy(() => import('./pages/ApiManagementDetailPage').then(({ ApiManagementDetailPage }) => ({ default: ApiManagementDetailPage }))),
-    navigation: contextual('api-management.resources.list'),
+    navigation: { type: 'sidebar', label: 'Open resource', icon: FileSearch, runtimeOrderKey: 'resources_detail', path: ROUTES.RESOURCES },
   },
   {
     id: 'api-management.configuration',
@@ -40,7 +38,7 @@ export const tenantRoutes = [
     title: 'API Management configuration · SARAISE',
     sourceFile: 'modules/api_management/pages/ApiManagementConfigurationPage.tsx',
     Page: lazy(() => import('./pages/ApiManagementConfigurationPage').then(({ ApiManagementConfigurationPage }) => ({ default: ApiManagementConfigurationPage }))),
-    navigation: { type: 'sidebar', label: 'Configuration', icon: Settings, order: 341 },
+    navigation: { type: 'sidebar', label: 'Configuration', icon: Settings, runtimeOrderKey: 'configuration' },
   },
 ] satisfies readonly TenantRoute[];
 

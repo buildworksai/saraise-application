@@ -18,7 +18,16 @@ function renderPage() {
 }
 
 describe('ApiManagementDetailPage', () => {
-  beforeEach(() => { vi.clearAllMocks(); vi.mocked(api_managementService.getConfiguration).mockResolvedValue(configuration); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api_managementService.getRuntimeConfiguration).mockResolvedValue(configuration);
+    vi.mocked(api_managementService.listResourceVersions).mockResolvedValue({
+      count: 0,
+      next: null,
+      previous: null,
+      results: [],
+    });
+  });
 
   it('renders complete resource details', async () => {
     vi.mocked(api_managementService.getResource).mockResolvedValue(resource({ name: 'Test resource', description: 'Test description', config: { key: 'value' } }));

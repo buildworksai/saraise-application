@@ -2,17 +2,23 @@ import { apiClient } from '@/services/api-client';
 import {
   ENDPOINTS,
   type ApiManagementConfiguration,
+  type ApiManagementConfigurationSchema,
   type ApiManagementResource,
   type ApiManagementResourceCreate,
   type ApiManagementResourceUpdate,
+  type ApiManagementResourceVersion,
+  type ConfigurationImportRequest,
+  type ConfigurationHistoryFilters,
   type ConfigurationPreview,
   type ConfigurationPreviewRequest,
   type ConfigurationRollbackRequest,
   type ConfigurationVersion,
   type ConfigurationWriteRequest,
+  type DeploymentEnvironment,
   type PaginatedResponse,
   type PortableApiManagementConfiguration,
   type ResourceListFilters,
+  type ResourceRollbackRequest,
 } from '../contracts';
 
 function isPage<T>(value: PaginatedResponse<T> | readonly T[]): value is PaginatedResponse<T> {
@@ -22,6 +28,14 @@ function isPage<T>(value: PaginatedResponse<T> | readonly T[]): value is Paginat
 function asPage<T>(value: PaginatedResponse<T> | readonly T[]): PaginatedResponse<T> {
   if (isPage(value)) return value;
   return { count: value.length, next: null, previous: null, results: value };
+}
+
+async function getRuntimeConfiguration(): Promise<ApiManagementConfiguration> {
+  const schema = await apiClient.get<ApiManagementConfigurationSchema>(ENDPOINTS.CONFIGURATION.SCHEMA());
+  if (!schema.environment || !schema.environments.includes(schema.environment)) {
+    throw new Error('The server configuration schema has no valid runtime environment.');
+  }
+  return apiClient.get(ENDPOINTS.CONFIGURATION.CURRENT(schema.environment));
 }
 
 export const api_managementService = {
@@ -42,14 +56,22 @@ export const api_managementService = {
   restoreResource: (id: string): Promise<ApiManagementResource> => apiClient.post(ENDPOINTS.RESOURCES.RESTORE(id), undefined, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
   activateResource: (id: string): Promise<ApiManagementResource> => apiClient.post(ENDPOINTS.RESOURCES.ACTIVATE(id), undefined, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
   deactivateResource: (id: string): Promise<ApiManagementResource> => apiClient.post(ENDPOINTS.RESOURCES.DEACTIVATE(id), undefined, { headers: { 'Idempotency-Key': crypto.randomUUID() } }),
-  getConfiguration: (): Promise<ApiManagementConfiguration> => apiClient.get(ENDPOINTS.CONFIGURATION.CURRENT),
-  updateConfiguration: (request: ConfigurationWriteRequest): Promise<ApiManagementConfiguration> => apiClient.put(ENDPOINTS.CONFIGURATION.CURRENT, request),
-  previewConfiguration: (request: ConfigurationPreviewRequest): Promise<ConfigurationPreview> => apiClient.post(ENDPOINTS.CONFIGURATION.PREVIEW, request),
-  listConfigurationHistory: async (): Promise<readonly ConfigurationVersion[]> => {
-    const response = await apiClient.get<PaginatedResponse<ConfigurationVersion> | readonly ConfigurationVersion[]>(ENDPOINTS.CONFIGURATION.HISTORY);
-    return asPage(response).results;
+  listResourceVersions: (id: string): Promise<PaginatedResponse<ApiManagementResourceVersion>> =>
+    apiClient.get(ENDPOINTS.RESOURCES.VERSIONS(id)),
+  rollbackResource: (id: string, request: ResourceRollbackRequest): Promise<ApiManagementResource> => {
+    const { idempotency_key, ...body } = request;
+    return apiClient.post(ENDPOINTS.RESOURCES.ROLLBACK(id), body, {
+      headers: { 'Idempotency-Key': idempotency_key },
+    });
   },
-  rollbackConfiguration: (request: ConfigurationRollbackRequest): Promise<ApiManagementConfiguration> => apiClient.post(ENDPOINTS.CONFIGURATION.ROLLBACK, request),
-  importConfiguration: (request: ConfigurationWriteRequest): Promise<ApiManagementConfiguration> => apiClient.post(ENDPOINTS.CONFIGURATION.IMPORT, request),
-  exportConfiguration: (): Promise<PortableApiManagementConfiguration> => apiClient.get(ENDPOINTS.CONFIGURATION.EXPORT),
+  getConfigurationSchema: (environment?: DeploymentEnvironment): Promise<ApiManagementConfigurationSchema> =>
+    apiClient.get(ENDPOINTS.CONFIGURATION.SCHEMA(environment)),
+  getRuntimeConfiguration,
+  getConfiguration: (environment: DeploymentEnvironment): Promise<ApiManagementConfiguration> => apiClient.get(ENDPOINTS.CONFIGURATION.CURRENT(environment)),
+  updateConfiguration: (environment: DeploymentEnvironment, request: ConfigurationWriteRequest): Promise<ApiManagementConfiguration> => apiClient.put(ENDPOINTS.CONFIGURATION.CURRENT(environment), request),
+  previewConfiguration: (environment: DeploymentEnvironment, request: ConfigurationPreviewRequest): Promise<ConfigurationPreview> => apiClient.post(ENDPOINTS.CONFIGURATION.PREVIEW(environment), request),
+  listConfigurationHistory: (environment: DeploymentEnvironment, filters: ConfigurationHistoryFilters = {}): Promise<PaginatedResponse<ConfigurationVersion>> => apiClient.get(ENDPOINTS.CONFIGURATION.HISTORY(environment, filters)),
+  rollbackConfiguration: (environment: DeploymentEnvironment, request: ConfigurationRollbackRequest): Promise<ApiManagementConfiguration> => apiClient.post(ENDPOINTS.CONFIGURATION.ROLLBACK(environment), request),
+  importConfiguration: (environment: DeploymentEnvironment, request: ConfigurationImportRequest): Promise<ApiManagementConfiguration> => apiClient.post(ENDPOINTS.CONFIGURATION.IMPORT(environment), request),
+  exportConfiguration: (environment: DeploymentEnvironment): Promise<PortableApiManagementConfiguration> => apiClient.get(ENDPOINTS.CONFIGURATION.EXPORT(environment)),
 };

@@ -10,6 +10,7 @@ from .api import (
     ConfigurationImportView,
     ConfigurationPreviewView,
     ConfigurationRollbackView,
+    ConfigurationSchemaView,
     ConfigurationView,
     HealthView,
 )
@@ -20,6 +21,7 @@ router.register(r"resources", ApiManagementResourceViewSet, basename="resource")
 urlpatterns = [
     path("", include(router.urls)),
     path("configuration/", ConfigurationView.as_view(), name="configuration"),
+    path("configuration/schema/", ConfigurationSchemaView.as_view(), name="configuration-schema"),
     path("configuration/preview/", ConfigurationPreviewView.as_view(), name="configuration-preview"),
     path("configuration/history/", ConfigurationHistoryView.as_view(), name="configuration-history"),
     path("configuration/rollback/", ConfigurationRollbackView.as_view(), name="configuration-rollback"),
