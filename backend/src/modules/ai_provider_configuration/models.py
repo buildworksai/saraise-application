@@ -16,7 +16,7 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models.functions import Lower
 
-from src.core.tenancy import TenantScopedModel, TimestampedModel
+from src.core.tenancy import TenantQuerySet, TenantScopedModel, TimestampedModel
 
 
 def generate_uuid() -> str:
@@ -84,42 +84,21 @@ class TenantDomainModel(TenantScopedModel, TimestampedModel):
         abstract = True
 
 
-class _LegacyTenantResourceBase(models.Model):
-    """Persistence base for the module's original public resource contract.
-
-    The first module API accepted string tenant identifiers, so this narrow
-    compatibility surface retains that storage type. New domain models use the
-    canonical UUID-backed :class:`TenantScopedModel` above.
-    """
-
-    tenant_id = models.CharField(max_length=36, db_index=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
-
-    def save(self, *args: Any, **kwargs: Any) -> None:
-        if not self.tenant_id:
-            raise ValidationError({"tenant_id": "Tenant ID is required."})
-        super().save(*args, **kwargs)
-
-
-class AIProviderConfigurationResource(_LegacyTenantResourceBase):
+class AIProviderConfigurationResource(TenantDomainModel):
     """Concrete tenant resource retained for the original module API."""
 
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid)
     name = models.CharField(max_length=255, db_index=True)
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
     config = models.JSONField(default=dict, blank=True)
-    created_by = models.CharField(max_length=36, db_index=True)
+    created_by = models.UUIDField(db_index=True)
 
     class Meta:
         db_table = "ai_provider_configuration_resources"
         indexes = [
             models.Index(fields=["tenant_id", "is_active"], name="aiprov_res_tenant_active_idx"),
             models.Index(fields=["tenant_id", "name"], name="aiprov_res_tenant_name_idx"),
+            models.Index(fields=["tenant_id", "is_deleted"], name="aiprov_res_tenant_deleted_idx"),
         ]
         ordering = ("name",)
 
@@ -261,6 +240,20 @@ class AIModelDeployment(TenantDomainModel):
         return self.deployment_name
 
 
+class AppendOnlyQuerySet(TenantQuerySet):
+    """Reject bulk mutation for evidence tables whose instance methods are append-only."""
+
+    def update(self, **kwargs: Any) -> int:
+        del kwargs
+        raise ValidationError("Evidence records are append-only.")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Evidence records are append-only.")
+
+
+AppendOnlyManager = models.Manager.from_queryset(AppendOnlyQuerySet)
+
+
 class AIUsageLog(TenantScopedModel):
     """Append-only provider usage and cost evidence."""
 
@@ -282,6 +275,8 @@ class AIUsageLog(TenantScopedModel):
     currency = models.CharField(max_length=3, default="USD")
     provider_request_id = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    objects = AppendOnlyManager()
 
     class Meta:
         db_table = "ai_provider_configuration_usage_logs"
@@ -351,12 +346,132 @@ class AIUsageLog(TenantScopedModel):
         return f"{self.total_tokens} tokens on {self.deployment_id}"
 
 
+class AIProviderRuntimeConfiguration(TenantScopedModel, TimestampedModel):
+    """Current tenant/environment runtime policy document for this module."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    environment = models.CharField(max_length=64, default="default")
+    values = models.JSONField(default=dict)
+    version = models.PositiveIntegerField(default=1)
+    updated_by = models.UUIDField()
+
+    class Meta:
+        db_table = "ai_provider_configuration_runtime_configs"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "environment"],
+                name="aiprov_runtime_config_tenant_env_uq",
+            ),
+            models.CheckConstraint(condition=models.Q(version__gte=1), name="aiprov_runtime_config_version_gte1"),
+        ]
+        indexes = [
+            models.Index(fields=["tenant_id", "environment"], name="aiprov_runtime_config_env_idx"),
+        ]
+
+
+class ImmutableAIProviderEvidence(TenantScopedModel):
+    """Append-only evidence base for configuration history and audit."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = AppendOnlyManager()
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("AI provider configuration evidence is append-only.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        del args, kwargs
+        raise ValidationError("AI provider configuration evidence is append-only.")
+
+
+class AIProviderRuntimeConfigurationVersion(ImmutableAIProviderEvidence):
+    """Immutable version snapshot for rollback and export."""
+
+    configuration = models.ForeignKey(
+        AIProviderRuntimeConfiguration,
+        on_delete=models.PROTECT,
+        related_name="versions",
+    )
+    version = models.PositiveIntegerField()
+    environment = models.CharField(max_length=64)
+    values = models.JSONField()
+    created_by = models.UUIDField()
+    correlation_id = models.UUIDField()
+    rollback_of = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        db_table = "ai_provider_configuration_runtime_config_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "configuration", "version"],
+                name="aiprov_runtime_config_version_uq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant_id", "configuration", "-version"], name="aiprov_runtime_cfg_ver_idx"),
+        ]
+
+
+class AIProviderRuntimeConfigurationAudit(ImmutableAIProviderEvidence):
+    """Immutable operator audit for every configuration change."""
+
+    configuration = models.ForeignKey(
+        AIProviderRuntimeConfiguration,
+        on_delete=models.PROTECT,
+        related_name="audit_records",
+    )
+    action = models.CharField(max_length=32)
+    actor_id = models.UUIDField()
+    correlation_id = models.UUIDField()
+    from_version = models.PositiveIntegerField(null=True, blank=True)
+    to_version = models.PositiveIntegerField()
+    before = models.JSONField()
+    after = models.JSONField()
+    rollback_of = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        db_table = "ai_provider_configuration_runtime_config_audit"
+        indexes = [
+            models.Index(fields=["tenant_id", "configuration", "-created_at"], name="aiprov_runtime_cfg_audit_idx"),
+        ]
+
+
+class AIProviderIdempotencyKey(TenantScopedModel, TimestampedModel):
+    """Tenant-scoped identity for retry-safe state creation."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key_digest = models.CharField(max_length=64)
+    request_fingerprint = models.CharField(max_length=64)
+    resource_type = models.CharField(max_length=64)
+    resource_id = models.UUIDField(null=True, blank=True)
+    response = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "ai_provider_configuration_idempotency_keys"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "key_digest"], name="aiprov_idem_tenant_key_uq"),
+        ]
+        indexes = [
+            models.Index(fields=["tenant_id", "key_digest"], name="aiprov_idem_lookup_idx"),
+        ]
+
+
 __all__ = [
     "AIModel",
     "AIModelDeployment",
     "AIProvider",
     "AIProviderConfigurationResource",
     "AIProviderCredential",
+    "AIProviderIdempotencyKey",
+    "AIProviderRuntimeConfiguration",
+    "AIProviderRuntimeConfigurationAudit",
+    "AIProviderRuntimeConfigurationVersion",
     "AIUsageLog",
     "CredentialStatus",
     "DeploymentStatus",

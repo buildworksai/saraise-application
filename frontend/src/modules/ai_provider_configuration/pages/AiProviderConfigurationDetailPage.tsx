@@ -7,11 +7,13 @@ import { ApiProblem, ConsoleHeader, ConsoleSkeleton, DeploymentStatusPill, Empty
 import { formatDate } from '../components/formatters';
 import { AI_PROVIDER_ROUTES } from '../contracts';
 import { aiProviderConfigurationService } from '../services/ai_provider_configuration-service';
+import { useAiProviderDocumentTitle } from '../use-ai-provider-document-title';
 
 // Provider detail coordinates four independently cached, read-only projections.
 // eslint-disable-next-line complexity
 export const AiProviderConfigurationDetailPage = () => {
   const { id } = useParams<{ id: string }>();
+  useAiProviderDocumentTitle('AI provider details');
   const navigate = useNavigate();
   const provider = useQuery({ queryKey: ['ai-provider-configuration', 'provider', id], queryFn: () => aiProviderConfigurationService.getProvider(id ?? ''), enabled: Boolean(id) });
   const models = useQuery({ queryKey: ['ai-provider-configuration', 'models', id], queryFn: () => aiProviderConfigurationService.listModels({ provider_id: id }), enabled: Boolean(id) });

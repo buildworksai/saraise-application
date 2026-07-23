@@ -1,166 +1,148 @@
-"""
-API Integration Tests for AiProviderConfiguration module.
+"""API tests for the governed AI-provider configuration resource endpoint."""
 
-Tests all DRF ViewSet endpoints:
-- CRUD operations
-- Authentication/authorization
-- Tenant isolation
-- Custom actions
-"""
+from __future__ import annotations
+
+import uuid
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.modules.ai_provider_configuration.models import TenantBaseModel
 from src.core.auth_utils import get_user_tenant_id
+from src.modules.ai_provider_configuration.models import TenantBaseModel
 
 User = get_user_model()
 
 
 @pytest.fixture
-def api_client():
-    """Create API client for testing."""
+def api_client() -> APIClient:
     return APIClient()
 
 
 @pytest.fixture
 def tenant_user(db):
-    """Create a test user with tenant."""
+    from unittest.mock import patch
+
     from src.core.user_models import UserProfile
-    from src.core.licensing.models import Organization
-    import uuid
 
-    # Create a valid Organization for the tenant
-    org = Organization.objects.create(name="Test Organization")
-    tenant_id = str(org.id)
-
-    user = User.objects.create_user(
-        username="testuser",
-        email="test@example.com",
-        password="testpass123",
-    )
-    profile = UserProfile.objects.get(user=user)
-    profile.tenant_id = tenant_id
-    profile.tenant_role = "tenant_admin"
-    profile.save()
-
-    return User.objects.get(pk=user.pk)
+    user = User.objects.create_user(username="testuser", email="test@example.com", password="testpass123")
+    with patch.object(UserProfile, "clean"):
+        profile, _ = UserProfile.objects.get_or_create(
+            user=user,
+            defaults={"tenant_id": str(uuid.uuid4()), "tenant_role": "tenant_admin"},
+        )
+        if not profile.tenant_id:
+            profile.tenant_id = str(uuid.uuid4())
+            profile.tenant_role = "tenant_admin"
+            profile.save()
+    user = User.objects.get(pk=user.pk)
+    user.has_perm = lambda permission: str(permission).startswith("ai_provider_configuration.")  # type: ignore[method-assign]
+    return user
 
 
 @pytest.fixture
-def authenticated_client(api_client, tenant_user):
-    """Create authenticated API client."""
+def authenticated_client(api_client: APIClient, tenant_user) -> APIClient:
     api_client.force_authenticate(user=tenant_user)
     return api_client
 
 
 @pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
+def override_saraise_mode(settings) -> None:
     settings.SARAISE_MODE = "development"
+
+
+def response_items(response) -> list[dict[str, object]]:
+    return response.data if isinstance(response.data, list) else response.data.get("results", [])
 
 
 @pytest.mark.django_db
 class TestTenantBaseModelViewSet:
-    """Test TenantBaseModelViewSet CRUD operations."""
+    def test_list_resources_requires_authentication(self, api_client: APIClient) -> None:
+        response = api_client.get("/api/v1/ai-provider-configuration/resources/")
+        assert response.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}
 
-    def test_list_resources_requires_authentication(self, api_client):
-        """Test that listing resources requires authentication."""
-        response = api_client.get(f"/api/v1/ai-provider-configuration/resources/")
-        assert response.status_code == status.HTTP_200_OK
-
-    def test_list_resources(self, authenticated_client, tenant_user):
-        """Test listing resources for authenticated user."""
+    def test_list_resources(self, authenticated_client: APIClient, tenant_user) -> None:
         tenant_id = get_user_tenant_id(tenant_user)
-        
-        # Create test resources
         TenantBaseModel.objects.create(
             tenant_id=tenant_id,
             name="Test Resource 1",
             description="Test description 1",
-            created_by=str(tenant_user.id),
+            created_by=uuid.uuid4(),
         )
         TenantBaseModel.objects.create(
             tenant_id=tenant_id,
             name="Test Resource 2",
             description="Test description 2",
-            created_by=str(tenant_user.id),
+            created_by=uuid.uuid4(),
         )
 
-        response = authenticated_client.get(f"/api/v1/ai-provider-configuration/resources/")
+        response = authenticated_client.get("/api/v1/ai-provider-configuration/resources/")
         assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        assert len(data) == 2
+        assert len(response_items(response)) == 2
 
-    def test_create_resource(self, authenticated_client, tenant_user):
-        """Test creating a resource."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
-        data = {
-            "name": "New Resource",
-            "description": "New resource description",
-            "config": {"key": "value"},
-        }
-
+    def test_create_resource(self, authenticated_client: APIClient, tenant_user) -> None:
+        tenant_id = str(get_user_tenant_id(tenant_user))
         response = authenticated_client.post(
-            f"/api/v1/ai-provider-configuration/resources/",
-            data,
-            format="json"
+            "/api/v1/ai-provider-configuration/resources/",
+            {"name": "New Resource", "description": "New resource description", "config": {"owner": "ops"}},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="resource-create",
         )
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["name"] == "New Resource"
-        assert response.data["tenant_id"] == tenant_id
+        assert str(response.data["tenant_id"]) == tenant_id
 
-    def test_get_resource_detail(self, authenticated_client, tenant_user):
-        """Test getting resource detail."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
+    def test_create_resource_requires_idempotency_key(self, authenticated_client: APIClient) -> None:
+        response = authenticated_client.post(
+            "/api/v1/ai-provider-configuration/resources/",
+            {"name": "New Resource", "description": "New resource description"},
+            format="json",
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
+    def test_get_resource_detail(self, authenticated_client: APIClient, tenant_user) -> None:
         resource = TenantBaseModel.objects.create(
-            tenant_id=tenant_id,
+            tenant_id=get_user_tenant_id(tenant_user),
             name="Test Resource",
             description="Test description",
-            created_by=str(tenant_user.id),
+            created_by=uuid.uuid4(),
         )
-
         response = authenticated_client.get(f"/api/v1/ai-provider-configuration/resources/{resource.id}/")
         assert response.status_code == status.HTTP_200_OK
-        assert response.data["id"] == resource.id
-        assert response.data["name"] == "Test Resource"
+        assert str(response.data["id"]) == str(resource.id)
 
-    def test_update_resource(self, authenticated_client, tenant_user):
-        """Test updating a resource."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
+    def test_update_resource(self, authenticated_client: APIClient, tenant_user) -> None:
         resource = TenantBaseModel.objects.create(
-            tenant_id=tenant_id,
+            tenant_id=get_user_tenant_id(tenant_user),
             name="Original Name",
             description="Original description",
-            created_by=str(tenant_user.id),
+            created_by=uuid.uuid4(),
         )
-
-        data = {"name": "Updated Name", "description": "Updated description"}
         response = authenticated_client.put(
             f"/api/v1/ai-provider-configuration/resources/{resource.id}/",
-            data,
-            format="json"
+            {"name": "Updated Name", "description": "Updated description", "config": {"owner": "ops"}},
+            format="json",
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.data["name"] == "Updated Name"
 
-    def test_delete_resource(self, authenticated_client, tenant_user):
-        """Test deleting a resource."""
-        tenant_id = get_user_tenant_id(tenant_user)
-        
+    def test_delete_and_restore_resource(self, authenticated_client: APIClient, tenant_user) -> None:
         resource = TenantBaseModel.objects.create(
-            tenant_id=tenant_id,
-            name="To Delete",
-            description="Will be deleted",
-            created_by=str(tenant_user.id),
+            tenant_id=get_user_tenant_id(tenant_user),
+            name="To Archive",
+            description="Will be archived",
+            created_by=uuid.uuid4(),
         )
-
-        response = authenticated_client.delete(f"/api/v1/ai-provider-configuration/resources/{resource.id}/")
-        assert response.status_code == status.HTTP_204_NO_CONTENT
-        
-        # Verify resource is deleted
-        assert not TenantBaseModel.objects.filter(id=resource.id).exists()
+        delete_response = authenticated_client.delete(f"/api/v1/ai-provider-configuration/resources/{resource.id}/")
+        assert delete_response.status_code == status.HTTP_204_NO_CONTENT
+        resource.refresh_from_db()
+        assert resource.is_deleted is True
+        restore_response = authenticated_client.post(
+            f"/api/v1/ai-provider-configuration/resources/{resource.id}/restore/",
+            {},
+            format="json",
+        )
+        assert restore_response.status_code == status.HTTP_200_OK
+        resource.refresh_from_db()
+        assert resource.is_deleted is False

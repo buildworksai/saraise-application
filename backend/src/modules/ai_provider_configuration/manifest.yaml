@@ -7,6 +7,10 @@ lifecycle: platform
 dependencies:
   - core-identity >=1.0
 permissions:
+  - ai_provider_configuration.resource:read
+  - ai_provider_configuration.resource:create
+  - ai_provider_configuration.resource:update
+  - ai_provider_configuration.resource:delete
   - ai_provider_configuration.provider:read
   - ai_provider_configuration.credential:read
   - ai_provider_configuration.credential:create
@@ -19,9 +23,69 @@ permissions:
   - ai_provider_configuration.deployment:delete
   - ai_provider_configuration.usage:read
   - ai_provider_configuration.secret:rotate
+  - ai_provider_configuration.configuration:read
+  - ai_provider_configuration.configuration:update
+  - ai_provider_configuration.configuration:preview
+  - ai_provider_configuration.configuration:rollback
+  - ai_provider_configuration.configuration:import
+  - ai_provider_configuration.configuration:export
+  - ai_provider_configuration.configuration:audit
   - ai_provider_configuration.health:read
 sod_actions:
   - [ai_provider_configuration.credential:create, ai_provider_configuration.credential:delete]
+entities:
+  - name: AIProviderConfigurationResource
+    table: ai_provider_configuration_resources
+    tenant_scoped: true
+  - name: AIProvider
+    table: ai_provider_configuration_providers
+    tenant_scoped: false
+  - name: AIProviderCredential
+    table: ai_provider_configuration_credentials
+    tenant_scoped: true
+  - name: AIModel
+    table: ai_provider_configuration_models
+    tenant_scoped: false
+  - name: AIModelDeployment
+    table: ai_provider_configuration_deployments
+    tenant_scoped: true
+  - name: AIUsageLog
+    table: ai_provider_configuration_usage_logs
+    tenant_scoped: true
+    immutable: true
+  - name: AIProviderRuntimeConfiguration
+    table: ai_provider_configuration_runtime_configs
+    tenant_scoped: true
+  - name: AIProviderRuntimeConfigurationVersion
+    table: ai_provider_configuration_runtime_config_versions
+    tenant_scoped: true
+    immutable: true
+  - name: AIProviderRuntimeConfigurationAudit
+    table: ai_provider_configuration_runtime_config_audit
+    tenant_scoped: true
+    immutable: true
+  - name: AIProviderIdempotencyKey
+    table: ai_provider_configuration_idempotency_keys
+    tenant_scoped: true
+endpoints:
+  - path: /resources/
+    actions: [list, retrieve, create, update, partial_update, destroy, restore]
+  - path: /providers/
+    actions: [list, retrieve]
+  - path: /credentials/
+    actions: [list, retrieve, create, update, partial_update, destroy]
+  - path: /models/
+    actions: [list, retrieve]
+  - path: /deployments/
+    actions: [list, retrieve, create, update, partial_update, destroy, activate, deactivate]
+  - path: /usage-logs/
+    actions: [list, retrieve]
+  - path: /secrets/
+    actions: [rotate_key, re_encrypt]
+  - path: /runtime-configuration/
+    actions: [current, update_current, preview, versions, audit, rollback, export, import]
+  - path: /health/
+    actions: [health]
 search_indexes:
   - ai_provider_configuration_providers
   - ai_provider_configuration_models
@@ -32,5 +96,6 @@ ai_tools:
   - inspect_ai_provider_usage
 metadata:
   credentials: encrypted-at-rest-never-returned
-  provider_runtime: explicit-timeout-circuit-breaker-ssrf-protected
+  provider_runtime: tenant-configured-timeout-retry-backoff-jitter-circuit-breaker-ssrf-protected
   extension_surface: provider-neutral-adapter-contract
+  configuration_runtime: versioned-audited-rollback-import-export-preview

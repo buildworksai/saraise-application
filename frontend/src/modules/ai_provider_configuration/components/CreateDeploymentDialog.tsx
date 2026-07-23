@@ -3,6 +3,8 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import type { AIModel, AIModelDeploymentCreate } from '../contracts';
+import { useQuery } from '@tanstack/react-query';
+import { aiProviderConfigurationService } from '../services/ai_provider_configuration-service';
 
 export function CreateDeploymentDialog({
   open,
@@ -19,9 +21,20 @@ export function CreateDeploymentDialog({
   isSubmitting: boolean;
   onSubmit: (request: AIModelDeploymentCreate) => Promise<void>;
 }) {
+  const runtimeConfiguration = useQuery({ queryKey: ['ai-provider-configuration', 'runtime-configuration'], queryFn: aiProviderConfigurationService.getRuntimeConfiguration });
+  const values = runtimeConfiguration.data?.values;
+  const deploymentPolicy = typeof values?.deployment_policy === 'object' && values.deployment_policy !== null ? values.deployment_policy as Record<string, unknown> : {};
+  const defaults = typeof deploymentPolicy.defaults === 'object' && deploymentPolicy.defaults !== null ? deploymentPolicy.defaults as Record<string, unknown> : {};
+  const limits = typeof deploymentPolicy.limits === 'object' && deploymentPolicy.limits !== null ? deploymentPolicy.limits as Record<string, unknown> : {};
+  const defaultTemperature = typeof defaults.temperature === 'number' ? defaults.temperature : 0;
+  const defaultMaxTokens = typeof defaults.max_tokens === 'number' ? defaults.max_tokens : 1;
+  const temperatureMin = typeof limits.temperature_min === 'number' ? limits.temperature_min : 0;
+  const temperatureMax = typeof limits.temperature_max === 'number' ? limits.temperature_max : 2;
+  const maxTokensMin = typeof limits.max_tokens_min === 'number' ? limits.max_tokens_min : 1;
+  const maxTokensMax = typeof limits.max_tokens_max === 'number' ? limits.max_tokens_max : undefined;
   const [model, setModel] = useState('');
-  const [temperature, setTemperature] = useState('0.7');
-  const [maxTokens, setMaxTokens] = useState('1024');
+  const [temperature, setTemperature] = useState('');
+  const [maxTokens, setMaxTokens] = useState('');
   const [name, setName] = useState('');
   const [credential, setCredential] = useState('');
   const [error, setError] = useState('');
@@ -29,13 +42,16 @@ export function CreateDeploymentDialog({
   useEffect(() => {
     if (!open) {
       setModel('');
-      setTemperature('0.7');
-      setMaxTokens('1024');
+      setTemperature('');
+      setMaxTokens('');
       setName('');
       setCredential('');
       setError('');
+    } else {
+      setTemperature(String(defaultTemperature));
+      setMaxTokens(String(defaultMaxTokens));
     }
-  }, [open]);
+  }, [defaultMaxTokens, defaultTemperature, open]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -43,10 +59,10 @@ export function CreateDeploymentDialog({
     const parsedMaxTokens = Number(maxTokens);
     if (!model) return setError('Choose a model.');
     if (!name.trim()) return setError('Deployment name is required.');
-    if (!Number.isFinite(parsedTemperature) || parsedTemperature < 0 || parsedTemperature > 2) return setError('Temperature must be between 0 and 2.');
-    if (!Number.isInteger(parsedMaxTokens) || parsedMaxTokens < 1) return setError('Maximum tokens must be a positive whole number.');
+    if (!Number.isFinite(parsedTemperature) || parsedTemperature < temperatureMin || parsedTemperature > temperatureMax) return setError(`Temperature must be between ${temperatureMin} and ${temperatureMax}.`);
+    if (!Number.isInteger(parsedMaxTokens) || parsedMaxTokens < maxTokensMin || (maxTokensMax !== undefined && parsedMaxTokens > maxTokensMax)) return setError('Maximum tokens violates the tenant runtime limits.');
     setError('');
-    await onSubmit({ model, credential: credential || null, deployment_name: name.trim(), status: 'active', config: { temperature: parsedTemperature, max_tokens: parsedMaxTokens } });
+    await onSubmit({ model, credential: credential || null, deployment_name: name.trim(), config: { temperature: parsedTemperature, max_tokens: parsedMaxTokens } });
   };
 
   return (
@@ -71,8 +87,8 @@ export function CreateDeploymentDialog({
           <p className="mt-1 text-xs text-muted-foreground">Only credentials for the selected model provider are available.</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Input id="deployment-temperature" label="Temperature" type="number" min="0" max="2" step="0.1" value={temperature} onChange={(event) => setTemperature(event.target.value)} />
-          <Input id="deployment-max-tokens" label="Maximum output tokens" type="number" min="1" step="1" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} />
+          <Input id="deployment-temperature" label="Temperature" type="number" min={temperatureMin} max={temperatureMax} step="0.1" value={temperature} onChange={(event) => setTemperature(event.target.value)} />
+          <Input id="deployment-max-tokens" label="Maximum output tokens" type="number" min={maxTokensMin} max={maxTokensMax} step="1" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} />
         </div>
         {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
         <div className="flex justify-end gap-2 pt-2">

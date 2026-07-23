@@ -38,6 +38,12 @@ export function ConsoleHeader({
           Provider console
         </NavLink>
         <NavLink
+          to={AI_PROVIDER_ROUTES.CONFIGURATION}
+          className={({ isActive }) => `whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium ${isActive ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'}`}
+        >
+          Runtime configuration
+        </NavLink>
+        <NavLink
           to={AI_PROVIDER_ROUTES.SECRETS}
           className={({ isActive }) => `flex items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium ${isActive ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'}`}
         >
@@ -92,7 +98,7 @@ export function EmptyPanel({ icon, title, description, action }: { icon: ReactNo
 
 export function DeploymentStatusPill({ status }: { status: DeploymentStatus }) {
   const styles = status === 'active'
-    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+    ? 'bg-primary/10 text-primary'
     : status === 'error'
       ? 'bg-destructive/15 text-destructive'
       : 'bg-muted text-muted-foreground';

@@ -22,9 +22,9 @@ describe('aiProviderConfigurationService', () => {
     expect(apiClient.get).toHaveBeenCalledWith(`${ENDPOINTS.MODELS.LIST}?provider_id=provider+with+spaces&search=vision+%26+tools`);
   });
 
-  it('uses PATCH for partial deployment updates', async () => {
-    vi.mocked(apiClient.patch).mockResolvedValue({});
-    await aiProviderConfigurationService.updateDeployment('deployment-1', { status: 'inactive' });
-    expect(apiClient.patch).toHaveBeenCalledWith(ENDPOINTS.DEPLOYMENTS.UPDATE('deployment-1'), { status: 'inactive' });
+  it('uses explicit deployment lifecycle endpoints for status transitions', async () => {
+    vi.mocked(apiClient.post).mockResolvedValue({});
+    await aiProviderConfigurationService.deactivateDeployment('deployment-1');
+    expect(apiClient.post).toHaveBeenCalledWith(ENDPOINTS.DEPLOYMENTS.DEACTIVATE('deployment-1'));
   });
 });

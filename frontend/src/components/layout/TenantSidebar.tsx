@@ -95,6 +95,17 @@ const tenantItems: NavItem[] = [
         icon: Database,
       },
       {
+        path: "/ai-provider-configuration/create",
+        label: "Connect Credential",
+        icon: Plus,
+      },
+      {
+        path: "/ai-provider-configuration/runtime-configuration",
+        label: "Runtime Configuration",
+        icon: Settings,
+        adminOnly: true,
+      },
+      {
         path: "/ai-providers/secrets",
         label: "Secret Operations",
         icon: Key,
