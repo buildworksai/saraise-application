@@ -23,6 +23,9 @@ import {
   Building2,
   Briefcase,
   CheckSquare,
+  Globe2,
+  Plus,
+  Settings,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
@@ -30,6 +33,7 @@ import { cn } from "@/lib/utils";
 import { getTenantSidebarTreeForMode } from "@/navigation/tenant-route-registry";
 import { useDocumentIntelligenceConfiguration } from "@/modules/document_intelligence/hooks/use-document-intelligence-configuration";
 import { useTraceabilityCapabilities } from "@/modules/blockchain_traceability/hooks/use-traceability-configuration";
+import { ROUTES as REGIONAL_ROUTES } from "@/modules/regional/contracts";
 import type { User } from "@/stores/auth-store";
 
 interface NavItem {
@@ -40,11 +44,28 @@ interface NavItem {
   module?: string;
   order?: number;
   children?: NavItem[];
+  adminOnly?: boolean;
 }
 
 const tenantItems: NavItem[] = [
   { path: "/tenant/dashboard", label: "Dashboard", icon: LayoutDashboard },
   // Phase 8 & 9 Modules
+  {
+    path: REGIONAL_ROUTES.ROOT,
+    label: "Regional",
+    icon: Globe2,
+    module: "regional",
+    children: [
+      { path: REGIONAL_ROUTES.ROOT, label: "Resources", icon: Globe2 },
+      { path: REGIONAL_ROUTES.CREATE, label: "Create resource", icon: Plus },
+      {
+        path: REGIONAL_ROUTES.CONFIGURATION,
+        label: "Configuration",
+        icon: Settings,
+        adminOnly: true,
+      },
+    ],
+  },
   {
     path: "/workflow-automation/workflows",
     label: "Workflow Automation",
@@ -286,6 +307,11 @@ export const TenantSidebar = ({ user }: { user: User }) => {
     documentIntelligenceConfiguration.data?.document.ui.navigation_order,
   );
   const renderedTenantItems = [...tenantItems, ...runtimeRegistryItems]
+    .filter((item) => !item.adminOnly || isAdmin)
+    .map((item) => ({
+      ...item,
+      children: item.children?.filter((child) => !child.adminOnly || isAdmin),
+    }))
     .map((item) => item.module === "blockchain_traceability" && traceabilityCapabilities.data
       ? { ...item, order: traceabilityCapabilities.data.document.ui.sidebar_order }
       : item)

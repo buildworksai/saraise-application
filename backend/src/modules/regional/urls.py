@@ -1,18 +1,17 @@
 """
 URL routing for Regional module.
 """
-from django.urls import path, include
+from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .api import RegionalResourceViewSet
+from .api import RegionalConfigurationViewSet, RegionalResourceViewSet
 from .health import health_check
 
-# Create router and register ViewSets
 router = DefaultRouter()
-router.register(r'resources', RegionalResourceViewSet, basename='resource')
+router.register(r"resources", RegionalResourceViewSet, basename="resource")
+router.register(r"configuration", RegionalConfigurationViewSet, basename="configuration")
 
-# URL patterns
 urlpatterns = [
-    path('', include(router.urls)),
-    path('health/', health_check, name='health_check'),
+    path("", include(router.urls)),
+    path("health/", health_check, name="health_check"),
 ]

@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/Textarea';
 import {
   REGIONAL_QUERY_KEYS,
   ROUTES,
-  type RegionalResourceCreate,
+  type RegionalResourceUpdate,
 } from '../contracts';
 import { regionalService } from '../services/regional-service';
 import { useRegionalDocumentTitle } from '../use-regional-document-title';
@@ -21,69 +21,71 @@ type ResourceFormData = {
   description: string;
 };
 
-export const CreateRegionalResourcePage = () => {
-  useRegionalDocumentTitle('Create regional resource');
+export const EditRegionalResourcePage = () => {
+  useRegionalDocumentTitle('Edit regional resource');
+  const { id = '' } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const idempotencyKey = useRef(crypto.randomUUID());
+  const resource = useQuery({
+    queryKey: REGIONAL_QUERY_KEYS.resource(id),
+    queryFn: () => regionalService.getResource(id),
+    enabled: Boolean(id),
+  });
   const configuration = useQuery({
     queryKey: [...REGIONAL_QUERY_KEYS.configuration('active'), 'active'],
     queryFn: regionalService.getActiveConfiguration,
   });
-  const rules = configuration.data?.document.resource;
-  const form = useForm<ResourceFormData>({
-    defaultValues: { name: '', description: '' },
-  });
+  const form = useForm<ResourceFormData>({ defaultValues: { name: '', description: '' } });
 
   useEffect(() => {
-    if (!rules || form.formState.isDirty) return;
-    form.reset({
-      name: rules.name_default,
-      description: rules.description_default,
-    });
-  }, [form, rules]);
+    if (resource.data) {
+      form.reset({
+        name: resource.data.name,
+        description: resource.data.description,
+      });
+    }
+  }, [form, resource.data]);
 
-  const createMutation = useMutation({
-    mutationFn: (data: RegionalResourceCreate) =>
-      regionalService.createResource(data, idempotencyKey.current),
-    onSuccess: (resource) => {
+  const updateMutation = useMutation({
+    mutationFn: (data: RegionalResourceUpdate) =>
+      regionalService.updateResource(id, data),
+    onSuccess: (updated) => {
       void queryClient.invalidateQueries({ queryKey: REGIONAL_QUERY_KEYS.resources });
-      toast.success('Resource created successfully');
-      navigate(ROUTES.DETAIL(resource.id));
+      void queryClient.invalidateQueries({ queryKey: REGIONAL_QUERY_KEYS.resource(id) });
+      toast.success('Resource updated successfully');
+      navigate(ROUTES.DETAIL(updated.id));
     },
-    onError: () => toast.error('Failed to create resource. Please try again.'),
+    onError: () => toast.error('Failed to update resource. Please try again.'),
   });
 
-  if (configuration.isLoading) {
-    return <p role="status" className="p-8 text-muted-foreground">Loading configuration…</p>;
+  if (resource.isLoading || configuration.isLoading) {
+    return <p role="status" className="p-8 text-muted-foreground">Loading resource…</p>;
   }
-  if (configuration.isError || !rules) {
+  const rules = configuration.data?.document.resource;
+  if (resource.isError || configuration.isError || !resource.data || !rules) {
     return (
       <ErrorState
-        title="Configuration unavailable"
-        message="The governed Regional defaults and safe limits could not be loaded. Creation is disabled."
-        onRetry={() => void configuration.refetch()}
+        message="The resource or its governed configuration could not be loaded."
+        onRetry={() => {
+          void resource.refetch();
+          void configuration.refetch();
+        }}
       />
     );
   }
 
   return (
     <main id="main-content" className="mx-auto max-w-4xl space-y-6 p-8">
-      <div>
-        <h1 className="text-3xl font-bold text-foreground">Create regional resource</h1>
-        <p className="mt-2 text-muted-foreground">
-          Fields are validated against the active tenant configuration.
-        </p>
-      </div>
+      <h1 className="text-3xl font-bold text-foreground">Edit regional resource</h1>
       <Card>
         <CardHeader><CardTitle>Resource details</CardTitle></CardHeader>
         <CardContent>
           <form
             className="space-y-4"
             onSubmit={form.handleSubmit((data) =>
-              createMutation.mutate({
+              updateMutation.mutate({
                 name: data.name.trim(),
-                description: data.description || rules.description_default,
+                description: data.description,
               }),
             )}
           >
@@ -93,7 +95,6 @@ export const CreateRegionalResourcePage = () => {
               required
               minLength={rules.name_min_length}
               maxLength={rules.name_max_length}
-              title={`Enter ${rules.name_min_length}–${rules.name_max_length} characters.`}
               error={form.formState.errors.name?.message}
               {...form.register('name', {
                 required: 'Name is required',
@@ -118,7 +119,6 @@ export const CreateRegionalResourcePage = () => {
                 id="description"
                 rows={4}
                 maxLength={rules.description_max_length}
-                title={`Up to ${rules.description_max_length} characters.`}
                 {...form.register('description', {
                   maxLength: {
                     value: rules.description_max_length,
@@ -132,18 +132,22 @@ export const CreateRegionalResourcePage = () => {
                 </p>
               ) : null}
             </div>
-            {createMutation.error ? (
+            {updateMutation.error ? (
               <p role="alert" className="text-sm text-destructive">
-                {createMutation.error instanceof Error
-                  ? createMutation.error.message
-                  : 'Resource creation failed.'}
+                {updateMutation.error instanceof Error
+                  ? updateMutation.error.message
+                  : 'Resource update failed.'}
               </p>
             ) : null}
-            <div className="flex gap-3 pt-2">
-              <Button type="submit" disabled={createMutation.isPending}>
-                {createMutation.isPending ? 'Creating…' : 'Create resource'}
+            <div className="flex gap-3">
+              <Button type="submit" disabled={updateMutation.isPending}>
+                {updateMutation.isPending ? 'Saving…' : 'Save changes'}
               </Button>
-              <Button type="button" variant="outline" onClick={() => navigate(ROUTES.ROOT)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => navigate(ROUTES.DETAIL(resource.data.id))}
+              >
                 Cancel
               </Button>
             </div>

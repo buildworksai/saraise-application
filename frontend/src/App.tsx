@@ -12,6 +12,7 @@ import {
   getTenantRoutesForMode,
   tenantRoutes,
 } from "./navigation/tenant-route-registry";
+import { ROUTES as REGIONAL_ROUTES } from "./modules/regional/contracts";
 
 const registryTenantRoutes = getTenantRoutesForMode(
   tenantRoutes,
@@ -165,6 +166,18 @@ const RegionalDetailPage = lazy(() =>
 const CreateRegionalResourcePage = lazy(() =>
   import("./modules/regional/pages/CreateRegionalResourcePage").then((m) => ({
     default: m.CreateRegionalResourcePage,
+  }))
+);
+
+const EditRegionalResourcePage = lazy(() =>
+  import("./modules/regional/pages/EditRegionalResourcePage").then((m) => ({
+    default: m.EditRegionalResourcePage,
+  }))
+);
+
+const RegionalConfigurationPage = lazy(() =>
+  import("./modules/regional/pages/RegionalConfigurationPage").then((m) => ({
+    default: m.RegionalConfigurationPage,
   }))
 );
 
@@ -1054,7 +1067,7 @@ function AnimatedRoutes() {
 
           {/* Regional routes */}
           <Route
-            path="/regional"
+            path={REGIONAL_ROUTES.ROOT}
             element={
               <ProtectedRoute>
                 <ModuleLayout>
@@ -1064,7 +1077,7 @@ function AnimatedRoutes() {
             }
           />
           <Route
-            path="/regional/create"
+            path={REGIONAL_ROUTES.CREATE}
             element={
               <ProtectedRoute>
                 <ModuleLayout>
@@ -1074,7 +1087,27 @@ function AnimatedRoutes() {
             }
           />
           <Route
-            path="/regional/:id"
+            path={REGIONAL_ROUTES.CONFIGURATION}
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RegionalConfigurationPage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path={REGIONAL_ROUTES.EDIT_PATTERN}
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <EditRegionalResourcePage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path={REGIONAL_ROUTES.DETAIL_PATTERN}
             element={
               <ProtectedRoute>
                 <ModuleLayout>

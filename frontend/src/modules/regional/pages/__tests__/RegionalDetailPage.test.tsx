@@ -1,107 +1,49 @@
-/**
- * RegionalDetailPage Component Tests
- */
-
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RegionalDetailPage } from './RegionalDetailPage';
-import { regional_service } from '../services/regional-service';
+import { RegionalDetailPage } from '../RegionalDetailPage';
+import { regionalService } from '../../services/regional-service';
+import { ROUTES } from '../../contracts';
+import { configurationFixture, resourceFixture } from './regional-test-fixtures';
 
-// Mock dependencies
-vi.mock('../services/regional-service');
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useParams: () => ({ id: 'test-id' }),
-    useNavigate: () => vi.fn(),
-  };
-});
+vi.mock('../../services/regional-service');
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-  },
-}));
-
-const createTestQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: { retry: false },
-    mutations: { retry: false },
-  },
-});
+function renderPage() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/regional/test-id']}>
+        <Routes>
+          <Route path={ROUTES.DETAIL_PATTERN} element={<RegionalDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
 
 describe('RegionalDetailPage', () => {
-  let queryClient: QueryClient;
-
   beforeEach(() => {
-    queryClient = createTestQueryClient();
     vi.clearAllMocks();
+    vi.mocked(regionalService.getActiveConfiguration).mockResolvedValue(configurationFixture());
   });
 
-  it('should render loading state', () => {
-    vi.mocked(regional_service.getResource).mockImplementation(
-      () => new Promise(() => {}) // Never resolves
+  it('renders a complete typed resource', async () => {
+    vi.mocked(regionalService.getResource).mockResolvedValue(
+      resourceFixture({ id: 'test-id', name: 'Test resource' }),
     );
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/:id" element={<RegionalDetailPage />} />
-          </Routes>
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    renderPage();
+    expect(await screen.findByText('Test resource')).toBeInTheDocument();
+    expect(screen.getByText('Active')).toBeInTheDocument();
   });
 
-  it('should render resource details', async () => {
-    const mockResource = {
-      id: 'test-id',
-      name: 'Test Resource',
-      description: 'Test Description',
-      is_active: true,
-      config: { key: 'value' },
-    };
-
-    vi.mocked(regional_service.getResource).mockResolvedValue(mockResource as any);
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/:id" element={<RegionalDetailPage />} />
-          </Routes>
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('Test Resource')).toBeInTheDocument();
-      expect(screen.getByText('Test Description')).toBeInTheDocument();
-    });
-  });
-
-  it('should render error state when resource not found', async () => {
-    vi.mocked(regional_service.getResource).mockRejectedValue(new Error('Not found'));
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/:id" element={<RegionalDetailPage />} />
-          </Routes>
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText(/not found/i)).toBeInTheDocument();
-    });
+  it('distinguishes a request failure and provides retry', async () => {
+    vi.mocked(regionalService.getResource).mockRejectedValue(new Error('Service unavailable'));
+    renderPage();
+    expect(await screen.findByText('Unable to load resource')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try Again' })).toBeInTheDocument();
   });
 });

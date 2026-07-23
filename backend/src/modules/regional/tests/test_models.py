@@ -1,57 +1,53 @@
-"""
-Model Unit Tests for Regional module.
+"""Model invariants for Regional tenant data and immutable evidence."""
 
-Tests model creation, validation, and relationships.
-"""
+import uuid
+
 import pytest
 from django.core.exceptions import ValidationError
+from django.db.models.deletion import ProtectedError
 
-from src.modules.regional.models import TenantBaseModel
+from src.modules.regional.models import RegionalAuditRecord, RegionalResource
 
 
 @pytest.mark.django_db
-class TestTenantBaseModelModel:
-    """Test TenantBaseModel model."""
-
-    def test_create_resource(self, db):
-        """Test creating a resource."""
-        resource = TenantBaseModel.objects.create(
-            tenant_id="tenant-123",
+class TestRegionalModels:
+    def test_resource_uses_uuid_tenant_and_soft_delete_guard(self):
+        tenant = uuid.uuid4()
+        resource = RegionalResource.objects.create(
+            tenant_id=tenant,
             name="Test Resource",
             description="Test description",
+            is_active=True,
             created_by="user-123",
         )
         assert resource.id is not None
-        assert resource.name == "Test Resource"
-        assert resource.tenant_id == "tenant-123"
-        assert resource.is_active is True
-
-    def test_resource_str_representation(self, db):
-        """Test resource string representation."""
-        resource = TenantBaseModel.objects.create(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
+        assert resource.tenant_id == tenant
         assert str(resource) == f"Test Resource ({resource.id})"
+        with pytest.raises(ProtectedError):
+            resource.delete()
 
-    def test_resource_has_tenant_id(self, db):
-        """Test that resource requires tenant_id."""
-        resource = TenantBaseModel(
-            name="Test Resource",
-            created_by="user-123",
-        )
-        # Should raise error if tenant_id is missing
-        with pytest.raises(Exception):
-            resource.save()
+    def test_resource_requires_valid_tenant_uuid(self):
+        with pytest.raises(ValidationError):
+            RegionalResource.objects.create(
+                tenant_id="not-a-uuid",
+                name="Test Resource",
+                is_active=True,
+                created_by="user-123",
+            )
 
-    def test_resource_config_field(self, db):
-        """Test resource config JSON field."""
-        config = {"key1": "value1", "key2": 123}
-        resource = TenantBaseModel.objects.create(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            config=config,
-            created_by="user-123",
+    def test_audit_records_are_immutable(self):
+        record = RegionalAuditRecord.objects.create(
+            tenant_id=uuid.uuid4(),
+            actor_id="user-123",
+            correlation_id=uuid.uuid4(),
+            operation="resource.create",
+            entity_type="resource",
+            entity_id=uuid.uuid4(),
+            before_value={},
+            after_value={"name": "Test"},
         )
-        assert resource.config == config
+        record.operation = "tampered"
+        with pytest.raises(ValidationError):
+            record.save()
+        with pytest.raises(ProtectedError):
+            RegionalAuditRecord.objects.filter(pk=record.pk).delete()
