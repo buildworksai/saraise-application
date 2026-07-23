@@ -116,6 +116,7 @@ class Guard:
         return self.decision
 
 
+@pytest.mark.django_db
 def test_operation_guard_registry_is_fail_closed_and_replaceable():
     tenant_id, document_id = uuid.uuid4(), uuid.uuid4()
     configure_operation_guards({})

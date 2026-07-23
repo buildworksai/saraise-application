@@ -5,6 +5,13 @@ import {
   type ApiErrorEnvelope,
   type DmsFrontendError,
   type DmsHealth,
+  type DmsConfiguration,
+  type DmsConfigurationAuditRecord,
+  type DmsConfigurationExportDocument,
+  type DmsConfigurationPreview,
+  type DmsConfigurationWrite,
+  type DmsConfigurationVersion,
+  type DmsEnvironment,
   type DmsListQuery,
   type DmsPage,
   type Document,
@@ -122,6 +129,7 @@ function queryPath(path: string, query: DmsListQuery = {}): string {
     ['modified_before', query.modified_before],
     ['search', query.search],
     ['ordering', query.ordering],
+    ['environment', query.environment],
     ['page', query.page],
     ['page_size', query.page_size],
   ];
@@ -131,8 +139,8 @@ function queryPath(path: string, query: DmsListQuery = {}): string {
   return serialized ? `${path}?${serialized}` : path;
 }
 
-function principalQueryPath(search: string, type: PrincipalType, limit = 20): string {
-  const parameters = new URLSearchParams({ search, type, limit: String(Math.min(Math.max(limit, 1), 50)) });
+function principalQueryPath(search: string, type: PrincipalType, limit: number): string {
+  const parameters = new URLSearchParams({ search, type, limit: String(limit) });
   return `${ENDPOINTS.PRINCIPALS}?${parameters.toString()}`;
 }
 
@@ -200,11 +208,22 @@ function isDocumentVersion(value: unknown): value is DocumentVersion {
     && typeof value.created_at === 'string';
 }
 
-function upload<T>(path: string, request: DocumentUpload | DocumentVersionCreate, accepts: (value: unknown) => value is T, options: UploadOptions = {}): Promise<T> {
+let uploadCircuitFailures = 0;
+let uploadCircuitOpenUntil = 0;
+
+function uploadAttempt<T>(
+  path: string,
+  request: DocumentUpload | DocumentVersionCreate,
+  accepts: (value: unknown) => value is T,
+  options: UploadOptions,
+  idempotencyKey: string,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', transportUrl(path));
     xhr.withCredentials = true;
+    xhr.timeout = options.transport.timeout_ms;
+    xhr.setRequestHeader('Idempotency-Key', idempotencyKey);
     const token = csrfToken();
     if (token) xhr.setRequestHeader('X-CSRFToken', token);
     xhr.upload.addEventListener('progress', (event) => {
@@ -224,10 +243,51 @@ function upload<T>(path: string, request: DocumentUpload | DocumentVersionCreate
       resolve(parsed.data);
     });
     xhr.addEventListener('error', () => reject(new DmsApiError({ kind: 'unavailable', status: 503, message: 'The upload connection failed. Your document was not reported as saved.', correlation_id: null })));
+    xhr.addEventListener('timeout', () => reject(new DmsApiError({ kind: 'unavailable', status: 503, message: 'The upload timed out before durable storage was confirmed.', correlation_id: null })));
     xhr.addEventListener('abort', () => reject(new DOMException('Upload cancelled', 'AbortError')));
     options.signal?.addEventListener('abort', () => xhr.abort(), { once: true });
     xhr.send(multipart(request));
   });
+}
+
+function uploadRetryable(error: unknown): boolean {
+  return error instanceof DmsApiError && (error.problem.kind === 'unavailable' || error.problem.kind === 'rate_limited');
+}
+
+async function retryDelay(attempt: number, options: UploadOptions): Promise<void> {
+  const retryWindow = options.transport.timeout_ms / (options.transport.max_retries + 1);
+  const exponential = Math.min(options.transport.circuit_breaker_reset_ms, retryWindow * 2 ** attempt);
+  const jittered = exponential / 2 + Math.random() * exponential / 2;
+  await new Promise<void>((resolve) => setTimeout(resolve, jittered));
+}
+
+async function upload<T>(
+  path: string,
+  request: DocumentUpload | DocumentVersionCreate,
+  accepts: (value: unknown) => value is T,
+  options: UploadOptions,
+): Promise<T> {
+  if (Date.now() < uploadCircuitOpenUntil) {
+    throw new DmsApiError({ kind: 'unavailable', status: 503, message: 'Uploads are temporarily paused after repeated transport failures. Retry after the circuit reset window.', correlation_id: null });
+  }
+  const idempotencyKey = crypto.randomUUID();
+  for (let attempt = 0; attempt <= options.transport.max_retries; attempt += 1) {
+    try {
+      const result = await uploadAttempt(path, request, accepts, options, idempotencyKey);
+      uploadCircuitFailures = 0;
+      uploadCircuitOpenUntil = 0;
+      return result;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') throw error;
+      uploadCircuitFailures += 1;
+      if (uploadCircuitFailures >= options.transport.circuit_breaker_failure_threshold) {
+        uploadCircuitOpenUntil = Date.now() + options.transport.circuit_breaker_reset_ms;
+      }
+      if (!uploadRetryable(error) || attempt >= options.transport.max_retries || Date.now() < uploadCircuitOpenUntil) throw error;
+      await retryDelay(attempt, options);
+    }
+  }
+  throw new DmsApiError({ kind: 'unavailable', status: 503, message: 'The upload retry policy was exhausted.', correlation_id: null });
 }
 
 function filenameFromDisposition(value: string | null, fallback: string): string {
@@ -268,6 +328,9 @@ export const DMS_QUERY_KEYS = {
   share: (id: UUID) => ['dms', 'share', id] as const,
   principals: (search: string, type: PrincipalType) => ['dms', 'principals', type, search] as const,
   health: ['dms', 'health'] as const,
+  configuration: (environment?: string) => ['dms', 'configuration', environment ?? 'current'] as const,
+  configurationHistory: (environment: string) => ['dms', 'configuration', environment, 'history'] as const,
+  configurationAudit: (environment: string) => ['dms', 'configuration', environment, 'audit'] as const,
 };
 
 export const dmsService = {
@@ -281,14 +344,14 @@ export const dmsService = {
 
   listDocuments: (query: DmsListQuery = {}) => governedPage(() => apiClient.get<ApiEnvelope<readonly DocumentSummary[]>>(queryPath(ENDPOINTS.DOCUMENTS.LIST, query))),
   getDocument: (id: UUID) => governed(() => apiClient.get<ApiEnvelope<Document>>(ENDPOINTS.DOCUMENTS.DETAIL(id))),
-  uploadDocument: (request: DocumentUpload, options?: UploadOptions) => upload<Document>(ENDPOINTS.DOCUMENTS.UPLOAD, request, isDocument, options),
+  uploadDocument: (request: DocumentUpload, options: UploadOptions) => upload<Document>(ENDPOINTS.DOCUMENTS.UPLOAD, request, isDocument, options),
   updateDocument: (id: UUID, request: DocumentUpdate) => governed(() => apiClient.patch<ApiEnvelope<Document>>(ENDPOINTS.DOCUMENTS.UPDATE(id), request)),
   deleteDocument: (id: UUID) => governedVoid(() => apiClient.delete<void>(ENDPOINTS.DOCUMENTS.DELETE(id))),
   moveDocument: (id: UUID, request: DocumentMove) => governed(() => apiClient.post<ApiEnvelope<Document>>(ENDPOINTS.DOCUMENTS.MOVE(id), request)),
   downloadDocument: (id: UUID, versionId?: UUID) => download(versionId ? `${ENDPOINTS.DOCUMENTS.DOWNLOAD(id)}?version_id=${encodeURIComponent(versionId)}` : ENDPOINTS.DOCUMENTS.DOWNLOAD(id), 'document'),
 
   listVersions: (documentId: UUID, query: DmsListQuery = {}) => governedPage(() => apiClient.get<ApiEnvelope<readonly DocumentVersion[]>>(queryPath(ENDPOINTS.VERSIONS.LIST, { ...query, document_id: documentId }))),
-  createVersion: (request: DocumentVersionCreate, options?: UploadOptions) => upload<DocumentVersion>(ENDPOINTS.VERSIONS.CREATE, request, isDocumentVersion, options),
+  createVersion: (request: DocumentVersionCreate, options: UploadOptions) => upload<DocumentVersion>(ENDPOINTS.VERSIONS.CREATE, request, isDocumentVersion, options),
   getVersion: (id: UUID) => governed(() => apiClient.get<ApiEnvelope<DocumentVersion>>(ENDPOINTS.VERSIONS.DETAIL(id))),
   restoreVersion: (id: UUID, request: DocumentVersionRestore) => governed(() => apiClient.post<ApiEnvelope<DocumentVersion>>(ENDPOINTS.VERSIONS.RESTORE(id), request)),
 
@@ -302,9 +365,17 @@ export const dmsService = {
   createShare: (request: DocumentShareCreate) => governed(() => apiClient.post<ApiEnvelope<ShareCreated>>(ENDPOINTS.SHARES.CREATE, request)),
   getShare: (id: UUID) => governed(() => apiClient.get<ApiEnvelope<DocumentShare>>(ENDPOINTS.SHARES.DETAIL(id))),
   revokeShare: (id: UUID) => governed(() => apiClient.post<ApiEnvelope<DocumentShare>>(ENDPOINTS.SHARES.REVOKE(id))),
-  searchPrincipals: (search: string, type: PrincipalType) => governed(() => apiClient.get<ApiEnvelope<readonly PrincipalSummary[]>>(principalQueryPath(search, type))),
+  searchPrincipals: (search: string, type: PrincipalType, limit: number) => governed(() => apiClient.get<ApiEnvelope<readonly PrincipalSummary[]>>(principalQueryPath(search, type, limit))),
   downloadPublicShare: (token: string) => download(ENDPOINTS.PUBLIC_SHARE_DOWNLOAD(token), 'shared-document'),
   health: () => governed(() => apiClient.get<ApiEnvelope<DmsHealth>>(ENDPOINTS.HEALTH)),
+  getConfiguration: (environment: DmsEnvironment = 'default') => governed(() => apiClient.get<ApiEnvelope<DmsConfiguration>>(queryPath(ENDPOINTS.CONFIGURATION.CURRENT, { environment }))),
+  updateConfiguration: (request: DmsConfigurationWrite) => governed(() => apiClient.put<ApiEnvelope<DmsConfiguration>>(ENDPOINTS.CONFIGURATION.CURRENT, request)),
+  previewConfiguration: (request: DmsConfigurationWrite) => governed(() => apiClient.post<ApiEnvelope<DmsConfigurationPreview>>(ENDPOINTS.CONFIGURATION.PREVIEW, request)),
+  configurationHistory: (environment: DmsEnvironment, query: DmsListQuery = {}) => governedPage(() => apiClient.get<ApiEnvelope<readonly DmsConfigurationVersion[]>>(queryPath(ENDPOINTS.CONFIGURATION.HISTORY, { ...query, environment }))),
+  configurationAudit: (environment: DmsEnvironment, query: DmsListQuery = {}) => governedPage(() => apiClient.get<ApiEnvelope<readonly DmsConfigurationAuditRecord[]>>(queryPath(ENDPOINTS.CONFIGURATION.AUDIT, { ...query, environment }))),
+  rollbackConfiguration: (version: number, environment: DmsEnvironment) => governed(() => apiClient.post<ApiEnvelope<DmsConfiguration>>(ENDPOINTS.CONFIGURATION.ROLLBACK, { version, environment })),
+  importConfiguration: (request: DmsConfigurationExportDocument) => governed(() => apiClient.post<ApiEnvelope<DmsConfiguration>>(ENDPOINTS.CONFIGURATION.IMPORT, request)),
+  exportConfiguration: (environment: DmsEnvironment) => governed(() => apiClient.get<ApiEnvelope<DmsConfigurationExportDocument>>(queryPath(ENDPOINTS.CONFIGURATION.EXPORT, { environment }))),
 };
 
 export { queryPath as serializeDmsQuery };

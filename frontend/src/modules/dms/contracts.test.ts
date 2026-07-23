@@ -7,6 +7,9 @@ describe('DMS v2 contracts', () => {
     expect(ENDPOINTS.FOLDERS.CONTENTS('folder id')).toBe('/api/v2/dms/folders/folder%20id/contents/');
     expect(ENDPOINTS.VERSIONS.RESTORE('version')).toBe('/api/v2/dms/document-versions/version/restore/');
     expect(ENDPOINTS.SHARES.REVOKE('share')).toBe('/api/v2/dms/document-shares/share/revoke/');
+    expect(ENDPOINTS.CONFIGURATION.CURRENT).toBe('/api/v2/dms/configuration/current/');
+    expect(ENDPOINTS.CONFIGURATION.PREVIEW).toBe('/api/v2/dms/configuration/preview/');
+    expect(ENDPOINTS.CONFIGURATION.ROLLBACK).toBe('/api/v2/dms/configuration/rollback/');
   });
 
   it('uses a browser File as upload input and exposes the seven canonical UI paths', () => {
@@ -19,5 +22,6 @@ describe('DMS v2 contracts', () => {
     expect(ROUTES.FOLDER_CREATE).toBe('/dms/folders/new');
     expect(ROUTES.FOLDER_DETAIL('id')).toBe('/dms/folders/id');
     expect(ROUTES.FOLDER_EDIT('id')).toBe('/dms/folders/id/edit');
+    expect(ROUTES.CONFIGURATION).toBe('/dms/configuration');
   });
 });

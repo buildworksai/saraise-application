@@ -13,6 +13,7 @@ from src.core.access.permissions import RequiresAccess
 from src.modules.dms import permissions as permission_contract
 from src.modules.dms.permissions import (
     ActionAccessMixin,
+    CONFIGURATION_ACTION_PERMISSIONS,
     DOCUMENT_ACTION_PERMISSIONS,
     DOCUMENT_PERMISSION_ACTION_PERMISSIONS,
     FOLDER_ACTION_PERMISSIONS,
@@ -51,6 +52,11 @@ def test_permission_catalog_exactly_matches_v2_manifest_contract() -> None:
         "dms.share:create",
         "dms.share:revoke",
         "dms.health:read",
+        "dms.configuration:read",
+        "dms.configuration:write",
+        "dms.configuration:rollback",
+        "dms.configuration:import",
+        "dms.configuration:export",
     }
     assert set(PERMISSIONS) == expected
     assert len(PERMISSIONS) == len(expected)
@@ -66,6 +72,7 @@ def test_all_declared_actions_map_to_manifest_permissions_and_explicit_quotas() 
         SHARE_ACTION_PERMISSIONS,
         HEALTH_ACTION_PERMISSIONS,
         PRINCIPAL_ACTION_PERMISSIONS,
+        CONFIGURATION_ACTION_PERMISSIONS,
     )
     declared = {permission for action_map in maps for permission in action_map.values()}
     assert declared == set(PERMISSIONS)

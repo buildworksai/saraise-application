@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.paginator import Paginator
 from django.http import StreamingHttpResponse
 from django.utils.http import content_disposition_header
 from rest_framework import status, viewsets
@@ -21,13 +22,20 @@ from src.core.api.profile import GovernedAPIViewMixin, GovernedMultipartAPIViewM
 from src.core.api.results import OperationFailed
 from src.core.auth_utils import get_user_tenant_id
 
-from .filters import DocumentFilterSet, FolderFilterSet
+from .filters import (
+    DocumentFilterSet,
+    DocumentPermissionFilterSet,
+    DocumentShareFilterSet,
+    DocumentVersionFilterSet,
+    FolderFilterSet,
+)
 from .health import get_module_health
-from .models import DocumentPermission, DocumentShare, DocumentVersion
+from .models import DmsConfiguration, Document, DocumentPermission, DocumentShare, DocumentVersion, Folder
 from .permissions import ActionAccessMixin
 from .permissions import (
     DOCUMENT_ACTION_PERMISSIONS,
     DOCUMENT_PERMISSION_ACTION_PERMISSIONS,
+    CONFIGURATION_ACTION_PERMISSIONS,
     FOLDER_ACTION_PERMISSIONS,
     HEALTH_ACTION_PERMISSIONS,
     PRINCIPAL_ACTION_PERMISSIONS,
@@ -36,6 +44,11 @@ from .permissions import (
 )
 from .serializers import (
     DocumentDetailSerializer,
+    DmsConfigurationAuditSerializer,
+    DmsConfigurationRollbackSerializer,
+    DmsConfigurationSerializer,
+    DmsConfigurationVersionSerializer,
+    DmsConfigurationWriteSerializer,
     DocumentListSerializer,
     DocumentMoveSerializer,
     DocumentPermissionCreateSerializer,
@@ -60,6 +73,7 @@ from .serializers import (
 )
 from .services import (
     DmsConflict,
+    DmsConfigurationService,
     DmsDependencyUnavailable,
     DmsIntegrityFailure,
     DmsNotFound,
@@ -81,6 +95,17 @@ def _tenant(request: Any) -> UUID:
         tenant_id = value if isinstance(value, UUID) else UUID(str(value))
     except (TypeError, ValueError, AttributeError) as exc:
         raise PermissionDenied("Authenticated identity has no valid tenant.") from exc
+    request.tenant_id = tenant_id
+    return tenant_id
+
+
+def _tenant_or_none(request: Any) -> UUID | None:
+    value = get_user_tenant_id(getattr(request, "user", None))
+    try:
+        tenant_id = value if isinstance(value, UUID) else UUID(str(value))
+    except (TypeError, ValueError, AttributeError):
+        request.tenant_id = None
+        return None
     request.tenant_id = tenant_id
     return tenant_id
 
@@ -159,7 +184,10 @@ class FolderViewSet(TenantGovernedViewSet):
     action_permissions = FOLDER_ACTION_PERMISSIONS
 
     def get_queryset(self):
-        return self.service_class().list_folders(self.tenant_id, self.actor_id)
+        tenant_id = _tenant_or_none(self.request)
+        if tenant_id is None:
+            return Folder.objects.none()
+        return self.service_class().list_folders(tenant_id, self.actor_id)
 
     def get_serializer_class(self) -> type:
         return {
@@ -172,14 +200,17 @@ class FolderViewSet(TenantGovernedViewSet):
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
-        filters = FolderFilterSet(self.request.query_params, queryset=self.get_queryset())
+        filters = FolderFilterSet(
+            self.request.query_params,
+            queryset=self.get_queryset(),
+            tenant_id=self.tenant_id,
+        )
         if not filters.is_valid():
             raise ValidationError(filters.errors)
         page = self.paginate_queryset(filters.qs)
         if page is None:
             raise RuntimeError("Governed pagination is mandatory for DMS collections")
-        for folder in page:
-            folder.allowed_actions = frozenset({"read"})
+        self.service_class().attach_allowed_actions(self.actor_id, page)
         return self.get_paginated_response(FolderListSerializer(page, many=True).data)
 
     def create(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -192,7 +223,7 @@ class FolderViewSet(TenantGovernedViewSet):
     def retrieve(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
         folder = _call(self.service_class().get_folder, self.tenant_id, self.actor_id, self.kwargs["pk"])
-        folder.allowed_actions = frozenset({"read"})
+        folder.allowed_actions = self.service_class().project_allowed_actions(self.actor_id, folder)
         return Response(FolderDetailSerializer(folder).data)
 
     def partial_update(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -236,12 +267,42 @@ class FolderViewSet(TenantGovernedViewSet):
             self.actor_id,
             folder_id=self.kwargs["pk"],
         )
-        result.allowed_actions = frozenset({"read"})
-        if result.folder is not None:
-            result.folder.allowed_actions = result.allowed_actions
-        for folder in (*result.breadcrumbs, *result.folders):
-            folder.allowed_actions = frozenset({"read"})
-        return Response(FolderContentsSerializer(result).data)
+        policy = DmsConfigurationService.runtime_values(self.tenant_id)
+        try:
+            folder_page_number = int(self.request.query_params.get("folder_page", "1"))
+            document_page_number = int(self.request.query_params.get("document_page", "1"))
+        except ValueError as exc:
+            raise ValidationError({"page": ["Folder and document pages must be integers."]}) from exc
+        if folder_page_number < 1 or document_page_number < 1:
+            raise ValidationError({"page": ["Folder and document pages must be positive."]})
+        folder_page = Paginator(result.folders, policy["folder_page_size"]).get_page(folder_page_number)
+        document_page = Paginator(result.documents, policy["document_page_size"]).get_page(document_page_number)
+        self.service_class().attach_allowed_actions(self.actor_id, folder_page.object_list)
+        permissions = PermissionService()
+        for document in document_page.object_list:
+            document.allowed_actions = permissions.allowed_actions(self.tenant_id, self.actor_id, document)
+
+        def pagination(page: Any) -> dict[str, object]:
+            return {
+                "count": page.paginator.count,
+                "page": page.number,
+                "page_size": page.paginator.per_page,
+                "total_pages": page.paginator.num_pages,
+                "has_next": page.has_next(),
+                "has_previous": page.has_previous(),
+            }
+
+        return Response(
+            {
+                "folder": FolderDetailSerializer(result.folder).data if result.folder else None,
+                "breadcrumbs": FolderListSerializer(result.breadcrumbs, many=True).data,
+                "folders": FolderListSerializer(folder_page.object_list, many=True).data,
+                "folders_pagination": pagination(folder_page),
+                "documents": DocumentListSerializer(document_page.object_list, many=True).data,
+                "documents_pagination": pagination(document_page),
+                "allowed_actions": sorted(result.allowed_actions),
+            }
+        )
 
 
 class DocumentViewSet(GovernedMultipartAPIViewMixin, TenantGovernedViewSet):
@@ -250,8 +311,11 @@ class DocumentViewSet(GovernedMultipartAPIViewMixin, TenantGovernedViewSet):
     action_quotas = {"create": "dms.api_writes", "download": "dms.api_reads"}
 
     def get_queryset(self):
+        tenant_id = _tenant_or_none(self.request)
+        if tenant_id is None:
+            return Document.objects.none()
         return self.service_class().list_documents(
-            self.tenant_id,
+            tenant_id,
             self.actor_id,
             filters={},
             search="",
@@ -276,7 +340,11 @@ class DocumentViewSet(GovernedMultipartAPIViewMixin, TenantGovernedViewSet):
             search="",
             ordering="-updated_at",
         )
-        filters = DocumentFilterSet(self.request.query_params, queryset=queryset)
+        filters = DocumentFilterSet(
+            self.request.query_params,
+            queryset=queryset,
+            tenant_id=self.tenant_id,
+        )
         if not filters.is_valid():
             raise ValidationError(filters.errors)
         page = self.paginate_queryset(filters.qs)
@@ -291,10 +359,12 @@ class DocumentViewSet(GovernedMultipartAPIViewMixin, TenantGovernedViewSet):
         del request, args, kwargs
         serializer = DocumentUploadSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
+        idempotency_key = self.request.headers.get("Idempotency-Key")
         document = _call(
             self.service_class().upload_document,
             self.tenant_id,
             self.actor_id,
+            idempotency_key=idempotency_key,
             **serializer.validated_data,
         )
         document = _call(self.service_class().get_document, self.tenant_id, self.actor_id, document.id)
@@ -360,10 +430,13 @@ class DocumentVersionViewSet(GovernedMultipartAPIViewMixin, TenantGovernedViewSe
     action_permissions = VERSION_ACTION_PERMISSIONS
 
     def get_queryset(self):
+        tenant_id = _tenant_or_none(self.request)
+        if tenant_id is None:
+            return DocumentVersion.objects.none()
         document_id = self.request.query_params.get("document_id")
         if not document_id:
             return DocumentVersion.objects.none()
-        return self.service_class().list_versions(self.tenant_id, self.actor_id, document_id)
+        return self.service_class().list_versions(tenant_id, self.actor_id, document_id)
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -374,10 +447,15 @@ class DocumentVersionViewSet(GovernedMultipartAPIViewMixin, TenantGovernedViewSe
             document_id = UUID(raw)
         except ValueError as exc:
             raise ValidationError({"document_id": ["Must be a valid UUID."]}) from exc
-        return self.paginated(
-            _call(self.service_class().list_versions, self.tenant_id, self.actor_id, document_id),
-            DocumentVersionListSerializer,
+        queryset = _call(self.service_class().list_versions, self.tenant_id, self.actor_id, document_id)
+        filters = DocumentVersionFilterSet(
+            self.request.query_params,
+            queryset=queryset,
+            tenant_id=self.tenant_id,
         )
+        if not filters.is_valid():
+            raise ValidationError(filters.errors)
+        return self.paginated(filters.qs, DocumentVersionListSerializer)
 
     def create(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -413,20 +491,28 @@ class DocumentPermissionViewSet(TenantGovernedViewSet):
     action_permissions = DOCUMENT_PERMISSION_ACTION_PERMISSIONS
 
     def get_queryset(self):
+        tenant_id = _tenant_or_none(self.request)
+        if tenant_id is None:
+            return DocumentPermission.objects.none()
         document_id = self.request.query_params.get("document_id")
         if not document_id:
             return DocumentPermission.objects.none()
-        return self.service_class().list_permissions(self.tenant_id, self.actor_id, document_id)
+        return self.service_class().list_permissions(tenant_id, self.actor_id, document_id)
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
         raw = self.request.query_params.get("document_id")
         if not raw:
             raise ValidationError({"document_id": ["This filter is required."]})
-        return self.paginated(
-            _call(self.service_class().list_permissions, self.tenant_id, self.actor_id, raw),
-            DocumentPermissionReadSerializer,
+        queryset = _call(self.service_class().list_permissions, self.tenant_id, self.actor_id, raw)
+        filters = DocumentPermissionFilterSet(
+            self.request.query_params,
+            queryset=queryset,
+            tenant_id=self.tenant_id,
         )
+        if not filters.is_valid():
+            raise ValidationError(filters.errors)
+        return self.paginated(filters.qs, DocumentPermissionReadSerializer)
 
     def create(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -466,20 +552,28 @@ class DocumentShareViewSet(TenantGovernedViewSet):
     action_permissions = SHARE_ACTION_PERMISSIONS
 
     def get_queryset(self):
+        tenant_id = _tenant_or_none(self.request)
+        if tenant_id is None:
+            return DocumentShare.objects.none()
         document_id = self.request.query_params.get("document_id")
         if not document_id:
             return DocumentShare.objects.none()
-        return self.service_class().list_shares(self.tenant_id, self.actor_id, document_id)
+        return self.service_class().list_shares(tenant_id, self.actor_id, document_id)
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
         raw = self.request.query_params.get("document_id")
         if not raw:
             raise ValidationError({"document_id": ["This filter is required."]})
-        return self.paginated(
-            _call(self.service_class().list_shares, self.tenant_id, self.actor_id, raw),
-            DocumentShareReadSerializer,
+        queryset = _call(self.service_class().list_shares, self.tenant_id, self.actor_id, raw)
+        filters = DocumentShareFilterSet(
+            self.request.query_params,
+            queryset=queryset,
+            tenant_id=self.tenant_id,
         )
+        if not filters.is_valid():
+            raise ValidationError(filters.errors)
+        return self.paginated(filters.qs, DocumentShareReadSerializer)
 
     def create(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
@@ -533,12 +627,131 @@ class PrincipalSearchAPIView(GovernedAPIViewMixin, ActionAccessMixin, APIView):
         principal_type = self.request.query_params.get("type") or None
         if principal_type not in (None, "user", "role", "group"):
             raise ValidationError({"type": ["Must be user, role, or group."]})
+        tenant_id = _tenant(self.request)
+        default_limit = DmsConfigurationService.runtime_values(tenant_id)["principal_search_default_limit"]
         try:
-            limit = int(self.request.query_params.get("limit", "20"))
+            limit = int(self.request.query_params.get("limit", str(default_limit)))
         except ValueError as exc:
             raise ValidationError({"limit": ["Must be an integer."]}) from exc
-        values = _call(get_identity_directory().search, _tenant(self.request), query, principal_type, limit)
+        values = _call(get_identity_directory().search, tenant_id, query, principal_type, limit)
         return Response(PrincipalSummarySerializer(values, many=True).data)
+
+
+class DmsConfigurationViewSet(TenantGovernedViewSet):
+    """Governed singleton configuration surface with immutable history."""
+
+    service_class = DmsConfigurationService
+    action_permissions = CONFIGURATION_ACTION_PERMISSIONS
+
+    def get_permissions(self) -> list[object]:
+        if getattr(self, "action", "") == "current" and self.request.method == "PUT":
+            self.action = "update_current"
+        return super().get_permissions()
+
+    def get_queryset(self):
+        tenant_id = _tenant_or_none(self.request)
+        if tenant_id is None:
+            return DmsConfiguration.objects.none()
+        return DmsConfiguration.objects.filter(tenant_id=tenant_id)
+
+    @action(detail=False, methods=("get", "put"))
+    def current(self, request: object) -> Response:
+        del request
+        if self.request.method == "PUT":
+            serializer = DmsConfigurationWriteSerializer(data=self.request.data)
+            serializer.is_valid(raise_exception=True)
+            configuration = _call(
+                self.service_class.update,
+                self.tenant_id,
+                self.actor_id,
+                serializer.validated_data["values"],
+                serializer.validated_data["environment"],
+            )
+        else:
+            configuration = _call(
+                self.service_class.current,
+                self.tenant_id,
+                self.actor_id,
+                self.request.query_params.get("environment", "default"),
+            )
+        return Response(DmsConfigurationSerializer(configuration).data)
+
+    @action(detail=False, methods=("post",))
+    def preview(self, request: object) -> Response:
+        del request
+        serializer = DmsConfigurationWriteSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        result = _call(
+            self.service_class.preview,
+            self.tenant_id,
+            self.actor_id,
+            serializer.validated_data["values"],
+            serializer.validated_data["environment"],
+        )
+        return Response(result)
+
+    @action(detail=False, methods=("get",))
+    def history(self, request: object) -> Response:
+        del request
+        return self.paginated(
+            _call(
+                self.service_class.history,
+                self.tenant_id,
+                self.actor_id,
+                self.request.query_params.get("environment", "default"),
+            ),
+            DmsConfigurationVersionSerializer,
+        )
+
+    @action(detail=False, methods=("get",))
+    def audit(self, request: object) -> Response:
+        del request
+        return self.paginated(
+            _call(
+                self.service_class.audit,
+                self.tenant_id,
+                self.actor_id,
+                self.request.query_params.get("environment", "default"),
+            ),
+            DmsConfigurationAuditSerializer,
+        )
+
+    @action(detail=False, methods=("post",))
+    def rollback(self, request: object) -> Response:
+        del request
+        serializer = DmsConfigurationRollbackSerializer(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        configuration = _call(
+            self.service_class.rollback,
+            self.tenant_id,
+            self.actor_id,
+            serializer.validated_data["version"],
+            serializer.validated_data["environment"],
+        )
+        return Response(DmsConfigurationSerializer(configuration).data)
+
+    @action(detail=False, methods=("post",), url_path="import")
+    def import_configuration(self, request: object) -> Response:
+        del request
+        configuration = _call(
+            self.service_class.import_document,
+            self.tenant_id,
+            self.actor_id,
+            self.request.data,
+        )
+        return Response(DmsConfigurationSerializer(configuration).data)
+
+    @action(detail=False, methods=("get",), url_path="export")
+    def export_configuration(self, request: object) -> Response:
+        del request
+        return Response(
+            _call(
+                self.service_class.export_document,
+                self.tenant_id,
+                self.actor_id,
+                self.request.query_params.get("environment", "default"),
+            )
+        )
 
 
 class DmsHealthAPIView(GovernedAPIViewMixin, ActionAccessMixin, APIView):
@@ -547,12 +760,13 @@ class DmsHealthAPIView(GovernedAPIViewMixin, ActionAccessMixin, APIView):
 
     def get(self, request: object) -> Response:
         del request
-        report = get_module_health()
+        report = get_module_health(_tenant(self.request))
         return Response(dict(report.payload), status=report.status_code)
 
 
 __all__ = [
     "DmsHealthAPIView",
+    "DmsConfigurationViewSet",
     "DocumentPermissionViewSet",
     "DocumentShareViewSet",
     "DocumentVersionViewSet",

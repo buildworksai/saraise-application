@@ -32,6 +32,11 @@ SHARE_READ: Final[str] = "dms.share:read"
 SHARE_CREATE: Final[str] = "dms.share:create"
 SHARE_REVOKE: Final[str] = "dms.share:revoke"
 HEALTH_READ: Final[str] = "dms.health:read"
+CONFIGURATION_READ: Final[str] = "dms.configuration:read"
+CONFIGURATION_WRITE: Final[str] = "dms.configuration:write"
+CONFIGURATION_ROLLBACK: Final[str] = "dms.configuration:rollback"
+CONFIGURATION_IMPORT: Final[str] = "dms.configuration:import"
+CONFIGURATION_EXPORT: Final[str] = "dms.configuration:export"
 
 PERMISSIONS: Final[tuple[str, ...]] = (
     FOLDER_READ,
@@ -55,10 +60,25 @@ PERMISSIONS: Final[tuple[str, ...]] = (
     SHARE_CREATE,
     SHARE_REVOKE,
     HEALTH_READ,
+    CONFIGURATION_READ,
+    CONFIGURATION_WRITE,
+    CONFIGURATION_ROLLBACK,
+    CONFIGURATION_IMPORT,
+    CONFIGURATION_EXPORT,
 )
 
 READ_PERMISSIONS: Final[frozenset[str]] = frozenset(
-    {FOLDER_READ, DOCUMENT_READ, DOCUMENT_DOWNLOAD, VERSION_READ, PERMISSION_READ, SHARE_READ, HEALTH_READ}
+    {
+        FOLDER_READ,
+        DOCUMENT_READ,
+        DOCUMENT_DOWNLOAD,
+        VERSION_READ,
+        PERMISSION_READ,
+        SHARE_READ,
+        HEALTH_READ,
+        CONFIGURATION_READ,
+        CONFIGURATION_EXPORT,
+    }
 )
 PERMISSION_QUOTAS: Final[dict[str, str]] = {
     permission: "dms.api_reads" if permission in READ_PERMISSIONS else "dms.api_writes" for permission in PERMISSIONS
@@ -103,6 +123,16 @@ SHARE_ACTION_PERMISSIONS: Final[dict[str, str]] = {
 }
 HEALTH_ACTION_PERMISSIONS: Final[dict[str, str]] = {"health": HEALTH_READ}
 PRINCIPAL_ACTION_PERMISSIONS: Final[dict[str, str]] = {"search": PERMISSION_GRANT}
+CONFIGURATION_ACTION_PERMISSIONS: Final[dict[str, str]] = {
+    "current": CONFIGURATION_READ,
+    "update_current": CONFIGURATION_WRITE,
+    "preview": CONFIGURATION_WRITE,
+    "history": CONFIGURATION_READ,
+    "audit": CONFIGURATION_READ,
+    "rollback": CONFIGURATION_ROLLBACK,
+    "import_configuration": CONFIGURATION_IMPORT,
+    "export_configuration": CONFIGURATION_EXPORT,
+}
 
 
 class SessionAuthentication401(SessionAuthentication):
@@ -151,6 +181,7 @@ class ActionAccessMixin:
 
 __all__ = [
     "ActionAccessMixin",
+    "CONFIGURATION_ACTION_PERMISSIONS",
     "DOCUMENT_ACTION_PERMISSIONS",
     "DOCUMENT_PERMISSION_ACTION_PERMISSIONS",
     "FOLDER_ACTION_PERMISSIONS",

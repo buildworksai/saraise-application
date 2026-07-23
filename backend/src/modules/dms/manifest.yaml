@@ -28,11 +28,44 @@ permissions:
   - dms.share:create
   - dms.share:revoke
   - dms.health:read
+  - dms.configuration:read
+  - dms.configuration:write
+  - dms.configuration:rollback
+  - dms.configuration:import
+  - dms.configuration:export
 sod_actions: []
 search_indexes:
   - dms_documents
   - dms_folders
 ai_tools: []
+entities:
+  - {name: Folder, model: models.Folder, serializers: [FolderListSerializer, FolderDetailSerializer], tenant_scoped: true}
+  - {name: Document, model: models.Document, serializers: [DocumentListSerializer, DocumentDetailSerializer], tenant_scoped: true}
+  - {name: DocumentVersion, model: models.DocumentVersion, serializers: [DocumentVersionListSerializer, DocumentVersionDetailSerializer], tenant_scoped: true, immutable: true}
+  - {name: DocumentPermission, model: models.DocumentPermission, serializers: [DocumentPermissionReadSerializer], tenant_scoped: true}
+  - {name: DocumentShare, model: models.DocumentShare, serializers: [DocumentShareReadSerializer], tenant_scoped: true}
+  - {name: DmsConfiguration, model: models.DmsConfiguration, serializers: [DmsConfigurationSerializer, DmsConfigurationWriteSerializer], tenant_scoped: true}
+  - {name: DmsConfigurationVersion, model: models.DmsConfigurationVersion, serializers: [DmsConfigurationVersionSerializer], tenant_scoped: true, immutable: true}
+  - {name: DmsConfigurationAudit, model: models.DmsConfigurationAudit, serializers: [DmsConfigurationAuditSerializer], tenant_scoped: true, immutable: true}
+  - {name: DmsUploadIdempotency, model: models.DmsUploadIdempotency, serializers: [], tenant_scoped: true}
+endpoints:
+  - name: folders
+    route: /api/v2/dms/folders/
+    viewset: FolderViewSet
+    methods: [GET, POST, PATCH, DELETE]
+    actions: [{route: "{id}/move/", method: POST}, {route: "{id}/contents/", method: GET}]
+  - name: documents
+    route: /api/v2/dms/documents/
+    viewset: DocumentViewSet
+    methods: [GET, POST, PATCH, DELETE]
+    actions: [{route: "{id}/move/", method: POST}, {route: "{id}/download/", method: GET}]
+  - {name: versions, route: /api/v2/dms/document-versions/, viewset: DocumentVersionViewSet, methods: [GET, POST], actions: [{route: "{id}/restore/", method: POST}]}
+  - {name: permissions, route: /api/v2/dms/document-permissions/, viewset: DocumentPermissionViewSet, methods: [GET, POST, PATCH, DELETE]}
+  - {name: shares, route: /api/v2/dms/document-shares/, viewset: DocumentShareViewSet, methods: [GET, POST], actions: [{route: "{id}/revoke/", method: POST}]}
+  - {name: configuration, route: /api/v2/dms/configuration/, viewset: DmsConfigurationViewSet, methods: [GET, PUT, POST], actions: [{route: current/, method: GET}, {route: current/, method: PUT}, {route: preview/, method: POST}, {route: history/, method: GET}, {route: audit/, method: GET}, {route: rollback/, method: POST}, {route: import/, method: POST}, {route: export/, method: GET}]}
+  - {name: principals, route: /api/v2/dms/principals/, view: PrincipalSearchAPIView, methods: [GET]}
+  - {name: public-share-download, route: "/api/v2/dms/public/shares/{token}/download/", view: PublicShareDownloadAPIView, methods: [GET]}
+  - {name: health, route: /api/v2/dms/health/, view: DmsHealthAPIView, methods: [GET]}
 metadata:
   api_version: v2
   api_prefix: /api/v2/dms/
@@ -70,18 +103,23 @@ metadata:
         - dms.share:create
         - dms.share:revoke
         - dms.health:read
+        - dms.configuration:read
+        - dms.configuration:write
+        - dms.configuration:rollback
+        - dms.configuration:import
+        - dms.configuration:export
     quotas:
       - resource: dms.api_reads
         required: true
-        limit: 100000
+        configuration_ref: api_read_quota
         period: month
       - resource: dms.api_writes
         required: true
-        limit: 10000
+        configuration_ref: api_write_quota
         period: month
       - resource: dms.storage_bytes
         required: true
-        limit: 5368709120
+        configuration_ref: storage_quota_bytes
         period: lifetime
   emitted_events:
     - dms.folder.created
@@ -95,8 +133,10 @@ metadata:
     - dms.version.created
     - dms.version.restored
     - dms.permission.granted
+    - dms.permission.updated
     - dms.permission.revoked
     - dms.share.created
     - dms.share.consumed
     - dms.share.revoked
     - dms.storage.cleanup_required
+    - dms.quota.compensation_required

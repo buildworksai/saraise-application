@@ -28,11 +28,17 @@ class BaseFilterSet:
     allowed: ClassVar[frozenset[str]] = frozenset({"page", "page_size", "ordering", "search"})
     ordering_fields: ClassVar[frozenset[str]] = frozenset({"created_at"})
     default_ordering: ClassVar[tuple[str, ...]] = ("-created_at", "id")
-    search_limit: ClassVar[int] = 200
 
-    def __init__(self, data: object | None = None, queryset: QuerySet[Any] | None = None) -> None:
+    def __init__(
+        self,
+        data: object | None = None,
+        queryset: QuerySet[Any] | None = None,
+        *,
+        tenant_id: UUID | None = None,
+    ) -> None:
         self.data = data or {}
         self.queryset = queryset
+        self.tenant_id = tenant_id
         self.errors: dict[str, str] = {}
         self._qs: QuerySet[Any] | None = None
 
@@ -78,8 +84,11 @@ class BaseFilterSet:
         search = self._get("search")
         if search not in (None, ""):
             normalized_search = str(search).strip()
-            if len(normalized_search) > self.search_limit:
-                raise FilterValidationError({"search": "Search is limited to 200 characters."})
+            from .services import DmsConfigurationService
+
+            limit = DmsConfigurationService.runtime_values(self.tenant_id)["collection_search_max_length"]
+            if len(normalized_search) > limit:
+                raise FilterValidationError({"search": "Search exceeds tenant policy."})
             if normalized_search:
                 result = self.apply_search(result, normalized_search)
         return self.apply_ordering(result)
@@ -166,8 +175,11 @@ class DocumentFilterSet(BaseFilterSet):
         if creator is not None:
             result = result.filter(created_by=creator)
         tags = [str(value).strip().casefold() for value in self._getlist("tags") if str(value).strip()]
-        if len(tags) > 10 or any(len(tag) > 64 for tag in tags):
-            raise FilterValidationError({"tags": "At most 10 tags of 64 characters may be filtered."})
+        from .services import DmsConfigurationService
+
+        policy = DmsConfigurationService.runtime_values(self.tenant_id)
+        if len(tags) > policy["tag_filter_max_tags"] or any(len(tag) > policy["tag_filter_max_length"] for tag in tags):
+            raise FilterValidationError({"tags": "Tag filters exceed tenant policy."})
         for tag in tags:
             if connection.features.supports_json_field_contains:
                 result = result.filter(tags__contains=[tag])

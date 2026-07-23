@@ -32,11 +32,13 @@ DOCUMENT_DELETED: Final[str] = "dms.document.deleted"
 VERSION_CREATED: Final[str] = "dms.version.created"
 VERSION_RESTORED: Final[str] = "dms.version.restored"
 PERMISSION_GRANTED: Final[str] = "dms.permission.granted"
+PERMISSION_UPDATED: Final[str] = "dms.permission.updated"
 PERMISSION_REVOKED: Final[str] = "dms.permission.revoked"
 SHARE_CREATED: Final[str] = "dms.share.created"
 SHARE_CONSUMED: Final[str] = "dms.share.consumed"
 SHARE_REVOKED: Final[str] = "dms.share.revoked"
 STORAGE_CLEANUP_REQUIRED: Final[str] = "dms.storage.cleanup_required"
+QUOTA_COMPENSATION_REQUIRED: Final[str] = "dms.quota.compensation_required"
 
 EVENT_TYPES: Final[frozenset[str]] = frozenset(
     {
@@ -51,11 +53,13 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         VERSION_CREATED,
         VERSION_RESTORED,
         PERMISSION_GRANTED,
+        PERMISSION_UPDATED,
         PERMISSION_REVOKED,
         SHARE_CREATED,
         SHARE_CONSUMED,
         SHARE_REVOKED,
         STORAGE_CLEANUP_REQUIRED,
+        QUOTA_COMPENSATION_REQUIRED,
     }
 )
 
@@ -75,6 +79,11 @@ SAFE_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(
         "permission_id",
         "principal_type",
         "permission",
+        "old_permission",
+        "new_permission",
+        "previous_grant_id",
+        "quota_resource",
+        "quota_cost",
         "share_id",
         "expires_at",
         "max_access_count",
@@ -375,7 +384,7 @@ def run_operation_guards(
     document_id: uuid.UUID,
     version_id: uuid.UUID | None = None,
 ) -> None:
-    """Run installed guards; absence permits core, configured failure denies."""
+    """Run tenant-required guards and fail closed when evaluation is absent."""
 
     try:
         operation_value = operation if isinstance(operation, DmsOperation) else DmsOperation(operation)
@@ -389,6 +398,11 @@ def run_operation_guards(
     )
     with _guard_lock:
         guards: Sequence[OperationGuard] = tuple(_operation_guards.values())
+    from .services import DmsConfigurationService
+
+    required_operations = DmsConfigurationService.runtime_values(context.tenant_id)["governance_required_operations"]
+    if operation_value.value in required_operations and not guards:
+        raise ExtensionOperationError("guard_unavailable")
     for guard in guards:
         try:
             decision = guard.evaluate(context)

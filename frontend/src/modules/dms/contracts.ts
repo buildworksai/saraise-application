@@ -173,7 +173,9 @@ export interface FolderContents {
   readonly folder: Folder | null;
   readonly breadcrumbs: readonly Folder[];
   readonly folders: readonly Folder[];
+  readonly folders_pagination: PaginationMeta;
   readonly documents: readonly DocumentSummary[];
+  readonly documents_pagination: PaginationMeta;
   readonly allowed_actions: readonly DmsAllowedAction[];
 }
 
@@ -194,6 +196,7 @@ export interface DmsListQuery {
   readonly ordering?: DocumentOrdering | FolderOrdering;
   readonly page?: number;
   readonly page_size?: number;
+  readonly environment?: DmsEnvironment;
 }
 
 export interface PaginationMeta {
@@ -246,8 +249,143 @@ export type DmsFrontendError =
 
 export interface DownloadResult { readonly blob: Blob; readonly filename: string; readonly mime_type: string }
 export interface UploadProgress { readonly loaded: number; readonly total: number; readonly percent: number }
-export interface UploadOptions { readonly signal?: AbortSignal; readonly onProgress?: (progress: UploadProgress) => void }
+export interface DmsUploadTransportPolicy {
+  readonly timeout_ms: number;
+  readonly max_retries: number;
+  readonly circuit_breaker_failure_threshold: number;
+  readonly circuit_breaker_reset_ms: number;
+}
+export interface UploadOptions {
+  readonly signal?: AbortSignal;
+  readonly onProgress?: (progress: UploadProgress) => void;
+  readonly transport: DmsUploadTransportPolicy;
+}
 export interface DmsHealth { readonly status: 'healthy' | 'degraded' | 'unhealthy'; readonly checks: Readonly<Record<string, Readonly<Record<string, JsonPrimitive>>>> }
+
+export type DmsEnvironment = 'default' | 'development' | 'staging' | 'production';
+export type FolderDeletionPolicy = 'empty_only' | 'recursive_soft_delete';
+
+/** Complete tenant-owned policy document. No business threshold is defined by a page. */
+export interface DmsConfigurationValues {
+  readonly max_folder_depth: number;
+  readonly max_document_tags: number;
+  readonly max_tag_length: number;
+  readonly max_metadata_bytes: number;
+  readonly max_share_lifetime_days: number;
+  readonly max_share_access_count: number;
+  readonly permission_implications: Readonly<Record<DocumentPermissionLevel, readonly DocumentPermissionLevel[]>>;
+  readonly principal_search_min_limit: number;
+  readonly principal_search_max_limit: number;
+  readonly principal_search_default_limit: number;
+  readonly principal_query_min_length: number;
+  readonly principal_query_max_length: number;
+  readonly max_name_length: number;
+  readonly forbidden_name_characters: readonly string[];
+  readonly max_metadata_key_length: number;
+  readonly folder_deletion_policy: FolderDeletionPolicy;
+  readonly download_verification_chunk_size: number;
+  readonly storage_backend: string;
+  readonly max_document_search_length: number;
+  readonly document_ordering_fields: readonly DocumentOrdering[];
+  readonly default_document_ordering: DocumentOrdering;
+  readonly restore_note_template: string;
+  readonly share_token_entropy_bytes: number;
+  readonly share_token_prefix_length: number;
+  readonly incoming_share_token_max_length: number;
+  readonly metadata_namespace_max_length: number;
+  readonly max_upload_bytes: number;
+  readonly storage_stream_chunk_size: number;
+  readonly content_inspection_window_bytes: number;
+  readonly storage_key_max_length: number;
+  readonly blocked_file_signatures: readonly string[];
+  readonly permitted_mime_types: readonly string[];
+  readonly max_control_character_ratio_percent: number;
+  readonly min_control_characters: number;
+  readonly storage_backend_name_max_length: number;
+  readonly outbox_freshness_seconds: number;
+  readonly collection_search_max_length: number;
+  readonly tag_filter_max_tags: number;
+  readonly tag_filter_max_length: number;
+  readonly version_change_note_max_length: number;
+  readonly api_read_quota: number;
+  readonly api_write_quota: number;
+  readonly storage_quota_bytes: number;
+  readonly folder_page_size: number;
+  readonly document_page_size: number;
+  readonly max_page_size: number;
+  readonly default_share_expiry_hours: number;
+  readonly default_share_access_count: number;
+  readonly text_preview_max_characters: number;
+  readonly upload_timeout_ms: number;
+  readonly upload_max_retries: number;
+  readonly circuit_breaker_failure_threshold: number;
+  readonly circuit_breaker_reset_ms: number;
+  readonly executable_extensions: readonly string[];
+  readonly governance_required_operations: readonly string[];
+  readonly feature_flags: Readonly<Record<string, boolean>>;
+  readonly rollout: Readonly<{
+    enabled: boolean;
+    roles: readonly string[];
+    cohorts: readonly string[];
+  }>;
+}
+
+export interface DmsConfiguration {
+  readonly id: UUID;
+  readonly tenant_id: UUID;
+  readonly environment: DmsEnvironment;
+  readonly version: number;
+  readonly values: DmsConfigurationValues;
+  readonly updated_by: UUID;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+}
+
+export interface DmsConfigurationWrite {
+  readonly environment: DmsEnvironment;
+  readonly values: DmsConfigurationValues;
+}
+
+export interface DmsConfigurationPreview {
+  readonly valid: true;
+  readonly normalized_values: DmsConfigurationValues;
+  readonly changes: readonly {
+    readonly field: string;
+    readonly before: JsonPrimitive | readonly JsonPrimitive[] | Readonly<Record<string, unknown>>;
+    readonly after: JsonPrimitive | readonly JsonPrimitive[] | Readonly<Record<string, unknown>>;
+  }[];
+  readonly restart_required: boolean;
+}
+
+export interface DmsConfigurationAuditRecord {
+  readonly id: UUID;
+  readonly actor_id: UUID;
+  readonly action: 'created' | 'updated' | 'rolled_back' | 'imported';
+  readonly correlation_id: string;
+  readonly from_version: number | null;
+  readonly to_version: number;
+  readonly before: DmsConfigurationValues | Readonly<Record<string, never>>;
+  readonly after: DmsConfigurationValues;
+  readonly created_at: ISODateTime;
+}
+
+export interface DmsConfigurationVersion {
+  readonly id: UUID;
+  readonly version: number;
+  readonly environment: DmsEnvironment;
+  readonly values: DmsConfigurationValues;
+  readonly created_by: UUID;
+  readonly correlation_id: string;
+  readonly created_at: ISODateTime;
+}
+
+export interface DmsConfigurationExportDocument {
+  readonly schema_version: number;
+  readonly module: 'dms';
+  readonly environment: DmsEnvironment;
+  readonly version: number;
+  readonly values: DmsConfigurationValues;
+}
 
 export const MODULE_API_PREFIX = '/api/v2/dms';
 
@@ -292,6 +430,15 @@ export const ENDPOINTS = {
   PRINCIPALS: `${MODULE_API_PREFIX}/principals/`,
   PUBLIC_SHARE_DOWNLOAD: (token: string) => `${MODULE_API_PREFIX}/public/shares/${encodeURIComponent(token)}/download/` as const,
   HEALTH: `${MODULE_API_PREFIX}/health/`,
+  CONFIGURATION: {
+    CURRENT: `${MODULE_API_PREFIX}/configuration/current/`,
+    PREVIEW: `${MODULE_API_PREFIX}/configuration/preview/`,
+    HISTORY: `${MODULE_API_PREFIX}/configuration/history/`,
+    AUDIT: `${MODULE_API_PREFIX}/configuration/audit/`,
+    ROLLBACK: `${MODULE_API_PREFIX}/configuration/rollback/`,
+    IMPORT: `${MODULE_API_PREFIX}/configuration/import/`,
+    EXPORT: `${MODULE_API_PREFIX}/configuration/export/`,
+  },
 } as const;
 
 export const ROUTES = {
@@ -302,4 +449,5 @@ export const ROUTES = {
   FOLDER_CREATE: '/dms/folders/new',
   FOLDER_DETAIL: (id: UUID) => `/dms/folders/${encodeURIComponent(id)}` as const,
   FOLDER_EDIT: (id: UUID) => `/dms/folders/${encodeURIComponent(id)}/edit` as const,
+  CONFIGURATION: '/dms/configuration',
 } as const;

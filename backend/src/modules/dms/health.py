@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Mapping
+from uuid import UUID
 
 from django.conf import settings
 from django.db import connection
@@ -15,7 +16,7 @@ from django.views.decorators.http import require_GET
 
 from src.core.async_jobs.models import OutboxEvent, OutboxStatus
 from src.core.health import HealthCheckResult, health_registry
-
+from .services import DmsConfigurationService
 from .storage import StorageHealth, get_document_storage
 
 DOMAIN_TABLES = (
@@ -25,7 +26,6 @@ DOMAIN_TABLES = (
     "dms_document_permissions",
     "dms_document_shares",
 )
-OUTBOX_FRESHNESS = timedelta(minutes=5)
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,12 +120,17 @@ def storage_readiness_probe() -> HealthCheckResult:
     return _result(True, "ready", "ready", latency_ms=storage.latency_ms)
 
 
-def outbox_readiness_probe() -> HealthCheckResult:
+def outbox_readiness_probe(tenant_id: UUID | None = None) -> HealthCheckResult:
     """Detect stale pending DMS events without counting or exposing tenant data."""
 
     started = time.monotonic()
     if not bool(getattr(settings, "DMS_OUTBOX_ENABLED", True)):
-        return _result(True, "disabled", "disabled", latency_ms=round((time.monotonic() - started) * 1000, 3))
+        return _result(
+            False,
+            "required_event_path_disabled",
+            "outbox_disabled",
+            latency_ms=round((time.monotonic() - started) * 1000, 3),
+        )
     try:
         tables = set(connection.introspection.table_names())
         if OutboxEvent._meta.db_table not in tables:
@@ -135,10 +140,11 @@ def outbox_readiness_probe() -> HealthCheckResult:
                 "schema_missing",
                 latency_ms=round((time.monotonic() - started) * 1000, 3),
             )
+        freshness_seconds = DmsConfigurationService.runtime_values(tenant_id)["outbox_freshness_seconds"]
         stale = OutboxEvent.objects.filter(
             event_type__startswith="dms.",
             status=OutboxStatus.PENDING,
-            created_at__lt=timezone.now() - OUTBOX_FRESHNESS,
+            created_at__lt=timezone.now() - timedelta(seconds=freshness_seconds),
         ).exists()
         return _result(
             not stale,
@@ -155,13 +161,14 @@ def outbox_readiness_probe() -> HealthCheckResult:
         )
 
 
-def get_module_health() -> ModuleHealthReport:
+def get_module_health(tenant_id: UUID | None = None) -> ModuleHealthReport:
     """Return health evidence suitable for an authenticated governed endpoint."""
 
+    outbox = outbox_readiness_probe(tenant_id) if tenant_id is not None else outbox_readiness_probe()
     probes = {
         "database_rls": database_readiness_probe(),
         "storage": storage_readiness_probe(),
-        "outbox": outbox_readiness_probe(),
+        "outbox": outbox,
     }
     unavailable = any(not result.healthy for result in probes.values())
     degraded = not unavailable and any(result.details.get("code") == "cleanup_failed" for result in probes.values())
