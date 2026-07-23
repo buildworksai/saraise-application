@@ -14,15 +14,10 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from django.core.exceptions import ValidationError
-from django.core.validators import RegexValidator
 from django.db import models
 from django.db.models import F, Q
 
 from src.core.tenancy import TenantQuerySet, TenantScopedModel, TimestampedModel
-
-
-ENTITY_TYPE_KEY_PATTERN = r"^[a-z][a-z0-9_]{1,63}$"
-FIELD_PATH_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 
 
 class EntityStatus(models.TextChoices):
@@ -89,14 +84,21 @@ class ParticipantRole(models.TextChoices):
 
 
 class HardDeleteForbiddenMixin:
-    """Make archive/deactivation the only supported removal semantics."""
+    """Enforce the tenant lifecycle policy for physical deletion."""
 
     def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
-        del args, kwargs
-        raise ValidationError(
-            "Physical deletion is forbidden; use the tenant-scoped lifecycle service.",
-            code="hard_delete_forbidden",
-        )
+        from .services import ConfigurationService
+
+        tenant_id = getattr(self, "tenant_id", None)
+        if tenant_id is None:
+            raise ValidationError("Tenant context is required for deletion.", code="tenant_required")
+        policy = ConfigurationService.get_effective(tenant_id).get("lifecycle")
+        if not isinstance(policy, dict) or policy.get("allow_physical_delete") is not True:
+            raise ValidationError(
+                "Physical deletion is forbidden by tenant lifecycle policy.",
+                code="hard_delete_forbidden",
+            )
+        return super().delete(*args, **kwargs)  # type: ignore[misc]
 
 
 class MutableMDMModel(HardDeleteForbiddenMixin, TenantScopedModel, TimestampedModel):
@@ -142,9 +144,12 @@ class StatefulMixin(models.Model):
         super().clean()
         if self._state.adding or not self.pk:
             return
-        prior = type(self)._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id).values(
-            "status", "transition_history"
-        ).first()
+        prior = (
+            type(self)
+            ._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id)
+            .values("status", "transition_history")
+            .first()
+        )
         if prior is None:
             return
         old_history = prior["transition_history"]
@@ -177,10 +182,16 @@ class StatefulMixin(models.Model):
 class AppendOnlyQuerySet(TenantQuerySet):
     def update(self, **kwargs: Any) -> int:
         del kwargs
-        raise ValidationError("Append-only records cannot be updated.", code="append_only")
+        raise ValidationError(
+            "Append-only records cannot be updated; immutable evidence is append-only.",
+            code="append_only",
+        )
 
     def delete(self) -> tuple[int, dict[str, int]]:
-        raise ValidationError("Append-only records cannot be deleted.", code="append_only")
+        raise ValidationError(
+            "Append-only records cannot be deleted; immutable evidence is append-only.",
+            code="append_only",
+        )
 
 
 class AppendOnlyMDMModel(TenantScopedModel):
@@ -196,13 +207,19 @@ class AppendOnlyMDMModel(TenantScopedModel):
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self._state.adding:
-            raise ValidationError("Append-only records cannot be updated.", code="append_only")
+            raise ValidationError(
+                "Append-only records cannot be updated; immutable evidence is append-only.",
+                code="append_only",
+            )
         self.full_clean(validate_constraints=False)
         super().save(*args, **kwargs)
 
     def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
         del args, kwargs
-        raise ValidationError("Append-only records cannot be deleted.", code="append_only")
+        raise ValidationError(
+            "Append-only records cannot be deleted; immutable evidence is append-only.",
+            code="append_only",
+        )
 
 
 def _require_json_object(instance: models.Model, field_name: str) -> None:
@@ -215,10 +232,25 @@ def _require_json_array(instance: models.Model, field_name: str) -> None:
         raise ValidationError({field_name: "Must be a JSON array."}, code="invalid_json_array")
 
 
+def _configured_schema_pattern(instance: models.Model, name: str) -> str:
+    from .services import ConfigurationService
+
+    tenant_id = getattr(instance, "tenant_id", None)
+    if tenant_id is None:
+        raise ValidationError("Tenant configuration is required.", code="tenant_required")
+    configuration = ConfigurationService.get_effective(tenant_id)
+    schema_policy = configuration.get("schema_policy")
+    pattern = schema_policy.get(name) if isinstance(schema_policy, dict) else None
+    if not isinstance(pattern, str):
+        raise ValidationError("Tenant schema policy is unavailable.", code="configuration_unavailable")
+    return pattern
+
+
 def _require_field_paths(instance: models.Model, field_name: str) -> None:
     value = getattr(instance, field_name)
+    pattern = _configured_schema_pattern(instance, "field_path_pattern")
     if not isinstance(value, list) or any(
-        not isinstance(path, str) or not FIELD_PATH_PATTERN.fullmatch(path) for path in value
+        not isinstance(path, str) or re.fullmatch(pattern, path) is None for path in value
     ):
         raise ValidationError(
             {field_name: "Must contain only dotted field paths."},
@@ -244,10 +276,7 @@ def _require_same_tenant(instance: TenantScopedModel, relation_name: str) -> Non
 class MasterEntityType(SoftDeleteMixin, MutableMDMModel):
     """Tenant-owned declarative entity schema and paid-module extension key."""
 
-    key = models.CharField(
-        max_length=64,
-        validators=[RegexValidator(ENTITY_TYPE_KEY_PATTERN, "Use a lowercase snake-case key.")],
-    )
+    key = models.CharField(max_length=64)
     display_name = models.CharField(max_length=120)
     description = models.TextField(blank=True, default="")
     json_schema = models.JSONField(default=dict)
@@ -265,7 +294,6 @@ class MasterEntityType(SoftDeleteMixin, MutableMDMModel):
         ordering = ("key",)
         constraints = [
             models.UniqueConstraint(fields=("tenant_id", "key"), name="mdm_type_tenant_key_uniq"),
-            models.CheckConstraint(condition=Q(key__regex=ENTITY_TYPE_KEY_PATTERN), name="mdm_type_key_format_ck"),
             models.CheckConstraint(condition=Q(schema_version__gte=1), name="mdm_type_schema_ver_gte_1_ck"),
             models.CheckConstraint(
                 condition=Q(is_system=False) | Q(is_deleted=False),
@@ -280,6 +308,18 @@ class MasterEntityType(SoftDeleteMixin, MutableMDMModel):
 
     def clean(self) -> None:
         super().clean()
+        from .services import ConfigurationService
+
+        configuration = ConfigurationService.get_effective(self.tenant_id)
+        schema_policy = configuration.get("schema_policy")
+        if not isinstance(schema_policy, dict):
+            raise ValidationError("Tenant schema policy is unavailable.", code="configuration_unavailable")
+        if (
+            not isinstance(self.key, str)
+            or len(self.key) > int(schema_policy["entity_type_key_max_length"])
+            or re.fullmatch(str(schema_policy["entity_type_key_pattern"]), self.key) is None
+        ):
+            raise ValidationError({"key": "Key violates the tenant schema policy."}, code="invalid_entity_type_key")
         _require_json_object(self, "json_schema")
         _require_json_object(self, "metadata")
         for field_name in ("required_fields", "sensitive_fields", "searchable_fields"):
@@ -480,8 +520,62 @@ class DataQualityRule(SoftDeleteMixin, MutableMDMModel):
         super().clean()
         _require_same_tenant(self, "entity_type")
         _require_json_object(self, "configuration")
-        if self.field_path and not FIELD_PATH_PATTERN.fullmatch(self.field_path):
-            raise ValidationError({"field_path": "Must be a dotted field path."}, code="invalid_field_path")
+        if (
+            self.field_path
+            and re.fullmatch(
+                _configured_schema_pattern(self, "field_path_pattern"),
+                self.field_path,
+            )
+            is None
+        ):
+            raise ValidationError(
+                {"field_path": "Must be a dotted field path allowed by the tenant policy."},
+                code="invalid_field_path",
+            )
+
+
+class DataQualityRuleVersion(AppendOnlyMDMModel):
+    """Immutable, tenant-owned snapshot of one quality-rule revision."""
+
+    rule = models.ForeignKey(DataQualityRule, models.PROTECT, related_name="versions")
+    version_number = models.PositiveIntegerField()
+    snapshot = models.JSONField()
+    changed_by = models.UUIDField()
+    correlation_id = models.CharField(max_length=64)
+    change_reason = models.CharField(max_length=255)
+
+    class Meta:
+        db_table = "mdm_quality_rule_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "rule", "version_number"),
+                name="mdm_quality_rule_version_uniq",
+            ),
+            models.CheckConstraint(
+                condition=Q(version_number__gte=1),
+                name="mdm_quality_rule_version_gte_1_ck",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "rule", "-version_number"),
+                name="mdm_quality_rule_version_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_same_tenant(self, "rule")
+        _require_json_object(self, "snapshot")
+
+
+class ImmutableIssueQuerySet(TenantQuerySet):
+    """Keep evidence immutable even when callers use queryset updates."""
+
+    def update(self, **kwargs: Any) -> int:
+        if "evidence" in kwargs:
+            raise ValidationError("Quality issue evidence is immutable.", code="immutable_evidence")
+        return super().update(**kwargs)
 
 
 class DataQualityIssue(StatefulMixin, MutableMDMModel):
@@ -498,6 +592,8 @@ class DataQualityIssue(StatefulMixin, MutableMDMModel):
     resolved_by = models.UUIDField(null=True, blank=True, editable=False)
     resolved_at = models.DateTimeField(null=True, blank=True, editable=False)
     transition_history = models.JSONField(default=list, blank=True, editable=False)
+
+    objects = ImmutableIssueQuerySet.as_manager()
 
     ALLOWED_TRANSITIONS = {
         (IssueStatus.OPEN, IssueStatus.IN_REVIEW): frozenset({"assign"}),
@@ -554,6 +650,18 @@ class DataQualityIssue(StatefulMixin, MutableMDMModel):
         _require_same_tenant(self, "rule")
         _require_json_object(self, "evidence")
         _require_json_array(self, "transition_history")
+        if not self._state.adding and self.pk:
+            prior_evidence = (
+                type(self)
+                ._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id)
+                .values_list("evidence", flat=True)
+                .first()
+            )
+            if prior_evidence is not None and prior_evidence != self.evidence:
+                raise ValidationError(
+                    {"evidence": "Quality issue evidence is immutable."},
+                    code="immutable_evidence",
+                )
         if self.rule_id and self.entity_id:
             entity = MasterDataEntity.objects.for_tenant(self.tenant_id).filter(pk=self.entity_id).first()
             rule = DataQualityRule.objects.for_tenant(self.tenant_id).filter(pk=self.rule_id).first()
@@ -606,7 +714,14 @@ class MatchingRule(SoftDeleteMixin, MutableMDMModel):
         _require_json_object(self, "field_weights")
         weights: list[Decimal] = []
         for path, value in self.field_weights.items():
-            if not isinstance(path, str) or not FIELD_PATH_PATTERN.fullmatch(path):
+            if (
+                not isinstance(path, str)
+                or re.fullmatch(
+                    _configured_schema_pattern(self, "field_path_pattern"),
+                    path,
+                )
+                is None
+            ):
                 raise ValidationError({"field_weights": "Every key must be a dotted field path."})
             try:
                 weight = Decimal(str(value))
@@ -617,6 +732,50 @@ class MatchingRule(SoftDeleteMixin, MutableMDMModel):
             weights.append(weight)
         if not weights or abs(sum(weights) - Decimal("1.0000")) > Decimal("0.0001"):
             raise ValidationError({"field_weights": "Positive field weights must sum to 1.0000."})
+
+
+class MatchingRuleVersion(AppendOnlyMDMModel):
+    """Immutable, tenant-owned snapshot of one matching-rule revision."""
+
+    rule = models.ForeignKey(MatchingRule, models.PROTECT, related_name="versions")
+    version_number = models.PositiveIntegerField()
+    snapshot = models.JSONField()
+    changed_by = models.UUIDField()
+    correlation_id = models.CharField(max_length=64)
+    change_reason = models.CharField(max_length=255)
+
+    class Meta:
+        db_table = "mdm_matching_rule_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "rule", "version_number"),
+                name="mdm_matching_rule_version_uniq",
+            ),
+            models.CheckConstraint(
+                condition=Q(version_number__gte=1),
+                name="mdm_matching_rule_version_gte_1_ck",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "rule", "-version_number"),
+                name="mdm_matching_rule_version_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_same_tenant(self, "rule")
+        _require_json_object(self, "snapshot")
+
+
+class ImmutableCandidateQuerySet(TenantQuerySet):
+    """Keep deterministic match evidence immutable across every ORM write path."""
+
+    def update(self, **kwargs: Any) -> int:
+        if {"field_scores", "evidence"} & set(kwargs):
+            raise ValidationError("Match candidate evidence is immutable.", code="immutable_evidence")
+        return super().update(**kwargs)
 
 
 class MatchCandidate(StatefulMixin, MutableMDMModel):
@@ -639,6 +798,8 @@ class MatchCandidate(StatefulMixin, MutableMDMModel):
         editable=False,
     )
     transition_history = models.JSONField(default=list, blank=True, editable=False)
+
+    objects = ImmutableCandidateQuerySet.as_manager()
 
     ALLOWED_TRANSITIONS = {
         (MatchStatus.PENDING, MatchStatus.CONFIRMED): frozenset({"confirm"}),
@@ -689,6 +850,18 @@ class MatchCandidate(StatefulMixin, MutableMDMModel):
         _require_json_object(self, "field_scores")
         _require_json_object(self, "evidence")
         _require_json_array(self, "transition_history")
+        if not self._state.adding and self.pk:
+            prior = (
+                type(self)
+                ._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id)
+                .values("field_scores", "evidence")
+                .first()
+            )
+            if prior is not None and (prior["field_scores"] != self.field_scores or prior["evidence"] != self.evidence):
+                raise ValidationError(
+                    {"evidence": "Match candidate field scores and evidence are immutable."},
+                    code="immutable_evidence",
+                )
         if self.left_entity_id and self.right_entity_id and self.left_entity_id >= self.right_entity_id:
             raise ValidationError(
                 {"right_entity": "Entity pairs must use ascending UUID order."},
@@ -709,8 +882,11 @@ class MatchCandidate(StatefulMixin, MutableMDMModel):
             if self.right_entity_id
             else None
         )
-        if rule and left and right and (
-            left.entity_type_id != right.entity_type_id or left.entity_type_id != rule.entity_type_id
+        if (
+            rule
+            and left
+            and right
+            and (left.entity_type_id != right.entity_type_id or left.entity_type_id != rule.entity_type_id)
         ):
             raise ValidationError(
                 "Both entities and the matching rule must use the same entity type.",
@@ -718,20 +894,9 @@ class MatchCandidate(StatefulMixin, MutableMDMModel):
             )
 
 
-class MergeHistoryQuerySet(TenantQuerySet):
-    def update(self, **kwargs: Any) -> int:
-        del kwargs
-        raise ValidationError("Merge history changes require the reversal state machine.", code="append_only")
+class MergeHistory(AppendOnlyMDMModel):
+    """Immutable evidence of an applied merge; reversal is separate evidence."""
 
-    def delete(self) -> tuple[int, dict[str, int]]:
-        raise ValidationError("Merge history cannot be deleted.", code="append_only")
-
-
-class MergeHistory(StatefulMixin, TenantScopedModel):
-    """Durable merge evidence; only its one governed reversal is mutable."""
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    created_at = models.DateTimeField(auto_now_add=True)
     golden_record = models.ForeignKey(MasterDataEntity, models.PROTECT, related_name="merge_histories")
     status = models.CharField(max_length=12, choices=MergeStatus.choices, default=MergeStatus.APPLIED, editable=False)
     survivorship_policy = models.JSONField(default=dict)
@@ -745,12 +910,6 @@ class MergeHistory(StatefulMixin, TenantScopedModel):
     idempotency_key = models.CharField(max_length=255)
     correlation_id = models.CharField(max_length=64)
     transition_history = models.JSONField(default=list, blank=True, editable=False)
-
-    objects = MergeHistoryQuerySet.as_manager()
-
-    ALLOWED_TRANSITIONS = {
-        (MergeStatus.APPLIED, MergeStatus.REVERSED): frozenset({"reverse"}),
-    }
 
     class Meta:
         db_table = "mdm_merge_history"
@@ -787,32 +946,64 @@ class MergeHistory(StatefulMixin, TenantScopedModel):
         for field_name in ("survivorship_policy", "golden_snapshot_before", "golden_snapshot_after"):
             _require_json_object(self, field_name)
         _require_json_array(self, "transition_history")
-        if self._state.adding or not self.pk:
-            return
-        prior = type(self)._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id).values().first()
-        if prior is None:
-            return
-        mutable = {"status", "reversed_by", "reversed_at", "reversal_reason", "transition_history"}
-        changed = {
-            field.attname
-            for field in self._meta.concrete_fields
-            if field.attname not in {"id"} and prior.get(field.attname) != getattr(self, field.attname)
-        }
-        if changed - mutable or prior["status"] != MergeStatus.APPLIED or self.status != MergeStatus.REVERSED:
-            raise ValidationError("Merge history is append-only except for governed reversal.", code="append_only")
+        if self._state.adding and (
+            self.status != MergeStatus.APPLIED
+            or self.reversed_by is not None
+            or self.reversed_at is not None
+            or self.reversal_reason
+            or self.transition_history
+        ):
+            raise ValidationError(
+                "Merge history records only the applied merge; reversal evidence is separate.",
+                code="append_only",
+            )
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        self.full_clean(validate_constraints=False)
-        update_fields = kwargs.get("update_fields")
-        if update_fields and self.status == MergeStatus.REVERSED:
-            kwargs["update_fields"] = sorted(
-                set(update_fields) | {"reversed_by", "reversed_at", "reversal_reason"}
-            )
+        if not self._state.adding:
+            raise ValidationError("Merge history is append-only.", code="append_only")
         super().save(*args, **kwargs)
 
-    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
-        del args, kwargs
-        raise ValidationError("Merge history cannot be deleted.", code="append_only")
+    @property
+    def current_status(self) -> str:
+        reversal = getattr(self, "reversal", None)
+        return MergeStatus.REVERSED if reversal is not None else MergeStatus.APPLIED
+
+
+class MergeReversal(AppendOnlyMDMModel):
+    """Immutable evidence that a prior merge was reversed."""
+
+    merge_history = models.OneToOneField(
+        MergeHistory,
+        models.PROTECT,
+        related_name="reversal",
+    )
+    reversed_by = models.UUIDField()
+    reason = models.TextField()
+    correlation_id = models.CharField(max_length=64)
+    transition_key = models.CharField(max_length=255)
+    participant_versions = models.JSONField(blank=True)
+
+    class Meta:
+        db_table = "mdm_merge_reversals"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "transition_key"),
+                name="mdm_merge_reversal_transition_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "-created_at"),
+                name="mdm_merge_reversal_created_idx",
+            ),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_same_tenant(self, "merge_history")
+        _require_json_object(self, "participant_versions")
+        if not self.reason.strip():
+            raise ValidationError({"reason": "Reversal reason is required."}, code="required")
 
 
 class MergeParticipant(AppendOnlyMDMModel):
@@ -862,9 +1053,90 @@ class MergeParticipant(AppendOnlyMDMModel):
             )
 
 
+class MasterDataConfiguration(MutableMDMModel):
+    """Current, tenant-owned MDM policy document.
+
+    The aggregate is deliberately a singleton per tenant.  Every mutation is
+    performed by ``ConfigurationService`` and accompanied by an immutable
+    ``MasterDataConfigurationVersion`` row in the same transaction.
+    """
+
+    tenant_id = models.UUIDField(db_index=True)
+    document = models.JSONField(default=dict)
+    version = models.PositiveIntegerField(default=1, editable=False)
+
+    class Meta:
+        db_table = "mdm_configurations"
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id",), name="mdm_config_tenant_uniq"),
+            models.CheckConstraint(condition=Q(version__gte=1), name="mdm_config_version_gte_1_ck"),
+        ]
+        indexes = [
+            models.Index(fields=("tenant_id", "-version"), name="mdm_config_tenant_version_idx"),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_json_object(self, "document")
+
+
+class MasterDataConfigurationVersion(AppendOnlyMDMModel):
+    """Immutable configuration version and audit evidence."""
+
+    tenant_id = models.UUIDField(db_index=True)
+    configuration = models.ForeignKey(
+        MasterDataConfiguration,
+        models.PROTECT,
+        related_name="versions",
+    )
+    version = models.PositiveIntegerField()
+    prior_value = models.JSONField(blank=True)
+    new_value = models.JSONField(blank=True)
+    actor_id = models.UUIDField()
+    correlation_id = models.CharField(max_length=64)
+    idempotency_key = models.CharField(max_length=255)
+    change_type = models.CharField(max_length=24)
+    reason = models.CharField(max_length=500)
+
+    class Meta:
+        db_table = "mdm_configuration_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "configuration", "version"),
+                name="mdm_config_version_tenant_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant_id", "idempotency_key"),
+                name="mdm_config_idempotency_uniq",
+            ),
+            models.CheckConstraint(condition=Q(version__gte=1), name="mdm_config_audit_version_gte_1_ck"),
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "configuration", "-version"),
+                name="mdm_config_audit_desc_idx",
+            ),
+            models.Index(fields=("tenant_id", "correlation_id"), name="mdm_config_corr_idx"),
+        ]
+
+    def clean(self) -> None:
+        super().clean()
+        _require_same_tenant(self, "configuration")
+        _require_json_object(self, "prior_value")
+        _require_json_object(self, "new_value")
+        if not self.correlation_id:
+            raise ValidationError(
+                {"correlation_id": "Configuration audit records require a correlation ID."},
+                code="missing_correlation_id",
+            )
+
+
 __all__ = [
+    "MasterDataConfiguration",
+    "MasterDataConfigurationVersion",
     "DataQualityIssue",
     "DataQualityRule",
+    "DataQualityRuleVersion",
     "EntityStatus",
     "IssueSeverity",
     "IssueStatus",
@@ -874,9 +1146,11 @@ __all__ = [
     "MatchCandidate",
     "MatchingAlgorithm",
     "MatchingRule",
+    "MatchingRuleVersion",
     "MatchStatus",
     "MergeHistory",
     "MergeParticipant",
+    "MergeReversal",
     "MergeStatus",
     "ParticipantRole",
     "QualityDimension",

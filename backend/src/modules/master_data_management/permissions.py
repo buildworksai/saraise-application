@@ -29,6 +29,7 @@ PERMISSIONS: Final[tuple[str, ...]] = (
     "mdm.quality_rule:manage",
     "mdm.quality_issue:read",
     "mdm.quality_issue:resolve",
+    "mdm.quality:scan",
     "mdm.matching_rule:read",
     "mdm.matching_rule:manage",
     "mdm.match:read",
@@ -38,6 +39,8 @@ PERMISSIONS: Final[tuple[str, ...]] = (
     "mdm.merge:execute",
     "mdm.merge:reverse",
     "mdm.dashboard:read",
+    "mdm.configuration:read",
+    "mdm.configuration:manage",
 )
 
 
@@ -64,11 +67,13 @@ MATCHING_RULE_MANAGE = access("mdm.matching_rule:manage")
 MATCH_READ = access("mdm.match:read")
 MATCH_REVIEW = access("mdm.match:review")
 MATCH_RUN = access("mdm.match:run", quota_resource="mdm.match.scan", quota_cost=1)
-QUALITY_SCAN = access("mdm.match:run", quota_resource="mdm.quality.scan", quota_cost=1)
+QUALITY_SCAN = access("mdm.quality:scan", quota_resource="mdm.quality.scan", quota_cost=1)
 MERGE_READ = access("mdm.merge:read")
 MERGE_EXECUTE = access("mdm.merge:execute")
 MERGE_REVERSE = access("mdm.merge:reverse")
 DASHBOARD_READ = access("mdm.dashboard:read")
+CONFIGURATION_READ = access("mdm.configuration:read")
+CONFIGURATION_MANAGE = access("mdm.configuration:manage")
 
 
 __all__ = ["AccessRule", "ENTITLEMENT", "PERMISSIONS"]

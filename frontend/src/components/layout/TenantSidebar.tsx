@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils";
 import { getTenantSidebarTreeForMode } from "@/navigation/tenant-route-registry";
 import { useDocumentIntelligenceConfiguration } from "@/modules/document_intelligence/hooks/use-document-intelligence-configuration";
 import { useTraceabilityCapabilities } from "@/modules/blockchain_traceability/hooks/use-traceability-configuration";
+import { useMasterDataConfiguration } from "@/modules/master_data_management/hooks/useMasterDataConfiguration";
 import type { User } from "@/stores/auth-store";
 
 interface NavItem {
@@ -277,12 +278,30 @@ const NavItem = ({ item }: { item: NavItem }) => {
   );
 };
 
+function rolloutBucket(actorId: string): number {
+  return Array.from(actorId).reduce((value, character) => (value * 31 + character.codePointAt(0)!) % 100, 0);
+}
+
 export const TenantSidebar = ({ user }: { user: User }) => {
   const isAdmin = user.tenant_role === "tenant_admin";
   const documentIntelligenceConfiguration = useDocumentIntelligenceConfiguration();
   const traceabilityCapabilities = useTraceabilityCapabilities();
+  const masterDataConfiguration = useMasterDataConfiguration();
+  const rollout = masterDataConfiguration.data?.data.document.feature_rollout;
+  const mode = import.meta.env.VITE_SARAISE_MODE;
+  const masterDataEnabled = Boolean(
+    rollout?.enabled &&
+    (!mode || rollout.modes.includes(mode)) &&
+    (!rollout.roles.length || (user.tenant_role && rollout.roles.includes(user.tenant_role))) &&
+    !rollout.cohorts.length &&
+    rolloutBucket(user.id) < rollout.percentage,
+  );
   const runtimeRegistryItems = applyRuntimeNavigationOrder(
-    registryTenantItems,
+    registryTenantItems
+      .filter((item) => item.module !== "master_data_management" || masterDataEnabled)
+      .map((item) => item.module === "master_data_management" && masterDataConfiguration.data
+        ? { ...item, order: masterDataConfiguration.data.data.document.ui.sidebar_order }
+        : item),
     documentIntelligenceConfiguration.data?.document.ui.navigation_order,
   );
   const renderedTenantItems = [...tenantItems, ...runtimeRegistryItems]

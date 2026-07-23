@@ -21,6 +21,7 @@ def test_permission_catalog_exactly_matches_public_contract() -> None:
         "mdm.quality_rule:manage",
         "mdm.quality_issue:read",
         "mdm.quality_issue:resolve",
+        "mdm.quality:scan",
         "mdm.matching_rule:read",
         "mdm.matching_rule:manage",
         "mdm.match:read",
@@ -30,6 +31,8 @@ def test_permission_catalog_exactly_matches_public_contract() -> None:
         "mdm.merge:execute",
         "mdm.merge:reverse",
         "mdm.dashboard:read",
+        "mdm.configuration:read",
+        "mdm.configuration:manage",
     }
     assert len(permissions.PERMISSIONS) == len(set(permissions.PERMISSIONS))
 
@@ -55,7 +58,7 @@ def test_only_bounded_batch_scans_consume_explicit_quota() -> None:
     assert permissions.MATCH_RUN.permission == "mdm.match:run"
     assert permissions.MATCH_RUN.quota_resource == "mdm.match.scan"
     assert permissions.MATCH_RUN.quota_cost == 1
-    assert permissions.QUALITY_SCAN.permission == "mdm.match:run"
+    assert permissions.QUALITY_SCAN.permission == "mdm.quality:scan"
     assert permissions.QUALITY_SCAN.quota_resource == "mdm.quality.scan"
     assert permissions.QUALITY_SCAN.quota_cost == 1
 

@@ -14,6 +14,7 @@ from src.modules.master_data_management import api
 from src.modules.master_data_management.permissions import PERMISSIONS
 from src.modules.master_data_management.serializers import (
     DataQualityRuleWriteSerializer,
+    MatchingRuleWriteSerializer,
     MasterDataEntityCreateSerializer,
     MasterDataEntityDetailSerializer,
     MasterDataEntityUpdateSerializer,
@@ -148,6 +149,7 @@ def test_every_viewset_action_has_one_known_permission_and_unknown_actions_deny(
         assert viewset.access_map, viewset.__name__
         assert all(rule.permission and rule.entitlement for rule in viewset.access_map.values())
         assert all(rule.permission in PERMISSIONS for rule in viewset.access_map.values())
+    assert api.QualityScanViewSet.access_map["create"].permission == "mdm.quality:scan"
     # The base class has no permissive fallback declaration.
     assert api.GovernedMDMViewSet.access_map == {}
 
@@ -192,8 +194,77 @@ def test_serializers_reject_unknown_and_server_owned_overposting() -> None:
         }
     )
     assert type_serializer.is_valid() is False and "schema_version" in type_serializer.errors
+    owner_serializer = MasterEntityTypeCreateSerializer(
+        data={
+            "key": "customer",
+            "display_name": "Customer",
+            "json_schema": {"type": "object"},
+            "owner_module": "spoofed_module",
+            "idempotency_key": "strict-owner",
+        }
+    )
+    assert owner_serializer.is_valid() is False and "owner_module" in owner_serializer.errors
     weight = DataQualityRuleWriteSerializer(data={"idempotency_key": "weight-zero", "weight": "0.0000"})
     assert weight.is_valid() is False and "weight" in weight.errors
+
+
+@pytest.mark.parametrize(
+    ("serializer_class", "required_fields"),
+    [
+        (
+            DataQualityRuleWriteSerializer,
+            {
+                "entity_type_id",
+                "name",
+                "rule_type",
+                "configuration",
+                "dimension",
+                "severity",
+                "weight",
+            },
+        ),
+        (
+            MatchingRuleWriteSerializer,
+            {
+                "entity_type_id",
+                "name",
+                "algorithm",
+                "field_weights",
+                "blocking_fields",
+                "review_threshold",
+                "auto_confirm_threshold",
+            },
+        ),
+    ],
+)
+def test_rule_write_serializers_authoritatively_require_create_fields(
+    serializer_class: type[object],
+    required_fields: set[str],
+) -> None:
+    serializer = serializer_class(data={"idempotency_key": "required-fields"})  # type: ignore[call-arg]
+    assert serializer.is_valid() is False  # type: ignore[attr-defined]
+    assert required_fields <= set(serializer.errors)  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    "viewset_class",
+    [
+        api.MasterEntityTypeViewSet,
+        api.MasterDataEntityViewSet,
+        api.DataQualityRuleViewSet,
+        api.DataQualityIssueViewSet,
+        api.MatchingRuleViewSet,
+        api.MatchCandidateViewSet,
+        api.MergeViewSet,
+        api.AsyncJobViewSet,
+    ],
+)
+def test_every_queryset_returns_none_when_tenant_is_absent(
+    viewset_class: type[api.GovernedMDMViewSet],
+) -> None:
+    view = viewset_class()
+    view._get_tenant_id = lambda: None  # type: ignore[method-assign]
+    assert view.get_queryset().query.is_empty()
 
 
 def test_entity_detail_masks_nested_sensitive_values_unless_field_policy_allows() -> None:

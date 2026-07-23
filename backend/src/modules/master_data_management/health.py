@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Final
 
 from django.db import connection
@@ -13,6 +14,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from src.core.api import SuccessEnvelopeRenderer
+from src.core.observability import get_correlation_id
 
 logger = logging.getLogger("saraise.master_data_management")
 
@@ -21,13 +23,25 @@ DOMAIN_TABLES: Final[tuple[str, ...]] = (
     "mdm_entities",
     "mdm_entity_versions",
     "mdm_quality_rules",
+    "mdm_quality_rule_versions",
     "mdm_quality_issues",
     "mdm_matching_rules",
+    "mdm_matching_rule_versions",
     "mdm_match_candidates",
     "mdm_merge_history",
+    "mdm_merge_reversals",
     "mdm_merge_participants",
+    "mdm_configurations",
+    "mdm_configuration_versions",
 )
 DURABILITY_TABLES: Final[tuple[str, ...]] = ("async_jobs", "async_job_outbox_events")
+
+
+def _health_correlation_id(request: object) -> str:
+    """Return one correlation identifier shared by a probe's log and payload."""
+
+    request_value = getattr(request, "correlation_id", "")
+    return str(request_value or get_correlation_id() or uuid.uuid4())
 
 
 @api_view(["GET"])
@@ -36,8 +50,24 @@ DURABILITY_TABLES: Final[tuple[str, ...]] = ("async_jobs", "async_job_outbox_eve
 def live(request: object) -> Response:
     """Report process liveness without touching tenant data."""
 
-    del request
-    return Response({"module": "master_data_management", "status": "live"})
+    correlation_id = _health_correlation_id(request)
+    logger.info(
+        "MDM liveness probe succeeded",
+        extra={
+            "event": "mdm.health.live",
+            "resource_type": "health",
+            "operation": "live",
+            "outcome": "succeeded",
+            "correlation_id": correlation_id,
+        },
+    )
+    return Response(
+        {
+            "module": "master_data_management",
+            "status": "live",
+            "correlation_id": correlation_id,
+        }
+    )
 
 
 def _readiness_components() -> dict[str, dict[str, object]]:
@@ -94,7 +124,7 @@ def _readiness_components() -> dict[str, dict[str, object]]:
 def ready(request: object) -> Response:
     """Verify the real domain schema and durable execution dependencies."""
 
-    del request
+    correlation_id = _health_correlation_id(request)
     try:
         components = _readiness_components()
         is_ready = all(bool(component.get("ready")) for component in components.values())
@@ -107,6 +137,7 @@ def ready(request: object) -> Response:
                 "operation": "ready",
                 "outcome": "failed",
                 "error_code": "READINESS_PROBE_FAILED",
+                "correlation_id": correlation_id,
             },
         )
         return Response(
@@ -114,15 +145,28 @@ def ready(request: object) -> Response:
                 "module": "master_data_management",
                 "status": "not_ready",
                 "components": {"probe": {"ready": False, "code": "READINESS_PROBE_FAILED"}},
+                "correlation_id": correlation_id,
             },
             status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
+    logger.log(
+        logging.INFO if is_ready else logging.WARNING,
+        "MDM readiness probe completed",
+        extra={
+            "event": "mdm.health.ready",
+            "resource_type": "health",
+            "operation": "ready",
+            "outcome": "succeeded" if is_ready else "not_ready",
+            "correlation_id": correlation_id,
+        },
+    )
     return Response(
         {
             "module": "master_data_management",
             "status": "ready" if is_ready else "not_ready",
             "components": components,
+            "correlation_id": correlation_id,
         },
         status=status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE,
     )
