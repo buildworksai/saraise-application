@@ -5,6 +5,7 @@ type: foundation
 lifecycle: core
 dependencies:
   - core-identity >=1.0
+  - ai-provider-configuration >=1.0
 permissions:
   - ai.agent:create
   - ai.agent:execute
@@ -34,6 +35,11 @@ permissions:
   - ai.evaluation:run
   - ai.evaluation:red_team
   - ai.health:view
+  - ai.configuration:view
+  - ai.configuration:manage
+  - ai.configuration:rollback
+  - ai.configuration:import
+  - ai.configuration:export
 sod_actions:
   - ai.agent:execute
   - ai.agent:terminate
@@ -46,3 +52,196 @@ ai_tools:
   - pause_agent
   - resume_agent
   - terminate_agent
+
+entities:
+  - {name: AgentManagementConfiguration, table: ai_agent_management_configuration, tenant_scoped: true}
+  - {name: AgentManagementConfigurationVersion, table: ai_agent_management_configuration_versions, tenant_scoped: true, immutable: true}
+  - {name: Agent, table: ai_agents, tenant_scoped: true}
+  - {name: AgentExecution, table: ai_agent_executions, tenant_scoped: true}
+  - {name: AgentSchedulerTask, table: ai_agent_scheduler_tasks, tenant_scoped: true}
+  - {name: ApprovalRequest, table: ai_approval_requests, tenant_scoped: true}
+  - {name: SoDPolicy, table: ai_sod_policies, tenant_scoped: true}
+  - {name: SoDViolation, table: ai_sod_violations, tenant_scoped: true, immutable: true}
+  - {name: Tool, table: ai_tools, tenant_scoped: true}
+  - {name: ToolInvocation, table: ai_tool_invocations, tenant_scoped: true}
+  - {name: EgressRule, table: ai_egress_rules, tenant_scoped: true}
+  - {name: EgressRequest, table: ai_egress_requests, tenant_scoped: true, immutable: true}
+  - {name: Secret, table: ai_secrets, tenant_scoped: true}
+  - {name: SecretAccess, table: ai_secret_accesses, tenant_scoped: true, immutable: true}
+  - {name: SecretRotationRecord, table: ai_secret_rotation_records, tenant_scoped: true, immutable: true}
+  - {name: QuotaUsage, table: ai_quota_usage, tenant_scoped: true, immutable: true}
+  - {name: ShardSaturation, table: ai_shard_saturation, tenant_scoped: true, immutable: true}
+  - {name: KillSwitch, table: ai_kill_switches, tenant_scoped: true}
+  - {name: TokenUsage, table: ai_token_usage, tenant_scoped: true, immutable: true}
+  - {name: CostRecord, table: ai_cost_records, tenant_scoped: true, immutable: true}
+  - {name: CostSummary, table: ai_cost_summaries, tenant_scoped: true}
+  - {name: AuditEvent, table: ai_audit_events, tenant_scoped: true, immutable: true}
+  - {name: AuditTrail, table: ai_audit_trails, tenant_scoped: true, immutable: true}
+  - {name: AuditTrailEvent, table: ai_audit_trail_events, tenant_scoped: true, immutable: true}
+
+endpoints:
+  - resource: agents
+    path: /api/v2/ai-agent-management/agents/
+    methods: [GET, POST, PUT, PATCH, DELETE]
+    permissions:
+      list: ai.agent:view
+      retrieve: ai.agent:view
+      create: ai.agent:create
+      update: ai.agent:update
+      partial_update: ai.agent:update
+      destroy: ai.agent:delete
+      activate: ai.agent:update
+      disable: ai.agent:update
+      retire: ai.agent:delete
+      execute: ai.agent:execute
+      evaluate: ai.evaluation:run
+      evaluate_red_team: ai.evaluation:red_team
+    actions:
+      - {path: "{id}/activate/", method: POST, permission: "ai.agent:update"}
+      - {path: "{id}/disable/", method: POST, permission: "ai.agent:update"}
+      - {path: "{id}/retire/", method: POST, permission: "ai.agent:delete"}
+      - {path: "{id}/execute/", method: POST, permission: "ai.agent:execute"}
+      - {path: "{id}/evaluate/", method: POST, permission: "ai.evaluation:run"}
+      - {path: "{id}/evaluate/", method: POST, condition: "red_team=true", permission: "ai.evaluation:red_team"}
+  - resource: executions
+    path: /api/v2/ai-agent-management/executions/
+    methods: [GET]
+    permissions: {list: "ai.execution:view", retrieve: "ai.execution:view", pause: "ai.agent:pause", resume: "ai.agent:resume", terminate: "ai.agent:terminate"}
+    actions:
+      - {path: "{id}/pause/", method: POST, permission: "ai.agent:pause"}
+      - {path: "{id}/resume/", method: POST, permission: "ai.agent:resume"}
+      - {path: "{id}/terminate/", method: POST, permission: "ai.agent:terminate"}
+  - resource: schedules
+    path: /api/v2/ai-agent-management/schedules/
+    methods: [GET, POST]
+    permissions: {list: "ai.execution:view", retrieve: "ai.execution:view", create: "ai.schedule:manage", cancel: "ai.schedule:manage"}
+    actions: [{path: "{id}/cancel/", method: POST, permission: "ai.schedule:manage"}]
+  - resource: approvals
+    path: /api/v2/ai-agent-management/approvals/
+    methods: [GET, POST]
+    permissions: {list: "ai.approval:view", retrieve: "ai.approval:view", create: "ai.approval:request", approve: "ai.approval:decide", reject: "ai.approval:decide", cancel: "ai.approval:request"}
+    actions:
+      - {path: "{id}/approve/", method: POST, permission: "ai.approval:decide"}
+      - {path: "{id}/reject/", method: POST, permission: "ai.approval:decide"}
+      - {path: "{id}/cancel/", method: POST, permission: "ai.approval:request"}
+  - resource: sod-policies
+    path: /api/v2/ai-agent-management/sod-policies/
+    methods: [GET, POST, PUT, PATCH, DELETE]
+    permissions: {list: "ai.governance:view", retrieve: "ai.governance:view", create: "ai.governance:manage", update: "ai.governance:manage", partial_update: "ai.governance:manage", destroy: "ai.governance:manage"}
+  - resource: sod-violations
+    path: /api/v2/ai-agent-management/sod-violations/
+    methods: [GET]
+    permissions: {list: "ai.governance:view", retrieve: "ai.governance:view"}
+  - resource: tools
+    path: /api/v2/ai-agent-management/tools/
+    methods: [GET, POST, PUT, PATCH, DELETE]
+    permissions: {list: "ai.tool:view", retrieve: "ai.tool:view", create: "ai.tool:register", update: "ai.tool:update", partial_update: "ai.tool:update", destroy: "ai.tool:delete", validate: "ai.tool:invoke"}
+    actions: [{path: "{id}/validate/", method: POST, permission: "ai.tool:invoke"}]
+  - resource: tool-invocations
+    path: /api/v2/ai-agent-management/tool-invocations/
+    methods: [GET]
+    permissions: {list: "ai.governance:view", retrieve: "ai.governance:view"}
+  - resource: egress-rules
+    path: /api/v2/ai-agent-management/egress-rules/
+    methods: [GET, POST, PUT, PATCH, DELETE]
+    permissions: {list: "ai.governance:view", retrieve: "ai.governance:view", create: "ai.governance:manage", update: "ai.governance:manage", partial_update: "ai.governance:manage", destroy: "ai.governance:manage"}
+  - resource: egress-requests
+    path: /api/v2/ai-agent-management/egress-requests/
+    methods: [GET]
+    permissions: {list: "ai.governance:view", retrieve: "ai.governance:view"}
+  - resource: secrets
+    path: /api/v2/ai-agent-management/secrets/
+    methods: [GET, POST]
+    permissions: {list: "ai.secret:view", retrieve: "ai.secret:view", create: "ai.secret:manage", rotate: "ai.secret:manage", deactivate: "ai.secret:manage"}
+    actions:
+      - {path: "{id}/rotate/", method: POST, permission: "ai.secret:manage"}
+      - {path: "{id}/deactivate/", method: POST, permission: "ai.secret:manage"}
+  - resource: secret-accesses
+    path: /api/v2/ai-agent-management/secret-accesses/
+    methods: [GET]
+    permissions: {list: "ai.governance:view", retrieve: "ai.governance:view"}
+  - resource: quotas
+    path: /api/v2/ai-agent-management/quotas/
+    methods: [GET]
+    permissions: {list: "ai.usage:view", retrieve: "ai.usage:view"}
+  - resource: quota-usage
+    path: /api/v2/ai-agent-management/quota-usage/
+    methods: [GET]
+    permissions: {list: "ai.usage:view", retrieve: "ai.usage:view"}
+  - resource: saturation
+    path: /api/v2/ai-agent-management/saturation/
+    methods: [GET]
+    permissions: {list: "ai.usage:view", retrieve: "ai.usage:view"}
+  - resource: kill-switches
+    path: /api/v2/ai-agent-management/kill-switches/
+    methods: [GET, POST]
+    permissions: {list: "ai.governance:view", retrieve: "ai.governance:view", create: "ai.governance:manage", deactivate: "ai.governance:manage"}
+    actions: [{path: "{id}/deactivate/", method: POST, permission: "ai.governance:manage"}]
+  - resource: token-usage
+    path: /api/v2/ai-agent-management/token-usage/
+    methods: [GET]
+    permissions: {list: "ai.usage:view", retrieve: "ai.usage:view"}
+  - resource: cost-records
+    path: /api/v2/ai-agent-management/cost-records/
+    methods: [GET]
+    permissions: {list: "ai.usage:view", retrieve: "ai.usage:view"}
+  - resource: cost-summaries
+    path: /api/v2/ai-agent-management/cost-summaries/
+    methods: [GET]
+    permissions: {list: "ai.usage:view", retrieve: "ai.usage:view", recalculate: "ai.usage:view"}
+    actions: [{path: recalculate/, method: POST, permission: "ai.usage:view"}]
+  - resource: audit-events
+    path: /api/v2/ai-agent-management/audit-events/
+    methods: [GET]
+    permissions: {list: "ai.audit:view", retrieve: "ai.audit:view"}
+  - resource: audit-trails
+    path: /api/v2/ai-agent-management/audit-trails/
+    methods: [GET]
+    permissions: {list: "ai.audit:view", retrieve: "ai.audit:view"}
+  - resource: jobs
+    path: /api/v2/ai-agent-management/jobs/
+    methods: [GET]
+    permissions: {list: "ai.execution:view", retrieve: "ai.execution:view"}
+  - resource: configuration
+    path: /api/v2/ai-agent-management/configuration/
+    methods: [GET, POST]
+    permissions: {list: "ai.configuration:view", retrieve: "ai.configuration:view", create: "ai.configuration:manage", update: "ai.configuration:manage", partial_update: "ai.configuration:manage", preview: "ai.configuration:manage", versions: "ai.configuration:view", rollback: "ai.configuration:rollback", import_document: "ai.configuration:import", export: "ai.configuration:export"}
+    actions:
+      - {path: preview/, method: POST, permission: "ai.configuration:manage"}
+      - {path: versions/, method: GET, permission: "ai.configuration:view"}
+      - {path: rollback/, method: POST, permission: "ai.configuration:rollback"}
+      - {path: import/, method: POST, permission: "ai.configuration:import"}
+      - {path: export/, method: GET, permission: "ai.configuration:export"}
+  - resource: health
+    path: /api/v2/ai-agent-management/health/
+    methods: [GET]
+    permissions: {get: "ai.health:view"}
+
+frontend_routes:
+  - /ai-agents
+  - /ai-agents/create
+  - "/ai-agents/{id}"
+  - "/ai-agents/{id}/edit"
+  - "/ai-agents/{id}/evaluation"
+  - /ai-agents/executions
+  - "/ai-agents/executions/{id}"
+  - /ai-agents/schedules
+  - /ai-agents/schedules/create
+  - "/ai-agents/schedules/{id}"
+  - /ai-agents/approvals
+  - "/ai-agents/approvals/{id}"
+  - /ai-agents/configuration
+  - /ai-agents/governance
+  - /ai-agents/tools
+  - /ai-agents/tools/create
+  - "/ai-agents/tools/{id}"
+  - "/ai-agents/tools/{id}/edit"
+  - /ai-agents/usage
+  - /ai-agents/audit
+  - "/ai-agents/audit/{id}"
+
+metadata:
+  api_version: v2
+  provider_boundary: ai-provider-configuration
+  configuration_schema: saraise.ai-agent-management.configuration/v1
+  health_probe: ai_agent_management.health

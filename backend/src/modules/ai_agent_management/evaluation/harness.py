@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Optional
 
+from ..services import DEFAULT_CONFIGURATION
+
 logger = logging.getLogger("saraise.ai.evaluation")
 
 
@@ -156,6 +158,10 @@ class AgentEvaluationHarness:
     def __init__(
         self,
         agent_callable: Optional[Callable] = None,
+        *,
+        tenant_id: str = "unavailable",
+        correlation_id: str = "unavailable",
+        latency_percentiles: list[float] | None = None,
     ) -> None:
         """
         Initialize harness.
@@ -165,6 +171,11 @@ class AgentEvaluationHarness:
                            Signature: (messages: list[dict]) -> str
         """
         self._agent_callable = agent_callable
+        self._tenant_id = tenant_id
+        self._correlation_id = correlation_id
+        self._latency_percentiles = list(
+            latency_percentiles or DEFAULT_CONFIGURATION["evaluation"]["latency_percentiles"]
+        )
 
     def set_agent(self, agent_callable: Callable) -> None:
         """Set or change the agent under test."""
@@ -175,7 +186,18 @@ class AgentEvaluationHarness:
         if not self._agent_callable:
             raise ValueError("No agent callable set. Use set_agent() first.")
 
-        logger.info("Starting evaluation suite: %s (%d cases)", suite.name, len(suite.test_cases))
+        logger.info(
+            "evaluation_suite",
+            extra={
+                "event": "ai_evaluation_suite_started",
+                "tenant_id": self._tenant_id,
+                "correlation_id": self._correlation_id,
+                "operation": "evaluation",
+                "outcome": "started",
+                "suite": suite.name,
+                "case_count": len(suite.test_cases),
+            },
+        )
         start_time = time.monotonic()
 
         case_results: list[TestCaseResult] = []
@@ -198,7 +220,18 @@ class AgentEvaluationHarness:
                     skipped += 1
 
             except Exception as exc:
-                logger.error("Error evaluating case %s: %s", tc.id, exc)
+                logger.error(
+                    "evaluation_case",
+                    extra={
+                        "event": "ai_evaluation_case_failed",
+                        "tenant_id": self._tenant_id,
+                        "correlation_id": self._correlation_id,
+                        "operation": "evaluation",
+                        "outcome": "failure",
+                        "case_id": tc.id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
                 case_results.append(
                     TestCaseResult(
                         test_case_id=tc.id,
@@ -228,12 +261,18 @@ class AgentEvaluationHarness:
         )
 
         logger.info(
-            "Suite '%s' complete: %d/%d passed (%.1f%%) in %.2fs",
-            suite.name,
-            passed,
-            len(suite.test_cases),
-            result.pass_rate * 100,
-            duration,
+            "evaluation_suite",
+            extra={
+                "event": "ai_evaluation_suite_completed",
+                "tenant_id": self._tenant_id,
+                "correlation_id": self._correlation_id,
+                "operation": "evaluation",
+                "outcome": result.overall_status.value,
+                "suite": suite.name,
+                "passed": passed,
+                "case_count": len(suite.test_cases),
+                "duration_seconds": duration,
+            },
         )
 
         return result
@@ -351,8 +390,10 @@ class AgentEvaluationHarness:
         if latencies:
             sorted_lat = sorted(latencies)
             result["latency_p50_ms"] = round(sorted_lat[len(sorted_lat) // 2], 2)
-            result["latency_p95_ms"] = round(sorted_lat[int(len(sorted_lat) * 0.95)], 2)
-            result["latency_p99_ms"] = round(sorted_lat[int(len(sorted_lat) * 0.99)], 2)
+            for percentile in self._latency_percentiles:
+                label = int(round(percentile * 100))
+                index = min(len(sorted_lat) - 1, int(len(sorted_lat) * percentile))
+                result[f"latency_p{label}_ms"] = round(sorted_lat[index], 2)
 
         return result
 

@@ -5,7 +5,7 @@ from rest_framework.routers import DefaultRouter
 
 from .api import (
     AgentExecutionViewSet, AgentViewSet, ApprovalRequestViewSet, AsyncJobViewSet,
-    AuditEventViewSet, AuditTrailViewSet, CostRecordViewSet, CostSummaryViewSet,
+    AuditEventViewSet, AuditTrailViewSet, ConfigurationViewSet, CostRecordViewSet, CostSummaryViewSet,
     EgressRequestViewSet, EgressRuleViewSet, KillSwitchViewSet, QuotaUsageViewSet,
     QuotaViewSet, ScheduleViewSet, SecretAccessViewSet, SecretViewSet,
     ShardSaturationViewSet, SoDPolicyViewSet, SoDViolationViewSet,
@@ -36,5 +36,6 @@ router.register("cost-summaries", CostSummaryViewSet, basename="cost-summary")
 router.register("audit-events", AuditEventViewSet, basename="audit-event")
 router.register("audit-trails", AuditTrailViewSet, basename="audit-trail")
 router.register("jobs", AsyncJobViewSet, basename="job")
+router.register("configuration", ConfigurationViewSet, basename="configuration")
 
 urlpatterns = [path("", include(router.urls)), path("health/", ModuleHealthView.as_view(), name="health")]

@@ -19,15 +19,25 @@ HandlerT = TypeVar("HandlerT", AgentRunner, EvaluationSuiteRunner)
 
 
 class ExtensionRegistry:
-    def __init__(self, kind: str) -> None:
+    def __init__(self, kind: str, maximum_key_length: int | None = None) -> None:
         self.kind = kind
+        self.maximum_key_length = maximum_key_length
         self._handlers: dict[str, Any] = {}
         self._lock = threading.RLock()
 
-    @staticmethod
-    def _key(key: str) -> str:
-        if not isinstance(key, str) or not key.strip() or len(key.strip()) > 100:
-            raise ValueError("Extension key must be a non-empty string of at most 100 characters")
+    def configure(self, maximum_key_length: int) -> None:
+        if maximum_key_length <= 0:
+            raise ValueError("Registry key limit must be positive")
+        with self._lock:
+            self.maximum_key_length = maximum_key_length
+
+    def _key(self, key: str) -> str:
+        if self.maximum_key_length is None:
+            raise RuntimeError("Extension registry policy is not configured")
+        if not isinstance(key, str) or not key.strip() or len(key.strip()) > self.maximum_key_length:
+            raise ValueError(
+                f"Extension key must be a non-empty string of at most {self.maximum_key_length} characters"
+            )
         return key.strip()
 
     def register(self, key: str, handler: HandlerT | None = None) -> HandlerT | Callable[[HandlerT], HandlerT]:

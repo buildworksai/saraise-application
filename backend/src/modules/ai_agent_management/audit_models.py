@@ -139,14 +139,7 @@ class AuditTrail(AITenantModel):
 
     def save(self, *args, **kwargs) -> None:
         if not self._state.adding and self.pk:
-            prior = (
-                type(self)
-                ._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id)
-                .values("completed_timestamp")
-                .first()
-            )
-            if prior and prior["completed_timestamp"] is not None:
-                raise ValidationError("Completed audit trails are immutable.", code="terminal_immutable")
+            raise ValidationError("Audit trails are append-only.", code="append_only")
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):

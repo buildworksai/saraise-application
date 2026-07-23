@@ -10,15 +10,22 @@ import pytest
 from django.utils import timezone
 from rest_framework import status
 
+from src.core.access.entitlements import Quota
 from src.core.access.permissions import RequiresAccess
 from src.core.async_jobs.models import AsyncJob, OutboxEvent
 from src.core.testing import TenantIsolationContract
-from src.modules.ai_agent_management.approval_models import ApprovalRequest, SoDPolicy
-from src.modules.ai_agent_management.audit_models import AuditEvent
-from src.modules.ai_agent_management.egress_models import EgressRequest, EgressRule, Secret
-from src.modules.ai_agent_management.models import Agent, AgentExecution, AgentSchedulerTask
-from src.modules.ai_agent_management.quota_models import KillSwitch, QuotaUsage
-from src.modules.ai_agent_management.token_models import CostRecord, TokenUsage
+from src.modules.ai_agent_management.approval_models import ApprovalRequest, SoDPolicy, SoDViolation
+from src.modules.ai_agent_management.audit_models import AuditEvent, AuditTrail
+from src.modules.ai_agent_management.egress_models import EgressRequest, EgressRule, Secret, SecretAccess
+from src.modules.ai_agent_management.models import (
+    Agent,
+    AgentExecution,
+    AgentManagementConfiguration,
+    AgentSchedulerTask,
+)
+from src.modules.ai_agent_management.quota_models import KillSwitch, QuotaUsage, ShardSaturation
+from src.modules.ai_agent_management.services import ConfigurationService
+from src.modules.ai_agent_management.token_models import CostRecord, CostSummary, TokenUsage
 from src.modules.ai_agent_management.tool_models import Tool, ToolInvocation
 
 BASE = "/api/v2/ai-agent-management"
@@ -290,6 +297,114 @@ def isolation_world(db, tenant_a, tenant_b):
             ),
         }
     )
+    world.update(
+        {
+            "sod_violation_a": SoDViolation.objects.create(
+                tenant_id=tenant_a.id,
+                policy=world["sod_a"],
+                agent_execution=execution_a,
+                action_1_user=actor_a,
+                action_2_user=uuid4(),
+                action_1_timestamp=now,
+                action_2_timestamp=now,
+            ),
+            "sod_violation_b": SoDViolation.objects.create(
+                tenant_id=tenant_b.id,
+                policy=world["sod_b"],
+                agent_execution=execution_b,
+                action_1_user=actor_b,
+                action_2_user=uuid4(),
+                action_1_timestamp=now,
+                action_2_timestamp=now,
+            ),
+            "secret_access_a": SecretAccess.objects.create(
+                tenant_id=tenant_a.id,
+                secret=world["secret_a"],
+                agent_execution=execution_a,
+                accessed_by=actor_a,
+                purpose="isolation proof",
+            ),
+            "secret_access_b": SecretAccess.objects.create(
+                tenant_id=tenant_b.id,
+                secret=world["secret_b"],
+                agent_execution=execution_b,
+                accessed_by=actor_b,
+                purpose="isolation proof",
+            ),
+            "quota_a": Quota.objects.create(
+                tenant_id=tenant_a.id,
+                resource="ai.isolation",
+                limit=10,
+                remaining=10,
+            ),
+            "quota_b": Quota.objects.create(
+                tenant_id=tenant_b.id,
+                resource="ai.isolation",
+                limit=10,
+                remaining=10,
+            ),
+            "saturation_a": ShardSaturation.objects.create(
+                tenant_id=tenant_a.id,
+                shard_id="tenant-a",
+                saturation_level=Decimal("0.1000"),
+            ),
+            "saturation_b": ShardSaturation.objects.create(
+                tenant_id=tenant_b.id,
+                shard_id="tenant-b",
+                saturation_level=Decimal("0.1000"),
+            ),
+            "cost_summary_a": CostSummary.objects.create(
+                tenant_id=tenant_a.id,
+                period_start=now - timedelta(hours=1),
+                period_end=now,
+                period_type="hourly",
+                total_cost=Decimal("0.10000000"),
+                currency="USD",
+                calculated_at=now,
+            ),
+            "cost_summary_b": CostSummary.objects.create(
+                tenant_id=tenant_b.id,
+                period_start=now - timedelta(hours=1),
+                period_end=now,
+                period_type="hourly",
+                total_cost=Decimal("0.10000000"),
+                currency="USD",
+                calculated_at=now,
+            ),
+            "audit_trail_a": AuditTrail.objects.create(
+                tenant_id=tenant_a.id,
+                request_id=uuid4(),
+                correlation_id=uuid4(),
+                agent_execution=execution_a,
+                initiating_principal=actor_a,
+                request_timestamp=now,
+            ),
+            "audit_trail_b": AuditTrail.objects.create(
+                tenant_id=tenant_b.id,
+                request_id=uuid4(),
+                correlation_id=uuid4(),
+                agent_execution=execution_b,
+                initiating_principal=actor_b,
+                request_timestamp=now,
+            ),
+            "job_a": AsyncJob.objects.create(
+                tenant_id=tenant_a.id,
+                actor_id=str(actor_a),
+                command="ai_agent_management.isolation",
+                idempotency_key="job-a",
+                payload={},
+                correlation_id=str(uuid4()),
+            ),
+            "job_b": AsyncJob.objects.create(
+                tenant_id=tenant_b.id,
+                actor_id=str(actor_b),
+                command="ai_agent_management.isolation",
+                idempotency_key="job-b",
+                payload={},
+                correlation_id=str(uuid4()),
+            ),
+        }
+    )
     return world
 
 
@@ -522,12 +637,19 @@ class TestKillSwitchIsolation(UnsupportedGenericMutationMixin, GovernedIsolation
     ("resource", "row_key"),
     (
         ("executions", "execution"),
+        ("sod-violations", "sod_violation"),
         ("tool-invocations", "invocation"),
         ("egress-requests", "egress_request"),
+        ("secret-accesses", "secret_access"),
+        ("quotas", "quota"),
         ("quota-usage", "quota_usage"),
+        ("saturation", "saturation"),
         ("token-usage", "token_usage"),
         ("cost-records", "cost"),
+        ("cost-summaries", "cost_summary"),
         ("audit-events", "audit"),
+        ("audit-trails", "audit_trail"),
+        ("jobs", "job"),
     ),
 )
 def test_read_only_evidence_is_tenant_hidden_and_has_no_mutation_route(
@@ -547,10 +669,49 @@ def test_read_only_evidence_is_tenant_hidden_and_has_no_mutation_route(
     assert str(foreign.pk) not in identities
     foreign_url = f"{BASE}/{resource}/{foreign.pk}/"
     assert authenticated_tenant_a_client.get(foreign_url).status_code == status.HTTP_404_NOT_FOUND
+    assert authenticated_tenant_a_client.patch(
+        foreign_url, {}, format="json"
+    ).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert authenticated_tenant_a_client.delete(foreign_url).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert authenticated_tenant_a_client.post(
+        f"{BASE}/{resource}/", {}, format="json"
+    ).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
     own_url = f"{BASE}/{resource}/{own.pk}/"
     patch_response = authenticated_tenant_a_client.patch(own_url, {}, format="json")
     assert patch_response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
     assert authenticated_tenant_a_client.delete(own_url).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+
+
+@pytest.mark.django_db
+def test_configuration_is_tenant_isolated_versioned_and_query_fails_closed(
+    authenticated_tenant_a_client,
+    isolation_world,
+):
+    tenant_a = isolation_world["tenant_a"]
+    tenant_b = isolation_world["tenant_b"]
+    actor_a = isolation_world["actor_a"]
+    actor_b = isolation_world["actor_b"]
+    config_a = ConfigurationService.current(tenant_a, actor_a, uuid4())
+    config_b = ConfigurationService.current(tenant_b, actor_b, uuid4())
+    document = ConfigurationService.defaults()
+    document["provider"]["max_tokens"] = 8192
+    updated = ConfigurationService.replace(
+        tenant_a,
+        actor_a,
+        uuid4(),
+        document,
+        expected_version=config_a.version,
+    )
+    assert updated.version == 2
+    config_b.refresh_from_db()
+    assert config_b.version == 1
+    assert config_b.document["provider"]["max_tokens"] != 8192
+
+    response = authenticated_tenant_a_client.get(f"{BASE}/configuration/")
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["data"]["id"] == str(config_a.id)
+    assert AgentManagementConfiguration.objects.filter(tenant_id=tenant_a).count() == 1
+    assert AgentManagementConfiguration.objects.filter(tenant_id=tenant_b).count() == 1
 
 
 @pytest.mark.django_db

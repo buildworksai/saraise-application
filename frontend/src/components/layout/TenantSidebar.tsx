@@ -8,6 +8,7 @@
  */
 import { NavLink, useLocation } from "react-router-dom";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   Shield,
@@ -30,6 +31,9 @@ import { cn } from "@/lib/utils";
 import { getTenantSidebarTreeForMode } from "@/navigation/tenant-route-registry";
 import { useDocumentIntelligenceConfiguration } from "@/modules/document_intelligence/hooks/use-document-intelligence-configuration";
 import { useTraceabilityCapabilities } from "@/modules/blockchain_traceability/hooks/use-traceability-configuration";
+import { useAiAgentConfiguration } from "@/modules/ai_agent_management/hooks/use-ai-agent-configuration";
+import { aiAgentService } from "@/modules/ai_agent_management/services/ai-agent-service";
+import type { AgentManagementConfigurationDocument } from "@/modules/ai_agent_management/contracts";
 import type { User } from "@/stores/auth-store";
 
 interface NavItem {
@@ -190,8 +194,25 @@ function configuredDocumentIntelligenceOrder(
 function applyRuntimeNavigationOrder(
   items: readonly NavItem[],
   order: DocumentIntelligenceNavigationOrder | undefined,
+  aiOrder: AgentManagementConfigurationDocument["ui"]["navigation_order"] | undefined,
 ): NavItem[] {
   return items.map((item) => {
+    if (item.module === "ai_agent_management" && item.children && aiOrder) {
+      return {
+        ...item,
+        children: [...item.children].sort((left, right) => {
+          const configuredOrder = (routeId: string | undefined): number => {
+            const section = routeId?.split(".")[1];
+            return section && section in aiOrder
+              ? aiOrder[section as keyof typeof aiOrder]
+              : Number.MAX_SAFE_INTEGER;
+          };
+          return configuredOrder(left.routeId) -
+            configuredOrder(right.routeId) ||
+            left.label.localeCompare(right.label);
+        }),
+      };
+    }
     if (item.module !== "document_intelligence" || !item.children || !order) return item;
     return {
       ...item,
@@ -281,9 +302,18 @@ export const TenantSidebar = ({ user }: { user: User }) => {
   const isAdmin = user.tenant_role === "tenant_admin";
   const documentIntelligenceConfiguration = useDocumentIntelligenceConfiguration();
   const traceabilityCapabilities = useTraceabilityCapabilities();
+  const aiConfiguration = useAiAgentConfiguration();
+  const aiHealth = useQuery({
+    queryKey: ["ai-agent-management", "health", "sidebar"],
+    queryFn: aiAgentService.getHealth,
+    refetchInterval: aiConfiguration.data?.document.ui.health_poll_interval_ms ?? false,
+    enabled: Boolean(aiConfiguration.data),
+    retry: false,
+  });
   const runtimeRegistryItems = applyRuntimeNavigationOrder(
     registryTenantItems,
     documentIntelligenceConfiguration.data?.document.ui.navigation_order,
+    aiConfiguration.data?.document.ui.navigation_order,
   );
   const renderedTenantItems = [...tenantItems, ...runtimeRegistryItems]
     .map((item) => item.module === "blockchain_traceability" && traceabilityCapabilities.data
@@ -322,18 +352,17 @@ export const TenantSidebar = ({ user }: { user: User }) => {
             <span className="text-xs font-semibold text-muted-foreground uppercase">
               System Status
             </span>
-            <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+            <span className={`h-2 w-2 rounded-full ${aiHealth.data?.status === "healthy" ? "bg-primary" : "bg-muted"}`} />
           </div>
-          <div className="text-xs text-muted-foreground">
-            <div className="flex justify-between">
-              <span>API</span>
-              <span className="text-green-500">Operational</span>
-            </div>
-            <div className="flex justify-between mt-1">
-              <span>Services</span>
-              <span className="text-green-500">Healthy</span>
-            </div>
-          </div>
+          {aiHealth.isLoading ? <p className="text-xs text-muted-foreground">Checking dependencies…</p> :
+            aiHealth.error || !aiHealth.data ? <p className="text-xs text-muted-foreground">Health unavailable</p> :
+              <div className="space-y-1 text-xs text-muted-foreground">
+                {Object.entries(aiHealth.data.components).map(([name, component]) =>
+                  <div className="flex justify-between gap-2" key={name}>
+                    <span>{name.replaceAll("_", " ")}</span>
+                    <span className={component.status === "healthy" ? "text-primary" : "text-destructive"}>{component.status}</span>
+                  </div>)}
+              </div>}
         </div>
 
         {/* User Role Indicator */}

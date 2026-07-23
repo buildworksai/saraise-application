@@ -35,10 +35,10 @@ class ProviderConfig:
     model: str
     credential_reference: str
     dependency_key: str
-    max_tokens: int = 4096
-    temperature: float = 0.7
-    timeout_seconds: int = 30
-    max_retries: int = 3
+    max_tokens: int
+    temperature: float
+    timeout_seconds: int
+    max_retries: int
     pricing_version: str | None = None
     cost_per_1k_input_tokens: float | None = None
     cost_per_1k_output_tokens: float | None = None

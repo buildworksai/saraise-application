@@ -8,12 +8,15 @@ import type { AgentStatus, IdentityType } from "../contracts";
 import { ROUTES } from "../contracts";
 import { aiAgentService } from "../services/ai-agent-service";
 import { EmptyState, GovernedError, PageHeader, PageSkeleton, Pagination, StatusPill, formatDate } from "../components/AgentUI";
+import { useAiAgentConfiguration } from "../hooks/use-ai-agent-configuration";
 
 export const AgentListPage = () => {
   const navigate = useNavigate();
+  const configuration = useAiAgentConfiguration();
   const [search, setSearch] = useState(""); const [status, setStatus] = useState<AgentStatus | "">(""); const [identity, setIdentity] = useState<IdentityType | "">(""); const [runner, setRunner] = useState(""); const [ordering, setOrdering] = useState<"name" | "-name" | "created_at" | "-created_at" | "updated_at" | "-updated_at">("-updated_at"); const [page, setPage] = useState(1);
-  const query = useQuery({ queryKey: ["ai-agents", { search, status, identity, runner, ordering, page }], queryFn: () => aiAgentService.listAgents({ search: search || undefined, status: status || undefined, identity_type: identity || undefined, runner_key: runner || undefined, ordering, page, page_size: 25 }), placeholderData: (previous) => previous });
-  if (query.isLoading) return <PageSkeleton rows={7}/>;
+  const query = useQuery({ queryKey: ["ai-agents", { search, status, identity, runner, ordering, page }], queryFn: () => aiAgentService.listAgents({ search: search || undefined, status: status || undefined, identity_type: identity || undefined, runner_key: runner || undefined, ordering, page, page_size: configuration.data?.document.ui.agent_page_size }), enabled: Boolean(configuration.data), placeholderData: (previous) => previous });
+  if (query.isLoading || configuration.isLoading) return <PageSkeleton rows={7}/>;
+  if (configuration.error) return <GovernedError error={configuration.error} retry={() => void configuration.refetch()}/>;
   if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()}/>;
   if (!query.data) return <GovernedError error={new Error("No governed agent response was received.")} retry={() => void query.refetch()}/>;
   const filtered = Boolean(search || status || identity || runner);

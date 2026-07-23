@@ -51,8 +51,8 @@ export interface AgentListItem {
   readonly allowed_actions?: readonly string[];
 }
 export interface AgentDetail extends AgentListItem {
-  readonly subject_id: UUID; readonly session_id: UUID | null; readonly config: JSONObject;
-  readonly transition_history: readonly TransitionEvidence[]; readonly created_by: UUID; readonly deleted_at: string | null;
+  readonly subject_id: UUID; readonly config: JSONObject;
+  readonly transition_history: readonly TransitionEvidence[]; readonly deleted_at: string | null;
   readonly provider_status?: Availability; readonly runner_status?: Availability;
   readonly entitlement?: EntitlementSummary; readonly quota?: Quota;
 }
@@ -94,7 +94,7 @@ export interface EgressRequest { readonly id: UUID; readonly agent_execution_id:
 
 export interface SecretMetadata { readonly id: UUID; readonly name: string; readonly description: string; readonly secret_type: "api_key" | "password" | "token" | "certificate" | "other"; readonly is_active: boolean; readonly expires_at: string | null; readonly last_rotated_at: string; readonly rotation_interval_days: number | null; readonly created_at: string; }
 export interface SecretCreateRequest { readonly name: string; readonly description?: string; readonly secret_type: SecretMetadata["secret_type"]; readonly plaintext: string; readonly expires_at?: string | null; readonly rotation_interval_days?: number | null; }
-export interface SecretRotateRequest { readonly plaintext: string; readonly transition_key: string; }
+export interface SecretRotateRequest { readonly plaintext: string; readonly idempotency_key: string; }
 export interface SecretAccess { readonly id: UUID; readonly secret_id: UUID; readonly secret_name?: string; readonly agent_execution_id: UUID | null; readonly accessed_by: UUID; readonly accessed_at: string; readonly purpose: string; }
 
 export interface Quota { readonly id: UUID; readonly resource: string; readonly limit: number; readonly consumed: number; readonly remaining: number; readonly period_start?: string; readonly period_end?: string; }
@@ -111,12 +111,96 @@ export interface KillSwitchActivateRequest { readonly name: string; readonly des
 export interface AuditEvent { readonly id: UUID; readonly event_type: string; readonly agent_execution_id: UUID | null; readonly tool_invocation_id: UUID | null; readonly approval_request_id: UUID | null; readonly initiating_principal: UUID; readonly subject_id: UUID; readonly session_id: UUID | null; readonly request_id: UUID; readonly correlation_id: UUID; readonly event_timestamp: string; readonly outcome: AuditOutcome; readonly decisions: JSONObject; readonly transitions: JSONObject; readonly resources: JSONObject; readonly metadata: JSONObject; }
 export interface AuditTrail { readonly id: UUID; readonly request_id: UUID; readonly correlation_id: UUID; readonly agent_execution_id: UUID; readonly initiating_principal: UUID; readonly request_timestamp: string; readonly completed_timestamp: string | null; readonly final_outcome: "success" | "failure" | "blocked" | "partial" | null; readonly summary: JSONObject; readonly events?: readonly AuditEvent[]; }
 
-export interface AsyncJob { readonly id: UUID; readonly command: string; readonly status: string; readonly result: JSONValue | null; readonly error_message: string; readonly attempts: number; readonly correlation_id: string; readonly started_at: string | null; readonly completed_at: string | null; readonly created_at: string; readonly updated_at: string; }
+export interface AsyncJob { readonly id: UUID; readonly status: string; readonly attempts: number; readonly correlation_id: string; readonly started_at: string | null; readonly completed_at: string | null; readonly created_at: string; readonly updated_at: string; }
 export interface EvaluationMetric { readonly key: string; readonly label: string; readonly value: number; readonly unit?: string; readonly passed: boolean; readonly baseline_value?: number | null; readonly delta?: number | null; }
 export interface EvaluationResult { readonly job: AsyncJob; readonly suite_key: string; readonly tested_agent_version?: string; readonly metrics: readonly EvaluationMetric[]; readonly failures: readonly string[]; readonly availability: Availability; readonly diagnostic?: string; }
 export interface HealthComponent { readonly status: "healthy" | "unavailable"; readonly latency_ms: number; }
 export interface ModuleHealth { readonly status: "healthy" | "unavailable"; readonly module: "ai_agent_management"; readonly components: { readonly [name: string]: HealthComponent }; }
 export interface CostRecalculationRequest { readonly period_start: string; readonly period_end: string; readonly period_type: CostSummary["period_type"]; readonly currency: string; readonly idempotency_key: string; }
+
+export type ConfigurationEnvironment = "development" | "staging" | "production";
+export interface AgentManagementConfigurationDocument {
+  readonly schema_version: "1.0";
+  readonly provider: {
+    readonly max_tokens: number; readonly temperature: number; readonly timeout_seconds: number;
+    readonly max_retries: number; readonly retry_backoff_seconds: number;
+    readonly circuit_failure_threshold: number; readonly circuit_reset_seconds: number;
+  };
+  readonly runner: { readonly allowed_task_fields: readonly string[]; readonly maximum_messages: number; readonly allowed_roles: readonly string[] };
+  readonly registry: { readonly key_maximum_length: number };
+  readonly agent: {
+    readonly metadata_fields: readonly string[]; readonly transition_key_maximum_length: number;
+    readonly execution_idempotency_key_maximum_length: number; readonly search_maximum_length: number;
+    readonly ordering_fields: readonly string[]; readonly transition_reason_maximum_length: number;
+    readonly error_code_maximum_length: number;
+    readonly user_bound_requires_active_session: boolean; readonly only_active_agents_may_execute: boolean;
+    readonly identity_session_rules: { readonly user_bound_requires_session: boolean; readonly system_bound_forbids_session: boolean };
+    readonly execution_state_transitions: { readonly [state: string]: readonly string[] };
+  };
+  readonly schedule: {
+    readonly default_priority: number; readonly priority_minimum: number; readonly priority_maximum: number;
+    readonly default_maximum_retries: number; readonly maximum_retries_limit: number;
+    readonly dispatch_batch_minimum: number; readonly dispatch_batch_maximum: number;
+  };
+  readonly approval: {
+    readonly require_for_non_read_only_tools: boolean; readonly requester_may_approve_own_request: boolean;
+    readonly enforce_expiry: boolean; readonly rejection_requires_reason: boolean; readonly only_requester_may_cancel: boolean;
+  };
+  readonly separation_of_duties: { readonly actions_must_be_nonempty_and_different: boolean; readonly counterpart_detection_enabled: boolean };
+  readonly egress: {
+    readonly forbidden_ip_addresses: readonly string[]; readonly internal_hostname_suffixes: readonly string[];
+    readonly allowed_url_schemes: readonly string[]; readonly forbid_url_credentials: boolean;
+    readonly forbid_url_query: boolean; readonly forbid_url_fragment: boolean;
+  };
+  readonly health: { readonly cache_probe_timeout_seconds: number; readonly minimum_rls_table_count: number; readonly outbox_stale_minutes: number };
+  readonly evaluation: {
+    readonly quality_pass_threshold: number; readonly quality_warn_threshold: number;
+    readonly hallucination_pass_threshold: number; readonly hallucination_warn_threshold: number;
+    readonly max_token_fallback: number; readonly characters_per_estimated_token: number;
+    readonly minimum_useful_output_length: number; readonly short_output_penalty: number;
+    readonly efficiency_pass_threshold: number; readonly efficiency_warn_threshold: number;
+    readonly latency_percentiles: readonly number[];
+  };
+  readonly secret: { readonly rotation_interval_minimum_days: number };
+  readonly ui: {
+    readonly agent_page_size: number; readonly execution_page_size: number; readonly execution_poll_interval_ms: number;
+    readonly approval_page_size: number; readonly approval_poll_interval_ms: number; readonly schedule_page_size: number;
+    readonly selection_page_size: number; readonly usage_page_size: number; readonly summary_page_size: number;
+    readonly health_poll_interval_ms: number;
+    readonly saturation_warning_threshold: number; readonly saturation_critical_threshold: number;
+    readonly status_tokens: { readonly success: string; readonly info: string; readonly warning: string; readonly danger: string; readonly neutral: string };
+    readonly status_token_by_state: { readonly [state: string]: keyof AgentManagementConfigurationDocument["ui"]["status_tokens"] };
+    readonly navigation_order: {
+      readonly agents: number; readonly executions: number; readonly schedules: number; readonly approvals: number;
+      readonly tools: number; readonly configuration: number; readonly governance: number; readonly usage: number; readonly audit: number;
+    };
+  };
+  readonly rollout: { readonly enabled: boolean; readonly roles: readonly string[]; readonly cohorts: readonly string[] };
+}
+export interface AgentManagementConfiguration {
+  readonly id: UUID; readonly environment: ConfigurationEnvironment; readonly version: number;
+  readonly document: AgentManagementConfigurationDocument; readonly created_at: string; readonly updated_at: string;
+}
+export interface AgentManagementConfigurationVersion {
+  readonly id: UUID; readonly environment: ConfigurationEnvironment; readonly version: number;
+  readonly previous_document: AgentManagementConfigurationDocument | JSONObject;
+  readonly document: AgentManagementConfigurationDocument; readonly changed_by: UUID; readonly correlation_id: UUID;
+  readonly change_type: "bootstrap" | "update" | "import" | "rollback"; readonly created_at: string;
+}
+export interface ConfigurationExportDocument {
+  readonly schema: "saraise.ai-agent-management.configuration/v1"; readonly environment: ConfigurationEnvironment;
+  readonly version: number; readonly configuration: AgentManagementConfigurationDocument;
+}
+export interface ConfigurationWriteRequest {
+  readonly environment: ConfigurationEnvironment; readonly expected_version: number;
+  readonly document: AgentManagementConfigurationDocument;
+}
+export interface ConfigurationPreview {
+  readonly valid: true; readonly changed: boolean; readonly current_version: number;
+  readonly proposed_version: number;
+  readonly changes: readonly { readonly path: string; readonly before: JSONValue; readonly after: JSONValue }[];
+}
+export interface ConfigurationRollbackRequest { readonly environment: ConfigurationEnvironment; readonly target_version: number; }
 
 export interface AgentFilters extends PageRequest { readonly status?: AgentStatus; readonly identity_type?: IdentityType; readonly runner_key?: string; readonly subject_id?: UUID; readonly search?: string; readonly ordering?: "name" | "-name" | "created_at" | "-created_at" | "updated_at" | "-updated_at"; }
 export interface ExecutionFilters extends PageRequest { readonly agent_id?: UUID; readonly state?: ExecutionState; readonly actor_id?: UUID; readonly created_after?: string; readonly created_before?: string; readonly ordering?: "created_at" | "-created_at" | "started_at" | "-started_at" | "completed_at" | "-completed_at"; }
@@ -164,6 +248,15 @@ export const ENDPOINTS = {
   AUDIT_EVENTS: { LIST: resource("audit-events"), DETAIL: (id: UUID) => detail("audit-events", id) },
   AUDIT_TRAILS: { LIST: resource("audit-trails"), DETAIL: (id: UUID) => detail("audit-trails", id) },
   JOBS: { LIST: resource("jobs"), DETAIL: (id: UUID) => detail("jobs", id) },
+  CONFIGURATION: {
+    CURRENT: resource("configuration"),
+    UPDATE: resource("configuration"),
+    PREVIEW: `${API_ROOT}/configuration/preview/`,
+    VERSIONS: `${API_ROOT}/configuration/versions/`,
+    ROLLBACK: `${API_ROOT}/configuration/rollback/`,
+    IMPORT: `${API_ROOT}/configuration/import/`,
+    EXPORT: `${API_ROOT}/configuration/export/`,
+  },
   HEALTH: `${API_ROOT}/health/`,
 } as const;
 
@@ -173,7 +266,7 @@ export const ROUTES = {
   SCHEDULES: "/ai-agents/schedules", SCHEDULE_CREATE: "/ai-agents/schedules/create", SCHEDULE_DETAIL: (id: UUID) => `/ai-agents/schedules/${id}` as const,
   APPROVALS: "/ai-agents/approvals", APPROVAL_DETAIL: (id: UUID) => `/ai-agents/approvals/${id}` as const,
   TOOLS: "/ai-agents/tools", TOOL_CREATE: "/ai-agents/tools/create", TOOL_DETAIL: (id: UUID) => `/ai-agents/tools/${id}` as const, TOOL_EDIT: (id: UUID) => `/ai-agents/tools/${id}/edit` as const,
-  GOVERNANCE: "/ai-agents/governance", USAGE: "/ai-agents/usage", AUDIT: "/ai-agents/audit", AUDIT_TRAIL_DETAIL: (id: UUID) => `/ai-agents/audit/${id}` as const,
+  CONFIGURATION: "/ai-agents/configuration", GOVERNANCE: "/ai-agents/governance", USAGE: "/ai-agents/usage", AUDIT: "/ai-agents/audit", AUDIT_TRAIL_DETAIL: (id: UUID) => `/ai-agents/audit/${id}` as const,
   EVALUATION: (id: UUID) => `/ai-agents/${id}/evaluation` as const,
 } as const;
 

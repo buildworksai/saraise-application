@@ -62,6 +62,11 @@ class ProviderFactory:
                 capability=f"provider_adapter:{adapter_key or 'unspecified'}",
                 message="The configured provider adapter is unavailable.",
             )
+        from ..services import ConfigurationService
+
+        runtime_defaults = ConfigurationService.resolve(tenant_id)["provider"]
+        for key in ("max_tokens", "temperature", "timeout_seconds", "max_retries"):
+            published.setdefault(key, runtime_defaults[key])
         try:
             configuration = ProviderConfig.from_published(published)
             provider = adapter(configuration)

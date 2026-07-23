@@ -18,7 +18,13 @@ from src.core.async_jobs.models import AsyncJob
 from .approval_models import ApprovalRequest, SoDPolicy, SoDViolation
 from .audit_models import AuditEvent, AuditTrail
 from .egress_models import EgressRequest, EgressRule, Secret, SecretAccess
-from .models import Agent, AgentExecution, AgentSchedulerTask
+from .models import (
+    Agent,
+    AgentExecution,
+    AgentManagementConfiguration,
+    AgentManagementConfigurationVersion,
+    AgentSchedulerTask,
+)
 from .quota_models import KillSwitch, QuotaUsage, ShardSaturation
 from .token_models import CostRecord, CostSummary, TokenUsage
 from .tool_models import Tool, ToolInvocation
@@ -93,10 +99,10 @@ class AgentDetailSerializer(serializers.ModelSerializer[Agent]):
     class Meta:
         model = Agent
         fields = (
-            "id", "name", "description", "identity_type", "subject_id", "session_id",
+            "id", "name", "description", "identity_type", "subject_id",
             "runner_key", "provider_config_id", "config", "status",
             "transition_history", "created_at", "updated_at", "deleted_at",
-            "created_by", "allowed_actions", "runner_status",
+            "allowed_actions", "runner_status",
         )
         read_only_fields = fields
 
@@ -225,8 +231,8 @@ class TransitionExecutionSerializer(TransitionKeySerializer):
 class ScheduleCreateSerializer(ClosedSerializer):
     agent_id = serializers.UUIDField()
     scheduled_at = serializers.DateTimeField()
-    priority = serializers.IntegerField(min_value=-100, max_value=100, required=False, default=0)
-    max_retries = serializers.IntegerField(min_value=0, max_value=65535, required=False, default=3)
+    priority = serializers.IntegerField(required=False)
+    max_retries = serializers.IntegerField(required=False)
     task_data = StrictJSONField()
     idempotency_key = serializers.CharField(max_length=255)
 
@@ -328,6 +334,7 @@ class SecretCreateSerializer(ClosedSerializer):
 
 class SecretRotateSerializer(ClosedSerializer):
     plaintext = serializers.CharField(trim_whitespace=False, write_only=True)
+    idempotency_key = serializers.CharField(max_length=255)
 
 
 class SecretMetadataSerializer(serializers.ModelSerializer[Secret]):
@@ -400,6 +407,9 @@ CostSummarySerializer = evidence_serializer("CostSummarySerializer", CostSummary
 AuditEventSerializer = evidence_serializer("AuditEventSerializer", AuditEvent)
 class AuditTrailSerializer(serializers.ModelSerializer[AuditTrail]):
     events = serializers.SerializerMethodField()
+    completed_timestamp = serializers.SerializerMethodField()
+    final_outcome = serializers.SerializerMethodField()
+    summary = serializers.SerializerMethodField()
 
     class Meta:
         model = AuditTrail
@@ -417,6 +427,21 @@ class AuditTrailSerializer(serializers.ModelSerializer[AuditTrail]):
         ]
         return AuditEventSerializer(events, many=True).data
 
+    def _completion(self, obj: AuditTrail) -> AuditEvent | None:
+        return obj.events.filter(event_type="audit_trail_completed").order_by("-event_timestamp", "id").first()
+
+    def get_completed_timestamp(self, obj: AuditTrail) -> Any:
+        event = self._completion(obj)
+        return event.event_timestamp if event else None
+
+    def get_final_outcome(self, obj: AuditTrail) -> str | None:
+        event = self._completion(obj)
+        return str(event.outcome_details.get("final_outcome")) if event else None
+
+    def get_summary(self, obj: AuditTrail) -> dict[str, Any]:
+        event = self._completion(obj)
+        return dict(event.metadata) if event else {}
+
 
 class AsyncJobSerializer(serializers.ModelSerializer[AsyncJob]):
     """Sanitized durable-job projection; command payload and actor stay private."""
@@ -424,10 +449,57 @@ class AsyncJobSerializer(serializers.ModelSerializer[AsyncJob]):
     class Meta:
         model = AsyncJob
         fields = (
-            "id", "command", "status", "result", "error_message", "attempts",
+            "id", "status", "attempts",
             "correlation_id", "started_at", "completed_at", "created_at", "updated_at",
         )
         read_only_fields = fields
+
+
+class ConfigurationSerializer(serializers.ModelSerializer[AgentManagementConfiguration]):
+    class Meta:
+        model = AgentManagementConfiguration
+        fields = ("id", "environment", "version", "document", "created_at", "updated_at")
+        read_only_fields = fields
+
+
+class ConfigurationVersionSerializer(serializers.ModelSerializer[AgentManagementConfigurationVersion]):
+    class Meta:
+        model = AgentManagementConfigurationVersion
+        fields = (
+            "id",
+            "environment",
+            "version",
+            "previous_document",
+            "document",
+            "changed_by",
+            "correlation_id",
+            "change_type",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class ConfigurationWriteSerializer(ClosedSerializer):
+    environment = serializers.ChoiceField(
+        choices=("development", "staging", "production"),
+        required=False,
+        default="production",
+    )
+    expected_version = serializers.IntegerField(min_value=1)
+    document = StrictJSONField()
+
+
+class ConfigurationImportSerializer(ClosedSerializer):
+    document = StrictJSONField()
+
+
+class ConfigurationRollbackSerializer(ClosedSerializer):
+    environment = serializers.ChoiceField(
+        choices=("development", "staging", "production"),
+        required=False,
+        default="production",
+    )
+    target_version = serializers.IntegerField(min_value=1)
 
 # Compatibility aliases for legacy imports while v1 is phased out.
 AgentSerializer = AgentDetailSerializer
