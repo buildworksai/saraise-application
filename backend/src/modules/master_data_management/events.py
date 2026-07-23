@@ -46,6 +46,7 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "mdm.match_candidate.reviewed",
         "mdm.entities.merged",
         "mdm.merge.reversed",
+        "mdm.configuration.changed",
     }
 )
 
@@ -75,6 +76,7 @@ SAFE_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(
         "job_id",
         "command",
         "request_fingerprint",
+        "change_type",
     }
 )
 

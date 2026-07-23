@@ -24,6 +24,7 @@ permissions:
   - mdm.quality_rule:manage
   - mdm.quality_issue:read
   - mdm.quality_issue:resolve
+  - mdm.quality:scan
   - mdm.matching_rule:read
   - mdm.matching_rule:manage
   - mdm.match:read
@@ -33,14 +34,105 @@ permissions:
   - mdm.merge:execute
   - mdm.merge:reverse
   - mdm.dashboard:read
+  - mdm.configuration:read
+  - mdm.configuration:manage
+
+entities:
+  - {name: MasterEntityType, table: mdm_entity_types, tenant_scoped: true}
+  - {name: MasterDataEntity, table: mdm_entities, tenant_scoped: true}
+  - {name: MasterDataVersion, table: mdm_entity_versions, tenant_scoped: true, immutable: true}
+  - {name: DataQualityRule, table: mdm_quality_rules, tenant_scoped: true}
+  - {name: DataQualityRuleVersion, table: mdm_quality_rule_versions, tenant_scoped: true, immutable: true}
+  - {name: DataQualityIssue, table: mdm_quality_issues, tenant_scoped: true}
+  - {name: MatchingRule, table: mdm_matching_rules, tenant_scoped: true}
+  - {name: MatchingRuleVersion, table: mdm_matching_rule_versions, tenant_scoped: true, immutable: true}
+  - {name: MatchCandidate, table: mdm_match_candidates, tenant_scoped: true}
+  - {name: MergeHistory, table: mdm_merge_history, tenant_scoped: true, immutable: true}
+  - {name: MergeReversal, table: mdm_merge_reversals, tenant_scoped: true, immutable: true}
+  - {name: MergeParticipant, table: mdm_merge_participants, tenant_scoped: true, immutable: true}
+  - {name: MasterDataConfiguration, table: mdm_configurations, tenant_scoped: true}
+  - {name: MasterDataConfigurationVersion, table: mdm_configuration_versions, tenant_scoped: true, immutable: true}
+
+endpoints:
+  - {methods: [GET], path: /api/v2/master-data-management/entity-types/, permission: mdm.entity_type:read}
+  - {methods: [POST], path: /api/v2/master-data-management/entity-types/, permission: mdm.entity_type:manage}
+  - {methods: [GET], path: "/api/v2/master-data-management/entity-types/{id}/", permission: mdm.entity_type:read}
+  - {methods: [PATCH], path: "/api/v2/master-data-management/entity-types/{id}/", permission: mdm.entity_type:manage}
+  - {methods: [POST], path: "/api/v2/master-data-management/entity-types/{id}/deactivate/", permission: mdm.entity_type:manage}
+  - {methods: [GET], path: /api/v2/master-data-management/entities/, permission: mdm.entity:read}
+  - {methods: [POST], path: /api/v2/master-data-management/entities/, permission: mdm.entity:create}
+  - {methods: [GET], path: "/api/v2/master-data-management/entities/{id}/", permission: mdm.entity:read}
+  - {methods: [PATCH], path: "/api/v2/master-data-management/entities/{id}/", permission: mdm.entity:update}
+  - {methods: [DELETE], path: "/api/v2/master-data-management/entities/{id}/", permission: mdm.entity:archive}
+  - {methods: [POST], path: "/api/v2/master-data-management/entities/{id}/restore/", permission: mdm.entity:restore}
+  - {methods: [GET], path: "/api/v2/master-data-management/entities/{id}/versions/", permission: mdm.entity:read}
+  - {methods: [GET], path: "/api/v2/master-data-management/entities/{id}/versions/{version}/", permission: mdm.entity:read}
+  - {methods: [POST], path: "/api/v2/master-data-management/entities/{id}/rollback/", permission: mdm.entity:rollback}
+  - {methods: [POST], path: "/api/v2/master-data-management/entities/{id}/validate/", permission: mdm.entity:update}
+  - {methods: [GET], path: /api/v2/master-data-management/quality-rules/, permission: mdm.quality_rule:read}
+  - {methods: [POST], path: /api/v2/master-data-management/quality-rules/, permission: mdm.quality_rule:manage}
+  - {methods: [GET], path: "/api/v2/master-data-management/quality-rules/{id}/", permission: mdm.quality_rule:read}
+  - {methods: [PATCH, DELETE], path: "/api/v2/master-data-management/quality-rules/{id}/", permission: mdm.quality_rule:manage}
+  - {methods: [GET], path: "/api/v2/master-data-management/quality-rules/{id}/history/", permission: mdm.quality_rule:read}
+  - {methods: [GET], path: "/api/v2/master-data-management/quality-rules/{id}/export/", permission: mdm.quality_rule:read}
+  - {methods: [POST], path: "/api/v2/master-data-management/quality-rules/{id}/rollback/", permission: mdm.quality_rule:manage}
+  - {methods: [POST], path: "/api/v2/master-data-management/quality-rules/{id}/import/", permission: mdm.quality_rule:manage}
+  - {methods: [GET], path: /api/v2/master-data-management/quality-issues/, permission: mdm.quality_issue:read}
+  - {methods: [GET], path: "/api/v2/master-data-management/quality-issues/{id}/", permission: mdm.quality_issue:read}
+  - {methods: [POST], path: "/api/v2/master-data-management/quality-issues/{id}/{assign|resolve|waive}/", permission: mdm.quality_issue:resolve}
+  - {methods: [POST], path: /api/v2/master-data-management/quality-scans/, permission: "mdm.quality:scan"}
+  - {methods: [GET], path: /api/v2/master-data-management/matching-rules/, permission: mdm.matching_rule:read}
+  - {methods: [POST], path: /api/v2/master-data-management/matching-rules/, permission: mdm.matching_rule:manage}
+  - {methods: [GET], path: "/api/v2/master-data-management/matching-rules/{id}/", permission: mdm.matching_rule:read}
+  - {methods: [PATCH, DELETE], path: "/api/v2/master-data-management/matching-rules/{id}/", permission: mdm.matching_rule:manage}
+  - {methods: [GET], path: "/api/v2/master-data-management/matching-rules/{id}/history/", permission: mdm.matching_rule:read}
+  - {methods: [GET], path: "/api/v2/master-data-management/matching-rules/{id}/export/", permission: mdm.matching_rule:read}
+  - {methods: [POST], path: "/api/v2/master-data-management/matching-rules/{id}/rollback/", permission: mdm.matching_rule:manage}
+  - {methods: [POST], path: "/api/v2/master-data-management/matching-rules/{id}/import/", permission: mdm.matching_rule:manage}
+  - {methods: [POST], path: /api/v2/master-data-management/matching/preview/, permission: mdm.match:read}
+  - {methods: [POST], path: /api/v2/master-data-management/matching/scans/, permission: mdm.match:run}
+  - {methods: [GET], path: /api/v2/master-data-management/match-candidates/, permission: mdm.match:read}
+  - {methods: [GET], path: "/api/v2/master-data-management/match-candidates/{id}/", permission: mdm.match:read}
+  - {methods: [POST], path: "/api/v2/master-data-management/match-candidates/{id}/review/", permission: mdm.match:review}
+  - {methods: [GET], path: /api/v2/master-data-management/merges/, permission: mdm.merge:read}
+  - {methods: [POST], path: /api/v2/master-data-management/merges/, permission: mdm.merge:execute}
+  - {methods: [POST], path: /api/v2/master-data-management/merges/preview/, permission: mdm.merge:read}
+  - {methods: [GET], path: "/api/v2/master-data-management/merges/{id}/", permission: mdm.merge:read}
+  - {methods: [GET], path: "/api/v2/master-data-management/merges/{id}/reversal-preview/", permission: mdm.merge:read}
+  - {methods: [POST], path: "/api/v2/master-data-management/merges/{id}/reverse/", permission: mdm.merge:reverse}
+  - {methods: [GET], path: /api/v2/master-data-management/dashboard/, permission: mdm.dashboard:read}
+  - {methods: [GET], path: "/api/v2/master-data-management/jobs/{id}/", permission: mdm.match:run}
+  - {methods: [GET], path: /api/v2/master-data-management/configurations/, permission: mdm.configuration:read}
+  - {methods: [POST], path: /api/v2/master-data-management/configurations/, permission: mdm.configuration:manage}
+  - {methods: [GET], path: "/api/v2/master-data-management/configurations/{id}/", permission: mdm.configuration:read}
+  - {methods: [PATCH], path: "/api/v2/master-data-management/configurations/{id}/", permission: mdm.configuration:manage}
+  - {methods: [POST], path: /api/v2/master-data-management/configurations/preview/, permission: mdm.configuration:manage}
+  - {methods: [GET], path: /api/v2/master-data-management/configurations/history/, permission: mdm.configuration:read}
+  - {methods: [POST], path: /api/v2/master-data-management/configurations/rollback/, permission: mdm.configuration:manage}
+  - {methods: [POST], path: /api/v2/master-data-management/configurations/import/, permission: mdm.configuration:manage}
+  - {methods: [GET], path: /api/v2/master-data-management/configurations/export/, permission: mdm.configuration:read}
+  - {methods: [GET], path: /api/v2/master-data-management/health/live/, permission: public}
+  - {methods: [GET], path: /api/v2/master-data-management/health/ready/, permission: public}
+
+worker_commands:
+  - master_data_management.quality_scan
+  - master_data_management.deduplication_scan
+
+configuration_surfaces:
+  - name: tenant_runtime_policy
+    model: MasterDataConfiguration
+    version_model: MasterDataConfigurationVersion
+    endpoint: /api/v2/master-data-management/configurations/
+    permissions: [mdm.configuration:read, mdm.configuration:manage]
+    supports: [preview, history, rollback, import, export, phased_rollout]
 
 health_checks:
   - name: liveness
     endpoint: /api/v2/master-data-management/health/live/
-    interval: 60
+    interval_config: operational.health_check_interval_seconds
   - name: readiness
     endpoint: /api/v2/master-data-management/health/ready/
-    interval: 60
+    interval_config: operational.health_check_interval_seconds
 
 metadata:
   api_version: v2

@@ -27,6 +27,8 @@ from . import selectors
 from .models import (
     DataQualityIssue,
     DataQualityRule,
+    MasterDataConfiguration,
+    MasterDataConfigurationVersion,
     MasterDataEntity,
     MasterEntityType,
     MatchCandidate,
@@ -34,6 +36,8 @@ from .models import (
     MergeHistory,
 )
 from .permissions import (
+    CONFIGURATION_MANAGE,
+    CONFIGURATION_READ,
     DASHBOARD_READ,
     ENTITY_ARCHIVE,
     ENTITY_CREATE,
@@ -60,16 +64,22 @@ from .permissions import (
 )
 from .serializers import (
     AsyncJobSerializer,
+    ConfigurationPreviewResultSerializer,
+    ConfigurationPreviewSerializer,
+    ConfigurationRollbackSerializer,
+    ConfigurationWriteSerializer,
     DataQualityIssueDetailSerializer,
     DataQualityIssueListSerializer,
     DataQualityRuleDetailSerializer,
     DataQualityRuleListSerializer,
     DataQualityRuleUpdateSerializer,
+    DataQualityRuleVersionSerializer,
     DataQualityRuleWriteSerializer,
     DeactivateRuleSerializer,
     DeactivateSerializer,
     LifecycleSerializer,
-    MDMSummarySerializer,
+    MasterDataConfigurationSerializer,
+    MasterDataConfigurationVersionSerializer,
     MasterDataEntityCreateSerializer,
     MasterDataEntityDetailSerializer,
     MasterDataEntityListSerializer,
@@ -84,22 +94,28 @@ from .serializers import (
     MatchingRuleDetailSerializer,
     MatchingRuleListSerializer,
     MatchingRuleUpdateSerializer,
+    MatchingRuleVersionSerializer,
     MatchingRuleWriteSerializer,
     MatchPreviewRequestSerializer,
     MatchResultSerializer,
     MatchReviewSerializer,
+    MDMSummarySerializer,
     MergeHistoryDetailSerializer,
     MergeHistoryListSerializer,
     MergePreviewSerializer,
     MergeRequestSerializer,
+    MergeReversalPreviewSerializer,
     MergeReverseSerializer,
     QualityIssueResolutionSerializer,
     QualityReportSerializer,
+    RuleImportSerializer,
+    RuleRollbackSerializer,
     RollbackSerializer,
     ScanRequestSerializer,
     ValidateRequestSerializer,
 )
 from .services import (
+    ConfigurationService,
     DashboardService,
     DataQualityService,
     EntityTypeService,
@@ -187,7 +203,10 @@ class GovernedMDMViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):
     def get_queryset(self) -> QuerySet[Any]:
         # Both calls are deliberate: the shared base validates ownership and
         # the explicit manager method makes the module's tenant query visible.
-        return super().get_queryset().for_tenant(self.tenant_id())
+        tenant = self._get_tenant_id()
+        if tenant is None:
+            return self.queryset.model.objects.none()
+        return super().get_queryset().for_tenant(tenant)
 
     def list(self, request: Request, *args: object, **kwargs: object) -> Response:
         with self.tenant_scope():
@@ -242,8 +261,11 @@ class MasterEntityTypeViewSet(GovernedMDMViewSet):
         }.get(self.action, MasterEntityTypeDetailSerializer)
 
     def get_queryset(self) -> QuerySet[MasterEntityType]:
+        tenant = self._get_tenant_id()
+        if tenant is None:
+            return MasterEntityType.objects.none()
         self._validate_query({"key", "owner_module", "is_active"})
-        queryset = selectors.entity_types(self.tenant_id())
+        queryset = selectors.entity_types(tenant)
         for field in ("key", "owner_module"):
             value = self.request.query_params.get(field)
             if value is not None:
@@ -261,8 +283,17 @@ class MasterEntityTypeViewSet(GovernedMDMViewSet):
         serializer.is_valid(raise_exception=True)
         values = dict(serializer.validated_data)
         key = str(values.pop("idempotency_key"))
-        entity_type = EntityTypeService.create_type(self.tenant_id(), _actor_id(request), idempotency_key=key, **values)
-        return Response(MasterEntityTypeDetailSerializer(entity_type, context={"request": request}).data, status=status.HTTP_201_CREATED)
+        entity_type = EntityTypeService.create_type(
+            self.tenant_id(),
+            _actor_id(request),
+            owner_module="master_data_management",
+            idempotency_key=key,
+            **values,
+        )
+        return Response(
+            MasterEntityTypeDetailSerializer(entity_type, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     def partial_update(self, request: Request, pk: str | None = None) -> Response:
         serializer = MasterEntityTypeUpdateSerializer(data=request.data)
@@ -271,14 +302,23 @@ class MasterEntityTypeViewSet(GovernedMDMViewSet):
         expected = int(values.pop("expected_schema_version"))
         key = str(values.pop("idempotency_key"))
         changes = values.pop("changes")
-        entity_type = EntityTypeService.update_type(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), expected_schema_version=expected, changes=changes, idempotency_key=key)
+        entity_type = EntityTypeService.update_type(
+            self.tenant_id(),
+            _actor_id(request),
+            _uuid(pk, "id"),
+            expected_schema_version=expected,
+            changes=changes,
+            idempotency_key=key,
+        )
         return Response(MasterEntityTypeDetailSerializer(entity_type, context={"request": request}).data)
 
     @action(detail=True, methods=["post"])
     def deactivate(self, request: Request, pk: str | None = None) -> Response:
         serializer = DeactivateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        entity_type = EntityTypeService.deactivate_type(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data)
+        entity_type = EntityTypeService.deactivate_type(
+            self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data
+        )
         return Response(MasterEntityTypeDetailSerializer(entity_type, context={"request": request}).data)
 
 
@@ -301,9 +341,12 @@ class MasterDataEntityViewSet(GovernedMDMViewSet):
         return MasterDataEntityListSerializer if self.action == "list" else MasterDataEntityDetailSerializer
 
     def get_queryset(self) -> QuerySet[MasterDataEntity]:
+        tenant = self._get_tenant_id()
+        if tenant is None:
+            return MasterDataEntity.objects.none()
         self._validate_query({"entity_type", "status", "quality_min", "quality_max", "source_system", "deleted"})
         include_deleted = self.action in {"restore", "destroy"} or self._boolean_query("deleted") is True
-        queryset = selectors.entities(self.tenant_id(), include_deleted=include_deleted)
+        queryset = selectors.entities(tenant, include_deleted=include_deleted)
         filters = {
             "entity_type_id": self.request.query_params.get("entity_type"),
             "status": self.request.query_params.get("status"),
@@ -317,33 +360,53 @@ class MasterDataEntityViewSet(GovernedMDMViewSet):
         search = self.request.query_params.get("search")
         if search:
             queryset = queryset.filter(Q(entity_code__icontains=search) | Q(entity_name__icontains=search))
-        return self._ordering(queryset, {"entity_code", "entity_name", "quality_score", "updated_at", "created_at"}, "entity_code")
+        return self._ordering(
+            queryset, {"entity_code", "entity_name", "quality_score", "updated_at", "created_at"}, "entity_code"
+        )
 
     def create(self, request: Request) -> Response:
         serializer = MasterDataEntityCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         entity = MasterEntityService.create_entity(self.tenant_id(), _actor_id(request), **serializer.validated_data)
-        return Response(MasterDataEntityDetailSerializer(entity, context={"request": request}).data, status=status.HTTP_201_CREATED)
+        return Response(
+            MasterDataEntityDetailSerializer(entity, context={"request": request}).data, status=status.HTTP_201_CREATED
+        )
 
     def partial_update(self, request: Request, pk: str | None = None) -> Response:
         serializer = MasterDataEntityUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         values = dict(serializer.validated_data)
-        expected, reason, key = int(values.pop("expected_version")), str(values.pop("reason")), str(values.pop("idempotency_key"))
-        entity = MasterEntityService.update_entity(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), expected_version=expected, changes=values["changes"], reason=reason, idempotency_key=key)
+        expected, reason, key = (
+            int(values.pop("expected_version")),
+            str(values.pop("reason")),
+            str(values.pop("idempotency_key")),
+        )
+        entity = MasterEntityService.update_entity(
+            self.tenant_id(),
+            _actor_id(request),
+            _uuid(pk, "id"),
+            expected_version=expected,
+            changes=values["changes"],
+            reason=reason,
+            idempotency_key=key,
+        )
         return Response(MasterDataEntityDetailSerializer(entity, context={"request": request}).data)
 
     def destroy(self, request: Request, pk: str | None = None) -> Response:
         serializer = LifecycleSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        MasterEntityService.archive_entity(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data)
+        MasterEntityService.archive_entity(
+            self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"])
     def restore(self, request: Request, pk: str | None = None) -> Response:
         serializer = LifecycleSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        entity = MasterEntityService.restore_entity(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data)
+        entity = MasterEntityService.restore_entity(
+            self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data
+        )
         return Response(MasterDataEntityDetailSerializer(entity, context={"request": request}).data)
 
     @action(detail=True, methods=["get"])
@@ -372,27 +435,47 @@ class MasterDataEntityViewSet(GovernedMDMViewSet):
         serializer.is_valid(raise_exception=True)
         values = dict(serializer.validated_data)
         version = int(values.pop("version_number"))
-        entity = MasterEntityService.rollback_to_version(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), version, **values)
+        entity = MasterEntityService.rollback_to_version(
+            self.tenant_id(), _actor_id(request), _uuid(pk, "id"), version, **values
+        )
         return Response(MasterDataEntityDetailSerializer(entity, context={"request": request}).data)
 
     @action(detail=True, methods=["post"])
     def validate(self, request: Request, pk: str | None = None) -> Response:
         serializer = ValidateRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        report = DataQualityService.evaluate_entity(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), idempotency_key=str(serializer.validated_data["idempotency_key"]))
+        report = DataQualityService.evaluate_entity(
+            self.tenant_id(),
+            _actor_id(request),
+            _uuid(pk, "id"),
+            idempotency_key=str(serializer.validated_data["idempotency_key"]),
+        )
         return Response(QualityReportSerializer(report).data)
 
 
 class DataQualityRuleViewSet(GovernedMDMViewSet):
     queryset = DataQualityRule.objects.all()
-    access_map = {"list": QUALITY_RULE_READ, "retrieve": QUALITY_RULE_READ, "create": QUALITY_RULE_MANAGE, "partial_update": QUALITY_RULE_MANAGE, "destroy": QUALITY_RULE_MANAGE}
+    access_map = {
+        "list": QUALITY_RULE_READ,
+        "retrieve": QUALITY_RULE_READ,
+        "create": QUALITY_RULE_MANAGE,
+        "partial_update": QUALITY_RULE_MANAGE,
+        "destroy": QUALITY_RULE_MANAGE,
+        "history": QUALITY_RULE_READ,
+        "rollback": QUALITY_RULE_MANAGE,
+        "import_document": QUALITY_RULE_MANAGE,
+        "export_document": QUALITY_RULE_READ,
+    }
 
     def get_serializer_class(self) -> type[Any]:
         return DataQualityRuleListSerializer if self.action == "list" else DataQualityRuleDetailSerializer
 
     def get_queryset(self) -> QuerySet[DataQualityRule]:
+        tenant = self._get_tenant_id()
+        if tenant is None:
+            return DataQualityRule.objects.none()
         self._validate_query({"entity_type", "rule_type", "dimension", "severity", "is_active"})
-        queryset = selectors.quality_rules(self.tenant_id())
+        queryset = selectors.quality_rules(tenant)
         for field in ("entity_type", "rule_type", "dimension", "severity"):
             value = self.request.query_params.get(field)
             if value:
@@ -408,10 +491,6 @@ class DataQualityRuleViewSet(GovernedMDMViewSet):
     def create(self, request: Request) -> Response:
         serializer = DataQualityRuleWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        required = {"entity_type_id", "name", "rule_type", "configuration", "dimension", "severity", "weight"}
-        missing = required - set(serializer.validated_data)
-        if missing:
-            raise ValidationError({field: "This field is required." for field in sorted(missing)})
         rule = QualityRuleService.create_rule(self.tenant_id(), _actor_id(request), **serializer.validated_data)
         return Response(DataQualityRuleDetailSerializer(rule).data, status=status.HTTP_201_CREATED)
 
@@ -420,27 +499,80 @@ class DataQualityRuleViewSet(GovernedMDMViewSet):
         serializer.is_valid(raise_exception=True)
         values = dict(serializer.validated_data)
         key = str(values.pop("idempotency_key"))
-        rule = QualityRuleService.update_rule(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), changes=values["changes"], idempotency_key=key)
+        rule = QualityRuleService.update_rule(
+            self.tenant_id(), _actor_id(request), _uuid(pk, "id"), changes=values["changes"], idempotency_key=key
+        )
         return Response(DataQualityRuleDetailSerializer(rule).data)
 
     def destroy(self, request: Request, pk: str | None = None) -> Response:
         serializer = DeactivateRuleSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        QualityRuleService.deactivate_rule(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), idempotency_key=str(serializer.validated_data["idempotency_key"]))
+        QualityRuleService.deactivate_rule(
+            self.tenant_id(),
+            _actor_id(request),
+            _uuid(pk, "id"),
+            idempotency_key=str(serializer.validated_data["idempotency_key"]),
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["get"])
+    def history(self, request: Request, pk: str | None = None) -> Response:
+        queryset = QualityRuleService.version_history(self.tenant_id(), _uuid(pk, "id"))
+        page = self.paginate_queryset(queryset)
+        data = DataQualityRuleVersionSerializer(page if page is not None else queryset, many=True).data
+        return self.get_paginated_response(data) if page is not None else Response(data)
+
+    @action(detail=True, methods=["post"])
+    def rollback(self, request: Request, pk: str | None = None) -> Response:
+        serializer = RuleRollbackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        rule = QualityRuleService.rollback(
+            self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data
+        )
+        return Response(DataQualityRuleDetailSerializer(rule).data)
+
+    @action(detail=True, methods=["post"], url_path="import")
+    def import_document(self, request: Request, pk: str | None = None) -> Response:
+        serializer = RuleImportSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        rule = QualityRuleService.import_document(
+            self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data
+        )
+        return Response(DataQualityRuleDetailSerializer(rule).data)
+
+    @action(detail=True, methods=["get"], url_path="export")
+    def export_document(self, request: Request, pk: str | None = None) -> Response:
+        del request
+        return Response(QualityRuleService.export_document(self.tenant_id(), _uuid(pk, "id")))
 
 
 class DataQualityIssueViewSet(GovernedMDMViewSet):
     queryset = DataQualityIssue.objects.all()
-    access_map = {"list": QUALITY_ISSUE_READ, "retrieve": QUALITY_ISSUE_READ, "assign": QUALITY_ISSUE_RESOLVE, "resolve": QUALITY_ISSUE_RESOLVE, "waive": QUALITY_ISSUE_RESOLVE}
+    access_map = {
+        "list": QUALITY_ISSUE_READ,
+        "retrieve": QUALITY_ISSUE_READ,
+        "assign": QUALITY_ISSUE_RESOLVE,
+        "resolve": QUALITY_ISSUE_RESOLVE,
+        "waive": QUALITY_ISSUE_RESOLVE,
+    }
 
     def get_serializer_class(self) -> type[Any]:
         return DataQualityIssueListSerializer if self.action == "list" else DataQualityIssueDetailSerializer
 
     def get_queryset(self) -> QuerySet[DataQualityIssue]:
+        tenant = self._get_tenant_id()
+        if tenant is None:
+            return DataQualityIssue.objects.none()
         self._validate_query({"entity", "entity_type", "status", "severity", "dimension", "assigned_to"})
-        queryset = selectors.quality_issues(self.tenant_id())
-        mapping = {"entity": "entity_id", "entity_type": "entity__entity_type_id", "status": "status", "severity": "severity", "dimension": "dimension", "assigned_to": "assigned_to"}
+        queryset = selectors.quality_issues(tenant)
+        mapping = {
+            "entity": "entity_id",
+            "entity_type": "entity__entity_type_id",
+            "status": "status",
+            "severity": "severity",
+            "dimension": "dimension",
+            "assigned_to": "assigned_to",
+        }
         for parameter, field in mapping.items():
             value = self.request.query_params.get(parameter)
             if value:
@@ -453,7 +585,13 @@ class DataQualityIssueViewSet(GovernedMDMViewSet):
         serializer.is_valid(raise_exception=True)
         if "assignee_id" not in serializer.validated_data:
             raise ValidationError({"assignee_id": "This field is required."})
-        issue = DataQualityService.assign_issue(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), serializer.validated_data["assignee_id"], transition_key=str(serializer.validated_data["transition_key"]))
+        issue = DataQualityService.assign_issue(
+            self.tenant_id(),
+            _actor_id(request),
+            _uuid(pk, "id"),
+            serializer.validated_data["assignee_id"],
+            transition_key=str(serializer.validated_data["transition_key"]),
+        )
         return Response(DataQualityIssueDetailSerializer(issue).data)
 
     def _resolve(self, request: Request, pk: str | None, command: str) -> Response:
@@ -462,7 +600,13 @@ class DataQualityIssueViewSet(GovernedMDMViewSet):
         if "resolution" not in serializer.validated_data:
             raise ValidationError({"resolution": "This field is required."})
         method = DataQualityService.resolve_issue if command == "resolve" else DataQualityService.waive_issue
-        issue = method(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), resolution=str(serializer.validated_data["resolution"]), transition_key=str(serializer.validated_data["transition_key"]))
+        issue = method(
+            self.tenant_id(),
+            _actor_id(request),
+            _uuid(pk, "id"),
+            resolution=str(serializer.validated_data["resolution"]),
+            transition_key=str(serializer.validated_data["transition_key"]),
+        )
         return Response(DataQualityIssueDetailSerializer(issue).data)
 
     @action(detail=True, methods=["post"])
@@ -482,20 +626,38 @@ class QualityScanViewSet(GovernedMDMViewSet):
     def create(self, request: Request) -> Response:
         serializer = ScanRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        job = DataQualityService.enqueue_quality_scan(self.tenant_id(), _actor_id(request), entity_type_id=serializer.validated_data["entity_type_id"], idempotency_key=str(serializer.validated_data["idempotency_key"]))
+        job = DataQualityService.enqueue_quality_scan(
+            self.tenant_id(),
+            _actor_id(request),
+            entity_type_id=serializer.validated_data["entity_type_id"],
+            idempotency_key=str(serializer.validated_data["idempotency_key"]),
+        )
         return Response(AsyncJobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 
 class MatchingRuleViewSet(GovernedMDMViewSet):
     queryset = MatchingRule.objects.all()
-    access_map = {"list": MATCHING_RULE_READ, "retrieve": MATCHING_RULE_READ, "create": MATCHING_RULE_MANAGE, "partial_update": MATCHING_RULE_MANAGE, "destroy": MATCHING_RULE_MANAGE}
+    access_map = {
+        "list": MATCHING_RULE_READ,
+        "retrieve": MATCHING_RULE_READ,
+        "create": MATCHING_RULE_MANAGE,
+        "partial_update": MATCHING_RULE_MANAGE,
+        "destroy": MATCHING_RULE_MANAGE,
+        "history": MATCHING_RULE_READ,
+        "rollback": MATCHING_RULE_MANAGE,
+        "import_document": MATCHING_RULE_MANAGE,
+        "export_document": MATCHING_RULE_READ,
+    }
 
     def get_serializer_class(self) -> type[Any]:
         return MatchingRuleListSerializer if self.action == "list" else MatchingRuleDetailSerializer
 
     def get_queryset(self) -> QuerySet[MatchingRule]:
+        tenant = self._get_tenant_id()
+        if tenant is None:
+            return MatchingRule.objects.none()
         self._validate_query({"entity_type", "algorithm", "is_active"})
-        queryset = selectors.matching_rules(self.tenant_id())
+        queryset = selectors.matching_rules(tenant)
         for parameter, field in (("entity_type", "entity_type_id"), ("algorithm", "algorithm")):
             value = self.request.query_params.get(parameter)
             if value:
@@ -508,10 +670,6 @@ class MatchingRuleViewSet(GovernedMDMViewSet):
     def create(self, request: Request) -> Response:
         serializer = MatchingRuleWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        required = {"entity_type_id", "name", "algorithm", "field_weights", "blocking_fields", "review_threshold", "auto_confirm_threshold"}
-        missing = required - set(serializer.validated_data)
-        if missing:
-            raise ValidationError({field: "This field is required." for field in sorted(missing)})
         rule = MatchingService.create_rule(self.tenant_id(), _actor_id(request), **serializer.validated_data)
         return Response(MatchingRuleDetailSerializer(rule).data, status=status.HTTP_201_CREATED)
 
@@ -520,14 +678,51 @@ class MatchingRuleViewSet(GovernedMDMViewSet):
         serializer.is_valid(raise_exception=True)
         values = dict(serializer.validated_data)
         key = str(values.pop("idempotency_key"))
-        rule = MatchingService.update_rule(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), changes=values["changes"], idempotency_key=key)
+        rule = MatchingService.update_rule(
+            self.tenant_id(), _actor_id(request), _uuid(pk, "id"), changes=values["changes"], idempotency_key=key
+        )
         return Response(MatchingRuleDetailSerializer(rule).data)
 
     def destroy(self, request: Request, pk: str | None = None) -> Response:
         serializer = DeactivateRuleSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        MatchingService.deactivate_rule(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), idempotency_key=str(serializer.validated_data["idempotency_key"]))
+        MatchingService.deactivate_rule(
+            self.tenant_id(),
+            _actor_id(request),
+            _uuid(pk, "id"),
+            idempotency_key=str(serializer.validated_data["idempotency_key"]),
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=["get"])
+    def history(self, request: Request, pk: str | None = None) -> Response:
+        queryset = MatchingService.version_history(self.tenant_id(), _uuid(pk, "id"))
+        page = self.paginate_queryset(queryset)
+        data = MatchingRuleVersionSerializer(page if page is not None else queryset, many=True).data
+        return self.get_paginated_response(data) if page is not None else Response(data)
+
+    @action(detail=True, methods=["post"])
+    def rollback(self, request: Request, pk: str | None = None) -> Response:
+        serializer = RuleRollbackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        rule = MatchingService.rollback(
+            self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data
+        )
+        return Response(MatchingRuleDetailSerializer(rule).data)
+
+    @action(detail=True, methods=["post"], url_path="import")
+    def import_document(self, request: Request, pk: str | None = None) -> Response:
+        serializer = RuleImportSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        rule = MatchingService.import_document(
+            self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data
+        )
+        return Response(MatchingRuleDetailSerializer(rule).data)
+
+    @action(detail=True, methods=["get"], url_path="export")
+    def export_document(self, request: Request, pk: str | None = None) -> Response:
+        del request
+        return Response(MatchingService.export_document(self.tenant_id(), _uuid(pk, "id")))
 
 
 class MatchingOperationsViewSet(GovernedMDMViewSet):
@@ -546,7 +741,9 @@ class MatchingOperationsViewSet(GovernedMDMViewSet):
     def scans(self, request: Request) -> Response:
         serializer = ScanRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        job = MatchingService.enqueue_deduplication_scan(self.tenant_id(), _actor_id(request), **serializer.validated_data)
+        job = MatchingService.enqueue_deduplication_scan(
+            self.tenant_id(), _actor_id(request), **serializer.validated_data
+        )
         return Response(AsyncJobSerializer(job).data, status=status.HTTP_202_ACCEPTED)
 
 
@@ -558,8 +755,11 @@ class MatchCandidateViewSet(GovernedMDMViewSet):
         return MatchCandidateListSerializer if self.action == "list" else MatchCandidateDetailSerializer
 
     def get_queryset(self) -> QuerySet[MatchCandidate]:
+        tenant = self._get_tenant_id()
+        if tenant is None:
+            return MatchCandidate.objects.none()
         self._validate_query({"entity_type", "status", "confidence_min", "confidence_max", "rule"})
-        queryset = selectors.match_candidates(self.tenant_id())
+        queryset = selectors.match_candidates(tenant)
         mapping = {"entity_type": "left_entity__entity_type_id", "status": "status", "rule": "matching_rule_id"}
         for parameter, field in mapping.items():
             value = self.request.query_params.get(parameter)
@@ -575,44 +775,79 @@ class MatchCandidateViewSet(GovernedMDMViewSet):
     def review(self, request: Request, pk: str | None = None) -> Response:
         serializer = MatchReviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        candidate = MatchingService.review_candidate(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data)
+        candidate = MatchingService.review_candidate(
+            self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data
+        )
         return Response(MatchCandidateDetailSerializer(candidate, context={"request": request}).data)
 
 
 class MergeViewSet(GovernedMDMViewSet):
     queryset = MergeHistory.objects.all()
-    access_map = {"list": MERGE_READ, "retrieve": MERGE_READ, "create": MERGE_EXECUTE, "preview": MERGE_READ, "reverse": MERGE_REVERSE}
+    access_map = {
+        "list": MERGE_READ,
+        "retrieve": MERGE_READ,
+        "create": MERGE_EXECUTE,
+        "preview": MERGE_READ,
+        "reversal_preview": MERGE_READ,
+        "reverse": MERGE_REVERSE,
+    }
 
     def get_serializer_class(self) -> type[Any]:
         return MergeHistoryListSerializer if self.action == "list" else MergeHistoryDetailSerializer
 
     def get_queryset(self) -> QuerySet[MergeHistory]:
+        tenant = self._get_tenant_id()
+        if tenant is None:
+            return MergeHistory.objects.none()
         self._validate_query({"status", "golden_record"})
-        queryset = selectors.merges(self.tenant_id())
-        for field in ("status", "golden_record"):
-            value = self.request.query_params.get(field)
-            if value:
-                queryset = queryset.filter(**{f"{field}_id" if field == "golden_record" else field: value})
+        queryset = selectors.merges(tenant)
+        golden_record = self.request.query_params.get("golden_record")
+        if golden_record:
+            queryset = queryset.filter(golden_record_id=golden_record)
+        merge_status = self.request.query_params.get("status")
+        if merge_status == "applied":
+            queryset = queryset.filter(reversal__isnull=True)
+        elif merge_status == "reversed":
+            queryset = queryset.filter(reversal__isnull=False)
+        elif merge_status:
+            raise ValidationError({"status": "Must be applied or reversed."})
         return self._ordering(queryset, {"created_at", "status"}, "-created_at")
 
     def create(self, request: Request) -> Response:
         serializer = MergeRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         history = MergeService.merge_entities(self.tenant_id(), _actor_id(request), **serializer.validated_data)
-        return Response(MergeHistoryDetailSerializer(history, context={"request": request}).data, status=status.HTTP_201_CREATED)
+        return Response(
+            MergeHistoryDetailSerializer(history, context={"request": request}).data, status=status.HTTP_201_CREATED
+        )
 
     @action(detail=False, methods=["post"])
     def preview(self, request: Request) -> Response:
         serializer = MergePreviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        preview = MergeService.preview_merge(self.tenant_id(), _actor_id(request), entity_ids=serializer.validated_data["entity_ids"], survivorship_overrides=serializer.validated_data.get("survivorship_overrides", {}))
+        preview = MergeService.preview_merge(
+            self.tenant_id(),
+            _actor_id(request),
+            entity_ids=serializer.validated_data["entity_ids"],
+            survivorship_overrides=serializer.validated_data.get("survivorship_overrides", {}),
+        )
         return Response(MergePreviewSerializer(preview).data)
+
+    @action(detail=True, methods=["get"], url_path="reversal-preview")
+    def reversal_preview(self, request: Request, pk: str | None = None) -> Response:
+        preview = MergeService.preview_reversal(
+            self.tenant_id(),
+            _uuid(pk, "id"),
+        )
+        return Response(MergeReversalPreviewSerializer(preview).data)
 
     @action(detail=True, methods=["post"])
     def reverse(self, request: Request, pk: str | None = None) -> Response:
         serializer = MergeReverseSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        history = MergeService.reverse_merge(self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data)
+        history = MergeService.reverse_merge(
+            self.tenant_id(), _actor_id(request), _uuid(pk, "id"), **serializer.validated_data
+        )
         return Response(MergeHistoryDetailSerializer(history, context={"request": request}).data)
 
 
@@ -624,7 +859,9 @@ class DashboardViewSet(GovernedMDMViewSet):
     def list(self, request: Request) -> Response:
         self._validate_query({"entity_type"})
         identifier = request.query_params.get("entity_type")
-        summary = DashboardService.get_summary(self.tenant_id(), entity_type_id=_uuid(identifier, "entity_type") if identifier else None)
+        summary = DashboardService.get_summary(
+            self.tenant_id(), entity_type_id=_uuid(identifier, "entity_type") if identifier else None
+        )
         return Response(MDMSummarySerializer(summary).data)
 
 
@@ -635,7 +872,130 @@ class AsyncJobViewSet(GovernedMDMViewSet):
     serializer_class = AsyncJobSerializer
 
     def get_queryset(self) -> QuerySet[AsyncJob]:
-        return AsyncJob.objects.for_tenant(self.tenant_id()).filter(command__in=("master_data_management.quality_scan", "master_data_management.deduplication_scan"))
+        tenant = self._get_tenant_id()
+        if tenant is None:
+            return AsyncJob.objects.none()
+        return AsyncJob.objects.for_tenant(tenant).filter(
+            command__in=("master_data_management.quality_scan", "master_data_management.deduplication_scan")
+        )
+
+
+class MasterDataConfigurationViewSet(GovernedMDMViewSet):
+    """Singleton tenant configuration boundary; every mutation delegates."""
+
+    queryset = MasterDataConfiguration.objects.all()
+    serializer_class = MasterDataConfigurationSerializer
+    access_map = {
+        "list": CONFIGURATION_READ,
+        "retrieve": CONFIGURATION_READ,
+        "create": CONFIGURATION_MANAGE,
+        "partial_update": CONFIGURATION_MANAGE,
+        "preview": CONFIGURATION_MANAGE,
+        "history": CONFIGURATION_READ,
+        "rollback": CONFIGURATION_MANAGE,
+        "import_document": CONFIGURATION_MANAGE,
+        "export_document": CONFIGURATION_READ,
+    }
+    http_method_names = ["get", "post", "patch", "head", "options"]
+
+    def get_queryset(self) -> QuerySet[MasterDataConfiguration]:
+        tenant = self._get_tenant_id()
+        if tenant is None:
+            return MasterDataConfiguration.objects.none()
+        return MasterDataConfiguration.objects.for_tenant(tenant).order_by("-version")
+
+    def list(self, request: Request) -> Response:
+        current = self.get_queryset().first()
+        if current is None:
+            current = ConfigurationService.ensure_defaults(
+                self.tenant_id(),
+                _actor_id(request),
+            )
+        return Response(MasterDataConfigurationSerializer(current).data)
+
+    def create(self, request: Request) -> Response:
+        serializer = ConfigurationWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        current = ConfigurationService.write(
+            self.tenant_id(),
+            _actor_id(request),
+            change_type="create",
+            **serializer.validated_data,
+        )
+        return Response(
+            MasterDataConfigurationSerializer(current).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        current = self.get_object()
+        serializer = ConfigurationWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = dict(serializer.validated_data)
+        values.setdefault("expected_version", current.version)
+        updated = ConfigurationService.write(
+            self.tenant_id(),
+            _actor_id(request),
+            change_type="update",
+            **values,
+        )
+        return Response(MasterDataConfigurationSerializer(updated).data)
+
+    @action(detail=False, methods=["post"])
+    def preview(self, request: Request) -> Response:
+        serializer = ConfigurationPreviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = ConfigurationService.preview(self.tenant_id(), serializer.validated_data["document"])
+        return Response(ConfigurationPreviewResultSerializer(result).data)
+
+    @action(detail=False, methods=["get"])
+    def history(self, request: Request) -> Response:
+        tenant = self._get_tenant_id()
+        if tenant is None:
+            versions = MasterDataConfigurationVersion.objects.none()
+        else:
+            versions = MasterDataConfigurationVersion.objects.for_tenant(tenant).order_by("-version")
+        return Response(MasterDataConfigurationVersionSerializer(versions, many=True).data)
+
+    @action(detail=False, methods=["post"])
+    def rollback(self, request: Request) -> Response:
+        serializer = ConfigurationRollbackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        current = ConfigurationService.rollback(
+            self.tenant_id(),
+            _actor_id(request),
+            **serializer.validated_data,
+        )
+        return Response(MasterDataConfigurationSerializer(current).data)
+
+    @action(detail=False, methods=["post"], url_path="import")
+    def import_document(self, request: Request) -> Response:
+        serializer = ConfigurationWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        current = ConfigurationService.write(
+            self.tenant_id(),
+            _actor_id(request),
+            change_type="import",
+            **serializer.validated_data,
+        )
+        return Response(MasterDataConfigurationSerializer(current).data)
+
+    @action(detail=False, methods=["get"], url_path="export")
+    def export_document(self, request: Request) -> Response:
+        current = self.get_queryset().first()
+        if current is None:
+            current = ConfigurationService.ensure_defaults(
+                self.tenant_id(),
+                _actor_id(request),
+            )
+        return Response(
+            {
+                "module": "master_data_management",
+                "schema_version": 1,
+                "configuration_version": current.version,
+                "document": current.document,
+            }
+        )
 
 
 __all__ = [name for name in globals() if name.endswith("ViewSet")]

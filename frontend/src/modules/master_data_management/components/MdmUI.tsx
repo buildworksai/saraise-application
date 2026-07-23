@@ -1,11 +1,12 @@
 /* eslint-disable react-refresh/only-export-components -- shared MDM presentation helpers intentionally colocate pure formatters. */
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, Database, LockKeyhole, RefreshCw, SearchX, ServerOff } from "lucide-react";
 import { ApiError } from "@/services/api-client";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { Skeleton } from "@/components/ui/Skeleton";
 import type { ApiErrorEnvelope, IssueSeverity, PaginationMeta } from "../contracts";
+import { useMasterDataConfiguration } from "../hooks/useMasterDataConfiguration";
 
 export const QUERY_KEYS = {
   dashboard: (type?: string) => ["mdm", "dashboard", type] as const,
@@ -17,15 +18,19 @@ export const QUERY_KEYS = {
   version: (id: string, version: number) => ["mdm", "entity", id, "version", version] as const,
   qualityRules: (filters: object) => ["mdm", "quality-rules", filters] as const,
   qualityRule: (id: string) => ["mdm", "quality-rule", id] as const,
+  qualityRuleHistory: (id: string) => ["mdm", "quality-rule", id, "history"] as const,
   qualityIssues: (filters: object) => ["mdm", "quality-issues", filters] as const,
   qualityIssue: (id: string) => ["mdm", "quality-issue", id] as const,
   matchingRules: (filters: object) => ["mdm", "matching-rules", filters] as const,
   matchingRule: (id: string) => ["mdm", "matching-rule", id] as const,
+  matchingRuleHistory: (id: string) => ["mdm", "matching-rule", id, "history"] as const,
   candidates: (filters: object) => ["mdm", "match-candidates", filters] as const,
   candidate: (id: string) => ["mdm", "match-candidate", id] as const,
   merges: (filters: object) => ["mdm", "merges", filters] as const,
   merge: (id: string) => ["mdm", "merge", id] as const,
   job: (id: string) => ["mdm", "job", id] as const,
+  configuration: () => ["mdm", "configuration"] as const,
+  configurationHistory: () => ["mdm", "configuration", "history"] as const,
 };
 
 export function idempotencyKey(scope: string): string {
@@ -33,18 +38,27 @@ export function idempotencyKey(scope: string): string {
   return `mdm-ui:${scope}:${random}`;
 }
 
+/** One key per mounted logical action, reused by every transport retry. */
+export function useStableIdempotencyKey(scope: string): string {
+  const key = useRef<string>();
+  if (!key.current) key.current = idempotencyKey(scope);
+  return key.current;
+}
+
 export function PageHeader({ title, description, actions }: { readonly title: string; readonly description: string; readonly actions?: ReactNode }) {
   return <header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1><p className="mt-1 max-w-3xl text-sm text-muted-foreground">{description}</p></div>{actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}</header>;
 }
 
-export function PageSkeleton({ cards = 5, label = "Loading master data" }: { readonly cards?: number; readonly label?: string }) {
-  return <main aria-busy="true" aria-label={label} className="space-y-6"><Skeleton className="h-20 w-full"/><Skeleton className="h-14 w-full"/><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{Array.from({ length: cards }, (_, index) => <Skeleton key={index} className="h-32 w-full"/>)}</div></main>;
+export function PageSkeleton({ cards, label = "Loading master data" }: { readonly cards?: number; readonly label?: string }) {
+  const configuration = useMasterDataConfiguration();
+  const cardCount = cards ?? configuration.data?.data.document.ui.skeleton_cards;
+  return <main aria-busy="true" aria-label={label} className="space-y-6"><Skeleton className="h-20 w-full"/><Skeleton className="h-14 w-full"/>{cardCount === undefined ? null : <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{Array.from({ length: cardCount }, (_, index) => <Skeleton key={index} className="h-32 w-full"/>)}</div>}</main>;
 }
 
 function errorPresentation(error: Error) {
   if (error instanceof ApiError && error.status === 403) return { title: "Access denied", message: "Your current policy does not permit this master-data action.", icon: LockKeyhole };
   if (error instanceof ApiError && error.status === 404) return { title: "Record not found", message: "The record does not exist or is outside your tenant.", icon: SearchX };
-  if (error instanceof ApiError && error.status === 503) return { title: "Capability unavailable", message: "The authoritative master-data service is not ready. No success has been assumed.", icon: ServerOff };
+  if (error instanceof ApiError && (error.status === 501 || error.status === 503)) return { title: "Capability unavailable", message: "The authoritative master-data service is not ready. No success has been assumed.", icon: ServerOff };
   if (error instanceof ApiError && error.status === 409) return { title: "Concurrent change detected", message: "Reload the latest version and review the conflict before trying again.", icon: RefreshCw };
   return { title: "Master-data request failed", message: error.message || "The request failed safely.", icon: AlertTriangle };
 }
@@ -74,9 +88,12 @@ export function formatScore(value: string | number | null | undefined): string {
 export function successMessage(state: unknown): string | undefined { if (!state || typeof state !== "object" || !("success" in state)) return undefined; const value = state.success; return typeof value === "string" ? value : undefined; }
 
 export function StatusPill({ value }: { readonly value: string }) {
+  const configuration = useMasterDataConfiguration();
   const positive = ["active", "resolved", "confirmed", "applied", "succeeded", "ready"].includes(value);
   const danger = ["critical", "failed", "timed_out", "rejected"].includes(value);
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${danger ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200" : positive ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200"}`}>{value.replaceAll("_", " ")}</span>;
+  const configuredToken = danger ? configuration.data?.data.document.ui.status_tokens.danger : positive ? configuration.data?.data.document.ui.status_tokens.success : configuration.data?.data.document.ui.status_tokens.warning;
+  const tokenClass = configuredToken === "destructive" ? "bg-destructive/10 text-destructive" : configuredToken === "success" ? "bg-primary/10 text-primary" : configuredToken === "warning" ? "bg-muted text-muted-foreground" : "bg-muted text-muted-foreground";
+  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${tokenClass}`}>{value.replaceAll("_", " ")}</span>;
 }
 
 export function SeverityPill({ value }: { readonly value: IssueSeverity }) { return <StatusPill value={value}/>; }
@@ -97,6 +114,9 @@ export function fieldErrors(error: Error | null, field: string): string | undefi
 }
 
 export function MutationNotice({ error, success }: { readonly error: Error | null; readonly success?: string }) {
+  const configuration = useMasterDataConfiguration();
   if (error) return <GovernedError error={error}/>;
-  return success ? <p role="status" aria-live="polite" className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100">{success}</p> : null;
+  const token = configuration.data?.data.document.ui.status_tokens.success;
+  const tokenClass = token === "destructive" ? "border-destructive/30 bg-destructive/10 text-destructive" : token === "success" ? "border-primary/30 bg-primary/10 text-primary" : "border-border bg-muted text-muted-foreground";
+  return success ? <p role="status" aria-live="polite" className={`rounded-md border p-3 text-sm ${tokenClass}`}>{success}</p> : null;
 }

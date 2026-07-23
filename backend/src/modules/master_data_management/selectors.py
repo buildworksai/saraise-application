@@ -57,7 +57,7 @@ def match_candidates(tenant_id: UUID) -> QuerySet[MatchCandidate]:
 def merges(tenant_id: UUID) -> QuerySet[MergeHistory]:
     return (
         MergeHistory.objects.for_tenant(tenant_id)
-        .select_related("golden_record", "golden_record__entity_type")
+        .select_related("golden_record", "golden_record__entity_type", "reversal")
         .prefetch_related("participants", "participants__source_entity")
     )
 

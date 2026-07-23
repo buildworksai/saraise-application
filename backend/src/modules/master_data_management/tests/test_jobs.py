@@ -107,6 +107,10 @@ def test_deduplication_job_blocks_compares_creates_once_and_reuses_on_redelivery
     assert {candidate.left_entity_id, candidate.right_entity_id} == {first.id, second.id}
     assert candidate.status == "confirmed"
     assert len(candidate.transition_history) == 1
+    assert (
+        candidate.transition_history[0]["metadata"]["correlation_id"]
+        == job.correlation_id
+    )
     assert OutboxEvent.objects.for_tenant(tenant).filter(
         event_type="mdm.match_candidate.created",
         aggregate_id=candidate.id,

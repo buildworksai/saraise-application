@@ -11,6 +11,7 @@ from .api import (
     DataQualityIssueViewSet,
     DataQualityRuleViewSet,
     MasterDataEntityViewSet,
+    MasterDataConfigurationViewSet,
     MasterEntityTypeViewSet,
     MatchCandidateViewSet,
     MatchingOperationsViewSet,
@@ -34,6 +35,7 @@ router.register("match-candidates", MatchCandidateViewSet, basename="match-candi
 router.register("merges", MergeViewSet, basename="merge")
 router.register("dashboard", DashboardViewSet, basename="dashboard")
 router.register("jobs", AsyncJobViewSet, basename="job")
+router.register("configurations", MasterDataConfigurationViewSet, basename="configuration")
 
 urlpatterns = [
     path("", include(router.urls)),

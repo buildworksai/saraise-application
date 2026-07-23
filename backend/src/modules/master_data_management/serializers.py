@@ -13,15 +13,19 @@ from src.core.async_jobs.models import AsyncJob
 from .models import (
     DataQualityIssue,
     DataQualityRule,
+    DataQualityRuleVersion,
+    MasterDataConfiguration,
+    MasterDataConfigurationVersion,
     MasterDataEntity,
     MasterDataVersion,
     MasterEntityType,
     MatchCandidate,
     MatchingRule,
+    MatchingRuleVersion,
     MergeHistory,
     MergeParticipant,
 )
-from .services import MatchResult, MergePreview, QualityReport, ValidationFinding, ValidationReport
+from .services import MergePreview
 
 
 class StrictSerializerMixin:
@@ -64,7 +68,9 @@ def _masked_data(entity: MasterDataEntity, context: Mapping[str, object]) -> dic
     return result
 
 
-def _masked_snapshot(snapshot: Mapping[str, object], entity: MasterDataEntity, context: Mapping[str, object]) -> dict[str, object]:
+def _masked_snapshot(
+    snapshot: Mapping[str, object], entity: MasterDataEntity, context: Mapping[str, object]
+) -> dict[str, object]:
     result = deepcopy(dict(snapshot))
     request = context.get("request")
     allowed = set(getattr(request, "allowed_sensitive_fields", ())) if request is not None else set()
@@ -124,7 +130,6 @@ class MasterEntityTypeCreateSerializer(StrictSerializer):
     required_fields = serializers.ListField(child=serializers.CharField(max_length=255), required=False, default=list)
     sensitive_fields = serializers.ListField(child=serializers.CharField(max_length=255), required=False, default=list)
     searchable_fields = serializers.ListField(child=serializers.CharField(max_length=255), required=False, default=list)
-    owner_module = serializers.CharField(max_length=100, required=False, default="master_data_management")
     metadata = serializers.JSONField(required=False, default=dict)
     idempotency_key = serializers.CharField(max_length=255)
 
@@ -263,9 +268,7 @@ class MasterDataEntityChangesSerializer(StrictSerializer):
 
 
 class MasterDataEntityUpdateSerializer(FlatOrNestedChangesMixin, MasterDataEntityChangesSerializer):
-    change_fields = frozenset(
-        {"entity_code", "entity_name", "data", "source_system", "source_record_id"}
-    )
+    change_fields = frozenset({"entity_code", "entity_name", "data", "source_system", "source_record_id"})
     expected_version = serializers.IntegerField(min_value=1)
     changes = MasterDataEntityChangesSerializer(required=False)
     reason = serializers.CharField(max_length=255)
@@ -359,15 +362,36 @@ class DataQualityRuleDetailSerializer(StrictModelSerializer):
         read_only_fields = fields
 
 
+class DataQualityRuleVersionSerializer(StrictModelSerializer):
+    class Meta:
+        model = DataQualityRuleVersion
+        fields = (
+            "id",
+            "tenant_id",
+            "rule",
+            "version_number",
+            "snapshot",
+            "changed_by",
+            "correlation_id",
+            "change_reason",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
 class DataQualityRuleWriteSerializer(StrictSerializer):
-    entity_type_id = serializers.UUIDField(required=False)
-    name = serializers.CharField(max_length=120, required=False)
+    entity_type_id = serializers.UUIDField()
+    name = serializers.CharField(max_length=120)
     field_path = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
-    rule_type = serializers.ChoiceField(choices=("required", "format", "range", "uniqueness", "referential", "timeliness"), required=False)
-    configuration = serializers.JSONField(required=False)
-    dimension = serializers.ChoiceField(choices=("completeness", "accuracy", "consistency", "timeliness", "uniqueness", "conformity"), required=False)
-    severity = serializers.ChoiceField(choices=("info", "warning", "error", "critical"), required=False)
-    weight = serializers.DecimalField(max_digits=7, decimal_places=4, min_value=Decimal("0.0001"), required=False)
+    rule_type = serializers.ChoiceField(
+        choices=("required", "format", "range", "uniqueness", "referential", "timeliness")
+    )
+    configuration = serializers.JSONField()
+    dimension = serializers.ChoiceField(
+        choices=("completeness", "accuracy", "consistency", "timeliness", "uniqueness", "conformity")
+    )
+    severity = serializers.ChoiceField(choices=("info", "warning", "error", "critical"))
+    weight = serializers.DecimalField(max_digits=7, decimal_places=4, min_value=Decimal("0.0001"))
     is_active = serializers.BooleanField(required=False)
     idempotency_key = serializers.CharField(max_length=255)
 
@@ -375,9 +399,13 @@ class DataQualityRuleWriteSerializer(StrictSerializer):
 class DataQualityRuleChangesSerializer(StrictSerializer):
     name = serializers.CharField(max_length=120, required=False)
     field_path = serializers.CharField(max_length=255, required=False, allow_blank=True)
-    rule_type = serializers.ChoiceField(choices=("required", "format", "range", "uniqueness", "referential", "timeliness"), required=False)
+    rule_type = serializers.ChoiceField(
+        choices=("required", "format", "range", "uniqueness", "referential", "timeliness"), required=False
+    )
     configuration = serializers.JSONField(required=False)
-    dimension = serializers.ChoiceField(choices=("completeness", "accuracy", "consistency", "timeliness", "uniqueness", "conformity"), required=False)
+    dimension = serializers.ChoiceField(
+        choices=("completeness", "accuracy", "consistency", "timeliness", "uniqueness", "conformity"), required=False
+    )
     severity = serializers.ChoiceField(choices=("info", "warning", "error", "critical"), required=False)
     weight = serializers.DecimalField(max_digits=7, decimal_places=4, min_value=Decimal("0.0001"), required=False)
     is_active = serializers.BooleanField(required=False)
@@ -408,9 +436,23 @@ class DataQualityIssueListSerializer(StrictModelSerializer):
     class Meta:
         model = DataQualityIssue
         fields = (
-            "id", "tenant_id", "entity", "entity_name", "entity_type_key", "rule", "rule_name", "field_path",
-            "dimension", "severity", "message", "status", "assigned_to", "created_by", "updated_by",
-            "created_at", "updated_at",
+            "id",
+            "tenant_id",
+            "entity",
+            "entity_name",
+            "entity_type_key",
+            "rule",
+            "rule_name",
+            "field_path",
+            "dimension",
+            "severity",
+            "message",
+            "status",
+            "assigned_to",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 
@@ -418,7 +460,11 @@ class DataQualityIssueListSerializer(StrictModelSerializer):
 class DataQualityIssueDetailSerializer(DataQualityIssueListSerializer):
     class Meta(DataQualityIssueListSerializer.Meta):
         fields = DataQualityIssueListSerializer.Meta.fields + (
-            "evidence", "resolution", "resolved_by", "resolved_at", "transition_history",
+            "evidence",
+            "resolution",
+            "resolved_by",
+            "resolved_at",
+            "transition_history",
         )
         read_only_fields = fields
 
@@ -435,9 +481,21 @@ class MatchingRuleListSerializer(StrictModelSerializer):
     class Meta:
         model = MatchingRule
         fields = (
-            "id", "tenant_id", "entity_type", "entity_type_key", "name", "algorithm", "review_threshold",
-            "auto_confirm_threshold", "is_active", "is_deleted", "deleted_at", "created_by", "updated_by",
-            "created_at", "updated_at",
+            "id",
+            "tenant_id",
+            "entity_type",
+            "entity_type_key",
+            "name",
+            "algorithm",
+            "review_threshold",
+            "auto_confirm_threshold",
+            "is_active",
+            "is_deleted",
+            "deleted_at",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 
@@ -445,19 +503,20 @@ class MatchingRuleListSerializer(StrictModelSerializer):
 class MatchingRuleDetailSerializer(MatchingRuleListSerializer):
     class Meta(MatchingRuleListSerializer.Meta):
         fields = MatchingRuleListSerializer.Meta.fields + (
-            "field_weights", "blocking_fields",
+            "field_weights",
+            "blocking_fields",
         )
         read_only_fields = fields
 
 
 class MatchingRuleWriteSerializer(StrictSerializer):
-    entity_type_id = serializers.UUIDField(required=False)
-    name = serializers.CharField(max_length=120, required=False)
-    algorithm = serializers.ChoiceField(choices=("exact", "normalized", "fuzzy", "phonetic"), required=False)
-    field_weights = serializers.DictField(child=serializers.DecimalField(max_digits=5, decimal_places=4), required=False)
-    blocking_fields = serializers.ListField(child=serializers.CharField(max_length=255), required=False)
-    review_threshold = serializers.DecimalField(max_digits=5, decimal_places=4, min_value=0, max_value=1, required=False)
-    auto_confirm_threshold = serializers.DecimalField(max_digits=5, decimal_places=4, min_value=0, max_value=1, required=False)
+    entity_type_id = serializers.UUIDField()
+    name = serializers.CharField(max_length=120)
+    algorithm = serializers.ChoiceField(choices=("exact", "normalized", "fuzzy", "phonetic"))
+    field_weights = serializers.DictField(child=serializers.DecimalField(max_digits=5, decimal_places=4))
+    blocking_fields = serializers.ListField(child=serializers.CharField(max_length=255))
+    review_threshold = serializers.DecimalField(max_digits=5, decimal_places=4, min_value=0, max_value=1)
+    auto_confirm_threshold = serializers.DecimalField(max_digits=5, decimal_places=4, min_value=0, max_value=1)
     is_active = serializers.BooleanField(required=False)
     idempotency_key = serializers.CharField(max_length=255)
 
@@ -465,10 +524,16 @@ class MatchingRuleWriteSerializer(StrictSerializer):
 class MatchingRuleChangesSerializer(StrictSerializer):
     name = serializers.CharField(max_length=120, required=False)
     algorithm = serializers.ChoiceField(choices=("exact", "normalized", "fuzzy", "phonetic"), required=False)
-    field_weights = serializers.DictField(child=serializers.DecimalField(max_digits=5, decimal_places=4), required=False)
+    field_weights = serializers.DictField(
+        child=serializers.DecimalField(max_digits=5, decimal_places=4), required=False
+    )
     blocking_fields = serializers.ListField(child=serializers.CharField(max_length=255), required=False)
-    review_threshold = serializers.DecimalField(max_digits=5, decimal_places=4, min_value=0, max_value=1, required=False)
-    auto_confirm_threshold = serializers.DecimalField(max_digits=5, decimal_places=4, min_value=0, max_value=1, required=False)
+    review_threshold = serializers.DecimalField(
+        max_digits=5, decimal_places=4, min_value=0, max_value=1, required=False
+    )
+    auto_confirm_threshold = serializers.DecimalField(
+        max_digits=5, decimal_places=4, min_value=0, max_value=1, required=False
+    )
     is_active = serializers.BooleanField(required=False)
 
 
@@ -488,6 +553,35 @@ class MatchingRuleUpdateSerializer(FlatOrNestedChangesMixin, MatchingRuleChanges
     idempotency_key = serializers.CharField(max_length=255)
 
 
+class MatchingRuleVersionSerializer(StrictModelSerializer):
+    class Meta:
+        model = MatchingRuleVersion
+        fields = (
+            "id",
+            "tenant_id",
+            "rule",
+            "version_number",
+            "snapshot",
+            "changed_by",
+            "correlation_id",
+            "change_reason",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class RuleRollbackSerializer(StrictSerializer):
+    version_number = serializers.IntegerField(min_value=1)
+    reason = serializers.CharField(max_length=255)
+    idempotency_key = serializers.CharField(max_length=255)
+
+
+class RuleImportSerializer(StrictSerializer):
+    document = serializers.JSONField()
+    reason = serializers.CharField(max_length=255)
+    idempotency_key = serializers.CharField(max_length=255)
+
+
 class DeactivateRuleSerializer(StrictSerializer):
     reason = serializers.CharField(max_length=255, required=False)
     idempotency_key = serializers.CharField(max_length=255)
@@ -501,9 +595,20 @@ class MatchCandidateListSerializer(StrictModelSerializer):
     class Meta:
         model = MatchCandidate
         fields = (
-            "id", "tenant_id", "matching_rule", "matching_rule_name", "left_entity", "right_entity",
-            "confidence", "status", "reviewed_by", "reviewed_at", "created_by", "updated_by",
-            "created_at", "updated_at",
+            "id",
+            "tenant_id",
+            "matching_rule",
+            "matching_rule_name",
+            "left_entity",
+            "right_entity",
+            "confidence",
+            "status",
+            "reviewed_by",
+            "reviewed_at",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 
@@ -511,7 +616,11 @@ class MatchCandidateListSerializer(StrictModelSerializer):
 class MatchCandidateDetailSerializer(MatchCandidateListSerializer):
     class Meta(MatchCandidateListSerializer.Meta):
         fields = MatchCandidateListSerializer.Meta.fields + (
-            "field_scores", "evidence", "review_note", "merge_history", "transition_history",
+            "field_scores",
+            "evidence",
+            "review_note",
+            "merge_history",
+            "transition_history",
         )
         read_only_fields = fields
 
@@ -553,7 +662,9 @@ class MergePreviewSerializer(StrictSerializer):
     source_versions = serializers.DictField(read_only=True)
     fields = serializers.SerializerMethodField(method_name="get_survivorship_fields")
     conflicts = serializers.SerializerMethodField()
-    survivorship_overrides = serializers.DictField(child=serializers.UUIDField(), write_only=True, required=False, default=dict)
+    survivorship_overrides = serializers.DictField(
+        child=serializers.UUIDField(), write_only=True, required=False, default=dict
+    )
 
     def get_survivorship_fields(self, obj: MergePreview) -> list[dict[str, object]]:
         values = dict(obj.golden_values)
@@ -580,10 +691,7 @@ class MergePreviewSerializer(StrictSerializer):
         ]
 
     def get_conflicts(self, obj: MergePreview) -> list[dict[str, str]]:
-        return [
-            {"code": "MERGE_PREVIEW_CONFLICT", "message": conflict}
-            for conflict in obj.conflicts
-        ]
+        return [{"code": "MERGE_PREVIEW_CONFLICT", "message": conflict} for conflict in obj.conflicts]
 
 
 class MergeRequestSerializer(StrictSerializer):
@@ -608,25 +716,57 @@ class MergeParticipantSerializer(StrictModelSerializer):
 class MergeHistoryListSerializer(StrictModelSerializer):
     golden_record_name = serializers.CharField(source="golden_record.entity_name", read_only=True)
     participant_count = serializers.IntegerField(source="participants.count", read_only=True)
+    status = serializers.SerializerMethodField()
+    reversed_by = serializers.SerializerMethodField()
+    reversed_at = serializers.SerializerMethodField()
 
     class Meta:
         model = MergeHistory
         fields = (
-            "id", "tenant_id", "golden_record", "golden_record_name", "status", "reason", "merged_by",
-            "reversed_by", "reversed_at", "participant_count", "correlation_id", "created_at",
+            "id",
+            "tenant_id",
+            "golden_record",
+            "golden_record_name",
+            "status",
+            "reason",
+            "merged_by",
+            "reversed_by",
+            "reversed_at",
+            "participant_count",
+            "correlation_id",
+            "created_at",
         )
         read_only_fields = fields
+
+    def _reversal(self, obj: MergeHistory) -> object | None:
+        return getattr(obj, "reversal", None)
+
+    def get_status(self, obj: MergeHistory) -> str:
+        return obj.current_status
+
+    def get_reversed_by(self, obj: MergeHistory) -> object | None:
+        reversal = self._reversal(obj)
+        return getattr(reversal, "reversed_by", None)
+
+    def get_reversed_at(self, obj: MergeHistory) -> object | None:
+        reversal = self._reversal(obj)
+        return getattr(reversal, "created_at", None)
 
 
 class MergeHistoryDetailSerializer(MergeHistoryListSerializer):
     participants = MergeParticipantSerializer(many=True, read_only=True)
     golden_snapshot_before = serializers.SerializerMethodField()
     golden_snapshot_after = serializers.SerializerMethodField()
+    reversal_reason = serializers.SerializerMethodField()
 
     class Meta(MergeHistoryListSerializer.Meta):
         fields = MergeHistoryListSerializer.Meta.fields + (
-            "survivorship_policy", "golden_snapshot_before", "golden_snapshot_after", "reversal_reason",
-            "transition_history", "participants",
+            "survivorship_policy",
+            "golden_snapshot_before",
+            "golden_snapshot_after",
+            "reversal_reason",
+            "transition_history",
+            "participants",
         )
         read_only_fields = fields
 
@@ -635,6 +775,28 @@ class MergeHistoryDetailSerializer(MergeHistoryListSerializer):
 
     def get_golden_snapshot_after(self, obj: MergeHistory) -> dict[str, object]:
         return _masked_snapshot(obj.golden_snapshot_after, obj.golden_record, self.context)
+
+    def get_reversal_reason(self, obj: MergeHistory) -> str:
+        reversal = self._reversal(obj)
+        return str(getattr(reversal, "reason", ""))
+
+
+class MergeReversalConflictSerializer(StrictSerializer):
+    entity_id = serializers.UUIDField(read_only=True, allow_null=True)
+    code = serializers.CharField(read_only=True)
+    expected_version = serializers.IntegerField(read_only=True, allow_null=True)
+    current_version = serializers.IntegerField(read_only=True, allow_null=True)
+    message = serializers.CharField(read_only=True)
+
+
+class MergeReversalPreviewSerializer(StrictSerializer):
+    merge_id = serializers.UUIDField(read_only=True)
+    can_reverse = serializers.BooleanField(read_only=True)
+    conflicts = MergeReversalConflictSerializer(many=True, read_only=True)
+    participant_versions = serializers.DictField(
+        child=serializers.IntegerField(),
+        read_only=True,
+    )
 
 
 class MergeReverseSerializer(StrictSerializer):
@@ -646,8 +808,17 @@ class AsyncJobSerializer(StrictModelSerializer):
     class Meta:
         model = AsyncJob
         fields = (
-            "id", "command", "status", "result", "error_message", "attempts", "correlation_id",
-            "started_at", "completed_at", "created_at", "updated_at",
+            "id",
+            "command",
+            "status",
+            "result",
+            "error_message",
+            "attempts",
+            "correlation_id",
+            "started_at",
+            "completed_at",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 
@@ -693,6 +864,64 @@ class MDMSummarySerializer(StrictSerializer):
     critical_issues = serializers.IntegerField(read_only=True)
     pending_matches = serializers.IntegerField(read_only=True)
     recent_activity = serializers.ListField(read_only=True)
+
+
+class MasterDataConfigurationSerializer(StrictModelSerializer):
+    class Meta:
+        model = MasterDataConfiguration
+        fields = (
+            "id",
+            "tenant_id",
+            "document",
+            "version",
+            "created_at",
+            "updated_at",
+            "created_by",
+            "updated_by",
+        )
+        read_only_fields = fields
+
+
+class MasterDataConfigurationVersionSerializer(StrictModelSerializer):
+    class Meta:
+        model = MasterDataConfigurationVersion
+        fields = (
+            "id",
+            "tenant_id",
+            "configuration",
+            "version",
+            "prior_value",
+            "new_value",
+            "actor_id",
+            "correlation_id",
+            "change_type",
+            "reason",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class ConfigurationWriteSerializer(StrictSerializer):
+    document = serializers.DictField()
+    idempotency_key = serializers.CharField(max_length=255)
+    reason = serializers.CharField(max_length=500)
+    expected_version = serializers.IntegerField(min_value=0, required=False, allow_null=True)
+
+
+class ConfigurationPreviewSerializer(StrictSerializer):
+    document = serializers.DictField()
+
+
+class ConfigurationRollbackSerializer(StrictSerializer):
+    version = serializers.IntegerField(min_value=1)
+    idempotency_key = serializers.CharField(max_length=255)
+    reason = serializers.CharField(max_length=500)
+
+
+class ConfigurationPreviewResultSerializer(StrictSerializer):
+    valid = serializers.BooleanField(read_only=True)
+    document = serializers.DictField(read_only=True)
+    changes = serializers.ListField(read_only=True)
 
 
 # Legacy symbol is a read serializer only; v1 routing has been removed.

@@ -18,7 +18,9 @@ def test_liveness_does_not_probe_database(monkeypatch: pytest.MonkeyPatch) -> No
     response = health.live(APIRequestFactory().get("/health/live/"))
 
     assert response.status_code == 200
-    assert response.data == {"module": "master_data_management", "status": "live"}
+    assert response.data["module"] == "master_data_management"
+    assert response.data["status"] == "live"
+    assert response.data["correlation_id"]
     cursor.assert_not_called()
 
 
@@ -28,11 +30,16 @@ def test_readiness_declares_every_domain_and_durability_table() -> None:
         "mdm_entities",
         "mdm_entity_versions",
         "mdm_quality_rules",
+        "mdm_quality_rule_versions",
         "mdm_quality_issues",
         "mdm_matching_rules",
+        "mdm_matching_rule_versions",
         "mdm_match_candidates",
         "mdm_merge_history",
+        "mdm_merge_reversals",
         "mdm_merge_participants",
+        "mdm_configurations",
+        "mdm_configuration_versions",
     }
     assert set(health.DURABILITY_TABLES) == {"async_jobs", "async_job_outbox_events"}
 
@@ -63,11 +70,12 @@ def test_readiness_failure_is_503_and_does_not_leak_exception(
     serialized = str(response.data)
     assert secret not in serialized
     assert "secret-password" not in serialized
-    assert response.data == {
-        "module": "master_data_management",
-        "status": "not_ready",
-        "components": {"probe": {"ready": False, "code": "READINESS_PROBE_FAILED"}},
+    assert response.data["module"] == "master_data_management"
+    assert response.data["status"] == "not_ready"
+    assert response.data["components"] == {
+        "probe": {"ready": False, "code": "READINESS_PROBE_FAILED"}
     }
+    assert response.data["correlation_id"]
 
 
 @pytest.mark.parametrize("ready", [True, False])
@@ -91,3 +99,4 @@ def test_readiness_status_reflects_all_components(
     assert response.status_code == (200 if ready else 503)
     assert response.data["status"] == ("ready" if ready else "not_ready")
     assert response.data["components"] == components
+    assert response.data["correlation_id"]

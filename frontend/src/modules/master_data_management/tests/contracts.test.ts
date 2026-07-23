@@ -7,6 +7,8 @@ describe("master data contracts", () => {
     expect(JSON.stringify(ENDPOINTS)).not.toContain("/api/v1/");
     expect(ENDPOINTS.ENTITIES.VERSION("entity", 4)).toBe("/api/v2/master-data-management/entities/entity/versions/4/");
     expect(ENDPOINTS.MERGES.REVERSE("merge")).toBe("/api/v2/master-data-management/merges/merge/reverse/");
+    expect(ENDPOINTS.MERGES.REVERSAL_PREVIEW("merge")).toBe("/api/v2/master-data-management/merges/merge/reversal-preview/");
+    expect(ENDPOINTS.CONFIGURATION.HISTORY).toBe("/api/v2/master-data-management/configurations/history/");
   });
 
   it("builds every parameterized application path", () => {
@@ -15,5 +17,6 @@ describe("master data contracts", () => {
     expect(ROUTES.QUALITY_ISSUE_DETAIL("issue")).toBe("/master-data/quality/issues/issue");
     expect(ROUTES.MATCH_DETAIL("match")).toBe("/master-data/matches/match");
     expect(ROUTES.JOB_DETAIL("job")).toBe("/master-data/jobs/job");
+    expect(ROUTES.CONFIGURATION).toBe("/master-data/configuration");
   });
 });

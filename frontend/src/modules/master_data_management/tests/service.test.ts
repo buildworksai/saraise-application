@@ -27,18 +27,18 @@ describe("master data v2 service", () => {
     await masterDataService.entities.update("entity-1", { expected_version: 2, changes: { entity_name: "Updated" }, reason: "Correction", idempotency_key: "update-1" });
     await masterDataService.matchCandidates.review("candidate-1", { decision: "confirm", transition_key: "review-1" });
     await masterDataService.merges.reverse("merge-1", { reason: "Incorrect merge", transition_key: "reverse-1" });
-    await masterDataService.qualityRules.delete("rule-1");
+    await masterDataService.qualityRules.delete("rule-1", { idempotency_key: "deactivate-rule-1" });
     expect(api.post).toHaveBeenCalledWith(ENDPOINTS.ENTITIES.RESTORE("entity-1"), expect.any(Object));
     expect(api.patch).toHaveBeenCalledWith(ENDPOINTS.ENTITIES.UPDATE("entity-1"), expect.any(Object));
     expect(api.post).toHaveBeenCalledWith(ENDPOINTS.MATCH_CANDIDATES.REVIEW("candidate-1"), expect.any(Object));
     expect(api.post).toHaveBeenCalledWith(ENDPOINTS.MERGES.REVERSE("merge-1"), expect.any(Object));
-    expect(api.delete).toHaveBeenCalledWith(ENDPOINTS.QUALITY_RULES.DELETE("rule-1"));
+    expect(api.delete).toHaveBeenCalledWith(ENDPOINTS.QUALITY_RULES.DELETE("rule-1"), { body: JSON.stringify({ idempotency_key: "deactivate-rule-1" }) });
   });
 
   it("returns durable job evidence from scan creation", async () => {
     const job = { id: "job-1", status: "queued" };
     api.post.mockResolvedValueOnce({ data: job, meta });
-    await expect(masterDataService.qualityScans.create({ idempotency_key: "scan-1" })).resolves.toEqual({ data: job, meta });
-    expect(api.post).toHaveBeenCalledWith(ENDPOINTS.QUALITY_SCANS, { idempotency_key: "scan-1" });
+    await expect(masterDataService.qualityScans.create({ entity_type_id: "entity-type-1", idempotency_key: "scan-1" })).resolves.toEqual({ data: job, meta });
+    expect(api.post).toHaveBeenCalledWith(ENDPOINTS.QUALITY_SCANS, { entity_type_id: "entity-type-1", idempotency_key: "scan-1" });
   });
 });
