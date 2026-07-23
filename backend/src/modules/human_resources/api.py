@@ -9,7 +9,7 @@ from uuid import UUID
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import DecimalField, ExpressionWrapper, F, Q, QuerySet
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -26,7 +26,17 @@ from src.core.api.results import OperationFailed
 from src.core.state_machine import StateMachineError
 from src.core.views.tenant_scoped import TenantScopedModelViewSet
 
-from .models import Attendance, Department, Employee, LeaveBalance, LeaveRequest
+from .models import (
+    Attendance,
+    Department,
+    Employee,
+    HumanResourcesConfiguration,
+    HumanResourcesConfigurationAudit,
+    HumanResourcesConfigurationVersion,
+    HumanResourcesMutationCommand,
+    LeaveBalance,
+    LeaveRequest,
+)
 from .permissions import AccessRequirement, GovernedSessionAuthentication
 from .serializers import (
     AttendanceCreateSerializer,
@@ -46,6 +56,12 @@ from .serializers import (
     EmployeeTransitionSerializer,
     EmployeeTreeSerializer,
     EmployeeUpdateSerializer,
+    HumanResourcesConfigurationAuditSerializer,
+    HumanResourcesConfigurationPreviewSerializer,
+    HumanResourcesConfigurationRollbackSerializer,
+    HumanResourcesConfigurationSerializer,
+    HumanResourcesConfigurationVersionSerializer,
+    HumanResourcesConfigurationWriteSerializer,
     LeaveApprovalSerializer,
     LeaveBalanceCreateSerializer,
     LeaveBalanceDetailSerializer,
@@ -62,6 +78,8 @@ from .services import (
     AttendanceService,
     DepartmentService,
     EmployeeService,
+    HumanResourcesConfigurationService,
+    HumanResourcesMutationCommandService,
     HumanResourcesServiceError,
     LeaveBalanceService,
     LeaveRequestService,
@@ -117,9 +135,23 @@ def _idempotency_key(request: Request, body_key: object | None = None) -> str:
     key = header_key or normalized_body
     if not key:
         raise ValidationError({"idempotency_key": ["An idempotency key is required."]})
-    if len(key) > 255:
-        raise ValidationError({"idempotency_key": ["Must contain at most 255 characters."]})
+    tenant_id = getattr(request, "tenant_id", None)
+    if tenant_id is None:
+        raise PermissionDenied("Authenticated tenant context is required.")
+    document = HumanResourcesConfigurationService.get_document(tenant_id)
+    maximum = cast(int, cast(Mapping[str, object], document["limits"])["idempotency_key_max_length"])
+    if len(key) > maximum:
+        raise ValidationError({"idempotency_key": [f"Must contain at most {maximum} characters."]})
     return key
+
+
+class HumanResourcesMutationReplay(Exception):
+    """Short-circuit a duplicate command with its committed response."""
+
+    def __init__(self, command: HumanResourcesMutationCommand) -> None:
+        self.response_status = int(command.response_status or status.HTTP_500_INTERNAL_SERVER_ERROR)
+        self.response_body = command.response_body
+        super().__init__("The mutation command has already completed.")
 
 
 class HumanResourcesViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):  # type: ignore[misc]
@@ -130,6 +162,57 @@ class HumanResourcesViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):  # 
     pagination_class = GovernedPageNumberPagination
     access_requirements: Mapping[str, AccessRequirement] = {}
     http_method_names = ("get", "post", "patch", "delete", "head", "options")
+    non_mutating_actions = frozenset({"preview"})
+
+    def dispatch(self, request: Any, *args: Any, **kwargs: Any) -> Response:
+        with transaction.atomic():
+            return cast(Response, super().dispatch(request, *args, **kwargs))
+
+    def initial(self, request: Request, *args: Any, **kwargs: Any) -> None:
+        super().initial(request, *args, **kwargs)
+        if request.method in {"GET", "HEAD", "OPTIONS"} or self.action in self.non_mutating_actions:
+            return
+        key = _idempotency_key(request)
+        fingerprint = HumanResourcesMutationCommandService.fingerprint(
+            method=request.method,
+            path=request.path,
+            action=self.action,
+            query=list(request.query_params.lists()),
+            body=request.data,
+        )
+        command, replay = HumanResourcesMutationCommandService.begin(
+            self.tenant_id(),
+            idempotency_key=key,
+            request_fingerprint=fingerprint,
+            method=request.method,
+            path=request.path,
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
+        )
+        self._mutation_command = command
+        self._mutation_replay = replay
+        if replay:
+            raise HumanResourcesMutationReplay(command)
+
+    def finalize_response(
+        self,
+        request: Request,
+        response: Response,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Response:
+        finalized = cast(Response, super().finalize_response(request, response, *args, **kwargs))
+        command = getattr(self, "_mutation_command", None)
+        if command is not None and not getattr(self, "_mutation_replay", False):
+            if status.is_success(finalized.status_code):
+                HumanResourcesMutationCommandService.complete(
+                    command,
+                    response_status=finalized.status_code,
+                    response_body=finalized.data,
+                )
+            else:
+                HumanResourcesMutationCommandService.abandon(command)
+        return finalized
 
     def get_permissions(self) -> Sequence[Any]:
         tenant_id = self._get_tenant_id()
@@ -156,7 +239,13 @@ class HumanResourcesViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):  # 
 
     def _queryset(self, model: type[Any]) -> QuerySet[Any, Any]:
         self._validate_model(model)
-        return model.objects.for_tenant(self.tenant_id()).filter(deleted_at__isnull=True)
+        tenant_id = self._get_tenant_id()
+        if tenant_id is None:
+            return model.objects.none()
+        queryset = model.objects.for_tenant(tenant_id)
+        if any(field.name == "deleted_at" for field in model._meta.fields):
+            queryset = queryset.filter(deleted_at__isnull=True)
+        return queryset
 
     def _validate_query(self, allowed: set[str]) -> None:
         unknown = set(self.request.query_params) - allowed - {"page", "page_size", "format"}
@@ -188,6 +277,8 @@ class HumanResourcesViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):  # 
         return self.get_paginated_response(serializer.data)
 
     def handle_exception(self, exc: Exception) -> Response:
+        if isinstance(exc, HumanResourcesMutationReplay):
+            return Response(exc.response_body, status=exc.response_status)
         if isinstance(exc, HumanResourcesServiceError):
             exc = OperationFailed(
                 error_code=exc.error_code,
@@ -220,6 +311,146 @@ class HumanResourcesViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):  # 
                 http_status=status.HTTP_400_BAD_REQUEST,
             )
         return super().handle_exception(exc)
+
+
+class HumanResourcesConfigurationViewSet(HumanResourcesViewSet):
+    """Governed singleton configuration plus immutable history surfaces."""
+
+    queryset = HumanResourcesConfiguration.objects.all()
+    serializer_class = HumanResourcesConfigurationSerializer
+
+    from .permissions import CONFIGURATION_ACTION_PERMISSIONS as access_requirements
+
+    def get_serializer_class(self) -> type[Any]:
+        return {
+            "partial_update": HumanResourcesConfigurationWriteSerializer,
+            "import_configuration": HumanResourcesConfigurationWriteSerializer,
+            "preview": HumanResourcesConfigurationPreviewSerializer,
+            "rollback": HumanResourcesConfigurationRollbackSerializer,
+            "history": HumanResourcesConfigurationVersionSerializer,
+            "audit": HumanResourcesConfigurationAuditSerializer,
+        }.get(self.action, HumanResourcesConfigurationSerializer)
+
+    def get_queryset(self) -> QuerySet[HumanResourcesConfiguration, HumanResourcesConfiguration]:
+        queryset = self._queryset(HumanResourcesConfiguration)
+        if not hasattr(self, "request"):
+            return queryset
+        self._validate_query({"environment"})
+        return queryset.filter(environment=self.request.query_params.get("environment", "default"))
+
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        del args, kwargs
+        environment = request.query_params.get("environment", "default")
+        configuration = HumanResourcesConfigurationService.ensure_configuration(self.tenant_id(), environment)
+        return Response(HumanResourcesConfigurationSerializer(configuration).data)
+
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
+        if pk is not None:
+            raise MethodNotAllowed("PATCH")
+        serializer = HumanResourcesConfigurationWriteSerializer(
+            data=request.data, context=self.get_serializer_context()
+        )
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        key = _idempotency_key(request, values["idempotency_key"])
+        configuration = HumanResourcesConfigurationService.update(
+            self.tenant_id(),
+            document=values["document"],
+            environment=values["environment"],
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
+            change_reason=values["change_reason"],
+            idempotency_key=key,
+        )
+        return Response(HumanResourcesConfigurationSerializer(configuration).data)
+
+    @action(detail=False, methods=("post",))
+    def preview(self, request: Request) -> Response:
+        serializer = HumanResourcesConfigurationPreviewSerializer(
+            data=request.data, context=self.get_serializer_context()
+        )
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            HumanResourcesConfigurationService.preview(
+                self.tenant_id(),
+                serializer.validated_data["document"],
+                serializer.validated_data["environment"],
+            )
+        )
+
+    @action(detail=False, methods=("get",))
+    def history(self, request: Request) -> Response:
+        self._validate_query({"environment"})
+        queryset = (
+            HumanResourcesConfigurationVersion.objects.for_tenant(self.tenant_id())
+            .filter(environment=request.query_params.get("environment", "default"))
+            .order_by("-version")
+        )
+        return self._paginated(queryset, HumanResourcesConfigurationVersionSerializer)
+
+    @action(detail=False, methods=("get",))
+    def audit(self, request: Request) -> Response:
+        self._validate_query({"environment"})
+        queryset = (
+            HumanResourcesConfigurationAudit.objects.for_tenant(self.tenant_id())
+            .filter(environment=request.query_params.get("environment", "default"))
+            .order_by("-version")
+        )
+        return self._paginated(queryset, HumanResourcesConfigurationAuditSerializer)
+
+    @action(detail=False, methods=("post",))
+    def rollback(self, request: Request) -> Response:
+        serializer = HumanResourcesConfigurationRollbackSerializer(
+            data=request.data, context=self.get_serializer_context()
+        )
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        key = _idempotency_key(request, values["idempotency_key"])
+        configuration = HumanResourcesConfigurationService.rollback(
+            self.tenant_id(),
+            environment=values["environment"],
+            version=values["version"],
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
+            change_reason=values["change_reason"],
+            idempotency_key=key,
+        )
+        return Response(HumanResourcesConfigurationSerializer(configuration).data)
+
+    @action(detail=False, methods=("post",), url_path="import")
+    def import_configuration(self, request: Request) -> Response:
+        serializer = HumanResourcesConfigurationWriteSerializer(
+            data=request.data, context=self.get_serializer_context()
+        )
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        key = _idempotency_key(request, values["idempotency_key"])
+        configuration = HumanResourcesConfigurationService.update(
+            self.tenant_id(),
+            document=values["document"],
+            environment=values["environment"],
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
+            change_reason=values["change_reason"],
+            idempotency_key=key,
+            action="import",
+        )
+        return Response(HumanResourcesConfigurationSerializer(configuration).data)
+
+    @action(detail=False, methods=("get",), url_path="export")
+    def export_configuration(self, request: Request) -> Response:
+        self._validate_query({"environment"})
+        configuration = HumanResourcesConfigurationService.ensure_configuration(
+            self.tenant_id(), request.query_params.get("environment", "default")
+        )
+        return Response(
+            {
+                "schema": "saraise.human_resources.configuration",
+                "environment": configuration.environment,
+                "version": configuration.version,
+                "document": configuration.document,
+            }
+        )
 
 
 class DepartmentViewSet(HumanResourcesViewSet):
@@ -285,30 +516,37 @@ class DepartmentViewSet(HumanResourcesViewSet):
         department = cast(Department, self.get_object())
         serializer = DepartmentUpdateSerializer(data=request.data, partial=True, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
-        values = dict(serializer.validated_data)
-        active_change = values.pop("is_active", None)
-        if active_change is True:
-            raise OperationFailed(
-                error_code="HR_INVALID_TRANSITION",
-                message="Department activation is not available through this lifecycle surface.",
-                http_status=status.HTTP_409_CONFLICT,
-            )
-        deactivate = active_change is False
-        if values:
-            department = DepartmentService.update_department(
-                self.tenant_id(),
-                department.id,
-                changes=values,
-                actor_id=_actor(request),
-                correlation_id=self.correlation_id(),
-            )
-        if deactivate:
-            department = DepartmentService.deactivate_department(
-                self.tenant_id(),
-                department.id,
-                actor_id=_actor(request),
-                correlation_id=self.correlation_id(),
-            )
+        department = DepartmentService.update_department(
+            self.tenant_id(),
+            department.id,
+            changes=dict(serializer.validated_data),
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
+        )
+        return Response(DepartmentDetailSerializer(department).data)
+
+    @action(detail=True, methods=("post",))
+    def activate(self, request: Request, pk: str | None = None) -> Response:
+        department = cast(Department, self.get_object())
+        _idempotency_key(request)
+        department = DepartmentService.activate_department(
+            self.tenant_id(),
+            department.id,
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
+        )
+        return Response(DepartmentDetailSerializer(department).data)
+
+    @action(detail=True, methods=("post",))
+    def deactivate(self, request: Request, pk: str | None = None) -> Response:
+        department = cast(Department, self.get_object())
+        _idempotency_key(request)
+        department = DepartmentService.deactivate_department(
+            self.tenant_id(),
+            department.id,
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
+        )
         return Response(DepartmentDetailSerializer(department).data)
 
     def destroy(self, request: Request, pk: str | None = None) -> Response:
@@ -359,17 +597,21 @@ class EmployeeViewSet(HumanResourcesViewSet):
             }
         )
         params = self.request.query_params
+        document = HumanResourcesConfigurationService.get_document(self.tenant_id())
+        allowed = cast(Mapping[str, object], document["allowed_values"])
         for name in ("department", "manager"):
             value = _parse_uuid(params.get(name), name)
             if value is not None:
                 queryset = queryset.filter(**{f"{name}_id": value})
         employment_type = _parse_choice(
-            params.get("employment_type"), "employment_type", {"full_time", "part_time", "contractor", "temporary"}
+            params.get("employment_type"),
+            "employment_type",
+            set(allowed["employment_types"]),
         )
         employment_status = _parse_choice(
             params.get("employment_status"),
             "employment_status",
-            {"active", "on_leave", "inactive", "terminated"},
+            set(allowed["employment_statuses"]),
         )
         if employment_type:
             queryset = queryset.filter(employment_type=employment_type)
@@ -460,13 +702,17 @@ class EmployeeViewSet(HumanResourcesViewSet):
     @action(detail=True, methods=("get",), url_path="reporting-tree")
     def reporting_tree(self, request: Request, pk: str | None = None) -> Response:
         employee = cast(Employee, self.get_object())
-        raw_depth = request.query_params.get("depth", "5")
+        document = HumanResourcesConfigurationService.get_document(self.tenant_id())
+        limits = cast(Mapping[str, object], document["limits"])
+        default_depth = cast(int, limits["reporting_tree_default_depth"])
+        maximum_depth = cast(int, limits["reporting_tree_max_depth"])
+        raw_depth = request.query_params.get("depth", str(default_depth))
         try:
             depth = int(raw_depth)
         except (TypeError, ValueError) as exc:
             raise ValidationError({"depth": ["Must be an integer."]}) from exc
-        if not 1 <= depth <= 10:
-            raise ValidationError({"depth": ["Must be between 1 and 10."]})
+        if not 1 <= depth <= maximum_depth:
+            raise ValidationError({"depth": [f"Must be between 1 and {maximum_depth}."]})
         tree = EmployeeService.get_reporting_tree(self.tenant_id(), employee.id, depth=depth)
         return Response(EmployeeTreeSerializer(tree).data)
 
@@ -526,13 +772,13 @@ class AttendanceViewSet(HumanResourcesViewSet):
             {"employee", "status", "source", "attendance_date_from", "attendance_date_to", "search", "ordering"}
         )
         params = self.request.query_params
+        document = HumanResourcesConfigurationService.get_document(self.tenant_id())
+        allowed = cast(Mapping[str, object], document["allowed_values"])
         employee = _parse_uuid(params.get("employee"), "employee")
         if employee:
             queryset = queryset.filter(employee_id=employee)
-        attendance_status = _parse_choice(
-            params.get("status"), "status", {"present", "absent", "late", "half_day", "on_leave"}
-        )
-        source = _parse_choice(params.get("source"), "source", {"manual", "clock", "import"})
+        attendance_status = _parse_choice(params.get("status"), "status", set(allowed["attendance_statuses"]))
+        source = _parse_choice(params.get("source"), "source", set(allowed["attendance_sources"]))
         if attendance_status:
             queryset = queryset.filter(status=attendance_status)
         if source:
@@ -652,13 +898,15 @@ class LeaveBalanceViewSet(HumanResourcesViewSet):
             return queryset
         self._validate_query({"employee", "leave_type", "period_start", "period_end", "active_period", "ordering"})
         params = self.request.query_params
+        document = HumanResourcesConfigurationService.get_document(self.tenant_id())
+        allowed = cast(Mapping[str, object], document["allowed_values"])
         employee = _parse_uuid(params.get("employee"), "employee")
         if employee:
             queryset = queryset.filter(employee_id=employee)
         leave_type = _parse_choice(
             params.get("leave_type"),
             "leave_type",
-            {"annual", "sick", "personal", "maternity", "paternity", "unpaid"},
+            set(allowed["leave_types"]),
         )
         if leave_type:
             queryset = queryset.filter(leave_type=leave_type)
@@ -755,8 +1003,11 @@ class LeaveRequestViewSet(HumanResourcesViewSet):
             {"employee", "leave_type", "status", "start_date", "end_date", "scope", "search", "ordering"}
         )
         params = self.request.query_params
-        scope = params.get("scope", "all")
-        if scope not in {"all", "self", "team", "approval_queue"}:
+        document = HumanResourcesConfigurationService.get_document(self.tenant_id())
+        allowed = cast(Mapping[str, object], document["allowed_values"])
+        defaults = cast(Mapping[str, object], document["defaults"])
+        scope = params.get("scope", str(defaults["leave_scope"]))
+        if scope not in set(allowed["leave_scopes"]):
             raise ValidationError({"scope": ["Unsupported leave scope."]})
         if scope in {"self", "team"}:
             raise CapabilityUnavailable(
@@ -764,16 +1015,16 @@ class LeaveRequestViewSet(HumanResourcesViewSet):
                 detail={"scope": scope, "reason_code": "ACTOR_EMPLOYEE_RESOLUTION_UNAVAILABLE"},
             )
         if scope == "approval_queue":
-            queryset = queryset.filter(status="pending")
+            queryset = queryset.filter(status=str(defaults["leave_request_status"]))
         employee = _parse_uuid(params.get("employee"), "employee")
         if employee:
             queryset = queryset.filter(employee_id=employee)
         leave_type = _parse_choice(
             params.get("leave_type"),
             "leave_type",
-            {"annual", "sick", "personal", "maternity", "paternity", "unpaid"},
+            set(allowed["leave_types"]),
         )
-        request_status = _parse_choice(params.get("status"), "status", {"pending", "approved", "rejected", "cancelled"})
+        request_status = _parse_choice(params.get("status"), "status", set(allowed["leave_states"]))
         if leave_type:
             queryset = queryset.filter(leave_type=leave_type)
         if request_status:
@@ -912,6 +1163,7 @@ __all__ = [
     "AttendanceViewSet",
     "DepartmentViewSet",
     "EmployeeViewSet",
+    "HumanResourcesConfigurationViewSet",
     "HumanResourcesViewSet",
     "LeaveBalanceViewSet",
     "LeaveRequestViewSet",

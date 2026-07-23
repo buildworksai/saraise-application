@@ -10,7 +10,6 @@ from src.core.testing.tenant_contract import TenantIsolationContract
 from ..models import Attendance, Department, Employee, LeaveBalance, LeaveRequest
 from .factories import AttendanceFactory, DepartmentFactory, EmployeeFactory, LeaveBalanceFactory, LeaveRequestFactory
 
-
 pytestmark = pytest.mark.django_db
 
 

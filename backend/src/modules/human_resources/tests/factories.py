@@ -72,4 +72,3 @@ class LeaveRequestFactory(HRFactory):
 
     class Meta:
         model = LeaveRequest
-

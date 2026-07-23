@@ -31,13 +31,8 @@ export interface TransitionRecord {
 
 export interface AuditFields {
   readonly id: UUID;
-  readonly tenant_id: UUID;
   readonly created_at: ISODateTime;
   readonly updated_at: ISODateTime;
-  readonly created_by: string;
-  readonly updated_by: string;
-  readonly deleted_at: ISODateTime | null;
-  readonly deleted_by: string;
 }
 
 export interface Department extends AuditFields {
@@ -59,7 +54,12 @@ export interface DepartmentCreate {
   manager_id?: UUID | null;
   description?: string;
 }
-export type DepartmentUpdate = Partial<DepartmentCreate> & { is_active?: boolean };
+/** Department lifecycle is changed only through explicit governed commands. */
+export type DepartmentUpdate = Partial<DepartmentCreate>;
+export interface DepartmentLifecyclePayload {
+  idempotency_key: string;
+  reason: string;
+}
 export interface DepartmentHierarchyNode {
   readonly id: UUID;
   readonly department_code: string;
@@ -151,6 +151,7 @@ export interface AttendanceUpdate {
   hours_worked?: DecimalString;
   status?: AttendanceStatus;
   notes: string;
+  correction_reason?: string;
 }
 export interface ClockInPayload { employee_id: UUID; occurred_at?: ISODateTime; idempotency_key: string }
 export interface ClockOutPayload { occurred_at?: ISODateTime; idempotency_key: string }
@@ -302,6 +303,185 @@ export interface HumanResourcesHealth {
   }>>;
 }
 
+export type RuntimeEnvironment = 'default' | 'development' | 'self-hosted' | 'saas';
+export type ConfigurationScalar = string | number | boolean | null;
+export type ConfigurationValue =
+  | ConfigurationScalar
+  | readonly ConfigurationValue[]
+  | { readonly [key: string]: ConfigurationValue };
+
+export interface HumanResourcesAllowedValues {
+  employment_types: readonly EmploymentType[];
+  employment_statuses: readonly EmploymentStatus[];
+  attendance_statuses: readonly AttendanceStatus[];
+  attendance_sources: readonly AttendanceSource[];
+  leave_types: readonly LeaveType[];
+  leave_states: readonly LeaveRequestStatus[];
+  leave_scopes: readonly LeaveWorkspaceScope[];
+}
+
+export interface HumanResourcesLimits {
+  actor_identifier_max_length: number;
+  idempotency_key_max_length: number;
+  department_code_max_length: number;
+  department_name_max_length: number;
+  employee_number_max_length: number;
+  employee_name_max_length: number;
+  employee_email_max_length: number;
+  employee_phone_max_length: number;
+  employee_position_max_length: number;
+  hierarchy_max_depth: number;
+  reporting_tree_default_depth: number;
+  reporting_tree_max_depth: number;
+  department_tree_max_nodes: number;
+  max_hours_per_day: DecimalString;
+  leave_amount_minimum: DecimalString;
+  list_page_size: number;
+  lookup_page_size: number;
+  leave_input_minimum: DecimalString;
+  leave_input_step: DecimalString;
+  decimal_quantum: DecimalString;
+}
+
+export interface HumanResourcesDefaults {
+  department_active: boolean;
+  employment_type: EmploymentType;
+  employment_status: EmploymentStatus;
+  attendance_hours: DecimalString;
+  attendance_status: AttendanceStatus;
+  attendance_source: AttendanceSource;
+  leave_type: LeaveType;
+  leave_request_status: LeaveRequestStatus;
+  leave_entitled_days: DecimalString;
+  leave_carried_days: DecimalString;
+  leave_adjustment_version: number;
+  leave_adjustment_note: string;
+  leave_scope: LeaveWorkspaceScope;
+  department_ordering: DepartmentFilters['ordering'];
+  event_schema_version: number;
+}
+
+export interface HumanResourcesPolicies {
+  manager_eligible_statuses: readonly EmploymentStatus[];
+  employee_active_statuses: readonly EmploymentStatus[];
+  attendance_eligible_statuses: readonly EmploymentStatus[];
+  clock_in_eligible_statuses: readonly EmploymentStatus[];
+  leave_eligible_statuses: readonly EmploymentStatus[];
+  attendance_zero_work_statuses: readonly AttendanceStatus[];
+  leave_overlap_blocking_statuses: readonly LeaveRequestStatus[];
+  department_deactivation_blocks_active_children: boolean;
+  department_deactivation_blocks_active_employees: boolean;
+  employee_inactivation_requires_no_managed_departments: boolean;
+  employee_archive_statuses: readonly EmploymentStatus[];
+  employee_archive_blocks_pending_leave: boolean;
+  leave_balance_enforce_capacity: boolean;
+  leave_submission_blocks_insufficient_balance: boolean;
+  allow_future_employee_transitions: boolean;
+  approved_leave_cancel_before_start_only: boolean;
+  leave_duration_calendar: 'inclusive';
+  one_attendance_per_employee_date: boolean;
+}
+
+export interface HumanResourcesWorkflows {
+  employee_transitions: readonly (readonly [string, EmploymentStatus, EmploymentStatus])[];
+  leave_transitions: readonly (readonly [string, LeaveRequestStatus, LeaveRequestStatus])[];
+  employee_terminal_states: readonly EmploymentStatus[];
+  leave_terminal_states: readonly LeaveRequestStatus[];
+}
+
+export interface HumanResourcesFeatureRollout {
+  enabled: boolean;
+  roles: readonly string[];
+  cohorts: readonly string[];
+  percentage: number;
+}
+
+export interface HumanResourcesVisualConfiguration {
+  positive_status_token: 'status-positive';
+  warning_status_token: 'status-warning';
+}
+
+export interface HumanResourcesOperations {
+  health_staleness_seconds: number;
+}
+
+export interface HumanResourcesConfigurationDocument {
+  schema_version: number;
+  allowed_values: HumanResourcesAllowedValues;
+  limits: HumanResourcesLimits;
+  defaults: HumanResourcesDefaults;
+  policies: HumanResourcesPolicies;
+  workflows: HumanResourcesWorkflows;
+  feature_rollout: HumanResourcesFeatureRollout;
+  visual: HumanResourcesVisualConfiguration;
+  operations: HumanResourcesOperations;
+}
+
+export interface HumanResourcesConfiguration {
+  readonly id: UUID;
+  readonly environment: RuntimeEnvironment;
+  readonly version: number;
+  readonly document: HumanResourcesConfigurationDocument;
+  readonly updated_at: ISODateTime;
+}
+
+export interface ConfigurationChange {
+  readonly path: string;
+  readonly before: ConfigurationValue | undefined;
+  readonly after: ConfigurationValue | undefined;
+}
+
+export interface ConfigurationPreview {
+  readonly valid: boolean;
+  readonly normalized_document: HumanResourcesConfigurationDocument;
+  readonly changes: readonly ConfigurationChange[];
+}
+
+export interface ConfigurationVersion {
+  readonly id: UUID;
+  readonly version: number;
+  readonly environment: RuntimeEnvironment;
+  readonly document: HumanResourcesConfigurationDocument;
+  readonly created_by: string;
+  readonly correlation_id: UUID;
+  readonly created_at: ISODateTime;
+  readonly change_reason: string;
+  readonly rolled_back_from_version: number | null;
+}
+
+export interface ConfigurationAuditRecord {
+  readonly id: UUID;
+  readonly environment: RuntimeEnvironment;
+  readonly version: number;
+  readonly action: 'update' | 'import' | 'rollback';
+  readonly actor_id: string;
+  readonly correlation_id: UUID;
+  readonly created_at: ISODateTime;
+  readonly change_reason: string;
+  readonly before_document: HumanResourcesConfigurationDocument | null;
+  readonly after_document: HumanResourcesConfigurationDocument;
+}
+
+export interface ConfigurationWrite {
+  environment: RuntimeEnvironment;
+  document: HumanResourcesConfigurationDocument;
+  change_reason: string;
+  idempotency_key: string;
+}
+export type ConfigurationPreviewRequest = Omit<ConfigurationWrite, 'idempotency_key'>;
+export interface ConfigurationRollbackRequest {
+  environment: RuntimeEnvironment;
+  version: number;
+  change_reason: string;
+  idempotency_key: string;
+}
+export interface ConfigurationExport {
+  readonly schema: 'saraise.human_resources.configuration';
+  readonly environment: RuntimeEnvironment;
+  readonly version: number;
+  readonly document: HumanResourcesConfigurationDocument;
+}
+
 export const MODULE_API_PREFIX = '/api/v2/human-resources';
 export const MODULE_PATH = '/human-resources';
 
@@ -312,6 +492,8 @@ export const ENDPOINTS = {
     UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/departments/${id}/` as const,
     DELETE: (id: UUID) => `${MODULE_API_PREFIX}/departments/${id}/` as const,
     TREE: `${MODULE_API_PREFIX}/departments/tree/`,
+    ACTIVATE: (id: UUID) => `${MODULE_API_PREFIX}/departments/${id}/activate/` as const,
+    DEACTIVATE: (id: UUID) => `${MODULE_API_PREFIX}/departments/${id}/deactivate/` as const,
   },
   EMPLOYEES: {
     LIST: `${MODULE_API_PREFIX}/employees/`, CREATE: `${MODULE_API_PREFIX}/employees/`,
@@ -348,6 +530,15 @@ export const ENDPOINTS = {
     REJECT: (id: UUID) => `${MODULE_API_PREFIX}/leave-requests/${id}/reject/` as const,
     CANCEL: (id: UUID) => `${MODULE_API_PREFIX}/leave-requests/${id}/cancel/` as const,
   },
+  CONFIGURATION: {
+    BASE: `${MODULE_API_PREFIX}/configuration/`,
+    PREVIEW: `${MODULE_API_PREFIX}/configuration/preview/`,
+    HISTORY: `${MODULE_API_PREFIX}/configuration/history/`,
+    ROLLBACK: `${MODULE_API_PREFIX}/configuration/rollback/`,
+    IMPORT: `${MODULE_API_PREFIX}/configuration/import/`,
+    EXPORT: `${MODULE_API_PREFIX}/configuration/export/`,
+    AUDIT: `${MODULE_API_PREFIX}/configuration/audit/`,
+  },
   HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
 
@@ -368,6 +559,7 @@ export const ROUTES = {
   LEAVE_REQUEST_CREATE: `${MODULE_PATH}/leave/requests/new`,
   LEAVE_REQUEST_DETAIL: (id: UUID) => `${MODULE_PATH}/leave/requests/${id}` as const,
   LEAVE_REQUEST_EDIT: (id: UUID) => `${MODULE_PATH}/leave/requests/${id}/edit` as const,
+  CONFIGURATION: `${MODULE_PATH}/configuration`,
 } as const;
 
 export const hrKeys = {
@@ -377,13 +569,16 @@ export const hrKeys = {
   hierarchy: (rootId?: UUID, includeInactive?: boolean) => ['human-resources', 'department-tree', rootId ?? '', includeInactive ?? false] as const,
   employees: (filters?: EmployeeFilters) => ['human-resources', 'employees', filters ?? {}] as const,
   employee: (id: UUID) => ['human-resources', 'employee', id] as const,
-  reportingTree: (id: UUID, depth = 5) => ['human-resources', 'reporting-tree', id, depth] as const,
+  reportingTree: (id: UUID, depth: number) => ['human-resources', 'reporting-tree', id, depth] as const,
   attendances: (filters?: AttendanceFilters) => ['human-resources', 'attendances', filters ?? {}] as const,
   attendance: (id: UUID) => ['human-resources', 'attendance', id] as const,
   leaveBalances: (filters?: LeaveBalanceFilters) => ['human-resources', 'leave-balances', filters ?? {}] as const,
   leaveBalance: (id: UUID) => ['human-resources', 'leave-balance', id] as const,
   leaveRequests: (filters?: LeaveRequestFilters) => ['human-resources', 'leave-requests', filters ?? {}] as const,
   leaveRequest: (id: UUID) => ['human-resources', 'leave-request', id] as const,
+  configuration: ['human-resources', 'configuration'] as const,
+  configurationHistory: ['human-resources', 'configuration', 'history'] as const,
+  configurationAudit: ['human-resources', 'configuration', 'audit'] as const,
   health: ['human-resources', 'health'] as const,
 };
 

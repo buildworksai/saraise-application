@@ -10,7 +10,16 @@ from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import serializers
 from rest_framework.exceptions import NotFound
 
-from .models import Attendance, Department, Employee, LeaveBalance, LeaveRequest
+from .models import (
+    Attendance,
+    Department,
+    Employee,
+    HumanResourcesConfiguration,
+    HumanResourcesConfigurationAudit,
+    HumanResourcesConfigurationVersion,
+    LeaveBalance,
+    LeaveRequest,
+)
 
 EMPLOYMENT_TYPES = ("full_time", "part_time", "contractor", "temporary")
 ATTENDANCE_STATUSES = ("present", "absent", "late", "half_day", "on_leave")
@@ -18,13 +27,8 @@ LEAVE_TYPES = ("annual", "sick", "personal", "maternity", "paternity", "unpaid")
 
 COMMON_READ_FIELDS = (
     "id",
-    "tenant_id",
     "created_at",
     "updated_at",
-    "created_by",
-    "updated_by",
-    "deleted_at",
-    "deleted_by",
 )
 
 
@@ -123,7 +127,6 @@ class DepartmentUpdateSerializer(CommandSerializer):
     parent_department_id = serializers.UUIDField(required=False, allow_null=True)
     manager_id = serializers.UUIDField(required=False, allow_null=True)
     description = serializers.CharField(required=False, allow_blank=True)
-    is_active = serializers.BooleanField(required=False)
 
     def validate_parent_department_id(self, value: UUID | None) -> UUID | None:
         return _related_exists(self, Department, value, "parent_department_id")
@@ -302,6 +305,23 @@ class AttendanceListSerializer(serializers.ModelSerializer):
             "notes",
         )
 
+    def to_representation(self, instance: Attendance) -> dict[str, Any]:
+        representation = cast(dict[str, Any], super().to_representation(instance))
+        revision = instance.revisions.order_by("-revision").only("after_values").first()
+        if revision is not None:
+            for field in (
+                "attendance_date",
+                "check_in_time",
+                "check_out_time",
+                "hours_worked",
+                "status",
+                "source",
+                "notes",
+            ):
+                if field in revision.after_values:
+                    representation[field] = revision.after_values[field]
+        return representation
+
     def get_employee_name(self, obj: Attendance) -> str:
         employee = cast(Employee, getattr(obj, "employee"))
         return f"{employee.first_name} {employee.last_name}".strip()
@@ -329,6 +349,7 @@ class AttendanceUpdateSerializer(CommandSerializer):
     hours_worked = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=24, required=False)
     status = serializers.ChoiceField(choices=ATTENDANCE_STATUSES, required=False)
     notes = serializers.CharField(allow_blank=False, trim_whitespace=True)
+    correction_reason = serializers.CharField(required=False, allow_blank=False, trim_whitespace=True, write_only=True)
 
 
 class ClockInSerializer(CommandSerializer):
@@ -495,6 +516,67 @@ class LeaveCancellationSerializer(LeaveApprovalSerializer):
     """Cancellation has the same idempotent transition payload as approval."""
 
 
+class HumanResourcesConfigurationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HumanResourcesConfiguration
+        fields = ("id", "environment", "version", "document", "updated_at")
+        read_only_fields = fields
+
+
+class HumanResourcesConfigurationVersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HumanResourcesConfigurationVersion
+        fields = (
+            "id",
+            "environment",
+            "version",
+            "document",
+            "created_by",
+            "correlation_id",
+            "created_at",
+            "change_reason",
+            "rolled_back_from_version",
+        )
+        read_only_fields = fields
+
+
+class HumanResourcesConfigurationAuditSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HumanResourcesConfigurationAudit
+        fields = (
+            "id",
+            "environment",
+            "version",
+            "action",
+            "actor_id",
+            "correlation_id",
+            "before_document",
+            "after_document",
+            "change_reason",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class HumanResourcesConfigurationWriteSerializer(CommandSerializer):
+    environment = serializers.RegexField(r"^[a-z0-9][a-z0-9_-]{0,31}$", default="default")
+    document = serializers.JSONField()
+    change_reason = serializers.CharField(min_length=1, max_length=500, trim_whitespace=True)
+    idempotency_key = serializers.CharField(min_length=1, max_length=1024, trim_whitespace=True)
+
+
+class HumanResourcesConfigurationPreviewSerializer(CommandSerializer):
+    environment = serializers.RegexField(r"^[a-z0-9][a-z0-9_-]{0,31}$", default="default")
+    document = serializers.JSONField()
+
+
+class HumanResourcesConfigurationRollbackSerializer(CommandSerializer):
+    environment = serializers.RegexField(r"^[a-z0-9][a-z0-9_-]{0,31}$", default="default")
+    version = serializers.IntegerField(min_value=1)
+    change_reason = serializers.CharField(min_length=1, max_length=500, trim_whitespace=True)
+    idempotency_key = serializers.CharField(min_length=1, max_length=1024, trim_whitespace=True)
+
+
 __all__ = [
     "AttendanceCreateSerializer",
     "AttendanceDetailSerializer",
@@ -513,6 +595,12 @@ __all__ = [
     "EmployeeTransitionSerializer",
     "EmployeeTreeSerializer",
     "EmployeeUpdateSerializer",
+    "HumanResourcesConfigurationAuditSerializer",
+    "HumanResourcesConfigurationPreviewSerializer",
+    "HumanResourcesConfigurationRollbackSerializer",
+    "HumanResourcesConfigurationSerializer",
+    "HumanResourcesConfigurationVersionSerializer",
+    "HumanResourcesConfigurationWriteSerializer",
     "LeaveApprovalSerializer",
     "LeaveBalanceCreateSerializer",
     "LeaveBalanceDetailSerializer",

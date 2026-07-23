@@ -10,10 +10,9 @@ from rest_framework import status
 from src.core.access.decision import HttpPolicyEvaluator, PolicyEvaluation
 from src.core.testing.factories import authenticated_api_client
 
-from ..models import Department, Employee
+from ..models import Department
 from ..services import DepartmentService
 from .factories import DepartmentFactory, EmployeeFactory
-
 
 pytestmark = pytest.mark.django_db
 
@@ -59,6 +58,35 @@ def test_csrf_is_enforced_for_unsafe_session_requests(tenant_a: Any, tenant_a_us
     assert not Department.objects.for_tenant(tenant_a.id).filter(department_code="NO-CSRF").exists()
 
 
+def test_every_mutation_requires_durable_idempotency_and_replays_exactly_once(
+    tenant_a: Any,
+    tenant_a_client: Any,
+    allow_hr_access: Any,
+) -> None:
+    allow_hr_access(tenant_a.id)
+    path = "/api/v2/human-resources/departments/"
+    payload = {"department_code": "IDEM", "department_name": "Idempotent"}
+
+    missing = tenant_a_client.post(path, payload, format="json", HTTP_IDEMPOTENCY_KEY="")
+    assert missing.status_code == status.HTTP_400_BAD_REQUEST
+
+    first = tenant_a_client.post(path, payload, format="json", HTTP_IDEMPOTENCY_KEY="department-create-1")
+    replay = tenant_a_client.post(path, payload, format="json", HTTP_IDEMPOTENCY_KEY="department-create-1")
+    conflict = tenant_a_client.post(
+        path,
+        {**payload, "department_name": "Conflicting reuse"},
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="department-create-1",
+    )
+
+    assert first.status_code == status.HTTP_201_CREATED
+    assert replay.status_code == first.status_code
+    assert replay.json()["data"] == first.json()["data"]
+    assert conflict.status_code == status.HTTP_409_CONFLICT
+    assert conflict.json()["error"]["code"] == "HR_IDEMPOTENCY_CONFLICT"
+    assert Department.objects.for_tenant(tenant_a.id).filter(department_code="IDEM").count() == 1
+
+
 def test_employee_collection_paginates_filters_searches_orders_and_rejects_tenant_input(
     tenant_a: Any,
     tenant_a_client: Any,
@@ -95,7 +123,13 @@ def test_employee_collection_paginates_filters_searches_orders_and_rejects_tenan
     payload = assert_success_envelope(response)
     assert [row["id"] for row in payload["data"]] == [str(alpha.id)]
     assert payload["meta"]["pagination"]["page_size"] == 100
-    assert "tenant_id" in payload["data"][0]
+    assert {
+        "tenant_id",
+        "created_by",
+        "updated_by",
+        "deleted_at",
+        "deleted_by",
+    }.isdisjoint(payload["data"][0])
 
     spoof = tenant_a_client.post(
         "/api/v2/human-resources/employees/",

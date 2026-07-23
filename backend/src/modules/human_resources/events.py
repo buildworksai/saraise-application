@@ -17,6 +17,7 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
     {
         "human_resources.department.created",
         "human_resources.department.updated",
+        "human_resources.department.activated",
         "human_resources.department.deactivated",
         "human_resources.department.archived",
         "human_resources.employee.created",
@@ -51,6 +52,13 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
 SAFE_PAYLOAD_KEYS: Final[frozenset[str]] = frozenset(
     {
         "attendance_date",
+        "attendance_revision",
+        "before_check_in_time",
+        "before_check_out_time",
+        "before_hours_worked",
+        "after_check_in_time",
+        "after_check_out_time",
+        "after_hours_worked",
         "command",
         "department_id",
         "effective_date",
