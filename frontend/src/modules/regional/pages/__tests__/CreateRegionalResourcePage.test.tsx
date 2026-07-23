@@ -1,102 +1,60 @@
-/**
- * CreateRegionalResourcePage Component Tests
- */
-
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { CreateRegionalResourcePage } from './CreateRegionalResourcePage';
-import { regional_service } from '../services/regional-service';
+import { CreateRegionalResourcePage } from '../CreateRegionalResourcePage';
+import { regionalService } from '../../services/regional-service';
+import { configurationFixture, resourceFixture } from './regional-test-fixtures';
 
-// Mock dependencies
-vi.mock('../services/regional-service');
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => vi.fn(),
-  };
-});
-
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-  },
-}));
+vi.mock('../../services/regional-service');
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const createTestQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: { retry: false },
-    mutations: { retry: false },
-  },
+  defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 });
 
+function renderPage(queryClient: QueryClient) {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter><CreateRegionalResourcePage /></BrowserRouter>
+    </QueryClientProvider>,
+  );
+}
+
 describe('CreateRegionalResourcePage', () => {
-  let queryClient: QueryClient;
-
   beforeEach(() => {
-    queryClient = createTestQueryClient();
     vi.clearAllMocks();
+    vi.mocked(regionalService.getActiveConfiguration).mockResolvedValue(configurationFixture());
   });
 
-  it('should render form', () => {
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <CreateRegionalResourcePage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    expect(screen.getByLabelText(/name/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/description/i)).toBeInTheDocument();
+  it('loads the governed form and validates required fields', async () => {
+    renderPage(createTestQueryClient());
+    const name = await screen.findByLabelText('Name');
+    expect(name).toHaveValue('Regional resource');
+    await userEvent.clear(name);
+    await userEvent.type(name, ' ');
+    await userEvent.click(screen.getByRole('button', { name: 'Create resource' }));
+    expect(
+      await screen.findByText('Name must contain at least 1 non-whitespace characters'),
+    ).toBeInTheDocument();
   });
 
-  it('should validate required fields', async () => {
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <CreateRegionalResourcePage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    const submitButton = screen.getByRole('button', { name: /create/i });
-    await userEvent.click(submitButton);
-
+  it('submits a typed request using the runtime description default', async () => {
+    const created = resourceFixture({ id: 'new-id', name: 'New resource' });
+    const create = vi.mocked(regionalService.createResource).mockResolvedValue(created);
+    renderPage(createTestQueryClient());
+    const name = await screen.findByLabelText('Name');
+    await userEvent.clear(name);
+    await userEvent.type(name, 'New resource');
+    await userEvent.click(screen.getByRole('button', { name: 'Create resource' }));
     await waitFor(() => {
-      expect(screen.getByText(/name is required/i)).toBeInTheDocument();
+      expect(create).toHaveBeenCalledOnce();
     });
-  });
-
-  it('should submit form with valid data', async () => {
-    const mockCreate = vi.mocked(regional_service.createResource).mockResolvedValue({ id: 'new-id' } as any);
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <CreateRegionalResourcePage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    const nameInput = screen.getByLabelText(/name/i);
-    const descriptionInput = screen.getByLabelText(/description/i);
-    const submitButton = screen.getByRole('button', { name: /create/i });
-
-    await userEvent.type(nameInput, 'New Resource');
-    await userEvent.type(descriptionInput, 'New Description');
-    await userEvent.click(submitButton);
-
-    await waitFor(() => {
-      expect(mockCreate).toHaveBeenCalledWith({
-        name: 'New Resource',
-        description: 'New Description',
-        config: {},
-      });
-    });
+    const firstCall = create.mock.calls[0];
+    if (!firstCall) throw new Error('Expected a createResource invocation.');
+    const [payload, key] = firstCall;
+    expect(payload).toEqual({ name: 'New resource', description: '' });
+    expect(typeof key).toBe('string');
   });
 });

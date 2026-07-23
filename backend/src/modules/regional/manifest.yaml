@@ -3,7 +3,7 @@
 
 name: regional
 version: 1.0.0
-description: Country-specific regulatory compliance, tax rules, legal requirements
+description: Tenant-scoped regional resource configuration and governed lifecycle management
 type: foundation
 lifecycle: platform
 dependencies:
@@ -16,11 +16,22 @@ permissions:
   - regional.resource:delete
   - regional.resource:activate
   - regional.resource:deactivate
+  - regional.configuration:read
+  - regional.configuration:write
+  - regional.configuration:rollback
+  - regional.configuration:import
+  - regional.configuration:export
 sod_actions:
   - [regional.resource:create, regional.resource:delete]
 search_indexes:
   - regional_resources
-ai_tools:
-  - create_regional_resource
-  - update_regional_resource
-  - delete_regional_resource
+entities:
+  - RegionalResource
+  - RegionalConfiguration
+  - RegionalConfigurationVersion
+  - RegionalAuditRecord
+endpoints:
+  - /api/v1/regional/resources/
+  - /api/v1/regional/configuration/
+  - /api/v1/regional/health/
+ai_tools: []

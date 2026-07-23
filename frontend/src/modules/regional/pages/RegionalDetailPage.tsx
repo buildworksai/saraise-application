@@ -1,118 +1,170 @@
-/**
- * Regional Detail Page
- * 
- * Displays resource details and allows editing.
- */
-import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate, useParams } from 'react-router-dom';
+import { Edit, Power, PowerOff, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { regionalService } from '../services/regional-service';
-import { Edit, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
+import { ConfirmDialog } from '@/components/ui/Dialog';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { StatusBadge } from '@/components/ui/StatusBadge';
+import { REGIONAL_QUERY_KEYS, ROUTES } from '../contracts';
+import { regionalService } from '../services/regional-service';
+import { useRegionalDocumentTitle } from '../use-regional-document-title';
 
 export const RegionalDetailPage = () => {
-  const { id } = useParams<{ id: string }>();
+  const { id = '' } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-
-  const { data: resource, isLoading } = useQuery({
-    queryKey: ['regional-resource', id],
-    queryFn: () => regionalService.getResource(id!),
-    enabled: !!id,
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const resource = useQuery({
+    queryKey: REGIONAL_QUERY_KEYS.resource(id),
+    queryFn: () => regionalService.getResource(id),
+    enabled: Boolean(id),
   });
+  const configuration = useQuery({
+    queryKey: [...REGIONAL_QUERY_KEYS.configuration('active'), 'active'],
+    queryFn: regionalService.getActiveConfiguration,
+  });
+  useRegionalDocumentTitle(resource.data?.name ?? 'Regional resource');
 
-  const deleteMutation = useMutation({
-    mutationFn: (resourceId: string) => regionalService.deleteResource(resourceId),
+  const remove = useMutation({
+    mutationFn: () => regionalService.deleteResource(id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['regional-resources'] });
-      toast.success('Resource deleted successfully');
-      navigate('/regional');
+      void queryClient.invalidateQueries({ queryKey: REGIONAL_QUERY_KEYS.resources });
+      toast.success('Resource archived successfully');
+      navigate(ROUTES.ROOT);
     },
-    onError: () => {
-      toast.error('Failed to delete resource. Please try again.');
+    onError: () => toast.error('Failed to archive resource. Please try again.'),
+  });
+  const lifecycle = useMutation({
+    mutationFn: (action: 'activate' | 'deactivate') =>
+      action === 'activate'
+        ? regionalService.activateResource(id)
+        : regionalService.deactivateResource(id),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(REGIONAL_QUERY_KEYS.resource(id), updated);
+      void queryClient.invalidateQueries({ queryKey: REGIONAL_QUERY_KEYS.resources });
+      toast.success(updated.is_active ? 'Resource activated' : 'Resource deactivated');
     },
+    onError: () => toast.error('The lifecycle transition failed.'),
   });
 
-  const handleDelete = async () => {
-    if (window.confirm('Are you sure you want to delete this resource?')) {
-      await deleteMutation.mutateAsync(id!);
-    }
+  if (resource.isLoading || configuration.isLoading) {
+    return <p role="status" className="p-8 text-muted-foreground">Loading resource…</p>;
+  }
+  if (resource.isError) {
+    return (
+      <div className="p-8">
+        <ErrorState
+          title="Unable to load resource"
+          message={
+            resource.error instanceof Error
+              ? resource.error.message
+              : 'The resource request failed.'
+          }
+          onRetry={() => void resource.refetch()}
+        />
+      </div>
+    );
+  }
+  if (configuration.isError || !configuration.data) {
+    return (
+      <div className="p-8">
+        <ErrorState
+          title="Configuration unavailable"
+          message="Lifecycle and deletion controls are disabled because the governed workflow could not be loaded."
+          onRetry={() => void configuration.refetch()}
+        />
+      </div>
+    );
+  }
+  if (!resource.data) {
+    return (
+      <div className="p-8">
+        <ErrorState title="Resource not found" message="No Regional resource exists at this address." />
+      </div>
+    );
+  }
+
+  const item = resource.data;
+  const workflow = configuration.data.document.workflow;
+  const executeDelete = () => remove.mutate();
+  const requestDelete = () => {
+    if (workflow.require_delete_confirmation) setDeleteDialogOpen(true);
+    else executeDelete();
   };
 
-  if (isLoading) {
-    return (
-      <div className="p-8">
-        <div className="text-gray-600">Loading resource...</div>
-      </div>
-    );
-  }
-
-  if (!resource) {
-    return (
-      <div className="p-8">
-        <div className="text-red-600">Resource not found</div>
-      </div>
-    );
-  }
-
-  const resourceData = resource as { name: string; description?: string; id: string; is_active: boolean; config?: Record<string, unknown> };
-
   return (
-    <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
+    <main id="main-content" className="space-y-6 p-8">
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">{String(resourceData.name)}</h1>
-          {resourceData.description && (
-            <p className="mt-2 text-gray-600">{String(resourceData.description)}</p>
-          )}
+          <h1 className="text-3xl font-bold text-foreground">{item.name}</h1>
+          <p className="mt-2 text-muted-foreground">
+            {item.description || 'No description provided.'}
+          </p>
         </div>
-        <div className="flex gap-2">
-          <Button onClick={() => navigate('/regional/' + id + '/edit')}>
-            <Edit className="w-4 h-4 mr-2" />
-            Edit
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => navigate(ROUTES.EDIT(item.id))}>
+            <Edit className="mr-2 h-4 w-4" />Edit
           </Button>
-          <Button variant="danger" onClick={handleDelete}>
-            <Trash2 className="w-4 h-4 mr-2" />
-            Delete
+          {item.is_active ? (
+            <Button
+              variant="outline"
+              disabled={lifecycle.isPending}
+              onClick={() => lifecycle.mutate('deactivate')}
+            >
+              <PowerOff className="mr-2 h-4 w-4" />Deactivate
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              disabled={lifecycle.isPending}
+              onClick={() => lifecycle.mutate('activate')}
+            >
+              <Power className="mr-2 h-4 w-4" />Activate
+            </Button>
+          )}
+          <Button variant="danger" disabled={remove.isPending} onClick={requestDelete}>
+            <Trash2 className="mr-2 h-4 w-4" />Archive
           </Button>
         </div>
       </div>
-
-      <Card className="p-6">
-        <div className="space-y-4">
+      {(remove.error || lifecycle.error) ? (
+        <p role="alert" className="rounded-md border border-destructive/40 p-3 text-sm text-destructive">
+          {(remove.error ?? lifecycle.error) instanceof Error
+            ? (remove.error ?? lifecycle.error)?.message
+            : 'The requested operation failed.'}
+        </p>
+      ) : null}
+      <Card>
+        <CardHeader><CardTitle>Resource details</CardTitle></CardHeader>
+        <CardContent className="grid gap-5 md:grid-cols-2">
           <div>
-            <label className="text-sm font-medium text-gray-700">ID</label>
-            <p className="mt-1 text-gray-900">{String(resourceData.id)}</p>
+            <p className="text-sm font-medium text-muted-foreground">Identifier</p>
+            <p className="mt-1 font-mono text-sm text-foreground">{item.id}</p>
           </div>
           <div>
-            <label className="text-sm font-medium text-gray-700">Name</label>
-            <p className="mt-1 text-gray-900">{String(resourceData.name)}</p>
+            <p className="text-sm font-medium text-muted-foreground">Status</p>
+            <p className="mt-1"><StatusBadge status={item.is_active ? 'active' : 'inactive'} /></p>
           </div>
-          {resourceData.description && (
-            <div>
-              <label className="text-sm font-medium text-gray-700">Description</label>
-              <p className="mt-1 text-gray-900">{String(resourceData.description)}</p>
-            </div>
-          )}
-          <div>
-            <label className="text-sm font-medium text-gray-700">Status</label>
-            <p className="mt-1">
-              <span className={resourceData.is_active ? 'px-2 py-1 rounded text-xs bg-green-100 text-green-800' : 'px-2 py-1 rounded text-xs bg-gray-100 text-gray-800'}>
-                {resourceData.is_active ? 'Active' : 'Inactive'}
-              </span>
-            </p>
+          <div className="md:col-span-2">
+            <p className="text-sm font-medium text-muted-foreground">Configuration</p>
+            <pre className="mt-1 max-h-80 overflow-auto rounded-md bg-muted p-3 text-sm text-foreground">
+              {JSON.stringify(item.config, null, 2)}
+            </pre>
           </div>
-          {resourceData.config && (
-            <div>
-              <label className="text-sm font-medium text-gray-700">Configuration</label>
-              <pre className="mt-1 p-2 bg-gray-100 rounded text-sm overflow-auto">
-                {JSON.stringify(resourceData.config, null, 2)}
-              </pre>
-            </div>
-          )}
-        </div>
+        </CardContent>
       </Card>
-    </div>
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        title="Archive this resource?"
+        description="The resource is retained as a tombstone and can be restored through the governed API."
+        confirmLabel="Archive resource"
+        variant="danger"
+        onConfirm={executeDelete}
+      />
+    </main>
   );
 };

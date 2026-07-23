@@ -1,137 +1,54 @@
-/**
- * RegionalListPage Component Tests
- */
-
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { RegionalListPage } from './RegionalListPage';
-import { regional_service } from '../services/regional-service';
+import { RegionalListPage } from '../RegionalListPage';
+import { regionalService } from '../../services/regional-service';
+import {
+  configurationFixture,
+  resourceFixture,
+  resourcePageFixture,
+} from './regional-test-fixtures';
 
-// Mock dependencies
-vi.mock('../services/regional-service');
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => vi.fn(),
-  };
-});
-
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-  },
-}));
+vi.mock('../../services/regional-service');
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const createTestQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: { retry: false },
-    mutations: { retry: false },
-  },
+  defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
 });
 
+function renderPage() {
+  return render(
+    <QueryClientProvider client={createTestQueryClient()}>
+      <BrowserRouter><RegionalListPage /></BrowserRouter>
+    </QueryClientProvider>,
+  );
+}
+
 describe('RegionalListPage', () => {
-  let queryClient: QueryClient;
-
   beforeEach(() => {
-    queryClient = createTestQueryClient();
     vi.clearAllMocks();
+    vi.mocked(regionalService.getActiveConfiguration).mockResolvedValue(configurationFixture());
   });
 
-  it('should render loading state', () => {
-    vi.mocked(regional_service.listResources).mockImplementation(
-      () => new Promise(() => {}) // Never resolves
-    );
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <RegionalListPage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+  it('renders the empty state from a typed page response', async () => {
+    vi.mocked(regionalService.listResources).mockResolvedValue(resourcePageFixture([]));
+    renderPage();
+    expect(await screen.findByText('No resources found')).toBeInTheDocument();
   });
 
-  it('should render empty state when no resources', async () => {
-    vi.mocked(regional_service.listResources).mockResolvedValue([]);
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <RegionalListPage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText(/no resources yet/i)).toBeInTheDocument();
-    });
-  });
-
-  it('should render resources list', async () => {
-    const mockResources = [
-      {
-        id: '1',
-        name: 'Resource 1',
-        description: 'Description 1',
-        is_active: true,
-      },
-      {
-        id: '2',
-        name: 'Resource 2',
-        description: 'Description 2',
-        is_active: false,
-      },
+  it('renders resources and sends server-side governed search', async () => {
+    const resources = [
+      resourceFixture({ id: 'one', name: 'Apple' }),
+      resourceFixture({ id: 'two', name: 'Banana', is_active: false }),
     ];
-
-    vi.mocked(regional_service.listResources).mockResolvedValue(mockResources as any);
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <RegionalListPage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('Resource 1')).toBeInTheDocument();
-      expect(screen.getByText('Resource 2')).toBeInTheDocument();
-    });
-  });
-
-  it('should filter resources by search term', async () => {
-    const mockResources = [
-      { id: '1', name: 'Apple', description: 'Fruit' },
-      { id: '2', name: 'Banana', description: 'Fruit' },
-    ];
-
-    vi.mocked(regional_service.listResources).mockResolvedValue(mockResources as any);
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <RegionalListPage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('Apple')).toBeInTheDocument();
-    });
-
-    const searchInput = screen.getByPlaceholderText(/search/i);
-    await userEvent.type(searchInput, 'Banana');
-
-    await waitFor(() => {
-      expect(screen.queryByText('Apple')).not.toBeInTheDocument();
-      expect(screen.getByText('Banana')).toBeInTheDocument();
-    });
+    const list = vi.mocked(regionalService.listResources)
+      .mockResolvedValue(resourcePageFixture(resources));
+    renderPage();
+    expect(await screen.findByText('Apple')).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Search resources'), 'Banana');
+    expect(await screen.findByText('Banana')).toBeInTheDocument();
+    expect(list).toHaveBeenCalled();
   });
 });

@@ -1,190 +1,136 @@
-"""
-Tenant Isolation Tests for Regional module.
+"""Cross-tenant isolation proof for resources and configuration."""
 
-CRITICAL: These tests verify that tenants cannot access each other's data.
-This is the PRIMARY security mechanism for multi-tenant isolation.
-
-Reference: saraise-documentation/rules/compliance-enforcement.md
-Rule: ALL tenant-scoped queries MUST filter by tenant_id
-"""
 import uuid
+from unittest.mock import patch
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.modules.regional.models import TenantBaseModel
 from src.core.auth_utils import get_user_tenant_id
+from src.core.user_models import UserProfile
+from src.modules.regional.models import RegionalConfiguration, RegionalResource
 
 User = get_user_model()
+PREFIX = "/api/v1/regional"
 
 
-@pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
-    settings.SARAISE_MODE = "development"
-
-
-@pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
+def make_tenant_user(username):
+    tenant_id = uuid.uuid4()
+    user = User.objects.create_user(
+        username=username,
+        email=f"{username}@example.com",
+        password="testpass123",
+    )
+    with patch.object(UserProfile, "clean"):
+        profile = UserProfile.objects.get(user=user)
+        profile.tenant_id = str(tenant_id)
+        profile.tenant_role = "tenant_admin"
+        profile.save()
+    return User.objects.get(pk=user.pk)
 
 
 @pytest.fixture
 def tenant_a_user(db):
-    """Create user for tenant A."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_a",
-        email="usera@example.com",
-        password="testpass123",
-    )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+    return make_tenant_user("user_a")
 
 
 @pytest.fixture
 def tenant_b_user(db):
-    """Create user for tenant B."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
+    return make_tenant_user("user_b")
 
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_b",
-        email="userb@example.com",
-        password="testpass123",
-    )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+
+@pytest.fixture
+def api_client():
+    return APIClient()
+
+
+@pytest.fixture(autouse=True)
+def override_saraise_mode(settings):
+    settings.SARAISE_MODE = "development"
 
 
 @pytest.mark.django_db
 class TestRegionalTenantIsolation:
-    """
-    CRITICAL: Tenant isolation tests for TenantBaseModel model.
-    These tests verify that tenants cannot access each other's resources.
-    """
-
-    def test_user_cannot_list_other_tenant_resources(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's resources in list."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant A
-        resource_a = TenantBaseModel.objects.create(
-            tenant_id=tenant_a_id,
-            name="Tenant A Resource",
-            description="Resource for tenant A",
+    def test_list_detail_update_delete_are_tenant_isolated(
+        self, api_client, tenant_a_user, tenant_b_user
+    ):
+        tenant_a = get_user_tenant_id(tenant_a_user)
+        tenant_b = get_user_tenant_id(tenant_b_user)
+        resource_a = RegionalResource.objects.create(
+            tenant_id=tenant_a,
+            name="Tenant A",
+            is_active=True,
             created_by=str(tenant_a_user.id),
         )
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
+        resource_b = RegionalResource.objects.create(
+            tenant_id=tenant_b,
+            name="Tenant B",
+            is_active=True,
             created_by=str(tenant_b_user.id),
         )
-
-        # Login as tenant A
         api_client.force_authenticate(user=tenant_a_user)
 
-        response = api_client.get("/api/v1/regional/resources/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        resource_ids = [r["id"] for r in data]
-
-        # User A should see tenant A's resource, but NOT tenant B's resource
-        assert resource_a.id in resource_ids
-        assert resource_b.id not in resource_ids
-
-    def test_user_cannot_get_other_tenant_resource_by_id(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot GET other tenant's resource by ID (returns 404)."""
-        tenant_a_id = get_user_tenant_id(tenant_a_user)
-        tenant_b_id = get_user_tenant_id(tenant_b_user)  # noqa: F841
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to access tenant B's resource
-        response = api_client.get(f"/api/v1/regional/resources/{resource_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    def test_user_cannot_update_other_tenant_resource(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot UPDATE other tenant's resource (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to update tenant B's resource
-        data = {"name": "Hacked Name"}
-        response = api_client.put(
-            f"/api/v1/regional/resources/{resource_b.id}/",
-            data,
-            format="json"
-        )
-        assert response.status_code == status.HTTP_404_NOT_FOUND
-
-        # Verify resource was not modified
+        listed = api_client.get(f"{PREFIX}/resources/")
+        assert listed.status_code == status.HTTP_200_OK
+        ids = {item["id"] for item in listed.data["results"]}
+        assert str(resource_a.id) in ids
+        assert str(resource_b.id) not in ids
+        assert api_client.get(
+            f"{PREFIX}/resources/{resource_b.id}/"
+        ).status_code == status.HTTP_404_NOT_FOUND
+        assert api_client.patch(
+            f"{PREFIX}/resources/{resource_b.id}/",
+            {"name": "Hacked"},
+            format="json",
+        ).status_code == status.HTTP_404_NOT_FOUND
+        assert api_client.delete(
+            f"{PREFIX}/resources/{resource_b.id}/"
+        ).status_code == status.HTTP_404_NOT_FOUND
         resource_b.refresh_from_db()
-        assert resource_b.name == "Tenant B Resource"
+        assert resource_b.name == "Tenant B"
+        assert resource_b.deleted_at is None
 
-    def test_user_cannot_delete_other_tenant_resource(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot DELETE other tenant's resource (returns 404)."""
-        tenant_b_id = get_user_tenant_id(tenant_b_user)
-
-        # Create resource for tenant B
-        resource_b = TenantBaseModel.objects.create(
-            tenant_id=tenant_b_id,
-            name="Tenant B Resource",
-            description="Resource for tenant B",
-            created_by=str(tenant_b_user.id),
-        )
-
-        # Login as tenant A
+    def test_create_cannot_bind_foreign_tenant(
+        self, api_client, tenant_a_user, tenant_b_user
+    ):
+        foreign_tenant = get_user_tenant_id(tenant_b_user)
         api_client.force_authenticate(user=tenant_a_user)
+        response = api_client.post(
+            f"{PREFIX}/resources/",
+            {
+                "tenant_id": foreign_tenant,
+                "name": "Injected",
+                "config": {"country_code": "IN"},
+            },
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert not RegionalResource.objects.filter(
+            tenant_id=foreign_tenant, name="Injected"
+        ).exists()
 
-        # Try to delete tenant B's resource
-        response = api_client.delete(f"/api/v1/regional/resources/{resource_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+    def test_configuration_history_and_rollback_are_tenant_isolated(
+        self, api_client, tenant_a_user, tenant_b_user
+    ):
+        api_client.force_authenticate(user=tenant_b_user)
+        assert api_client.get(
+            f"{PREFIX}/configuration/current/"
+        ).status_code == status.HTTP_200_OK
+        tenant_b = get_user_tenant_id(tenant_b_user)
+        assert RegionalConfiguration.objects.filter(tenant_id=tenant_b).exists()
 
-        # Verify resource still exists
-        assert TenantBaseModel.objects.filter(id=resource_b.id).exists()
+        api_client.force_authenticate(user=tenant_a_user)
+        history = api_client.get(
+            f"{PREFIX}/configuration/history/?environment=development"
+        )
+        assert history.status_code == status.HTTP_200_OK
+        assert all(item["environment"] == "development" for item in history.data)
+        rollback = api_client.post(
+            f"{PREFIX}/configuration/rollback/",
+            {"environment": "development", "version": 99},
+            format="json",
+        )
+        assert rollback.status_code == status.HTTP_400_BAD_REQUEST
