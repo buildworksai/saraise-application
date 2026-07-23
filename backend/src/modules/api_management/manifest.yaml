@@ -14,6 +14,7 @@ permissions:
   - api_management.resource:activate
   - api_management.resource:deactivate
   - api_management.resource:restore
+  - api_management.resource:rollback
   - api_management.configuration:read
   - api_management.configuration:update
   - api_management.configuration:rollback
@@ -28,12 +29,14 @@ sod_actions:
 metadata:
   entities:
     - api_management_resource
+    - api_management_resource_version
     - api_management_configuration
     - api_management_configuration_version
     - api_management_audit_record
   capabilities:
     - managed_api_registration
     - reversible_resource_archival
+    - resource_version_rollback
     - tenant_runtime_configuration
     - configuration_preview
     - configuration_version_history
@@ -55,12 +58,18 @@ metadata:
       permission: api_management.resource:deactivate
     - path: /api/v1/api-management/resources/{id}/restore/
       permission: api_management.resource:restore
+    - path: /api/v1/api-management/resources/{id}/rollback/
+      permission: api_management.resource:rollback
+    - path: /api/v1/api-management/resources/{id}/versions/
+      permission: api_management.resource:read
     - path: /api/v1/api-management/configuration/
       permissions:
         read: api_management.configuration:read
         update: api_management.configuration:update
     - path: /api/v1/api-management/configuration/preview/
       permission: api_management.configuration:update
+    - path: /api/v1/api-management/configuration/schema/
+      permission: api_management.configuration:read
     - path: /api/v1/api-management/configuration/history/
       permission: api_management.configuration:read
     - path: /api/v1/api-management/configuration/rollback/

@@ -19,7 +19,7 @@ function renderPage() {
 }
 
 describe('ApiManagementListPage', () => {
-  beforeEach(() => { vi.clearAllMocks(); vi.mocked(api_managementService.getConfiguration).mockResolvedValue(configuration); });
+  beforeEach(() => { vi.clearAllMocks(); vi.mocked(api_managementService.getRuntimeConfiguration).mockResolvedValue(configuration); });
 
   it('renders tenant-configured loading state', async () => {
     vi.mocked(api_managementService.listResources).mockImplementation(() => new Promise(() => undefined));

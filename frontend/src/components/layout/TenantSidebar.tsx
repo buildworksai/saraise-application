@@ -8,6 +8,7 @@
  */
 import { NavLink, useLocation } from "react-router-dom";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   Shield,
@@ -30,6 +31,8 @@ import { cn } from "@/lib/utils";
 import { getTenantSidebarTreeForMode } from "@/navigation/tenant-route-registry";
 import { useDocumentIntelligenceConfiguration } from "@/modules/document_intelligence/hooks/use-document-intelligence-configuration";
 import { useTraceabilityCapabilities } from "@/modules/blockchain_traceability/hooks/use-traceability-configuration";
+import { QUERY_KEYS, type ApiManagementConfigurationSchema } from "@/modules/api_management/contracts";
+import { api_managementService } from "@/modules/api_management/services/api_management-service";
 import type { User } from "@/stores/auth-store";
 
 interface NavItem {
@@ -39,6 +42,7 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   module?: string;
   order?: number;
+  runtimeOrderKey?: string;
   children?: NavItem[];
 }
 
@@ -163,6 +167,7 @@ const registryTenantItems: NavItem[] = getTenantSidebarTreeForMode(
         icon: leaf.icon,
         module: leaf.module,
         order: leaf.order,
+        runtimeOrderKey: leaf.runtimeOrderKey,
       })),
     };
   });
@@ -202,6 +207,24 @@ function applyRuntimeNavigationOrder(
           left.label.localeCompare(right.label),
       ),
     };
+  });
+}
+
+function applyApiManagementNavigationOrder(
+  items: readonly NavItem[],
+  schema: ApiManagementConfigurationSchema | undefined,
+): NavItem[] {
+  return items.map((item) => {
+    if (item.module !== "api_management" || !item.children || !schema) return item;
+    const children = item.children.map((child) => {
+      const key = child.runtimeOrderKey;
+      if (!key || !(key in schema.navigation)) return child;
+      return {
+        ...child,
+        order: schema.navigation[key as keyof ApiManagementConfigurationSchema["navigation"]].order,
+      };
+    }).sort((left, right) => (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER) || left.label.localeCompare(right.label));
+    return { ...item, order: children[0]?.order, children };
   });
 }
 
@@ -281,10 +304,14 @@ export const TenantSidebar = ({ user }: { user: User }) => {
   const isAdmin = user.tenant_role === "tenant_admin";
   const documentIntelligenceConfiguration = useDocumentIntelligenceConfiguration();
   const traceabilityCapabilities = useTraceabilityCapabilities();
-  const runtimeRegistryItems = applyRuntimeNavigationOrder(
+  const apiManagementSchema = useQuery({
+    queryKey: QUERY_KEYS.CONFIGURATION_SCHEMA(),
+    queryFn: () => api_managementService.getConfigurationSchema(),
+  });
+  const runtimeRegistryItems = applyApiManagementNavigationOrder(applyRuntimeNavigationOrder(
     registryTenantItems,
     documentIntelligenceConfiguration.data?.document.ui.navigation_order,
-  );
+  ), apiManagementSchema.data);
   const renderedTenantItems = [...tenantItems, ...runtimeRegistryItems]
     .map((item) => item.module === "blockchain_traceability" && traceabilityCapabilities.data
       ? { ...item, order: traceabilityCapabilities.data.document.ui.sidebar_order }

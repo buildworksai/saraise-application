@@ -18,6 +18,7 @@ RESOURCE_DELETE: Final = "api_management.resource:delete"
 RESOURCE_ACTIVATE: Final = "api_management.resource:activate"
 RESOURCE_DEACTIVATE: Final = "api_management.resource:deactivate"
 RESOURCE_RESTORE: Final = "api_management.resource:restore"
+RESOURCE_ROLLBACK: Final = "api_management.resource:rollback"
 CONFIG_READ: Final = "api_management.configuration:read"
 CONFIG_UPDATE: Final = "api_management.configuration:update"
 CONFIG_ROLLBACK: Final = "api_management.configuration:rollback"
@@ -33,6 +34,7 @@ PERMISSIONS: Final = (
     RESOURCE_ACTIVATE,
     RESOURCE_DEACTIVATE,
     RESOURCE_RESTORE,
+    RESOURCE_ROLLBACK,
     CONFIG_READ,
     CONFIG_UPDATE,
     CONFIG_ROLLBACK,
@@ -61,7 +63,16 @@ class ActionAccessMixin:
         self.required_permission = permission
         self.required_entitlement = permission
         self.quota_resource = f"api_management.{getattr(self, 'action', 'unknown')}" if permission else None
-        self.quota_cost = 1
+        from .services import PLATFORM_HARD_CEILINGS, ApiManagementService, runtime_environment
+
+        environment = runtime_environment()
+        if self.request.tenant_id is not None:
+            self.quota_cost = ApiManagementService.quota_cost_for_access(
+                self.request.tenant_id,
+                environment,
+            )
+        else:
+            self.quota_cost = PLATFORM_HARD_CEILINGS["quota_cost"]
         return [IsAuthenticated(), RequiresAccess()]
 
 

@@ -1,13 +1,22 @@
 """Service proof for validation, audit, idempotency and reversibility."""
 
+import copy
 import uuid
 
 import pytest
 
-from src.modules.api_management.models import ApiManagementAuditRecord, TenantBaseModel
+from src.modules.api_management.models import (
+    ApiManagementAuditRecord,
+    ApiManagementConfiguration,
+    ApiManagementResourceVersion,
+    TenantBaseModel,
+)
 from src.modules.api_management.services import (
+    CONFIGURATION_KEYS,
+    PLATFORM_HARD_CEILINGS,
     ApiManagementService,
     ConfigurationValidationError,
+    IdempotencyConflictError,
 )
 
 
@@ -150,6 +159,7 @@ class TestApiManagementService:
             correlation_id=context["correlation_id"],
         )
         assert exported["module"] == "api_management"
+        assert exported["schema_version"] == 2
         imported_document = dict(rolled_back.document)
         imported_document["resource_name_min_length"] = 2
         imported = service.import_configuration(
@@ -216,3 +226,162 @@ class TestApiManagementService:
             audience_roles=["beta_operator"],
         )
         assert list(visible) == [resource]
+
+    def test_environment_configuration_and_import_promotion_are_isolated(self, context):
+        service = ApiManagementService()
+        production = service.get_configuration(
+            context["tenant_id"],
+            environment="production",
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+        )
+        staging = service.get_configuration(
+            context["tenant_id"],
+            environment="staging",
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+        )
+        staging_document = copy.deepcopy(staging.document)
+        staging_document["resource_name_max_length"] = 88
+        service.update_configuration(
+            context["tenant_id"],
+            staging_document,
+            environment="staging",
+            **mutation(context),
+        )
+
+        production.refresh_from_db()
+        assert production.document["resource_name_max_length"] == 255
+        exported = service.export_configuration(
+            context["tenant_id"],
+            environment="production",
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+        )
+        promoted = service.import_configuration(
+            context["tenant_id"],
+            exported,
+            environment="staging",
+            **mutation(context),
+        )
+        assert promoted.environment == "staging"
+        assert promoted.document["environment"] == "staging"
+        assert "staging" in promoted.document["environment_registry"]
+
+    def test_configuration_history_is_environment_scoped_and_governed(self, context):
+        service = ApiManagementService()
+        current = service.get_configuration(
+            context["tenant_id"],
+            environment="production",
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+        )
+        document = copy.deepcopy(current.document)
+        document["validation_limits"]["configuration_history_page_size"] = 1
+        document["validation_limits"]["configuration_history_max_page_size"] = 1
+        document["validation_limits"]["configuration_history_max_page"] = 2
+        service.update_configuration(context["tenant_id"], document, **mutation(context))
+
+        versions, count, page, page_size = service.configuration_history(
+            context["tenant_id"],
+            page=1,
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+        )
+        assert count == 2
+        assert (page, page_size) == (1, 1)
+        assert [item.version for item in versions] == [2]
+        with pytest.raises(ConfigurationValidationError):
+            service.configuration_history(
+                context["tenant_id"],
+                page=3,
+                actor_id=context["actor_id"],
+                correlation_id=context["correlation_id"],
+            )
+
+    def test_resource_version_rollback_is_audited_and_payload_idempotent(self, context):
+        service = ApiManagementService()
+        resource = service.create_resource(context["tenant_id"], "Version one", **mutation(context))
+        service.update_resource(
+            resource.id,
+            context["tenant_id"],
+            updates={"name": "Version two"},
+            **mutation(context),
+        )
+        rollback_key = uuid.uuid4()
+        rollback_context = {
+            "actor_id": context["actor_id"],
+            "correlation_id": "req_resource_rollback",
+            "idempotency_key": rollback_key,
+        }
+        rolled_back = service.rollback_resource(
+            resource.id,
+            context["tenant_id"],
+            1,
+            **rollback_context,
+        )
+        assert rolled_back is not None
+        assert rolled_back.name == "Version one"
+        assert rolled_back.version == 3
+        assert (
+            service.rollback_resource(
+                resource.id,
+                context["tenant_id"],
+                1,
+                **rollback_context,
+            )
+            == rolled_back
+        )
+        evidence = ApiManagementResourceVersion.objects.get(
+            tenant_id=context["tenant_id"],
+            idempotency_key=rollback_key,
+        )
+        assert evidence.source_version == 1
+        audit = ApiManagementAuditRecord.objects.get(
+            tenant_id=context["tenant_id"],
+            idempotency_key=rollback_key,
+        )
+        assert audit.correlation_id == "req_resource_rollback"
+        assert audit.before_value["name"] == "Version two"
+        assert audit.after_value["name"] == "Version one"
+        with pytest.raises(IdempotencyConflictError):
+            service.rollback_resource(
+                resource.id,
+                context["tenant_id"],
+                2,
+                **rollback_context,
+            )
+
+    def test_configuration_schema_covers_every_governed_field(self, context):
+        service = ApiManagementService()
+        schema = service.configuration_schema(
+            context["tenant_id"],
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+        )
+        nested = {"validation_limits", "navigation"}
+        assert CONFIGURATION_KEYS - nested <= set(schema["fields"])
+        current = service.get_configuration(
+            context["tenant_id"],
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+        )
+        assert all(f"validation_limits.{field}" in schema["fields"] for field in current.document["validation_limits"])
+        assert all(f"navigation.{target}.order" in schema["fields"] for target in current.document["navigation"])
+        assert schema["environment"] == "production"
+        assert all(metadata["label"] and metadata["help_text"] for metadata in schema["fields"].values())
+
+    def test_evidence_constraints_are_unsavable_and_quota_fails_closed(self, context):
+        service = ApiManagementService()
+        current = service.get_configuration(
+            context["tenant_id"],
+            actor_id=context["actor_id"],
+            correlation_id=context["correlation_id"],
+        )
+        invalid = copy.deepcopy(current.document)
+        invalid["audit_actions"].remove("rollback")
+        with pytest.raises(ConfigurationValidationError):
+            service.update_configuration(context["tenant_id"], invalid, **mutation(context))
+
+        ApiManagementConfiguration.objects.filter(pk=current.pk).update(document={"quota_cost": 0})
+        assert service.quota_cost_for_access(context["tenant_id"], "production") == PLATFORM_HARD_CEILINGS["quota_cost"]

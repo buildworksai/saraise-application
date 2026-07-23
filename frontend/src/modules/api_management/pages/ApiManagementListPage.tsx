@@ -26,8 +26,8 @@ export function ApiManagementListPage() {
   useEffect(() => { document.title = 'API Management resources · SARAISE'; }, []);
 
   const configuration = useQuery({
-    queryKey: QUERY_KEYS.CONFIGURATION,
-    queryFn: api_managementService.getConfiguration,
+    queryKey: QUERY_KEYS.RUNTIME_CONFIGURATION,
+    queryFn: api_managementService.getRuntimeConfiguration,
   });
   const policy = configuration.data?.document;
   const filters = {

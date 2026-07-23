@@ -10,7 +10,12 @@ from rest_framework.test import APIClient
 
 from src.core.auth_utils import get_user_tenant_id
 from src.core.user_models import UserProfile
-from src.modules.api_management.models import TenantBaseModel
+from src.modules.api_management.models import (
+    ApiManagementConfiguration,
+    ApiManagementConfigurationVersion,
+    ApiManagementResourceVersion,
+    TenantBaseModel,
+)
 from src.modules.api_management.services import ApiManagementService
 
 User = get_user_model()
@@ -122,3 +127,75 @@ class TestApiManagementTenantIsolation:
         response = client.get("/api/v1/api-management/configuration/")
         assert response.status_code == 200
         assert response.data["document"]["resource_name_max_length"] == 255
+
+    def test_environment_configuration_versions_are_tenant_isolated(
+        self,
+        tenant_a_user,
+        tenant_b_user,
+    ):
+        service = ApiManagementService()
+        tenant_b = get_user_tenant_id(tenant_b_user)
+        staging_b = service.get_configuration(
+            tenant_b,
+            environment="staging",
+            actor_id=str(tenant_b_user.id),
+            correlation_id="req_b_staging",
+        )
+        changed = dict(staging_b.document)
+        changed["resource_name_max_length"] = 73
+        service.update_configuration(
+            tenant_b,
+            changed,
+            environment="staging",
+            actor_id=str(tenant_b_user.id),
+            correlation_id="req_b_staging",
+            idempotency_key=uuid.uuid4(),
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=tenant_a_user)
+        response = client.get("/api/v1/api-management/configuration/?environment=staging")
+        assert response.status_code == 200
+        assert response.data["document"]["resource_name_max_length"] == 255
+        tenant_a = get_user_tenant_id(tenant_a_user)
+        assert not ApiManagementConfiguration.objects.filter(
+            tenant_id=tenant_a,
+            document__resource_name_max_length=73,
+        ).exists()
+        assert not ApiManagementConfigurationVersion.objects.filter(
+            tenant_id=tenant_a,
+            document__resource_name_max_length=73,
+        ).exists()
+
+    def test_resource_versions_cannot_be_rolled_back_cross_tenant(
+        self,
+        tenant_a_user,
+        tenant_b_user,
+    ):
+        foreign = create_resource(tenant_b_user, "Foreign version")
+        service = ApiManagementService()
+        service.update_resource(
+            foreign.id,
+            get_user_tenant_id(tenant_b_user),
+            updates={"name": "Foreign version two"},
+            actor_id=str(tenant_b_user.id),
+            correlation_id="req_foreign_update",
+            idempotency_key=uuid.uuid4(),
+        )
+        assert (
+            ApiManagementResourceVersion.objects.filter(
+                tenant_id=get_user_tenant_id(tenant_b_user),
+                resource_id=foreign.id,
+            ).count()
+            == 2
+        )
+
+        client = APIClient()
+        client.force_authenticate(user=tenant_a_user)
+        response = client.post(
+            f"/api/v1/api-management/resources/{foreign.id}/rollback/",
+            {"version": 1},
+            format="json",
+            **headers(),
+        )
+        assert response.status_code == status.HTTP_404_NOT_FOUND

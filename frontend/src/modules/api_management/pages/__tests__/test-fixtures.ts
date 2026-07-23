@@ -1,10 +1,43 @@
-import type { ApiManagementConfiguration, ApiManagementResource, PaginatedResponse } from '../../contracts';
+import type { ApiManagementConfiguration, ApiManagementConfigurationSchema, ApiManagementResource, ConfigurationFieldSchema, PaginatedResponse } from '../../contracts';
+
+const numberField = (label: string, helpText = `${label} operational impact.`): ConfigurationFieldSchema => ({ type: 'integer', label, help_text: helpText, min_value: 0, max_value: 10_000 });
+const field = (label: string, type: ConfigurationFieldSchema['type'] = 'string'): ConfigurationFieldSchema => ({ type, label, help_text: `${label} operational guidance.` });
 
 export const configuration = {
+  environment: 'development',
   version: 1,
   updated_at: '2026-07-23T10:00:00Z',
   document: {
     environment: 'development',
+    environment_registry: ['development', 'staging', 'production'],
+    navigation: { resources_list: { order: 340 }, resources_create: { order: 341 }, resources_detail: { order: 342 }, configuration: { order: 343 } },
+    validation_limits: {
+      list_max_items: 64,
+      list_item_max_length: 128,
+      resource_name_minimum_floor: 1,
+      resource_name_minimum_ceiling: 128,
+      resource_name_maximum_floor: 1,
+      resource_name_maximum_ceiling: 255,
+      resource_description_max_length: 4000,
+      page_size_minimum: 1,
+      page_size_maximum: 100,
+      deletion_confirmation_max_length: 512,
+      health_cache_ttl_minimum: 1,
+      health_cache_ttl_maximum: 300,
+      table_skeleton_rows_minimum: 1,
+      table_skeleton_rows_maximum: 20,
+      form_description_rows_minimum: 2,
+      form_description_rows_maximum: 20,
+      rollout_percentage_minimum: 0,
+      rollout_percentage_maximum: 100,
+      configuration_history_page_size: 25,
+      configuration_history_max_page_size: 100,
+      configuration_history_max_page: 1000,
+      configuration_version_reason_max_length: 64,
+      resource_version_reason_max_length: 64,
+      audit_target_type_max_length: 32,
+      audit_action_max_length: 64,
+    },
     resource_name_min_length: 1,
     resource_name_max_length: 255,
     resource_description_default: '',
@@ -27,9 +60,67 @@ export const configuration = {
     rollout_percentage: 100,
     rollout_roles: [],
     rollout_cohorts: [],
+    rollout_strategy: 'tenant_uuid_modulo',
+    rollout_bucket_count: 100,
+    quota_cost: 1,
+    configuration_version_reasons: ['update', 'rollback', 'import'],
+    resource_version_reasons: ['create', 'update', 'rollback'],
+    audit_target_types: ['configuration', 'resource'],
+    audit_actions: ['create', 'update', 'rollback', 'import'],
     allowed_resource_config_keys: [],
   },
 } satisfies ApiManagementConfiguration;
+
+const configurationFields: Readonly<Record<string, ConfigurationFieldSchema>> = {
+  environment: { ...field('Environment', 'select'), options: ['development', 'staging', 'production'] },
+  environment_registry: { ...field('Environment registry', 'string_list'), max_items: 64, max_length: 128 },
+  feature_enabled: field('Feature enabled', 'boolean'),
+  rollout_percentage: numberField('Rollout percentage'),
+  rollout_roles: { ...field('Rollout roles', 'string_list'), max_items: 64, max_length: 128 },
+  rollout_cohorts: { ...field('Rollout cohorts', 'string_list'), max_items: 64, max_length: 128 },
+  resource_name_min_length: numberField('Minimum name length'),
+  resource_name_max_length: numberField('Maximum name length'),
+  resource_description_default: { ...field('Default description'), max_length: 4000 },
+  resource_initially_active: field('New resources start active', 'boolean'),
+  allowed_resource_config_keys: { ...field('Allowed resource configuration keys', 'string_list'), max_items: 64, max_length: 128 },
+  resource_config_default: field('Default resource configuration', 'json_object'),
+  writable_fields: { ...field('Writable fields', 'string_list'), options: ['name', 'description', 'config'] },
+  filter_fields: { ...field('Filter fields', 'string_list'), options: ['is_active'] },
+  search_fields: { ...field('Search fields', 'string_list'), options: ['name', 'description'] },
+  ordering_fields: { ...field('Ordering fields', 'string_list'), options: ['name', 'created_at', 'updated_at'] },
+  default_ordering: { ...field('Default ordering'), options: ['name', '-name', 'created_at', '-created_at', 'updated_at', '-updated_at'] },
+  deletion_confirmation_message: { ...field('Archive confirmation message'), max_length: 512 },
+  page_size: numberField('Page size'),
+  max_page_size: numberField('Maximum page size'),
+  table_skeleton_rows: numberField('Loading table rows'),
+  form_description_rows: numberField('Description field rows'),
+  health_cache_ttl_seconds: numberField('Health cache TTL', 'Seconds a health result may be reused; lower values increase dependency traffic.'),
+  activation_enabled: field('Activation transition enabled', 'boolean'),
+  deactivation_enabled: field('Deactivation transition enabled', 'boolean'),
+  rollout_strategy: { ...field('Rollout strategy'), options: ['tenant_uuid_modulo'] },
+  rollout_bucket_count: numberField('Rollout bucket count'),
+  quota_cost: numberField('Quota cost'),
+  configuration_version_reasons: { ...field('Configuration version reasons', 'string_list'), max_items: 64, max_length: 64 },
+  resource_version_reasons: { ...field('Resource version reasons', 'string_list'), max_items: 64, max_length: 64 },
+  audit_target_types: { ...field('Audit target types', 'string_list'), max_items: 64, max_length: 32 },
+  audit_actions: { ...field('Audit actions', 'string_list'), max_items: 64, max_length: 64 },
+  ...Object.fromEntries(Object.keys(configuration.document.validation_limits).map((key) => [`validation_limits.${key}`, numberField(key)])),
+  ...Object.fromEntries(Object.keys(configuration.document.navigation).map((key) => [`navigation.${key}.order`, numberField(`${key} navigation order`)])),
+};
+
+export const configurationSchema = {
+  schema_version: 2,
+  environment: 'development',
+  environments: ['development', 'staging', 'production'],
+  fields: configurationFields,
+  dependencies: [
+    { source_field: 'feature_enabled', operator: 'equals', value: false, target_fields: ['rollout_percentage'], effect: { kind: 'set', value: 0 } },
+    { source_field: 'feature_enabled', operator: 'equals', value: false, target_fields: ['rollout_percentage', 'rollout_roles', 'rollout_cohorts', 'activation_enabled', 'deactivation_enabled'], effect: { kind: 'disable' } },
+    { source_field: 'rollout_percentage', operator: 'equals', value: 100, target_fields: ['rollout_roles', 'rollout_cohorts'], effect: { kind: 'disable' } },
+  ],
+  navigation: configuration.document.navigation,
+  platform_hard_ceilings: {},
+} satisfies ApiManagementConfigurationSchema;
 
 export function resource(overrides: Partial<ApiManagementResource> = {}): ApiManagementResource {
   return {

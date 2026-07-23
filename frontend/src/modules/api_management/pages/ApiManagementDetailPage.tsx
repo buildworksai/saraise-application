@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Power, Trash2 } from 'lucide-react';
+import { Power, RotateCcw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -17,8 +17,10 @@ export function ApiManagementDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [rollbackVersion, setRollbackVersion] = useState<number | null>(null);
   const resource = useQuery({ queryKey: QUERY_KEYS.RESOURCE(id), queryFn: () => api_managementService.getResource(id), enabled: Boolean(id) });
-  const configuration = useQuery({ queryKey: QUERY_KEYS.CONFIGURATION, queryFn: api_managementService.getConfiguration });
+  const versions = useQuery({ queryKey: QUERY_KEYS.RESOURCE_VERSIONS(id), queryFn: () => api_managementService.listResourceVersions(id), enabled: Boolean(id) });
+  const configuration = useQuery({ queryKey: QUERY_KEYS.RUNTIME_CONFIGURATION, queryFn: api_managementService.getRuntimeConfiguration });
   const policy = configuration.data?.document;
 
   useEffect(() => { document.title = resource.data ? `${resource.data.name} · API Management · SARAISE` : 'API Management resource · SARAISE'; }, [resource.data]);
@@ -40,6 +42,20 @@ export function ApiManagementDetailPage() {
     mutationFn: (resourceId: string) => api_managementService.deleteResource(resourceId),
     onSuccess: async (_result, resourceId) => { await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.RESOURCES() }); toast.success('Resource archived', { action: { label: 'Restore', onClick: () => restore.mutate(resourceId) } }); navigate(ROUTES.RESOURCES); },
     onError: () => toast.error('The archive operation was rejected.'),
+  });
+  const rollback = useMutation({
+    mutationFn: (version: number) => api_managementService.rollbackResource(id, {
+      version,
+      idempotency_key: crypto.randomUUID(),
+    }),
+    onSuccess: async (updated, sourceVersion) => {
+      queryClient.setQueryData(QUERY_KEYS.RESOURCE(id), updated);
+      setRollbackVersion(null);
+      await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.RESOURCE_VERSIONS(id) });
+      await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.RESOURCES() });
+      toast.success(`Resource restored from version ${sourceVersion}`);
+    },
+    onError: () => toast.error('The resource rollback was rejected.'),
   });
 
   if (resource.isLoading || configuration.isLoading) return <div className="p-8 text-muted-foreground" role="status">Loading resource…</div>;
@@ -68,8 +84,25 @@ export function ApiManagementDetailPage() {
         </dl>
         <div className="mt-6"><h2 className="text-sm font-medium text-muted-foreground">Resource configuration</h2><pre className="mt-2 overflow-auto rounded bg-muted p-3 text-sm text-foreground">{JSON.stringify(item.config, null, 2)}</pre></div>
       </Card>
+      <Card className="space-y-3 p-6">
+        <h2 className="text-lg font-semibold">Immutable resource versions</h2>
+        <p className="text-sm text-muted-foreground">Rollback creates a new audited version; it never rewrites evidence.</p>
+        {versions.isLoading ? <p role="status">Loading resource versions…</p> : versions.error ? <ErrorState message="Resource version history could not be loaded." onRetry={() => { void versions.refetch(); }} /> : (
+          <div className="divide-y rounded border">
+            {versions.data?.results.map((version) => (
+              <div key={version.version} className="flex items-center justify-between gap-3 p-3 text-sm">
+                <div><strong>Version {version.version}</strong><p className="text-muted-foreground">{version.reason} · {new Date(version.created_at).toLocaleString()}</p></div>
+                <Button variant="outline" size="sm" disabled={version.version === item.version || rollback.isPending} onClick={() => setRollbackVersion(version.version)}><RotateCcw className="mr-2 h-3 w-3" />Rollback</Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
       <Dialog open={archiveOpen} onOpenChange={(open) => { if (!archive.isPending) setArchiveOpen(open); }} title="Archive API resource?" description={policy.deletion_confirmation_message} size="sm">
         <div className="flex justify-end gap-2"><Button variant="outline" disabled={archive.isPending} onClick={() => setArchiveOpen(false)}>Cancel</Button><Button variant="danger" disabled={archive.isPending} onClick={() => archive.mutate(id)}>{archive.isPending ? 'Archiving…' : 'Archive'}</Button></div>
+      </Dialog>
+      <Dialog open={rollbackVersion !== null} onOpenChange={(open) => { if (!open && !rollback.isPending) setRollbackVersion(null); }} title={`Rollback resource to version ${rollbackVersion ?? ''}?`} description="The selected immutable snapshot will be restored as a new audited resource version." size="sm">
+        <div className="flex justify-end gap-2"><Button variant="outline" disabled={rollback.isPending} onClick={() => setRollbackVersion(null)}>Cancel</Button><Button disabled={rollbackVersion === null || rollback.isPending} onClick={() => { if (rollbackVersion !== null) rollback.mutate(rollbackVersion); }}>{rollback.isPending ? 'Rolling back…' : 'Create rollback version'}</Button></div>
       </Dialog>
     </main>
   );

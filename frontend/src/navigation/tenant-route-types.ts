@@ -11,7 +11,10 @@ export interface TenantSidebarNavigation {
   type: "sidebar";
   label: string;
   icon: TenantRouteIcon;
-  order: number;
+  /** Static order, omitted when the owning module supplies a governed runtime key. */
+  order?: number;
+  /** Module-defined key resolved from its tenant configuration API at runtime. */
+  runtimeOrderKey?: string;
   /** Stable entry path used when the owned page route requires an instance id. */
   path?: string;
 }
