@@ -25,6 +25,7 @@ BASE = "/api/v2/ai-agent-management/"
 EXPECTED_ROUTES = {
     "agents",
     "executions",
+    "configuration",
     "schedules",
     "approvals",
     "sod-policies",

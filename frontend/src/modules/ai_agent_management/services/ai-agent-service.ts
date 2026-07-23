@@ -14,6 +14,9 @@ import {
   type TokenUsage, type ToolCreateRequest, type ToolDetail, type ToolFilters, type ToolInvocation,
   type ToolListItem, type ToolUpdateRequest, type ToolValidationRequest, type TransitionExecutionRequest,
   type ValidationDiagnostic,
+  type AgentManagementConfiguration, type AgentManagementConfigurationVersion,
+  type ConfigurationEnvironment, type ConfigurationExportDocument, type ConfigurationPreview,
+  type ConfigurationRollbackRequest, type ConfigurationWriteRequest,
 } from "../contracts";
 
 function unwrap<T>(response: APIEnvelope<T>): T { return response.data; }
@@ -102,6 +105,22 @@ export const aiAgentService = {
   listJobs: (filters: PageRequest = {}) => getPage<AsyncJob>(withQuery(ENDPOINTS.JOBS.LIST, filters)),
   getJob: (id: string) => get<AsyncJob>(ENDPOINTS.JOBS.DETAIL(id)),
   getHealth: () => get<ModuleHealth>(ENDPOINTS.HEALTH),
+  getConfiguration: (environment: ConfigurationEnvironment = "production") =>
+    get<AgentManagementConfiguration>(withQuery(ENDPOINTS.CONFIGURATION.CURRENT, { environment })),
+  updateConfiguration: (body: ConfigurationWriteRequest) =>
+    post<AgentManagementConfiguration>(ENDPOINTS.CONFIGURATION.UPDATE, body),
+  previewConfiguration: (body: ConfigurationWriteRequest) =>
+    post<ConfigurationPreview>(ENDPOINTS.CONFIGURATION.PREVIEW, body),
+  listConfigurationVersions: (environment: ConfigurationEnvironment = "production") =>
+    get<readonly AgentManagementConfigurationVersion[]>(
+      withQuery(ENDPOINTS.CONFIGURATION.VERSIONS, { environment }),
+    ),
+  rollbackConfiguration: (body: ConfigurationRollbackRequest) =>
+    post<AgentManagementConfiguration>(ENDPOINTS.CONFIGURATION.ROLLBACK, body),
+  importConfiguration: (document: ConfigurationExportDocument) =>
+    post<AgentManagementConfiguration>(ENDPOINTS.CONFIGURATION.IMPORT, { document }),
+  exportConfiguration: (environment: ConfigurationEnvironment = "production") =>
+    get<ConfigurationExportDocument>(withQuery(ENDPOINTS.CONFIGURATION.EXPORT, { environment })),
 };
 
 export type AiAgentService = typeof aiAgentService;

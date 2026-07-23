@@ -7,12 +7,18 @@ Each metric implements the evaluate() method that returns a MetricResult.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from typing import Any
 
 from .harness import EvaluationStatus, MetricResult, TestCase
+from ..services import DEFAULT_CONFIGURATION
 
 
 class CorrectnessMetric:
     """Evaluate whether agent output matches expected behavior."""
+
+    def __init__(self, configuration: Mapping[str, Any] | None = None) -> None:
+        self.configuration = dict(configuration or DEFAULT_CONFIGURATION["evaluation"])
 
     def evaluate(
         self,
@@ -52,7 +58,11 @@ class CorrectnessMetric:
                     details.append(f"Contains forbidden term: '{term}'")
 
         status = (
-            EvaluationStatus.PASS if score >= 0.8 else EvaluationStatus.WARN if score >= 0.5 else EvaluationStatus.FAIL
+            EvaluationStatus.PASS
+            if score >= float(self.configuration["quality_pass_threshold"])
+            else EvaluationStatus.WARN
+            if score >= float(self.configuration["quality_warn_threshold"])
+            else EvaluationStatus.FAIL
         )
 
         return MetricResult(
@@ -66,6 +76,9 @@ class CorrectnessMetric:
 
 class HallucinationMetric:
     """Detect claims in output not supported by provided context."""
+
+    def __init__(self, configuration: Mapping[str, Any] | None = None) -> None:
+        self.configuration = dict(configuration or DEFAULT_CONFIGURATION["evaluation"])
 
     def evaluate(
         self,
@@ -98,7 +111,11 @@ class HallucinationMetric:
             score = max(0.0, score)
 
         status = (
-            EvaluationStatus.PASS if score >= 0.9 else EvaluationStatus.WARN if score >= 0.7 else EvaluationStatus.FAIL
+            EvaluationStatus.PASS
+            if score >= float(self.configuration["hallucination_pass_threshold"])
+            else EvaluationStatus.WARN
+            if score >= float(self.configuration["hallucination_warn_threshold"])
+            else EvaluationStatus.FAIL
         )
 
         details = ""
@@ -151,15 +168,17 @@ class LatencyMetric:
 class TokenEfficiencyMetric:
     """Evaluate output quality relative to tokens consumed."""
 
+    def __init__(self, configuration: Mapping[str, Any] | None = None) -> None:
+        self.configuration = dict(configuration or DEFAULT_CONFIGURATION["evaluation"])
+
     def evaluate(
         self,
         test_case: TestCase,
         actual_output: str,
         latency_ms: float,
     ) -> MetricResult:
-        max_tokens = test_case.max_tokens or 4096
-        # Rough token estimate: ~4 chars per token
-        estimated_tokens = len(actual_output) / 4
+        max_tokens = test_case.max_tokens or int(self.configuration["max_token_fallback"])
+        estimated_tokens = len(actual_output) / float(self.configuration["characters_per_estimated_token"])
 
         if estimated_tokens == 0:
             return MetricResult(
@@ -171,13 +190,15 @@ class TokenEfficiencyMetric:
 
         efficiency = min(1.0, max_tokens / max(estimated_tokens, 1))
         # Penalize very short outputs (likely unhelpful)
-        if len(actual_output) < 20:
-            efficiency *= 0.3
+        if len(actual_output) < int(self.configuration["minimum_useful_output_length"]):
+            efficiency *= float(self.configuration["short_output_penalty"])
 
         status = (
             EvaluationStatus.PASS
-            if efficiency >= 0.7
-            else EvaluationStatus.WARN if efficiency >= 0.4 else EvaluationStatus.FAIL
+            if efficiency >= float(self.configuration["efficiency_pass_threshold"])
+            else EvaluationStatus.WARN
+            if efficiency >= float(self.configuration["efficiency_warn_threshold"])
+            else EvaluationStatus.FAIL
         )
 
         return MetricResult(

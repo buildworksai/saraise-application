@@ -228,3 +228,37 @@ class SecretAccess(AppendOnlyTenantModel):
 
     def __str__(self) -> str:
         return f"Secret Access {self.id}"
+
+
+@tenancy_scope(TENANT_SCOPED)
+class SecretRotationRecord(AppendOnlyTenantModel):
+    """Idempotency and compensation evidence for a completed secret rotation."""
+
+    secret = models.ForeignKey(Secret, on_delete=models.PROTECT, related_name="rotation_records")
+    idempotency_key = models.CharField(max_length=255)
+    rotated_by = models.UUIDField()
+    correlation_id = models.UUIDField()
+    previous_ciphertext = models.TextField(editable=False)
+    previous_wrapped_data_key = models.TextField(editable=False)
+    previous_key_id = models.CharField(max_length=255, editable=False)
+    resulting_rotated_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "ai_secret_rotation_records"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "idempotency_key"),
+                name="ai_secret_rotation_t_idem_uniq",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "secret", "-created_at"),
+                name="ai_secret_rotation_t_sec_idx",
+            ),
+            models.Index(fields=("tenant_id", "correlation_id"), name="ai_secret_rotation_corr_idx"),
+        ]
+
+    def clean(self) -> None:
+        validate_same_tenant(self, "secret")

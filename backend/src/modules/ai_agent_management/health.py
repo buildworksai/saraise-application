@@ -24,7 +24,7 @@ from .authentication import GovernedSessionAuthentication
 from .providers.factory import get_provider_factory
 from .providers.registry import get_registry as get_provider_registry
 from .registries import runner_registry
-from .services import EXECUTE_COMMAND
+from .services import ConfigurationService, EXECUTE_COMMAND
 
 
 def _probe(operation) -> dict[str, object]:
@@ -53,6 +53,7 @@ class ModuleHealthView(GovernedAPIViewMixin, APIView):
 
     def get(self, request):
         tenant = UUID(str(get_user_tenant_id(request.user)))
+        configuration = ConfigurationService.resolve(tenant)["health"]
 
         def database() -> None:
             with connection.cursor() as cursor:
@@ -62,7 +63,7 @@ class ModuleHealthView(GovernedAPIViewMixin, APIView):
 
         def cache_probe() -> None:
             key = f"ai-agent-management:health:{tenant}"
-            cache.set(key, "ok", timeout=5)
+            cache.set(key, "ok", timeout=int(configuration["cache_probe_timeout_seconds"]))
             if cache.get(key) != "ok":
                 raise RuntimeError
 
@@ -74,14 +75,14 @@ class ModuleHealthView(GovernedAPIViewMixin, APIView):
                     "SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
                     "WHERE c.relname LIKE 'ai_%%' AND c.relrowsecurity AND c.relforcerowsecurity"
                 )
-                if int(cursor.fetchone()[0]) < 21:
+                if int(cursor.fetchone()[0]) < int(configuration["minimum_rls_table_count"]):
                     raise RuntimeError
 
         def handler() -> None:
             get_handler(EXECUTE_COMMAND)
 
         def outbox() -> None:
-            cutoff = timezone.now() - timedelta(minutes=5)
+            cutoff = timezone.now() - timedelta(minutes=int(configuration["outbox_stale_minutes"]))
             if OutboxEvent.objects.filter(
                 tenant_id=tenant, status="pending", available_at__lte=cutoff
             ).exists():

@@ -7,7 +7,7 @@ import { aiAgentService } from "./ai-agent-service";
 vi.mock("@/services/api-client", () => ({ apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() } }));
 
 const meta = { correlation_id: "correlation-1", timestamp: "2026-07-23T00:00:00Z" };
-const agent: AgentDetail = { id: "agent-1", name: "Reconciler", description: "", identity_type: "system_bound", subject_id: "subject-1", session_id: null, runner_key: "reference_runner", provider_config_id: null, config: {}, status: "draft", transition_history: [], created_by: "actor-1", deleted_at: null, created_at: meta.timestamp, updated_at: meta.timestamp };
+const agent: AgentDetail = { id: "agent-1", name: "Reconciler", description: "", identity_type: "system_bound", subject_id: "subject-1", runner_key: "reference_runner", provider_config_id: null, config: {}, status: "draft", transition_history: [], deleted_at: null, created_at: meta.timestamp, updated_at: meta.timestamp };
 
 describe("aiAgentService", () => {
   beforeEach(() => vi.clearAllMocks());

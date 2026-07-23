@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import type { JSONValue, PaginationMeta } from "../contracts";
+import { useAiAgentConfiguration } from "../hooks/use-ai-agent-configuration";
 
 export function PageHeader({ title, description, actions }: { readonly title: string; readonly description: string; readonly actions?: ReactNode }) {
   return <header className="flex flex-col gap-4 border-b pb-6 sm:flex-row sm:items-end sm:justify-between"><div className="max-w-3xl"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">AI agent governance</p><h1 className="mt-2 text-3xl font-semibold tracking-tight">{title}</h1><p className="mt-2 text-sm leading-6 text-muted-foreground">{description}</p></div>{actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}</header>;
@@ -26,10 +27,22 @@ export function GovernedError({ error, retry }: { readonly error: Error; readonl
 export function MutationError({ error }: { readonly error: Error }) { const value = errorPresentation(error); return <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm"><p className="font-semibold">{value.title}</p><p className="mt-1 text-muted-foreground">{value.message}</p>{value.correlation ? <p className="mt-2 font-mono text-xs">Correlation: {value.correlation}</p> : null}</div>; }
 
 export function EmptyState({ title, description, action }: { readonly title: string; readonly description: string; readonly action?: ReactNode }) { return <Card><CardContent className="flex min-h-64 flex-col items-center justify-center text-center"><span className="mb-4 rounded-2xl bg-primary/10 p-3 text-primary"><Bot aria-hidden="true"/></span><h2 className="text-xl font-semibold">{title}</h2><p className="mt-2 max-w-lg text-sm text-muted-foreground">{description}</p>{action ? <div className="mt-5">{action}</div> : null}</CardContent></Card>; }
-export function Unavailable({ title, detail }: { readonly title: string; readonly detail: string }) { return <div role="status" className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-5"><div className="flex gap-3"><LockKeyhole className="mt-0.5 h-5 w-5 text-amber-600"/><div><h3 className="font-semibold">{title}</h3><p className="mt-1 text-sm text-muted-foreground">{detail}</p></div></div></div>; }
+export function Unavailable({ title, detail }: { readonly title: string; readonly detail: string }) { return <div role="status" className="rounded-xl border border-accent bg-accent/20 p-5"><div className="flex gap-3"><LockKeyhole className="mt-0.5 h-5 w-5 text-accent-foreground"/><div><h3 className="font-semibold">{title}</h3><p className="mt-1 text-sm text-muted-foreground">{detail}</p></div></div></div>; }
 
-const colors: { readonly [key: string]: string } = { active: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200", completed: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200", approved: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200", running: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200", queued: "bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-200", pending: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200", paused: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200", failed: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200", rejected: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200", blocked: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200", disabled: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200", retired: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200" };
-export function StatusPill({ status }: { readonly status: string }) { return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${colors[status] ?? "bg-muted text-muted-foreground"}`}>{status.replaceAll("_", " ")}</span>; }
+const semanticTokenClasses: Readonly<Record<string, string>> = {
+  "status-success": "bg-primary/10 text-primary",
+  "status-info": "bg-secondary text-secondary-foreground",
+  "status-warning": "bg-accent text-accent-foreground",
+  "status-danger": "bg-destructive/10 text-destructive",
+  "status-neutral": "bg-muted text-muted-foreground",
+};
+export function StatusPill({ status }: { readonly status: string }) {
+  const configuration = useAiAgentConfiguration();
+  const category = configuration.data?.document.ui.status_token_by_state[status] ?? "neutral";
+  const token = configuration.data?.document.ui.status_tokens[category] ?? "status-neutral";
+  const classes = semanticTokenClasses[token] ?? semanticTokenClasses["status-neutral"];
+  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${classes}`}>{status.replaceAll("_", " ")}</span>;
+}
 export function formatDate(value: string | null | undefined): string { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date); }
 export function JsonEvidence({ value, label }: { readonly value: JSONValue | undefined; readonly label: string }) { return value === undefined ? <Unavailable title="Sensitive evidence withheld" detail="This projection deliberately omits opaque task, tool-input, prompt, and provider payloads. Follow the correlated audit metadata instead."/> : <pre aria-label={label} tabIndex={0} className="max-h-80 overflow-auto rounded-lg border bg-muted/30 p-4 text-xs leading-5">{JSON.stringify(value, null, 2)}</pre>; }
 export function can(actions: readonly string[] | undefined, action: string): boolean { return Boolean(actions?.includes(action)); }

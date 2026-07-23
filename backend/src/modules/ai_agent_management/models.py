@@ -147,6 +147,70 @@ class AppendOnlyTenantModel(TenantScopedModel):
         raise ValidationError("Evidence records are append-only.", code="append_only")
 
 
+@tenancy_scope(TENANT_SCOPED)
+class AgentManagementConfiguration(AITenantModel):
+    """The single active, tenant-owned runtime configuration document."""
+
+    environment = models.CharField(max_length=32, default="production")
+    version = models.PositiveIntegerField(default=1)
+    document = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = "ai_agent_management_configuration"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "environment"),
+                name="ai_config_tenant_environment_uniq",
+            ),
+            models.CheckConstraint(condition=Q(version__gte=1), name="ai_config_version_positive"),
+        ]
+        indexes = [
+            models.Index(fields=("tenant_id", "environment"), name="ai_config_tenant_env_idx"),
+        ]
+
+    def clean(self) -> None:
+        _json_type(self.document, dict, "document")
+
+
+@tenancy_scope(TENANT_SCOPED)
+class AgentManagementConfigurationVersion(AppendOnlyTenantModel):
+    """Immutable change/audit evidence for every configuration transition."""
+
+    environment = models.CharField(max_length=32)
+    version = models.PositiveIntegerField()
+    previous_document = models.JSONField(default=dict, blank=True)
+    document = models.JSONField(default=dict)
+    changed_by = models.UUIDField()
+    correlation_id = models.UUIDField()
+    change_type = models.CharField(
+        max_length=16,
+        choices=(("update", "Update"), ("import", "Import"), ("rollback", "Rollback"), ("bootstrap", "Bootstrap")),
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "ai_agent_management_configuration_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "environment", "version"),
+                name="ai_config_version_tenant_env_uniq",
+            ),
+            models.CheckConstraint(condition=Q(version__gte=1), name="ai_config_history_version_positive"),
+        ]
+        indexes = [
+            models.Index(
+                fields=("tenant_id", "environment", "-version"),
+                name="ai_config_history_t_env_idx",
+            ),
+            models.Index(fields=("tenant_id", "correlation_id"), name="ai_config_history_corr_idx"),
+        ]
+        ordering = ("-version", "id")
+
+    def clean(self) -> None:
+        _json_type(self.previous_document, dict, "previous_document")
+        _json_type(self.document, dict, "document")
+
+
 class AgentIdentityType(models.TextChoices):
     USER_BOUND = "user_bound", "User-bound"
     SYSTEM_BOUND = "system_bound", "System-bound"
@@ -417,7 +481,7 @@ class AgentSchedulerTask(StatefulTenantModel):
 # loaded (management commands and migration tests rely on this).
 from .approval_models import ApprovalRequest, ApprovalStatus, SoDPolicy, SoDViolation  # noqa: E402
 from .audit_models import AuditEvent, AuditEventType, AuditTrail, AuditTrailEvent  # noqa: E402
-from .egress_models import EgressRequest, EgressRule, Secret, SecretAccess  # noqa: E402
+from .egress_models import EgressRequest, EgressRule, Secret, SecretAccess, SecretRotationRecord  # noqa: E402
 from .quota_models import KillSwitch, QuotaUsage, ShardSaturation  # noqa: E402
 from .token_models import CostRecord, CostSummary, TokenUsage  # noqa: E402
 from .tool_models import Tool, ToolInvocation  # noqa: E402
@@ -427,6 +491,8 @@ __all__ = [
     "AgentExecution",
     "AgentIdentityType",
     "AgentLifecycleState",
+    "AgentManagementConfiguration",
+    "AgentManagementConfigurationVersion",
     "AgentSchedulerTask",
     "AgentStatus",
     "ApprovalRequest",
@@ -445,6 +511,7 @@ __all__ = [
     "ScheduleStatus",
     "Secret",
     "SecretAccess",
+    "SecretRotationRecord",
     "ShardSaturation",
     "SoDPolicy",
     "SoDViolation",
