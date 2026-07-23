@@ -1,19 +1,29 @@
 """
 Pagination classes for CRM module.
 
-Per plan requirement: default 20, max 100.
+Limits are resolved from tenant configuration for each request.
 """
 
-from rest_framework.pagination import PageNumberPagination
+from src.core.api import GovernedPageNumberPagination
+
+from .configuration import DEFAULT_CRM_CONFIGURATION, effective_configuration
 
 
-class CRMResultsSetPagination(PageNumberPagination):
+class CRMResultsSetPagination(GovernedPageNumberPagination):
     """Pagination for CRM module endpoints.
-    
-    Default page size: 20
-    Max page size: 100
-    Page size query parameter: page_size
+
+    The query parameter and safe bound are governed by tenant configuration.
     """
-    page_size = 20
-    page_size_query_param = 'page_size'
-    max_page_size = 100
+
+    page_size_query_param = "page_size"
+
+    def get_page_size(self, request):
+        tenant_id = getattr(request, "tenant_id", None)
+        configuration = (
+            effective_configuration(tenant_id)["pagination"]
+            if tenant_id is not None
+            else DEFAULT_CRM_CONFIGURATION["pagination"]
+        )
+        self.page_size = int(configuration["default_page_size"])
+        self.max_page_size = int(configuration["maximum_page_size"])
+        return super().get_page_size(request)

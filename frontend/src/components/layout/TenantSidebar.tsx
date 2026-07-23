@@ -18,11 +18,6 @@ import {
   FolderTree,
   Key,
   Bot,
-  BarChart3,
-  TrendingUp,
-  Building2,
-  Briefcase,
-  CheckSquare,
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
@@ -78,59 +73,6 @@ const tenantItems: NavItem[] = [
         path: "/ai-providers/secrets",
         label: "Secret Operations",
         icon: Key,
-      },
-    ],
-  },
-  // CRM Module - Collapsible Group
-  {
-    path: "/crm",
-    label: "CRM",
-    icon: BarChart3,
-    module: "crm",
-    children: [
-      { path: "/crm/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      {
-        path: "/crm/leads",
-        label: "Leads",
-        icon: TrendingUp,
-        children: [
-          { path: "/crm/leads", label: "All Leads", icon: TrendingUp },
-          { path: "/crm/leads/new", label: "New Leads", icon: TrendingUp },
-          { path: "/crm/leads/qualified", label: "Qualified Leads", icon: TrendingUp },
-          { path: "/crm/leads/converted", label: "Converted Leads", icon: TrendingUp },
-        ],
-      },
-      { path: "/crm/contacts", label: "Contacts", icon: Users },
-      {
-        path: "/crm/accounts",
-        label: "Accounts",
-        icon: Building2,
-        children: [
-          { path: "/crm/accounts", label: "All Accounts", icon: Building2 },
-          { path: "/crm/accounts/customers", label: "Customers", icon: Building2 },
-          { path: "/crm/accounts/prospects", label: "Prospects", icon: Building2 },
-          { path: "/crm/accounts/hierarchy", label: "Account Hierarchy", icon: Building2 },
-        ],
-      },
-      {
-        path: "/crm/opportunities",
-        label: "Opportunities",
-        icon: Briefcase,
-        children: [
-          { path: "/crm/opportunities/pipeline", label: "Pipeline View", icon: Briefcase },
-          { path: "/crm/opportunities", label: "All Opportunities", icon: Briefcase },
-          { path: "/crm/opportunities/my", label: "My Opportunities", icon: Briefcase },
-          { path: "/crm/opportunities/closed", label: "Closed Opportunities", icon: Briefcase },
-        ],
-      },
-      {
-        path: "/crm/activities",
-        label: "Activities",
-        icon: CheckSquare,
-        children: [
-          { path: "/crm/activities/tasks", label: "My Tasks", icon: CheckSquare },
-          { path: "/crm/activities", label: "Activity Log", icon: CheckSquare },
-        ],
       },
     ],
   },

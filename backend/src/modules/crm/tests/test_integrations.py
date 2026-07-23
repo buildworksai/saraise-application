@@ -5,6 +5,7 @@ from decimal import Decimal
 import pytest
 from django.test import override_settings
 
+from src.core.resilience import DependencyTimeoutError
 from src.modules.crm import integrations
 
 
@@ -37,6 +38,18 @@ class _Client:
     def get_breaker(self, dependency: str) -> _Breaker:
         assert dependency == "crm_ai"
         return _Breaker()
+
+
+class _RetryingClient(_Client):
+    def __init__(self, body: object) -> None:
+        super().__init__(body)
+        self.attempts = 0
+
+    def post(self, endpoint: str, **kwargs: object) -> _Response:
+        self.attempts += 1
+        if self.attempts < 3:
+            raise DependencyTimeoutError("temporary timeout", dependency="crm_ai")
+        return super().post(endpoint, **kwargs)
 
 
 SCORING = {
@@ -92,6 +105,25 @@ def test_missing_provider_configuration_is_explicitly_unavailable() -> None:
     with override_settings(CRM_LEAD_SCORING_PROVIDER=None):
         with pytest.raises(integrations.IntegrationUnavailable):
             integrations.get_scoring_client()
+
+
+@override_settings(CRM_LEAD_SCORING_PROVIDER=SCORING)
+def test_idempotent_provider_post_retries_with_bounded_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _RetryingClient({"score": 83, "grade": "A", "factors": {}})
+    delays: list[float] = []
+    monkeypatch.setattr(integrations, "ResilientHttpClient", lambda: client)
+    monkeypatch.setattr(integrations.time, "sleep", delays.append)
+    monkeypatch.setattr(integrations.random, "uniform", lambda _minimum, _maximum: 0.0)
+
+    result = integrations.get_scoring_client().score_lead({}, correlation_id="retry_score_1")
+
+    assert result.score == 83
+    assert client.attempts == 3
+    assert delays == [0.1, 0.2]
+    assert client.calls[0][1]["headers"] == {
+        "Idempotency-Key": "retry_score_1",
+        "Accept": "application/json",
+    }
 
 
 @override_settings(CRM_LEAD_SCORING_PROVIDER=SCORING)

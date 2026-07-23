@@ -9,9 +9,10 @@ from django.db import migrations, models
 
 import src.modules.crm.models
 
-
 MARKER = "__crm_0005_original__"
+WIDE_ACTOR_MARKER = "__crm_0005_wide_created_by__"
 MODEL_NAMES = ("Lead", "Account", "Contact", "Opportunity", "Activity")
+TABLE_NAMES = ("crm_leads", "crm_accounts", "crm_contacts", "crm_opportunities", "crm_activities")
 
 
 def _remember(instance, **values):
@@ -63,7 +64,9 @@ def _normalize_leads(Lead):
             lead.email = normalized_email
             changed.add("email")
         normalized_score = min(100, max(0, int(lead.score or 0)))
-        grade = "A" if normalized_score >= 80 else "B" if normalized_score >= 60 else "C" if normalized_score >= 40 else "D"
+        grade = (
+            "A" if normalized_score >= 80 else "B" if normalized_score >= 60 else "C" if normalized_score >= 40 else "D"
+        )
         if lead.score != normalized_score or lead.grade != grade:
             _remember(lead, score=lead.score, grade=lead.grade)
             lead.score, lead.grade = normalized_score, grade
@@ -111,9 +114,11 @@ def _valid_parent(Account, account):
         if parent_id in visited:
             return False
         visited.add(parent_id)
-        parent = Account.objects.filter(
-            id=parent_id, tenant_id=account.tenant_id, is_deleted=False
-        ).only("id", "parent_account_id").first()
+        parent = (
+            Account.objects.filter(id=parent_id, tenant_id=account.tenant_id, is_deleted=False)
+            .only("id", "parent_account_id")
+            .first()
+        )
         if parent is None:
             return False
         ancestors += 1
@@ -218,12 +223,15 @@ def _normalize_opportunities(Opportunity, Account, Contact):
         if not active_account:
             _soft_delete(opportunity)
             changed.update({"is_deleted", "deleted_at", "metadata"})
-        if opportunity.primary_contact_id and not Contact.objects.filter(
-            id=opportunity.primary_contact_id,
-            account_id=opportunity.account_id,
-            tenant_id=opportunity.tenant_id,
-            is_deleted=False,
-        ).exists():
+        if (
+            opportunity.primary_contact_id
+            and not Contact.objects.filter(
+                id=opportunity.primary_contact_id,
+                account_id=opportunity.account_id,
+                tenant_id=opportunity.tenant_id,
+                is_deleted=False,
+            ).exists()
+        ):
             _remember(opportunity, primary_contact_id=opportunity.primary_contact_id)
             opportunity.primary_contact_id = None
             changed.add("primary_contact_id")
@@ -268,9 +276,7 @@ def _normalize_activities(Activity, related_models):
         model = related_models.get(activity.related_to_type)
         related_exists = bool(
             model
-            and model.objects.filter(
-                id=activity.related_to_id, tenant_id=activity.tenant_id, is_deleted=False
-            ).exists()
+            and model.objects.filter(id=activity.related_to_id, tenant_id=activity.tenant_id, is_deleted=False).exists()
         )
         if not related_exists:
             _soft_delete(activity)
@@ -301,9 +307,7 @@ def reconcile_rows(apps, schema_editor):
     _normalize_accounts(models_by_name["Account"])
     _normalize_leads(models_by_name["Lead"])
     _normalize_contacts(models_by_name["Contact"], models_by_name["Account"])
-    _normalize_opportunities(
-        models_by_name["Opportunity"], models_by_name["Account"], models_by_name["Contact"]
-    )
+    _normalize_opportunities(models_by_name["Opportunity"], models_by_name["Account"], models_by_name["Contact"])
     _normalize_activities(
         models_by_name["Activity"],
         {
@@ -338,14 +342,37 @@ def widen_actor_columns(apps, schema_editor):
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
-    for table in ("crm_leads", "crm_accounts", "crm_contacts", "crm_opportunities", "crm_activities"):
+    for table in TABLE_NAMES:
         schema_editor.execute(f'ALTER TABLE "{table}" ALTER COLUMN "created_by" TYPE varchar(255)')
+        schema_editor.execute(
+            f'UPDATE "{table}" '
+            f'SET "created_by" = "metadata"->>\'{WIDE_ACTOR_MARKER}\', '
+            f'"metadata" = "metadata" - \'{WIDE_ACTOR_MARKER}\' '
+            f"WHERE \"metadata\" ? '{WIDE_ACTOR_MARKER}'"
+        )
 
 
-def preserve_wide_actor_columns(apps, schema_editor):
-    """Intentionally retain varchar(255) during rollback to avoid truncation."""
+def narrow_actor_columns_losslessly(apps, schema_editor):
+    """Restore the legacy width without truncating post-expansion actor IDs.
 
-    del apps, schema_editor
+    Values wider than the legacy column are moved into reserved row metadata
+    during rollback.  A later forward migration restores them after widening,
+    which makes forward/reverse/forward lossless while giving the 0004 schema
+    its real physical ``varchar(36)`` contract.
+    """
+
+    del apps
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    for table in reversed(TABLE_NAMES):
+        schema_editor.execute(
+            f'UPDATE "{table}" '
+            f'SET "metadata" = jsonb_set(COALESCE("metadata", \'{{}}\'::jsonb), '
+            f"'{{{WIDE_ACTOR_MARKER}}}', to_jsonb(\"created_by\")), "
+            '"created_by" = NULL '
+            'WHERE length("created_by") > 36'
+        )
+        schema_editor.execute(f'ALTER TABLE "{table}" ALTER COLUMN "created_by" TYPE varchar(36)')
 
 
 ACTOR_STATE = [
@@ -388,7 +415,7 @@ class Migration(migrations.Migration):
             )
         ],
         migrations.SeparateDatabaseAndState(
-            database_operations=[migrations.RunPython(widen_actor_columns, preserve_wide_actor_columns)],
+            database_operations=[migrations.RunPython(widen_actor_columns, narrow_actor_columns_losslessly)],
             state_operations=ACTOR_STATE,
         ),
         *[
@@ -398,9 +425,7 @@ class Migration(migrations.Migration):
                 migrations.AddField(
                     model_name=name.lower(),
                     name="updated_by",
-                    field=models.CharField(
-                        blank=True, db_index=True, editable=False, max_length=255, null=True
-                    ),
+                    field=models.CharField(blank=True, db_index=True, editable=False, max_length=255, null=True),
                 ),
                 migrations.AddField(
                     model_name=name.lower(),
@@ -419,9 +444,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="lead",
             name="score_explanation",
-            field=models.JSONField(
-                blank=True, default=dict, validators=[src.modules.crm.models.validate_metadata]
-            ),
+            field=models.JSONField(blank=True, default=dict, validators=[src.modules.crm.models.validate_metadata]),
         ),
         migrations.AddField(
             model_name="lead",
@@ -434,9 +457,7 @@ class Migration(migrations.Migration):
             field=models.JSONField(blank=True, default=list, editable=False),
         ),
         migrations.RunPython(reconcile_rows, restore_rows),
-        migrations.AlterField(
-            model_name="account", name="name", field=models.CharField(max_length=255)
-        ),
+        migrations.AlterField(model_name="account", name="name", field=models.CharField(max_length=255)),
         migrations.AlterField(
             model_name="account", name="billing_country", field=models.CharField(blank=True, max_length=2)
         ),
@@ -452,15 +473,11 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="lead", name="email", field=models.EmailField(blank=True, max_length=255, null=True)
         ),
-        migrations.AlterField(
-            model_name="lead", name="score", field=models.SmallIntegerField(default=0)
-        ),
+        migrations.AlterField(model_name="lead", name="score", field=models.SmallIntegerField(default=0)),
         migrations.AlterField(
             model_name="lead",
             name="grade",
-            field=models.CharField(
-                choices=[("A", "A"), ("B", "B"), ("C", "C"), ("D", "D")], default="D", max_length=1
-            ),
+            field=models.CharField(choices=[("A", "A"), ("B", "B"), ("C", "C"), ("D", "D")], default="D", max_length=1),
         ),
         migrations.AlterField(
             model_name="lead",
@@ -480,17 +497,13 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="contact", name="email", field=models.EmailField(blank=True, max_length=255, null=True)
         ),
-        migrations.AlterField(
-            model_name="contact", name="engagement_score", field=models.SmallIntegerField(default=0)
-        ),
+        migrations.AlterField(model_name="contact", name="engagement_score", field=models.SmallIntegerField(default=0)),
         migrations.AlterField(
             model_name="opportunity",
             name="primary_contact_id",
             field=models.UUIDField(blank=True, db_index=True, null=True),
         ),
-        migrations.AlterField(
-            model_name="opportunity", name="probability", field=models.SmallIntegerField(default=10)
-        ),
+        migrations.AlterField(model_name="opportunity", name="probability", field=models.SmallIntegerField(default=10)),
         migrations.AlterField(
             model_name="opportunity",
             name="stage",
@@ -562,9 +575,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="activity", name="due_date", field=models.DateTimeField(blank=True, null=True)
         ),
-        migrations.AlterField(
-            model_name="activity", name="completed", field=models.BooleanField(default=False)
-        ),
+        migrations.AlterField(model_name="activity", name="completed", field=models.BooleanField(default=False)),
         migrations.AlterField(
             model_name="activity", name="external_id", field=models.CharField(blank=True, max_length=255)
         ),
@@ -580,9 +591,7 @@ class Migration(migrations.Migration):
             migrations.AlterField(
                 model_name=name.lower(),
                 name="metadata",
-                field=models.JSONField(
-                    blank=True, default=dict, validators=[src.modules.crm.models.validate_metadata]
-                ),
+                field=models.JSONField(blank=True, default=dict, validators=[src.modules.crm.models.validate_metadata]),
             )
             for name in MODEL_NAMES
         ],

@@ -253,7 +253,8 @@ def test_activity_reference_due_completion_external_uniqueness_and_immutability(
     completed.refresh_from_db()
     completed.is_deleted, completed.deleted_at = True, timezone.now()
     completed._allow_admin_delete = True
-    completed.save()
+    with pytest.raises(ValidationError, match="immutable"):
+        completed.save()
 
 
 def test_declared_constraint_and_index_names_are_complete():

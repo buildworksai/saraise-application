@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Iterable
+from decimal import Decimal
 from typing import Any
 
 from django.core.exceptions import ValidationError
@@ -21,6 +22,13 @@ from django.utils import timezone
 from jsonschema import Draft202012Validator
 
 from src.core.tenancy import TenantScopedModel, TimestampedModel
+
+from .configuration import DEFAULT_CRM_CONFIGURATION, effective_configuration
+
+_DEFAULT_LEAD = DEFAULT_CRM_CONFIGURATION["lead"]
+_DEFAULT_GRADE_THRESHOLDS = _DEFAULT_LEAD["grade_thresholds"]
+_DEFAULT_OPPORTUNITY = DEFAULT_CRM_CONFIGURATION["opportunity"]
+_DEFAULT_CONTACT = DEFAULT_CRM_CONFIGURATION["contact"]
 
 
 def generate_uuid() -> str:
@@ -60,7 +68,7 @@ def _normalize_email(value: str | None) -> str | None:
     return normalized or None
 
 
-def _normalize_phone(value: str) -> str:
+def _normalize_phone(value: str, tenant_id: uuid.UUID | None = None) -> str:
     """Normalize unambiguous phone strings while retaining opaque extensions."""
 
     value = value.strip()
@@ -70,7 +78,10 @@ def _normalize_phone(value: str) -> str:
         return value
     international = value.startswith("+")
     digits = re.sub(r"\D", "", value)
-    if not 7 <= len(digits) <= 15:
+    limits = (
+        effective_configuration(tenant_id)["field_limits"] if tenant_id else DEFAULT_CRM_CONFIGURATION["field_limits"]
+    )
+    if not int(limits["phone_min_digits"]) <= len(digits) <= int(limits["phone_max_digits"]):
         return value
     return f"+{digits}" if international else digits
 
@@ -156,8 +167,20 @@ class CRMModel(TenantScopedModel, TimestampedModel):
     """Common mutable CRM persistence and optimistic-version contract."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    created_by = models.CharField(max_length=255, null=True, blank=True, db_index=True, editable=False)
-    updated_by = models.CharField(max_length=255, null=True, blank=True, db_index=True, editable=False)
+    created_by = models.CharField(
+        max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["actor_id"],
+        null=True,
+        blank=True,
+        db_index=True,
+        editable=False,
+    )
+    updated_by = models.CharField(
+        max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["actor_id"],
+        null=True,
+        blank=True,
+        db_index=True,
+        editable=False,
+    )
     version = models.PositiveBigIntegerField(default=1, editable=False)
     is_deleted = models.BooleanField(default=False, db_index=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
@@ -235,20 +258,30 @@ class LeadScoreSource(models.TextChoices):
 
 
 class Lead(CRMModel):
-    first_name = models.CharField(max_length=100, blank=True)
-    last_name = models.CharField(max_length=100)
-    email = models.EmailField(max_length=255, blank=True, null=True)
-    phone = models.CharField(max_length=50, blank=True)
-    company = models.CharField(max_length=255, blank=True)
-    title = models.CharField(max_length=100, blank=True)
-    score = models.SmallIntegerField(default=0)
-    grade = models.CharField(max_length=1, choices=LeadGrade.choices, default=LeadGrade.D)
-    score_source = models.CharField(max_length=20, choices=LeadScoreSource.choices, default=LeadScoreSource.RULES)
+    first_name = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["lead_name"], blank=True)
+    last_name = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["lead_name"])
+    email = models.EmailField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["lead_email"], blank=True, null=True)
+    phone = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["lead_phone"], blank=True)
+    company = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["lead_email"], blank=True)
+    title = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["lead_name"], blank=True)
+    score = models.SmallIntegerField(default=DEFAULT_CRM_CONFIGURATION["lead"]["default_score"])
+    grade = models.CharField(
+        max_length=1, choices=LeadGrade.choices, default=DEFAULT_CRM_CONFIGURATION["lead"]["default_grade"]
+    )
+    score_source = models.CharField(
+        max_length=20,
+        choices=LeadScoreSource.choices,
+        default=DEFAULT_CRM_CONFIGURATION["lead"]["default_score_source"],
+    )
     score_explanation = models.JSONField(default=dict, blank=True, validators=[validate_metadata])
     source = models.CharField(max_length=100, blank=True)
     campaign_id = models.UUIDField(null=True, blank=True)
     owner_id = models.UUIDField(null=True, blank=True, db_index=True)
-    status = models.CharField(max_length=20, choices=LeadStatus.choices, default=LeadStatus.NEW)
+    status = models.CharField(
+        max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["lead_status"],
+        choices=LeadStatus.choices,
+        default=DEFAULT_CRM_CONFIGURATION["lead"]["default_status"],
+    )
     converted_at = models.DateTimeField(null=True, blank=True)
     converted_to_opportunity_id = models.UUIDField(null=True, blank=True)
     transition_history = models.JSONField(default=list, blank=True, editable=False)
@@ -257,12 +290,37 @@ class Lead(CRMModel):
         db_table = "crm_leads"
         constraints = [
             *CRMModel.Meta.constraints,
-            models.CheckConstraint(condition=models.Q(score__gte=0, score__lte=100), name="crm_lead_score_range_ck"),
             models.CheckConstraint(
-                condition=(models.Q(grade="A", score__gte=80, score__lte=100))
-                | (models.Q(grade="B", score__gte=60, score__lte=79))
-                | (models.Q(grade="C", score__gte=40, score__lte=59))
-                | (models.Q(grade="D", score__gte=0, score__lte=39)),
+                condition=models.Q(score__gte=_DEFAULT_LEAD["score_min"], score__lte=_DEFAULT_LEAD["score_max"]),
+                name="crm_lead_score_range_ck",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        grade="A", score__gte=_DEFAULT_GRADE_THRESHOLDS["A"], score__lte=_DEFAULT_LEAD["score_max"]
+                    )
+                )
+                | (
+                    models.Q(
+                        grade="B",
+                        score__gte=_DEFAULT_GRADE_THRESHOLDS["B"],
+                        score__lte=_DEFAULT_GRADE_THRESHOLDS["A"] - 1,
+                    )
+                )
+                | (
+                    models.Q(
+                        grade="C",
+                        score__gte=_DEFAULT_GRADE_THRESHOLDS["C"],
+                        score__lte=_DEFAULT_GRADE_THRESHOLDS["B"] - 1,
+                    )
+                )
+                | (
+                    models.Q(
+                        grade="D",
+                        score__gte=_DEFAULT_GRADE_THRESHOLDS["D"],
+                        score__lte=_DEFAULT_GRADE_THRESHOLDS["C"] - 1,
+                    )
+                ),
                 name="crm_lead_grade_score_ck",
             ),
             models.CheckConstraint(
@@ -297,13 +355,17 @@ class Lead(CRMModel):
 
     def clean(self) -> None:
         self.email = _normalize_email(self.email)
-        self.phone = _normalize_phone(self.phone)
+        self.phone = _normalize_phone(self.phone, self.tenant_id)
         super().clean()
         if not self.last_name.strip():
             raise ValidationError({"last_name": "Last name is required."})
         if self.email:
             EmailValidator()(self.email)
-        expected_grade = "A" if self.score >= 80 else "B" if self.score >= 60 else "C" if self.score >= 40 else "D"
+        lead_configuration = effective_configuration(self.tenant_id)["lead"]
+        thresholds = lead_configuration["grade_thresholds"]
+        if not int(lead_configuration["score_min"]) <= self.score <= int(lead_configuration["score_max"]):
+            raise ValidationError({"score": "Lead score is outside the configured range."})
+        expected_grade = next(grade for grade in "ABCD" if self.score >= int(thresholds[grade]))
         if self.grade != expected_grade:
             raise ValidationError({"grade": f"Grade {expected_grade} is required for score {self.score}."})
         converted = self.status == LeadStatus.CONVERTED
@@ -327,19 +389,25 @@ class AccountType(models.TextChoices):
 
 
 class Account(CRMModel):
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["account_name"])
     website = models.URLField(max_length=255, blank=True)
-    industry = models.CharField(max_length=100, blank=True)
+    industry = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["account_industry"], blank=True)
     employees = models.IntegerField(null=True, blank=True)
     annual_revenue = models.DecimalField(max_digits=15, decimal_places=2, null=True, blank=True)
     parent_account_id = models.UUIDField(null=True, blank=True, db_index=True)
     billing_street = models.TextField(blank=True)
     billing_city = models.CharField(max_length=100, blank=True)
     billing_state = models.CharField(max_length=100, blank=True)
-    billing_postal_code = models.CharField(max_length=20, blank=True)
-    billing_country = models.CharField(max_length=2, blank=True)
+    billing_postal_code = models.CharField(
+        max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["account_postal_code"], blank=True
+    )
+    billing_country = models.CharField(
+        max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["account_country"], blank=True
+    )
     owner_id = models.UUIDField(null=True, blank=True, db_index=True)
-    account_type = models.CharField(max_length=20, choices=AccountType.choices, default=AccountType.PROSPECT)
+    account_type = models.CharField(
+        max_length=20, choices=AccountType.choices, default=DEFAULT_CRM_CONFIGURATION["account"]["default_type"]
+    )
 
     class Meta(CRMModel.Meta):
         db_table = "crm_accounts"
@@ -395,7 +463,7 @@ class Account(CRMModel):
             raise ValidationError({"parent_account_id": "Account cannot be its own parent."})
         visited = {self.id}
         parent_id = self.parent_account_id
-        # Including root, the proposed row may have at most two ancestors.
+        maximum_depth = int(effective_configuration(self.tenant_id)["account"]["hierarchy_max_depth"])
         ancestors = 0
         while parent_id:
             if parent_id in visited:
@@ -409,8 +477,13 @@ class Account(CRMModel):
             if parent is None:
                 raise ValidationError({"parent_account_id": "Active parent account was not found."})
             ancestors += 1
-            if ancestors >= 3:
-                raise ValidationError({"parent_account_id": "Account hierarchy cannot exceed three nodes."})
+            if ancestors >= maximum_depth:
+                label = (
+                    "three nodes"
+                    if maximum_depth == DEFAULT_CRM_CONFIGURATION["account"]["hierarchy_max_depth"]
+                    else f"{maximum_depth} nodes"
+                )
+                raise ValidationError({"parent_account_id": f"Account hierarchy cannot exceed {label}."})
             parent_id = parent.parent_account_id
 
     def __str__(self) -> str:
@@ -419,17 +492,21 @@ class Account(CRMModel):
 
 class Contact(CRMModel):
     account_id = models.UUIDField(db_index=True)
-    first_name = models.CharField(max_length=100, blank=True)
-    last_name = models.CharField(max_length=100)
-    email = models.EmailField(max_length=255, blank=True, null=True)
-    phone = models.CharField(max_length=50, blank=True)
-    mobile = models.CharField(max_length=50, blank=True)
-    title = models.CharField(max_length=100, blank=True)
-    department = models.CharField(max_length=100, blank=True)
+    first_name = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["contact_name"], blank=True)
+    last_name = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["contact_name"])
+    email = models.EmailField(
+        max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["contact_email"], blank=True, null=True
+    )
+    phone = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["contact_phone"], blank=True)
+    mobile = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["contact_phone"], blank=True)
+    title = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["contact_name"], blank=True)
+    department = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["contact_name"], blank=True)
     linkedin = models.URLField(max_length=255, blank=True)
     twitter = models.CharField(max_length=100, blank=True)
     last_contacted_at = models.DateTimeField(null=True, blank=True)
-    engagement_score = models.SmallIntegerField(default=0)
+    engagement_score = models.SmallIntegerField(
+        default=DEFAULT_CRM_CONFIGURATION["contact"]["default_engagement_score"]
+    )
     owner_id = models.UUIDField(null=True, blank=True, db_index=True)
 
     class Meta(CRMModel.Meta):
@@ -437,7 +514,10 @@ class Contact(CRMModel):
         constraints = [
             *CRMModel.Meta.constraints,
             models.CheckConstraint(
-                condition=models.Q(engagement_score__gte=0, engagement_score__lte=100),
+                condition=models.Q(
+                    engagement_score__gte=_DEFAULT_CONTACT["engagement_score_min"],
+                    engagement_score__lte=_DEFAULT_CONTACT["engagement_score_max"],
+                ),
                 name="crm_contact_engagement_ck",
             ),
             models.UniqueConstraint(
@@ -466,15 +546,28 @@ class Contact(CRMModel):
 
     def clean(self) -> None:
         self.email = _normalize_email(self.email)
-        self.phone = _normalize_phone(self.phone)
-        self.mobile = _normalize_phone(self.mobile)
+        self.phone = _normalize_phone(self.phone, self.tenant_id)
+        self.mobile = _normalize_phone(self.mobile, self.tenant_id)
         super().clean()
         if not self.last_name.strip():
             raise ValidationError({"last_name": "Last name is required."})
         if self.email:
             EmailValidator()(self.email)
-        if not 0 <= self.engagement_score <= 100:
-            raise ValidationError({"engagement_score": "Engagement score must be between 0 and 100."})
+        contact_configuration = effective_configuration(self.tenant_id)["contact"]
+        if (
+            not int(contact_configuration["engagement_score_min"])
+            <= self.engagement_score
+            <= int(contact_configuration["engagement_score_max"])
+        ):
+            raise ValidationError(
+                {
+                    "engagement_score": (
+                        "Engagement score must be between "
+                        f"{contact_configuration['engagement_score_min']} and "
+                        f"{contact_configuration['engagement_score_max']}."
+                    )
+                }
+            )
         account = (
             Account.objects.filter(id=self.account_id, tenant_id=self.tenant_id, is_deleted=False)
             .only("id", "metadata")
@@ -483,7 +576,12 @@ class Contact(CRMModel):
         if account is None:
             raise ValidationError({"account_id": "Active account was not found."})
         required_domain = self._account_email_domain(account.metadata)
-        if self.email and required_domain and self.email.rpartition("@")[2] != required_domain:
+        if (
+            contact_configuration["enforce_account_email_domain"]
+            and self.email
+            and required_domain
+            and self.email.rpartition("@")[2] != required_domain
+        ):
             override_required = self._state.adding
             if not override_required:
                 prior = (
@@ -521,17 +619,31 @@ class OpportunityStatus(models.TextChoices):
 class Opportunity(CRMModel):
     account_id = models.UUIDField(db_index=True)
     primary_contact_id = models.UUIDField(null=True, blank=True, db_index=True)
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["opportunity_name"])
     description = models.TextField(blank=True)
-    amount = models.DecimalField(max_digits=15, decimal_places=2)
-    currency = models.CharField(max_length=3, default="USD")
-    probability = models.SmallIntegerField(default=10)
-    stage = models.CharField(max_length=30, choices=OpportunityStage.choices, default=OpportunityStage.PROSPECTING)
+    amount = models.DecimalField(
+        max_digits=DEFAULT_CRM_CONFIGURATION["field_limits"]["opportunity_amount_digits"],
+        decimal_places=DEFAULT_CRM_CONFIGURATION["field_limits"]["opportunity_amount_decimals"],
+    )
+    currency = models.CharField(
+        max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["opportunity_currency"],
+        default=DEFAULT_CRM_CONFIGURATION["opportunity"]["default_currency"],
+    )
+    probability = models.SmallIntegerField(default=DEFAULT_CRM_CONFIGURATION["opportunity"]["default_probability"])
+    stage = models.CharField(
+        max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["opportunity_stage"],
+        choices=OpportunityStage.choices,
+        default=DEFAULT_CRM_CONFIGURATION["opportunity"]["default_stage"],
+    )
     close_date = models.DateField(db_index=True)
     product_ids = models.JSONField(default=list, blank=True, validators=[validate_uuid_string_array])
     competitors = models.JSONField(default=list, blank=True, validators=[validate_non_empty_string_array])
     owner_id = models.UUIDField(null=True, blank=True, db_index=True)
-    status = models.CharField(max_length=10, choices=OpportunityStatus.choices, default=OpportunityStatus.OPEN)
+    status = models.CharField(
+        max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["opportunity_status"],
+        choices=OpportunityStatus.choices,
+        default=DEFAULT_CRM_CONFIGURATION["opportunity"]["default_status"],
+    )
     closed_at = models.DateTimeField(null=True, blank=True)
     loss_reason = models.TextField(blank=True)
     converted_to_order_id = models.UUIDField(null=True, blank=True)
@@ -544,7 +656,11 @@ class Opportunity(CRMModel):
             *CRMModel.Meta.constraints,
             models.CheckConstraint(condition=models.Q(amount__gt=0), name="crm_opp_amount_positive_ck"),
             models.CheckConstraint(
-                condition=models.Q(probability__gte=0, probability__lte=100), name="crm_opp_probability_ck"
+                condition=models.Q(
+                    probability__gte=_DEFAULT_OPPORTUNITY["probability_min"],
+                    probability__lte=_DEFAULT_OPPORTUNITY["probability_max"],
+                ),
+                name="crm_opp_probability_ck",
             ),
             models.CheckConstraint(
                 condition=(
@@ -562,14 +678,14 @@ class Opportunity(CRMModel):
                     | models.Q(
                         status=OpportunityStatus.WON,
                         stage=OpportunityStage.CLOSED_WON,
-                        probability=100,
+                        probability=_DEFAULT_OPPORTUNITY["closed_won_probability"],
                         closed_at__isnull=False,
                     )
                     | (
                         models.Q(
                             status=OpportunityStatus.LOST,
                             stage=OpportunityStage.CLOSED_LOST,
-                            probability=0,
+                            probability=_DEFAULT_OPPORTUNITY["closed_lost_probability"],
                             closed_at__isnull=False,
                         )
                         & ~models.Q(loss_reason="")
@@ -594,10 +710,15 @@ class Opportunity(CRMModel):
         super().clean()
         if not self.name:
             raise ValidationError({"name": "Opportunity name is required."})
-        if self.amount <= 0:
-            raise ValidationError({"amount": "Opportunity amount must be positive."})
-        if not 0 <= self.probability <= 100:
-            raise ValidationError({"probability": "Probability must be between 0 and 100."})
+        opportunity_configuration = effective_configuration(self.tenant_id)["opportunity"]
+        if self.amount < Decimal(str(opportunity_configuration["minimum_amount"])):
+            raise ValidationError({"amount": "Opportunity amount is below the configured minimum."})
+        if (
+            not int(opportunity_configuration["probability_min"])
+            <= self.probability
+            <= int(opportunity_configuration["probability_max"])
+        ):
+            raise ValidationError({"probability": "Probability is outside the configured range."})
         if self.currency not in ISO_4217_CODES:
             raise ValidationError({"currency": "Use an uppercase ISO 4217 currency code."})
         if self._state.adding and self.close_date < timezone.localdate():
@@ -634,7 +755,8 @@ class Opportunity(CRMModel):
         elif self.status == OpportunityStatus.WON:
             valid = (
                 self.stage == OpportunityStage.CLOSED_WON
-                and self.probability == 100
+                and self.probability
+                == int(effective_configuration(self.tenant_id)["opportunity"]["closed_won_probability"])
                 and self.closed_at is not None
                 and not self.loss_reason
             )
@@ -642,7 +764,8 @@ class Opportunity(CRMModel):
             valid = (
                 self.status == OpportunityStatus.LOST
                 and self.stage == OpportunityStage.CLOSED_LOST
-                and self.probability == 0
+                and self.probability
+                == int(effective_configuration(self.tenant_id)["opportunity"]["closed_lost_probability"])
                 and self.closed_at is not None
                 and bool(self.loss_reason)
             )
@@ -680,14 +803,16 @@ class Activity(CRMModel):
     activity_type = models.CharField(max_length=20, choices=ActivityType.choices)
     related_to_type = models.CharField(max_length=20, choices=RelatedToType.choices)
     related_to_id = models.UUIDField()
-    subject = models.CharField(max_length=500)
+    subject = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["activity_subject"])
     description = models.TextField(blank=True)
-    outcome = models.CharField(max_length=100, blank=True)
+    outcome = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["activity_outcome"], blank=True)
     due_date = models.DateTimeField(null=True, blank=True)
     completed = models.BooleanField(default=False)
     completed_at = models.DateTimeField(null=True, blank=True)
     owner_id = models.UUIDField(null=True, blank=True, db_index=True)
-    external_id = models.CharField(max_length=255, blank=True)
+    external_id = models.CharField(
+        max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["activity_external_id"], blank=True
+    )
 
     class Meta(CRMModel.Meta):
         db_table = "crm_activities"
@@ -732,7 +857,8 @@ class Activity(CRMModel):
         ).first()
         if related is None:
             raise ValidationError({"related_to_id": "Active related CRM record was not found."})
-        if self._state.adding and self.activity_type == ActivityType.TASK and self.due_date:
+        require_future_due = effective_configuration(self.tenant_id)["activity"]["require_future_task_due_date"]
+        if require_future_due and self._state.adding and self.activity_type == ActivityType.TASK and self.due_date:
             if self.due_date <= timezone.now():
                 raise ValidationError({"due_date": "A new task due date must be in the future."})
         if self.completed != (self.completed_at is not None):
@@ -769,7 +895,7 @@ class Activity(CRMModel):
         )
         changed = any(getattr(prior, field) != getattr(self, field) for field in mutable_fields)
         deleting = not prior.is_deleted and self.is_deleted and self.deleted_at is not None
-        if changed or (deleting and not getattr(self, "_allow_admin_delete", False)):
+        if changed or deleting:
             raise ValidationError(
                 "Completed activities and activities on closed opportunities are immutable.",
                 code="activity_immutable",
@@ -777,3 +903,114 @@ class Activity(CRMModel):
 
     def __str__(self) -> str:
         return f"{self.activity_type}: {self.subject}"
+
+
+class CRMConfiguration(TenantScopedModel, TimestampedModel):
+    """Current tenant/environment CRM configuration projection."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    environment = models.CharField(max_length=32)
+    document = models.JSONField(default=dict, validators=[validate_metadata])
+    feature_flags = models.JSONField(default=dict, validators=[validate_metadata])
+    rollout = models.JSONField(default=dict, validators=[validate_metadata])
+    version = models.PositiveBigIntegerField(default=1, editable=False)
+    updated_by = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["actor_id"], editable=False)
+
+    class Meta:
+        db_table = "crm_configurations"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "environment"], name="crm_cfg_tenant_env_uniq"),
+            models.CheckConstraint(condition=models.Q(version__gte=1), name="crm_cfg_version_positive_ck"),
+        ]
+        indexes = [models.Index(fields=["tenant_id", "environment"], name="crm_config_tenant_env_idx")]
+
+    def clean(self) -> None:
+        super().clean()
+        validate_metadata(self.document)
+        validate_metadata(self.feature_flags)
+        validate_metadata(self.rollout)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise ValidationError(
+            "CRM configuration cannot be deleted; apply a new version or rollback.",
+            code="configuration_delete_forbidden",
+        )
+
+
+class ImmutableConfigurationRecord(TenantScopedModel):
+    """Model-layer immutability shared by configuration evidence tables."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    environment = models.CharField(max_length=32)
+    version = models.PositiveBigIntegerField()
+    actor_id = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["actor_id"], editable=False)
+    correlation_id = models.CharField(
+        max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["correlation_id"], editable=False
+    )
+    created_at = models.DateTimeField(auto_now_add=True, editable=False)
+
+    class Meta:
+        abstract = True
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ValidationError("Configuration evidence is immutable.", code="immutable_configuration_evidence")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise ValidationError("Configuration evidence is immutable.", code="immutable_configuration_evidence")
+
+
+class CRMConfigurationVersion(ImmutableConfigurationRecord):
+    """Append-only complete snapshot for rollback to any prior version."""
+
+    document = models.JSONField(validators=[validate_metadata])
+    feature_flags = models.JSONField(validators=[validate_metadata])
+    rollout = models.JSONField(validators=[validate_metadata])
+    change_type = models.CharField(max_length=32)
+    rollback_of_version = models.PositiveBigIntegerField(null=True, blank=True)
+
+    class Meta:
+        db_table = "crm_configuration_versions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant_id", "environment", "version"], name="crm_config_version_tenant_env_uniq"
+            )
+        ]
+        indexes = [models.Index(fields=["tenant_id", "environment", "-version"], name="crm_config_version_lookup_idx")]
+
+
+class CRMConfigurationAudit(ImmutableConfigurationRecord):
+    """Append-only before/after evidence for every configuration mutation."""
+
+    prior_value = models.JSONField(validators=[validate_metadata])
+    new_value = models.JSONField(validators=[validate_metadata])
+    changed_fields = models.JSONField(default=list)
+    action = models.CharField(max_length=32)
+
+    class Meta:
+        db_table = "crm_configuration_audits"
+        indexes = [
+            models.Index(fields=["tenant_id", "environment", "-created_at"], name="crm_config_audit_lookup_idx"),
+            models.Index(fields=["tenant_id", "correlation_id"], name="crm_config_audit_corr_idx"),
+        ]
+
+
+class CRMIdempotencyRecord(TenantScopedModel, TimestampedModel):
+    """Tenant-scoped request fingerprint and completed response replay evidence."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    idempotency_key = models.CharField(max_length=DEFAULT_CRM_CONFIGURATION["field_limits"]["async_idempotency_key"])
+    method = models.CharField(max_length=16)
+    path = models.CharField(max_length=512)
+    request_fingerprint = models.CharField(max_length=64)
+    response_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    response_body = models.JSONField(null=True, blank=True)
+    completed = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "crm_idempotency_records"
+        constraints = [
+            models.UniqueConstraint(fields=["tenant_id", "idempotency_key"], name="crm_idem_tenant_key_uniq")
+        ]
+        indexes = [models.Index(fields=["tenant_id", "-created_at"], name="crm_idem_tenant_created_idx")]

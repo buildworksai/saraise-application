@@ -5,15 +5,17 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { CrmPage, EmptyPanel, GovernedError, PageSkeleton, Pagination, fieldClass } from './CrmPage';
 import type { PageResult } from '../services/crm-service';
+import { useCrmConfiguration } from '../hooks/use-crm-configuration';
 
 export interface ListColumn<T> { key: string; label: string; sortable?: boolean; render: (item:T)=>React.ReactNode; }
 export interface FilterChoice { value:string; label:string; }
 export interface ListFilter { key:string; label:string; choices?:readonly FilterChoice[]; placeholder?:string; }
 export function EntityList<T extends { readonly id:string }>({ title,description,createPath,emptyTitle,emptyDescription,columns,filters=[],query,isLoading,error,refetch,selectable=false,total }:{ title:string;description:string;createPath:string;emptyTitle:string;emptyDescription:string;columns:readonly ListColumn<T>[];filters?:readonly ListFilter[];query?:PageResult<T>;isLoading:boolean;error:unknown;refetch:()=>void;selectable?:boolean;total?:React.ReactNode }) {
   const [params,setParams]=useSearchParams(); const [search,setSearch]=useState(params.get('search')??''); const deferred=useDeferredValue(search); const [selected,setSelected]=useState<Set<string>>(new Set());
+  const configuration=useCrmConfiguration(); const savedPageSize=configuration.data?.document.ui.saved_page_size;
   const preferenceKey=`crm.view.${title.toLowerCase()}`;
   useEffect(()=>{if(params.has('ordering')||params.has('page_size'))return;try{const saved=JSON.parse(localStorage.getItem(preferenceKey)??'{}') as {ordering?:string;page_size?:string};if(saved.ordering||saved.page_size){const next=new URLSearchParams(params);if(saved.ordering)next.set('ordering',saved.ordering);if(saved.page_size)next.set('page_size',saved.page_size);setParams(next,{replace:true})}}catch{/* Invalid local preference is ignored; server state remains authoritative. */}},[]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(()=>{try{localStorage.setItem(preferenceKey,JSON.stringify({ordering:params.get('ordering')??'',page_size:params.get('page_size')??'25'}))}catch{/* Private browsing can disable storage without disabling CRM. */}},[params,preferenceKey]);
+  useEffect(()=>{if(savedPageSize===undefined)return;try{localStorage.setItem(preferenceKey,JSON.stringify({ordering:params.get('ordering')??'',page_size:params.get('page_size')??String(savedPageSize)}))}catch{/* Private browsing can disable storage without disabling CRM. */}},[params,preferenceKey,savedPageSize]);
   useEffect(()=>{ const next=new URLSearchParams(params); if(deferred)next.set('search',deferred);else next.delete('search'); next.set('page','1'); if(next.toString()!==params.toString())setParams(next,{replace:true}); },[deferred]); // eslint-disable-line react-hooks/exhaustive-deps
   const activeFilters=[...params.entries()].some(([key,value])=>key!=='page'&&key!=='ordering'&&value);
   const clear=()=>{setSearch('');setParams({page:'1'});};
@@ -21,6 +23,8 @@ export function EntityList<T extends { readonly id:string }>({ title,description
   const order=(key:string)=>{const current=params.get('ordering');update('ordering',current===key?`-${key}`:key);};
   const allSelected=!!query?.items.length&&query.items.every(item=>selected.has(item.id));
   const actions=<Link to={createPath}><Button><Plus className="mr-2 h-4 w-4"/>Create {title.replace(/s$/u,'')}</Button></Link>;
+  if(configuration.isLoading)return <CrmPage title={title} description={description}><PageSkeleton label="Loading list configuration"/></CrmPage>;
+  if(configuration.error||!configuration.data)return <CrmPage title={title} description={description}><GovernedError error={configuration.error} onRetry={()=>void configuration.refetch()} subject="CRM list configuration"/></CrmPage>;
   return <CrmPage title={title} description={description} actions={actions}>
     <section aria-label={`${title} filters`} className="grid gap-3 rounded-lg border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4"><label className="relative sm:col-span-2"><span className="sr-only">Search {title}</span><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={`Search ${title.toLowerCase()}…`} className={`${fieldClass} pl-9`}/></label>{filters.map(filter=><label key={filter.key} className="text-sm"><span className="sr-only">{filter.label}</span>{filter.choices?<select aria-label={filter.label} value={params.get(filter.key)??''} onChange={e=>update(filter.key,e.target.value)} className={fieldClass}><option value="">All {filter.label.toLowerCase()}</option>{filter.choices.map(choice=><option key={choice.value} value={choice.value}>{choice.label}</option>)}</select>:<input aria-label={filter.label} value={params.get(filter.key)??''} onChange={e=>update(filter.key,e.target.value)} placeholder={filter.placeholder??filter.label} className={fieldClass}/>}</label>)}</section>
     {total?<div aria-live="polite">{total}</div>:null}

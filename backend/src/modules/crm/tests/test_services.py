@@ -8,6 +8,7 @@ idempotency and explicit dependency-unavailable outcomes.
 from __future__ import annotations
 
 import uuid
+from copy import deepcopy
 from datetime import timedelta
 from decimal import Decimal
 
@@ -28,7 +29,7 @@ from src.modules.crm.models import (
     Activity,
     ActivityType,
     Contact,
-    Lead,
+    CRMIdempotencyRecord,
     LeadScoreSource,
     LeadStatus,
     Opportunity,
@@ -39,8 +40,9 @@ from src.modules.crm.models import (
 from src.modules.crm.services import (
     AccountService,
     ActivityService,
-    CRMServiceError,
     ContactService,
+    CRMIdempotencyService,
+    CRMServiceError,
     ForecastingService,
     IntegrationService,
     LeadService,
@@ -326,6 +328,70 @@ def test_account_crud_hierarchy_duplicates_and_delete_guards(tenant_id, actor_id
     assert root.is_deleted
 
 
+def test_account_hierarchy_queries_only_the_bounded_target_subtree(tenant_id, monkeypatch):
+    root = AccountFactory(tenant_id=tenant_id, name="Root")
+    child = AccountFactory(tenant_id=tenant_id, name="Child", parent_account_id=root.id)
+    for index in range(4):
+        AccountFactory(tenant_id=tenant_id, name=f"Unrelated {index}")
+    configuration = deepcopy(services.DEFAULT_CRM_CONFIGURATION)
+    configuration["hierarchy"]["max_nodes"] = 2
+    monkeypatch.setattr(services, "effective_configuration", lambda _tenant_id: configuration)
+
+    tree = AccountService.get_hierarchy(tenant_id, account_id=root.id)
+
+    assert tree.id == root.id
+    assert [node.id for node in tree.children] == [child.id]
+
+
+def test_idempotency_records_are_tenant_scoped_conflict_safe_and_json_replayable(tenant_id):
+    key = "retryable-mutation"
+    record = CRMIdempotencyService.begin(
+        tenant_id,
+        key=key,
+        method="POST",
+        path="/api/v2/crm/leads/?source=web",
+        payload={"amount": Decimal("12.50")},
+    )
+    response_id = uuid.uuid4()
+    CRMIdempotencyService.complete(
+        tenant_id,
+        record_id=record.id,
+        response_status=201,
+        response_body={"id": response_id, "amount": Decimal("12.50")},
+    )
+
+    replay = CRMIdempotencyService.begin(
+        tenant_id,
+        key=key,
+        method="POST",
+        path="/api/v2/crm/leads/?source=web",
+        payload={"amount": Decimal("12.50")},
+    )
+    assert replay.completed is True
+    assert replay.response_status == 201
+    assert replay.response_body == {"id": str(response_id), "amount": "12.50"}
+
+    with pytest.raises(CRMServiceError) as conflict:
+        CRMIdempotencyService.begin(
+            tenant_id,
+            key=key,
+            method="POST",
+            path="/api/v2/crm/leads/?source=event",
+            payload={"amount": Decimal("12.50")},
+        )
+    assert conflict.value.error_code == "IDEMPOTENCY_CONFLICT"
+
+    other_tenant_record = CRMIdempotencyService.begin(
+        uuid.uuid4(),
+        key=key,
+        method="POST",
+        path="/api/v2/crm/leads/?source=web",
+        payload={"amount": Decimal("12.50")},
+    )
+    assert other_tenant_record.id != record.id
+    assert CRMIdempotencyRecord.objects.filter(id__in=(record.id, other_tenant_record.id)).count() == 2
+
+
 def test_contact_crud_domain_override_engagement_and_timeline(tenant_id, actor_id):
     account = AccountFactory(tenant_id=tenant_id, metadata={"email_domain": "acme.test"})
     with pytest.raises(Exception):
@@ -581,15 +647,17 @@ def test_activity_crud_completion_immutability_delete_and_timeline(tenant_id, ac
             expected_version=completed.version,
             actor_id=actor_id,
         )
-    ActivityService.delete_activity(
-        tenant_id,
-        activity_id=activity.id,
-        expected_version=completed.version,
-        actor_id=actor_id,
-        is_administrator=True,
-    )
+    with pytest.raises(CRMServiceError) as exc:
+        ActivityService.delete_activity(
+            tenant_id,
+            activity_id=activity.id,
+            expected_version=completed.version,
+            actor_id=actor_id,
+            is_administrator=True,
+        )
+    assert exc.value.error_code == "ACTIVITY_EVIDENCE_IMMUTABLE"
     activity.refresh_from_db()
-    assert activity.is_deleted
+    assert not activity.is_deleted
 
 
 def test_external_activity_sync_is_idempotent_and_conflict_safe(tenant_id):

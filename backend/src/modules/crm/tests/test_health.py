@@ -84,11 +84,14 @@ def test_health_payload_exposes_no_business_counts_or_dependency_secrets(
         assert {"name", "status", "latency_ms"} <= set(check)
 
 
-def test_sqlite_rls_probe_is_explicitly_not_applicable(settings: object) -> None:
+def test_rls_probe_fails_closed_when_postgresql_catalog_is_unavailable(settings: object) -> None:
     del settings
     if health.connection.vendor == "postgresql":
         pytest.skip("This assertion is specific to the SQLite unit-test profile")
-    assert health._rls() == (True, "not_applicable")
+    assert health._rls() == (False, "rls_unverifiable")
+    result = health.rls_readiness_probe()
+    assert result.healthy is False
+    assert result.message == "rls_unverifiable"
 
 
 def test_health_view_binds_only_authenticated_profile_tenant() -> None:
