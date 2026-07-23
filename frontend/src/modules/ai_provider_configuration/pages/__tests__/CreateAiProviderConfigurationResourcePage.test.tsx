@@ -19,7 +19,7 @@ function renderPage() {
 describe('CreateAiProviderConfigurationResourcePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(aiProviderConfigurationService.listProviders).mockResolvedValue([{ id: 'provider-1', name: 'Anthropic', provider_type: 'anthropic', base_url: '', is_active: true, models_count: 2, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }]);
+    vi.mocked(aiProviderConfigurationService.listProviders).mockResolvedValue([{ id: 'provider-1', name: 'Anthropic', provider_type: 'anthropic', is_active: true, models_count: 2, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }]);
   });
 
   it('validates the provider before submitting secret material', async () => {

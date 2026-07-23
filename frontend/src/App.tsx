@@ -73,6 +73,14 @@ const SecretManagementPage = lazy(() =>
   )
 );
 
+const AiProviderRuntimeConfigurationPage = lazy(() =>
+  import(
+    "./modules/ai_provider_configuration/pages/AiProviderRuntimeConfigurationPage"
+  ).then((m) => ({
+    default: m.AiProviderRuntimeConfigurationPage,
+  }))
+);
+
 const NotificationCenterPage = lazy(() =>
   import("./modules/notifications/pages/NotificationCenterPage").then((m) => ({
     default: m.NotificationCenterPage,
@@ -835,9 +843,6 @@ function AnimatedRoutes() {
             }
           />
 
-          {/* 404 */}
-          <Route path="*" element={<div className="p-8">Page not found</div>} />
-
           {/* AiProviderConfiguration routes */}
           <Route
             path="/ai-provider-configuration"
@@ -855,6 +860,16 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <CreateAiProviderConfigurationResourcePage />
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/ai-provider-configuration/runtime-configuration"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <AiProviderRuntimeConfigurationPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -1085,6 +1100,7 @@ function AnimatedRoutes() {
               }
             />
           ))}
+          <Route path="*" element={<div className="p-8">Page not found</div>} />
         </Routes>
       </AnimatePresence>
     </>

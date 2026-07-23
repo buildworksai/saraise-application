@@ -58,7 +58,9 @@ def tenant_a_user(db):
             profile.tenant_id = tenant_id
             profile.tenant_role = "tenant_admin"
             profile.save()
-    return User.objects.get(pk=user.pk)
+    user = User.objects.get(pk=user.pk)
+    user.has_perm = lambda permission: str(permission).startswith("ai_provider_configuration.")  # type: ignore[method-assign]
+    return user
 
 
 @pytest.fixture
@@ -82,7 +84,9 @@ def tenant_b_user(db):
             profile.tenant_id = tenant_id
             profile.tenant_role = "tenant_admin"
             profile.save()
-    return User.objects.get(pk=user.pk)
+    user = User.objects.get(pk=user.pk)
+    user.has_perm = lambda permission: str(permission).startswith("ai_provider_configuration.")  # type: ignore[method-assign]
+    return user
 
 
 @pytest.mark.django_db
@@ -150,6 +154,7 @@ class TestAIModelDeploymentTenantIsolation:
         deployment_a = AIModelDeployment.objects.create(
             tenant_id=tenant_a_id,
             model=model,
+            deployment_name="Tenant A deployment",
             status="active",
             created_by=str(tenant_a_user.id),
         )
@@ -157,6 +162,7 @@ class TestAIModelDeploymentTenantIsolation:
         deployment_b = AIModelDeployment.objects.create(
             tenant_id=tenant_b_id,
             model=model,
+            deployment_name="Tenant B deployment",
             status="active",
             created_by=str(tenant_b_user.id),
         )
@@ -198,11 +204,13 @@ class TestAIUsageLogTenantIsolation:
         deployment_a = AIModelDeployment.objects.create(
             tenant_id=tenant_a_id,
             model=model,
+            deployment_name="Tenant A deployment",
             created_by=str(tenant_a_user.id),
         )
         deployment_b = AIModelDeployment.objects.create(
             tenant_id=tenant_b_id,
             model=model,
+            deployment_name="Tenant B deployment",
             created_by=str(tenant_b_user.id),
         )
 

@@ -22,7 +22,6 @@ export interface AIProvider {
   id: UUID;
   name: string;
   provider_type: ProviderType;
-  base_url: string;
   is_active: boolean;
   models_count: number;
   created_at: ISODateTime;
@@ -111,10 +110,9 @@ export interface AIModelDeploymentCreate {
   credential?: UUID | null;
   deployment_name: string;
   config: AIModelDeploymentConfig;
-  status: DeploymentStatus;
 }
 
-export type AIModelDeploymentUpdate = Partial<Pick<AIModelDeployment, 'credential' | 'deployment_name' | 'config' | 'status'>>;
+export type AIModelDeploymentUpdate = Partial<Pick<AIModelDeployment, 'credential' | 'deployment_name' | 'config'>>;
 
 export interface AIUsageLog {
   id: UUID;
@@ -171,12 +169,87 @@ export interface ListFilters {
   status?: DeploymentStatus;
 }
 
+export interface AIProviderConfigurationResource {
+  id: UUID;
+  tenant_id: UUID;
+  name: string;
+  description: string;
+  is_active: boolean;
+  config: Record<string, unknown>;
+  created_by: UUID;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
+
+export type RuntimeConfigurationValues = Record<string, unknown>;
+
+export interface AIProviderRuntimeConfiguration {
+  id: UUID;
+  tenant_id: UUID;
+  environment: string;
+  values: RuntimeConfigurationValues;
+  version: number;
+  updated_by: UUID;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
+}
+
+export interface AIProviderRuntimeConfigurationVersion {
+  id: UUID;
+  tenant_id: UUID;
+  configuration: UUID;
+  version: number;
+  environment: string;
+  values: RuntimeConfigurationValues;
+  created_by: UUID;
+  correlation_id: UUID;
+  rollback_of: number | null;
+  created_at: ISODateTime;
+}
+
+export interface AIProviderRuntimeConfigurationAudit {
+  id: UUID;
+  tenant_id: UUID;
+  configuration: UUID;
+  action: string;
+  actor_id: UUID;
+  correlation_id: UUID;
+  from_version: number | null;
+  to_version: number;
+  before: RuntimeConfigurationValues;
+  after: RuntimeConfigurationValues;
+  rollback_of: number | null;
+  created_at: ISODateTime;
+}
+
+export interface RuntimeConfigurationPreview {
+  environment: string;
+  current_version: number;
+  would_create_version: number;
+  changes: Record<string, { before: unknown; after: unknown }>;
+}
+
+export interface RuntimeConfigurationDocument {
+  module: 'ai_provider_configuration';
+  environment: string;
+  version: number;
+  values: RuntimeConfigurationValues;
+}
+
 export const MODULE_API_PREFIX = '/api/v1/ai-provider-configuration';
 
 export const ENDPOINTS = {
   PROVIDERS: {
     LIST: `${MODULE_API_PREFIX}/providers/`,
     DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/providers/${id}/` as const,
+  },
+  RESOURCES: {
+    LIST: `${MODULE_API_PREFIX}/resources/`,
+    CREATE: `${MODULE_API_PREFIX}/resources/`,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/resources/${id}/` as const,
+    UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/resources/${id}/` as const,
+    DELETE: (id: UUID) => `${MODULE_API_PREFIX}/resources/${id}/` as const,
+    RESTORE: (id: UUID) => `${MODULE_API_PREFIX}/resources/${id}/restore/` as const,
   },
   CREDENTIALS: {
     LIST: `${MODULE_API_PREFIX}/credentials/`,
@@ -195,6 +268,8 @@ export const ENDPOINTS = {
     DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/deployments/${id}/` as const,
     UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/deployments/${id}/` as const,
     DELETE: (id: UUID) => `${MODULE_API_PREFIX}/deployments/${id}/` as const,
+    ACTIVATE: (id: UUID) => `${MODULE_API_PREFIX}/deployments/${id}/activate/` as const,
+    DEACTIVATE: (id: UUID) => `${MODULE_API_PREFIX}/deployments/${id}/deactivate/` as const,
   },
   USAGE_LOGS: {
     LIST: `${MODULE_API_PREFIX}/usage-logs/`,
@@ -204,6 +279,15 @@ export const ENDPOINTS = {
     ROTATE_KEY: `${MODULE_API_PREFIX}/secrets/rotate-key/`,
     RE_ENCRYPT: `${MODULE_API_PREFIX}/secrets/re-encrypt/`,
   },
+  RUNTIME_CONFIGURATION: {
+    CURRENT: `${MODULE_API_PREFIX}/runtime-configuration/current/`,
+    PREVIEW: `${MODULE_API_PREFIX}/runtime-configuration/preview/`,
+    VERSIONS: `${MODULE_API_PREFIX}/runtime-configuration/versions/`,
+    AUDIT: `${MODULE_API_PREFIX}/runtime-configuration/audit/`,
+    ROLLBACK: `${MODULE_API_PREFIX}/runtime-configuration/rollback/`,
+    EXPORT: `${MODULE_API_PREFIX}/runtime-configuration/export/`,
+    IMPORT: `${MODULE_API_PREFIX}/runtime-configuration/import/`,
+  },
   HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
 
@@ -211,6 +295,7 @@ export const ENDPOINTS = {
 export const AI_PROVIDER_ROUTES = {
   HOME: '/ai-provider-configuration',
   CONNECT: '/ai-provider-configuration/create',
+  CONFIGURATION: '/ai-provider-configuration/runtime-configuration',
   PROVIDER: (id: UUID) => `/ai-provider-configuration/${id}` as const,
   SECRETS: '/ai-providers/secrets',
 } as const;

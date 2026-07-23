@@ -12,8 +12,10 @@ from .models import (
     AIProvider,
     AIProviderConfigurationResource,
     AIProviderCredential,
+    AIProviderRuntimeConfiguration,
+    AIProviderRuntimeConfigurationAudit,
+    AIProviderRuntimeConfigurationVersion,
     AIUsageLog,
-    DeploymentStatus,
 )
 
 
@@ -59,7 +61,6 @@ class AIProviderListSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "provider_type",
-            "base_url",
             "is_active",
             "models_count",
             "created_at",
@@ -68,8 +69,7 @@ class AIProviderListSerializer(serializers.ModelSerializer):
 
 
 class AIProviderDetailSerializer(AIProviderListSerializer):
-    class Meta(AIProviderListSerializer.Meta):
-        fields = AIProviderListSerializer.Meta.fields + ("api_version", "config")
+    pass
 
 
 class AIProviderCredentialListSerializer(serializers.ModelSerializer):
@@ -77,6 +77,7 @@ class AIProviderCredentialListSerializer(serializers.ModelSerializer):
     provider_name = serializers.CharField(source="provider.name", read_only=True)
     provider_type = serializers.CharField(source="provider.provider_type", read_only=True)
     has_secret = serializers.BooleanField(read_only=True)
+    last_error_code = serializers.CharField(read_only=True)
 
     class Meta:
         model = AIProviderCredential
@@ -91,6 +92,7 @@ class AIProviderCredentialListSerializer(serializers.ModelSerializer):
             "secret_hint",
             "has_secret",
             "last_verified_at",
+            "last_error_code",
             "created_at",
             "updated_at",
         )
@@ -98,17 +100,13 @@ class AIProviderCredentialListSerializer(serializers.ModelSerializer):
 
 
 class AIProviderCredentialDetailSerializer(AIProviderCredentialListSerializer):
-    last_error_code = serializers.CharField(read_only=True)
-
-    class Meta(AIProviderCredentialListSerializer.Meta):
-        fields = AIProviderCredentialListSerializer.Meta.fields + ("last_error_code",)
+    pass
 
 
 class AIProviderCredentialCreateSerializer(serializers.Serializer):
     provider = serializers.UUIDField()
-    label = serializers.CharField(max_length=120, required=False, default="Default", trim_whitespace=True)
+    label = serializers.CharField(required=False, trim_whitespace=True)
     api_key = serializers.CharField(
-        max_length=20_000,
         write_only=True,
         trim_whitespace=True,
         style={"input_type": "password"},
@@ -117,9 +115,8 @@ class AIProviderCredentialCreateSerializer(serializers.Serializer):
 
 class AIProviderCredentialUpdateSerializer(serializers.Serializer):
     provider = serializers.UUIDField(required=False)
-    label = serializers.CharField(max_length=120, required=False, trim_whitespace=True)
+    label = serializers.CharField(required=False, trim_whitespace=True)
     api_key = serializers.CharField(
-        max_length=20_000,
         required=False,
         write_only=True,
         trim_whitespace=True,
@@ -200,38 +197,22 @@ class AIModelDeploymentDetailSerializer(AIModelDeploymentListSerializer):
 class AIModelDeploymentCreateSerializer(serializers.Serializer):
     model = serializers.UUIDField()
     credential = serializers.UUIDField(required=False, allow_null=True)
-    deployment_name = serializers.CharField(max_length=255, trim_whitespace=True)
+    deployment_name = serializers.CharField(trim_whitespace=True)
     config = serializers.DictField(required=False, default=dict)
-    status = serializers.ChoiceField(choices=DeploymentStatus.choices, required=False, default=DeploymentStatus.ACTIVE)
-    is_active = serializers.BooleanField(required=False, write_only=True)
 
     def validate(self, attrs: dict[str, object]) -> dict[str, object]:
-        is_active = attrs.pop("is_active", None)
-        if is_active is not None:
-            requested = DeploymentStatus.ACTIVE if is_active else DeploymentStatus.INACTIVE
-            if "status" in attrs and attrs["status"] != requested:
-                raise serializers.ValidationError({"is_active": "Conflicts with status."})
-            attrs["status"] = requested
         return attrs
 
 
 class AIModelDeploymentUpdateSerializer(serializers.Serializer):
     model = serializers.UUIDField(required=False)
     credential = serializers.UUIDField(required=False, allow_null=True)
-    deployment_name = serializers.CharField(max_length=255, required=False, trim_whitespace=True)
+    deployment_name = serializers.CharField(required=False, trim_whitespace=True)
     config = serializers.DictField(required=False)
-    status = serializers.ChoiceField(choices=DeploymentStatus.choices, required=False)
-    is_active = serializers.BooleanField(required=False, write_only=True)
 
     def validate(self, attrs: dict[str, object]) -> dict[str, object]:
         if not attrs:
             raise serializers.ValidationError("At least one editable field is required.")
-        is_active = attrs.pop("is_active", None)
-        if is_active is not None:
-            requested = DeploymentStatus.ACTIVE if is_active else DeploymentStatus.INACTIVE
-            if "status" in attrs and attrs["status"] != requested:
-                raise serializers.ValidationError({"is_active": "Conflicts with status."})
-            attrs["status"] = requested
         return attrs
 
 
@@ -240,6 +221,7 @@ class AIUsageLogSerializer(serializers.ModelSerializer):
     deployment_name = serializers.CharField(source="deployment.deployment_name", read_only=True)
     model = serializers.UUIDField(source="deployment.model_id", read_only=True)
     model_id = serializers.CharField(source="deployment.model.model_id", read_only=True)
+    model_name = serializers.CharField(source="deployment.model.display_name", read_only=True)
     input_tokens = serializers.IntegerField(source="prompt_tokens", read_only=True)
     output_tokens = serializers.IntegerField(source="completion_tokens", read_only=True)
     tokens_used = serializers.IntegerField(source="total_tokens", read_only=True)
@@ -254,6 +236,7 @@ class AIUsageLogSerializer(serializers.ModelSerializer):
             "deployment_name",
             "model",
             "model_id",
+            "model_name",
             "prompt_tokens",
             "completion_tokens",
             "total_tokens",
@@ -274,8 +257,67 @@ class RotateKeySerializer(serializers.Serializer):
 
 
 class ReEncryptSerializer(serializers.Serializer):
-    old_key = serializers.CharField(max_length=1_000, write_only=True, style={"input_type": "password"})
-    new_key = serializers.CharField(max_length=1_000, write_only=True, style={"input_type": "password"})
+    old_key = serializers.CharField(write_only=True, style={"input_type": "password"})
+    new_key = serializers.CharField(write_only=True, style={"input_type": "password"})
+
+
+class AIProviderRuntimeConfigurationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AIProviderRuntimeConfiguration
+        fields = ("id", "tenant_id", "environment", "values", "version", "updated_by", "created_at", "updated_at")
+        read_only_fields = fields
+
+
+class AIProviderRuntimeConfigurationWriteSerializer(serializers.Serializer):
+    environment = serializers.CharField(max_length=64, required=False, default="default")
+    values = serializers.DictField()
+
+
+class AIProviderRuntimeConfigurationImportSerializer(serializers.Serializer):
+    document = serializers.DictField()
+
+
+class AIProviderRuntimeConfigurationRollbackSerializer(serializers.Serializer):
+    version = serializers.IntegerField(min_value=1)
+    environment = serializers.CharField(max_length=64, required=False, default="default")
+
+
+class AIProviderRuntimeConfigurationVersionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AIProviderRuntimeConfigurationVersion
+        fields = (
+            "id",
+            "tenant_id",
+            "configuration",
+            "version",
+            "environment",
+            "values",
+            "created_by",
+            "correlation_id",
+            "rollback_of",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class AIProviderRuntimeConfigurationAuditSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AIProviderRuntimeConfigurationAudit
+        fields = (
+            "id",
+            "tenant_id",
+            "configuration",
+            "action",
+            "actor_id",
+            "correlation_id",
+            "from_version",
+            "to_version",
+            "before",
+            "after",
+            "rollback_of",
+            "created_at",
+        )
+        read_only_fields = fields
 
 
 # Stable names kept for existing schema imports.

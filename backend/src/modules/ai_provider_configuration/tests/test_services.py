@@ -1,9 +1,11 @@
-"""
-Service Unit Tests for AiProviderConfiguration module.
+"""Service tests for governed AI-provider configuration behavior."""
 
-Tests business logic in services layer.
-"""
+from __future__ import annotations
+
+import uuid
+
 import pytest
+from rest_framework.exceptions import ValidationError
 
 from src.modules.ai_provider_configuration.models import TenantBaseModel
 from src.modules.ai_provider_configuration.services import AiProviderConfigurationService
@@ -11,126 +13,95 @@ from src.modules.ai_provider_configuration.services import AiProviderConfigurati
 
 @pytest.mark.django_db
 class TestAiProviderConfigurationService:
-    """Test AiProviderConfigurationService business logic."""
-
-    def test_create_resource(self, db):
-        """Test creating a resource via service."""
+    def test_create_resource_requires_uuid_tenant_and_idempotency(self) -> None:
         service = AiProviderConfigurationService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
+        with pytest.raises(ValidationError):
+            service.create_resource(tenant_id="tenant-123", name="Test Resource", created_by=uuid.uuid4())
+        with pytest.raises(ValidationError):
+            service.create_resource(tenant_id=uuid.uuid4(), name="Test Resource", created_by=uuid.uuid4())
+
+    def test_create_resource(self) -> None:
+        tenant_id = uuid.uuid4()
+        actor_id = uuid.uuid4()
+        resource = AiProviderConfigurationService().create_resource(
+            tenant_id=tenant_id,
             name="Test Resource",
             description="Test description",
-            created_by="user-123",
+            created_by=actor_id,
+            idempotency_key="create-resource",
         )
         assert resource.id is not None
         assert resource.name == "Test Resource"
-        assert resource.tenant_id == "tenant-123"
+        assert resource.tenant_id == tenant_id
+        assert resource.created_by == actor_id
 
-    def test_get_resource(self, db):
-        """Test getting a resource by ID."""
+    def test_create_resource_replays_same_idempotency_key(self) -> None:
+        tenant_id = uuid.uuid4()
+        actor_id = uuid.uuid4()
         service = AiProviderConfigurationService()
-        created = service.create_resource(
-            tenant_id="tenant-123",
+        first = service.create_resource(
+            tenant_id=tenant_id,
             name="Test Resource",
-            created_by="user-123",
+            created_by=actor_id,
+            idempotency_key="same-request",
         )
-        
-        retrieved = service.get_resource(created.id, "tenant-123")
-        assert retrieved is not None
-        assert retrieved.id == created.id
-        assert retrieved.name == "Test Resource"
-
-    def test_get_resource_wrong_tenant(self, db):
-        """Test that getting resource from wrong tenant returns None."""
-        service = AiProviderConfigurationService()
-        created = service.create_resource(
-            tenant_id="tenant-123",
+        second = service.create_resource(
+            tenant_id=tenant_id,
             name="Test Resource",
-            created_by="user-123",
+            created_by=actor_id,
+            idempotency_key="same-request",
         )
-        
-        retrieved = service.get_resource(created.id, "tenant-456")
-        assert retrieved is None
+        assert second.id == first.id
 
-    def test_list_resources(self, db):
-        """Test listing resources for tenant."""
-        service = AiProviderConfigurationService()
-        service.create_resource(
-            tenant_id="tenant-123",
-            name="Resource 1",
-            created_by="user-123",
-        )
-        service.create_resource(
-            tenant_id="tenant-123",
-            name="Resource 2",
-            created_by="user-123",
-        )
-        service.create_resource(
-            tenant_id="tenant-456",
-            name="Resource 3",
-            created_by="user-456",
-        )
-        
-        resources = service.list_resources("tenant-123")
-        assert len(resources) == 2
-        assert all(r.tenant_id == "tenant-123" for r in resources)
-
-    def test_update_resource(self, db):
-        """Test updating a resource."""
+    def test_get_resource_wrong_tenant(self) -> None:
         service = AiProviderConfigurationService()
         resource = service.create_resource(
-            tenant_id="tenant-123",
+            tenant_id=uuid.uuid4(),
+            name="Test Resource",
+            created_by=uuid.uuid4(),
+            idempotency_key="tenant-a-create",
+        )
+        assert service.get_resource(resource.id, uuid.uuid4()) is None
+
+    def test_update_resource_validates_allowed_config_keys(self) -> None:
+        tenant_id = uuid.uuid4()
+        service = AiProviderConfigurationService()
+        resource = service.create_resource(
+            tenant_id=tenant_id,
             name="Original Name",
-            created_by="user-123",
+            created_by=uuid.uuid4(),
+            idempotency_key="update-create",
         )
-        
-        updated = service.update_resource(
-            resource.id,
-            "tenant-123",
-            name="Updated Name",
-            description="Updated description",
-        )
+        updated = service.update_resource(resource.id, tenant_id, name="Updated Name", config={"owner": "ops"})
         assert updated is not None
         assert updated.name == "Updated Name"
-        assert updated.description == "Updated description"
+        assert updated.config == {"owner": "ops"}
+        with pytest.raises(ValidationError):
+            service.update_resource(resource.id, tenant_id, config={"unsupported": True})
 
-    def test_delete_resource(self, db):
-        """Test deleting a resource."""
+    def test_delete_and_restore_resource_are_reversible(self) -> None:
+        tenant_id = uuid.uuid4()
         service = AiProviderConfigurationService()
         resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="To Delete",
-            created_by="user-123",
+            tenant_id=tenant_id,
+            name="To Archive",
+            created_by=uuid.uuid4(),
+            idempotency_key="delete-create",
         )
-        
-        result = service.delete_resource(resource.id, "tenant-123")
-        assert result is True
-        assert not TenantBaseModel.objects.filter(id=resource.id).exists()
+        assert service.delete_resource(resource.id, tenant_id) is True
+        archived = TenantBaseModel.objects.get(id=resource.id)
+        assert archived.is_deleted is True
+        restored = service.restore_resource(resource.id, tenant_id)
+        assert restored.is_deleted is False
 
-    def test_activate_resource(self, db):
-        """Test activating a resource."""
+    def test_activate_and_deactivate_resource(self) -> None:
+        tenant_id = uuid.uuid4()
         service = AiProviderConfigurationService()
         resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
+            tenant_id=tenant_id,
+            name="Toggle Resource",
+            created_by=uuid.uuid4(),
+            idempotency_key="toggle-create",
         )
-        resource.is_active = False
-        resource.save()
-        
-        activated = service.activate_resource(resource.id, "tenant-123")
-        assert activated is not None
-        assert activated.is_active is True
-
-    def test_deactivate_resource(self, db):
-        """Test deactivating a resource."""
-        service = AiProviderConfigurationService()
-        resource = service.create_resource(
-            tenant_id="tenant-123",
-            name="Test Resource",
-            created_by="user-123",
-        )
-        
-        deactivated = service.deactivate_resource(resource.id, "tenant-123")
-        assert deactivated is not None
-        assert deactivated.is_active is False
+        assert service.deactivate_resource(resource.id, tenant_id).is_active is False
+        assert service.activate_resource(resource.id, tenant_id).is_active is True

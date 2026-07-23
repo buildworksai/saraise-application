@@ -8,10 +8,14 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.throttling import SimpleRateThrottle
 
-from src.core.auth_utils import get_user_tenant_id, get_user_tenant_role
+from src.core.auth_utils import get_user_tenant_id
 
 PERMISSIONS: Final[tuple[str, ...]] = (
     "ai_provider_configuration.provider:read",
+    "ai_provider_configuration.resource:read",
+    "ai_provider_configuration.resource:create",
+    "ai_provider_configuration.resource:update",
+    "ai_provider_configuration.resource:delete",
     "ai_provider_configuration.credential:read",
     "ai_provider_configuration.credential:create",
     "ai_provider_configuration.credential:update",
@@ -23,6 +27,13 @@ PERMISSIONS: Final[tuple[str, ...]] = (
     "ai_provider_configuration.deployment:delete",
     "ai_provider_configuration.usage:read",
     "ai_provider_configuration.secret:rotate",
+    "ai_provider_configuration.configuration:read",
+    "ai_provider_configuration.configuration:update",
+    "ai_provider_configuration.configuration:preview",
+    "ai_provider_configuration.configuration:rollback",
+    "ai_provider_configuration.configuration:import",
+    "ai_provider_configuration.configuration:export",
+    "ai_provider_configuration.configuration:audit",
     "ai_provider_configuration.health:read",
 )
 
@@ -43,11 +54,9 @@ class SessionAuthentication401(SessionAuthentication):
 
 
 class AIProviderActionPermission(BasePermission):
-    """Allow tenant reads and require an administrator or Django grant for writes."""
+    """Require explicit manifest-declared grants for every action."""
 
     message = "You do not have permission to manage AI provider configuration."
-    SAFE_ACTIONS = frozenset({"list", "retrieve", "health"})
-    ADMIN_ROLES = frozenset({"tenant_admin", "system_admin", "super_admin"})
 
     def has_permission(self, request: object, view: object) -> bool:
         user = getattr(request, "user", None)
@@ -60,10 +69,6 @@ class AIProviderActionPermission(BasePermission):
             return False
         if bool(getattr(user, "is_superuser", False)):
             return True
-        if action in self.SAFE_ACTIONS:
-            return True
-        if get_user_tenant_role(user) in self.ADMIN_ROLES:
-            return True
         return bool(user.has_perm(required))
 
 
@@ -71,7 +76,21 @@ class TenantProviderThrottle(SimpleRateThrottle):
     """Bound traffic per tenant without trusting a request header."""
 
     scope = "ai_provider_configuration"
-    rate = "120/min"
+
+    def get_rate(self) -> str | None:
+        from .services import AIProviderRuntimeConfigurationService, _section
+
+        tenant_id = None
+        request = getattr(self, "request", None)
+        if request is not None:
+            tenant_id = get_user_tenant_id(getattr(request, "user", None))
+        values = AIProviderRuntimeConfigurationService.runtime_values(tenant_id)
+        rate_limits = _section(values, "rate_limits")
+        return f"{int(rate_limits['tenant_requests_per_minute'])}/min"
+
+    def allow_request(self, request: object, view: object) -> bool:
+        self.request = request
+        return super().allow_request(request, view)
 
     def get_cache_key(self, request: object, view: object) -> str | None:
         del view

@@ -16,7 +16,7 @@ function renderPage() {
 describe('AiProviderConfigurationDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(aiProviderConfigurationService.getProvider).mockResolvedValue({ id: 'provider-1', name: 'Mistral', provider_type: 'mistral', base_url: '', is_active: true, models_count: 1, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' });
+    vi.mocked(aiProviderConfigurationService.getProvider).mockResolvedValue({ id: 'provider-1', name: 'Mistral', provider_type: 'mistral', is_active: true, models_count: 1, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' });
     vi.mocked(aiProviderConfigurationService.listModels).mockResolvedValue([{ id: 'model-1', provider: 'provider-1', provider_name: 'Mistral', provider_type: 'mistral', model_id: 'large', display_name: 'Mistral Large', capabilities: ['text'], pricing: {}, max_tokens: 32000, is_active: true, deployments_count: 0, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' }]);
     vi.mocked(aiProviderConfigurationService.listCredentials).mockResolvedValue([]);
     vi.mocked(aiProviderConfigurationService.listDeployments).mockResolvedValue([]);

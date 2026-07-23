@@ -11,7 +11,7 @@ vi.mock('../../services/ai_provider_configuration-service');
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const provider: AIProvider = {
-  id: 'provider-1', name: 'OpenAI', provider_type: 'openai', base_url: 'https://example.invalid',
+  id: 'provider-1', name: 'OpenAI', provider_type: 'openai',
   is_active: true, models_count: 1, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
 };
 const model: AIModel = {

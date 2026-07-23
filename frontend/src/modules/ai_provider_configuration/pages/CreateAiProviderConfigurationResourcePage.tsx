@@ -9,18 +9,27 @@ import { Input } from '@/components/ui/Input';
 import { ApiProblem, ConsoleHeader, ConsoleSkeleton } from '../components/ConsolePrimitives';
 import { AI_PROVIDER_ROUTES } from '../contracts';
 import { aiProviderConfigurationService } from '../services/ai_provider_configuration-service';
+import { useAiProviderDocumentTitle } from '../use-ai-provider-document-title';
 
 export const CreateAiProviderConfigurationResourcePage = () => {
+  useAiProviderDocumentTitle('Connect provider credential');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [provider, setProvider] = useState('');
-  const [label, setLabel] = useState('Default');
+  const [label, setLabel] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [validationError, setValidationError] = useState('');
   const providers = useQuery({ queryKey: ['ai-provider-configuration', 'providers'], queryFn: () => aiProviderConfigurationService.listProviders() });
+  const runtimeConfiguration = useQuery({ queryKey: ['ai-provider-configuration', 'runtime-configuration'], queryFn: aiProviderConfigurationService.getRuntimeConfiguration });
+  const values = runtimeConfiguration.data?.values;
+  const credentialPolicy = typeof values?.credential_policy === 'object' && values.credential_policy !== null ? values.credential_policy as Record<string, unknown> : {};
+  const fieldLimits = typeof values?.field_limits === 'object' && values.field_limits !== null ? values.field_limits as Record<string, unknown> : {};
+  const defaultLabel = typeof credentialPolicy.default_label === 'string' ? credentialPolicy.default_label : '';
+  const labelMax = typeof fieldLimits.credential_label_max === 'number' ? fieldLimits.credential_label_max : undefined;
+  const keyMinimum = typeof fieldLimits.credential_secret_hint_length === 'number' ? fieldLimits.credential_secret_hint_length * 2 : 1;
   const createCredential = useMutation({
-    mutationFn: () => aiProviderConfigurationService.createCredential({ provider, label: label.trim(), api_key: apiKey }),
+    mutationFn: () => aiProviderConfigurationService.createCredential({ provider, label: (label || defaultLabel).trim(), api_key: apiKey }),
     onSuccess: (credential) => {
       void queryClient.invalidateQueries({ queryKey: ['ai-provider-configuration'] });
       toast.success(`${credential.provider_name} credential connected`);
@@ -32,8 +41,8 @@ export const CreateAiProviderConfigurationResourcePage = () => {
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!provider) return setValidationError('Select a provider.');
-    if (!label.trim()) return setValidationError('Credential label is required.');
-    if (apiKey.trim().length < 8) return setValidationError('Enter the complete provider API key.');
+    if (!(label || defaultLabel).trim()) return setValidationError('Credential label is required.');
+    if (apiKey.trim().length < keyMinimum) return setValidationError('Enter the complete provider API key.');
     setValidationError('');
     await createCredential.mutateAsync();
   };
@@ -43,6 +52,14 @@ export const CreateAiProviderConfigurationResourcePage = () => {
       <ConsoleHeader title="Connect provider credential" description="Authorize this tenant to use an approved provider. Secret material is encrypted at rest and is never returned by the API." />
       {providers.isLoading ? <ConsoleSkeleton /> : providers.error ? (
         <main className="p-4 sm:p-6 lg:p-8"><ApiProblem error={providers.error} onRetry={() => { void providers.refetch(); }} /></main>
+      ) : providers.data?.length === 0 ? (
+        <main className="mx-auto max-w-3xl p-4 sm:p-6 lg:p-8">
+          <Card className="p-6 text-center">
+            <CardTitle>No active providers</CardTitle>
+            <CardDescription className="mt-2">The provider catalog has no active entries available for credential creation.</CardDescription>
+            <Button className="mt-5" variant="outline" onClick={() => navigate(AI_PROVIDER_ROUTES.HOME)}><ArrowLeft className="mr-2 h-4 w-4" />Return to console</Button>
+          </Card>
+        </main>
       ) : (
         <main className="mx-auto grid max-w-5xl gap-6 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:p-8">
           <Card>
@@ -59,7 +76,7 @@ export const CreateAiProviderConfigurationResourcePage = () => {
                     {(providers.data ?? []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                   </select>
                 </div>
-                <Input id="credential-label" label="Credential label" value={label} maxLength={120} autoComplete="off" onChange={(event) => setLabel(event.target.value)} placeholder="Default" />
+                <Input id="credential-label" label="Credential label" value={label} maxLength={labelMax} autoComplete="off" onChange={(event) => setLabel(event.target.value)} placeholder={defaultLabel} />
                 <div className="relative">
                   <Input id="credential-api-key" label="Provider API key" type={showKey ? 'text' : 'password'} value={apiKey} autoComplete="new-password" spellCheck={false} onChange={(event) => setApiKey(event.target.value)} className="pr-11 font-mono" placeholder="Paste the key supplied by your provider" />
                   <button type="button" className="absolute right-2 top-7 rounded p-2 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => setShowKey((current) => !current)} aria-label={showKey ? 'Hide API key' : 'Show API key'}>{showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>

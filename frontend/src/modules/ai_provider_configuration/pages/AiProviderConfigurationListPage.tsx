@@ -39,6 +39,7 @@ import {
   type CredentialStatus,
 } from '../contracts';
 import { aiProviderConfigurationService } from '../services/ai_provider_configuration-service';
+import { useAiProviderDocumentTitle } from '../use-ai-provider-document-title';
 
 const QUERY_ROOT = ['ai-provider-configuration'] as const;
 type ConsoleSection = 'providers' | 'credentials' | 'models' | 'deployments' | 'usage';
@@ -54,6 +55,7 @@ const sections: { id: ConsoleSection; label: string }[] = [
 // This orchestration component intentionally keeps all resource tabs on one cache-coherent screen.
 // eslint-disable-next-line complexity, max-lines-per-function
 export const AiProviderConfigurationListPage = () => {
+  useAiProviderDocumentTitle('AI provider console');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [section, setSection] = useState<ConsoleSection>('providers');
@@ -91,7 +93,7 @@ export const AiProviderConfigurationListPage = () => {
   });
   const updateDeployment = useMutation({
     mutationFn: ({ id, active }: { id: string; active: boolean }) =>
-      aiProviderConfigurationService.updateDeployment(id, { status: active ? 'active' : 'inactive' }),
+      active ? aiProviderConfigurationService.activateDeployment(id) : aiProviderConfigurationService.deactivateDeployment(id),
     onSuccess: () => { void invalidateTenantData(); toast.success('Deployment status updated'); },
     onError: () => toast.error('Deployment status could not be updated.'),
   });
@@ -205,13 +207,13 @@ function CredentialsPanel({ items, onConnect, onDelete }: { items: AIProviderCre
 }
 
 function CredentialStatus({ status }: { status: CredentialStatus }) {
-  const style = status === 'valid' ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300' : status === 'invalid' ? 'bg-destructive/15 text-destructive' : 'bg-amber-500/15 text-amber-700 dark:text-amber-300';
+  const style = status === 'valid' ? 'bg-primary/10 text-primary' : status === 'invalid' ? 'bg-destructive/15 text-destructive' : 'bg-muted text-foreground';
   return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${style}`}>{status}</span>;
 }
 
 function ModelsPanel({ items, onDeploy }: { items: AIModel[]; onDeploy: () => void }) {
   if (!items.length) return <div className="p-4"><EmptyPanel icon={<Box className="h-5 w-5" />} title="No models found" description="The active provider catalog does not contain a matching model." /></div>;
-  return <div className="divide-y">{items.map((model) => <div key={model.id} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{model.display_name}</h3><span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">{model.provider_name}</span></div><p className="mt-1 font-mono text-xs text-muted-foreground">{model.model_id}</p><div className="mt-2 flex flex-wrap gap-1">{model.capabilities.slice(0, 4).map((capability) => <span key={capability} className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">{capability.replaceAll('_', ' ')}</span>)}</div></div><div className="flex items-center gap-4"><div className="text-right text-xs text-muted-foreground"><p>{model.max_tokens ? `${formatTokens(model.max_tokens)} token context` : 'Context not published'}</p><p>{model.deployments_count} deployments</p></div><Button size="sm" variant="outline" onClick={onDeploy}>Deploy</Button></div></div>)}</div>;
+  return <div className="divide-y">{items.map((model) => <div key={model.id} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="font-medium">{model.display_name}</h3><span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">{model.provider_name}</span></div><p className="mt-1 font-mono text-xs text-muted-foreground">{model.model_id}</p><div className="mt-2 flex flex-wrap gap-1">{model.capabilities.map((capability) => <span key={capability} className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">{capability.replaceAll('_', ' ')}</span>)}</div></div><div className="flex items-center gap-4"><div className="text-right text-xs text-muted-foreground"><p>{model.max_tokens ? `${formatTokens(model.max_tokens)} token context` : 'Context not published'}</p><p>{model.deployments_count} deployments</p></div><Button size="sm" variant="outline" onClick={onDeploy}>Deploy</Button></div></div>)}</div>;
 }
 
 function DeploymentsPanel({ items, isUpdating, onToggle, onDelete, onCreate }: { items: AIModelDeployment[]; isUpdating: boolean; onToggle: (id: string, active: boolean) => void; onDelete: (id: string, name: string) => void; onCreate: () => void }) {
