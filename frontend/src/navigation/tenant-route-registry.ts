@@ -53,6 +53,7 @@ const routeModules = import.meta.glob<TenantRouteModule>(
 );
 
 const KNOWN_ACRONYMS = new Map<string, string>([["crm", "CRM"]]);
+const GOVERNED_ROUTE_MODULES = new Set(["document_intelligence", "workflow_automation"]);
 
 function normalizePath(path: string): string {
   return path.length > 1 ? path.replace(/\/+$/, "") : path;
@@ -117,7 +118,7 @@ function validateRequiredFields(
   if (!route.sourceFile.trim()) {
     addIssue(issues, route, "sourceFile must not be empty");
   }
-  if (route.module === "document_intelligence" && !route.title?.trim()) {
+  if (GOVERNED_ROUTE_MODULES.has(route.module) && !route.title?.trim()) {
     addIssue(issues, route, "title must not be empty");
   }
   if (!route.path.startsWith("/")) {
@@ -192,7 +193,7 @@ export function getTenantRouteValidationIssues(
     } else if (parent.module !== route.module) {
       addIssue(issues, route, "contextual parent must belong to the same module");
     }
-    if (route.module === "document_intelligence") {
+    if (GOVERNED_ROUTE_MODULES.has(route.module)) {
       if (!route.navigation.label?.trim()) addIssue(issues, route, "contextual NavItem label must not be empty");
       if (!route.navigation.icon) addIssue(issues, route, "contextual NavItem icon is required");
       if (!Number.isFinite(route.navigation.order)) addIssue(issues, route, "contextual NavItem order must be finite");
@@ -246,7 +247,9 @@ export function buildTenantSidebarTree(
 
   const routesById = new Map(routes.map((route) => [route.id, route]));
   for (const route of routes) {
-    const contextualNavItem = route.module === "process_mining" && route.navigation.type === "contextual";
+    const contextualNavItem = (
+      route.module === "process_mining" || route.module === "workflow_automation"
+    ) && route.navigation.type === "contextual";
     if (route.navigation.type !== "sidebar" && !contextualNavItem) continue;
     if (grantedPermissions && route.requiredPermission && !grantedPermissions.has(route.requiredPermission)) continue;
     const parent = route.navigation.type === "contextual" ? routesById.get(route.navigation.parentRouteId) : undefined;

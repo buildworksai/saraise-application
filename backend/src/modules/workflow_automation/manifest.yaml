@@ -22,7 +22,15 @@ permissions:
   - workflow_automation.task:complete
   - workflow_automation.task:reject
   - workflow_automation.catalog:read
+  - workflow_automation.configuration:read
+  - workflow_automation.configuration:write
+  - workflow_automation.configuration:rollback
+  - workflow_automation.configuration:import
+  - workflow_automation.configuration:export
   - workflow_automation.health:read
+policy_permissions:
+  - workflow_automation.task:manage
+  - workflow_automation.task:self_approve
 sod_actions:
   - workflow_automation.workflow:publish
   - workflow_automation.workflow:delete
@@ -31,6 +39,56 @@ search_indexes:
   - workflow_instances
   - workflow_tasks
 ai_tools: []
+entities:
+  - workflow_definitions
+  - workflow_steps
+  - workflow_instances
+  - workflow_tasks
+  - workflow_step_executions
+  - workflow_automation_configurations
+  - workflow_automation_configuration_revisions
+  - workflow_transition_audits
+api_surface:
+  - GET /workflows/
+  - POST /workflows/
+  - GET /workflows/{id}/
+  - PATCH /workflows/{id}/
+  - DELETE /workflows/{id}/
+  - POST /workflows/validate/
+  - POST /workflows/{id}/publish/
+  - POST /workflows/{id}/archive/
+  - POST /workflows/{id}/clone/
+  - GET /instances/
+  - POST /instances/
+  - GET /instances/{id}/
+  - POST /instances/{id}/cancel/
+  - GET /tasks/
+  - GET /tasks/{id}/
+  - POST /tasks/{id}/complete/
+  - POST /tasks/{id}/reject/
+  - GET /catalog/actions/
+  - GET /catalog/conditions/
+  - GET /catalog/subjects/
+  - GET /catalog/assignees/
+  - GET /catalog/lookups/{provider_key}/
+  - GET /configuration/
+  - PUT /configuration/current/
+  - POST /configuration/preview/
+  - GET /configuration/history/
+  - POST /configuration/rollback/
+  - POST /configuration/import/
+  - GET /configuration/export/
+  - GET /health/
+frontend_surfaces:
+  - /workflow-automation/workflows
+  - /workflow-automation/workflows/new
+  - /workflow-automation/workflows/{id}
+  - /workflow-automation/workflows/{id}/edit
+  - /workflow-automation/instances
+  - /workflow-automation/instances/{id}
+  - /workflow-automation/tasks
+  - /workflow-automation/tasks/{id}
+  - /workflow-automation/configuration
 metadata:
   api_version: v2
   public_api_prefix: /api/v2/workflow-automation/

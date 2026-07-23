@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, Copy, Pencil, Play, Send } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -11,6 +12,7 @@ import { formatDate, newTransitionKey } from "../workflow-utils";
 export function WorkflowDetailPage() {
   const { id = "" } = useParams(); const navigate = useNavigate(); const cache = useQueryClient();
   const query = useQuery({ queryKey: ["workflow-definition", id], queryFn: () => workflowService.workflows.get(id), enabled: Boolean(id) });
+  useEffect(() => { if (query.data) document.title = `${query.data.name} · Workflows · SARAISE`; }, [query.data]);
   const refresh = (): void => { void cache.invalidateQueries({ queryKey: ["workflow-definition", id] }); };
   const publish = useMutation({ mutationFn: () => workflowService.workflows.publish(id, { transition_key: newTransitionKey("publish") }), onSuccess: refresh });
   const archive = useMutation({ mutationFn: () => workflowService.workflows.archive(id, { transition_key: newTransitionKey("archive") }), onSuccess: refresh });

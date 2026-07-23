@@ -22,6 +22,12 @@ EXPECTED_PERMISSIONS = {
     "workflow_automation.task:read",
     "workflow_automation.task:complete",
     "workflow_automation.task:reject",
+    "workflow_automation.catalog:read",
+    "workflow_automation.configuration:read",
+    "workflow_automation.configuration:write",
+    "workflow_automation.configuration:rollback",
+    "workflow_automation.configuration:import",
+    "workflow_automation.configuration:export",
     "workflow_automation.health:read",
 }
 
@@ -54,6 +60,14 @@ def test_every_route_action_has_permission_and_quota_metadata() -> None:
         "catalog_conditions",
         "catalog_subjects",
         "catalog_assignees",
+        "catalog_lookup",
+        "configuration_list",
+        "configuration_update",
+        "configuration_preview",
+        "configuration_history",
+        "configuration_rollback",
+        "configuration_import_configuration",
+        "configuration_export_configuration",
         "health",
     }
     assert required_actions.issubset(ACTION_ACCESS)

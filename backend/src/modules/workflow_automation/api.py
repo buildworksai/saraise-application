@@ -31,9 +31,14 @@ from .extensions import (
     subject_registry,
 )
 from .health import sanitized_health_payload
+from .models import Workflow, WorkflowAutomationConfiguration, WorkflowInstance, WorkflowTask
 from .permissions import MODULE_ENTITLEMENT, access_metadata
 from .serializers import (
     WorkflowCloneSerializer,
+    WorkflowConfigurationImportSerializer,
+    WorkflowConfigurationPreviewSerializer,
+    WorkflowConfigurationRollbackSerializer,
+    WorkflowConfigurationWriteSerializer,
     WorkflowCreateSerializer,
     WorkflowDefinitionValidationSerializer,
     WorkflowDetailSerializer,
@@ -49,9 +54,13 @@ from .serializers import (
     WorkflowTaskRejectSerializer,
     WorkflowUpdateSerializer,
 )
-from .services import WorkflowDefinitionService, WorkflowExecutionService, WorkflowTaskService
+from .services import (
+    WorkflowConfigurationService,
+    WorkflowDefinitionService,
+    WorkflowExecutionService,
+    WorkflowTaskService,
+)
 
-SUNSET = "Thu, 31 Dec 2026 23:59:59 GMT"
 SUCCESSOR = '</api/v2/workflow-automation/>; rel="successor-version"'
 
 
@@ -83,7 +92,11 @@ class DeprecatedV1HeadersMixin:
         response = super().finalize_response(request, response, *args, **kwargs)  # type: ignore[misc]
         if request.path.startswith("/api/v1/workflow-automation/"):
             response["Deprecation"] = "true"
-            response["Sunset"] = SUNSET
+            tenant_id = getattr(request, "tenant_id", None)
+            if isinstance(tenant_id, uuid.UUID):
+                response["Sunset"] = str(
+                    WorkflowConfigurationService.value(tenant_id, "operational.v1_sunset")
+                )
             response["Link"] = SUCCESSOR
         return response
 
@@ -102,7 +115,12 @@ class GovernedWorkflowViewSet(DeprecatedV1HeadersMixin, GovernedAPIViewMixin, vi
             permission, quota = None, None
         self.required_permission = permission
         self.quota_resource = quota
-        self.quota_cost = 1
+        tenant_id = getattr(self.request, "tenant_id", None)
+        self.quota_cost = (
+            WorkflowConfigurationService.value(tenant_id, "operational.api_quota_cost")
+            if isinstance(tenant_id, uuid.UUID)
+            else None
+        )
         return super().get_permissions()
 
     @property
@@ -164,7 +182,10 @@ class WorkflowViewSet(
         }.get(self.action, WorkflowDetailSerializer)
 
     def get_queryset(self):
-        return WorkflowDefinitionService.list_workflows(self.tenant_id, self._filters())
+        tenant_id = getattr(self.request, "tenant_id", None)
+        if not isinstance(tenant_id, uuid.UUID):
+            return Workflow.objects.none()
+        return WorkflowDefinitionService.list_workflows(tenant_id, self._filters())
 
     def _filters(self) -> dict[str, Any]:
         return {
@@ -286,7 +307,10 @@ class WorkflowInstanceViewSet(
         }
 
     def get_queryset(self):
-        return WorkflowExecutionService.list_instances(self.tenant_id, self._filters())
+        tenant_id = getattr(self.request, "tenant_id", None)
+        if not isinstance(tenant_id, uuid.UUID):
+            return WorkflowInstance.objects.none()
+        return WorkflowExecutionService.list_instances(tenant_id, self._filters())
 
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         page = self.paginate_queryset(self.get_queryset())
@@ -302,9 +326,6 @@ class WorkflowInstanceViewSet(
         serializer = WorkflowInstanceStartSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
-        workflow = WorkflowDefinitionService.get_workflow(self.tenant_id, values["workflow_id"])
-        if workflow.trigger_type != "manual":
-            raise ValidationError({"workflow_id": ["Event and scheduled workflows must start through their registered trigger adapter."]})
         instance = WorkflowExecutionService.start_workflow(
             self.tenant_id,
             values["workflow_id"],
@@ -313,7 +334,7 @@ class WorkflowInstanceViewSet(
             values["idempotency_key"],
             values.get("entity_type"),
             values.get("entity_id"),
-            values["priority"],
+            values.get("priority"),
         )
         response_status = status.HTTP_200_OK if instance.state in {"completed", "failed", "cancelled"} else status.HTTP_202_ACCEPTED
         return Response(WorkflowInstanceDetailSerializer(instance).data, status=response_status)
@@ -360,7 +381,10 @@ class WorkflowTaskViewSet(
         }
 
     def get_queryset(self):
-        return WorkflowTaskService.list_tasks(self.tenant_id, self.request.user, self._filters())
+        tenant_id = getattr(self.request, "tenant_id", None)
+        if not isinstance(tenant_id, uuid.UUID):
+            return WorkflowTask.objects.none()
+        return WorkflowTaskService.list_tasks(tenant_id, self.request.user, self._filters())
 
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         page = self.paginate_queryset(self.get_queryset())
@@ -488,7 +512,42 @@ class CatalogViewSet(GovernedWorkflowViewSet):
 
     def _catalog(self, registry: object, kind: str) -> Response:
         descriptors = registry.catalog(None)  # type: ignore[attr-defined]
-        return Response([_catalog_item(descriptor, kind) for descriptor in descriptors])
+        limits = WorkflowConfigurationService.get_configuration(self.tenant_id).document["limits"]
+        default_limit = int(limits["catalog_default_limit"])
+        maximum = int(limits["catalog_max_limit"])
+        raw_limit = self.request.query_params.get("limit", str(default_limit))
+        ordering = self.request.query_params.get("ordering", "key")
+        allowed_orderings = WorkflowConfigurationService.value(
+            self.tenant_id, "allowed_values.catalog_orderings"
+        )
+        try:
+            limit = int(raw_limit)
+        except ValueError as exc:
+            raise ValidationError({"limit": ["Must be an integer."]}) from exc
+        if limit < 1 or limit > maximum:
+            raise ValidationError({"limit": [f"Must be between 1 and {maximum}."]})
+        if ordering not in allowed_orderings:
+            raise ValidationError({"ordering": ["Unsupported catalog ordering."]})
+        items = [_catalog_item(descriptor, kind) for descriptor in descriptors]
+        if kind == "action":
+            quota_costs = WorkflowConfigurationService.value(
+                self.tenant_id,
+                "action_quota_costs",
+            )
+            for item in items:
+                key = str(item.get("key", ""))
+                if not isinstance(quota_costs, Mapping) or key not in quota_costs:
+                    raise OperationFailed(
+                        error_code="ACTION_QUOTA_UNCONFIGURED",
+                        message="An action catalog entry has no tenant quota policy.",
+                        http_status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    )
+                item["quota_cost"] = int(quota_costs[key])
+        items.sort(key=lambda item: (str(item.get(ordering, "")).casefold(), str(item.get("key", ""))))
+        response = Response(items[:limit])
+        response["X-Total-Count"] = str(len(items))
+        response["X-Result-Limit"] = str(limit)
+        return response
 
     def _provider_options(self, provider_key: str) -> list[dict[str, Any]]:
         try:
@@ -500,15 +559,26 @@ class CatalogViewSet(GovernedWorkflowViewSet):
                 capability=provider_key,
                 message="The requested lookup provider is unavailable.",
             ) from exc
-        raw_limit = self.request.query_params.get("limit", "25")
+        limits = WorkflowConfigurationService.get_configuration(self.tenant_id).document["limits"]
+        default_limit = int(limits["catalog_default_limit"])
+        maximum = int(limits["catalog_max_limit"])
+        search_max_length = int(limits["catalog_search_max_length"])
+        raw_limit = self.request.query_params.get("limit", str(default_limit))
         try:
-            limit = min(max(int(raw_limit), 1), 100)
+            limit = int(raw_limit)
         except ValueError as exc:
-            raise ValidationError({"limit": ["Must be an integer between 1 and 100."]}) from exc
+            raise ValidationError({"limit": ["Must be an integer."]}) from exc
+        if limit < 1 or limit > maximum:
+            raise ValidationError({"limit": [f"Must be between 1 and {maximum}."]})
+        search = self.request.query_params.get("search", "")
+        if len(search) > search_max_length:
+            raise ValidationError(
+                {"search": [f"Must not exceed {search_max_length} characters."]}
+            )
         result = provider.search(
             AssigneeSearchInvocation(
                 tenant_id=self.tenant_id,
-                query=self.request.query_params.get("search", "")[:200],
+                query=search,
                 limit=limit,
             )
         ).unwrap()
@@ -543,7 +613,19 @@ class CatalogViewSet(GovernedWorkflowViewSet):
             raw = _catalog_item(descriptor, "subject")
             for entity_type in raw.get("entity_types", []):
                 items.append({**raw, "entity_type": entity_type})
-        return Response(items)
+        items.sort(key=lambda item: (str(item.get("entity_type", "")).casefold(), str(item.get("key", ""))))
+        maximum = int(WorkflowConfigurationService.value(self.tenant_id, "limits.catalog_max_limit"))
+        default = int(WorkflowConfigurationService.value(self.tenant_id, "limits.catalog_default_limit"))
+        try:
+            limit = int(request.query_params.get("limit", str(default)))
+        except ValueError as exc:
+            raise ValidationError({"limit": ["Must be an integer."]}) from exc
+        if limit < 1 or limit > maximum:
+            raise ValidationError({"limit": [f"Must be between 1 and {maximum}."]})
+        response = Response(items[:limit])
+        response["X-Total-Count"] = str(len(items))
+        response["X-Result-Limit"] = str(limit)
+        return response
 
     @action(detail=False, methods=("get",), url_path="assignees")
     def assignees(self, request: Request) -> Response:
@@ -552,7 +634,25 @@ class CatalogViewSet(GovernedWorkflowViewSet):
             if descriptor.availability == "available":
                 options.extend(self._provider_options(descriptor.key))
         options.sort(key=lambda item: (item["label"].casefold(), item["id"]))
-        return Response(options[:100])
+        cap = int(WorkflowConfigurationService.value(self.tenant_id, "limits.assignee_result_limit"))
+        maximum = min(
+            cap,
+            int(WorkflowConfigurationService.value(self.tenant_id, "limits.catalog_max_limit")),
+        )
+        default = min(
+            maximum,
+            int(WorkflowConfigurationService.value(self.tenant_id, "limits.catalog_default_limit")),
+        )
+        try:
+            limit = int(request.query_params.get("limit", str(default)))
+        except ValueError as exc:
+            raise ValidationError({"limit": ["Must be an integer."]}) from exc
+        if limit < 1 or limit > maximum:
+            raise ValidationError({"limit": [f"Must be between 1 and {maximum}."]})
+        response = Response(options[:limit])
+        response["X-Total-Count"] = str(len(options))
+        response["X-Result-Limit"] = str(limit)
+        return response
 
     @action(
         detail=False,
@@ -565,15 +665,150 @@ class CatalogViewSet(GovernedWorkflowViewSet):
         return Response(self._provider_options(provider_key))
 
 
+class WorkflowConfigurationViewSet(GovernedWorkflowViewSet):
+    """Singleton tenant configuration surface with versioned commands."""
+
+    access_prefix = "configuration"
+
+    @staticmethod
+    def _payload(configuration: WorkflowAutomationConfiguration) -> dict[str, Any]:
+        return {
+            "id": str(configuration.id),
+            "tenant_id": str(configuration.tenant_id),
+            "environment": configuration.environment,
+            "version": configuration.version,
+            "document": configuration.document,
+            "updated_by": str(configuration.updated_by_id) if configuration.updated_by_id else None,
+            "created_at": configuration.created_at,
+            "updated_at": configuration.updated_at,
+        }
+
+    def get_queryset(self):
+        tenant_id = getattr(self.request, "tenant_id", None)
+        if not isinstance(tenant_id, uuid.UUID):
+            return WorkflowAutomationConfiguration.objects.none()
+        return WorkflowAutomationConfiguration.objects.for_tenant(tenant_id)
+
+    def list(self, request: Request) -> Response:
+        environment = request.query_params.get("environment", "production")
+        configuration = WorkflowConfigurationService.get_configuration(self.tenant_id, environment)
+        return Response(self._payload(configuration))
+
+    def update(self, request: Request, pk: str | None = None) -> Response:
+        del pk
+        serializer = WorkflowConfigurationWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        configuration = WorkflowConfigurationService.update_configuration(
+            self.tenant_id,
+            request.user,
+            values["document"],
+            environment=values["environment"],
+            expected_version=values["expected_version"],
+            change_reason=values["change_reason"],
+        )
+        return Response(self._payload(configuration))
+
+    @action(detail=False, methods=("post",))
+    def preview(self, request: Request) -> Response:
+        serializer = WorkflowConfigurationPreviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        return Response(
+            WorkflowConfigurationService.preview(
+                self.tenant_id,
+                values["document"],
+                values["environment"],
+            )
+        )
+
+    @action(detail=False, methods=("get",))
+    def history(self, request: Request) -> Response:
+        environment = request.query_params.get("environment", "production")
+        revisions = WorkflowConfigurationService.history(self.tenant_id, environment)
+        return Response(
+            [
+                {
+                    "id": str(item.id),
+                    "version": item.version,
+                    "previous_document": item.previous_document,
+                    "document": item.document,
+                    "actor_id": str(item.actor_id) if item.actor_id else None,
+                    "correlation_id": item.correlation_id,
+                    "change_reason": item.change_reason,
+                    "created_at": item.created_at,
+                }
+                for item in revisions
+            ]
+        )
+
+    @action(detail=False, methods=("post",))
+    def rollback(self, request: Request) -> Response:
+        serializer = WorkflowConfigurationRollbackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        configuration = WorkflowConfigurationService.rollback(
+            self.tenant_id,
+            request.user,
+            values["target_version"],
+            environment=values["environment"],
+            expected_version=values["expected_version"],
+        )
+        return Response(self._payload(configuration))
+
+    @action(detail=False, methods=("post",), url_path="import")
+    def import_configuration(self, request: Request) -> Response:
+        serializer = WorkflowConfigurationImportSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        configuration = WorkflowConfigurationService.update_configuration(
+            self.tenant_id,
+            request.user,
+            values["document"],
+            environment=values["environment"],
+            expected_version=values["expected_version"],
+            change_reason=values["change_reason"],
+        )
+        return Response(self._payload(configuration))
+
+    @action(detail=False, methods=("get",), url_path="export")
+    def export_configuration(self, request: Request) -> Response:
+        environment = request.query_params.get("environment", "production")
+        configuration = WorkflowConfigurationService.get_configuration(self.tenant_id, environment)
+        response = Response(
+            {
+                "schema": "saraise.workflow-automation.configuration/v1",
+                "environment": configuration.environment,
+                "version": configuration.version,
+                "document": configuration.document,
+            }
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="workflow-automation-{configuration.environment}-v{configuration.version}.json"'
+        )
+        return response
+
+
 class HealthView(DeprecatedV1HeadersMixin, GovernedAPIViewMixin, APIView):
     authentication_classes = (StrictSessionAuthentication,)
     permission_classes = (IsAuthenticated, RequiresAccess)
     required_permission, quota_resource = access_metadata("health")
     required_entitlement = MODULE_ENTITLEMENT
-    quota_cost = 1
+    quota_cost = None
+
+    def get_permissions(self) -> list[object]:
+        tenant_id = getattr(self.request, "tenant_id", None)
+        self.quota_cost = (
+            WorkflowConfigurationService.value(tenant_id, "operational.api_quota_cost")
+            if isinstance(tenant_id, uuid.UUID)
+            else None
+        )
+        return super().get_permissions()
 
     def get(self, request: Request) -> Response:
         tenant_id = getattr(request, "tenant_id", None)
+        if not isinstance(tenant_id, uuid.UUID):
+            raise PermissionDenied("A valid tenant context is required.")
         payload, response_status = sanitized_health_payload(tenant_id)
         return Response(payload, status=response_status)
 
@@ -585,6 +820,7 @@ health_check = HealthView.as_view()
 __all__ = [
     "CatalogViewSet",
     "HealthView",
+    "WorkflowConfigurationViewSet",
     "WorkflowInstanceViewSet",
     "WorkflowTaskViewSet",
     "WorkflowViewSet",

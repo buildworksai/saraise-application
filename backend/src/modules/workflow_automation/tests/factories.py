@@ -88,6 +88,7 @@ class WorkflowInstanceFactory(TenantFactory):
     workflow_version = factory.LazyAttribute(lambda instance: instance.workflow.version)
     context_data = factory.LazyFunction(dict)
     result_data = factory.LazyFunction(dict)
+    priority = 5
     idempotency_key = factory.LazyFunction(lambda: f"instance:{uuid.uuid4().hex}")
     correlation_id = factory.LazyFunction(lambda: str(uuid.uuid4()))
 
@@ -132,6 +133,7 @@ class WorkflowStepExecutionFactory(TenantFactory):
         tenant_id=factory.SelfAttribute("..tenant_id"),
     )
     step = factory.LazyAttribute(lambda execution: _instance_step(execution.instance))
+    attempt = 1
     operation_key = factory.LazyFunction(lambda: f"step:{uuid.uuid4().hex}")
     handler_key = "builtin.context_projection.v1"
     handler_contract_version = "1.0"

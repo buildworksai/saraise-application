@@ -13,7 +13,6 @@ import {
   Shield,
   Users,
   Database,
-  Workflow,
   Plug,
   FolderTree,
   Key,
@@ -30,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { getTenantSidebarTreeForMode } from "@/navigation/tenant-route-registry";
 import { useDocumentIntelligenceConfiguration } from "@/modules/document_intelligence/hooks/use-document-intelligence-configuration";
 import { useTraceabilityCapabilities } from "@/modules/blockchain_traceability/hooks/use-traceability-configuration";
+import { useWorkflowConfiguration } from "@/modules/workflow_automation/hooks/use-workflow-configuration";
 import type { User } from "@/stores/auth-store";
 
 interface NavItem {
@@ -45,12 +45,6 @@ interface NavItem {
 const tenantItems: NavItem[] = [
   { path: "/tenant/dashboard", label: "Dashboard", icon: LayoutDashboard },
   // Phase 8 & 9 Modules
-  {
-    path: "/workflow-automation/workflows",
-    label: "Workflow Automation",
-    icon: Workflow,
-    module: "workflow_automation",
-  },
   {
     path: "/integration-platform",
     label: "Integration Platform",
@@ -281,10 +275,25 @@ export const TenantSidebar = ({ user }: { user: User }) => {
   const isAdmin = user.tenant_role === "tenant_admin";
   const documentIntelligenceConfiguration = useDocumentIntelligenceConfiguration();
   const traceabilityCapabilities = useTraceabilityCapabilities();
+  const workflowConfiguration = useWorkflowConfiguration();
+  const workflowOrders = workflowConfiguration.data?.document.ui.sidebar_orders;
   const runtimeRegistryItems = applyRuntimeNavigationOrder(
     registryTenantItems,
     documentIntelligenceConfiguration.data?.document.ui.navigation_order,
-  );
+  ).map((item) => {
+    if (item.module !== "workflow_automation" || !workflowOrders) return item;
+    const children = item.children?.map((child) => {
+      const order = child.routeId?.includes(".instances.")
+        ? workflowOrders.instances
+        : child.routeId?.includes(".tasks.")
+          ? workflowOrders.tasks
+          : child.routeId?.includes("configuration")
+            ? workflowOrders.configuration
+            : workflowOrders.workflows;
+      return { ...child, order };
+    });
+    return { ...item, order: workflowOrders.workflows, children };
+  });
   const renderedTenantItems = [...tenantItems, ...runtimeRegistryItems]
     .map((item) => item.module === "blockchain_traceability" && traceabilityCapabilities.data
       ? { ...item, order: traceabilityCapabilities.data.document.ui.sidebar_order }

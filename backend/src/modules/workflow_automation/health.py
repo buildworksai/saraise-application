@@ -48,10 +48,13 @@ def _handlers_registered() -> bool:
 
 def _outbox_fresh(tenant_id: uuid.UUID | None) -> bool:
     if tenant_id is None:
-        # Global core readiness has no lawful tenant scope. Per-request module
-        # readiness performs the operational outbox check under RLS context.
-        return True
-    threshold = timezone.now() - timedelta(minutes=5)
+        return False
+    from .services import WorkflowConfigurationService
+
+    stale_seconds = int(
+        WorkflowConfigurationService.value(tenant_id, "operational.outbox_stale_seconds")
+    )
+    threshold = timezone.now() - timedelta(seconds=stale_seconds)
     try:
         return not OutboxEvent.objects.for_tenant(tenant_id).filter(
             status=OutboxStatus.PENDING,
@@ -129,11 +132,13 @@ def sanitized_health_payload(tenant_id: uuid.UUID | str | None = None) -> tuple[
 def register_module_health() -> None:
     """Register the critical module probe idempotently for Django reload."""
 
+    from .services import default_configuration_document
+
     health_registry.register(
         MODULE_HEALTH_NAME,
         module_readiness,
         critical=True,
-        staleness_limit=30,
+        staleness_limit=default_configuration_document()["operational"]["health_staleness_seconds"],
         replace=True,
     )
 

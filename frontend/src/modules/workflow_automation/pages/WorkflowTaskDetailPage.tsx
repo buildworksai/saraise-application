@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, X } from "lucide-react";
 import { useParams } from "react-router-dom";
@@ -13,6 +13,7 @@ function safeValue(value: string | number | boolean | null): string { return val
 export function WorkflowTaskDetailPage() {
   const { id = "" } = useParams(); const cache = useQueryClient(); const [decision, setDecision] = useState<"complete" | "reject" | null>(null); const [result, setResult] = useState("");
   const query = useQuery({ queryKey: ["workflow-task", id], queryFn: () => workflowService.tasks.get(id), enabled: Boolean(id) });
+  useEffect(() => { if (query.data) document.title = `${query.data.step_name} · Workflow task · SARAISE`; }, [query.data]);
   const mutation = useMutation({ mutationFn: (reason: string) => decision === "reject" ? workflowService.tasks.reject(id, { reason, meta_data: {}, transition_key: newTransitionKey("reject") }) : workflowService.tasks.complete(id, { meta_data: {}, transition_key: newTransitionKey("complete") }), onSuccess: (task) => { setResult(`Decision recorded once: ${task.status}.`); setDecision(null); void cache.invalidateQueries({ queryKey: ["workflow-task", id] }); } });
   if (query.isLoading) return <PageSkeleton label="Loading workflow task"/>;
   if (query.error) return <WorkflowProblem error={query.error} retry={() => void query.refetch()}/>;
