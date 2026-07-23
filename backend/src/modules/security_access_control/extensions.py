@@ -140,9 +140,9 @@ class PredicateSchemaDescriptor:
 
     schema_version: str = EXTENSION_SCHEMA_VERSION
     allowed_nodes: tuple[str, ...] = tuple(sorted(ALLOWED_PREDICATE_NODES))
-    max_depth: int = 8
-    max_nodes: int = 64
-    max_in_values: int = 100
+    max_depth: int | None = None
+    max_nodes: int | None = None
+    max_in_values: int | None = None
 
     def __post_init__(self) -> None:
         match = _SCHEMA_VERSION.fullmatch(self.schema_version) if isinstance(self.schema_version, str) else None
@@ -151,13 +151,31 @@ class PredicateSchemaDescriptor:
         nodes = tuple(self.allowed_nodes)
         if not nodes or len(nodes) != len(set(nodes)) or not set(nodes).issubset(ALLOWED_PREDICATE_NODES):
             raise ExtensionContractError("predicate schema contains unsupported nodes")
-        for name, value, maximum in (
-            ("max_depth", self.max_depth, 16),
-            ("max_nodes", self.max_nodes, 256),
-            ("max_in_values", self.max_in_values, 500),
+        from .services import default_security_configuration
+
+        limits = default_security_configuration()["limits"]
+        if not isinstance(limits, Mapping):
+            raise ExtensionContractError("predicate configuration limits are unavailable")
+        configured = {
+            "max_depth": int(limits["predicate_max_depth"]),
+            "max_nodes": int(limits["predicate_max_nodes"]),
+            "max_in_values": int(limits["predicate_max_in_values"]),
+        }
+        hard_limits = {
+            "max_depth": int(limits["predicate_hard_max_depth"]),
+            "max_nodes": int(limits["predicate_hard_max_nodes"]),
+            "max_in_values": int(limits["predicate_hard_max_in_values"]),
+        }
+        for name, supplied in (
+            ("max_depth", self.max_depth),
+            ("max_nodes", self.max_nodes),
+            ("max_in_values", self.max_in_values),
         ):
+            value = configured[name] if supplied is None else supplied
+            maximum = hard_limits[name]
             if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
                 raise ExtensionContractError(f"{name} must be between 1 and {maximum}")
+            object.__setattr__(self, name, value)
         object.__setattr__(self, "allowed_nodes", nodes)
 
 

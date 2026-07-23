@@ -14,6 +14,8 @@ from .models import (
     RolePermission,
     RowSecurityRule,
     SecurityAuditLog,
+    SecurityConfiguration,
+    SecurityConfigurationVersion,
     SecurityProfile,
     SecurityProfileAssignment,
     UserPermissionSet,
@@ -23,6 +25,64 @@ from .predicates import validate_predicate
 from .validators import redact_sensitive
 
 UUID = serializers.UUIDField
+
+
+class SecurityConfigurationSerializer(serializers.ModelSerializer[SecurityConfiguration]):
+    class Meta:
+        model = SecurityConfiguration
+        fields = (
+            "id",
+            "environment",
+            "version",
+            "document",
+            "rollout",
+            "updated_by",
+            "correlation_id",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = fields
+
+
+class SecurityConfigurationVersionSerializer(serializers.ModelSerializer[SecurityConfigurationVersion]):
+    class Meta:
+        model = SecurityConfigurationVersion
+        fields = (
+            "id",
+            "version",
+            "environment",
+            "previous_document",
+            "current_document",
+            "previous_rollout",
+            "current_rollout",
+            "actor_id",
+            "correlation_id",
+            "reason",
+            "change_kind",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
+class SecurityConfigurationWriteSerializer(serializers.Serializer[dict[str, Any]]):
+    environment = serializers.ChoiceField(choices=("development", "test", "staging", "production"))
+    document = serializers.DictField()
+    rollout = serializers.DictField(required=False)
+    reason = serializers.CharField(allow_blank=False, max_length=2000)
+
+
+class SecurityConfigurationPreviewSerializer(serializers.Serializer[dict[str, Any]]):
+    document = serializers.DictField()
+    rollout = serializers.DictField(required=False)
+
+
+class SecurityConfigurationRollbackSerializer(serializers.Serializer[dict[str, Any]]):
+    reason = serializers.CharField(allow_blank=False, max_length=2000)
+
+
+class SecurityConfigurationRolloutSerializer(serializers.Serializer[dict[str, Any]]):
+    rollout = serializers.DictField()
+    reason = serializers.CharField(allow_blank=False, max_length=2000)
 
 
 class PermissionSerializer(serializers.ModelSerializer[Permission]):
@@ -216,7 +276,7 @@ class PermissionSetDetailSerializer(PermissionSetListSerializer):
 class PermissionSetCreateSerializer(serializers.Serializer[dict[str, Any]]):
     name = serializers.CharField(max_length=255)
     description = serializers.CharField(required=False, allow_blank=True, max_length=4000)
-    default_duration_days = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=365)
+    default_duration_days = serializers.IntegerField(required=False, allow_null=True)
     is_active = serializers.BooleanField(required=False, default=True)
     permission_ids = serializers.ListField(
         child=serializers.UUIDField(), required=False, allow_empty=True, max_length=1000
@@ -226,7 +286,7 @@ class PermissionSetCreateSerializer(serializers.Serializer[dict[str, Any]]):
 class PermissionSetUpdateSerializer(serializers.Serializer[dict[str, Any]]):
     name = serializers.CharField(max_length=255, required=False)
     description = serializers.CharField(required=False, allow_blank=True, max_length=4000)
-    default_duration_days = serializers.IntegerField(required=False, allow_null=True, min_value=1, max_value=365)
+    default_duration_days = serializers.IntegerField(required=False, allow_null=True)
     is_active = serializers.BooleanField(required=False)
 
 
@@ -270,7 +330,7 @@ class UserPermissionSetCreateSerializer(serializers.Serializer[dict[str, Any]]):
     user_id = serializers.CharField(max_length=128)
     permission_set_id = serializers.UUIDField()
     expires_at = serializers.DateTimeField(required=False)
-    duration_days = serializers.IntegerField(required=False, min_value=1, max_value=365)
+    duration_days = serializers.IntegerField(required=False)
     reason = serializers.CharField(max_length=2000, allow_blank=False)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
@@ -321,8 +381,8 @@ class FieldSecurityCreateSerializer(serializers.Serializer[dict[str, Any]]):
     resource = serializers.RegexField(r"^[a-z][a-z0-9_-]{0,99}$")
     field = serializers.RegexField(r"^[a-z][a-z0-9_]{0,99}$")
     role_id = serializers.UUIDField()
-    visibility = serializers.ChoiceField(choices=FieldSecurity.Visibility.choices)
-    edit_control = serializers.ChoiceField(choices=FieldSecurity.EditControl.choices)
+    visibility = serializers.ChoiceField(choices=FieldSecurity.Visibility.choices, required=False)
+    edit_control = serializers.ChoiceField(choices=FieldSecurity.EditControl.choices, required=False)
     mask_pattern = serializers.CharField(required=False, allow_blank=True, max_length=100)
     is_active = serializers.BooleanField(required=False, default=True)
 
@@ -344,10 +404,6 @@ class FieldSecurityUpdateSerializer(serializers.Serializer[dict[str, Any]]):
 class PredicateSerializer(serializers.DictField):
     def to_internal_value(self, data: Any) -> dict[str, Any]:
         value = super().to_internal_value(data)
-        try:
-            validate_predicate(value)
-        except Exception as exc:
-            raise serializers.ValidationError(str(exc)) from exc
         return value
 
 
@@ -387,16 +443,16 @@ class RowSecurityRuleCreateSerializer(serializers.Serializer[dict[str, Any]]):
     module = serializers.RegexField(r"^[a-z][a-z0-9_-]{0,99}$")
     resource = serializers.RegexField(r"^[a-z][a-z0-9_-]{0,99}$")
     role_id = serializers.UUIDField()
-    rule_type = serializers.ChoiceField(choices=RowSecurityRule.RuleType.choices)
+    rule_type = serializers.ChoiceField(choices=RowSecurityRule.RuleType.choices, required=False)
     filter_criteria = PredicateSerializer()
-    priority = serializers.IntegerField(required=False, default=0, min_value=-32768, max_value=32767)
+    priority = serializers.IntegerField(required=False)
     is_active = serializers.BooleanField(required=False, default=True)
 
 
 class RowSecurityRuleUpdateSerializer(serializers.Serializer[dict[str, Any]]):
     rule_type = serializers.ChoiceField(choices=RowSecurityRule.RuleType.choices, required=False)
     filter_criteria = PredicateSerializer(required=False)
-    priority = serializers.IntegerField(required=False, min_value=-32768, max_value=32767)
+    priority = serializers.IntegerField(required=False)
     is_active = serializers.BooleanField(required=False)
 
 
@@ -494,9 +550,9 @@ class SecurityProfileWriteSerializer(serializers.Serializer[dict[str, Any]]):
         child=serializers.CharField(max_length=32), required=False, max_length=20
     )
     password_policy = serializers.DictField(required=False)
-    session_timeout_minutes = serializers.IntegerField(required=False, min_value=5, max_value=1440)
-    absolute_session_timeout_hours = serializers.IntegerField(required=False, min_value=1, max_value=168)
-    max_concurrent_sessions = serializers.IntegerField(required=False, min_value=1, max_value=100)
+    session_timeout_minutes = serializers.IntegerField(required=False)
+    absolute_session_timeout_hours = serializers.IntegerField(required=False)
+    max_concurrent_sessions = serializers.IntegerField(required=False)
     download_allowed = serializers.BooleanField(required=False)
     print_allowed = serializers.BooleanField(required=False)
     copy_paste_allowed = serializers.BooleanField(required=False)
@@ -555,7 +611,7 @@ class SecurityProfileAssignmentCreateSerializer(serializers.Serializer[dict[str,
     security_profile_id = serializers.UUIDField()
     user_id = serializers.CharField(required=False, allow_null=True, max_length=128)
     role_id = serializers.UUIDField(required=False, allow_null=True)
-    precedence = serializers.IntegerField(required=False, default=0, min_value=-32768, max_value=32767)
+    precedence = serializers.IntegerField(required=False)
     valid_from = serializers.DateTimeField(required=False)
     valid_until = serializers.DateTimeField(required=False, allow_null=True)
     reason = serializers.CharField(max_length=2000, allow_blank=False)
@@ -567,7 +623,7 @@ class SecurityProfileAssignmentCreateSerializer(serializers.Serializer[dict[str,
 
 
 class SecurityProfileAssignmentUpdateSerializer(serializers.Serializer[dict[str, Any]]):
-    precedence = serializers.IntegerField(required=False, min_value=-32768, max_value=32767)
+    precedence = serializers.IntegerField(required=False)
     valid_from = serializers.DateTimeField(required=False)
     valid_until = serializers.DateTimeField(required=False, allow_null=True)
     reason = serializers.CharField(required=False, max_length=2000, allow_blank=False)
@@ -580,20 +636,15 @@ class SecurityAuditLogSerializer(serializers.ModelSerializer[SecurityAuditLog]):
         model = SecurityAuditLog
         fields = (
             "id",
-            "tenant_id",
             "action",
             "actor_type",
-            "actor_id",
             "resource_type",
             "resource_id",
             "decision",
             "reason_codes",
             "timestamp",
             "details",
-            "ip_address",
-            "user_agent",
             "correlation_id",
-            "outbox_event_id",
         )
         read_only_fields = fields
 

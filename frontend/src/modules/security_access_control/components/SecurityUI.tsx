@@ -7,15 +7,19 @@ import { ApiError } from "@/services/api-client";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
-import { QUERY_KEYS, ROUTES, type PaginatedResult, type SecurityAuditLog, type UUID, type V2PageMeta } from "../contracts";
+import { QUERY_KEYS, ROUTES, type DeletionReasonInput, type PaginatedResult, type SecurityAuditLog, type SecuritySemanticToken, type UUID, type V2PageMeta } from "../contracts";
+import { useSecurityConfiguration } from "../hooks/use-security-configuration";
 import { securityService } from "../services/security-service";
 
 export function PageHeader({ title, description, actions }: { readonly title: string; readonly description: string; readonly actions?: ReactNode }) {
+  useEffect(() => { document.title = `${title} · SARAISE`; }, [title]);
   return <header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1><p className="mt-1 max-w-3xl text-sm text-muted-foreground">{description}</p></div>{actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}</header>;
 }
 
-export function PageSkeleton({ rows = 6, label = "Loading security administration data" }: { readonly rows?: number; readonly label?: string }) {
-  return <main aria-busy="true" aria-label={label} className="space-y-6"><Skeleton className="h-20 w-full"/><Skeleton className="h-14 w-full"/><div className="space-y-3 rounded-xl border p-4">{Array.from({ length: rows }, (_, index) => <Skeleton key={index} className="h-16 w-full"/>)}</div></main>;
+export function PageSkeleton({ rows, label = "Loading security administration data" }: { readonly rows?: number; readonly label?: string }) {
+  const configuration = useSecurityConfiguration();
+  const configuredRows = rows ?? configuration.data?.data.document.ui.loading_skeleton_rows;
+  return <main aria-busy="true" aria-label={label} className="space-y-6"><Skeleton className="h-20 w-full"/><Skeleton className="h-14 w-full"/>{configuredRows === undefined ? <Skeleton className="h-40 w-full"/> : <div className="space-y-3 rounded-xl border p-4">{Array.from({ length: configuredRows }, (_, index) => <Skeleton key={index} className="h-16 w-full"/>)}</div>}</main>;
 }
 
 function presentError(error: Error): { title: string; message: string; Icon: typeof AlertTriangle; correlation?: string } {
@@ -27,7 +31,8 @@ function presentError(error: Error): { title: string; message: string; Icon: typ
 }
 
 export function GovernedError({ error, retry }: { readonly error: Error; readonly retry?: () => void }) {
-  const view = presentError(error); const Icon = view.Icon;
+  const view = presentError(error);
+ const Icon = view.Icon;
   return <section role="alert" className="rounded-xl border bg-card p-8 text-center"><Icon aria-hidden className="mx-auto h-10 w-10 text-muted-foreground"/><h2 className="mt-4 text-lg font-semibold">{view.title}</h2><p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">{view.message}</p>{view.correlation ? <p className="mt-3 font-mono text-xs text-muted-foreground">Correlation ID: {view.correlation}</p> : null}{retry ? <Button className="mt-5" variant="outline" onClick={retry}><RefreshCw className="mr-2 h-4 w-4"/>Retry</Button> : null}</section>;
 }
 
@@ -41,8 +46,19 @@ export function Pagination({ value, onPage }: { readonly value: V2PageMeta; read
   return <nav aria-label="Pagination" className="flex flex-col gap-3 border-t p-4 text-sm sm:flex-row sm:items-center sm:justify-between"><p>Page {value.page} of {Math.max(value.total_pages, 1)} · {value.count} records</p><div className="flex gap-2"><Button variant="outline" size="sm" disabled={!value.has_previous} onClick={() => onPage(value.page - 1)}><ChevronLeft className="mr-1 h-4 w-4"/>Previous</Button><Button variant="outline" size="sm" disabled={!value.has_next} onClick={() => onPage(value.page + 1)}>Next<ChevronRight className="ml-1 h-4 w-4"/></Button></div></nav>;
 }
 
+const semanticTokenClasses: Readonly<Record<SecuritySemanticToken, string>> = {
+  "status-success": "border border-primary/30 bg-primary/10 text-foreground",
+  "status-danger": "border border-destructive/30 bg-destructive/10 text-destructive",
+  "status-warning": "border border-accent bg-accent text-accent-foreground",
+  "status-neutral": "border border-border bg-muted text-muted-foreground",
+};
+
+export function semanticClass(token: SecuritySemanticToken): string { return semanticTokenClasses[token]; }
+
 export function StatusChip({ active, label }: { readonly active: boolean; readonly label?: string }) {
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${active ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"}`}>{label ?? (active ? "Active" : "Inactive")}</span>;
+  const configuration = useSecurityConfiguration();
+  const token = active ? configuration.data?.data.document.semantic_tokens.success : configuration.data?.data.document.semantic_tokens.neutral;
+  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${token ? semanticClass(token) : "border border-border bg-muted text-muted-foreground"}`}>{label ?? (active ? "Active" : "Inactive")}</span>;
 }
 
 export interface Column<T> { readonly label: string; readonly render: (item: T) => ReactNode }
@@ -64,10 +80,16 @@ export function useUnsavedChanges(dirty: boolean): void {
 }
 
 export function AuditTimeline({ resourceType, resourceId }: { readonly resourceType: string; readonly resourceId: UUID }) {
-  const query = useQuery({ queryKey: [...QUERY_KEYS.auditLogs({ resource_type: resourceType, resource_id: resourceId }), "timeline"], queryFn: () => securityService.auditLogs.list({ resource_type: resourceType, resource_id: resourceId, ordering: "-timestamp", page_size: 10 }) });
-  return <Surface title="Audit evidence">{query.isLoading ? <Skeleton className="h-24 w-full"/> : query.error ? <GovernedError error={query.error} retry={() => void query.refetch()}/> : query.data?.items.length ? <ol className="border-l pl-5">{query.data.items.map((entry: SecurityAuditLog) => <li key={entry.id} className="mb-5"><div className="flex flex-wrap items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary"/><Link to={ROUTES.AUDIT_LOG_DETAIL(entry.id)} className="font-medium text-primary hover:underline">{entry.action}</Link>{entry.decision ? <StatusChip active={entry.decision === "allow"} label={entry.decision}/> : null}</div><p className="mt-1 text-xs text-muted-foreground">{formatDate(entry.timestamp)} · actor {entry.actor_id}</p><Link to={`${ROUTES.AUDIT_LOGS}?correlation_id=${encodeURIComponent(entry.correlation_id)}`} className="font-mono text-xs text-muted-foreground hover:text-primary">{entry.correlation_id}</Link></li>)}</ol> : <p className="text-sm text-muted-foreground">No audit event is linked to this resource.</p>}</Surface>;
+  const configuration = useSecurityConfiguration();
+  const pageSize = configuration.data?.data.document.ui.audit_timeline_page_size;
+  const ordering = configuration.data?.data.document.ordering.audit_logs.join(",");
+  const query = useQuery({ queryKey: [...QUERY_KEYS.auditLogs({ resource_type: resourceType, resource_id: resourceId }), "timeline", pageSize, ordering], queryFn: () => securityService.auditLogs.list({ resource_type: resourceType, resource_id: resourceId, ordering, page_size: pageSize }), enabled: pageSize !== undefined && ordering !== undefined });
+  return <Surface title="Audit evidence">{configuration.error ? <GovernedError error={configuration.error} retry={() => void configuration.refetch()}/> : configuration.isLoading || query.isLoading ? <Skeleton className="h-24 w-full"/> : query.error ? <GovernedError error={query.error} retry={() => void query.refetch()}/> : query.data?.items.length ? <ol className="border-l pl-5">{query.data.items.map((entry: SecurityAuditLog) => <li key={entry.id} className="mb-5"><div className="flex flex-wrap items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary"/><Link to={ROUTES.AUDIT_LOG_DETAIL(entry.id)} className="font-medium text-primary hover:underline">{entry.action}</Link>{entry.decision ? <StatusChip active={entry.decision === "allow"} label={entry.decision}/> : null}</div><p className="mt-1 text-xs text-muted-foreground">{formatDate(entry.timestamp)} · actor type {entry.actor_type}</p><Link to={`${ROUTES.AUDIT_LOGS}?correlation_id=${encodeURIComponent(entry.correlation_id)}`} className="font-mono text-xs text-muted-foreground hover:text-primary">{entry.correlation_id}</Link></li>)}</ol> : <p className="text-sm text-muted-foreground">No audit event is linked to this resource.</p>}</Surface>;
 }
 
-export function ConfirmButton({ label, question, pending, onConfirm }: { readonly label: string; readonly question: string; readonly pending: boolean; readonly onConfirm: () => void }) {
-  return <Button variant="danger" disabled={pending} onClick={() => { if (window.confirm(question)) onConfirm(); }}>{pending ? "Working…" : label}</Button>;
+export function ConfirmButton({ label, question, pending, onConfirm }: { readonly label: string; readonly question: string; readonly pending: boolean; readonly onConfirm: (input: DeletionReasonInput) => void }) {
+  const configuration = useSecurityConfiguration();
+  return <Button variant="danger" disabled={pending || !configuration.data} onClick={() => { const reason = window.prompt(`${question}\n\nEnter the mandatory audit reason:`)?.trim();
+ const maximum = configuration.data?.data.document.limits.required_text_max_length;
+ if (reason && maximum !== undefined && reason.length <= maximum) onConfirm({ reason }); }}>{pending ? "Working…" : label}</Button>;
 }

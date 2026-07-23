@@ -13,9 +13,6 @@ from uuid import UUID
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 
-MAX_PREDICATE_NODES = 64
-MAX_PREDICATE_DEPTH = 8
-MAX_IN_VALUES = 100
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,99}$")
 _LEAF = frozenset({"eq", "in", "is_null", "owner", "tenant"})
 _COMPOUND = frozenset({"and", "or", "not"})
@@ -52,10 +49,25 @@ def validate_predicate(
     predicate: object,
     *,
     allowed_fields: Sequence[str] | None = None,
-    max_nodes: int = MAX_PREDICATE_NODES,
-    max_depth: int = MAX_PREDICATE_DEPTH,
+    tenant_id: UUID | None = None,
+    max_nodes: int | None = None,
+    max_depth: int | None = None,
+    max_in_values: int | None = None,
 ) -> dict[str, object]:
     """Validate and return the same predicate after enforcing the closed schema."""
+
+    if max_nodes is None or max_depth is None or max_in_values is None:
+        if tenant_id is None:
+            raise ValidationError("Tenant predicate limits are required.")
+        from .models import SecurityConfiguration
+
+        configuration = SecurityConfiguration.objects.for_tenant(tenant_id).first()
+        limits = configuration.document.get("limits") if configuration is not None else None
+        if not isinstance(limits, Mapping):
+            raise ValidationError("Tenant predicate limits are missing.")
+        max_nodes = int(limits["predicate_max_nodes"])
+        max_depth = int(limits["predicate_max_depth"])
+        max_in_values = int(limits["predicate_max_in_values"])
 
     fields = frozenset(allowed_fields) if allowed_fields is not None else None
     count = 0
@@ -90,8 +102,8 @@ def validate_predicate(
             raise ValidationError(f"'{operation}' predicate has unexpected or missing keys.")
         if operation == "in":
             values = node.get("value")
-            if not _sequence(values) or not values or len(values) > MAX_IN_VALUES:
-                raise ValidationError("'in' requires 1 to 100 literal values.")
+            if not _sequence(values) or not values or len(values) > max_in_values:
+                raise ValidationError(f"'in' requires 1 to {max_in_values} literal values.")
             for value in values:
                 _literal(value, subject_attributes={}) if not isinstance(value, Mapping) else None
         elif operation == "eq" and not isinstance(node.get("value"), Mapping):
@@ -110,7 +122,7 @@ def compile_predicate(
 ) -> Q:
     """Compile a validated predicate into a Django ``Q`` expression."""
 
-    validate_predicate(predicate, allowed_fields=allowed_fields)
+    validate_predicate(predicate, allowed_fields=allowed_fields, tenant_id=tenant_id)
     fields = frozenset(allowed_fields)
 
     def compile_node(node: Mapping[str, object]) -> Q:
@@ -156,7 +168,7 @@ def predicate_matches(
 ) -> bool:
     """Evaluate the same DSL against a bounded attribute mapping for previews."""
 
-    validate_predicate(predicate, allowed_fields=allowed_fields)
+    validate_predicate(predicate, allowed_fields=allowed_fields, tenant_id=tenant_id)
 
     def evaluate(node: Mapping[str, object]) -> bool:
         operation = str(node["op"])

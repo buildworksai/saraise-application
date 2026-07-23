@@ -252,18 +252,13 @@ export interface FieldSecurityInput {
 export type FieldSecurityUpdateInput = Partial<FieldSecurityInput>;
 
 export type PredicateValue = string | number | boolean | null;
-export type PredicateOperand =
-  | { readonly source: "field"; readonly name: string }
-  | { readonly source: "subject"; readonly name: string }
-  | { readonly source: "literal"; readonly value: PredicateValue };
+export type PredicateSubjectReference = { readonly subject: string };
 export type RowPredicate =
   | { readonly op: "and" | "or"; readonly args: readonly RowPredicate[] }
   | { readonly op: "not"; readonly arg: RowPredicate }
-  | { readonly op: "eq"; readonly left: PredicateOperand; readonly right: PredicateOperand }
-  | { readonly op: "in"; readonly left: PredicateOperand; readonly values: readonly PredicateValue[] }
-  | { readonly op: "is_null"; readonly operand: PredicateOperand }
-  | { readonly op: "owner"; readonly field: string; readonly subject_attribute?: string }
-  | { readonly op: "tenant"; readonly field: string };
+  | { readonly op: "eq"; readonly field: string; readonly value: PredicateValue | PredicateSubjectReference }
+  | { readonly op: "in"; readonly field: string; readonly value: readonly PredicateValue[] }
+  | { readonly op: "is_null" | "owner" | "tenant"; readonly field: string };
 
 export interface RowSecurityRule {
   readonly id: UUID;
@@ -406,20 +401,20 @@ export interface SecurityProfileAssignmentUpdateInput {
 
 export interface SecurityAuditLog {
   readonly id: UUID;
-  readonly tenant_id: UUID;
   readonly action: string;
   readonly actor_type: ActorType;
-  readonly actor_id: UUID;
   readonly resource_type: string;
   readonly resource_id: UUID | null;
   readonly decision: Decision | null;
   readonly reason_codes: readonly ReasonCode[];
   readonly timestamp: ISODateTime;
   readonly details: Readonly<Record<string, unknown>>;
-  readonly ip_address: string | null;
-  readonly user_agent: string;
   readonly correlation_id: string;
-  readonly outbox_event_id: UUID | null;
+  /** Present only on separately authorized diagnostic representations. */
+  readonly tenant_id?: UUID;
+  readonly ip_address?: string | null;
+  readonly user_agent?: string;
+  readonly outbox_event_id?: UUID | null;
 }
 
 export interface FieldAccessDecision {
@@ -468,6 +463,162 @@ export interface HealthStatus {
   readonly components: Readonly<Record<string, "ready" | "not_ready" | "degraded">>;
 }
 
+export type SecuritySemanticToken = "status-success" | "status-danger" | "status-warning" | "status-neutral";
+export interface SecurityConfigurationLimits {
+  readonly rate_requests_per_minute: number;
+  readonly correlation_id_max_length: number;
+  readonly correlation_id_pattern: string;
+  readonly role_hierarchy_max_depth: number;
+  readonly permission_set_duration_min_days: number;
+  readonly permission_set_duration_max_days: number;
+  readonly profile_idle_timeout_min_minutes: number;
+  readonly profile_idle_timeout_max_minutes: number;
+  readonly profile_absolute_timeout_min_hours: number;
+  readonly profile_absolute_timeout_max_hours: number;
+  readonly profile_concurrent_sessions_min: number;
+  readonly profile_concurrent_sessions_max: number;
+  readonly predicate_max_depth: number;
+  readonly predicate_max_nodes: number;
+  readonly predicate_max_in_values: number;
+  readonly predicate_hard_max_depth: number;
+  readonly predicate_hard_max_nodes: number;
+  readonly predicate_hard_max_in_values: number;
+  readonly predicate_compound_max_arguments: number;
+  readonly audit_payload_max_bytes: number;
+  readonly policy_array_max_entries: number;
+  readonly mfa_methods_max_entries: number;
+  readonly audit_redaction_max_depth: number;
+  readonly audit_collection_max_entries: number;
+  readonly audit_string_max_length: number;
+  readonly required_text_max_length: number;
+  readonly audit_reason_codes_max_entries: number;
+  readonly user_agent_max_length: number;
+  readonly audit_default_window_days: number;
+  readonly audit_max_window_days: number;
+  readonly row_priority_min: number;
+  readonly row_priority_max: number;
+  readonly name_min_length: number;
+  readonly name_max_length: number;
+  readonly description_max_length: number;
+  readonly list_page_size: number;
+  readonly lookup_page_size: number;
+}
+export interface SecurityProfileDefaults {
+  readonly profile_type: ProfileType;
+  readonly mfa_required: MfaRequired;
+  readonly allowed_mfa_methods: readonly string[];
+  readonly time_restrictions: TimeRestrictions;
+  readonly session_timeout_minutes: number;
+  readonly absolute_session_timeout_hours: number;
+  readonly max_concurrent_sessions: number;
+  readonly download_allowed: boolean;
+  readonly print_allowed: boolean;
+  readonly copy_paste_allowed: boolean;
+  readonly mobile_access_allowed: boolean;
+  readonly login_notification: boolean;
+  readonly access_notification: boolean;
+}
+export interface SecurityConfigurationDefaults {
+  readonly field_visibility: Visibility;
+  readonly field_edit_control: EditControl;
+  readonly row_rule_type: RuleType;
+  readonly row_rule_priority: number;
+  readonly row_owner_field: string;
+  readonly profile_assignment_precedence: number;
+  readonly security_profile: SecurityProfileDefaults;
+  readonly automatic_revocation_reason: string;
+  readonly mfa_precedence: Readonly<Record<MfaRequired, number>>;
+  readonly allowed_mfa_methods: readonly string[];
+}
+export interface SecurityConfigurationOrdering {
+  readonly roles: readonly string[];
+  readonly role_assignments: readonly string[];
+  readonly permission_sets: readonly string[];
+  readonly permission_set_grants: readonly string[];
+  readonly field_rules: readonly string[];
+  readonly row_rules: readonly string[];
+  readonly security_profiles: readonly string[];
+  readonly profile_assignments: readonly string[];
+  readonly audit_logs: readonly string[];
+}
+export interface SecurityConfigurationRollout {
+  readonly enabled: boolean;
+  readonly percentage: number;
+  readonly role_ids: readonly UUID[];
+  readonly cohorts: readonly string[];
+}
+export interface SecurityConfigurationDocument {
+  readonly limits: SecurityConfigurationLimits;
+  readonly defaults: SecurityConfigurationDefaults;
+  readonly ordering: SecurityConfigurationOrdering;
+  readonly resilience: {
+    readonly connect_timeout_seconds: number;
+    readonly read_timeout_seconds: number;
+    readonly max_retries: number;
+    readonly failure_threshold: number;
+    readonly reset_timeout_seconds: number;
+  };
+  readonly remote_context_keys: readonly string[];
+  readonly ui: { readonly loading_skeleton_rows: number; readonly audit_timeline_page_size: number };
+  readonly semantic_tokens: {
+    readonly success: SecuritySemanticToken;
+    readonly danger: SecuritySemanticToken;
+    readonly warning: SecuritySemanticToken;
+    readonly neutral: SecuritySemanticToken;
+  };
+  readonly commercial_controls: { readonly entitlement: string; readonly quota: string };
+  readonly baseline_profile: Omit<SecurityProfileDefaults, "profile_type" | "time_restrictions" | "login_notification" | "access_notification"> & {
+    readonly ip_whitelist: readonly string[];
+    readonly ip_blacklist: readonly string[];
+    readonly allowed_countries: readonly string[];
+    readonly blocked_countries: readonly string[];
+  };
+  readonly feature_flags: Readonly<Record<string, { readonly enabled: boolean; readonly percentage: number; readonly roles: readonly UUID[]; readonly cohorts: readonly string[] }>>;
+}
+export interface SecurityConfiguration {
+  readonly id: UUID;
+  readonly environment: string;
+  readonly version: number;
+  readonly document: SecurityConfigurationDocument;
+  readonly rollout: SecurityConfigurationRollout;
+  readonly updated_by: UUID;
+  readonly correlation_id: string;
+  readonly created_at: ISODateTime;
+  readonly updated_at: ISODateTime;
+}
+export interface SecurityConfigurationVersion {
+  readonly id: UUID;
+  readonly version: number;
+  readonly environment: string;
+  readonly previous_document: SecurityConfigurationDocument | null;
+  readonly current_document: SecurityConfigurationDocument;
+  readonly previous_rollout: SecurityConfigurationRollout | null;
+  readonly current_rollout: SecurityConfigurationRollout;
+  readonly actor_id: UUID;
+  readonly correlation_id: string;
+  readonly reason: string;
+  readonly change_kind: string;
+  readonly created_at: ISODateTime;
+}
+export interface SecurityConfigurationWriteInput { readonly document: SecurityConfigurationDocument; readonly environment: string; readonly reason: string; readonly rollout?: SecurityConfigurationRollout }
+export interface SecurityConfigurationPreviewInput { readonly document: SecurityConfigurationDocument; readonly rollout?: SecurityConfigurationRollout }
+export interface SecurityConfigurationPreview {
+  readonly valid: boolean;
+  readonly diff: readonly unknown[];
+  readonly normalized_document: SecurityConfigurationDocument;
+  readonly normalized_rollout: SecurityConfigurationRollout;
+}
+export interface SecurityConfigurationExport {
+  readonly schema_version: string;
+  readonly environment: string;
+  readonly version: number;
+  readonly document: SecurityConfigurationDocument;
+  readonly rollout: SecurityConfigurationRollout;
+}
+export interface SecurityConfigurationRollbackInput { readonly reason: string }
+export interface SecurityConfigurationRolloutInput { readonly rollout: SecurityConfigurationRollout; readonly reason: string }
+export interface DeletionReasonInput { readonly reason: string }
+
 export interface PageFilters { readonly page?: number; readonly page_size?: number; readonly search?: string; readonly ordering?: string }
 export interface RoleFilters extends PageFilters { readonly role_type?: RoleType; readonly is_active?: boolean; readonly parent_role_id?: UUID }
 export interface PermissionFilters extends PageFilters { readonly module?: string; readonly resource?: string; readonly action?: string; readonly risk_level?: RiskLevel }
@@ -491,6 +642,15 @@ export const ENDPOINTS = {
   PROFILE_ASSIGNMENTS: { LIST: `${API_ROOT}/security-profile-assignments/`, CREATE: `${API_ROOT}/security-profile-assignments/`, DETAIL: (id: UUID) => `${API_ROOT}/security-profile-assignments/${id}/` as const, UPDATE: (id: UUID) => `${API_ROOT}/security-profile-assignments/${id}/` as const, DELETE: (id: UUID) => `${API_ROOT}/security-profile-assignments/${id}/` as const },
   AUDIT_LOGS: { LIST: `${API_ROOT}/audit-logs/`, DETAIL: (id: UUID) => `${API_ROOT}/audit-logs/${id}/` as const },
   ACCESS_DECISIONS: { SIMULATE: `${API_ROOT}/access-decisions/simulate/` },
+  CONFIGURATION: {
+    CURRENT: `${API_ROOT}/configuration/`,
+    PREVIEW: `${API_ROOT}/configuration/preview/`,
+    VERSIONS: `${API_ROOT}/configuration/versions/`,
+    ROLLBACK: (version: number) => `${API_ROOT}/configuration/versions/${version}/rollback/` as const,
+    IMPORT: `${API_ROOT}/configuration/import/`,
+    EXPORT: `${API_ROOT}/configuration/export/`,
+    ROLLOUT: `${API_ROOT}/configuration/rollout/`,
+  },
   HEALTH: `${API_ROOT}/health/`,
 } as const;
 
@@ -506,6 +666,7 @@ export const ROUTES = {
   PROFILE_ASSIGNMENTS: "/security-access-control/assignments/profile-assignments", PROFILE_ASSIGNMENT_CREATE: "/security-access-control/assignments/profile-assignments/create", PROFILE_ASSIGNMENT_DETAIL: (id: UUID) => `/security-access-control/assignments/profile-assignments/${id}` as const, PROFILE_ASSIGNMENT_EDIT: (id: UUID) => `/security-access-control/assignments/profile-assignments/${id}/edit` as const,
   AUDIT_LOGS: "/security-access-control/audit-logs", AUDIT_LOG_DETAIL: (id: UUID) => `/security-access-control/audit-logs/${id}` as const,
   ACCESS_SIMULATOR: "/security-access-control/access-simulator",
+  CONFIGURATION: "/security-access-control/configuration",
 } as const;
 
 function stableFilters(filters: object): readonly (readonly [string, string])[] {
@@ -533,6 +694,8 @@ export const QUERY_KEYS = {
   profileAssignment: (id: UUID) => [...QUERY_KEYS.root, "profile-assignment", id] as const,
   auditLogs: (filters: AuditLogFilters = {}) => [...QUERY_KEYS.root, "audit-logs", stableFilters(filters)] as const,
   auditLog: (id: UUID) => [...QUERY_KEYS.root, "audit-log", id] as const,
+  configuration: () => [...QUERY_KEYS.root, "configuration"] as const,
+  configurationVersions: () => [...QUERY_KEYS.root, "configuration", "versions"] as const,
 } as const;
 
 export function isRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
@@ -556,29 +719,29 @@ export function isPermissionSet(value: unknown): value is PermissionSet { return
 export function isUserPermissionSet(value: unknown): value is UserPermissionSet { return hasEntityCore(value) && isString(value.user_id) && isString(value.permission_set_id) && isString(value.expires_at) && isBoolean(value.is_active); }
 export function isFieldSecurity(value: unknown): value is FieldSecurity { return hasEntityCore(value) && isString(value.module) && isString(value.resource) && isString(value.field) && isString(value.role_id) && isVisibility(value.visibility) && isEditControl(value.edit_control); }
 
-export function isPredicateOperand(value: unknown): value is PredicateOperand {
-  if (!isRecord(value) || !isString(value.source)) return false;
-  if (value.source === "literal") return value.value === null || ["string", "number", "boolean"].includes(typeof value.value);
-  return (value.source === "field" || value.source === "subject") && isString(value.name);
-}
 // Recursive discriminated-union validation necessarily visits every supported node.
 // eslint-disable-next-line complexity
-export function isRowPredicate(value: unknown, depth = 0): value is RowPredicate {
-  if (!isRecord(value) || depth > 12 || !isString(value.op)) return false;
-  if (value.op === "and" || value.op === "or") return Array.isArray(value.args) && value.args.length > 0 && value.args.length <= 20 && value.args.every((item) => isRowPredicate(item, depth + 1));
-  if (value.op === "not") return isRowPredicate(value.arg, depth + 1);
-  if (value.op === "eq") return isPredicateOperand(value.left) && isPredicateOperand(value.right);
-  if (value.op === "in") return isPredicateOperand(value.left) && Array.isArray(value.values) && value.values.length <= 100 && value.values.every((item) => item === null || ["string", "number", "boolean"].includes(typeof item));
-  if (value.op === "is_null") return isPredicateOperand(value.operand);
-  if (value.op === "owner") return isString(value.field) && (value.subject_attribute === undefined || isString(value.subject_attribute));
-  return value.op === "tenant" && isString(value.field);
+export function isRowPredicate(value: unknown): value is RowPredicate {
+  if (!isRecord(value) || !isString(value.op)) return false;
+  if (value.op === "and" || value.op === "or") return Array.isArray(value.args) && value.args.length > 0 && value.args.every((item) => isRowPredicate(item));
+  if (value.op === "not") return isRowPredicate(value.arg);
+  if (!isString(value.field)) return false;
+  if (value.op === "eq") return isRecord(value.value) ? isString(value.value.subject) && Object.keys(value.value).length === 1 : value.value === null || ["string", "number", "boolean"].includes(typeof value.value);
+  if (value.op === "in") return Array.isArray(value.value) && value.value.length > 0 && value.value.every((item) => item === null || ["string", "number", "boolean"].includes(typeof item));
+  return value.op === "is_null" || value.op === "owner" || value.op === "tenant";
 }
 export function isRowSecurityRule(value: unknown): value is RowSecurityRule { return hasEntityCore(value) && isString(value.module) && isString(value.resource) && isString(value.role_id) && enumGuard(value.rule_type, ["ownership", "hierarchy", "attribute", "criteria"] as const) && isRowPredicate(value.filter_criteria) && isNumber(value.version); }
 export function isSecurityProfile(value: unknown): value is SecurityProfile { return hasEntityCore(value) && isString(value.name) && enumGuard(value.profile_type, ["standard", "privileged", "restricted", "high_security"] as const) && enumGuard(value.mfa_required, ["always", "conditional", "sensitive_actions", "never"] as const) && isNumber(value.session_timeout_minutes) && isBoolean(value.is_active); }
 export function isProfileAssignment(value: unknown): value is SecurityProfileAssignment { return hasEntityCore(value) && isString(value.security_profile_id) && isNullableString(value.user_id) && isNullableString(value.role_id) && ((value.user_id === null) !== (value.role_id === null)) && isBoolean(value.is_active); }
-export function isSecurityAuditLog(value: unknown): value is SecurityAuditLog { return hasEntityCore(value) && isString(value.action) && enumGuard(value.actor_type, ["user", "system", "agent"] as const) && isString(value.actor_id) && isString(value.resource_type) && isString(value.timestamp) && isStringArray(value.reason_codes) && isString(value.correlation_id) && isRecord(value.details); }
+export function isSecurityAuditLog(value: unknown): value is SecurityAuditLog { return hasEntityCore(value) && isString(value.action) && enumGuard(value.actor_type, ["user", "system", "agent"] as const) && isString(value.resource_type) && isString(value.timestamp) && isStringArray(value.reason_codes) && isString(value.correlation_id) && isRecord(value.details); }
 function isCommercialDecision(value: unknown): value is CommercialDecision { return isRecord(value) && isBoolean(value.required) && isBoolean(value.allowed); }
 function isFieldAccessDecision(value: unknown): value is FieldAccessDecision { return isRecord(value) && isString(value.field) && isVisibility(value.visibility) && isEditControl(value.edit_control) && isStringArray(value.reason_codes) && isStringArray(value.applied_policy_ids); }
 function isRowExplanation(value: unknown): value is RowAccessExplanation { return isRecord(value) && isBoolean(value.allowed) && isStringArray(value.applied_rule_ids) && isStringArray(value.reason_codes) && isString(value.explanation); }
 export function isAccessDecision(value: unknown): value is AccessDecision { return isRecord(value) && isString(value.subject_id) && isString(value.permission_code) && enumGuard(value.decision, ["allow", "deny"] as const) && isStringArray(value.reason_codes) && isStringArray(value.applied_policy_ids) && isCommercialDecision(value.entitlement) && isCommercialDecision(value.quota) && Array.isArray(value.field_decisions) && value.field_decisions.every(isFieldAccessDecision) && (value.row_explanation === null || isRowExplanation(value.row_explanation)) && isString(value.correlation_id) && isString(value.evaluated_at); }
 export function isHealthStatus(value: unknown): value is HealthStatus { return isRecord(value) && enumGuard(value.status, ["ready", "not_ready"] as const) && isString(value.correlation_id) && isRecord(value.components); }
+export function isSecurityConfigurationDocument(value: unknown): value is SecurityConfigurationDocument { return isRecord(value) && isRecord(value.limits) && isNumber(value.limits.list_page_size) && isRecord(value.defaults) && isRecord(value.defaults.security_profile) && isRecord(value.ordering) && isRecord(value.resilience) && Array.isArray(value.remote_context_keys) && isRecord(value.ui) && isNumber(value.ui.loading_skeleton_rows) && isRecord(value.semantic_tokens) && isRecord(value.commercial_controls) && isRecord(value.baseline_profile) && isRecord(value.feature_flags); }
+export function isSecurityConfigurationRollout(value: unknown): value is SecurityConfigurationRollout { return isRecord(value) && isBoolean(value.enabled) && isNumber(value.percentage) && isStringArray(value.role_ids) && isStringArray(value.cohorts); }
+export function isSecurityConfiguration(value: unknown): value is SecurityConfiguration { return hasEntityCore(value) && isString(value.environment) && isNumber(value.version) && isSecurityConfigurationDocument(value.document) && isSecurityConfigurationRollout(value.rollout) && isString(value.updated_by) && isString(value.correlation_id) && isString(value.created_at) && isString(value.updated_at); }
+export function isSecurityConfigurationVersion(value: unknown): value is SecurityConfigurationVersion { return hasEntityCore(value) && isNumber(value.version) && isString(value.environment) && (value.previous_document === null || isSecurityConfigurationDocument(value.previous_document)) && isSecurityConfigurationDocument(value.current_document) && (value.previous_rollout === null || isSecurityConfigurationRollout(value.previous_rollout)) && isSecurityConfigurationRollout(value.current_rollout) && isString(value.actor_id) && isString(value.correlation_id) && isString(value.reason) && isString(value.change_kind) && isString(value.created_at); }
+export function isSecurityConfigurationPreview(value: unknown): value is SecurityConfigurationPreview { return isRecord(value) && isBoolean(value.valid) && Array.isArray(value.diff) && isSecurityConfigurationDocument(value.normalized_document) && isSecurityConfigurationRollout(value.normalized_rollout); }
+export function isSecurityConfigurationExport(value: unknown): value is SecurityConfigurationExport { return isRecord(value) && isString(value.schema_version) && isString(value.environment) && isNumber(value.version) && isSecurityConfigurationDocument(value.document) && isSecurityConfigurationRollout(value.rollout); }

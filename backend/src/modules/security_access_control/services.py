@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import re
 import threading
 import uuid
+from copy import deepcopy
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from typing import Any, Final
 from uuid import UUID
@@ -26,6 +28,7 @@ from src.core.resilience.http import ResilientHttpClient
 
 from .models import (
     FieldSecurity,
+    MutationReplay,
     Permission,
     PermissionSet,
     PermissionSetPermission,
@@ -33,6 +36,8 @@ from .models import (
     RolePermission,
     RowSecurityRule,
     SecurityAuditLog,
+    SecurityConfiguration,
+    SecurityConfigurationVersion,
     SecurityProfile,
     SecurityProfileAssignment,
     UserPermissionSet,
@@ -47,6 +52,131 @@ PERMISSION_CODE_RE: Final[re.Pattern[str]] = re.compile(
     r"^(?P<module>[a-z][a-z0-9_-]{0,99})\.(?P<resource>[a-z][a-z0-9_-]{0,99}):(?P<action>[a-z][a-z0-9_-]{0,49})$"
 )
 POLICY_DEPENDENCY = "policy-engine"
+
+
+def default_security_configuration() -> dict[str, object]:
+    """Return the defensible seed copied into each tenant's persisted configuration."""
+
+    return {
+        "limits": {
+            "rate_requests_per_minute": 240,
+            "correlation_id_max_length": 128,
+            "correlation_id_pattern": r"^[A-Za-z0-9._:-]+$",
+            "role_hierarchy_max_depth": 16,
+            "permission_set_duration_min_days": 1,
+            "permission_set_duration_max_days": 365,
+            "profile_idle_timeout_min_minutes": 5,
+            "profile_idle_timeout_max_minutes": 1440,
+            "profile_absolute_timeout_min_hours": 1,
+            "profile_absolute_timeout_max_hours": 168,
+            "profile_concurrent_sessions_min": 1,
+            "profile_concurrent_sessions_max": 100,
+            "predicate_max_depth": 8,
+            "predicate_max_nodes": 64,
+            "predicate_max_in_values": 100,
+            "predicate_hard_max_depth": 16,
+            "predicate_hard_max_nodes": 256,
+            "predicate_hard_max_in_values": 500,
+            "predicate_compound_max_arguments": 20,
+            "audit_payload_max_bytes": 16384,
+            "policy_array_max_entries": 100,
+            "mfa_methods_max_entries": 20,
+            "audit_redaction_max_depth": 8,
+            "audit_collection_max_entries": 100,
+            "audit_string_max_length": 2000,
+            "required_text_max_length": 2000,
+            "audit_reason_codes_max_entries": 32,
+            "user_agent_max_length": 512,
+            "audit_default_window_days": 30,
+            "audit_max_window_days": 90,
+            "row_priority_min": -32768,
+            "row_priority_max": 32767,
+            "name_min_length": 2,
+            "name_max_length": 255,
+            "description_max_length": 4000,
+            "list_page_size": 25,
+            "lookup_page_size": 100,
+        },
+        "defaults": {
+            "field_visibility": "visible",
+            "field_edit_control": "editable",
+            "row_rule_type": "ownership",
+            "row_rule_priority": 0,
+            "row_owner_field": "owner_id",
+            "profile_assignment_precedence": 0,
+            "security_profile": {
+                "profile_type": "standard",
+                "mfa_required": "conditional",
+                "allowed_mfa_methods": ["totp", "webauthn"],
+                "time_restrictions": {
+                    "timezone": "UTC",
+                    "weekdays": [1, 2, 3, 4, 5],
+                    "windows": [{"start": "09:00", "end": "17:00"}],
+                },
+                "session_timeout_minutes": 60,
+                "absolute_session_timeout_hours": 8,
+                "max_concurrent_sessions": 5,
+                "download_allowed": True,
+                "print_allowed": True,
+                "copy_paste_allowed": True,
+                "mobile_access_allowed": True,
+                "login_notification": False,
+                "access_notification": False,
+            },
+            "automatic_revocation_reason": "Superseded by renewal",
+            "mfa_precedence": {"never": 0, "sensitive_actions": 1, "conditional": 2, "always": 3},
+            "allowed_mfa_methods": ["totp", "webauthn", "push", "sms", "email", "recovery_code"],
+        },
+        "ordering": {
+            "roles": ["name"],
+            "role_assignments": ["-valid_from"],
+            "permission_sets": ["name"],
+            "permission_set_grants": ["-granted_at"],
+            "field_rules": ["module", "resource", "field"],
+            "row_rules": ["-priority", "module", "resource"],
+            "security_profiles": ["name"],
+            "profile_assignments": ["-precedence", "-valid_from"],
+            "audit_logs": ["-timestamp"],
+        },
+        "resilience": {
+            "connect_timeout_seconds": 1.0,
+            "read_timeout_seconds": 2.0,
+            "max_retries": 2,
+            "failure_threshold": 3,
+            "reset_timeout_seconds": 30.0,
+        },
+        "remote_context_keys": [
+            "record_id", "resource_id", "module", "resource", "owner_id",
+            "classification", "country", "requested_fields",
+        ],
+        "ui": {"loading_skeleton_rows": 6, "audit_timeline_page_size": 10},
+        "semantic_tokens": {
+            "success": "status-success", "danger": "status-danger",
+            "warning": "status-warning", "neutral": "status-neutral",
+        },
+        "commercial_controls": {"entitlement": "not_required", "quota": "not_required"},
+        "baseline_profile": {
+            "mfa_required": "always",
+            "allowed_mfa_methods": ["totp", "webauthn"],
+            "session_timeout_minutes": 15,
+            "absolute_session_timeout_hours": 4,
+            "max_concurrent_sessions": 1,
+            "download_allowed": False,
+            "print_allowed": False,
+            "copy_paste_allowed": False,
+            "mobile_access_allowed": False,
+            "ip_whitelist": [], "ip_blacklist": [], "allowed_countries": [], "blocked_countries": [],
+        },
+        "feature_flags": {"configuration_ui": {"enabled": True, "percentage": 100, "roles": [], "cohorts": []}},
+    }
+
+
+DEFAULT_ROLLOUT: Mapping[str, object] = {
+    "enabled": True,
+    "percentage": 100,
+    "role_ids": [],
+    "cohorts": [],
+}
 
 
 class SecurityServiceError(RuntimeError):
@@ -69,6 +199,380 @@ class SecurityValidationError(SecurityServiceError):
     def __init__(self, message: str, *, detail: Mapping[str, object] | None = None) -> None:
         super().__init__(message)
         self.detail = dict(detail or {})
+
+
+class SecurityConfigurationMissing(SecurityServiceError):
+    """Raised when an authorization control has no valid tenant configuration."""
+
+    code = "SECURITY_CONFIGURATION_MISSING"
+
+
+class SecurityDependencyUnavailable(SecurityServiceError):
+    """Raised instead of fabricating an authorization integration result."""
+
+    code = "SECURITY_DEPENDENCY_UNAVAILABLE"
+
+
+class ConfigurationService:
+    """Validate, version, import, export, preview, and roll back tenant configuration."""
+
+    ENVIRONMENTS = frozenset({"development", "test", "staging", "production"})
+    ROOT_KEYS = frozenset(
+        {
+            "limits", "defaults", "ordering", "resilience", "remote_context_keys", "ui",
+            "semantic_tokens", "commercial_controls", "baseline_profile", "feature_flags",
+        }
+    )
+    ORDERING_ALLOWED: Mapping[str, frozenset[str]] = {
+        "roles": frozenset({"name", "created_at", "updated_at"}),
+        "role_assignments": frozenset({"valid_from", "created_at"}),
+        "permission_sets": frozenset({"name", "created_at"}),
+        "permission_set_grants": frozenset({"granted_at", "expires_at", "created_at"}),
+        "field_rules": frozenset({"module", "resource", "field", "created_at"}),
+        "row_rules": frozenset({"priority", "module", "resource", "created_at"}),
+        "security_profiles": frozenset({"name", "created_at", "updated_at"}),
+        "profile_assignments": frozenset({"precedence", "valid_from", "created_at"}),
+        "audit_logs": frozenset({"timestamp", "action", "decision"}),
+    }
+
+    @staticmethod
+    def _integer(mapping: Mapping[str, object], key: str, minimum: int, maximum: int) -> int:
+        value = mapping.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+            raise SecurityValidationError(
+                "Invalid security configuration", detail={f"limits.{key}": [f"Must be {minimum}..{maximum}."]}
+            )
+        return value
+
+    @classmethod
+    def validate_document(cls, document: object) -> dict[str, object]:
+        if not isinstance(document, Mapping) or set(document) != cls.ROOT_KEYS:
+            raise SecurityValidationError(
+                "Invalid security configuration",
+                detail={"document": ["Configuration must contain exactly the governed top-level sections."]},
+            )
+        normalized = deepcopy(dict(document))
+        limits = normalized["limits"]
+        defaults = normalized["defaults"]
+        resilience = normalized["resilience"]
+        baseline = normalized["baseline_profile"]
+        if not all(isinstance(value, Mapping) for value in (limits, defaults, resilience, baseline)):
+            raise SecurityValidationError("Invalid security configuration", detail={"document": ["Invalid section."]})
+        assert isinstance(limits, Mapping) and isinstance(defaults, Mapping)
+        assert isinstance(resilience, Mapping) and isinstance(baseline, Mapping)
+        bounded = {
+            "rate_requests_per_minute": (1, 10000), "correlation_id_max_length": (32, 256),
+            "role_hierarchy_max_depth": (1, 64), "permission_set_duration_min_days": (1, 3650),
+            "permission_set_duration_max_days": (1, 3650), "profile_idle_timeout_min_minutes": (1, 1440),
+            "profile_idle_timeout_max_minutes": (1, 10080), "profile_absolute_timeout_min_hours": (1, 168),
+            "profile_absolute_timeout_max_hours": (1, 744), "profile_concurrent_sessions_min": (1, 100),
+            "profile_concurrent_sessions_max": (1, 1000), "predicate_max_depth": (1, 16),
+            "predicate_max_nodes": (1, 256), "predicate_max_in_values": (1, 500),
+            "predicate_hard_max_depth": (1, 32), "predicate_hard_max_nodes": (1, 1024),
+            "predicate_hard_max_in_values": (1, 2000), "predicate_compound_max_arguments": (1, 100),
+            "audit_payload_max_bytes": (1024, 1048576), "policy_array_max_entries": (1, 1000),
+            "mfa_methods_max_entries": (1, 50), "audit_redaction_max_depth": (1, 32),
+            "audit_collection_max_entries": (1, 1000), "audit_string_max_length": (128, 10000),
+            "required_text_max_length": (128, 10000), "audit_reason_codes_max_entries": (1, 100),
+            "user_agent_max_length": (64, 4096), "audit_default_window_days": (1, 365),
+            "audit_max_window_days": (1, 3650), "row_priority_min": (-32768, 0),
+            "row_priority_max": (0, 32767), "name_min_length": (1, 255),
+            "name_max_length": (1, 512), "description_max_length": (1, 20000),
+            "list_page_size": (1, 100), "lookup_page_size": (1, 500),
+        }
+        for key, bounds in bounded.items():
+            cls._integer(limits, key, *bounds)
+        pairs = (
+            ("permission_set_duration_min_days", "permission_set_duration_max_days"),
+            ("profile_idle_timeout_min_minutes", "profile_idle_timeout_max_minutes"),
+            ("profile_absolute_timeout_min_hours", "profile_absolute_timeout_max_hours"),
+            ("profile_concurrent_sessions_min", "profile_concurrent_sessions_max"),
+            ("audit_default_window_days", "audit_max_window_days"),
+            ("row_priority_min", "row_priority_max"), ("name_min_length", "name_max_length"),
+        )
+        for lower, upper in pairs:
+            if int(limits[lower]) > int(limits[upper]):
+                raise SecurityValidationError(
+                    "Invalid security configuration", detail={f"limits.{lower}": [f"Must not exceed {upper}."]}
+                )
+        pattern = limits.get("correlation_id_pattern")
+        try:
+            if not isinstance(pattern, str) or re.compile(pattern).groups:
+                raise ValueError
+        except (re.error, ValueError) as exc:
+            raise SecurityValidationError(
+                "Invalid security configuration", detail={"limits.correlation_id_pattern": ["Invalid safe regex."]}
+            ) from exc
+        allowed_mfa = defaults.get("allowed_mfa_methods")
+        profile_defaults = defaults.get("security_profile")
+        if not isinstance(allowed_mfa, list) or not allowed_mfa or not all(isinstance(v, str) for v in allowed_mfa):
+            raise SecurityValidationError("Invalid security configuration", detail={"defaults.allowed_mfa_methods": ["Required allow-list."]})
+        if len(set(allowed_mfa)) != len(allowed_mfa) or len(allowed_mfa) > int(limits["mfa_methods_max_entries"]):
+            raise SecurityValidationError("Invalid security configuration", detail={"defaults.allowed_mfa_methods": ["Duplicate or excessive values."]})
+        if not isinstance(profile_defaults, Mapping):
+            raise SecurityValidationError("Invalid security configuration", detail={"defaults.security_profile": ["Required."]})
+        cls._validate_profile(profile_defaults, limits, frozenset(allowed_mfa), "defaults.security_profile")
+        cls._validate_profile(baseline, limits, frozenset(allowed_mfa), "baseline_profile")
+        if baseline.get("mfa_required") != "always" or any(
+            baseline.get(flag) is not False
+            for flag in ("download_allowed", "print_allowed", "copy_paste_allowed", "mobile_access_allowed")
+        ):
+            raise SecurityValidationError(
+                "Invalid security configuration",
+                detail={"baseline_profile": ["The mandatory baseline must require MFA and deny data egress."]},
+            )
+        for key in ("connect_timeout_seconds", "read_timeout_seconds", "reset_timeout_seconds"):
+            value = resilience.get(key)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0.05 <= float(value) <= 300:
+                raise SecurityValidationError("Invalid security configuration", detail={f"resilience.{key}": ["Out of safe bounds."]})
+        cls._integer(resilience, "max_retries", 1, 8)
+        cls._integer(resilience, "failure_threshold", 1, 20)
+        context_keys = normalized["remote_context_keys"]
+        if not isinstance(context_keys, list) or not context_keys or len(context_keys) > 64 or not all(
+            isinstance(value, str) and SLUG_RE.fullmatch(value) for value in context_keys
+        ):
+            raise SecurityValidationError("Invalid security configuration", detail={"remote_context_keys": ["Invalid allow-list."]})
+        controls = normalized["commercial_controls"]
+        if not isinstance(controls, Mapping) or controls.get("entitlement") not in {"not_required", "required"} or controls.get("quota") not in {"not_required", "required"}:
+            raise SecurityValidationError("Invalid security configuration", detail={"commercial_controls": ["Invalid modes."]})
+        ordering = normalized["ordering"]
+        if not isinstance(ordering, Mapping) or set(ordering) != set(cls.ORDERING_ALLOWED):
+            raise SecurityValidationError("Invalid security configuration", detail={"ordering": ["Incomplete ordering policy."]})
+        for resource, allowed in cls.ORDERING_ALLOWED.items():
+            values = ordering.get(resource)
+            if not isinstance(values, list) or not values or any(
+                not isinstance(value, str) or value.removeprefix("-") not in allowed for value in values
+            ):
+                raise SecurityValidationError(
+                    "Invalid security configuration", detail={f"ordering.{resource}": ["Unsupported ordering."]}
+                )
+        ui = normalized["ui"]
+        if not isinstance(ui, Mapping):
+            raise SecurityValidationError("Invalid security configuration", detail={"ui": ["Required."]})
+        cls._integer(ui, "loading_skeleton_rows", 1, 20)
+        cls._integer(ui, "audit_timeline_page_size", 1, 100)
+        tokens = normalized["semantic_tokens"]
+        if not isinstance(tokens, Mapping) or set(tokens) != {"success", "danger", "warning", "neutral"} or any(
+            not isinstance(value, str) or not re.fullmatch(r"[a-z][a-z0-9-]{1,63}", value)
+            for value in tokens.values()
+        ):
+            raise SecurityValidationError("Invalid security configuration", detail={"semantic_tokens": ["Invalid token map."]})
+        flags = normalized["feature_flags"]
+        if not isinstance(flags, Mapping) or not flags:
+            raise SecurityValidationError("Invalid security configuration", detail={"feature_flags": ["At least one flag is required."]})
+        for name, flag in flags.items():
+            if not isinstance(name, str) or not SLUG_RE.fullmatch(name) or not isinstance(flag, Mapping):
+                raise SecurityValidationError("Invalid security configuration", detail={"feature_flags": ["Invalid flag."]})
+            if set(flag) != {"enabled", "percentage", "roles", "cohorts"}:
+                raise SecurityValidationError("Invalid security configuration", detail={f"feature_flags.{name}": ["Invalid shape."]})
+            percentage = flag.get("percentage")
+            if not isinstance(flag.get("enabled"), bool) or isinstance(percentage, bool) or not isinstance(percentage, int) or not 0 <= percentage <= 100:
+                raise SecurityValidationError("Invalid security configuration", detail={f"feature_flags.{name}": ["Invalid rollout."]})
+            if any(not isinstance(flag.get(key), list) or len(flag[key]) > 100 for key in ("roles", "cohorts")):
+                raise SecurityValidationError("Invalid security configuration", detail={f"feature_flags.{name}": ["Invalid targets."]})
+        return normalized
+
+    @staticmethod
+    def _validate_profile(
+        profile: Mapping[str, object], limits: Mapping[str, object], allowed_mfa: frozenset[str], path: str
+    ) -> None:
+        checks = (
+            ("session_timeout_minutes", "profile_idle_timeout_min_minutes", "profile_idle_timeout_max_minutes"),
+            ("absolute_session_timeout_hours", "profile_absolute_timeout_min_hours", "profile_absolute_timeout_max_hours"),
+            ("max_concurrent_sessions", "profile_concurrent_sessions_min", "profile_concurrent_sessions_max"),
+        )
+        for key, low, high in checks:
+            value = profile.get(key)
+            if isinstance(value, bool) or not isinstance(value, int) or not int(limits[low]) <= value <= int(limits[high]):
+                raise SecurityValidationError("Invalid security configuration", detail={f"{path}.{key}": ["Out of configured bounds."]})
+        methods = profile.get("allowed_mfa_methods")
+        if not isinstance(methods, list) or not methods or not set(methods) <= allowed_mfa:
+            raise SecurityValidationError("Invalid security configuration", detail={f"{path}.allowed_mfa_methods": ["Outside allow-list."]})
+        if profile.get("mfa_required") not in {"always", "conditional", "sensitive_actions", "never"}:
+            raise SecurityValidationError("Invalid security configuration", detail={f"{path}.mfa_required": ["Invalid value."]})
+
+    @staticmethod
+    def validate_rollout(rollout: object) -> dict[str, object]:
+        if not isinstance(rollout, Mapping) or set(rollout) != {"enabled", "percentage", "role_ids", "cohorts"}:
+            raise SecurityValidationError("Invalid rollout", detail={"rollout": ["Invalid rollout document."]})
+        percentage = rollout.get("percentage")
+        if not isinstance(rollout.get("enabled"), bool) or isinstance(percentage, bool) or not isinstance(percentage, int) or not 0 <= percentage <= 100:
+            raise SecurityValidationError("Invalid rollout", detail={"rollout.percentage": ["Must be 0..100."]})
+        for key in ("role_ids", "cohorts"):
+            values = rollout.get(key)
+            if not isinstance(values, list) or len(values) > 100 or not all(isinstance(value, str) and value for value in values):
+                raise SecurityValidationError("Invalid rollout", detail={f"rollout.{key}": ["Invalid allow-list."]})
+        return deepcopy(dict(rollout))
+
+    @classmethod
+    @transaction.atomic
+    def current(
+        cls, tenant_id: UUID, *, actor_id: UUID, correlation_id: str, environment: str | None = None
+    ) -> SecurityConfiguration:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        current = SecurityConfiguration.objects.select_for_update().for_tenant(tenant).first()
+        if current is not None:
+            cls.validate_document(current.document)
+            cls.validate_rollout(current.rollout)
+            return current
+        env = str(environment or getattr(settings, "SARAISE_ENVIRONMENT", "development")).lower()
+        if env not in cls.ENVIRONMENTS:
+            raise SecurityConfigurationMissing("A valid tenant security environment is required")
+        document = cls.validate_document(default_security_configuration())
+        rollout = cls.validate_rollout(DEFAULT_ROLLOUT)
+        current = SecurityConfiguration(
+            tenant_id=tenant, environment=env, version=1, document=document, rollout=rollout,
+            updated_by=actor, correlation_id=correlation_id,
+        )
+        current.save(force_insert=True)
+        SecurityConfigurationVersion.objects.create(
+            tenant_id=tenant, version=1, environment=env, previous_document=None, current_document=document,
+            previous_rollout=None, current_rollout=rollout, actor_id=actor, correlation_id=correlation_id,
+            reason="Initial governed tenant configuration", change_kind="bootstrap",
+        )
+        _security_event(
+            tenant,
+            event_type="security.configuration.changed",
+            aggregate_type="security_configuration",
+            aggregate_id=current.id,
+            actor_id=actor,
+            correlation_id=correlation_id,
+            payload={"operation": "bootstrap", "version": 1},
+        )
+        return current
+
+    @classmethod
+    def require_existing(cls, tenant_id: UUID) -> SecurityConfiguration:
+        tenant = _uuid(tenant_id, "tenant_id")
+        current = SecurityConfiguration.objects.for_tenant(tenant).first()
+        if current is None:
+            raise SecurityConfigurationMissing("Tenant security configuration is required")
+        cls.validate_document(current.document)
+        cls.validate_rollout(current.rollout)
+        return current
+
+    @staticmethod
+    def _diff(previous: Mapping[str, object], current: Mapping[str, object], prefix: str = "") -> list[dict[str, object]]:
+        changes: list[dict[str, object]] = []
+        for key in sorted(set(previous) | set(current)):
+            path = f"{prefix}.{key}" if prefix else key
+            before, after = previous.get(key), current.get(key)
+            if isinstance(before, Mapping) and isinstance(after, Mapping):
+                changes.extend(ConfigurationService._diff(before, after, path))
+            elif before != after:
+                changes.append({"path": path, "before": before, "after": after})
+        return changes
+
+    @classmethod
+    def preview(cls, current: SecurityConfiguration, *, document: object, rollout: object | None = None) -> dict[str, object]:
+        normalized_document = cls.validate_document(document)
+        normalized_rollout = cls.validate_rollout(current.rollout if rollout is None else rollout)
+        return {
+            "valid": True,
+            "diff": cls._diff(current.document, normalized_document) + cls._diff(current.rollout, normalized_rollout, "rollout"),
+            "normalized_document": normalized_document,
+            "normalized_rollout": normalized_rollout,
+        }
+
+    @classmethod
+    @transaction.atomic
+    def replace(
+        cls, tenant_id: UUID, *, document: object, environment: str, rollout: object | None, actor_id: UUID,
+        correlation_id: str, reason: str, change_kind: str = "update",
+    ) -> SecurityConfiguration:
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        current = cls.current(tenant, actor_id=actor, correlation_id=correlation_id, environment=environment)
+        current = SecurityConfiguration.objects.select_for_update().get(pk=current.pk)
+        if environment not in cls.ENVIRONMENTS:
+            raise SecurityValidationError("Invalid environment", detail={"environment": ["Unsupported value."]})
+        normalized_document = cls.validate_document(document)
+        normalized_rollout = cls.validate_rollout(current.rollout if rollout is None else rollout)
+        previous_document, previous_rollout = deepcopy(current.document), deepcopy(current.rollout)
+        current.version += 1
+        current.environment, current.document, current.rollout = environment, normalized_document, normalized_rollout
+        current.updated_by, current.correlation_id = actor, correlation_id
+        current.save()
+        SecurityConfigurationVersion.objects.create(
+            tenant_id=tenant, version=current.version, environment=environment,
+            previous_document=previous_document, current_document=normalized_document,
+            previous_rollout=previous_rollout, current_rollout=normalized_rollout,
+            actor_id=actor, correlation_id=correlation_id, reason=_required_text(reason, "reason"),
+            change_kind=change_kind,
+        )
+        _security_event(
+            tenant,
+            event_type="security.configuration.changed",
+            aggregate_type="security_configuration",
+            aggregate_id=current.id,
+            actor_id=actor,
+            correlation_id=correlation_id,
+            payload={"operation": change_kind, "version": current.version},
+        )
+        return current
+
+    @classmethod
+    def update_rollout(cls, tenant_id: UUID, *, rollout: object, actor_id: UUID, correlation_id: str, reason: str) -> SecurityConfiguration:
+        current = cls.require_existing(tenant_id)
+        return cls.replace(
+            tenant_id, document=current.document, environment=current.environment, rollout=rollout,
+            actor_id=actor_id, correlation_id=correlation_id, reason=reason, change_kind="rollout",
+        )
+
+    @classmethod
+    def rollback(
+        cls, tenant_id: UUID, version: int, *, actor_id: UUID, correlation_id: str, reason: str
+    ) -> SecurityConfiguration:
+        tenant = _uuid(tenant_id, "tenant_id")
+        target = SecurityConfigurationVersion.objects.for_tenant(tenant).filter(version=version).first()
+        if target is None:
+            raise SecurityNotFound("Configuration version was not found")
+        return cls.replace(
+            tenant, document=target.current_document, environment=target.environment, rollout=target.current_rollout,
+            actor_id=actor_id, correlation_id=correlation_id, reason=reason, change_kind="rollback",
+        )
+
+    @staticmethod
+    def export_document(current: SecurityConfiguration) -> dict[str, object]:
+        return {
+            "schema_version": "1.0", "environment": current.environment, "version": current.version,
+            "document": deepcopy(current.document), "rollout": deepcopy(current.rollout),
+        }
+
+
+class MutationReplayService:
+    """Execute a mutation and persist its response atomically for safe retries."""
+
+    @staticmethod
+    @transaction.atomic
+    def execute(
+        tenant_id: UUID,
+        *,
+        idempotency_key: str,
+        operation: str,
+        request_document: Mapping[str, object],
+        correlation_id: str,
+        callback: Any,
+    ) -> tuple[dict[str, object], int, bool]:
+        tenant = _uuid(tenant_id, "tenant_id")
+        key = str(idempotency_key).strip()
+        if not key or len(key) > 128 or not re.fullmatch(r"[A-Za-z0-9._:-]+", key):
+            raise SecurityValidationError(
+                "A valid Idempotency-Key is required", detail={"idempotency_key": ["Required for mutations."]}
+            )
+        encoded = json.dumps(request_document, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        request_hash = hashlib.sha256(operation.encode("utf-8") + b"\0" + encoded).hexdigest()
+        replay = MutationReplay.objects.select_for_update().for_tenant(tenant).filter(idempotency_key=key).first()
+        if replay is not None:
+            if replay.request_hash != request_hash or replay.operation != operation:
+                raise SecurityConflict("Idempotency-Key was already used for a different mutation")
+            return deepcopy(replay.response_document), replay.response_status, True
+        response_document, response_status, resource_id = callback()
+        MutationReplay.objects.create(
+            tenant_id=tenant, idempotency_key=key, request_hash=request_hash, operation=operation,
+            resource_id=resource_id, response_status=response_status, response_document=response_document,
+            correlation_id=correlation_id,
+        )
+        return deepcopy(response_document), response_status, False
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,14 +611,18 @@ class EffectiveSecurityProfile:
 @dataclass(frozen=True, slots=True)
 class AccessDecisionResult:
     allowed: bool
+    subject_id: str
     permission_code: str
     reason_codes: tuple[str, ...]
     applied_policy_ids: tuple[str, ...]
-    entitlement: str
+    entitlement: Mapping[str, object]
     quota: Mapping[str, object]
-    field_policy: Mapping[str, object]
-    row_policy: Mapping[str, object]
+    field_decisions: tuple[Mapping[str, object], ...]
+    row_explanation: Mapping[str, object]
+    profile: Mapping[str, object]
     audit_id: str | None = None
+    correlation_id: str = ""
+    evaluated_at: datetime | None = None
 
 
 def _uuid(value: UUID | str, field: str) -> UUID:
@@ -124,6 +632,17 @@ def _uuid(value: UUID | str, field: str) -> UUID:
         raise SecurityValidationError(f"{field} must be a UUID", detail={field: ["Invalid UUID."]}) from exc
 
 
+def _actor_uuid(value: object) -> UUID:
+    """Normalize native user primary keys into the immutable UUID evidence contract."""
+
+    try:
+        return _uuid(str(value), "actor_id")
+    except SecurityValidationError:
+        if value is None or not str(value):
+            raise SecurityValidationError("actor_id is required")
+        return uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:user:{value}")
+
+
 def _slug(value: object, field: str) -> str:
     normalized = str(value).strip().lower().replace(" ", "_")
     if not SLUG_RE.fullmatch(normalized):
@@ -131,7 +650,12 @@ def _slug(value: object, field: str) -> str:
     return normalized
 
 
-def _required_text(value: object, field: str, maximum: int = 2000) -> str:
+def _required_text(value: object, field: str, maximum: int | None = None) -> str:
+    if maximum is None:
+        limits = default_security_configuration()["limits"]
+        if not isinstance(limits, Mapping):
+            raise SecurityConfigurationMissing("Required-text validation configuration is unavailable")
+        maximum = int(limits["required_text_max_length"])
     normalized = str(value).strip()
     if not normalized or len(normalized) > maximum:
         raise SecurityValidationError(
@@ -259,12 +783,23 @@ class AuditService:
     ) -> SecurityAuditLog:
         tenant = _uuid(tenant_id, "tenant_id")
         actor = _uuid(actor_id, "actor_id")
+        configuration = ConfigurationService.current(tenant, actor_id=actor, correlation_id=correlation_id)
+        limits = configuration.document.get("limits")
+        if not isinstance(limits, Mapping):
+            raise SecurityConfigurationMissing("Audit safety limits are required")
         codes = tuple(_required_text(item, "reason_code", 100) for item in reason_codes)
-        if len(codes) > 32:
-            raise SecurityValidationError("At most 32 reason codes are allowed")
-        if len(json.dumps(details, separators=(",", ":"), default=str).encode()) > 16 * 1024:
-            raise SecurityValidationError("Audit details exceed 16 KiB")
-        safe_details = redact_sensitive(details)
+        max_codes = int(limits["audit_reason_codes_max_entries"])
+        max_bytes = int(limits["audit_payload_max_bytes"])
+        if len(codes) > max_codes:
+            raise SecurityValidationError(f"At most {max_codes} reason codes are allowed")
+        if len(json.dumps(details, separators=(",", ":"), default=str).encode()) > max_bytes:
+            raise SecurityValidationError(f"Audit details exceed {max_bytes} bytes")
+        safe_details = redact_sensitive(
+            details,
+            max_depth=int(limits["audit_redaction_max_depth"]),
+            max_collection=int(limits["audit_collection_max_entries"]),
+            max_string=int(limits["audit_string_max_length"]),
+        )
         record = SecurityAuditLog(
             tenant_id=tenant,
             action=_required_text(action, "action", 100),
@@ -276,8 +811,8 @@ class AuditService:
             reason_codes=list(codes),
             details=safe_details,
             ip_address=ip_address,
-            user_agent=str(user_agent)[:512],
-            correlation_id=_required_text(correlation_id, "correlation_id", 128),
+            user_agent=str(user_agent)[: int(limits["user_agent_max_length"])],
+            correlation_id=_required_text(correlation_id, "correlation_id", int(limits["correlation_id_max_length"])),
             outbox_event_id=outbox_event_id,
         )
         _model_validation(record)
@@ -325,6 +860,7 @@ class RoleService:
     ) -> Role:
         tenant = _uuid(tenant_id, "tenant_id")
         actor = _uuid(actor_id, "actor_id")
+        ConfigurationService.current(tenant, actor_id=actor, correlation_id=correlation_id)
         parent = _role(tenant, parent_role_id, lock=True) if parent_role_id else None
         normalized_code = _slug(code, "code").replace("-", "_")
         if Role.objects.for_tenant(tenant).filter(code=normalized_code, is_deleted=False).exists():
@@ -368,6 +904,11 @@ class RoleService:
     ) -> Role:
         tenant = _uuid(tenant_id, "tenant_id")
         actor = _uuid(actor_id, "actor_id")
+        configuration = ConfigurationService.current(tenant, actor_id=actor, correlation_id=correlation_id)
+        limits = configuration.document["limits"]
+        if not isinstance(limits, Mapping):
+            raise SecurityConfigurationMissing("Role hierarchy limits are required")
+        maximum_depth = int(limits["role_hierarchy_max_depth"])
         role = _role(tenant, role_id, lock=True)
         allowed = {"name", "code", "description", "role_type", "parent_role_id", "is_active"}
         if set(changes) - allowed:
@@ -404,8 +945,10 @@ class RoleService:
                 Role.objects.select_for_update().for_tenant(tenant).filter(parent_role=parent, is_deleted=False)
             )
             for child in children:
-                if child.id in seen or level + 1 > 16:
-                    raise SecurityValidationError("Role hierarchy is cyclic or exceeds 16 levels")
+                if child.id in seen or level + 1 > maximum_depth:
+                    raise SecurityValidationError(
+                        f"Role hierarchy is cyclic or exceeds {maximum_depth} levels"
+                    )
                 seen.add(child.id)
                 child.hierarchy_level = level + 1
                 child.updated_by = actor
@@ -530,6 +1073,10 @@ class RoleService:
         correlation_id: str,
     ) -> UserRole:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        configuration = ConfigurationService.current(tenant, actor_id=actor, correlation_id=correlation_id)
+        defaults = configuration.document.get("defaults")
+        if not isinstance(defaults, Mapping):
+            raise SecurityConfigurationMissing("Assignment defaults are required")
         user, role = _tenant_user(tenant, user_id), _role(tenant, role_id, lock=True)
         start = valid_from or timezone.now()
         existing = (
@@ -542,7 +1089,7 @@ class RoleService:
             raise SecurityConflict("An active assignment already exists")
         if existing:
             existing.revoked_at, existing.revoked_by = timezone.now(), actor
-            existing.revocation_reason = "Superseded by renewal"
+            existing.revocation_reason = str(defaults["automatic_revocation_reason"])
             existing.save(update_fields=("revoked_at", "revoked_by", "revocation_reason", "updated_at"))
         assignment = UserRole(
             tenant_id=tenant,
@@ -741,6 +1288,16 @@ class PermissionSetService:
         correlation_id: str,
     ) -> PermissionSet:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        configuration = ConfigurationService.current(tenant, actor_id=actor, correlation_id=correlation_id)
+        limits = configuration.document.get("limits")
+        if not isinstance(limits, Mapping):
+            raise SecurityConfigurationMissing("Permission-set limits are required")
+        if default_duration_days is not None and not (
+            int(limits["permission_set_duration_min_days"])
+            <= default_duration_days
+            <= int(limits["permission_set_duration_max_days"])
+        ):
+            raise SecurityValidationError("Default duration is outside tenant configuration limits")
         normalized_name = _required_text(name, "name", 255)
         if PermissionSet.objects.for_tenant(tenant).filter(name=normalized_name, is_deleted=False).exists():
             raise SecurityConflict("An active permission set with this name already exists")
@@ -872,6 +1429,17 @@ class PermissionSetService:
         correlation_id: str,
     ) -> UserPermissionSet:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        configuration = ConfigurationService.current(tenant, actor_id=actor, correlation_id=correlation_id)
+        limits = configuration.document.get("limits")
+        defaults = configuration.document.get("defaults")
+        if not isinstance(limits, Mapping) or not isinstance(defaults, Mapping):
+            raise SecurityConfigurationMissing("Grant configuration is required")
+        if duration_days is not None and not (
+            int(limits["permission_set_duration_min_days"])
+            <= duration_days
+            <= int(limits["permission_set_duration_max_days"])
+        ):
+            raise SecurityValidationError("Grant duration is outside tenant configuration limits")
         item, user = _permission_set(tenant, permission_set_id, lock=True), _tenant_user(tenant, user_id)
         if not item.is_active:
             raise SecurityConflict("Inactive permission sets cannot be granted")
@@ -891,7 +1459,11 @@ class PermissionSetService:
         if existing and existing.is_active:
             raise SecurityConflict("An active permission-set grant already exists")
         if existing:
-            existing.revoked_at, existing.revoked_by, existing.revocation_reason = start, actor, "Superseded by renewal"
+            existing.revoked_at, existing.revoked_by, existing.revocation_reason = (
+                start,
+                actor,
+                str(defaults["automatic_revocation_reason"]),
+            )
             existing.save(update_fields=("revoked_at", "revoked_by", "revocation_reason", "updated_at"))
         grant = UserPermissionSet(
             tenant_id=tenant,
@@ -986,14 +1558,18 @@ class FieldSecurityService:
         resource: str,
         field: str,
         role_id: UUID,
-        visibility: str,
-        edit_control: str,
+        visibility: str | None = None,
+        edit_control: str | None = None,
         mask_pattern: str = "",
         is_active: bool = True,
         actor_id: UUID,
         correlation_id: str,
     ) -> FieldSecurity:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        configuration = ConfigurationService.current(tenant, actor_id=actor, correlation_id=correlation_id)
+        defaults = configuration.document.get("defaults")
+        if not isinstance(defaults, Mapping):
+            raise SecurityConfigurationMissing("Field-security defaults are required")
         module_key, resource_key, field_key = (
             _slug(module, "module"),
             _slug(resource, "resource"),
@@ -1007,8 +1583,8 @@ class FieldSecurityService:
             resource=resource_key,
             field=field_key,
             role=_role(tenant, role_id),
-            visibility=visibility,
-            edit_control=edit_control,
+            visibility=visibility or str(defaults["field_visibility"]),
+            edit_control=edit_control or str(defaults["field_edit_control"]),
             mask_pattern=mask_pattern,
             is_active=is_active,
             created_by=actor,
@@ -1137,24 +1713,35 @@ class RowSecurityService:
         module: str,
         resource: str,
         role_id: UUID,
-        rule_type: str,
+        rule_type: str | None = None,
         filter_criteria: Mapping[str, object],
-        priority: int = 0,
+        priority: int | None = None,
         is_active: bool = True,
         actor_id: UUID,
         correlation_id: str,
     ) -> RowSecurityRule:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
         module_key, resource_key = _slug(module, "module"), _slug(resource, "resource")
-        validate_predicate(filter_criteria, allowed_fields=_resource_fields(module_key, resource_key))
+        ConfigurationService.current(tenant, actor_id=actor, correlation_id=correlation_id)
+        configuration = ConfigurationService.require_existing(tenant)
+        defaults = configuration.document.get("defaults")
+        limits = configuration.document.get("limits")
+        if not isinstance(defaults, Mapping) or not isinstance(limits, Mapping):
+            raise SecurityConfigurationMissing("Row-security configuration is required")
+        resolved_priority = int(defaults["row_rule_priority"] if priority is None else priority)
+        if not int(limits["row_priority_min"]) <= resolved_priority <= int(limits["row_priority_max"]):
+            raise SecurityValidationError("Row priority is outside tenant configuration limits")
+        validate_predicate(
+            filter_criteria, allowed_fields=_resource_fields(module_key, resource_key), tenant_id=tenant
+        )
         item = RowSecurityRule(
             tenant_id=tenant,
             module=module_key,
             resource=resource_key,
             role=_role(tenant, role_id),
-            rule_type=rule_type,
+            rule_type=rule_type or str(defaults["row_rule_type"]),
             filter_criteria=dict(filter_criteria),
-            priority=priority,
+            priority=resolved_priority,
             is_active=is_active,
             created_by=actor,
             updated_by=actor,
@@ -1187,7 +1774,10 @@ class RowSecurityService:
         if set(changes) - allowed:
             raise SecurityValidationError("Row target and role are immutable")
         criteria = changes.get("filter_criteria", previous.filter_criteria)
-        validate_predicate(criteria, allowed_fields=_resource_fields(previous.module, previous.resource))
+        ConfigurationService.current(tenant, actor_id=actor, correlation_id=correlation_id)
+        validate_predicate(
+            criteria, allowed_fields=_resource_fields(previous.module, previous.resource), tenant_id=tenant
+        )
         previous.is_active, previous.is_deleted, previous.deleted_at, previous.updated_by = (
             False,
             True,
@@ -1316,12 +1906,17 @@ class SecurityProfileService:
     @transaction.atomic
     def create_profile(tenant_id: UUID, *, actor_id: UUID, correlation_id: str, **values: object) -> SecurityProfile:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        configuration = ConfigurationService.current(tenant, actor_id=actor, correlation_id=correlation_id)
+        configured_defaults = configuration.document.get("defaults")
+        profile_defaults = configured_defaults.get("security_profile") if isinstance(configured_defaults, Mapping) else None
+        if not isinstance(profile_defaults, Mapping):
+            raise SecurityConfigurationMissing("Security profile defaults are required")
         if set(values) - SecurityProfileService.PROFILE_FIELDS:
             raise SecurityValidationError("Unsupported security profile fields")
         name = _required_text(values.get("name", ""), "name", 255)
         if SecurityProfile.objects.for_tenant(tenant).filter(name=name, is_deleted=False).exists():
             raise SecurityConflict("An active security profile with this name already exists")
-        values = {**values, "name": name}
+        values = {**deepcopy(dict(profile_defaults)), **values, "name": name}
         item = SecurityProfile(tenant_id=tenant, created_by=actor, updated_by=actor, **values)
         _model_validation(item)
         item.save(force_insert=True)
@@ -1342,6 +1937,7 @@ class SecurityProfileService:
         tenant_id: UUID, profile_id: UUID, *, changes: Mapping[str, object], actor_id: UUID, correlation_id: str
     ) -> SecurityProfile:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        ConfigurationService.current(tenant, actor_id=actor, correlation_id=correlation_id)
         item = (
             SecurityProfile.objects.select_for_update()
             .for_tenant(tenant)
@@ -1406,7 +2002,7 @@ class SecurityProfileService:
         *,
         user_id: UUID | str | None = None,
         role_id: UUID | None = None,
-        precedence: int = 0,
+        precedence: int | None = None,
         valid_from: datetime | None = None,
         valid_until: datetime | None = None,
         reason: str,
@@ -1414,6 +2010,14 @@ class SecurityProfileService:
         correlation_id: str,
     ) -> SecurityProfileAssignment:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        configuration = ConfigurationService.current(tenant, actor_id=actor, correlation_id=correlation_id)
+        defaults = configuration.document.get("defaults")
+        limits = configuration.document.get("limits")
+        if not isinstance(defaults, Mapping) or not isinstance(limits, Mapping):
+            raise SecurityConfigurationMissing("Profile assignment configuration is required")
+        resolved_precedence = int(defaults["profile_assignment_precedence"] if precedence is None else precedence)
+        if not int(limits["row_priority_min"]) <= resolved_precedence <= int(limits["row_priority_max"]):
+            raise SecurityValidationError("Assignment precedence is outside tenant configuration limits")
         profile = (
             SecurityProfile.objects.for_tenant(tenant).filter(id=profile_id, is_deleted=False, is_active=True).first()
         )
@@ -1426,7 +2030,7 @@ class SecurityProfileService:
             security_profile=profile,
             user=user,
             role=role,
-            precedence=precedence,
+            precedence=resolved_precedence,
             valid_from=valid_from or timezone.now(),
             valid_until=valid_until,
             assigned_by=actor,
@@ -1523,10 +2127,28 @@ class SecurityProfileService:
             item for item in assignments if item.security_profile.is_active and not item.security_profile.is_deleted
         ]
         if not assignments:
-            return EffectiveSecurityProfile((), None, {}, {})
+            configuration = ConfigurationService.require_existing(tenant)
+            baseline = configuration.document.get("baseline_profile")
+            if not isinstance(baseline, Mapping):
+                raise SecurityConfigurationMissing("A valid mandatory baseline security profile is required")
+            return EffectiveSecurityProfile(
+                (f"tenant-baseline:v{configuration.version}",),
+                -32768,
+                deepcopy(dict(baseline)),
+                {
+                    "mfa_required": "authentication_service",
+                    "session_limits": "authentication_service",
+                    "network_and_geography": "access_pipeline",
+                    "data_handling": "resource_enforcement_facade",
+                },
+            )
         top = assignments[0].precedence
         profiles = [item.security_profile for item in assignments if item.precedence == top]
-        mfa_rank = {"never": 0, "sensitive_actions": 1, "conditional": 2, "always": 3}
+        configuration = ConfigurationService.require_existing(tenant)
+        defaults = configuration.document.get("defaults")
+        mfa_rank = defaults.get("mfa_precedence") if isinstance(defaults, Mapping) else None
+        if not isinstance(mfa_rank, Mapping) or set(mfa_rank) != {"never", "sensitive_actions", "conditional", "always"}:
+            raise SecurityConfigurationMissing("MFA precedence configuration is missing or invalid")
         restrictions: dict[str, object] = {
             "mfa_required": max((item.mfa_required for item in profiles), key=mfa_rank.__getitem__),
             "allowed_mfa_methods": (
@@ -1562,31 +2184,67 @@ class SecurityProfileService:
         return EffectiveSecurityProfile(tuple(str(item.id) for item in profiles), top, restrictions, enforcement)
 
 
-_policy_client: ResilientHttpClient | None = None
+_policy_clients: dict[tuple[str, int], ResilientHttpClient] = {}
 _policy_client_lock = threading.Lock()
+_policy_client_context = threading.local()
 
 
 def get_policy_http_client() -> ResilientHttpClient:
-    global _policy_client
+    tenant_id = getattr(_policy_client_context, "tenant_id", None)
+    if tenant_id is None:
+        raise SecurityConfigurationMissing("Tenant context is required for the policy client")
+    configuration = ConfigurationService.require_existing(tenant_id)
+    resilience = configuration.document.get("resilience")
+    if not isinstance(resilience, Mapping):
+        raise SecurityConfigurationMissing("Policy resilience configuration is required")
+    cache_key = (str(configuration.tenant_id), configuration.version)
     with _policy_client_lock:
-        if _policy_client is None:
-            _policy_client = ResilientHttpClient(
-                connect_timeout=1.0, read_timeout=2.0, max_retries=0, failure_threshold=3, reset_timeout=30.0
+        client = _policy_clients.get(cache_key)
+        if client is None:
+            client = ResilientHttpClient(
+                connect_timeout=float(resilience["connect_timeout_seconds"]),
+                read_timeout=float(resilience["read_timeout_seconds"]),
+                max_retries=int(resilience["max_retries"]),
+                failure_threshold=int(resilience["failure_threshold"]),
+                reset_timeout=float(resilience["reset_timeout_seconds"]),
             )
-        return _policy_client
+            _policy_clients[cache_key] = client
+        return client
 
 
 def reset_policy_http_client() -> None:
-    global _policy_client
     with _policy_client_lock:
-        if _policy_client is not None:
-            _policy_client.close()
-        _policy_client = None
+        for client in _policy_clients.values():
+            client.close()
+        _policy_clients.clear()
+
+
+class PolicyEvaluatorComposition:
+    """Validated application-policy composition kept outside the authorization primitive."""
+
+    @staticmethod
+    def authoritative() -> Callable[..., PolicyEvaluation]:
+        mode = str(getattr(settings, "SARAISE_MODE", "")).lower()
+        if mode == "saas":
+            return AccessEvaluationService.evaluate_remote
+        if mode in {"development", "self-hosted"}:
+            return AccessEvaluationService.evaluate_local
+
+        def deny_invalid_configuration(*args: object, **kwargs: object) -> PolicyEvaluation:
+            del args, kwargs
+            return PolicyEvaluation(False, ("EVALUATOR_CONFIGURATION_INVALID",), ())
+
+        return deny_invalid_configuration
 
 
 class AccessEvaluationService:
     @staticmethod
     def active_role_ids(tenant_id: UUID, user_id: UUID, *, at: datetime | None = None) -> tuple[UUID, ...]:
+        configuration = ConfigurationService.require_existing(tenant_id)
+        limits = configuration.document.get("limits")
+        if not isinstance(limits, Mapping):
+            raise SecurityConfigurationMissing("Role hierarchy limits are required")
+        maximum_depth = int(limits["role_hierarchy_max_depth"])
         when = at or timezone.now()
         direct = (
             UserRole.objects.for_tenant(tenant_id)
@@ -1604,7 +2262,7 @@ class AccessEvaluationService:
         for assignment in direct:
             role = assignment.role
             depth = 0
-            while role is not None and role.id not in result and depth <= 16:
+            while role is not None and role.id not in result and depth <= maximum_depth:
                 if role.is_active and not role.is_deleted:
                     result.add(role.id)
                 role = (
@@ -1657,14 +2315,46 @@ class AccessEvaluationService:
         *,
         resource_context: Mapping[str, object] | None = None,
         request: object | None = None,
+        correlation_id: str = "",
     ) -> PolicyEvaluation:
-        del resource_context, request
-        effective = cls.get_effective_permissions(_uuid(tenant_id, "tenant_id"), getattr(identity, "id", ""))
+        tenant = _uuid(tenant_id, "tenant_id")
+        subject_id = getattr(identity, "id", None)
+        if subject_id is None:
+            return PolicyEvaluation(False, ("SUBJECT_ID_REQUIRED",), ())
+        correlation = correlation_id or str(getattr(request, "correlation_id", "")) or f"evaluation-{uuid.uuid4()}"
+        ConfigurationService.current(tenant, actor_id=_actor_uuid(subject_id), correlation_id=correlation)
+        effective = cls.get_effective_permissions(tenant, subject_id)
         if permission_code in effective.denied:
             return PolicyEvaluation(False, ("EXPLICIT_DENY",), effective.role_ids)
-        if permission_code in effective.allowed:
-            return PolicyEvaluation(True, ("ALLOW",), effective.role_ids + effective.permission_set_ids)
-        return PolicyEvaluation(False, ("DENY_DEFAULT",), ())
+        if permission_code not in effective.allowed:
+            return PolicyEvaluation(False, ("DENY_DEFAULT",), ())
+        context_values = dict(resource_context or {})
+        profile = SecurityProfileService.resolve_effective_profile(tenant, subject_id, context=context_values)
+        if not profile.profile_ids or not profile.restrictions:
+            return PolicyEvaluation(False, ("PROFILE_CONFIGURATION_MISSING",), ())
+        module, resource = context_values.get("module"), context_values.get("resource")
+        if bool(module) != bool(resource):
+            return PolicyEvaluation(False, ("INVALID_RESOURCE_CONTEXT",), ())
+        applied = list(effective.role_ids + effective.permission_set_ids + profile.profile_ids)
+        if isinstance(module, str) and isinstance(resource, str):
+            requested_fields = context_values.get("requested_fields", [])
+            if not isinstance(requested_fields, Sequence) or isinstance(requested_fields, (str, bytes)):
+                return PolicyEvaluation(False, ("INVALID_RESOURCE_CONTEXT",), tuple(applied))
+            try:
+                field_decisions = FieldSecurityService.resolve_field_access(
+                    tenant, subject_id, module, resource, fields=tuple(str(value) for value in requested_fields),
+                    context=context_values,
+                )
+                row = RowSecurityService.explain_row_access(
+                    tenant, subject_id, module, resource, record_attributes=context_values, context=context_values,
+                )
+            except (SecurityValidationError, SecurityNotFound):
+                return PolicyEvaluation(False, ("INVALID_RESOURCE_CONTEXT",), tuple(applied))
+            applied.extend(rule for decision in field_decisions.values() for rule in decision.applied_rule_ids)
+            applied.extend(row.applied_rule_ids)
+            if any(decision.visibility in {"hidden", "redacted"} for decision in field_decisions.values()) or not row.allowed:
+                return PolicyEvaluation(False, ("RESOURCE_POLICY_DENIED",), tuple(dict.fromkeys(applied)))
+        return PolicyEvaluation(True, ("ALLOW",), tuple(dict.fromkeys(applied)))
 
     @staticmethod
     def evaluate_remote(
@@ -1674,21 +2364,26 @@ class AccessEvaluationService:
         *,
         resource_context: Mapping[str, object] | None = None,
         request: object | None = None,
+        correlation_id: str = "",
     ) -> PolicyEvaluation:
         tenant = _uuid(tenant_id, "tenant_id")
-        correlation = str(getattr(request, "correlation_id", ""))
-        allowed_context_keys = frozenset(
-            {
-                "record_id",
-                "resource_id",
-                "module",
-                "resource",
-                "owner_id",
-                "classification",
-                "country",
-                "requested_fields",
-            }
-        )
+        correlation = correlation_id or str(getattr(request, "correlation_id", "")) or f"evaluation-{uuid.uuid4()}"
+        try:
+            configuration = ConfigurationService.current(
+                tenant,
+                actor_id=_actor_uuid(getattr(identity, "id", None)),
+                correlation_id=correlation,
+            )
+        except SecurityServiceError as exc:
+            logger.warning(
+                "security.policy_dependency.degraded",
+                extra={"tenant_id": str(tenant), "correlation_id": correlation, "reason_codes": [exc.code]},
+            )
+            return PolicyEvaluation(False, ("SECURITY_CONFIGURATION_INVALID",), ())
+        configured_keys = configuration.document.get("remote_context_keys")
+        if not isinstance(configured_keys, list):
+            return PolicyEvaluation(False, ("SECURITY_CONFIGURATION_INVALID",), ())
+        allowed_context_keys = frozenset(str(value) for value in configured_keys)
         context_values = dict(resource_context or {})
         if set(context_values) - allowed_context_keys or any(
             isinstance(value, Mapping) for value in context_values.values()
@@ -1702,6 +2397,7 @@ class AccessEvaluationService:
             "context": {"correlation_id": correlation},
         }
         try:
+            _policy_client_context.tenant_id = tenant
             response = get_policy_http_client().post(
                 "/api/v1/evaluate", dependency=POLICY_DEPENDENCY, correlation_id=correlation, json=payload
             )
@@ -1731,13 +2427,24 @@ class AccessEvaluationService:
 
     @classmethod
     def evaluate(
-        cls, tenant_id: UUID, identity: object, required_permission: str, *, request: object | None = None
+        cls,
+        tenant_id: UUID,
+        identity: object,
+        required_permission: str,
+        *,
+        resource_context: Mapping[str, object] | None = None,
+        request: object | None = None,
+        correlation_id: str = "",
+        evaluator: Callable[..., PolicyEvaluation] | None = None,
     ) -> PolicyEvaluation:
-        mode = str(getattr(settings, "SARAISE_MODE", "development")).lower()
-        return (
-            cls.evaluate_remote(tenant_id, identity, required_permission, request=request)
-            if mode == "saas"
-            else cls.evaluate_local(tenant_id, identity, required_permission, request=request)
+        authoritative = evaluator or PolicyEvaluatorComposition.authoritative()
+        return authoritative(
+            tenant_id,
+            identity,
+            required_permission,
+            resource_context=resource_context,
+            request=request,
+            correlation_id=correlation_id,
         )
 
     @classmethod
@@ -1754,8 +2461,77 @@ class AccessEvaluationService:
     ) -> AccessDecisionResult:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
         subject = _tenant_user(tenant, subject_id)
+        configuration = ConfigurationService.current(tenant, actor_id=actor, correlation_id=correlation_id)
         PermissionCatalogService.resolve_code(tenant, permission_code)
-        evaluation = cls.evaluate(tenant, subject, permission_code)
+        context_values = dict(resource_context or {})
+        evaluation = cls.evaluate(
+            tenant,
+            subject,
+            permission_code,
+            resource_context=context_values,
+            correlation_id=correlation_id,
+        )
+        controls = configuration.document.get("commercial_controls")
+        if not isinstance(controls, Mapping):
+            raise SecurityConfigurationMissing("Commercial control policy is required")
+        if controls.get("entitlement") != "not_required" or controls.get("quota") != "not_required":
+            raise SecurityDependencyUnavailable("Configured entitlement or quota evaluator is unavailable")
+        entitlement = {"required": False, "allowed": True, "reason_code": "NOT_REQUIRED_BY_CONFIGURATION"}
+        quota = {"required": False, "allowed": True, "remaining": None, "reason_code": "NOT_REQUIRED_BY_CONFIGURATION"}
+        profile = SecurityProfileService.resolve_effective_profile(tenant, subject.id, context=context_values)
+        if not profile.profile_ids:
+            raise SecurityConfigurationMissing("No effective or baseline security profile is available")
+        module, resource = context_values.get("module"), context_values.get("resource")
+        requested_fields = context_values.get("requested_fields", [])
+        if not isinstance(requested_fields, Sequence) or isinstance(requested_fields, (str, bytes)):
+            raise SecurityValidationError("requested_fields must be an array")
+        field_decisions: tuple[Mapping[str, object], ...] = ()
+        row_explanation: Mapping[str, object] = {
+            "allowed": evaluation.allowed,
+            "applied_rule_ids": [],
+            "reason_codes": ["NOT_APPLICABLE_WITHOUT_RESOURCE"],
+            "explanation": "No resource target was supplied; row policy is not applicable.",
+        }
+        if isinstance(module, str) and isinstance(resource, str):
+            resolved_fields = FieldSecurityService.resolve_field_access(
+                tenant,
+                subject.id,
+                module,
+                resource,
+                fields=tuple(str(value) for value in requested_fields),
+                context=context_values,
+            )
+            field_decisions = tuple(
+                {
+                    "field": item.field,
+                    "visibility": item.visibility,
+                    "edit_control": item.edit_control,
+                    "mask_pattern": item.mask_pattern,
+                    "reason_codes": list(item.reason_codes),
+                    "applied_policy_ids": list(item.applied_rule_ids),
+                }
+                for item in resolved_fields.values()
+            )
+            row = RowSecurityService.explain_row_access(
+                tenant,
+                subject.id,
+                module,
+                resource,
+                record_attributes=context_values,
+                context=context_values,
+            )
+            row_explanation = {
+                "allowed": row.allowed,
+                "applied_rule_ids": list(row.applied_rule_ids),
+                "reason_codes": list(row.reason_codes),
+                "explanation": "A matching tenant row policy allowed access." if row.allowed else "No matching tenant row policy allowed access.",
+            }
+        final_allowed = evaluation.allowed and bool(row_explanation["allowed"]) and all(
+            item["visibility"] not in {"hidden", "redacted"} for item in field_decisions
+        )
+        reason_codes = evaluation.reason_codes
+        if evaluation.allowed and not final_allowed:
+            reason_codes = tuple(dict.fromkeys(reason_codes + ("RESOURCE_POLICY_DENIED",)))
         _, audit = AuditService.append_with_outbox(
             tenant,
             action="security.access.decided",
@@ -1763,24 +2539,49 @@ class AccessEvaluationService:
             actor_id=actor,
             resource_type="access_decision",
             resource_id=None,
-            decision="allow" if evaluation.allowed else "deny",
-            reason_codes=evaluation.reason_codes or (("ALLOW",) if evaluation.allowed else ("DENY_DEFAULT",)),
-            details={"subject_id": str(subject_id), "permission_code": permission_code},
+            decision="allow" if final_allowed else "deny",
+            reason_codes=reason_codes or (("ALLOW",) if final_allowed else ("DENY_DEFAULT",)),
+            details={
+                "subject_id": str(subject_id),
+                "permission_code": permission_code,
+                "profile_ids": list(profile.profile_ids),
+                "field_decision_count": len(field_decisions),
+                "row_allowed": bool(row_explanation["allowed"]),
+            },
             ip_address=None,
             user_agent="",
             correlation_id=correlation_id,
         )
         return AccessDecisionResult(
-            evaluation.allowed,
-            permission_code,
-            evaluation.reason_codes,
-            evaluation.applied_policies,
-            "not_metered",
-            {"consumed": False},
-            {},
-            dict(resource_context or {}),
-            str(audit.id),
+            allowed=final_allowed,
+            subject_id=str(subject_id),
+            permission_code=permission_code,
+            reason_codes=reason_codes,
+            applied_policy_ids=evaluation.applied_policies,
+            entitlement=entitlement,
+            quota=quota,
+            field_decisions=field_decisions,
+            row_explanation=row_explanation,
+            profile={
+                "profile_ids": list(profile.profile_ids),
+                "precedence": profile.precedence,
+                "restrictions": dict(profile.restrictions),
+                "enforcement": dict(profile.enforcement),
+            },
+            audit_id=str(audit.id),
+            correlation_id=correlation_id,
+            evaluated_at=timezone.now(),
         )
+
+    @staticmethod
+    def decision_payload(result: AccessDecisionResult) -> dict[str, object]:
+        """Construct the complete public decision envelope in the service layer."""
+
+        payload = asdict(result)
+        payload["decision"] = "allow" if result.allowed else "deny"
+        payload["audit_log_id"] = payload.pop("audit_id")
+        payload.pop("profile", None)
+        return payload
 
 
 class SecurityPolicyEvaluator:
