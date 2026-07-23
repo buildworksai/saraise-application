@@ -3,6 +3,7 @@ API Endpoint Tests for CRM module.
 
 Tests DRF ViewSets and API endpoints.
 """
+
 import uuid
 from datetime import date, timedelta
 from decimal import Decimal
@@ -14,19 +15,30 @@ from rest_framework.test import APIClient
 
 from src.modules.crm.models import (
     Account,
-    AccountType,
-    Activity,
-    ActivityType,
-    Contact,
     Lead,
     LeadStatus,
     Opportunity,
-    OpportunityStage,
     OpportunityStatus,
-    RelatedToType,
 )
 
 User = get_user_model()
+
+
+@pytest.fixture(autouse=True)
+def authorized_access_pipeline(monkeypatch):
+    """Exercise endpoint behavior behind an explicit successful access decision."""
+
+    from src.core.access.decision import AccessDecision, AccessDecisionPipeline, AccessReasonCode
+
+    def decide(_self, tenant_id, _identity, _permission, **_kwargs):
+        return AccessDecision(
+            allowed=True,
+            reason_code=AccessReasonCode.ALLOW,
+            reason="Test policy, entitlement, and quota granted access.",
+            tenant_id=uuid.UUID(str(tenant_id)),
+        )
+
+    monkeypatch.setattr(AccessDecisionPipeline, "decide", decide)
 
 
 @pytest.fixture(autouse=True)
@@ -45,6 +57,7 @@ def api_client():
 def authenticated_user(db):
     """Create authenticated user for testing."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
@@ -69,6 +82,22 @@ def authenticated_user(db):
 class TestLeadAPI:
     """Test Lead API endpoints."""
 
+    def test_create_lead_requires_idempotency_key(self, api_client, authenticated_user):
+        api_client.force_authenticate(user=authenticated_user)
+
+        response = api_client.post(
+            "/api/v1/crm/leads/",
+            {"first_name": "No", "last_name": "Duplicate"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert not Lead.objects.filter(
+            tenant_id=uuid.UUID(authenticated_user.profile.tenant_id),
+            first_name="No",
+            last_name="Duplicate",
+        ).exists()
+
     def test_create_lead(self, api_client, authenticated_user):
         """Test creating a lead via API."""
         api_client.force_authenticate(user=authenticated_user)
@@ -80,7 +109,12 @@ class TestLeadAPI:
             "company": "Acme Corp",
         }
 
-        response = api_client.post("/api/v1/crm/leads/", data, format="json")
+        response = api_client.post(
+            "/api/v1/crm/leads/",
+            data,
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="create-lead",
+        )
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["first_name"] == "John"
         assert response.data["last_name"] == "Doe"
@@ -126,7 +160,12 @@ class TestLeadAPI:
             "close_date": str(date.today() + timedelta(days=30)),
         }
 
-        response = api_client.post(f"/api/v1/crm/leads/{lead.id}/convert/", data, format="json")
+        response = api_client.post(
+            f"/api/v1/crm/leads/{lead.id}/convert/",
+            data,
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="convert-lead",
+        )
         assert response.status_code == status.HTTP_201_CREATED
         assert "id" in response.data  # Opportunity created
 
@@ -163,7 +202,12 @@ class TestOpportunityAPI:
             "owner_id": str(owner_uuid),
         }
 
-        response = api_client.post("/api/v1/crm/opportunities/", data, format="json")
+        response = api_client.post(
+            "/api/v1/crm/opportunities/",
+            data,
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="create-opportunity",
+        )
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["name"] == "Deal 1"
 
@@ -192,7 +236,12 @@ class TestOpportunityAPI:
 
         api_client.force_authenticate(user=authenticated_user)
 
-        response = api_client.post(f"/api/v1/crm/opportunities/{opportunity.id}/close-won/", {}, format="json")
+        response = api_client.post(
+            f"/api/v1/crm/opportunities/{opportunity.id}/close-won/",
+            {},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="close-opportunity-won",
+        )
         assert response.status_code == status.HTTP_200_OK
         assert response.data["status"] == OpportunityStatus.WON
 
@@ -226,6 +275,7 @@ class TestOpportunityAPI:
             f"/api/v1/crm/opportunities/{opportunity.id}/close-lost/",
             {},
             format="json",
+            HTTP_IDEMPOTENCY_KEY="close-opportunity-lost-invalid",
         )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -234,6 +284,7 @@ class TestOpportunityAPI:
             f"/api/v1/crm/opportunities/{opportunity.id}/close-lost/",
             {"loss_reason": "Customer chose competitor"},
             format="json",
+            HTTP_IDEMPOTENCY_KEY="close-opportunity-lost",
         )
         assert response.status_code == status.HTTP_200_OK
         assert response.data["status"] == OpportunityStatus.LOST

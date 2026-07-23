@@ -36,10 +36,14 @@ PERMISSIONS: Final[tuple[str, ...]] = (
     "crm.activity:create",
     "crm.activity:read",
     "crm.activity:update",
-    "crm.activity:delete",
     "crm.activity:complete",
     "crm.forecasting:read",
     "crm.forecasting:predict",
+    "crm.configuration:read",
+    "crm.configuration:write",
+    "crm.configuration:import",
+    "crm.configuration:export",
+    "crm.configuration:rollback",
     "crm.health:read",
 )
 
@@ -112,7 +116,6 @@ ACTIVITY_ACTION_PERMISSIONS: Final = _mapping(
         "retrieve": "crm.activity:read",
         "create": "crm.activity:create",
         "partial_update": "crm.activity:update",
-        "destroy": "crm.activity:delete",
         "complete": "crm.activity:complete",
     }
 )
@@ -122,6 +125,19 @@ FORECAST_ACTION_PERMISSIONS: Final = _mapping(
         "win_rate": "crm.forecasting:read",
         "by_stage": "crm.forecasting:read",
         "predict": "crm.forecasting:predict",
+    }
+)
+
+CONFIGURATION_ACTION_PERMISSIONS: Final = _mapping(
+    {
+        "list": "crm.configuration:read",
+        "update": "crm.configuration:write",
+        "partial_update": "crm.configuration:write",
+        "preview": "crm.configuration:write",
+        "versions": "crm.configuration:read",
+        "rollback": "crm.configuration:rollback",
+        "import_configuration": "crm.configuration:import",
+        "export_configuration": "crm.configuration:export",
     }
 )
 # Job retrieval is command-dependent. The empty static action map deliberately
@@ -146,6 +162,7 @@ ACTION_PERMISSION_MAPS: Final[Mapping[str, Mapping[str, str]]] = MappingProxyTyp
         "opportunity": OPPORTUNITY_ACTION_PERMISSIONS,
         "activity": ACTIVITY_ACTION_PERMISSIONS,
         "forecasting": FORECAST_ACTION_PERMISSIONS,
+        "configuration": CONFIGURATION_ACTION_PERMISSIONS,
         "job": JOB_ACTION_PERMISSIONS,
         "health": HEALTH_ACTION_PERMISSIONS,
     }
@@ -175,6 +192,7 @@ __all__ = [
     "ACTION_PERMISSION_MAPS",
     "ACTIVITY_ACTION_PERMISSIONS",
     "CONTACT_ACTION_PERMISSIONS",
+    "CONFIGURATION_ACTION_PERMISSIONS",
     "FORECAST_ACTION_PERMISSIONS",
     "HEALTH_ACTION_PERMISSIONS",
     "JOB_ACTION_PERMISSIONS",

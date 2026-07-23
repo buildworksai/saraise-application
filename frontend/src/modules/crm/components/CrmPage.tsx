@@ -8,7 +8,12 @@ import type { PaginationMeta } from '../contracts';
 
 export function CrmPage({ title, description, parent, actions, children }: { title: string; description?: string; parent?: { label: string; to: string }; actions?: React.ReactNode; children: React.ReactNode }) {
   const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { heading.current?.focus(); }, [title]);
+  useEffect(() => {
+    heading.current?.focus();
+    const previousTitle = document.title;
+    document.title = `${title} | SARAISE CRM`;
+    return () => { document.title = previousTitle; };
+  }, [title]);
   return <main className="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6 lg:p-8">
     <nav aria-label="Breadcrumb" className="text-sm text-muted-foreground"><Link to="/crm/dashboard" className="hover:text-foreground">CRM</Link>{parent ? <> / <Link to={parent.to} className="hover:text-foreground">{parent.label}</Link></> : null} / <span aria-current="page">{title}</span></nav>
     <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><h1 ref={heading} tabIndex={-1} className="text-2xl font-bold outline-none sm:text-3xl">{title}</h1>{description ? <p className="mt-1 text-muted-foreground">{description}</p> : null}</div>{actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}</header>

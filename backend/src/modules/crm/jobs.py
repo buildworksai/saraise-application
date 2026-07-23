@@ -13,7 +13,6 @@ from decimal import Decimal
 from typing import Final, Iterator, cast
 from uuid import UUID
 
-from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -24,6 +23,7 @@ from src.core.middleware.correlation import correlation_id_var
 from src.core.observability import get_correlation_id, get_task_context
 from src.core.tenancy import tenant_context, tenant_context_worker
 
+from .configuration import effective_configuration
 from .integrations import verify_fulfillment_acknowledgement
 from .models import Opportunity, OpportunityStatus
 
@@ -64,7 +64,6 @@ EVENT_TYPES: Final[frozenset[str]] = frozenset(
         "crm.opportunity.order_acknowledged",
         "crm.activity.created",
         "crm.activity.updated",
-        "crm.activity.deleted",
         "crm.activity.completed",
         "crm.activity.external_synced",
         "crm.stale_deal.detected",
@@ -194,8 +193,9 @@ def publish_crm_event(
     resolved_job_id = job_id or (task.job_id if task else None)
     if resolved_job_id is not None:
         resolved_job_id = str(_uuid(resolved_job_id, "job_id"))
+    limits = effective_configuration(tenant)["field_limits"]
     actor = None if actor_id is None else str(actor_id)
-    if actor is not None and (not actor.strip() or len(actor) > 255):
+    if actor is not None and (not actor.strip() or len(actor) > int(limits["actor_id"])):
         raise ValueError("actor_id must be a bounded non-empty identifier")
 
     event_id = uuid.uuid4()
@@ -226,8 +226,9 @@ def publish_crm_event(
 
 
 @contextmanager
-def _bound_correlation(correlation_id: str) -> Iterator[None]:
-    value = _identifier(correlation_id, "correlation_id", maximum=64)
+def _bound_correlation(tenant_id: UUID, correlation_id: str) -> Iterator[None]:
+    maximum = int(effective_configuration(tenant_id)["field_limits"]["correlation_id"])
+    value = _identifier(correlation_id, "correlation_id", maximum=maximum)
     token = correlation_id_var.set(value)
     try:
         yield
@@ -244,12 +245,13 @@ def _enqueue_checked(
     idempotency_key: str,
     correlation_id: str,
 ) -> AsyncJob:
+    maximum = int(effective_configuration(tenant_id)["field_limits"]["async_idempotency_key"])
     namespaced_key = f"{command}:{idempotency_key.strip()}"
     if not idempotency_key.strip():
         raise ValueError("idempotency_key must not be empty")
-    if len(namespaced_key) > 255:
-        raise ValueError("namespaced idempotency_key must not exceed 255 characters")
-    with tenant_context(tenant_id), _bound_correlation(correlation_id):
+    if len(namespaced_key) > maximum:
+        raise ValueError(f"namespaced idempotency_key must not exceed {maximum} characters")
+    with tenant_context(tenant_id), _bound_correlation(tenant_id, correlation_id):
         job = enqueue(tenant_id, actor_id, command, payload, namespaced_key)
         if job.command != command or job.payload != payload:
             raise JobIdempotencyConflict("Idempotency key is already associated with different CRM work")
@@ -347,10 +349,13 @@ def enqueue_fulfillment_acknowledgement_job(
     )
 
 
-def _stale_days() -> int:
-    value = getattr(settings, "CRM_STALE_DEAL_DAYS", 14)
-    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 365:
-        raise ValueError("CRM_STALE_DEAL_DAYS must be an integer from 1 to 365")
+def _stale_days(tenant_id: UUID) -> int:
+    configuration = effective_configuration(tenant_id)["jobs"]
+    value = configuration["stale_deal_days"]
+    minimum = int(configuration["stale_deal_min_days"])
+    maximum = int(configuration["stale_deal_max_days"])
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+        raise ValueError(f"stale_deal_days must be an integer from {minimum} to {maximum}")
     return value
 
 
@@ -379,7 +384,8 @@ def scan_stale_deals(*, tenant_id: UUID, as_of: datetime) -> dict[str, int]:
     """Emit one durable alert per opportunity and elapsed stale interval."""
 
     effective_as_of = _aware(as_of, "as_of")
-    stale_days = _stale_days()
+    configuration = effective_configuration(tenant_id)["jobs"]
+    stale_days = _stale_days(tenant_id)
     cutoff = effective_as_of - timedelta(days=stale_days)
     emitted = 0
     with transaction.atomic():
@@ -389,7 +395,7 @@ def scan_stale_deals(*, tenant_id: UUID, as_of: datetime) -> dict[str, int]:
             .filter(Q(last_activity_at__lt=cutoff) | Q(last_activity_at__isnull=True, updated_at__lt=cutoff))
             .order_by("id")
         )
-        for raw_opportunity in candidates.iterator(chunk_size=200):
+        for raw_opportunity in candidates.iterator(chunk_size=int(configuration["iterator_chunk_size"])):
             opportunity = cast(Opportunity, raw_opportunity)
             elapsed = (effective_as_of - _reference_time(opportunity)).total_seconds()
             interval = math.floor(elapsed / timedelta(days=stale_days).total_seconds())

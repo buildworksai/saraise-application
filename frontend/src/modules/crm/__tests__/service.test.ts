@@ -25,7 +25,9 @@ describe('crmService governed decoding', () => {
   it('sends optimistic concurrency in payload and If-Match', async () => {
     vi.mocked(apiClient.patch).mockResolvedValue({ data:lead, meta });
     await crmService.updateLead(lead.id, { company:'Difference Engine', version:3 });
-    expect(apiClient.patch).toHaveBeenCalledWith(expect.stringContaining(lead.id), expect.objectContaining({version:3}), {headers:{'If-Match':'3'}});
+    // Vitest asymmetric matcher factories are intentionally untyped at this boundary.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    expect(apiClient.patch).toHaveBeenCalledWith(expect.stringContaining(lead.id), expect.objectContaining({version:3}), {headers:expect.objectContaining({'If-Match':'3','Idempotency-Key':expect.any(String)})});
   });
 
   it.each([[401,'authentication'],[403,'permission'],[404,'not_found'],[409,'conflict'],[422,'validation'],[429,'rate_limit'],[503,'unavailable']] as const)('maps %s distinctly', async (status, kind) => {

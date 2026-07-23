@@ -27,6 +27,7 @@ from src.core.async_jobs.services import get_handler
 from src.core.health import HealthCheckResult, health_registry
 from src.core.state_machine import registry as state_machine_registry
 
+from .configuration import DEFAULT_CRM_CONFIGURATION, effective_configuration
 from .integrations import IntegrationUnavailable, extension_registry, get_revenue_prediction_client, get_scoring_client
 from .jobs import EXTERNAL_ACTIVITY_COMMAND, FULFILLMENT_ACK_COMMAND, LEAD_SCORING_COMMAND, STALE_DEAL_COMMAND
 
@@ -36,6 +37,10 @@ DOMAIN_TABLES: Final = (
     "crm_contacts",
     "crm_opportunities",
     "crm_activities",
+    "crm_configurations",
+    "crm_configuration_versions",
+    "crm_configuration_audits",
+    "crm_idempotency_records",
 )
 ASYNC_TABLES: Final = ("async_jobs", "async_job_outbox_events", "async_job_transitions")
 STATE_MACHINES: Final = ("crm.lead", "crm.opportunity")
@@ -143,8 +148,7 @@ def _migrations() -> tuple[bool, str]:
 
 def _rls() -> tuple[bool, str]:
     if connection.vendor != "postgresql":
-        # SQLite is restricted to development/test and has no RLS catalog.
-        return True, "not_applicable"
+        return False, "rls_unverifiable"
     with connection.cursor() as cursor:
         cursor.execute(
             """SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity
@@ -169,14 +173,15 @@ def _rls() -> tuple[bool, str]:
     return ready, "ready" if ready else "rls_missing"
 
 
-def _cache() -> tuple[bool, str]:
+def _cache(tenant_id: UUID | None = None) -> tuple[bool, str]:
     configuration = getattr(settings, "CACHES", {}).get("default", {})
     backend = str(configuration.get("BACKEND", "")) if isinstance(configuration, Mapping) else ""
     if not backend or backend.endswith("DummyCache"):
         return True, "disabled"
     key = "crm:readiness:cache"
     marker = timezone.now().isoformat()
-    cache.set(key, marker, timeout=10)
+    crm_configuration = effective_configuration(tenant_id) if tenant_id is not None else DEFAULT_CRM_CONFIGURATION
+    cache.set(key, marker, timeout=int(crm_configuration["health"]["cache_timeout_seconds"]))
     ready = cache.get(key) == marker
     return ready, "ready" if ready else "roundtrip_failed"
 
@@ -249,7 +254,7 @@ def rls_readiness_probe() -> HealthCheckResult:
     return HealthCheckResult(check.healthy, check.code, timezone.now(), check.as_dict())
 
 
-def get_module_health() -> ModuleHealthReport:
+def get_module_health(tenant_id: UUID | None = None) -> ModuleHealthReport:
     """Run real readiness checks without querying or exposing business rows."""
 
     checks = (
@@ -257,17 +262,17 @@ def get_module_health() -> ModuleHealthReport:
         _run("domain_schema", _schema, critical=True),
         _run("required_migrations", _migrations, critical=True),
         _run("row_level_security", _rls, critical=True),
-        _run("cache", _cache, critical=False),
+        _run("cache", lambda: _cache() if tenant_id is None else _cache(tenant_id), critical=False),
         _run("async_outbox", _async_outbox, critical=True),
         _run("state_machines", _state_machines, critical=True),
         _run(
             "lead_scoring_provider",
-            lambda: _provider(get_scoring_client, "CRM_LEAD_SCORING_PROVIDER"),
+            lambda: _provider(lambda: get_scoring_client(tenant_id), "CRM_LEAD_SCORING_PROVIDER"),
             critical=False,
         ),
         _run(
             "revenue_prediction_provider",
-            lambda: _provider(get_revenue_prediction_client, "CRM_REVENUE_PREDICTION_PROVIDER"),
+            lambda: _provider(lambda: get_revenue_prediction_client(tenant_id), "CRM_REVENUE_PREDICTION_PROVIDER"),
             critical=False,
         ),
         _run("optional_extensions", _optional_extensions, critical=False),
@@ -318,8 +323,7 @@ class CRMHealthView(GovernedAPIViewMixin, APIView):  # type: ignore[misc]
             return
 
     def get(self, request: Request) -> Response:
-        del request
-        report = get_module_health()
+        report = get_module_health(getattr(request, "tenant_id", None))
         return Response(report.as_dict(), status=report.status_code)
 
 

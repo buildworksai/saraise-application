@@ -26,6 +26,7 @@ from src.core.state_machine import (
     registry,
 )
 
+from .configuration import DEFAULT_CRM_CONFIGURATION, effective_configuration
 from .models import Lead, LeadStatus, Opportunity, OpportunityStage, OpportunityStatus
 
 
@@ -139,7 +140,7 @@ for target_index, target in enumerate(_OPEN_STAGES[:-1]):
     _opportunity_transitions.append(
         {
             "command": f"reopen_to_{target}",
-            "from": _OPEN_STAGES[target_index + 1 :],
+            "from": _OPEN_STAGES[target_index + 1 :],  # noqa: E203
             "to": target,
             "guards": "allow_backward",
         }
@@ -214,15 +215,24 @@ class CRMStateMachineExtensionRegistry:
         self._lock = threading.RLock()
 
     @staticmethod
-    def _validate(machine: str, provider: str, extension: object, priority: int) -> None:
+    def _validate(machine: str, provider: str, extension: object, priority: int | None, tenant_id: UUID | None) -> int:
+        configuration = effective_configuration(tenant_id) if tenant_id is not None else DEFAULT_CRM_CONFIGURATION
+        providers = configuration["providers"]
+        limits = configuration["field_limits"]
+        if priority is None:
+            priority = int(providers["extension_priority_default"])
         if machine not in {"crm.lead", "crm.opportunity"}:
             raise ValueError("extensions may target crm.lead or crm.opportunity")
-        if not provider or len(provider) > 160:
+        if not provider or len(provider) > int(limits["provider_id"]):
             raise ValueError("provider must be a bounded non-empty identifier")
-        if getattr(extension, "schema_version", None) != "1.0":
-            raise ValueError("CRM transition extension schema_version must be 1.0")
-        if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 10_000:
-            raise ValueError("priority must be an integer from 0 to 10000")
+        schema_version = str(providers["extension_schema_version"])
+        if getattr(extension, "schema_version", None) != schema_version:
+            raise ValueError(f"CRM transition extension schema_version must be {schema_version}")
+        minimum = int(providers["extension_priority_min"])
+        maximum = int(providers["extension_priority_max"])
+        if isinstance(priority, bool) or not isinstance(priority, int) or not minimum <= priority <= maximum:
+            raise ValueError(f"priority must be an integer from {minimum} to {maximum}")
+        return priority
 
     def register_guard(
         self,
@@ -230,9 +240,10 @@ class CRMStateMachineExtensionRegistry:
         provider: str,
         extension: TransitionGuardExtension,
         *,
-        priority: int = 100,
+        priority: int | None = None,
+        tenant_id: UUID | None = None,
     ) -> None:
-        self._validate(machine, provider, extension, priority)
+        priority = self._validate(machine, provider, extension, priority, tenant_id)
         key = (machine, provider)
         with self._lock:
             if key in self._guards:
@@ -245,9 +256,10 @@ class CRMStateMachineExtensionRegistry:
         provider: str,
         extension: TransitionEffectExtension,
         *,
-        priority: int = 100,
+        priority: int | None = None,
+        tenant_id: UUID | None = None,
     ) -> None:
-        self._validate(machine, provider, extension, priority)
+        priority = self._validate(machine, provider, extension, priority, tenant_id)
         key = (machine, provider)
         with self._lock:
             if key in self._effects:
@@ -285,17 +297,19 @@ class StaleTransitionVersionError(StateMachineError):
     """Raised when a transition is based on an obsolete aggregate version."""
 
 
-def _required_transition_key(value: str) -> str:
-    if not isinstance(value, str) or not value.strip() or len(value.strip()) > 255:
+def _required_transition_key(tenant_id: UUID, value: str) -> str:
+    maximum = int(effective_configuration(tenant_id)["field_limits"]["async_idempotency_key"])
+    if not isinstance(value, str) or not value.strip() or len(value.strip()) > maximum:
         raise ValueError("transition_key must be a bounded non-empty string")
     return value.strip()
 
 
-def _actor(value: str | None) -> str | None:
+def _actor(tenant_id: UUID, value: str | None) -> str | None:
     if value is None:
         return None
     normalized = str(value).strip()
-    if not normalized or len(normalized) > 255:
+    maximum = int(effective_configuration(tenant_id)["field_limits"]["actor_id"])
+    if not normalized or len(normalized) > maximum:
         raise ValueError("actor_id must be a bounded non-empty identifier")
     return normalized
 
@@ -389,8 +403,9 @@ def apply_lead_command(
 ) -> Lead:
     """Persist lead state and conversion effects in one validated save."""
 
-    key = _required_transition_key(transition_key)
-    actor = _actor(actor_id)
+    tenant = UUID(str(tenant_id))
+    key = _required_transition_key(tenant, transition_key)
+    actor = _actor(tenant, actor_id)
     guard_context = dict(context or {})
     if command == "convert" and opportunity_id is None:
         opportunity_id = guard_context.get("opportunity_id")
@@ -411,7 +426,19 @@ def apply_lead_command(
                 f"Expected lead version {expected_version}, current version is {lead.version}"
             )
         source = str(lead.status)
+        lead_configuration = effective_configuration(tenant)["lead"]
+        if source in lead_configuration["terminal_states"]:
+            raise TerminalStateError(f"crm.lead is immutable in configured terminal state {source!r}")
         edge = _edge(LEAD_MACHINE, command, source)
+        configured_transition = lead_configuration["transitions"].get(command)
+        if (
+            not isinstance(configured_transition, Mapping)
+            or source not in configured_transition.get("from", [])
+            or edge.target != configured_transition.get("to")
+        ):
+            raise IllegalTransitionError(
+                f"Command {command!r} is not enabled for lead state {source!r} by tenant configuration"
+            )
         _run_core_guards(edge, lead, guard_context)
         extension_context = _extension_context(
             machine="crm.lead",
@@ -465,17 +492,6 @@ def apply_lead_command(
         return lead
 
 
-_STAGE_PROBABILITY: Final[Mapping[str, int]] = {
-    OpportunityStage.PROSPECTING: 10,
-    OpportunityStage.QUALIFICATION: 20,
-    OpportunityStage.NEEDS_ANALYSIS: 40,
-    OpportunityStage.PROPOSAL: 60,
-    OpportunityStage.NEGOTIATION: 80,
-    OpportunityStage.CLOSED_WON: 100,
-    OpportunityStage.CLOSED_LOST: 0,
-}
-
-
 def apply_opportunity_command(
     tenant_id: object,
     *,
@@ -491,8 +507,9 @@ def apply_opportunity_command(
 ) -> Opportunity:
     """Persist stage, derived status, probability, and close fields atomically."""
 
-    key = _required_transition_key(transition_key)
-    actor = _actor(actor_id)
+    tenant = UUID(str(tenant_id))
+    key = _required_transition_key(tenant, transition_key)
+    actor = _actor(tenant, actor_id)
     normalized_reason = str(reason or "").strip()
     context: dict[str, object] = {
         "reason": normalized_reason,
@@ -516,7 +533,19 @@ def apply_opportunity_command(
                 f"Expected opportunity version {expected_version}, current version is {opportunity.version}"
             )
         source = str(opportunity.stage)
+        opportunity_configuration = effective_configuration(tenant)["opportunity"]
+        if source in opportunity_configuration["terminal_states"]:
+            raise TerminalStateError(f"crm.opportunity is immutable in configured terminal state {source!r}")
         edge = _edge(OPPORTUNITY_MACHINE, command, source)
+        configured_transition = opportunity_configuration["transitions"].get(command)
+        if (
+            not isinstance(configured_transition, Mapping)
+            or source not in configured_transition.get("from", [])
+            or edge.target != configured_transition.get("to")
+        ):
+            raise IllegalTransitionError(
+                f"Command {command!r} is not enabled for opportunity stage {source!r} by tenant configuration"
+            )
         _run_core_guards(edge, opportunity, context)
         extension_context = _extension_context(
             machine="crm.opportunity",
@@ -544,7 +573,8 @@ def apply_opportunity_command(
             },
         )
         opportunity.stage = edge.target
-        opportunity.probability = _STAGE_PROBABILITY[edge.target]
+        stage_probabilities = {item["name"]: item["probability"] for item in opportunity_configuration["stages"]}
+        opportunity.probability = int(stage_probabilities[edge.target])
         if edge.target == OpportunityStage.CLOSED_WON:
             opportunity.status = OpportunityStatus.WON
             opportunity.closed_at = occurred_at

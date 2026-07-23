@@ -7,8 +7,10 @@ from Django settings and are revalidated by :class:`ResilientHttpClient`.
 from __future__ import annotations
 
 import logging
+import random
 import re
 import threading
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -27,6 +29,8 @@ from src.core.resilience import (
     ResilientHttpError,
     UnsafeDestinationError,
 )
+
+from .configuration import DEFAULT_CRM_CONFIGURATION, effective_configuration
 
 logger = logging.getLogger("saraise.crm.integrations")
 
@@ -67,10 +71,13 @@ class ExtensionConflictError(CRMIntegrationError):
 Primitive = str | int | bool | Decimal | None
 
 
-def _safe_factors(value: object) -> Mapping[str, Primitive]:
+def _safe_factors(value: object, tenant_id: UUID | None = None) -> Mapping[str, Primitive]:
+    configuration = effective_configuration(tenant_id) if tenant_id is not None else DEFAULT_CRM_CONFIGURATION
+    maximum_factors = int(configuration["providers"]["maximum_evidence_factors"])
+    maximum_string = int(configuration["field_limits"]["provider_evidence_string"])
     if not isinstance(value, Mapping):
         raise InvalidIntegrationResponse("Provider factors must be an object")
-    if len(value) > 50:
+    if len(value) > maximum_factors:
         raise InvalidIntegrationResponse("Provider returned too many evidence factors")
     factors: dict[str, Primitive] = {}
     for raw_key, raw_value in value.items():
@@ -81,7 +88,7 @@ def _safe_factors(value: object) -> Mapping[str, Primitive]:
             raw_value = Decimal(str(raw_value))
         if not isinstance(raw_value, (str, int, bool, Decimal)) and raw_value is not None:
             raise InvalidIntegrationResponse("Provider evidence factors must contain scalar values")
-        if isinstance(raw_value, str) and len(raw_value) > 500:
+        if isinstance(raw_value, str) and len(raw_value) > maximum_string:
             raise InvalidIntegrationResponse("Provider evidence factor is too long")
         factors[key] = raw_value
     return factors
@@ -191,23 +198,49 @@ class _JsonProviderClient:
     setting_name: str
     operation: str
 
-    def __init__(self, configuration: _ProviderConfiguration, client: ResilientHttpClient) -> None:
+    def __init__(
+        self, configuration: _ProviderConfiguration, client: ResilientHttpClient, tenant_id: UUID | None = None
+    ) -> None:
         self.configuration = configuration
         self.client = client
+        self.tenant_id = tenant_id
 
     def _post(self, payload: Mapping[str, object], correlation_id: str) -> Mapping[str, object]:
         if not isinstance(payload, Mapping):
             raise TypeError("provider payload must be a mapping")
         correlation = _correlation(correlation_id)
         dependency = self.configuration.dependency
+        crm_configuration = (
+            effective_configuration(self.tenant_id) if self.tenant_id is not None else DEFAULT_CRM_CONFIGURATION
+        )["providers"]
+        attempts = int(crm_configuration["retry_attempts"])
+        retry_error: ResilientHttpError | None = None
+        response = None
+        for attempt in range(attempts):
+            try:
+                response = self.client.post(
+                    self.configuration.endpoint,
+                    dependency=dependency,
+                    correlation_id=correlation,
+                    headers={"Idempotency-Key": correlation, "Accept": "application/json"},
+                    json=dict(payload),
+                )
+                break
+            except CircuitBreakerError:
+                raise
+            except (DependencyTimeoutError, DependencyConnectionError, DependencyResponseError) as exc:
+                retry_error = exc
+                if attempt + 1 >= attempts:
+                    break
+                base = float(Decimal(str(crm_configuration["backoff_base_seconds"])))
+                maximum = float(Decimal(str(crm_configuration["backoff_max_seconds"])))
+                jitter = float(Decimal(str(crm_configuration["backoff_jitter_seconds"])))
+                time.sleep(min(maximum, base * (2**attempt)) + random.uniform(0, jitter))
         try:
-            response = self.client.post(
-                self.configuration.endpoint,
-                dependency=dependency,
-                correlation_id=correlation,
-                headers={"Idempotency-Key": correlation, "Accept": "application/json"},
-                json=dict(payload),
-            )
+            if retry_error is not None and response is None:
+                raise retry_error
+            if response is None:
+                raise IntegrationUnavailable("Provider returned no response", dependency=dependency)
         except DependencyTimeoutError as exc:
             self._log("unavailable", IntegrationTimeout.code, dependency)
             raise IntegrationTimeout("Provider request timed out", dependency=dependency) from exc
@@ -264,11 +297,18 @@ class LeadScoringClient(_JsonProviderClient):
     operation = "lead_scoring"
 
     def score_lead(self, payload: Mapping[str, object], *, correlation_id: str) -> LeadScoreResult:
+        configuration = (
+            effective_configuration(self.tenant_id) if self.tenant_id is not None else DEFAULT_CRM_CONFIGURATION
+        )
+        score_configuration = configuration["lead"]
         body = self._post(payload, correlation_id)
         raw_score = body.get("score")
-        if isinstance(raw_score, bool) or not isinstance(raw_score, int) or not 0 <= raw_score <= 100:
-            raise InvalidIntegrationResponse("Provider score must be an integer from 0 to 100")
-        grade = "A" if raw_score >= 80 else "B" if raw_score >= 60 else "C" if raw_score >= 40 else "D"
+        score_min = int(score_configuration["score_min"])
+        score_max = int(score_configuration["score_max"])
+        if isinstance(raw_score, bool) or not isinstance(raw_score, int) or not score_min <= raw_score <= score_max:
+            raise InvalidIntegrationResponse(f"Provider score must be an integer from {score_min} to {score_max}")
+        thresholds = score_configuration["grade_thresholds"]
+        grade = next(value for value in "ABCD" if raw_score >= int(thresholds[value]))
         supplied_grade = body.get("grade")
         if supplied_grade is not None and supplied_grade != grade:
             raise InvalidIntegrationResponse("Provider grade does not correspond to score")
@@ -280,7 +320,7 @@ class LeadScoringClient(_JsonProviderClient):
             model=self.configuration.model,
             score=raw_score,
             grade=grade,
-            factors=_safe_factors(body.get("factors")),
+            factors=_safe_factors(body.get("factors"), self.tenant_id),
             provider_request_id=provider_request_id,
         )
 
@@ -290,6 +330,9 @@ class RevenuePredictionClient(_JsonProviderClient):
     operation = "revenue_prediction"
 
     def predict_revenue(self, payload: Mapping[str, object], *, correlation_id: str) -> RevenuePredictionResult:
+        configuration = (
+            effective_configuration(self.tenant_id) if self.tenant_id is not None else DEFAULT_CRM_CONFIGURATION
+        )["providers"]
         body = self._post(payload, correlation_id)
         amount = _decimal(body.get("amount"), "amount")
         if amount < 0:
@@ -299,8 +342,10 @@ class RevenuePredictionClient(_JsonProviderClient):
             raise InvalidIntegrationResponse("Provider currency must be ISO-4217 alpha-3")
         raw_confidence = body.get("confidence")
         confidence = None if raw_confidence is None else _decimal(raw_confidence, "confidence")
-        if confidence is not None and not Decimal("0") <= confidence <= Decimal("1"):
-            raise InvalidIntegrationResponse("Provider confidence must be from 0 to 1")
+        confidence_min = Decimal(str(configuration["confidence_min"]))
+        confidence_max = Decimal(str(configuration["confidence_max"]))
+        if confidence is not None and not confidence_min <= confidence <= confidence_max:
+            raise InvalidIntegrationResponse(f"Provider confidence must be from {confidence_min} to {confidence_max}")
         as_of = _required_string(body.get("as_of"), "as_of", maximum=64)
         provider_request_id = body.get("provider_request_id")
         if provider_request_id is not None:
@@ -311,13 +356,15 @@ class RevenuePredictionClient(_JsonProviderClient):
             amount=amount,
             currency=currency,
             confidence=confidence,
-            factors=_safe_factors(body.get("factors")),
+            factors=_safe_factors(body.get("factors"), self.tenant_id),
             as_of=as_of,
             provider_request_id=provider_request_id,
         )
 
 
-def _client(setting_name: str, client_type: type[_JsonProviderClient]) -> _JsonProviderClient:
+def _client(
+    setting_name: str, client_type: type[_JsonProviderClient], tenant_id: UUID | None = None
+) -> _JsonProviderClient:
     configuration = _configuration(setting_name)
     try:
         resilient_client = ResilientHttpClient()
@@ -325,19 +372,19 @@ def _client(setting_name: str, client_type: type[_JsonProviderClient]) -> _JsonP
         raise IntegrationUnavailable(
             "Outbound dependency allowlist is not configured", dependency=configuration.dependency
         ) from exc
-    return client_type(configuration, resilient_client)
+    return client_type(configuration, resilient_client, tenant_id)
 
 
-def get_scoring_client() -> LeadScoringClient:
+def get_scoring_client(tenant_id: UUID | None = None) -> LeadScoringClient:
     """Return a configured scoring adapter or raise explicit unavailability."""
 
-    return _client("CRM_LEAD_SCORING_PROVIDER", LeadScoringClient)  # type: ignore[return-value]
+    return _client("CRM_LEAD_SCORING_PROVIDER", LeadScoringClient, tenant_id)  # type: ignore[return-value]
 
 
-def get_revenue_prediction_client() -> RevenuePredictionClient:
+def get_revenue_prediction_client(tenant_id: UUID | None = None) -> RevenuePredictionClient:
     """Return a configured prediction adapter or raise explicit unavailability."""
 
-    return _client("CRM_REVENUE_PREDICTION_PROVIDER", RevenuePredictionClient)  # type: ignore[return-value]
+    return _client("CRM_REVENUE_PREDICTION_PROVIDER", RevenuePredictionClient, tenant_id)  # type: ignore[return-value]
 
 
 # ----- Stable paid-module service ABI -------------------------------------
@@ -536,16 +583,25 @@ class CRMExtensionRegistry:
         provider_key: str,
         provider: ExtensionProvider,
         *,
-        priority: int = 100,
+        priority: int | None = None,
+        tenant_id: UUID | None = None,
     ) -> ExtensionProvider:
+        configuration = (effective_configuration(tenant_id) if tenant_id is not None else DEFAULT_CRM_CONFIGURATION)[
+            "providers"
+        ]
+        if priority is None:
+            priority = int(configuration["extension_priority_default"])
         if capability not in self._capabilities:
             raise ValueError("unknown CRM extension capability")
         if not _SAFE_IDENTIFIER.fullmatch(provider_key):
             raise ValueError("provider_key must be a stable identifier")
-        if getattr(provider, "schema_version", None) != "1.0":
-            raise ValueError("CRM extension schema_version must be 1.0")
-        if isinstance(priority, bool) or not isinstance(priority, int) or not 0 <= priority <= 10_000:
-            raise ValueError("priority must be an integer from 0 to 10000")
+        schema_version = str(configuration["extension_schema_version"])
+        if getattr(provider, "schema_version", None) != schema_version:
+            raise ValueError(f"CRM extension schema_version must be {schema_version}")
+        minimum = int(configuration["extension_priority_min"])
+        maximum = int(configuration["extension_priority_max"])
+        if isinstance(priority, bool) or not isinstance(priority, int) or not minimum <= priority <= maximum:
+            raise ValueError(f"priority must be an integer from {minimum} to {maximum}")
         key = (capability, provider_key)
         with self._lock:
             if key in self._entries:

@@ -2,31 +2,31 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from datetime import date
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
-from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Q, QuerySet
 from django.utils.dateparse import parse_date
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
-from rest_framework.exceptions import MethodNotAllowed, NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import APIException, MethodNotAllowed, NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from src.core.access import RequiresAccess
-from src.core.api import GovernedAPIViewMixin, GovernedPageNumberPagination
+from src.core.api import GovernedAPIViewMixin
 from src.core.api.results import OperationFailed
 from src.core.async_jobs.models import AsyncJob
 from src.core.views.tenant_scoped import TenantScopedModelViewSet
 
+from .configuration import DEFAULT_CRM_CONFIGURATION, effective_configuration
 from .jobs import enqueue_lead_scoring_job
 from .models import (
     Account,
@@ -34,6 +34,7 @@ from .models import (
     Activity,
     ActivityType,
     Contact,
+    CRMConfiguration,
     Lead,
     LeadStatus,
     Opportunity,
@@ -41,9 +42,11 @@ from .models import (
     OpportunityStatus,
     RelatedToType,
 )
+from .pagination import CRMResultsSetPagination
 from .permissions import (
     ACCOUNT_ACTION_PERMISSIONS,
     ACTIVITY_ACTION_PERMISSIONS,
+    CONFIGURATION_ACTION_PERMISSIONS,
     CONTACT_ACTION_PERMISSIONS,
     FORECAST_ACTION_PERMISSIONS,
     LEAD_ACTION_PERMISSIONS,
@@ -59,12 +62,16 @@ from .serializers import (
     ActivityCreateSerializer,
     ActivityReadSerializer,
     ActivityUpdateSerializer,
+    AsyncJobReadSerializer,
     AsyncOperationSerializer,
     CloseLostSerializer,
     CloseWonSerializer,
     ContactCreateSerializer,
     ContactReadSerializer,
     ContactUpdateSerializer,
+    CRMConfigurationImportSerializer,
+    CRMConfigurationRollbackSerializer,
+    CRMConfigurationWriteSerializer,
     DuplicateAccountQuerySerializer,
     ForecastQuerySerializer,
     ForecastSerializer,
@@ -87,9 +94,10 @@ from .services import (
     AccountService,
     ActivityService,
     ContactService,
+    CRMConfigurationService,
+    CRMIdempotencyService,
     CRMServiceError,
     ForecastingService,
-    IntegrationService,
     LeadService,
     OpportunityService,
 )
@@ -101,6 +109,17 @@ class CsrfSessionAuthentication(SessionAuthentication):
     def authenticate_header(self, request: Request) -> str:
         del request
         return "Session"
+
+
+class CRMIdempotentReplay(APIException):
+    """Short-circuit a duplicate mutation with its original response."""
+
+    default_code = "IDEMPOTENT_REPLAY"
+
+    def __init__(self, response_body: object, response_status: int) -> None:
+        self.response_body = response_body
+        self.status_code = response_status
+        super().__init__("The original response was replayed.")
 
 
 def _actor(request: Request) -> str:
@@ -153,24 +172,54 @@ class GovernedCRMViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):
 
     authentication_classes = (CsrfSessionAuthentication,)
     permission_classes = (IsAuthenticated, RequiresAccess)
-    pagination_class = GovernedPageNumberPagination
+    pagination_class = CRMResultsSetPagination
     required_entitlement = "crm"
     permission_map: Mapping[str, str] = {}
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
-    def get_permissions(self) -> Sequence[Any]:
-        """Retain the authenticated v1 development contract during migration.
+    def dispatch(self, *args: Any, **kwargs: Any) -> Response:
+        with transaction.atomic():
+            return super().dispatch(*args, **kwargs)
 
-        API v2 and every non-development deployment use the unified access
-        pipeline.  The deprecated v1 API remains usable in development, where
-        the application contract enables all modules without provisioning an
-        external policy engine, entitlement projection, or quota ledger.
-        Tenant isolation is still enforced by the tenant-scoped queryset.
-        """
+    def initial(self, request: Request, *args: Any, **kwargs: Any) -> None:
+        super().initial(request, *args, **kwargs)
+        mutating = request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        if not mutating or self.action == "preview":
+            return
+        key = request.headers.get("Idempotency-Key", "")
+        if not key:
+            raise ValidationError({"Idempotency-Key": "Required for every mutating CRM request."})
+        try:
+            record = CRMIdempotencyService.begin(
+                self.tenant_id(),
+                key=key,
+                method=request.method,
+                path=request.get_full_path(),
+                payload=request.data,
+            )
+        except CRMServiceError as exc:
+            error = APIException(detail=exc.public_message, code=exc.error_code)
+            error.status_code = exc.http_status
+            raise error from exc
+        if record.completed:
+            raise CRMIdempotentReplay(
+                record.response_body,
+                record.response_status or status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        setattr(request, "crm_idempotency_record", record)
 
-        if self.request.path.startswith("/api/v1/") and getattr(settings, "SARAISE_MODE", "") == "development":
-            return [IsAuthenticated()]
-        return cast(Sequence[Any], super().get_permissions())
+    def finalize_response(self, request: Request, response: Response, *args: Any, **kwargs: Any) -> Response:
+        finalized = super().finalize_response(request, response, *args, **kwargs)
+        record = getattr(request, "crm_idempotency_record", None)
+        tenant_id = getattr(request, "tenant_id", None)
+        if record is not None and tenant_id is not None:
+            CRMIdempotencyService.complete(
+                tenant_id,
+                record_id=record.id,
+                response_status=finalized.status_code,
+                response_body=getattr(finalized, "data", None),
+            )
+        return finalized
 
     def check_permissions(self, request: Request) -> None:
         method = request.method or ""
@@ -184,7 +233,11 @@ class GovernedCRMViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):
         except KeyError:
             self.required_permission = ""
         self.quota_resource = f"crm.api.{getattr(self, 'action', 'unknown')}"
-        self.quota_cost = 1
+        self.quota_cost = int(
+            effective_configuration(tenant_id)["api"]["quota_cost"]
+            if tenant_id is not None
+            else DEFAULT_CRM_CONFIGURATION["api"]["quota_cost"]
+        )
         super().check_permissions(request)
 
     def tenant_id(self) -> UUID:
@@ -230,6 +283,10 @@ class GovernedCRMViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):
             raise PermissionDenied("The additional action permission is required.")
 
     def handle_exception(self, exc: Exception) -> Response:
+        if isinstance(exc, CRMIdempotentReplay):
+            response = Response(exc.response_body, status=exc.status_code)
+            response["Idempotent-Replayed"] = "true"
+            return response
         if isinstance(exc, CRMServiceError):
             exc = OperationFailed(
                 error_code=exc.error_code, message=exc.public_message, detail=exc.detail, http_status=exc.http_status
@@ -272,8 +329,21 @@ class LeadViewSet(GovernedCRMViewSet):
             queryset = queryset.filter(status=params["status"])
         if params.get("owner_id"):
             queryset = queryset.filter(owner_id=_parse_uuid(params["owner_id"], "owner_id"))
-        minimum = _parse_int(params.get("score_min"), "score_min", minimum=0, maximum=100)
-        maximum = _parse_int(params.get("score_max"), "score_max", minimum=0, maximum=100)
+        score_configuration = effective_configuration(self.tenant_id())["lead"]
+        score_minimum = int(score_configuration["score_min"])
+        score_maximum = int(score_configuration["score_max"])
+        minimum = _parse_int(
+            params.get("score_min"),
+            "score_min",
+            minimum=score_minimum,
+            maximum=score_maximum,
+        )
+        maximum = _parse_int(
+            params.get("score_max"),
+            "score_max",
+            minimum=score_minimum,
+            maximum=score_maximum,
+        )
         if minimum is not None:
             queryset = queryset.filter(score__gte=minimum)
         if maximum is not None:
@@ -351,25 +421,19 @@ class LeadViewSet(GovernedCRMViewSet):
         instance = self.get_object()
         payload = dict(request.data)
         if request.path.startswith("/api/v1/"):
-            payload.setdefault("expected_version", instance.version)
-            payload.setdefault("transition_key", f"legacy-convert:{instance.id}")
-            payload.setdefault("create_new_account", True)
-            payload.setdefault("currency", "USD")
-            payload.setdefault("close_date", (date.today()).isoformat())
+            payload = LeadService.prepare_legacy_conversion(self.tenant_id(), instance, payload)
         serializer = LeadConvertSerializer(data=payload)
         serializer.is_valid(raise_exception=True)
         values = dict(serializer.validated_data)
         if request.path.startswith("/api/v1/"):
-            for field in ("account_id", "create_new_account", "expected_version", "transition_key"):
-                values.pop(field, None)
-            legacy_result = IntegrationService.convert_lead_to_opportunity(
-                instance.id,
+            opportunity = LeadService.convert_legacy(
                 self.tenant_id(),
-                values,
-                _actor(request),
+                lead_id=instance.id,
+                validated_data=values,
+                actor_id=_actor(request),
             )
             return Response(
-                OpportunityReadSerializer(legacy_result["opportunity"]).data,
+                OpportunityReadSerializer(opportunity).data,
                 status=status.HTTP_201_CREATED,
             )
         expected = values.pop("expected_version")
@@ -520,7 +584,13 @@ class ContactViewSet(GovernedCRMViewSet):
         for field in ("account_id", "owner_id"):
             if params.get(field):
                 queryset = queryset.filter(**{field: _parse_uuid(params[field], field)})
-        minimum = _parse_int(params.get("engagement_min"), "engagement_min", minimum=0, maximum=100)
+        engagement_configuration = effective_configuration(self.tenant_id())["contact"]
+        minimum = _parse_int(
+            params.get("engagement_min"),
+            "engagement_min",
+            minimum=int(engagement_configuration["engagement_score_min"]),
+            maximum=int(engagement_configuration["engagement_score_max"]),
+        )
         if minimum is not None:
             queryset = queryset.filter(engagement_score__gte=minimum)
         if params.get("search"):
@@ -728,6 +798,7 @@ class ActivityViewSet(GovernedCRMViewSet):
     queryset = Activity.objects.all()
     serializer_class = ActivityReadSerializer
     permission_map = ACTIVITY_ACTION_PERMISSIONS
+    http_method_names = ["get", "post", "patch", "head", "options"]
 
     def get_queryset(self) -> QuerySet[Activity]:
         queryset = super().get_queryset().filter(is_deleted=False)
@@ -800,15 +871,8 @@ class ActivityViewSet(GovernedCRMViewSet):
         return Response(ActivityReadSerializer(activity).data)
 
     def destroy(self, request: Request, pk: str | None = None) -> Response:
-        instance = self.get_object()
-        ActivityService.delete_activity(
-            self.tenant_id(),
-            activity_id=instance.id,
-            expected_version=self._expected_version({}, instance),
-            actor_id=_actor(request),
-            is_administrator=bool(getattr(request.user, "is_staff", False)),
-        )
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        del request, pk
+        raise MethodNotAllowed("DELETE", detail="CRM activity evidence is append-only and cannot be deleted.")
 
     @action(detail=True, methods=["post"])
     def complete(self, request: Request, pk: str | None = None) -> Response:
@@ -840,7 +904,7 @@ class ForecastingViewSet(GovernedCRMViewSet):
     def pipeline(self, request: Request) -> Response:
         values = self._query(request)
         forecast = ForecastingService.get_weighted_pipeline(
-            self.tenant_id(), owner_id=values.get("owner_id"), period_days=values["period"]
+            self.tenant_id(), owner_id=values.get("owner_id"), period_days=values.get("period")
         )
         if request.path.startswith("/api/v1/"):
             if len(forecast.currencies) > 1:
@@ -864,7 +928,7 @@ class ForecastingViewSet(GovernedCRMViewSet):
     def win_rate(self, request: Request) -> Response:
         values = self._query(request)
         result = ForecastingService.get_win_rate(
-            self.tenant_id(), owner_id=values.get("owner_id"), period_days=values["period"]
+            self.tenant_id(), owner_id=values.get("owner_id"), period_days=values.get("period")
         )
         return Response(WinRateSerializer(result).data)
 
@@ -872,7 +936,7 @@ class ForecastingViewSet(GovernedCRMViewSet):
     def by_stage(self, request: Request) -> Response:
         values = self._query(request)
         rows = ForecastingService.get_pipeline_by_stage(
-            self.tenant_id(), owner_id=values.get("owner_id"), period_days=values["period"]
+            self.tenant_id(), owner_id=values.get("owner_id"), period_days=values.get("period")
         )
         return Response(StageForecastSerializer(rows, many=True).data)
 
@@ -882,7 +946,7 @@ class ForecastingViewSet(GovernedCRMViewSet):
         serializer.is_valid(raise_exception=True)
         result = ForecastingService.predict_revenue(
             self.tenant_id(),
-            period_days=serializer.validated_data["period"],
+            period_days=serializer.validated_data.get("period"),
             actor_id=_actor(request),
             correlation_id=self.correlation_id(),
         )
@@ -890,9 +954,95 @@ class ForecastingViewSet(GovernedCRMViewSet):
         return Response(RevenuePredictionSerializer(prediction).data)
 
 
+class CRMConfigurationViewSet(GovernedCRMViewSet):
+    """Singleton tenant configuration endpoint backed only by the service layer."""
+
+    queryset = CRMConfiguration.objects.all()
+    serializer_class = CRMConfigurationWriteSerializer
+    permission_map = CONFIGURATION_ACTION_PERMISSIONS
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+
+    def _environment(self, request: Request) -> str:
+        unknown = set(request.query_params) - {"environment", "format"}
+        if unknown:
+            raise ValidationError({field: "Unknown query parameter." for field in sorted(unknown)})
+        return request.query_params.get("environment", "production")
+
+    def list(self, request: Request) -> Response:
+        return Response(CRMConfigurationService.get(self.tenant_id(), environment=self._environment(request)))
+
+    def _write(self, request: Request) -> Response:
+        serializer = CRMConfigurationWriteSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        payload = dict(serializer.validated_data)
+        payload.setdefault("environment", self._environment(request))
+        raw_version = request.headers.get("If-Match")
+        if raw_version is None:
+            raise ValidationError({"If-Match": "Current configuration version is required."})
+        try:
+            expected_version = int(raw_version.strip().removeprefix("W/").strip('"'))
+        except ValueError as exc:
+            raise ValidationError({"If-Match": "Must contain a non-negative configuration version."}) from exc
+        if expected_version < 0:
+            raise ValidationError({"If-Match": "Must contain a non-negative configuration version."})
+        value = CRMConfigurationService.write(
+            self.tenant_id(),
+            payload=payload,
+            actor_id=_actor(request),
+            correlation_id=self.correlation_id(),
+            expected_version=expected_version,
+        )
+        return Response(value)
+
+    def update(self, request: Request) -> Response:
+        return self._write(request)
+
+    def partial_update(self, request: Request) -> Response:
+        return self._write(request)
+
+    def preview(self, request: Request) -> Response:
+        serializer = CRMConfigurationWriteSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        payload = dict(serializer.validated_data)
+        payload.setdefault("environment", self._environment(request))
+        return Response(CRMConfigurationService.preview(self.tenant_id(), payload=payload))
+
+    def versions(self, request: Request) -> Response:
+        return Response(CRMConfigurationService.versions(self.tenant_id(), environment=self._environment(request)))
+
+    def rollback(self, request: Request) -> Response:
+        serializer = CRMConfigurationRollbackSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        values = serializer.validated_data
+        return Response(
+            CRMConfigurationService.rollback(
+                self.tenant_id(),
+                environment=values.get("environment", self._environment(request)),
+                version=values["version"],
+                actor_id=_actor(request),
+                correlation_id=self.correlation_id(),
+            )
+        )
+
+    def import_configuration(self, request: Request) -> Response:
+        serializer = CRMConfigurationImportSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            CRMConfigurationService.import_document(
+                self.tenant_id(),
+                exported=serializer.validated_data,
+                actor_id=_actor(request),
+                correlation_id=self.correlation_id(),
+            )
+        )
+
+    def export_configuration(self, request: Request) -> Response:
+        return Response(CRMConfigurationService.export(self.tenant_id(), environment=self._environment(request)))
+
+
 class AsyncJobViewSet(GovernedCRMViewSet):
     queryset = AsyncJob.objects.all()
-    serializer_class = AsyncOperationSerializer
+    serializer_class = AsyncJobReadSerializer
     http_method_names = ["get", "head", "options"]
     permission_map = {"retrieve": "crm.lead:score"}
 
@@ -916,6 +1066,7 @@ __all__ = [
     "ActivityViewSet",
     "AsyncJobViewSet",
     "ContactViewSet",
+    "CRMConfigurationViewSet",
     "ForecastingViewSet",
     "GovernedCRMViewSet",
     "LeadViewSet",
