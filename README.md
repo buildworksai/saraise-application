@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="frontend/public/logos/logo.png" alt="SARAISE Logo" width="180"/>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="frontend/public/brand/symphony-white.svg" />
+    <img alt="SARAISE" src="frontend/public/brand/symphony-azure.svg" width="132" />
+  </picture>
 </p>
 
 # SARAISE
@@ -175,7 +178,7 @@ SARAISE follows a layered architecture with strict separation of concerns:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-org/saraise.git
+git clone https://github.com/buildworksai/saraise-application.git
 cd saraise
 ```
 
@@ -477,8 +480,8 @@ See [LICENSE](LICENSE) for full text.
 ## Support
 
 - **Documentation**: [docs.saraise.com](https://docs.saraise.com)
-- **Issues**: [GitHub Issues](https://github.com/your-org/saraise/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-org/saraise/discussions)
+- **Issues**: [GitHub Issues](https://github.com/buildworksai/saraise-application/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/buildworksai/saraise-application/discussions)
 - **Email**: support@saraise.com
 
 ---

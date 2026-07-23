@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="SARAISE">
+  <path d="M72 31C72 20 61 15 49 15C33 15 25 25 25 36C25 48 37 52 50 54C63 56 75 60 75 71C75 82 63 87 49 87C36 87 25 82 24 72"
+    fill="none" stroke="#FFFFFF" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="72" cy="31" r="5.4" fill="#FFFFFF"/>
+  <circle cx="24" cy="72" r="5.4" fill="#FFFFFF"/>
+  <circle cx="50" cy="54" r="8" fill="none" stroke="#FFFFFF" stroke-width="5"/>
+  <circle cx="50" cy="54" r="2.4" fill="#FFFFFF"/>
+</svg>

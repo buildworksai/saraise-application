@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="SARAISE">
+  <mask id="ks">
+    <rect x="8" y="8" width="84" height="84" rx="25" fill="#fff"/>
+    <path d="M67 35C67 26 58 22 49 22C36 22 30 29 30 38C30 47 40 50 50 52C60 54 70 57 70 65C70 74 60 78 50 78C41 78 32 74 32 66"
+      fill="none" stroke="#000" stroke-width="9" stroke-linecap="round"/>
+  </mask>
+  <rect x="8" y="8" width="84" height="84" rx="25" fill="#2E6BF5" mask="url(#ks)"/>
+</svg>

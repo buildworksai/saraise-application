@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="SARAISE">
+<style>
+.b{stroke-linecap:round}
+@keyframes eq{0%,100%{stroke-dashoffset:var(--o)}50%{stroke-dashoffset:0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.rot{transform-origin:50px 50px;animation:spin 26s linear infinite}
+@media (prefers-reduced-motion:reduce){.b{stroke-dashoffset:0!important;animation:none!important}.rot{animation:none!important}}
+</style>
+<g class="rot">
+<line x1="44.38" y1="36.09" x2="41.38" y2="28.67" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="8.00" style="--o:4.80;stroke-dashoffset:4.80;animation:eq 2.4s ease-in-out infinite;animation-delay:0.00s"/>
+<line x1="48.09" y1="35.12" x2="44.96" y2="10.87" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="24.45" style="--o:14.67;stroke-dashoffset:14.67;animation:eq 2.4s ease-in-out infinite;animation-delay:0.08s"/>
+<line x1="51.91" y1="35.12" x2="55.04" y2="10.87" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="24.45" style="--o:14.67;stroke-dashoffset:14.67;animation:eq 2.4s ease-in-out infinite;animation-delay:0.16s"/>
+<line x1="55.62" y1="36.09" x2="58.62" y2="28.67" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="8.00" style="--o:4.80;stroke-dashoffset:4.80;animation:eq 2.4s ease-in-out infinite;animation-delay:0.24s"/>
+<line x1="59.23" y1="38.18" x2="62.78" y2="33.64" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="5.76" style="--o:3.46;stroke-dashoffset:3.46;animation:eq 2.4s ease-in-out infinite;animation-delay:0.32s"/>
+<line x1="61.93" y1="40.90" x2="75.93" y2="30.23" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="17.61" style="--o:10.56;stroke-dashoffset:10.56;animation:eq 2.4s ease-in-out infinite;animation-delay:0.40s"/>
+<line x1="63.84" y1="44.22" x2="80.09" y2="37.43" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="17.61" style="--o:10.56;stroke-dashoffset:10.56;animation:eq 2.4s ease-in-out infinite;animation-delay:0.48s"/>
+<line x1="64.85" y1="47.91" x2="70.56" y2="47.11" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="5.76" style="--o:3.46;stroke-dashoffset:3.46;animation:eq 2.4s ease-in-out infinite;animation-delay:0.56s"/>
+<line x1="64.85" y1="52.09" x2="71.98" y2="53.09" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="7.20" style="--o:4.32;stroke-dashoffset:4.32;animation:eq 2.4s ease-in-out infinite;animation-delay:0.64s"/>
+<line x1="63.84" y1="55.78" x2="84.15" y2="64.26" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="22.01" style="--o:13.21;stroke-dashoffset:13.21;animation:eq 2.4s ease-in-out infinite;animation-delay:0.72s"/>
+<line x1="61.93" y1="59.10" x2="79.43" y2="72.44" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="22.01" style="--o:13.21;stroke-dashoffset:13.21;animation:eq 2.4s ease-in-out infinite;animation-delay:0.80s"/>
+<line x1="59.23" y1="61.82" x2="63.67" y2="67.49" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="7.20" style="--o:4.32;stroke-dashoffset:4.32;animation:eq 2.4s ease-in-out infinite;animation-delay:0.88s"/>
+<line x1="55.62" y1="63.91" x2="57.60" y2="68.80" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="5.28" style="--o:3.17;stroke-dashoffset:3.17;animation:eq 2.4s ease-in-out infinite;animation-delay:0.96s"/>
+<line x1="51.91" y1="64.88" x2="53.97" y2="80.89" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="16.14" style="--o:9.68;stroke-dashoffset:9.68;animation:eq 2.4s ease-in-out infinite;animation-delay:1.04s"/>
+<line x1="48.09" y1="64.88" x2="46.03" y2="80.89" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="16.14" style="--o:9.68;stroke-dashoffset:9.68;animation:eq 2.4s ease-in-out infinite;animation-delay:1.12s"/>
+<line x1="44.38" y1="63.91" x2="42.40" y2="68.80" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="5.28" style="--o:3.17;stroke-dashoffset:3.17;animation:eq 2.4s ease-in-out infinite;animation-delay:1.20s"/>
+<line x1="40.77" y1="61.82" x2="36.53" y2="67.24" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="6.88" style="--o:4.13;stroke-dashoffset:4.13;animation:eq 2.4s ease-in-out infinite;animation-delay:1.28s"/>
+<line x1="38.07" y1="59.10" x2="21.35" y2="71.85" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="21.03" style="--o:12.62;stroke-dashoffset:12.62;animation:eq 2.4s ease-in-out infinite;animation-delay:1.36s"/>
+<line x1="36.16" y1="55.78" x2="16.75" y2="63.89" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="21.03" style="--o:12.62;stroke-dashoffset:12.62;animation:eq 2.4s ease-in-out infinite;animation-delay:1.44s"/>
+<line x1="35.15" y1="52.09" x2="28.33" y2="53.05" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="6.88" style="--o:4.13;stroke-dashoffset:4.13;animation:eq 2.4s ease-in-out infinite;animation-delay:1.52s"/>
+<line x1="35.15" y1="47.91" x2="29.13" y2="47.07" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="6.08" style="--o:3.65;stroke-dashoffset:3.65;animation:eq 2.4s ease-in-out infinite;animation-delay:1.60s"/>
+<line x1="36.16" y1="44.22" x2="19.01" y2="37.06" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="18.59" style="--o:11.15;stroke-dashoffset:11.15;animation:eq 2.4s ease-in-out infinite;animation-delay:1.68s"/>
+<line x1="38.07" y1="40.90" x2="23.30" y2="29.63" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="18.59" style="--o:11.15;stroke-dashoffset:11.15;animation:eq 2.4s ease-in-out infinite;animation-delay:1.76s"/>
+<line x1="40.77" y1="38.18" x2="37.02" y2="33.39" stroke="#2E6BF5" stroke-width="3.3" stroke-linecap="round" class="b" stroke-dasharray="6.08" style="--o:3.65;stroke-dashoffset:3.65;animation:eq 2.4s ease-in-out infinite;animation-delay:1.84s"/>
+</g>
+<circle cx="50" cy="50" r="6.2" fill="none" stroke="#2E6BF5" stroke-width="3"/><circle cx="50" cy="50" r="2" fill="#2E6BF5"/>
+</svg>
