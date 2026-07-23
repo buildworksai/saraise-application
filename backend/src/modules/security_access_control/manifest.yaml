@@ -33,6 +33,8 @@ permissions:
   - security.security-profiles:delete
   - security.audit-logs:read
   - security.access:simulate
+  - security.configuration:read
+  - security.configuration:update
 sod_actions:
   - security.roles:delete
   - security.security-profiles:update
@@ -41,6 +43,154 @@ search_indexes:
   - security_permissions
   - security_audit_logs
 metadata:
+  entity_inventory:
+    - {model: SecurityConfiguration, table: security_configurations, ownership: tenant, mutability: current-version-pointer}
+    - {model: SecurityConfigurationVersion, table: security_configuration_versions, ownership: tenant, mutability: immutable}
+    - {model: MutationReplay, table: security_mutation_replays, ownership: tenant, mutability: immutable}
+    - {model: Permission, table: security_permissions, ownership: global, mutability: immutable-catalog}
+    - {model: Role, table: security_roles, ownership: tenant, mutability: soft-delete}
+    - {model: RolePermission, table: security_role_permissions, ownership: tenant, mutability: revocable}
+    - {model: UserRole, table: security_user_roles, ownership: tenant, mutability: revocable}
+    - {model: PermissionSet, table: security_permission_sets, ownership: tenant, mutability: soft-delete}
+    - {model: PermissionSetPermission, table: security_permission_set_permissions, ownership: tenant, mutability: revocable}
+    - {model: UserPermissionSet, table: security_user_permission_sets, ownership: tenant, mutability: revocable}
+    - {model: FieldSecurity, table: security_field_security, ownership: tenant, mutability: soft-delete}
+    - {model: RowSecurityRule, table: security_row_security_rules, ownership: tenant, mutability: versioned-soft-delete}
+    - {model: SecurityProfile, table: security_security_profiles, ownership: tenant, mutability: soft-delete}
+    - {model: SecurityProfileAssignment, table: security_profile_assignments, ownership: tenant, mutability: revocable}
+    - {model: SecurityAuditLog, table: security_audit_logs, ownership: tenant, mutability: immutable}
+  api_inventory:
+    base_path: /api/v2/security-access-control/
+    ownership: runtime-plane
+    resources:
+      - prefix: roles
+        basename: security-roles
+        viewset: RoleViewSet
+        entity: Role
+        ownership: tenant
+        actions:
+          list: {method: GET, path: "", permission: "security.roles:read"}
+          retrieve: {method: GET, path: "{id}/", permission: "security.roles:read"}
+          create: {method: POST, path: "", permission: "security.roles:create"}
+          partial_update: {method: PATCH, path: "{id}/", permission: "security.roles:update"}
+          destroy: {method: DELETE, path: "{id}/", permission: "security.roles:delete"}
+          set_permission: {method: POST, path: "{id}/permissions/", permission: "security.roles:update"}
+          remove_permission: {method: DELETE, path: "{id}/permissions/{permission_id}/", permission: "security.roles:update"}
+      - prefix: permissions
+        basename: security-permissions
+        viewset: PermissionViewSet
+        entity: Permission
+        ownership: global-catalog
+        actions:
+          list: {method: GET, path: "", permission: "security.permissions:read"}
+          retrieve: {method: GET, path: "{id}/", permission: "security.permissions:read"}
+      - prefix: user-roles
+        basename: security-user-roles
+        viewset: UserRoleViewSet
+        entity: UserRole
+        ownership: tenant
+        actions:
+          list: {method: GET, path: "", permission: "security.assignments:read"}
+          retrieve: {method: GET, path: "{id}/", permission: "security.assignments:read"}
+          create: {method: POST, path: "", permission: "security.assignments:create"}
+          partial_update: {method: PATCH, path: "{id}/", permission: "security.assignments:update"}
+          destroy: {method: DELETE, path: "{id}/", permission: "security.assignments:delete"}
+      - prefix: permission-sets
+        basename: security-permission-sets
+        viewset: PermissionSetViewSet
+        entity: PermissionSet
+        ownership: tenant
+        actions:
+          list: {method: GET, path: "", permission: "security.permission-sets:read"}
+          retrieve: {method: GET, path: "{id}/", permission: "security.permission-sets:read"}
+          create: {method: POST, path: "", permission: "security.permission-sets:create"}
+          partial_update: {method: PATCH, path: "{id}/", permission: "security.permission-sets:update"}
+          destroy: {method: DELETE, path: "{id}/", permission: "security.permission-sets:delete"}
+          replace_permissions: {method: PUT, path: "{id}/permissions/", permission: "security.permission-sets:update"}
+      - prefix: user-permission-sets
+        basename: security-user-permission-sets
+        viewset: UserPermissionSetViewSet
+        entity: UserPermissionSet
+        ownership: tenant
+        actions:
+          list: {method: GET, path: "", permission: "security.assignments:read"}
+          retrieve: {method: GET, path: "{id}/", permission: "security.assignments:read"}
+          create: {method: POST, path: "", permission: "security.assignments:create"}
+          partial_update: {method: PATCH, path: "{id}/", permission: "security.assignments:update"}
+          destroy: {method: DELETE, path: "{id}/", permission: "security.assignments:delete"}
+      - prefix: field-security
+        basename: security-field-security
+        viewset: FieldSecurityViewSet
+        entity: FieldSecurity
+        ownership: tenant
+        actions:
+          list: {method: GET, path: "", permission: "security.field-security:read"}
+          retrieve: {method: GET, path: "{id}/", permission: "security.field-security:read"}
+          create: {method: POST, path: "", permission: "security.field-security:create"}
+          partial_update: {method: PATCH, path: "{id}/", permission: "security.field-security:update"}
+          destroy: {method: DELETE, path: "{id}/", permission: "security.field-security:delete"}
+      - prefix: row-security-rules
+        basename: security-row-security-rules
+        viewset: RowSecurityRuleViewSet
+        entity: RowSecurityRule
+        ownership: tenant
+        actions:
+          list: {method: GET, path: "", permission: "security.row-security:read"}
+          retrieve: {method: GET, path: "{id}/", permission: "security.row-security:read"}
+          create: {method: POST, path: "", permission: "security.row-security:create"}
+          partial_update: {method: PATCH, path: "{id}/", permission: "security.row-security:update"}
+          destroy: {method: DELETE, path: "{id}/", permission: "security.row-security:delete"}
+      - prefix: security-profiles
+        basename: security-profiles
+        viewset: SecurityProfileViewSet
+        entity: SecurityProfile
+        ownership: tenant
+        actions:
+          list: {method: GET, path: "", permission: "security.security-profiles:read"}
+          retrieve: {method: GET, path: "{id}/", permission: "security.security-profiles:read"}
+          create: {method: POST, path: "", permission: "security.security-profiles:create"}
+          partial_update: {method: PATCH, path: "{id}/", permission: "security.security-profiles:update"}
+          destroy: {method: DELETE, path: "{id}/", permission: "security.security-profiles:delete"}
+      - prefix: security-profile-assignments
+        basename: security-profile-assignments
+        viewset: SecurityProfileAssignmentViewSet
+        entity: SecurityProfileAssignment
+        ownership: tenant
+        actions:
+          list: {method: GET, path: "", permission: "security.assignments:read"}
+          retrieve: {method: GET, path: "{id}/", permission: "security.assignments:read"}
+          create: {method: POST, path: "", permission: "security.assignments:create"}
+          partial_update: {method: PATCH, path: "{id}/", permission: "security.assignments:update"}
+          destroy: {method: DELETE, path: "{id}/", permission: "security.assignments:delete"}
+      - prefix: audit-logs
+        basename: security-audit-logs
+        viewset: SecurityAuditLogViewSet
+        entity: SecurityAuditLog
+        ownership: tenant
+        actions:
+          list: {method: GET, path: "", permission: "security.audit-logs:read"}
+          retrieve: {method: GET, path: "{id}/", permission: "security.audit-logs:read"}
+      - prefix: access-decisions
+        basename: security-access-decisions
+        viewset: AccessDecisionViewSet
+        entity: derived-policy-decision
+        ownership: tenant
+        actions:
+          simulate: {method: POST, path: simulate/, permission: "security.access:simulate"}
+      - prefix: configuration
+        basename: security-configuration
+        viewset: SecurityConfigurationViewSet
+        entity: SecurityConfiguration
+        ownership: tenant
+        actions:
+          retrieve_current: {method: GET, path: "", permission: "security.configuration:read"}
+          update_current: {method: PUT, path: "", permission: "security.configuration:update"}
+          preview: {method: POST, path: preview/, permission: "security.configuration:update"}
+          versions: {method: GET, path: versions/, permission: "security.configuration:read"}
+          rollback: {method: POST, path: "versions/{version}/rollback/", permission: "security.configuration:update"}
+          import_document: {method: POST, path: import/, permission: "security.configuration:update"}
+          export_document: {method: GET, path: export/, permission: "security.configuration:read"}
+          update_rollout: {method: PUT, path: rollout/, permission: "security.configuration:update"}
   policy_ownership:
     development: local
     self-hosted: local

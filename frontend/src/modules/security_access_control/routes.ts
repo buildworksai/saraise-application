@@ -1,11 +1,11 @@
 import { lazy } from "react";
-import { BookLock, ClipboardList, Filter, KeyRound, LockKeyhole, SearchCheck, Shield, ShieldCheck, UsersRound } from "lucide-react";
+import { BookLock, ClipboardList, Filter, KeyRound, LockKeyhole, SearchCheck, Settings2, Shield, ShieldCheck, UsersRound } from "lucide-react";
 import type { TenantRoute } from "@/navigation/tenant-route-types";
 
 const localModes = ["development", "self-hosted"] as const;
 const allModes = ["development", "self-hosted", "saas"] as const;
 
-export const tenantRoutes = [
+const securityRouteDefinitions = [
   { id: "security-access-control.roles.list", module: "security_access_control", path: "/security-access-control/roles", sourceFile: "modules/security_access_control/pages/RolesPage.tsx", Page: lazy(() => import("./pages/RolesPage").then(({ RolesPage }) => ({ default: RolesPage }))), modes: localModes, navigation: { type: "sidebar", label: "Roles", icon: Shield, order: 120 } },
   { id: "security-access-control.roles.create", module: "security_access_control", path: "/security-access-control/roles/create", sourceFile: "modules/security_access_control/pages/RolesPage.tsx", Page: lazy(() => import("./pages/RolesPage").then(({ RoleCreatePage }) => ({ default: RoleCreatePage }))), modes: localModes, navigation: { type: "contextual", parentRouteId: "security-access-control.roles.list" } },
   { id: "security-access-control.roles.detail", module: "security_access_control", path: "/security-access-control/roles/:id", sourceFile: "modules/security_access_control/pages/RolesPage.tsx", Page: lazy(() => import("./pages/RolesPage").then(({ RoleDetailPage }) => ({ default: RoleDetailPage }))), modes: localModes, navigation: { type: "contextual", parentRouteId: "security-access-control.roles.list" } },
@@ -52,6 +52,21 @@ export const tenantRoutes = [
   { id: "security-access-control.audit.list", module: "security_access_control", path: "/security-access-control/audit-logs", sourceFile: "modules/security_access_control/pages/AuditLogPage.tsx", Page: lazy(() => import("./pages/AuditLogPage").then(({ AuditLogPage }) => ({ default: AuditLogPage }))), modes: allModes, navigation: { type: "sidebar", label: "Audit logs", icon: ClipboardList, order: 127 } },
   { id: "security-access-control.audit.detail", module: "security_access_control", path: "/security-access-control/audit-logs/:id", sourceFile: "modules/security_access_control/pages/AuditLogPage.tsx", Page: lazy(() => import("./pages/AuditLogPage").then(({ AuditLogDetailPage }) => ({ default: AuditLogDetailPage }))), modes: allModes, navigation: { type: "contextual", parentRouteId: "security-access-control.audit.list" } },
   { id: "security-access-control.simulator", module: "security_access_control", path: "/security-access-control/access-simulator", sourceFile: "modules/security_access_control/pages/AccessSimulatorPage.tsx", Page: lazy(() => import("./pages/AccessSimulatorPage").then(({ AccessSimulatorPage }) => ({ default: AccessSimulatorPage }))), modes: allModes, navigation: { type: "sidebar", label: "Access simulator", icon: SearchCheck, order: 128 } },
+  { id: "security-access-control.configuration", module: "security_access_control", path: "/security-access-control/configuration", sourceFile: "modules/security_access_control/pages/SecurityConfigurationPage.tsx", Page: lazy(() => import("./pages/SecurityConfigurationPage").then(({ SecurityConfigurationPage }) => ({ default: SecurityConfigurationPage }))), modes: allModes, requiredPermission: "security.configuration:read", navigation: { type: "sidebar", label: "Configuration", icon: Settings2, order: 129 } },
 ] satisfies readonly TenantRoute[];
+
+const routeTitleByKind: Readonly<Record<string, string>> = {
+  list: "Security administration",
+  create: "Create security policy",
+  detail: "Security policy detail",
+  edit: "Edit security policy",
+  simulator: "Access simulator",
+  configuration: "Security configuration",
+};
+
+export const tenantRoutes = securityRouteDefinitions.map((route) => {
+  const kind = route.id.split(".").at(-1) ?? "detail";
+  return { ...route, title: routeTitleByKind[kind] ?? "Security & Access Control" };
+}) satisfies readonly TenantRoute[];
 
 export default tenantRoutes;

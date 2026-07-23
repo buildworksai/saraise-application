@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from django.conf import settings
 from django.db import connection
 from django.test import override_settings
 from rest_framework.permissions import AllowAny
@@ -209,9 +210,9 @@ def test_database_schema_and_catalog_success_and_failure_paths(monkeypatch: pyte
     assert health._permission_catalog_check() == health.ComponentResult(False, "catalog_unavailable")
 
 
-def test_rls_not_applicable_success_and_dependency_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rls_unsupported_database_fails_closed_and_dependency_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(connection, "vendor", "sqlite")
-    assert health._rls_check() == health.ComponentResult(True, "not_applicable")
+    assert health._rls_check() == health.ComponentResult(False, "rls_unsupported")
 
     class Cursor:
         call = 0
@@ -242,15 +243,53 @@ def test_remote_dependency_requires_configuration() -> None:
     assert health._remote_policy_check("req") == health.ComponentResult(False, "configuration_missing", "unknown")
 
 
-def test_local_evaluator_registration_is_verified(monkeypatch: pytest.MonkeyPatch) -> None:
+@override_settings(
+    SARAISE_SECURITY_CANARY_TENANT_ID=None,
+    SARAISE_SECURITY_CANARY_USER_ID=None,
+)
+def test_local_evaluator_canary_requires_configuration_and_default_deny(
+    tenant_a, tenant_a_user, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from src.modules.security_access_control import services
+    from src.modules.security_access_control.models import Role, SecurityConfiguration, UserRole
+
+    role = Role.objects.create(tenant_id=tenant_a.id, name="Readiness principal", code="readiness_principal")
+    UserRole.objects.create(
+        tenant_id=tenant_a.id,
+        user=tenant_a_user,
+        role=role,
+        assigned_by=tenant_a_user.id,
+        reason="readiness fixture",
+    )
 
     class Evaluator:
-        def evaluate_local(self) -> None:
-            return None
+        @staticmethod
+        def evaluate_local(tenant_id, identity, permission_code, **kwargs):
+            assert tenant_id == tenant_a.id
+            assert identity.id == str(tenant_a_user.id)
+            assert permission_code == health.LOCAL_CANARY_PERMISSION
+            assert kwargs["resource_context"] == {"readiness_canary": True}
+            return SimpleNamespace(allowed=False, reason_codes=("DENY_DEFAULT",))
 
     monkeypatch.setattr(services, "AccessEvaluationService", Evaluator, raising=False)
+    assert health._local_evaluator_check() == health.ComponentResult(False, "canary_fixture_missing")
+    monkeypatch.setattr(settings, "SARAISE_SECURITY_CANARY_TENANT_ID", str(tenant_a.id))
+    monkeypatch.setattr(settings, "SARAISE_SECURITY_CANARY_USER_ID", str(tenant_a_user.id))
+    assert health._local_evaluator_check() == health.ComponentResult(False, "configuration_missing")
+    SecurityConfiguration.objects.create(
+        tenant_id=tenant_a.id,
+        environment="development",
+        document={"enabled": True},
+        rollout={},
+        updated_by=tenant_a_user.id,
+        correlation_id="readiness-test",
+    )
     assert health._local_evaluator_check() == health.ComponentResult(True, "ready")
+
+    Evaluator.evaluate_local = staticmethod(
+        lambda *_args, **_kwargs: SimpleNamespace(allowed=True, reason_codes=("ALLOW",))
+    )
+    assert health._local_evaluator_check() == health.ComponentResult(False, "canary_did_not_deny")
     monkeypatch.setattr(services, "AccessEvaluationService", object)
     assert health._local_evaluator_check() == health.ComponentResult(False, "evaluator_unavailable")
 

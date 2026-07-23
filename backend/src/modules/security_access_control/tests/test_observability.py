@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import io
+import json
 import logging
 import uuid
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 
 from src.core.async_jobs.models import OutboxEvent
+from src.core.observability.logging import JSONFormatter, ObservabilityContextFilter
 from src.modules.security_access_control.models import SecurityAuditLog
+from src.modules.security_access_control.observability import enforce_security_json_logging
+from src.modules.security_access_control.serializers import SecurityAuditLogSerializer
 from src.modules.security_access_control.services import AccessEvaluationService, AuditService
 
 pytest_plugins = ["src.core.testing.factories"]
@@ -87,3 +93,59 @@ def test_audit_query_remains_tenant_scoped_for_observability(tenant_a, tenant_b)
     own = SecurityAuditLog.objects.create(tenant_id=tenant_a.id, **common)
     SecurityAuditLog.objects.create(tenant_id=tenant_b.id, **common)
     assert list(SecurityAuditLog.objects.for_tenant(tenant_a.id)) == [own]
+
+
+def test_public_audit_representation_excludes_tenant_actor_network_and_outbox_plumbing(tenant_a) -> None:
+    audit = SecurityAuditLog.objects.create(
+        tenant_id=tenant_a.id,
+        action="security.profile.changed",
+        actor_id=uuid.uuid4(),
+        resource_type="security_profile",
+        correlation_id="corr-public-audit",
+        ip_address="192.0.2.10",
+        user_agent="sensitive operational client fingerprint",
+        outbox_event_id=uuid.uuid4(),
+    )
+
+    representation = SecurityAuditLogSerializer(audit).data
+
+    assert set(representation).isdisjoint({"tenant_id", "actor_id", "ip_address", "user_agent", "outbox_event_id"})
+    assert representation["correlation_id"] == "corr-public-audit"
+
+
+def test_security_logger_contract_serializes_structured_correlation_and_security_fields() -> None:
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(JSONFormatter())
+    handler.addFilter(ObservabilityContextFilter())
+    logger = logging.Logger("saraise.security_access_control.contract-test")
+    logger.propagate = False
+    logger.addHandler(handler)
+
+    enforce_security_json_logging(logger).warning(
+        "security.policy.denied",
+        extra={
+            "correlation_id": "corr-json-contract",
+            "tenant_id": "tenant-contract",
+            "reason_codes": ["DENY_DEFAULT"],
+            "permission_code": "security.roles:read",
+        },
+    )
+
+    payload = json.loads(stream.getvalue())
+    assert payload["correlation_id"] == "corr-json-contract"
+    assert payload["tenant_id"] == "tenant-contract"
+    assert payload["reason_codes"] == ["DENY_DEFAULT"]
+    assert payload["permission_code"] == "security.roles:read"
+
+
+def test_security_logger_contract_rejects_plain_text_or_context_free_handlers() -> None:
+    logger = logging.Logger("saraise.security_access_control.invalid-contract")
+    logger.propagate = False
+    logger.addHandler(logging.StreamHandler())
+    with pytest.raises(ImproperlyConfigured, match="JSONFormatter"):
+        enforce_security_json_logging(logger)
+
+    logger.handlers[0].setFormatter(JSONFormatter())
+    with pytest.raises(ImproperlyConfigured, match="ObservabilityContextFilter"):
+        enforce_security_json_logging(logger)

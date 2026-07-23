@@ -9,7 +9,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.core.exceptions import ValidationError
 
-_MFA_METHODS = frozenset({"totp", "webauthn", "push", "sms", "email", "recovery_code"})
 _SENSITIVE_KEYS = frozenset(
     {
         "authorization",
@@ -50,10 +49,7 @@ _PII_KEYS = frozenset(
         "tax_id",
     }
 )
-MAX_AUDIT_BYTES = 16 * 1024
-
-
-def _string_array(value: object, field: str, *, maximum: int = 100) -> list[str]:
+def _string_array(value: object, field: str, *, maximum: int) -> list[str]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) > maximum:
         raise ValidationError({field: f"Must be an array containing at most {maximum} strings."})
     if not all(isinstance(item, str) and item.strip() for item in value):
@@ -64,9 +60,25 @@ def _string_array(value: object, field: str, *, maximum: int = 100) -> list[str]
 def validate_security_profile(profile: object) -> None:
     """Validate network, geography, time, and authentication policy structures."""
 
+    from .services import ConfigurationService, SecurityConfigurationMissing, default_security_configuration
+
+    try:
+        configuration = ConfigurationService.require_existing(getattr(profile, "tenant_id"))
+        document = configuration.document
+    except SecurityConfigurationMissing:
+        # Direct model construction is structural validation only. All request
+        # mutations pass through SecurityProfileService, which persists the
+        # tenant document before invoking this validator.
+        document = default_security_configuration()
+    limits = document.get("limits")
+    defaults = document.get("defaults")
+    if not isinstance(limits, Mapping) or not isinstance(defaults, Mapping):
+        raise SecurityConfigurationMissing("Profile validation configuration is required")
+    array_maximum = int(limits["policy_array_max_entries"])
+
     networks: dict[str, set[ipaddress.IPv4Network | ipaddress.IPv6Network]] = {}
     for field in ("ip_whitelist", "ip_blacklist"):
-        raw = _string_array(getattr(profile, field), field)
+        raw = _string_array(getattr(profile, field), field, maximum=array_maximum)
         try:
             networks[field] = {ipaddress.ip_network(item, strict=False) for item in raw}
         except ValueError as exc:
@@ -76,7 +88,7 @@ def validate_security_profile(profile: object) -> None:
 
     countries: dict[str, set[str]] = {}
     for field in ("allowed_countries", "blocked_countries"):
-        raw = _string_array(getattr(profile, field), field)
+        raw = _string_array(getattr(profile, field), field, maximum=array_maximum)
         normalized = {item.upper() for item in raw}
         if any(len(item) != 2 or not item.isalpha() for item in normalized):
             raise ValidationError({field: "Country codes must be ISO 3166-1 alpha-2 values."})
@@ -84,8 +96,13 @@ def validate_security_profile(profile: object) -> None:
     if countries["allowed_countries"] & countries["blocked_countries"]:
         raise ValidationError("Allowed and blocked countries cannot overlap.")
 
-    methods = _string_array(getattr(profile, "allowed_mfa_methods"), "allowed_mfa_methods", maximum=20)
-    if not set(methods).issubset(_MFA_METHODS):
+    methods = _string_array(
+        getattr(profile, "allowed_mfa_methods"),
+        "allowed_mfa_methods",
+        maximum=int(limits["mfa_methods_max_entries"]),
+    )
+    registered_methods = defaults.get("allowed_mfa_methods")
+    if not isinstance(registered_methods, list) or not set(methods).issubset(registered_methods):
         raise ValidationError({"allowed_mfa_methods": "Contains an unregistered MFA method."})
     password_policy = getattr(profile, "password_policy")
     if not isinstance(password_policy, Mapping):
@@ -122,9 +139,18 @@ def validate_security_profile(profile: object) -> None:
                 raise ValidationError({"time_restrictions": "Window end must be later than start."})
 
     ranges = {
-        "session_timeout_minutes": (5, 1440),
-        "absolute_session_timeout_hours": (1, 168),
-        "max_concurrent_sessions": (1, 100),
+        "session_timeout_minutes": (
+            int(limits["profile_idle_timeout_min_minutes"]),
+            int(limits["profile_idle_timeout_max_minutes"]),
+        ),
+        "absolute_session_timeout_hours": (
+            int(limits["profile_absolute_timeout_min_hours"]),
+            int(limits["profile_absolute_timeout_max_hours"]),
+        ),
+        "max_concurrent_sessions": (
+            int(limits["profile_concurrent_sessions_min"]),
+            int(limits["profile_concurrent_sessions_max"]),
+        ),
     }
     for field, (minimum, maximum) in ranges.items():
         value = getattr(profile, field)
@@ -144,25 +170,58 @@ def _is_sensitive_evidence_key(key: object) -> bool:
     return False
 
 
-def redact_sensitive(value: object, *, depth: int = 0) -> object:
+def redact_sensitive(
+    value: object,
+    *,
+    depth: int = 0,
+    max_depth: int | None = None,
+    max_collection: int | None = None,
+    max_string: int | None = None,
+) -> object:
     """Recursively redact secrets and bound collection sizes for permanent evidence."""
 
-    if depth > 8:
+    if max_depth is None or max_collection is None or max_string is None:
+        from .services import default_security_configuration
+
+        limits = default_security_configuration()["limits"]
+        if not isinstance(limits, Mapping):
+            raise RuntimeError("Audit redaction configuration is unavailable")
+        max_depth = int(limits["audit_redaction_max_depth"])
+        max_collection = int(limits["audit_collection_max_entries"])
+        max_string = int(limits["audit_string_max_length"])
+    if depth > max_depth:
         return "[TRUNCATED]"
     if isinstance(value, Mapping):
         result: dict[str, object] = {}
-        for key, item in list(value.items())[:100]:
-            result[str(key)[:100]] = (
-                "[REDACTED]" if _is_sensitive_evidence_key(key) else redact_sensitive(item, depth=depth + 1)
+        for key, item in list(value.items())[:max_collection]:
+            result[str(key)[:max_string]] = (
+                "[REDACTED]"
+                if _is_sensitive_evidence_key(key)
+                else redact_sensitive(
+                    item,
+                    depth=depth + 1,
+                    max_depth=max_depth,
+                    max_collection=max_collection,
+                    max_string=max_string,
+                )
             )
         return result
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [redact_sensitive(item, depth=depth + 1) for item in list(value)[:100]]
+        return [
+            redact_sensitive(
+                item,
+                depth=depth + 1,
+                max_depth=max_depth,
+                max_collection=max_collection,
+                max_string=max_string,
+            )
+            for item in list(value)[:max_collection]
+        ]
     if isinstance(value, str):
-        return value[:2000]
+        return value[:max_string]
     if value is None or isinstance(value, (bool, int, float)):
         return value
-    return str(value)[:2000]
+    return str(value)[:max_string]
 
 
-__all__ = ["MAX_AUDIT_BYTES", "redact_sensitive", "validate_security_profile"]
+__all__ = ["redact_sensitive", "validate_security_profile"]

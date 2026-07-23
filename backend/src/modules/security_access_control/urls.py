@@ -12,6 +12,7 @@ from .api import (
     PermissionViewSet,
     RoleViewSet,
     RowSecurityRuleViewSet,
+    SecurityConfigurationViewSet,
     SecurityAuditLogViewSet,
     SecurityProfileAssignmentViewSet,
     SecurityProfileViewSet,
@@ -44,8 +45,14 @@ router.register(
 )
 router.register(r"audit-logs", SecurityAuditLogViewSet, basename="security-audit-logs")
 router.register(r"access-decisions", AccessDecisionViewSet, basename="security-access-decisions")
+router.register(r"configuration", SecurityConfigurationViewSet, basename="security-configuration")
 
 urlpatterns = [
+    path(
+        "configuration/",
+        SecurityConfigurationViewSet.as_view({"get": "retrieve_current", "put": "update_current"}),
+        name="security-configuration-current",
+    ),
     path("", include(router.urls)),
     path(
         "health/",

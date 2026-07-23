@@ -60,7 +60,16 @@ describe("securityService governed v2 integration", () => {
     api.post.mockResolvedValueOnce(envelope(access)); await expect(securityService.accessDecisions.simulate({ subject_id: "user-1", permission_code: "security.roles:read", resource_context: {} })).resolves.toMatchObject({ data: access });
     api.get.mockResolvedValueOnce(envelope(health)); await expect(securityService.health()).resolves.toMatchObject({ data: health });
     api.delete.mockResolvedValue(undefined);
-    await Promise.all([securityService.roles.delete("role-1"), securityService.roles.removePermission("role-1", "permission-1"), securityService.userRoles.revoke("user-role-1"), securityService.permissionSets.delete("set-1"), securityService.userPermissionSets.revoke("grant-1"), securityService.fieldSecurity.delete("field-1"), securityService.rowSecurity.delete("row-1"), securityService.securityProfiles.delete("profile-1"), securityService.profileAssignments.revoke("profile-assignment-1")]);
+    const reason = { reason: "Approved security-policy cleanup" };
+    await Promise.all([securityService.roles.delete("role-1", reason),
+securityService.roles.removePermission("role-1", "permission-1", reason),
+securityService.userRoles.revoke("user-role-1", reason),
+securityService.permissionSets.delete("set-1", reason),
+securityService.userPermissionSets.revoke("grant-1", reason),
+securityService.fieldSecurity.delete("field-1", reason),
+securityService.rowSecurity.delete("row-1", reason),
+securityService.securityProfiles.delete("profile-1", reason),
+securityService.profileAssignments.revoke("profile-assignment-1", reason)]);
     expect(api.delete).toHaveBeenCalledTimes(9);
   });
 

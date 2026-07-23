@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+import sys
 from typing import Any
 
 from django.conf import settings
@@ -12,6 +13,87 @@ from django.db.models import Q
 from django.utils import timezone
 
 from src.core.tenancy import TenantScopedModel, TimestampedModel
+
+
+def _seed_default(section: str, key: str) -> object:
+    """Resolve ORM construction defaults from the governed configuration seed."""
+    from .services import default_security_configuration
+
+    configured = default_security_configuration()[section]
+    if not isinstance(configured, dict):
+        raise RuntimeError(f"Invalid security configuration seed section: {section}")
+    return configured[key]
+
+
+def default_field_visibility() -> str:
+    return str(_seed_default("defaults", "field_visibility"))
+
+
+def default_field_edit_control() -> str:
+    return str(_seed_default("defaults", "field_edit_control"))
+
+
+def default_row_rule_type() -> str:
+    return str(_seed_default("defaults", "row_rule_type"))
+
+
+def default_row_rule_priority() -> int:
+    return int(_seed_default("defaults", "row_rule_priority"))
+
+
+def _profile_seed_default(key: str) -> object:
+    profile = _seed_default("defaults", "security_profile")
+    if not isinstance(profile, dict):
+        raise RuntimeError("Invalid security profile configuration seed")
+    return profile[key]
+
+
+def default_profile_type() -> str:
+    return str(_profile_seed_default("profile_type"))
+
+
+def default_mfa_requirement() -> str:
+    return str(_profile_seed_default("mfa_required"))
+
+
+def default_session_timeout_minutes() -> int:
+    return int(_profile_seed_default("session_timeout_minutes"))
+
+
+def default_absolute_session_timeout_hours() -> int:
+    return int(_profile_seed_default("absolute_session_timeout_hours"))
+
+
+def default_max_concurrent_sessions() -> int:
+    return int(_profile_seed_default("max_concurrent_sessions"))
+
+
+def default_download_allowed() -> bool:
+    return bool(_profile_seed_default("download_allowed"))
+
+
+def default_print_allowed() -> bool:
+    return bool(_profile_seed_default("print_allowed"))
+
+
+def default_copy_paste_allowed() -> bool:
+    return bool(_profile_seed_default("copy_paste_allowed"))
+
+
+def default_mobile_access_allowed() -> bool:
+    return bool(_profile_seed_default("mobile_access_allowed"))
+
+
+def default_login_notification() -> bool:
+    return bool(_profile_seed_default("login_notification"))
+
+
+def default_access_notification() -> bool:
+    return bool(_profile_seed_default("access_notification"))
+
+
+def default_profile_assignment_precedence() -> int:
+    return int(_seed_default("defaults", "profile_assignment_precedence"))
 
 
 class MutableSecurityModel(TenantScopedModel, TimestampedModel):
@@ -24,6 +106,113 @@ class MutableSecurityModel(TenantScopedModel, TimestampedModel):
 
     class Meta:
         abstract = True
+
+
+class ImmutableConfigurationError(RuntimeError):
+    """Raised when append-only configuration evidence is mutated."""
+
+
+class ImmutableConfigurationQuerySet(models.QuerySet):
+    """Queryset that makes configuration history and replay evidence append-only."""
+
+    def for_tenant(self, tenant_id: uuid.UUID) -> "ImmutableConfigurationQuerySet":
+        return self.filter(tenant_id=tenant_id)
+
+    def update(self, **kwargs: Any) -> int:
+        del kwargs
+        raise ImmutableConfigurationError("Configuration evidence is append-only")
+
+    def delete(self) -> tuple[int, dict[str, int]]:
+        raise ImmutableConfigurationError("Configuration evidence is append-only")
+
+
+class SecurityConfiguration(TenantScopedModel, TimestampedModel):
+    """Current tenant-owned security behavior document."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    environment = models.CharField(max_length=32)
+    version = models.PositiveIntegerField(default=1)
+    document = models.JSONField()
+    rollout = models.JSONField()
+    updated_by = models.UUIDField()
+    correlation_id = models.CharField(max_length=128)
+
+    class Meta:
+        db_table = "security_configurations"
+        constraints = [models.UniqueConstraint(fields=("tenant_id",), name="sec_config_tenant_uniq")]
+        indexes = [
+            models.Index(fields=("tenant_id", "version"), name="sec_config_tenant_version_idx"),
+            models.Index(fields=("tenant_id", "environment"), name="sec_config_tenant_env_idx"),
+        ]
+
+
+class SecurityConfigurationVersion(TenantScopedModel):
+    """Immutable before/after evidence for every tenant configuration change."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    version = models.PositiveIntegerField()
+    environment = models.CharField(max_length=32)
+    previous_document = models.JSONField(null=True)
+    current_document = models.JSONField()
+    previous_rollout = models.JSONField(null=True)
+    current_rollout = models.JSONField()
+    actor_id = models.UUIDField()
+    correlation_id = models.CharField(max_length=128)
+    reason = models.TextField()
+    change_kind = models.CharField(max_length=24)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ImmutableConfigurationQuerySet.as_manager()
+
+    class Meta:
+        db_table = "security_configuration_versions"
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "version"), name="sec_config_version_tenant_uniq")
+        ]
+        indexes = [
+            models.Index(fields=("tenant_id", "-version"), name="sec_config_version_history_idx"),
+            models.Index(fields=("tenant_id", "correlation_id"), name="sec_config_version_corr_idx"),
+        ]
+        ordering = ("-version",)
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ImmutableConfigurationError("Configuration evidence is append-only")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise ImmutableConfigurationError("Configuration evidence is append-only")
+
+
+class MutationReplay(TenantScopedModel):
+    """Immutable response ledger used to make tenant mutations replay-safe."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    idempotency_key = models.CharField(max_length=128)
+    request_hash = models.CharField(max_length=64)
+    operation = models.CharField(max_length=128)
+    resource_id = models.UUIDField(null=True)
+    response_status = models.PositiveSmallIntegerField()
+    response_document = models.JSONField()
+    correlation_id = models.CharField(max_length=128)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ImmutableConfigurationQuerySet.as_manager()
+
+    class Meta:
+        db_table = "security_mutation_replays"
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="sec_replay_tenant_key_uniq")
+        ]
+        indexes = [models.Index(fields=("tenant_id", "operation"), name="sec_replay_tenant_op_idx")]
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if not self._state.adding:
+            raise ImmutableConfigurationError("Mutation replay evidence is append-only")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        raise ImmutableConfigurationError("Mutation replay evidence is append-only")
 
 
 class Permission(models.Model):
@@ -103,14 +292,27 @@ class Role(MutableSecurityModel):
             parent = Role.objects.filter(id=self.parent_role_id).only("tenant_id", "parent_role_id").first()
             if parent is None or parent.tenant_id != self.tenant_id:
                 raise ValidationError({"parent_role_id": "Parent role must belong to this tenant."})
+            configuration = SecurityConfiguration.objects.for_tenant(self.tenant_id).first()
+            if configuration is None:
+                # Direct ORM/model validation can run before the API bootstrap has
+                # an authenticated actor. Apply the same fail-closed seed policy;
+                # API/service mutations always persist the tenant copy first.
+                from .services import default_security_configuration
+
+                limits = default_security_configuration()["limits"]
+            else:
+                limits = configuration.document.get("limits")
+            if not isinstance(limits, dict):
+                raise ValidationError({"parent_role_id": "Tenant hierarchy configuration is required."})
+            maximum_depth = int(limits["role_hierarchy_max_depth"])
             seen = {self.id}
             depth = 1
             while parent is not None:
                 if parent.id in seen:
                     raise ValidationError({"parent_role_id": "Role hierarchy cannot contain a cycle."})
                 seen.add(parent.id)
-                if depth > 16:
-                    raise ValidationError({"parent_role_id": "Role hierarchy cannot exceed 16 levels."})
+                if depth > maximum_depth:
+                    raise ValidationError({"parent_role_id": f"Role hierarchy cannot exceed {maximum_depth} levels."})
                 parent = (
                     Role.objects.filter(id=parent.parent_role_id).only("id", "tenant_id", "parent_role_id").first()
                     if parent.parent_role_id
@@ -216,12 +418,29 @@ class PermissionSet(MutableSecurityModel):
             ),
             models.CheckConstraint(
                 condition=Q(default_duration_days__isnull=True)
-                | Q(default_duration_days__gte=1, default_duration_days__lte=365),
+                | Q(default_duration_days__gte=1, default_duration_days__lte=3650),
                 name="sec_permset_duration_range",
             ),
         ]
         indexes = [models.Index(fields=("tenant_id", "is_active", "name"), name="sec_permset_active_name_idx")]
         ordering = ("name", "id")
+
+    def clean(self) -> None:
+        configuration = SecurityConfiguration.objects.for_tenant(self.tenant_id).first()
+        if configuration is None:
+            from .services import default_security_configuration
+
+            limits = default_security_configuration()["limits"]
+        else:
+            limits = configuration.document.get("limits")
+        if not isinstance(limits, dict):
+            raise ValidationError({"default_duration_days": "Tenant duration configuration is required."})
+        minimum = int(limits["permission_set_duration_min_days"])
+        maximum = int(limits["permission_set_duration_max_days"])
+        if self.default_duration_days is not None and not minimum <= self.default_duration_days <= maximum:
+            raise ValidationError(
+                {"default_duration_days": f"Must be between {minimum} and {maximum} days."}
+            )
 
     def __str__(self) -> str:
         return self.name
@@ -321,8 +540,8 @@ class FieldSecurity(MutableSecurityModel):
     resource = models.CharField(max_length=100)
     field = models.CharField(max_length=100)
     role = models.ForeignKey(Role, on_delete=models.PROTECT, related_name="field_security_rules")
-    visibility = models.CharField(max_length=20, choices=Visibility.choices, default=Visibility.VISIBLE)
-    edit_control = models.CharField(max_length=20, choices=EditControl.choices, default=EditControl.EDITABLE)
+    visibility = models.CharField(max_length=20, choices=Visibility.choices, default=default_field_visibility)
+    edit_control = models.CharField(max_length=20, choices=EditControl.choices, default=default_field_edit_control)
     mask_pattern = models.CharField(max_length=100, blank=True)
     is_active = models.BooleanField(default=True)
 
@@ -369,9 +588,9 @@ class RowSecurityRule(MutableSecurityModel):
     module = models.CharField(max_length=100)
     resource = models.CharField(max_length=100)
     role = models.ForeignKey(Role, on_delete=models.PROTECT, related_name="row_security_rules")
-    rule_type = models.CharField(max_length=20, choices=RuleType.choices, default=RuleType.OWNERSHIP)
+    rule_type = models.CharField(max_length=20, choices=RuleType.choices, default=default_row_rule_type)
     filter_criteria = models.JSONField(default=dict)
-    priority = models.SmallIntegerField(default=0)
+    priority = models.SmallIntegerField(default=default_row_rule_priority)
     is_active = models.BooleanField(default=True)
     version = models.PositiveIntegerField(default=1)
 
@@ -396,7 +615,14 @@ class RowSecurityRule(MutableSecurityModel):
 
         if self.role_id and self.role.tenant_id != self.tenant_id:
             raise ValidationError({"role_id": "Role must belong to this tenant."})
-        validate_predicate(self.filter_criteria)
+        # Model validation enforces the closed grammar. Tenant-configured complexity
+        # bounds are enforced in RowSecurityService before this model is persisted.
+        validate_predicate(
+            self.filter_criteria,
+            max_nodes=sys.maxsize,
+            max_depth=max(1, sys.getrecursionlimit() - 10),
+            max_in_values=sys.maxsize,
+        )
 
     def __str__(self) -> str:
         return f"{self.module}.{self.resource} -> {self.role.code} ({self.rule_type})"
@@ -420,24 +646,24 @@ class SecurityProfile(MutableSecurityModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True)
-    profile_type = models.CharField(max_length=20, choices=ProfileType.choices, default=ProfileType.STANDARD)
+    profile_type = models.CharField(max_length=20, choices=ProfileType.choices, default=default_profile_type)
     ip_whitelist = models.JSONField(default=list, blank=True)
     ip_blacklist = models.JSONField(default=list, blank=True)
     allowed_countries = models.JSONField(default=list, blank=True)
     blocked_countries = models.JSONField(default=list, blank=True)
     time_restrictions = models.JSONField(default=dict, blank=True)
-    mfa_required = models.CharField(max_length=20, choices=MFARequired.choices, default=MFARequired.CONDITIONAL)
+    mfa_required = models.CharField(max_length=20, choices=MFARequired.choices, default=default_mfa_requirement)
     allowed_mfa_methods = models.JSONField(default=list, blank=True)
     password_policy = models.JSONField(default=dict, blank=True)
-    session_timeout_minutes = models.PositiveIntegerField(default=60)
-    absolute_session_timeout_hours = models.PositiveIntegerField(default=8)
-    max_concurrent_sessions = models.PositiveIntegerField(default=5)
-    download_allowed = models.BooleanField(default=True)
-    print_allowed = models.BooleanField(default=True)
-    copy_paste_allowed = models.BooleanField(default=True)
-    mobile_access_allowed = models.BooleanField(default=True)
-    login_notification = models.BooleanField(default=False)
-    access_notification = models.BooleanField(default=False)
+    session_timeout_minutes = models.PositiveIntegerField(default=default_session_timeout_minutes)
+    absolute_session_timeout_hours = models.PositiveIntegerField(default=default_absolute_session_timeout_hours)
+    max_concurrent_sessions = models.PositiveIntegerField(default=default_max_concurrent_sessions)
+    download_allowed = models.BooleanField(default=default_download_allowed)
+    print_allowed = models.BooleanField(default=default_print_allowed)
+    copy_paste_allowed = models.BooleanField(default=default_copy_paste_allowed)
+    mobile_access_allowed = models.BooleanField(default=default_mobile_access_allowed)
+    login_notification = models.BooleanField(default=default_login_notification)
+    access_notification = models.BooleanField(default=default_access_notification)
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -447,15 +673,15 @@ class SecurityProfile(MutableSecurityModel):
                 fields=("tenant_id", "name"), condition=Q(is_deleted=False), name="sec_profile_tenant_name_uniq"
             ),
             models.CheckConstraint(
-                condition=Q(session_timeout_minutes__gte=5, session_timeout_minutes__lte=1440),
+                condition=Q(session_timeout_minutes__gte=1, session_timeout_minutes__lte=10080),
                 name="sec_profile_session_timeout",
             ),
             models.CheckConstraint(
-                condition=Q(absolute_session_timeout_hours__gte=1, absolute_session_timeout_hours__lte=168),
+                condition=Q(absolute_session_timeout_hours__gte=1, absolute_session_timeout_hours__lte=744),
                 name="sec_profile_absolute_timeout",
             ),
             models.CheckConstraint(
-                condition=Q(max_concurrent_sessions__gte=1, max_concurrent_sessions__lte=100),
+                condition=Q(max_concurrent_sessions__gte=1, max_concurrent_sessions__lte=1000),
                 name="sec_profile_session_count",
             ),
         ]
@@ -486,7 +712,7 @@ class SecurityProfileAssignment(TenantScopedModel, TimestampedModel):
     role = models.ForeignKey(
         Role, null=True, blank=True, on_delete=models.PROTECT, related_name="security_profile_assignments"
     )
-    precedence = models.SmallIntegerField(default=0)
+    precedence = models.SmallIntegerField(default=default_profile_assignment_precedence)
     valid_from = models.DateTimeField(default=timezone.now)
     valid_until = models.DateTimeField(null=True, blank=True)
     assigned_by = models.UUIDField()

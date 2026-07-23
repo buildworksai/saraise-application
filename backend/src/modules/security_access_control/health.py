@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Callable, Mapping
 from urllib.parse import urljoin
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from django.conf import settings
 from django.db import connection
@@ -20,6 +21,7 @@ from src.core.resilience import CircuitBreakerError, CircuitState, ResilientHttp
 
 POLICY_DEPENDENCY = "policy-engine"
 POLICY_HEALTH_PATH = "/health/ready"
+LOCAL_CANARY_PERMISSION = "security.readiness-canary:deny"
 
 GLOBAL_TABLES = ("security_permissions",)
 TENANT_TABLES = (
@@ -75,10 +77,10 @@ def _schema_check() -> ComponentResult:
 
 def _rls_check() -> ComponentResult:
     if connection.vendor != "postgresql":
-        # SQLite is supported only for local development and fast unit tests.
-        # Production deployments use PostgreSQL, where the checks below are
-        # mandatory and fail closed.
-        return ComponentResult(True, "not_applicable")
+        # RLS is a mandatory security dependency, not an optional capability.
+        # Test suites may substitute this probe at their composition boundary;
+        # the security primitive itself always fails closed.
+        return ComponentResult(False, "rls_unsupported")
     try:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -123,11 +125,58 @@ def _permission_catalog_check() -> ComponentResult:
 
 def _local_evaluator_check() -> ComponentResult:
     try:
+        from .models import SecurityConfiguration, UserRole
         from .services import AccessEvaluationService
 
-        ready = callable(getattr(AccessEvaluationService, "evaluate_local", None))
-        return ComponentResult(ready, "ready" if ready else "evaluator_unavailable")
-    except (ImportError, AttributeError):
+        evaluator = getattr(AccessEvaluationService, "evaluate_local", None)
+        if not callable(evaluator):
+            return ComponentResult(False, "evaluator_unavailable")
+
+        # A readiness result must prove the evaluator and its tenant-owned
+        # configuration work together.  The canary principal is explicitly
+        # configured so this public probe never scans across tenant data.
+        raw_tenant_id = getattr(settings, "SARAISE_SECURITY_CANARY_TENANT_ID", None)
+        raw_user_id = getattr(settings, "SARAISE_SECURITY_CANARY_USER_ID", None)
+        try:
+            tenant_id = UUID(str(raw_tenant_id))
+        except (TypeError, ValueError, AttributeError):
+            return ComponentResult(False, "canary_fixture_missing")
+        user_id = str(raw_user_id).strip()
+        if not user_id:
+            return ComponentResult(False, "canary_fixture_missing")
+        principal_exists = (
+            UserRole.objects.for_tenant(tenant_id)
+            .filter(
+                user_id=user_id,
+                revoked_at__isnull=True,
+            )
+            .exists()
+        )
+        if not principal_exists:
+            return ComponentResult(False, "canary_fixture_missing")
+        configuration = SecurityConfiguration.objects.for_tenant(tenant_id).values("document", "version").first()
+        if (
+            configuration is None
+            or not isinstance(configuration.get("document"), Mapping)
+            or not configuration["document"]
+            or not isinstance(configuration.get("version"), int)
+            or configuration["version"] < 1
+        ):
+            return ComponentResult(False, "configuration_missing")
+        result = evaluator(
+            tenant_id,
+            SimpleNamespace(id=user_id),
+            LOCAL_CANARY_PERMISSION,
+            resource_context={"readiness_canary": True},
+            request=SimpleNamespace(correlation_id="readiness-canary"),
+        )
+        ready = result.allowed is False and tuple(result.reason_codes) == ("DENY_DEFAULT",)
+        return ComponentResult(ready, "ready" if ready else "canary_did_not_deny")
+    except (ImportError, AttributeError, TypeError, ValueError):
+        return ComponentResult(False, "evaluator_unavailable")
+    except Exception:
+        # Database, configuration, or evaluator failures are deliberately
+        # indistinguishable on the public readiness surface.
         return ComponentResult(False, "evaluator_unavailable")
 
 
@@ -219,6 +268,7 @@ def check_security_module_health(request: Request) -> Response:
 __all__ = [
     "EXPECTED_TABLES",
     "GLOBAL_TABLES",
+    "LOCAL_CANARY_PERMISSION",
     "POLICY_DEPENDENCY",
     "POLICY_HEALTH_PATH",
     "TENANT_TABLES",

@@ -12,6 +12,10 @@ import {
   isRole,
   isRolePermission,
   isRowSecurityRule,
+  isSecurityConfiguration,
+  isSecurityConfigurationExport,
+  isSecurityConfigurationPreview,
+  isSecurityConfigurationVersion,
   isSecurityAuditLog,
   isSecurityProfile,
   isUserPermissionSet,
@@ -24,6 +28,7 @@ import {
   type FieldSecurityFilters,
   type FieldSecurityInput,
   type FieldSecurityUpdateInput,
+  type DeletionReasonInput,
   type GovernedResult,
   type HealthStatus,
   type PaginatedResult,
@@ -45,6 +50,13 @@ import {
   type SecurityProfileFilters,
   type SecurityProfileInput,
   type SecurityProfileUpdateInput,
+  type SecurityConfiguration,
+  type SecurityConfigurationExport,
+  type SecurityConfigurationPreview,
+  type SecurityConfigurationPreviewInput,
+  type SecurityConfigurationRollbackInput,
+  type SecurityConfigurationRolloutInput,
+  type SecurityConfigurationWriteInput,
   type SetRolePermissionInput,
   type UUID,
   type UserPermissionSetCreateInput,
@@ -91,6 +103,16 @@ function query(path: string, filters: object): string {
   return encoded ? `${path}?${encoded}` : path;
 }
 
+function withDeletionReason(path: string, input: DeletionReasonInput): string {
+  const reason = input.reason.trim();
+  if (!reason) throw new ApiError("A nonblank deletion or revocation reason is required.", 400, undefined, "REASON_REQUIRED");
+  return query(path, { reason });
+}
+
+function mutationInit(): RequestInit {
+  return { headers: { "Idempotency-Key": crypto.randomUUID() } };
+}
+
 async function getOne<T>(path: string, guard: Guard<T>): Promise<GovernedResult<T>> {
   return unwrap(await apiClient.get<unknown>(path), guard);
 }
@@ -98,13 +120,13 @@ async function getPage<T>(path: string, filters: object, guard: Guard<T>): Promi
   return unwrapPage(await apiClient.get<unknown>(query(path, filters)), guard);
 }
 async function postOne<T>(path: string, input: unknown, guard: Guard<T>): Promise<GovernedResult<T>> {
-  return unwrap(await apiClient.post<unknown>(path, input), guard);
+  return unwrap(await apiClient.post<unknown>(path, input, mutationInit()), guard);
 }
 async function patchOne<T>(path: string, input: unknown, guard: Guard<T>): Promise<GovernedResult<T>> {
-  return unwrap(await apiClient.patch<unknown>(path, input), guard);
+  return unwrap(await apiClient.patch<unknown>(path, input, mutationInit()), guard);
 }
 async function putOne<T>(path: string, input: unknown, guard: Guard<T>): Promise<GovernedResult<T>> {
-  return unwrap(await apiClient.put<unknown>(path, input), guard);
+  return unwrap(await apiClient.put<unknown>(path, input, mutationInit()), guard);
 }
 
 export const securityService = {
@@ -113,9 +135,9 @@ export const securityService = {
     get: (id: UUID) => getOne(ENDPOINTS.ROLES.DETAIL(id), isRole),
     create: (input: RoleCreateInput) => postOne(ENDPOINTS.ROLES.CREATE, input, isRole),
     update: (id: UUID, input: RoleUpdateInput) => patchOne(ENDPOINTS.ROLES.UPDATE(id), input, isRole),
-    delete: (id: UUID) => apiClient.delete<void>(ENDPOINTS.ROLES.DELETE(id)),
+    delete: (id: UUID, input: DeletionReasonInput) => apiClient.delete<void>(withDeletionReason(ENDPOINTS.ROLES.DELETE(id), input), mutationInit()),
     setPermission: (id: UUID, input: SetRolePermissionInput) => postOne(ENDPOINTS.ROLES.PERMISSIONS(id), input, isRolePermission),
-    removePermission: (id: UUID, permissionId: UUID) => apiClient.delete<void>(ENDPOINTS.ROLES.PERMISSION(id, permissionId)),
+    removePermission: (id: UUID, permissionId: UUID, input: DeletionReasonInput) => apiClient.delete<void>(withDeletionReason(ENDPOINTS.ROLES.PERMISSION(id, permissionId), input), mutationInit()),
   },
   permissions: {
     list: (filters: PermissionFilters = {}) => getPage(ENDPOINTS.PERMISSIONS.LIST, filters, isPermission),
@@ -126,14 +148,14 @@ export const securityService = {
     get: (id: UUID) => getOne(ENDPOINTS.USER_ROLES.DETAIL(id), isUserRole),
     create: (input: UserRoleCreateInput) => postOne(ENDPOINTS.USER_ROLES.CREATE, input, isUserRole),
     update: (id: UUID, input: UserRoleUpdateInput) => patchOne(ENDPOINTS.USER_ROLES.UPDATE(id), input, isUserRole),
-    revoke: (id: UUID) => apiClient.delete<void>(ENDPOINTS.USER_ROLES.DELETE(id)),
+    revoke: (id: UUID, input: DeletionReasonInput) => apiClient.delete<void>(withDeletionReason(ENDPOINTS.USER_ROLES.DELETE(id), input), mutationInit()),
   },
   permissionSets: {
     list: (filters: PermissionSetFilters = {}) => getPage(ENDPOINTS.PERMISSION_SETS.LIST, filters, isPermissionSet),
     get: (id: UUID) => getOne(ENDPOINTS.PERMISSION_SETS.DETAIL(id), isPermissionSet),
     create: (input: PermissionSetCreateInput) => postOne(ENDPOINTS.PERMISSION_SETS.CREATE, input, isPermissionSet),
     update: (id: UUID, input: PermissionSetUpdateInput) => patchOne(ENDPOINTS.PERMISSION_SETS.UPDATE(id), input, isPermissionSet),
-    delete: (id: UUID) => apiClient.delete<void>(ENDPOINTS.PERMISSION_SETS.DELETE(id)),
+    delete: (id: UUID, input: DeletionReasonInput) => apiClient.delete<void>(withDeletionReason(ENDPOINTS.PERMISSION_SETS.DELETE(id), input), mutationInit()),
     replacePermissions: (id: UUID, input: ReplacePermissionSetPermissionsInput) => putOne(ENDPOINTS.PERMISSION_SETS.PERMISSIONS(id), input, isPermissionSet),
   },
   userPermissionSets: {
@@ -141,35 +163,35 @@ export const securityService = {
     get: (id: UUID) => getOne(ENDPOINTS.USER_PERMISSION_SETS.DETAIL(id), isUserPermissionSet),
     create: (input: UserPermissionSetCreateInput) => postOne(ENDPOINTS.USER_PERMISSION_SETS.CREATE, input, isUserPermissionSet),
     update: (id: UUID, input: UserPermissionSetUpdateInput) => patchOne(ENDPOINTS.USER_PERMISSION_SETS.UPDATE(id), input, isUserPermissionSet),
-    revoke: (id: UUID) => apiClient.delete<void>(ENDPOINTS.USER_PERMISSION_SETS.DELETE(id)),
+    revoke: (id: UUID, input: DeletionReasonInput) => apiClient.delete<void>(withDeletionReason(ENDPOINTS.USER_PERMISSION_SETS.DELETE(id), input), mutationInit()),
   },
   fieldSecurity: {
     list: (filters: FieldSecurityFilters = {}) => getPage(ENDPOINTS.FIELD_SECURITY.LIST, filters, isFieldSecurity),
     get: (id: UUID) => getOne(ENDPOINTS.FIELD_SECURITY.DETAIL(id), isFieldSecurity),
     create: (input: FieldSecurityInput) => postOne(ENDPOINTS.FIELD_SECURITY.CREATE, input, isFieldSecurity),
     update: (id: UUID, input: FieldSecurityUpdateInput) => patchOne(ENDPOINTS.FIELD_SECURITY.UPDATE(id), input, isFieldSecurity),
-    delete: (id: UUID) => apiClient.delete<void>(ENDPOINTS.FIELD_SECURITY.DELETE(id)),
+    delete: (id: UUID, input: DeletionReasonInput) => apiClient.delete<void>(withDeletionReason(ENDPOINTS.FIELD_SECURITY.DELETE(id), input), mutationInit()),
   },
   rowSecurity: {
     list: (filters: RowSecurityFilters = {}) => getPage(ENDPOINTS.ROW_SECURITY.LIST, filters, isRowSecurityRule),
     get: (id: UUID) => getOne(ENDPOINTS.ROW_SECURITY.DETAIL(id), isRowSecurityRule),
     create: (input: RowSecurityRuleInput) => postOne(ENDPOINTS.ROW_SECURITY.CREATE, input, isRowSecurityRule),
     update: (id: UUID, input: RowSecurityRuleUpdateInput) => patchOne(ENDPOINTS.ROW_SECURITY.UPDATE(id), input, isRowSecurityRule),
-    delete: (id: UUID) => apiClient.delete<void>(ENDPOINTS.ROW_SECURITY.DELETE(id)),
+    delete: (id: UUID, input: DeletionReasonInput) => apiClient.delete<void>(withDeletionReason(ENDPOINTS.ROW_SECURITY.DELETE(id), input), mutationInit()),
   },
   securityProfiles: {
     list: (filters: SecurityProfileFilters = {}) => getPage(ENDPOINTS.SECURITY_PROFILES.LIST, filters, isSecurityProfile),
     get: (id: UUID) => getOne(ENDPOINTS.SECURITY_PROFILES.DETAIL(id), isSecurityProfile),
     create: (input: SecurityProfileInput) => postOne(ENDPOINTS.SECURITY_PROFILES.CREATE, input, isSecurityProfile),
     update: (id: UUID, input: SecurityProfileUpdateInput) => patchOne(ENDPOINTS.SECURITY_PROFILES.UPDATE(id), input, isSecurityProfile),
-    delete: (id: UUID) => apiClient.delete<void>(ENDPOINTS.SECURITY_PROFILES.DELETE(id)),
+    delete: (id: UUID, input: DeletionReasonInput) => apiClient.delete<void>(withDeletionReason(ENDPOINTS.SECURITY_PROFILES.DELETE(id), input), mutationInit()),
   },
   profileAssignments: {
     list: (filters: AssignmentFilters = {}) => getPage(ENDPOINTS.PROFILE_ASSIGNMENTS.LIST, filters, isProfileAssignment),
     get: (id: UUID) => getOne(ENDPOINTS.PROFILE_ASSIGNMENTS.DETAIL(id), isProfileAssignment),
     create: (input: SecurityProfileAssignmentCreateInput) => postOne(ENDPOINTS.PROFILE_ASSIGNMENTS.CREATE, input, isProfileAssignment),
     update: (id: UUID, input: SecurityProfileAssignmentUpdateInput) => patchOne(ENDPOINTS.PROFILE_ASSIGNMENTS.UPDATE(id), input, isProfileAssignment),
-    revoke: (id: UUID) => apiClient.delete<void>(ENDPOINTS.PROFILE_ASSIGNMENTS.DELETE(id)),
+    revoke: (id: UUID, input: DeletionReasonInput) => apiClient.delete<void>(withDeletionReason(ENDPOINTS.PROFILE_ASSIGNMENTS.DELETE(id), input), mutationInit()),
   },
   auditLogs: {
     list: (filters: AuditLogFilters = {}) => getPage(ENDPOINTS.AUDIT_LOGS.LIST, filters, isSecurityAuditLog),
@@ -177,6 +199,16 @@ export const securityService = {
   },
   accessDecisions: {
     simulate: (input: AccessSimulationInput): Promise<GovernedResult<AccessDecision>> => postOne(ENDPOINTS.ACCESS_DECISIONS.SIMULATE, input, isAccessDecision),
+  },
+  configuration: {
+    get: (): Promise<GovernedResult<SecurityConfiguration>> => getOne(ENDPOINTS.CONFIGURATION.CURRENT, isSecurityConfiguration),
+    update: (input: SecurityConfigurationWriteInput): Promise<GovernedResult<SecurityConfiguration>> => putOne(ENDPOINTS.CONFIGURATION.CURRENT, input, isSecurityConfiguration),
+    preview: (input: SecurityConfigurationPreviewInput): Promise<GovernedResult<SecurityConfigurationPreview>> => postOne(ENDPOINTS.CONFIGURATION.PREVIEW, input, isSecurityConfigurationPreview),
+    versions: () => getPage(ENDPOINTS.CONFIGURATION.VERSIONS, {}, isSecurityConfigurationVersion),
+    rollback: (version: number, input: SecurityConfigurationRollbackInput): Promise<GovernedResult<SecurityConfiguration>> => postOne(ENDPOINTS.CONFIGURATION.ROLLBACK(version), input, isSecurityConfiguration),
+    importDocument: (input: SecurityConfigurationWriteInput): Promise<GovernedResult<SecurityConfiguration>> => postOne(ENDPOINTS.CONFIGURATION.IMPORT, input, isSecurityConfiguration),
+    exportDocument: (): Promise<GovernedResult<SecurityConfigurationExport>> => getOne(ENDPOINTS.CONFIGURATION.EXPORT, isSecurityConfigurationExport),
+    updateRollout: (input: SecurityConfigurationRolloutInput): Promise<GovernedResult<SecurityConfiguration>> => putOne(ENDPOINTS.CONFIGURATION.ROLLOUT, input, isSecurityConfiguration),
   },
   health: (): Promise<GovernedResult<HealthStatus>> => getOne(ENDPOINTS.HEALTH, isHealthStatus),
 } as const;
