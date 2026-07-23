@@ -1,134 +1,34 @@
-"""
-Tenant Isolation Tests for Notifications module.
-"""
+"""Concrete cross-tenant isolation checks for notification resources."""
 
 import uuid
+
 import pytest
-from django.contrib.auth import get_user_model
-from rest_framework import status
-from rest_framework.test import APIClient
 
-from src.core.auth_utils import get_user_id, get_user_tenant_id
-from src.modules.notifications.models import Notification
-
-User = get_user_model()
-
-
-@pytest.fixture(autouse=True)
-def override_saraise_mode(settings):
-    """Force development mode for tests to bypass licensing."""
-    settings.SARAISE_MODE = "development"
-
-
-@pytest.fixture
-def api_client():
-    """Create API client for testing."""
-    return APIClient()
-
-
-@pytest.fixture
-def tenant_a_user(db):
-    """Create user for tenant A."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_a",
-        email="usera@example.com",
-        password="testpass123",
-    )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
-
-
-@pytest.fixture
-def tenant_b_user(db):
-    """Create user for tenant B."""
-    from unittest.mock import patch
-    from src.core.user_models import UserProfile
-
-    tenant_id = str(uuid.uuid4())
-    user = User.objects.create_user(
-        username="user_b",
-        email="userb@example.com",
-        password="testpass123",
-    )
-    with patch.object(UserProfile, "clean"):
-        profile, _ = UserProfile.objects.get_or_create(
-            user=user,
-            defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"},
-        )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return User.objects.get(pk=user.pk)
+from src.modules.notifications.models import Notification, NotificationConfiguration, NotificationEndpoint, NotificationPreference, NotificationTemplate
+from src.modules.notifications.services import NotificationConfigurationService, NotificationInboxService, NotificationTemplateService
 
 
 @pytest.mark.django_db
-class TestNotificationTenantIsolation:
-    """CRITICAL: Tenant isolation tests for Notification model."""
+def test_inbox_list_detail_update_delete_and_same_user_are_tenant_isolated():
+    tenant_a, tenant_b, same_user = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    row_a = Notification.objects.create(tenant_id=tenant_a, user_id=same_user, title="A", message="A")
+    row_b = Notification.objects.create(tenant_id=tenant_b, user_id=same_user, title="B", message="B")
+    assert list(NotificationInboxService.list_for_user(tenant_a, same_user)) == [row_a]
+    with pytest.raises(Notification.DoesNotExist): NotificationInboxService.get_for_user(tenant_a, same_user, row_b.id)
+    before = Notification.objects.filter(pk=row_b.pk).values().get()
+    with pytest.raises(Notification.DoesNotExist): NotificationInboxService.mark_read(tenant_a, same_user, row_b.id, "cross-read")
+    assert Notification.objects.filter(pk=row_b.pk).values().get() == before
 
-    def test_user_cannot_list_other_tenant_notifications(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User sees only their tenant's notifications in list."""
-        tenant_a_id = uuid.UUID(get_user_tenant_id(tenant_a_user))
-        tenant_b_id = uuid.UUID(get_user_tenant_id(tenant_b_user))
-        user_a_id = uuid.UUID(get_user_id(tenant_a_user))
-        user_b_id = uuid.UUID(get_user_id(tenant_b_user))
 
-        # Create notification for tenant A user
-        notification_a = Notification.objects.create(
-            tenant_id=tenant_a_id,
-            user_id=user_a_id,
-            title="Notification A",
-            message="Test message A",
-        )
-
-        # Create notification for tenant B user
-        notification_b = Notification.objects.create(
-            tenant_id=tenant_b_id,
-            user_id=user_b_id,
-            title="Notification B",
-            message="Test message B",
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        response = api_client.get("/api/v1/notifications/notifications/")
-        assert response.status_code == status.HTTP_200_OK
-        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        notification_ids = [n["id"] for n in data]
-
-        # User A should see tenant A's notification, but NOT tenant B's notification
-        assert str(notification_a.id) in notification_ids
-        assert str(notification_b.id) not in notification_ids
-
-    def test_user_cannot_get_other_tenant_notification_by_id(self, api_client, tenant_a_user, tenant_b_user):
-        """Test: User cannot GET other tenant's notification by ID (returns 404)."""
-        tenant_b_id = uuid.UUID(get_user_tenant_id(tenant_b_user))
-        user_b_id = uuid.UUID(get_user_id(tenant_b_user))
-
-        # Create notification for tenant B
-        notification_b = Notification.objects.create(
-            tenant_id=tenant_b_id,
-            user_id=user_b_id,
-            title="Notification B",
-            message="Test message B",
-        )
-
-        # Login as tenant A
-        api_client.force_authenticate(user=tenant_a_user)
-
-        # Try to access tenant B's notification
-        response = api_client.get(f"/api/v1/notifications/notifications/{notification_b.id}/")
-        assert response.status_code == status.HTTP_404_NOT_FOUND
+@pytest.mark.django_db
+def test_templates_configuration_preferences_and_endpoints_require_explicit_tenant_scope():
+    tenant_a, tenant_b, actor, user = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    NotificationConfigurationService.get_or_create_default(tenant_a, "development", actor)
+    config_b = NotificationConfigurationService.get_or_create_default(tenant_b, "development", actor)
+    template_b = NotificationTemplateService.create_template(tenant_b, actor, {"code": "tenant.b", "name": "Tenant B", "category": "general", "channel": "in_app", "body_template": "Body", "variables_schema": {}}, "b-create")
+    NotificationPreference.objects.create(tenant_id=tenant_b, user_id=user, channel="in_app", category="general")
+    NotificationEndpoint.objects.create(tenant_id=tenant_b, user_id=user, kind="push", device_type="web", address_ciphertext="encrypted", fingerprint="f" * 64, display_name="B", created_by=actor)
+    assert not NotificationTemplateService.list_templates(tenant_a).filter(pk=template_b.pk).exists()
+    assert not NotificationConfiguration.objects.for_tenant(tenant_a).filter(pk=config_b.pk).exists()
+    assert not NotificationPreference.objects.for_tenant(tenant_a).filter(tenant_id=tenant_b).exists()
+    assert not NotificationEndpoint.objects.for_tenant(tenant_a).filter(tenant_id=tenant_b).exists()

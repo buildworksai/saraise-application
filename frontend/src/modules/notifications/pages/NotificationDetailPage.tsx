@@ -1,0 +1,23 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Archive, Check, ExternalLink, Undo2 } from "lucide-react";
+import { useParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { PATHS } from "../contracts";
+import { NOTIFICATION_QUERY_KEYS, notificationService } from "../services/notification-service";
+import { GovernedError, MutationError, PageShell, PageSkeleton, StatusPill, formatDate, transitionKey } from "../components/NotificationUI";
+
+function safeActionUrl(value: string): string | null { if (!value) return null; try { const parsed = new URL(value, window.location.origin); return parsed.origin === window.location.origin ? `${parsed.pathname}${parsed.search}${parsed.hash}` : null; } catch { return null; } }
+
+export function NotificationDetailPage() {
+  const { id = "" } = useParams(); const client = useQueryClient();
+  const detail = useQuery({ queryKey: NOTIFICATION_QUERY_KEYS.inboxItem(id), queryFn: ({ signal }) => notificationService.inbox.get(id, signal), enabled: Boolean(id) });
+  const change = useMutation({ mutationFn: async (action: "read" | "unread" | "archive") => { const input = { transition_key: transitionKey(action) }; if (action === "read") return notificationService.inbox.markRead(id, input); if (action === "unread") return notificationService.inbox.markUnread(id, input); return notificationService.inbox.archive(id, input); }, onMutate: async (action) => { await client.cancelQueries({ queryKey: NOTIFICATION_QUERY_KEYS.inboxItem(id) }); const previous = client.getQueryData<Awaited<ReturnType<typeof notificationService.inbox.get>>>(NOTIFICATION_QUERY_KEYS.inboxItem(id)); if (previous) client.setQueryData(NOTIFICATION_QUERY_KEYS.inboxItem(id), { ...previous, status: action === "read" ? "read" : action === "unread" ? "unread" : "archived", read_at: action === "read" ? new Date().toISOString() : null }); return { previous }; }, onError: (_error, _action, context) => { if (context?.previous) client.setQueryData(NOTIFICATION_QUERY_KEYS.inboxItem(id), context.previous); }, onSuccess: (value) => { client.setQueryData(NOTIFICATION_QUERY_KEYS.inboxItem(id), value); void client.invalidateQueries({ queryKey: ["notifications", "inbox"] }); void client.invalidateQueries({ queryKey: NOTIFICATION_QUERY_KEYS.unread }); } });
+  if (detail.isLoading) return <PageSkeleton cards={2}/>;
+  if (detail.error || !detail.data) return <PageShell title="Notification" description="Full notification details."><GovernedError error={detail.error} retry={() => void detail.refetch()} subject="Notification"/></PageShell>;
+  const item = detail.data; const action = safeActionUrl(item.action_url);
+  return <PageShell title={item.title} description={`${item.category} · ${formatDate(item.created_at)}`} back={{ label: "Back to inbox", to: PATHS.INBOX }} actions={<>{item.status === "unread" ? <Button disabled={change.isPending} onClick={() => change.mutate("read")}><Check className="mr-2 h-4 w-4"/>Mark read</Button> : item.status === "read" ? <Button variant="outline" disabled={change.isPending} onClick={() => change.mutate("unread")}><Undo2 className="mr-2 h-4 w-4"/>Mark unread</Button> : null}{item.status !== "archived" ? <Button variant="outline" disabled={change.isPending} onClick={() => change.mutate("archive")}><Archive className="mr-2 h-4 w-4"/>Archive</Button> : null}</>}>
+    <MutationError error={change.error}/><Card className="space-y-5 p-5 sm:p-7"><div className="flex flex-wrap gap-2"><StatusPill value={item.status}/><StatusPill value={item.notification_type}/></div><p className="whitespace-pre-wrap leading-7">{item.message}</p>{action ? <a className="inline-flex items-center text-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" href={action}>Open related record<ExternalLink className="ml-2 h-4 w-4"/></a> : item.action_url ? <p role="note" className="text-sm text-muted-foreground">The related link was hidden because it is not a safe internal destination.</p> : null}</Card>
+    {item.transition_history?.length ? <Card className="p-5"><h2 className="font-semibold">Activity</h2><ol className="mt-4 space-y-3">{item.transition_history.map((record) => <li key={record.transition_key} className="border-l-2 border-border pl-4 text-sm"><strong className="capitalize">{record.action.replaceAll("_", " ")}</strong><span className="block text-muted-foreground">{formatDate(record.at)} · Correlation {record.correlation_id}</span></li>)}</ol></Card> : null}
+  </PageShell>;
+}

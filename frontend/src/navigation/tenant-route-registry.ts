@@ -239,6 +239,7 @@ export function validateTenantSidebarTree(
 /** Build stable, module-grouped sidebar branches from validated route descriptors. */
 export function buildTenantSidebarTree(
   routes: readonly TenantRoute[],
+  grantedPermissions?: ReadonlySet<string>,
 ): readonly TenantSidebarBranch[] {
   validateTenantRoutes(routes);
   const leavesByModule = new Map<string, TenantSidebarLeaf[]>();
@@ -247,6 +248,7 @@ export function buildTenantSidebarTree(
   for (const route of routes) {
     const contextualNavItem = route.module === "process_mining" && route.navigation.type === "contextual";
     if (route.navigation.type !== "sidebar" && !contextualNavItem) continue;
+    if (grantedPermissions && route.requiredPermission && !grantedPermissions.has(route.requiredPermission)) continue;
     const parent = route.navigation.type === "contextual" ? routesById.get(route.navigation.parentRouteId) : undefined;
     const parentNavigation = parent?.navigation.type === "sidebar" ? parent.navigation : undefined;
     const derivedLabel = route.sourceFile.split('/').at(-1)?.replace(/Page\.tsx$/, '').replace(/([a-z])([A-Z])/g, '$1 $2') ?? route.id;
@@ -301,6 +303,7 @@ export const tenantSidebarTree = buildTenantSidebarTree(tenantRoutes);
 
 export function getTenantSidebarTreeForMode(
   mode?: TenantApplicationMode,
+  grantedPermissions?: ReadonlySet<string>,
 ): readonly TenantSidebarBranch[] {
-  return buildTenantSidebarTree(getTenantRoutesForMode(tenantRoutes, mode));
+  return buildTenantSidebarTree(getTenantRoutesForMode(tenantRoutes, mode), grantedPermissions);
 }
