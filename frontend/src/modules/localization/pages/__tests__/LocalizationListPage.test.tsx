@@ -7,11 +7,12 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { LocalizationListPage } from './LocalizationListPage';
-import { localization_service } from '../services/localization-service';
+import { LocalizationListPage } from '../LocalizationListPage';
+import { localizationService as localization_service } from '../../services/localization-service';
+import type { Translation } from '../../contracts';
 
 // Mock dependencies
-vi.mock('../services/localization-service');
+vi.mock('../../services/localization-service');
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
   return {
@@ -44,10 +45,12 @@ describe('LocalizationListPage', () => {
 
   it('should render loading state', () => {
     vi.mocked(localization_service.listResources).mockImplementation(
-      () => new Promise(() => {}) // Never resolves
+      () => new Promise<Translation[]>(() => {
+        // Intentionally unresolved to exercise the loading state.
+      })
     );
 
-    render(
+    const { container } = render(
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <LocalizationListPage />
@@ -55,7 +58,7 @@ describe('LocalizationListPage', () => {
       </QueryClientProvider>
     );
 
-    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    expect(container.querySelector('.animate-pulse')).toBeInTheDocument();
   });
 
   it('should render empty state when no resources', async () => {
@@ -75,22 +78,30 @@ describe('LocalizationListPage', () => {
   });
 
   it('should render resources list', async () => {
-    const mockResources = [
+    const mockResources: Translation[] = [
       {
         id: '1',
-        name: 'Resource 1',
-        description: 'Description 1',
-        is_active: true,
+        tenant_id: 'tenant-id',
+        language: 'en',
+        key: 'Resource 1',
+        value: 'First resource',
+        context: 'Description 1',
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
       },
       {
         id: '2',
-        name: 'Resource 2',
-        description: 'Description 2',
-        is_active: false,
+        tenant_id: 'tenant-id',
+        language: 'en',
+        key: 'Resource 2',
+        value: 'Second resource',
+        context: 'Description 2',
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
       },
     ];
 
-    vi.mocked(localization_service.listResources).mockResolvedValue(mockResources as any);
+    vi.mocked(localization_service.listResources).mockResolvedValue(mockResources);
 
     render(
       <QueryClientProvider client={queryClient}>
@@ -107,12 +118,12 @@ describe('LocalizationListPage', () => {
   });
 
   it('should filter resources by search term', async () => {
-    const mockResources = [
-      { id: '1', name: 'Apple', description: 'Fruit' },
-      { id: '2', name: 'Banana', description: 'Fruit' },
+    const mockResources: Translation[] = [
+      { id: '1', tenant_id: 'tenant-id', language: 'en', key: 'Apple', value: 'Apple', context: 'Fruit', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
+      { id: '2', tenant_id: 'tenant-id', language: 'en', key: 'Banana', value: 'Banana', context: 'Fruit', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' },
     ];
 
-    vi.mocked(localization_service.listResources).mockResolvedValue(mockResources as any);
+    vi.mocked(localization_service.listResources).mockResolvedValue(mockResources);
 
     render(
       <QueryClientProvider client={queryClient}>
@@ -123,15 +134,15 @@ describe('LocalizationListPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText('Apple')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Apple' })).toBeInTheDocument();
     });
 
     const searchInput = screen.getByPlaceholderText(/search/i);
     await userEvent.type(searchInput, 'Banana');
 
     await waitFor(() => {
-      expect(screen.queryByText('Apple')).not.toBeInTheDocument();
-      expect(screen.getByText('Banana')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Apple' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Banana' })).toBeInTheDocument();
     });
   });
 });
