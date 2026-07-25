@@ -33,7 +33,7 @@ export interface ApiError {
     readonly field_errors?: readonly FieldError[];
   };
 }
-export interface ListResult<T> { readonly items: readonly T[]; readonly pagination: PaginationMeta; readonly meta: ApiMeta }
+export interface ListResult<T> { readonly results: readonly T[]; readonly pagination: PaginationMeta; readonly meta: ApiMeta }
 
 export interface TransitionHistoryItem {
   readonly command: string;
@@ -75,6 +75,7 @@ export interface AccountCreateRequest {
   parent?: string | null; is_group?: boolean; is_active?: boolean; currency?: string;
   allow_multi_currency?: boolean; cash_flow_category?: CashFlowCategory | null; description?: string;
 }
+export type AccountCreate = AccountCreateRequest;
 export type AccountUpdateRequest = Partial<AccountCreateRequest> & { version: number };
 export interface AccountNode extends Account { readonly children: readonly AccountNode[] }
 
@@ -173,6 +174,7 @@ export interface PaymentCreateRequest {
 export interface PaymentUpdateRequest { reference_number?: string; description?: string }
 
 export interface TransitionCommand { transition_key: string; version: number; reason?: string }
+export interface PaymentVoidCommand { transition_key: string; reason?: string }
 export interface ApprovalCommand extends TransitionCommand { comments?: string }
 export interface ReversalCommand extends TransitionCommand { posting_date: string; reason: string }
 export interface BatchImportCommand { file_reference: string }

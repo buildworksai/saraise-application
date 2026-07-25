@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/Select';
-import { accountingService } from '../services/accounting-service';
+import { accountingService, createIdempotencyKey } from '../services/accounting-service';
 import type { AccountCreate } from '../contracts';
 
 const MODULE_PATH = '/accounting-finance/accounts';
@@ -28,11 +28,13 @@ export const CreateAccountPage = () => {
     code: '',
     name: '',
     account_type: 'asset',
+    normal_balance: 'debit',
     is_active: true,
   });
 
   const createMutation = useMutation({
-    mutationFn: (data: AccountCreate) => accountingService.createAccount(data),
+    mutationFn: (data: AccountCreate) =>
+      accountingService.createAccount(data, createIdempotencyKey('account.create')),
     onSuccess: (account) => {
       void queryClient.invalidateQueries({ queryKey: ['accounting-accounts'] });
       toast.success('Account created successfully');
@@ -90,7 +92,9 @@ export const CreateAccountPage = () => {
               <label className="text-sm font-medium mb-2 block">Type</label>
               <Select
                 value={form.account_type}
-                onValueChange={(v) => setForm({ ...form, account_type: v })}
+                onValueChange={(v) =>
+                  setForm({ ...form, account_type: v as AccountCreate['account_type'] })
+                }
               >
                 <SelectTrigger>
                   <SelectValue />

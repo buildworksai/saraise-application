@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { TableSkeleton, EmptyState, ErrorState } from '@/components/ui';
 import { accountingService } from '../services/accounting-service';
-import type { Account } from '../contracts';
 
 const MODULE_PATH = '/accounting-finance/accounts';
 
@@ -58,7 +57,7 @@ export const AccountListPage = () => {
     );
   }
 
-  if (!accounts || accounts.length === 0) {
+  if (!accounts || accounts.results.length === 0) {
     return (
       <div className="p-8">
         <div className="mb-6 flex items-center justify-between">
@@ -113,7 +112,7 @@ export const AccountListPage = () => {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {accounts.map((account) => (
+            {accounts.results.map((account) => (
               <tr key={account.id} className="hover:bg-muted/50">
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                   {account.code}

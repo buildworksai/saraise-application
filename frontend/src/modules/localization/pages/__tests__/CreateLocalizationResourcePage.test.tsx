@@ -7,11 +7,12 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { CreateLocalizationResourcePage } from './CreateLocalizationResourcePage';
-import { localization_service } from '../services/localization-service';
+import { CreateLocalizationResourcePage } from '../CreateLocalizationResourcePage';
+import { localizationService as localization_service } from '../../services/localization-service';
+import type { Translation } from '../../contracts';
 
 // Mock dependencies
-vi.mock('../services/localization-service');
+vi.mock('../../services/localization-service');
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
   return {
@@ -51,8 +52,10 @@ describe('CreateLocalizationResourcePage', () => {
       </QueryClientProvider>
     );
 
-    expect(screen.getByLabelText(/name/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/description/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/language id/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/translation key/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/translation value/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/context/i)).toBeInTheDocument();
   });
 
   it('should validate required fields', async () => {
@@ -68,12 +71,22 @@ describe('CreateLocalizationResourcePage', () => {
     await userEvent.click(submitButton);
 
     await waitFor(() => {
-      expect(screen.getByText(/name is required/i)).toBeInTheDocument();
+      expect(screen.getByText(/language is required/i)).toBeInTheDocument();
     });
   });
 
   it('should submit form with valid data', async () => {
-    const mockCreate = vi.mocked(localization_service.createResource).mockResolvedValue({ id: 'new-id' } as any);
+    const createdTranslation: Translation = {
+      id: 'new-id',
+      tenant_id: 'tenant-id',
+      language: 'en',
+      key: 'common.save',
+      value: 'Save',
+      context: 'button',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+    const mockCreate = vi.mocked(localization_service.createTranslation).mockResolvedValue(createdTranslation);
 
     render(
       <QueryClientProvider client={queryClient}>
@@ -83,19 +96,24 @@ describe('CreateLocalizationResourcePage', () => {
       </QueryClientProvider>
     );
 
-    const nameInput = screen.getByLabelText(/name/i);
-    const descriptionInput = screen.getByLabelText(/description/i);
+    const languageInput = screen.getByLabelText(/language id/i);
+    const keyInput = screen.getByLabelText(/translation key/i);
+    const valueInput = screen.getByLabelText(/translation value/i);
+    const contextInput = screen.getByLabelText(/context/i);
     const submitButton = screen.getByRole('button', { name: /create/i });
 
-    await userEvent.type(nameInput, 'New Resource');
-    await userEvent.type(descriptionInput, 'New Description');
+    await userEvent.type(languageInput, 'en');
+    await userEvent.type(keyInput, 'common.save');
+    await userEvent.type(valueInput, 'Save');
+    await userEvent.type(contextInput, 'button');
     await userEvent.click(submitButton);
 
     await waitFor(() => {
       expect(mockCreate).toHaveBeenCalledWith({
-        name: 'New Resource',
-        description: 'New Description',
-        config: {},
+        language: 'en',
+        key: 'common.save',
+        value: 'Save',
+        context: 'button',
       });
     });
   });

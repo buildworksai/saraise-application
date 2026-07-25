@@ -38,6 +38,7 @@ import {
   type PaymentCreateRequest,
   type PaymentListQuery,
   type PaymentUpdateRequest,
+  type PaymentVoidCommand,
   type PostingPeriod,
   type PostingPeriodCreateRequest,
   type PostingPeriodListQuery,
@@ -133,7 +134,7 @@ async function unwrap<T>(request: Promise<ApiEnvelope<T>>): Promise<T> {
 async function unwrapList<T>(request: Promise<ApiListEnvelope<T>>): Promise<ListResult<T>> {
   const envelope = await translate(request);
   if (!Array.isArray(envelope.data) || !envelope.meta?.pagination) throw new AccountingApiError('The server returned an invalid paginated response envelope.', 502, 'MALFORMED_RESPONSE', envelope.meta?.correlation_id ?? null, null);
-  return { items: envelope.data, pagination: envelope.meta.pagination, meta: envelope.meta };
+  return { results: envelope.data, pagination: envelope.meta.pagination, meta: envelope.meta };
 }
 
 export function createIdempotencyKey(command: string): string {
@@ -190,7 +191,7 @@ export const accountingService = {
   getPayment: (id: string) => unwrap(apiClient.get<ApiEnvelope<Payment>>(ENDPOINTS.PAYMENTS.DETAIL(id))),
   createPayment: (data: PaymentCreateRequest, key: string) => unwrap(apiClient.post<ApiEnvelope<Payment>>(ENDPOINTS.PAYMENTS.CREATE, data, mutationHeaders(key))),
   updatePayment: (id: string, data: PaymentUpdateRequest) => unwrap(apiClient.patch<ApiEnvelope<Payment>>(ENDPOINTS.PAYMENTS.UPDATE(id), data)),
-  voidPayment: (id: string, command: TransitionCommand) => unwrap(apiClient.post<ApiEnvelope<Payment>>(ENDPOINTS.PAYMENTS.VOID(id), command, mutationHeaders(command.transition_key, command.version))),
+  voidPayment: (id: string, command: PaymentVoidCommand) => unwrap(apiClient.post<ApiEnvelope<Payment>>(ENDPOINTS.PAYMENTS.VOID(id), command, mutationHeaders(command.transition_key))),
 
   trialBalance: (queryValues: AsOfDateQuery) => unwrap(apiClient.get<ApiEnvelope<TrialBalance>>(query(ENDPOINTS.REPORTS.TRIAL_BALANCE, queryValues))),
   generalLedger: (queryValues: GeneralLedgerQuery) => unwrap(apiClient.get<ApiEnvelope<GeneralLedger>>(query(ENDPOINTS.REPORTS.GENERAL_LEDGER, queryValues))),

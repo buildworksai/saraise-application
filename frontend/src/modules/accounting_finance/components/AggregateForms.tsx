@@ -61,7 +61,11 @@ const emptyInvoiceLine = (lineNumber: number): InvoiceLineWriteRequest => ({ lin
 type InvoiceCreate = APInvoiceCreateRequest | ARInvoiceCreateRequest;
 export function InvoiceForm({ kind, initial, pending, serverErrors = {}, onSubmit, onCancel }: { kind: 'ap' | 'ar'; initial?: InvoiceCreate; pending: boolean; serverErrors?: FormErrors; onSubmit: (value: InvoiceCreate) => void; onCancel: () => void }) {
   const partyKey = kind === 'ap' ? 'supplier_id' : 'customer_id';
-  const partyInitial = initial && partyKey in initial ? initial[partyKey] : '';
+  const partyInitial = initial
+    ? 'supplier_id' in initial
+      ? initial.supplier_id
+      : initial.customer_id
+    : '';
   const [base, setBase] = useState({ invoice_number: initial?.invoice_number ?? '', party_id: partyInitial, invoice_date: initial?.invoice_date ?? today(), due_date: initial?.due_date ?? today(), currency: initial?.currency ?? 'USD', exchange_rate: initial?.exchange_rate ?? '1.00000000', description: initial?.description ?? '', lines: initial?.lines ?? [emptyInvoiceLine(1)] });
   const [errors, setErrors] = useState<FormErrors>({});
   const setLine = (index: number, changes: Partial<InvoiceLineWriteRequest>) => setBase({ ...base, lines: base.lines.map((line, lineIndex) => lineIndex === index ? { ...line, ...changes } : line) });

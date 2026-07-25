@@ -28,7 +28,7 @@ export function RuleGovernancePanel({ kind, ruleId }: { readonly kind: RuleKind;
     await cache.invalidateQueries({ queryKey: historyKey });
     await cache.invalidateQueries({ queryKey: detailKey });
   };
-  const rollback = useMutation<ItemResult<DataQualityRule> | ItemResult<MatchingRule>, unknown, number>({
+  const rollback = useMutation<ItemResult<DataQualityRule> | ItemResult<MatchingRule>, Error, number>({
     mutationFn: (versionNumber: number) => kind === "quality"
       ? masterDataService.qualityRules.rollback(ruleId, { version_number: versionNumber, reason, idempotency_key: rollbackKey })
       : masterDataService.matchingRules.rollback(ruleId, { version_number: versionNumber, reason, idempotency_key: rollbackKey }),
@@ -37,7 +37,7 @@ export function RuleGovernancePanel({ kind, ruleId }: { readonly kind: RuleKind;
       await refresh();
     },
   });
-  const imported = useMutation<ItemResult<DataQualityRule> | ItemResult<MatchingRule>, unknown, void>({
+  const imported = useMutation<ItemResult<DataQualityRule> | ItemResult<MatchingRule>, Error, void>({
     mutationFn: () => {
       if (!document) throw new Error("Choose a portable rule document before importing.");
       return kind === "quality"
