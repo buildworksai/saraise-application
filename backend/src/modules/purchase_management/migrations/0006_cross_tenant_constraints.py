@@ -18,7 +18,7 @@ def forward(apps, schema_editor):
     q = schema_editor.quote_name
     with schema_editor.connection.cursor() as cursor:
         for table in PARENTS:
-            cursor.execute(f"ALTER TABLE {q(table)} ADD CONSTRAINT {q(table[:18] + '_tenant_id_uq')} UNIQUE (tenant_id, id)")
+            cursor.execute(f"ALTER TABLE {q(table)} ADD CONSTRAINT {q(table + '_tenant_id_uq')} UNIQUE (tenant_id, id)")
         for index, (child, column, parent) in enumerate(RELATIONS):
             cursor.execute(f"ALTER TABLE {q(child)} ADD CONSTRAINT {q('purchase_tenant_fk_' + str(index))} FOREIGN KEY (tenant_id, {q(column)}) REFERENCES {q(parent)} (tenant_id, id) DEFERRABLE INITIALLY DEFERRED")
 
@@ -27,7 +27,7 @@ def reverse(apps, schema_editor):
     q = schema_editor.quote_name
     with schema_editor.connection.cursor() as cursor:
         for index, (child, _, _) in reversed(list(enumerate(RELATIONS))): cursor.execute(f"ALTER TABLE {q(child)} DROP CONSTRAINT IF EXISTS {q('purchase_tenant_fk_' + str(index))}")
-        for table in reversed(PARENTS): cursor.execute(f"ALTER TABLE {q(table)} DROP CONSTRAINT IF EXISTS {q(table[:18] + '_tenant_id_uq')}")
+        for table in reversed(PARENTS): cursor.execute(f"ALTER TABLE {q(table)} DROP CONSTRAINT IF EXISTS {q(table + '_tenant_id_uq')}")
 
 class Migration(migrations.Migration):
     dependencies = [("purchase_management", "0005_procurement_configuration")]
