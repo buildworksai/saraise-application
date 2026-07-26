@@ -556,6 +556,7 @@ class InvoiceAggregate(SoftDeletableStatefulAggregate):
 
 @tenancy_scope(TENANT_SCOPED)
 class APInvoice(InvoiceAggregate):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     _state_edges = {
         (APInvoiceStatus.DRAFT, "submit"): APInvoiceStatus.SUBMITTED,
         (APInvoiceStatus.SUBMITTED, "approve"): APInvoiceStatus.APPROVED,
@@ -616,6 +617,7 @@ class APInvoice(InvoiceAggregate):
 
 @tenancy_scope(TENANT_SCOPED)
 class ARInvoice(InvoiceAggregate):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     _state_edges = {
         (ARInvoiceStatus.DRAFT, "post"): ARInvoiceStatus.POSTED,
         (ARInvoiceStatus.POSTED, "record_partial_payment"): ARInvoiceStatus.PARTIALLY_PAID,
