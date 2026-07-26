@@ -2,21 +2,27 @@
  * BillingSubscriptionsDetailPage Component Tests
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import userEvent from '@testing-library/user-event';
+import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BillingSubscriptionsDetailPage } from './BillingSubscriptionsDetailPage';
-import { billing_subscriptions_service } from '../services/billing-subscriptions-service';
+import { toast } from 'sonner';
+import type { Subscription } from '../../contracts';
+import { billing_subscriptionsService } from '../../services/billing_subscriptions-service';
+import { BillingSubscriptionsDetailPage } from '../BillingSubscriptionsDetailPage';
 
-// Mock dependencies
-vi.mock('../services/billing-subscriptions-service');
+const { navigateMock } = vi.hoisted(() => ({
+  navigateMock: vi.fn(),
+}));
+
+vi.mock('../../services/billing_subscriptions-service');
 vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
   return {
     ...actual,
-    useParams: () => ({ id: 'test-id' }),
-    useNavigate: () => vi.fn(),
+    useParams: () => ({ id: 'subscription-1' }),
+    useNavigate: () => navigateMock,
   };
 });
 
@@ -27,12 +33,34 @@ vi.mock('sonner', () => ({
   },
 }));
 
-const createTestQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: { retry: false },
-    mutations: { retry: false },
-  },
-});
+const subscription: Subscription = {
+  id: 'subscription-1',
+  tenant_id: 'tenant-1',
+  plan: 'enterprise-plan',
+  plan_id: 'plan-1',
+  status: 'active',
+  current_period_start: '2026-07-01T00:00:00Z',
+  current_period_end: '2026-08-01T00:00:00Z',
+  created_at: '2026-07-01T00:00:00Z',
+  updated_at: '2026-07-01T00:00:00Z',
+};
+
+const createTestQueryClient = () =>
+  new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+
+const renderPage = (queryClient: QueryClient) =>
+  render(
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <BillingSubscriptionsDetailPage />
+      </BrowserRouter>
+    </QueryClientProvider>,
+  );
 
 describe('BillingSubscriptionsDetailPage', () => {
   let queryClient: QueryClient;
@@ -42,66 +70,63 @@ describe('BillingSubscriptionsDetailPage', () => {
     vi.clearAllMocks();
   });
 
-  it('should render loading state', () => {
-    vi.mocked(billing_subscriptions_service.getResource).mockImplementation(
-      () => new Promise(() => {}) // Never resolves
+  it('renders the loading state while the subscription request is pending', () => {
+    vi.mocked(billing_subscriptionsService.getSubscription).mockImplementation(
+      () => new Promise<Subscription>(() => {}),
     );
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/:id" element={<BillingSubscriptionsDetailPage />} />
-          </Routes>
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
+    renderPage(queryClient);
 
-    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+    expect(screen.getByText('Loading resource...')).toBeInTheDocument();
+    expect(billing_subscriptionsService.getSubscription).toHaveBeenCalledWith('subscription-1');
   });
 
-  it('should render resource details', async () => {
-    const mockResource = {
-      id: 'test-id',
-      name: 'Test Resource',
-      description: 'Test Description',
-      is_active: true,
-      config: { key: 'value' },
-    };
+  it('renders the subscription details returned by the service', async () => {
+    vi.mocked(billing_subscriptionsService.getSubscription).mockResolvedValue(subscription);
 
-    vi.mocked(billing_subscriptions_service.getResource).mockResolvedValue(mockResource as any);
+    renderPage(queryClient);
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/:id" element={<BillingSubscriptionsDetailPage />} />
-          </Routes>
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText('Test Resource')).toBeInTheDocument();
-      expect(screen.getByText('Test Description')).toBeInTheDocument();
-    });
+    expect(
+      await screen.findByRole('heading', { name: 'Subscription subscription-1' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Plan: enterprise-plan')).toBeInTheDocument();
+    expect(screen.getByText('enterprise-plan')).toBeInTheDocument();
+    expect(screen.getByText('active')).toBeInTheDocument();
+    expect(
+      screen.getByText(new Date(subscription.current_period_start).toLocaleDateString()),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(new Date(subscription.current_period_end).toLocaleDateString()),
+    ).toBeInTheDocument();
+    expect(billing_subscriptionsService.getSubscription).toHaveBeenCalledWith('subscription-1');
   });
 
-  it('should render error state when resource not found', async () => {
-    vi.mocked(billing_subscriptions_service.getResource).mockRejectedValue(new Error('Not found'));
-
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/:id" element={<BillingSubscriptionsDetailPage />} />
-          </Routes>
-        </BrowserRouter>
-      </QueryClientProvider>
+  it('renders the not-found state when the subscription request fails', async () => {
+    vi.mocked(billing_subscriptionsService.getSubscription).mockRejectedValue(
+      new Error('Subscription not found'),
     );
 
+    renderPage(queryClient);
+
+    expect(await screen.findByText('Resource not found')).toBeInTheDocument();
+    expect(billing_subscriptionsService.getSubscription).toHaveBeenCalledWith('subscription-1');
+  });
+
+  it('deletes the subscription and returns to the list after confirmation', async () => {
+    vi.mocked(billing_subscriptionsService.getSubscription).mockResolvedValue(subscription);
+    vi.mocked(billing_subscriptionsService.deleteSubscription).mockResolvedValue();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const user = userEvent.setup();
+
+    renderPage(queryClient);
+    await user.click(await screen.findByRole('button', { name: 'Delete' }));
+
     await waitFor(() => {
-      expect(screen.getByText(/not found/i)).toBeInTheDocument();
+      expect(billing_subscriptionsService.deleteSubscription).toHaveBeenCalledWith('subscription-1');
     });
+    expect(toast.success).toHaveBeenCalledWith('Resource deleted successfully');
+    expect(navigateMock).toHaveBeenCalledWith('/billing-subscriptions');
+
+    confirmSpy.mockRestore();
   });
 });

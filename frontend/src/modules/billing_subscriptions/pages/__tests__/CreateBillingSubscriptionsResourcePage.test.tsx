@@ -2,21 +2,26 @@
  * CreateBillingSubscriptionsResourcePage Component Tests
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { CreateBillingSubscriptionsResourcePage } from './CreateBillingSubscriptionsResourcePage';
-import { billing_subscriptions_service } from '../services/billing-subscriptions-service';
+import { toast } from 'sonner';
+import type { Subscription } from '../../contracts';
+import { billing_subscriptionsService } from '../../services/billing_subscriptions-service';
+import { CreateBillingSubscriptionsResourcePage } from '../CreateBillingSubscriptionsResourcePage';
 
-// Mock dependencies
-vi.mock('../services/billing-subscriptions-service');
+const { navigateMock } = vi.hoisted(() => ({
+  navigateMock: vi.fn(),
+}));
+
+vi.mock('../../services/billing_subscriptions-service');
 vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
   return {
     ...actual,
-    useNavigate: () => vi.fn(),
+    useNavigate: () => navigateMock,
   };
 });
 
@@ -27,12 +32,34 @@ vi.mock('sonner', () => ({
   },
 }));
 
-const createTestQueryClient = () => new QueryClient({
-  defaultOptions: {
-    queries: { retry: false },
-    mutations: { retry: false },
-  },
-});
+const createdSubscription: Subscription = {
+  id: 'subscription-new',
+  tenant_id: 'tenant-1',
+  plan: 'enterprise-plan',
+  plan_id: 'plan-1',
+  status: 'pending',
+  current_period_start: '2026-07-26T00:00:00Z',
+  current_period_end: '2027-07-26T00:00:00Z',
+  created_at: '2026-07-26T00:00:00Z',
+  updated_at: '2026-07-26T00:00:00Z',
+};
+
+const createTestQueryClient = () =>
+  new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+
+const renderPage = (queryClient: QueryClient) =>
+  render(
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <CreateBillingSubscriptionsResourcePage />
+      </BrowserRouter>
+    </QueryClientProvider>,
+  );
 
 describe('CreateBillingSubscriptionsResourcePage', () => {
   let queryClient: QueryClient;
@@ -42,61 +69,41 @@ describe('CreateBillingSubscriptionsResourcePage', () => {
     vi.clearAllMocks();
   });
 
-  it('should render form', () => {
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <CreateBillingSubscriptionsResourcePage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
+  it('renders the real subscription form fields and default billing cycle', () => {
+    renderPage(queryClient);
 
-    expect(screen.getByLabelText(/name/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/description/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Create BillingSubscriptions Resource' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Plan ID *')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Billing Cycle' })).toHaveValue('monthly');
+    expect(screen.getByRole('option', { name: 'Monthly' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Yearly' })).toBeInTheDocument();
   });
 
-  it('should validate required fields', async () => {
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <CreateBillingSubscriptionsResourcePage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
+  it('validates that a plan is required before submitting', async () => {
+    const user = userEvent.setup();
+    renderPage(queryClient);
 
-    const submitButton = screen.getByRole('button', { name: /create/i });
-    await userEvent.click(submitButton);
+    await user.click(screen.getByRole('button', { name: 'Create Resource' }));
 
-    await waitFor(() => {
-      expect(screen.getByText(/name is required/i)).toBeInTheDocument();
-    });
+    expect(await screen.findByText('Plan is required')).toBeInTheDocument();
+    expect(billing_subscriptionsService.createSubscription).not.toHaveBeenCalled();
   });
 
-  it('should submit form with valid data', async () => {
-    const mockCreate = vi.mocked(billing_subscriptions_service.createResource).mockResolvedValue({ id: 'new-id' } as any);
+  it('submits the selected plan and billing cycle through createSubscription', async () => {
+    vi.mocked(billing_subscriptionsService.createSubscription).mockResolvedValue(createdSubscription);
+    const user = userEvent.setup();
+    renderPage(queryClient);
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <CreateBillingSubscriptionsResourcePage />
-        </BrowserRouter>
-      </QueryClientProvider>
-    );
+    await user.type(screen.getByLabelText('Plan ID *'), 'enterprise-plan');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Billing Cycle' }), 'yearly');
+    await user.click(screen.getByRole('button', { name: 'Create Resource' }));
 
-    const nameInput = screen.getByLabelText(/name/i);
-    const descriptionInput = screen.getByLabelText(/description/i);
-    const submitButton = screen.getByRole('button', { name: /create/i });
-
-    await userEvent.type(nameInput, 'New Resource');
-    await userEvent.type(descriptionInput, 'New Description');
-    await userEvent.click(submitButton);
-
-    await waitFor(() => {
-      expect(mockCreate).toHaveBeenCalledWith({
-        name: 'New Resource',
-        description: 'New Description',
-        config: {},
-      });
+    expect(billing_subscriptionsService.createSubscription).toHaveBeenCalledWith({
+      plan: 'enterprise-plan',
+      billing_cycle: 'yearly',
     });
+    expect(await screen.findByRole('button', { name: 'Create Resource' })).toBeEnabled();
+    expect(toast.success).toHaveBeenCalledWith('Subscription created successfully');
+    expect(navigateMock).toHaveBeenCalledWith('/billing-subscriptions');
   });
 });

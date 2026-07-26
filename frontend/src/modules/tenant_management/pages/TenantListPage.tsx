@@ -10,7 +10,13 @@ import { useNavigate } from "react-router-dom";
 import { Search, Building2 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
-import { Select } from "@/components/ui/Select";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/Select";
 import { TableSkeleton, EmptyState, ErrorState } from "@/components/ui";
 import { tenantService, type Tenant } from "../services/tenant-service";
 import { TenantStatusBadge, type TenantStatus } from "../components";
@@ -88,17 +94,21 @@ export const TenantListPage = () => {
           </div>
           <div className="w-48">
             <Select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              options={[
-                { value: "", label: "All Statuses" },
-                { value: "trial", label: "Trial" },
-                { value: "active", label: "Active" },
-                { value: "suspended", label: "Suspended" },
-                { value: "cancelled", label: "Cancelled" },
-                { value: "archived", label: "Archived" },
-              ]}
-            />
+              value={statusFilter || "all"}
+              onValueChange={(v) => setStatusFilter(v === "all" ? "" : v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="trial">Trial</SelectItem>
+                <SelectItem value="active">Active</SelectItem>
+                <SelectItem value="suspended">Suspended</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+                <SelectItem value="archived">Archived</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </Card>
