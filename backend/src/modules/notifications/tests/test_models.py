@@ -3,6 +3,7 @@ Model tests for Notifications module.
 """
 
 import uuid
+
 import pytest
 
 from src.modules.notifications.models import Notification

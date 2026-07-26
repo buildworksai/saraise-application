@@ -9,8 +9,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+from datetime import timedelta
 from decimal import Decimal
-from datetime import date, timedelta
 from typing import Any, Dict, Optional
 
 import razorpay
@@ -19,7 +19,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Invoice, Payment, Subscription, SubscriptionPlan
+from .models import Payment, Subscription, SubscriptionPlan
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ class SubscriptionService:
 
         with transaction.atomic():
             # Calculate proration
-            proration_amount = self._calculate_proration(subscription, new_plan)
+            self._calculate_proration(subscription, new_plan)
 
             # Update subscription
             subscription.plan = new_plan
@@ -441,9 +441,7 @@ class PaymentService:
             return {"success": False, "error": str(e)}
 
     @staticmethod
-    def verify_webhook_signature(
-        payload: bytes, signature: str, gateway: str = "stripe"
-    ) -> bool:
+    def verify_webhook_signature(payload: bytes, signature: str, gateway: str = "stripe") -> bool:
         """Verify webhook signature from payment gateway.
 
         Args:
@@ -488,9 +486,7 @@ class PaymentService:
                 return False
 
             # Razorpay uses HMAC SHA256
-            expected_signature = hmac.new(
-                webhook_secret.encode("utf-8"), payload, hashlib.sha256
-            ).hexdigest()
+            expected_signature = hmac.new(webhook_secret.encode("utf-8"), payload, hashlib.sha256).hexdigest()
 
             return hmac.compare_digest(expected_signature, signature)
         except Exception:
@@ -521,9 +517,7 @@ class PaymentService:
             return {"success": False, "error": f"Unsupported payment method: {payment.payment_method}"}
 
     @staticmethod
-    def _process_stripe_refund(
-        payment: Payment, amount: Optional[Decimal], reason: Optional[str]
-    ) -> Dict[str, Any]:
+    def _process_stripe_refund(payment: Payment, amount: Optional[Decimal], reason: Optional[str]) -> Dict[str, Any]:
         """Process Stripe refund."""
         try:
             stripe.api_key = getattr(settings, "STRIPE_SECRET_KEY", None)
@@ -549,9 +543,7 @@ class PaymentService:
             return {"success": False, "error": str(e)}
 
     @staticmethod
-    def _process_razorpay_refund(
-        payment: Payment, amount: Optional[Decimal], reason: Optional[str]
-    ) -> Dict[str, Any]:
+    def _process_razorpay_refund(payment: Payment, amount: Optional[Decimal], reason: Optional[str]) -> Dict[str, Any]:
         """Process Razorpay refund."""
         try:
             razorpay_key_id = getattr(settings, "RAZORPAY_KEY_ID", None)

@@ -3,9 +3,9 @@ Service tests for Multi-Company module.
 """
 
 import uuid
+
 import pytest
 
-from src.modules.multi_company.models import Company
 from src.modules.multi_company.services import CompanyService
 
 

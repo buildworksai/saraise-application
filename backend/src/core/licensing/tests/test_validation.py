@@ -412,9 +412,7 @@ class TestLicenseServiceHelpers:
             "core": {"tier": "free", "limits": {"max_companies": 1}},
             "modules": {"included": []},
         }
-        with patch.object(
-            LicenseService, "_decode_license_key", return_value=(wrong_org_data, "sig")
-        ):
+        with patch.object(LicenseService, "_decode_license_key", return_value=(wrong_org_data, "sig")):
             with patch.object(LicenseService, "_verify_signature", return_value=True):
                 is_valid, message = LicenseService._validate_isolated(active_license)
                 assert not is_valid

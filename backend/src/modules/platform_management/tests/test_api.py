@@ -4,8 +4,9 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.test import APIClient
+from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
+from src.modules.platform_management.api import PlatformSettingViewSet
 from src.modules.platform_management.models import FeatureFlag, PlatformAuditEvent, PlatformSetting, SystemHealth
 
 User = get_user_model()
@@ -24,7 +25,6 @@ def tenant_user(db):
 
     from src.core.user_models import UserProfile
 
-    tenant_id = str(uuid.uuid4())
     user = User.objects.create_user(
         username="testuser",
         email="test@example.com",
@@ -34,11 +34,12 @@ def tenant_user(db):
     # Mock the clean method to skip tenant existence check
     with patch.object(UserProfile, "clean"):
         profile, _ = UserProfile.objects.get_or_create(
-            user=user, defaults={"tenant_id": tenant_id, "tenant_role": "tenant_admin"}
+            user=user, defaults={"tenant_id": None, "platform_role": "platform_owner"}
         )
-        if not profile.tenant_id:
-            profile.tenant_id = tenant_id
-            profile.tenant_role = "tenant_admin"
+        if profile.platform_role != "platform_owner":
+            profile.tenant_id = None
+            profile.tenant_role = None
+            profile.platform_role = "platform_owner"
             profile.save()
     # Force reload profile
     user = User.objects.get(pk=user.pk)
@@ -52,9 +53,31 @@ def authenticated_client(api_client, tenant_user):
     return api_client
 
 
+@pytest.fixture
+def tenant_admin_user(db):
+    """Create a real tenant administrator who must not administer platform resources."""
+    from unittest.mock import patch
+
+    from src.core.user_models import UserProfile
+
+    user = User.objects.create_user(username="tenant-admin", password="testpass123")
+    profile = UserProfile.objects.get(user=user)
+    profile.tenant_id = str(uuid.uuid4())
+    profile.tenant_role = "tenant_admin"
+    with patch.object(UserProfile, "clean"):
+        profile.save()
+    return User.objects.select_related("profile").get(pk=user.pk)
+
+
 @pytest.mark.django_db
 class TestPlatformSettingViewSet:
     """Test cases for Platform Settings API."""
+
+    def test_tenant_admin_cannot_read_platform_settings(self, tenant_admin_user):
+        request = APIRequestFactory().get("/api/v1/platform/settings/")
+        force_authenticate(request, user=tenant_admin_user)
+        response = PlatformSettingViewSet.as_view({"get": "list"})(request)
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
     def test_create_setting_success(self, authenticated_client, tenant_user):
         """Test: Create setting with valid data."""
@@ -104,7 +127,7 @@ class TestPlatformSettingViewSet:
         assert "tenant_setting" in keys
 
     def test_list_settings_invalid_tenant_id(self, authenticated_client, monkeypatch):
-        """Test: Invalid tenant ID returns platform-wide settings only."""
+        """Platform owner access is not narrowed by a malformed tenant context."""
         monkeypatch.setattr(
             "src.modules.platform_management.api.get_user_tenant_id",
             lambda _user: "not-a-uuid",
@@ -115,7 +138,7 @@ class TestPlatformSettingViewSet:
         assert response.status_code == status.HTTP_200_OK
         keys = [s["key"] for s in response.data]
         assert "platform_only" in keys
-        assert "tenant_only" not in keys
+        assert "tenant_only" in keys
 
     def test_secret_value_masked(self, authenticated_client, tenant_user):
         """Test: Secret values are masked in API response."""
@@ -178,8 +201,7 @@ class TestFeatureFlagViewSet:
 
     def test_toggle_feature_flag(self, authenticated_client, tenant_user):
         """Test: Toggle feature flag status."""
-        tenant_id = uuid.UUID(tenant_user.profile.tenant_id)
-        flag = FeatureFlag.objects.create(tenant_id=tenant_id, name="toggle_me", enabled=True)
+        flag = FeatureFlag.objects.create(tenant_id=None, name="toggle_me", enabled=True)
         response = authenticated_client.post(f"/api/v1/platform/feature-flags/{flag.id}/toggle/")
         assert response.status_code == status.HTTP_200_OK
         assert not response.data["enabled"]
@@ -222,7 +244,7 @@ class TestFeatureFlagViewSet:
         assert response.status_code == status.HTTP_200_OK
         names = [f["name"] for f in response.data]
         assert "platform_flag" in names
-        assert "tenant_flag" not in names
+        assert "tenant_flag" in names
 
 
 @pytest.mark.django_db
@@ -288,11 +310,11 @@ class TestPlatformAuditEventViewSet:
         # Try to update (should fail)
         data = {"action": "modified.action"}
         response = authenticated_client.patch(f"/api/v1/platform/audit-events/{event.id}/", data, format="json")
-        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
         # Try to delete (should fail)
         response = authenticated_client.delete(f"/api/v1/platform/audit-events/{event.id}/")
-        assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.django_db

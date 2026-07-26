@@ -84,9 +84,7 @@ class LicenseService:
     def _validate_connected(cls, license: License) -> Tuple[bool, str]:
         """Validate license via license server."""
         version = getattr(settings, "SARAISE_VERSION", "1.0.0")
-        license_server_url = getattr(
-            settings, "SARAISE_LICENSE_SERVER_URL", cls.LICENSE_SERVER_URL
-        )
+        license_server_url = getattr(settings, "SARAISE_LICENSE_SERVER_URL", cls.LICENSE_SERVER_URL)
         try:
             response = requests.post(
                 f"{license_server_url}/api/v1/validate/",
@@ -282,9 +280,7 @@ class LicenseService:
 
             # Serialize payload without signature (matches platform crypto.py)
             payload_clean = {k: v for k, v in payload_dict.items() if k != "signature"}
-            payload_bytes = json.dumps(payload_clean, sort_keys=True, separators=(",", ":")).encode(
-                "utf-8"
-            )
+            payload_bytes = json.dumps(payload_clean, sort_keys=True, separators=(",", ":")).encode("utf-8")
             signature_bytes = base64.b64decode(signature_b64)
 
             public_key = serialization.load_pem_public_key(public_key_pem.encode())
@@ -346,19 +342,10 @@ class ModuleAccessService:
         "metadata_modeling",
         "dms",  # Document Management System (module name is 'dms', not 'document_management')
         "integration_platform",
-        "api_management",
         "ai_provider_configuration",
-        "automation_orchestration",
-        "document_intelligence",
-        "process_mining",
-        "backup_disaster_recovery",  # Backup & Disaster Recovery (includes all backup capabilities)
-        "performance_monitoring",
         "localization",
-        "regional",  # Regional Compliance (module name is 'regional', not 'regional_compliance')
-        "blockchain_traceability",
         "billing_subscriptions",
         "data_migration",
-        "customization_framework",
     ]
 
     CORE_MODULES = [

@@ -3,8 +3,8 @@ Model tests for Project Management module.
 """
 
 import uuid
+
 import pytest
-from datetime import date
 
 from src.modules.project_management.models import Project, Task
 

@@ -25,6 +25,7 @@ from src.modules.security_access_control.models import (
     UserPermissionSet,
     UserRole,
 )
+from src.modules.tenant_management.models import Tenant
 
 pytest_plugins = ["src.core.testing.factories"]
 pytestmark = pytest.mark.django_db

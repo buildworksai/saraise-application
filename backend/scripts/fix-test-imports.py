@@ -22,13 +22,13 @@ def get_module_path(file_path: Path) -> str:
     parts = file_path.parts
     if "src" not in parts:
         return None
-    
+
     src_idx = parts.index("src")
     module_parts = parts[src_idx:]
-    
+
     # Remove 'tests' and filename
     module_parts = [p for p in module_parts if p != "tests" and not p.endswith(".py")]
-    
+
     return ".".join(module_parts)
 
 
@@ -37,17 +37,17 @@ def fix_imports_in_file(file_path: Path) -> bool:
     try:
         content = file_path.read_text()
         original_content = content
-        
+
         # Get module path
         module_path = get_module_path(file_path)
         if not module_path:
             return False
-        
+
         # Pattern: from ..{name} import {items}
         pattern = r"from \.\.(\w+) import"
         replacement = f"from {module_path}.\\1 import"
         content = re.sub(pattern, replacement, content)
-        
+
         # Pattern: from ...{name} import {items} (three dots)
         pattern = r"from \.\.\.(\w+) import"
         # For three dots, go up one more level
@@ -56,7 +56,7 @@ def fix_imports_in_file(file_path: Path) -> bool:
             parent_module = ".".join(parts[:-1])
             replacement = f"from {parent_module}.\\1 import"
             content = re.sub(pattern, replacement, content)
-        
+
         if content != original_content:
             file_path.write_text(content)
             return True
@@ -70,19 +70,19 @@ def main():
     """Main function."""
     backend_dir = Path(__file__).parent.parent
     src_dir = backend_dir / "src"
-    
+
     if not src_dir.exists():
         print(f"Error: {src_dir} does not exist", file=sys.stderr)
         sys.exit(1)
-    
+
     test_files = list(src_dir.rglob("test_*.py"))
     fixed_count = 0
-    
+
     for test_file in test_files:
         if fix_imports_in_file(test_file):
             print(f"Fixed: {test_file.relative_to(backend_dir)}")
             fixed_count += 1
-    
+
     print(f"\nFixed {fixed_count} files")
     return 0
 

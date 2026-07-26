@@ -3,6 +3,7 @@ Tenant Isolation Tests for Budget Management module.
 """
 
 import uuid
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
@@ -40,6 +41,7 @@ def allow_declared_access(monkeypatch):
 def tenant_a_user(db):
     """Create user for tenant A."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())
@@ -64,6 +66,7 @@ def tenant_a_user(db):
 def tenant_b_user(db):
     """Create user for tenant B."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())

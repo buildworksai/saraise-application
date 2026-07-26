@@ -248,19 +248,7 @@ class ModuleInstaller:
         Raises:
             InstallationError: If permission registration fails.
         """
-        try:
-            # Import permission registry (placeholder - actual implementation depends on platform)
-            # from saraise.backend.src.core.permission_registry import PermissionRegistry
-            # permission_registry = PermissionRegistry()
-            # for perm in registry_entry.permissions:
-            #     permission_registry.register(tenant_id, perm, registry_entry.name)
-
-            logger.info(
-                f"Registered {len(registry_entry.permissions)} permissions " f"for module {registry_entry.name}"
-            )
-
-        except Exception as e:
-            raise InstallationError(f"Permission registration failed: {e}") from e
+        raise InstallationError("Permission registry integration is not implemented")
 
     def _register_sod_actions(self, tenant_id: str, registry_entry: ModuleRegistryEntry) -> None:
         """Register SoD actions.
@@ -272,19 +260,7 @@ class ModuleInstaller:
         Raises:
             InstallationError: If SoD action registration fails.
         """
-        try:
-            # Import SoD registry (placeholder - actual implementation depends on platform)
-            # from saraise.backend.src.core.sod_registry import SoDRegistry
-            # sod_registry = SoDRegistry()
-            # for action in registry_entry.sod_actions:
-            #     sod_registry.register(tenant_id, action, registry_entry.name)
-
-            logger.info(
-                f"Registered {len(registry_entry.sod_actions)} SoD actions " f"for module {registry_entry.name}"
-            )
-
-        except Exception as e:
-            raise InstallationError(f"SoD action registration failed: {e}") from e
+        raise InstallationError("SoD registry integration is not implemented")
 
     def _register_search_indexes(self, tenant_id: str, registry_entry: ModuleRegistryEntry) -> None:
         """Register search indexes.
@@ -296,19 +272,7 @@ class ModuleInstaller:
         Raises:
             InstallationError: If search index registration fails.
         """
-        try:
-            # Import search registry (placeholder - actual implementation depends on platform)
-            # from saraise.backend.src.core.search_registry import SearchRegistry
-            # search_registry = SearchRegistry()
-            # for index in registry_entry.search_indexes:
-            #     search_registry.register(tenant_id, index, registry_entry.name)
-
-            logger.info(
-                f"Registered {len(registry_entry.search_indexes)} search indexes " f"for module {registry_entry.name}"
-            )
-
-        except Exception as e:
-            raise InstallationError(f"Search index registration failed: {e}") from e
+        raise InstallationError("Search registry integration is not implemented")
 
     def _register_ai_tools(self, tenant_id: str, registry_entry: ModuleRegistryEntry) -> None:
         """Register AI tools.
@@ -320,17 +284,7 @@ class ModuleInstaller:
         Raises:
             InstallationError: If AI tool registration fails.
         """
-        try:
-            # Import AI tool registry (placeholder - actual implementation depends on platform)
-            # from saraise.backend.src.modules.ai_agent_management.tool_registry import ToolRegistryService
-            # tool_registry = ToolRegistryService()
-            # for tool_name in registry_entry.ai_tools:
-            #     tool_registry.register_from_module(tenant_id, registry_entry.name, tool_name)
-
-            logger.info(f"Registered {len(registry_entry.ai_tools)} AI tools " f"for module {registry_entry.name}")
-
-        except Exception as e:
-            raise InstallationError(f"AI tool registration failed: {e}") from e
+        raise InstallationError("AI tool registry integration is not implemented")
 
     def _post_install_verification(self, tenant_id: str, module_name: str) -> None:
         """Perform post-install verification.

@@ -6,21 +6,26 @@ Task: 501.2 - Module Registry & Compatibility Validation
 from __future__ import annotations
 
 import pytest
-from django.utils import timezone
 
-from src.core.module_manifest_schema import ModuleLifecycle, ModuleType
 from src.core.module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
-from src.core.module_registry_service import (
-    DependencyResolutionError,
-    ModuleRegistryService,
-    RegistryError,
-    module_registry_service,
-)
+from src.core.module_registry_service import DependencyResolutionError, ModuleRegistryService, RegistryError
 
 
 @pytest.mark.django_db
 class TestModuleRegistryService:
     """Test ModuleRegistryService."""
+
+    def test_unimplemented_module_cannot_be_registered(self) -> None:
+        manifest_yaml = """
+name: scaffold-module
+version: 1.0.0
+description: Scaffold module
+type: foundation
+lifecycle: managed
+status: unimplemented
+"""
+        with pytest.raises(RegistryError, match="unimplemented and cannot be registered"):
+            ModuleRegistryService().register_module(manifest_yaml, verify_signature=False)
 
     def test_register_module(self) -> None:
         """Test registering a module."""

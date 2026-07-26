@@ -11,37 +11,37 @@ MIGRATIONS_DIR = BACKEND_DIR / "src/modules/ai_agent_management/migrations"
 BACKUP_FILE = BACKEND_DIR / "migration-backups-2026-01-09/ai_agent_0001_initial_BACKUP.py"
 
 # Read backup
-with open(BACKUP_FILE, 'r') as f:
+with open(BACKUP_FILE, "r") as f:
     content = f.read()
 
 # Extract all AddIndex operations and map to models
-lines = content.split('\n')
+lines = content.split("\n")
 model_indexes = {}  # model_name -> list of index operations
 
 i = 0
 while i < len(lines):
     line = lines[i]
-    if 'migrations.AddIndex(' in line:
+    if "migrations.AddIndex(" in line:
         # Extract model_name
-        model_match = re.search(r'model_name="(\w+)"', lines[i+1] if i+1 < len(lines) else '')
+        model_match = re.search(r'model_name="(\w+)"', lines[i + 1] if i + 1 < len(lines) else "")
         if model_match:
             model_name = model_match.group(1).lower()
 
             # Extract the index definition
             index_start = i
-            paren_count = line.count('(') - line.count(')')
+            paren_count = line.count("(") - line.count(")")
             i += 1
 
             while i < len(lines) and paren_count > 0:
-                paren_count += lines[i].count('(') - lines[i].count(')')
+                paren_count += lines[i].count("(") - lines[i].count(")")
                 i += 1
 
             # Get the index definition between "index=" and the closing paren
             index_lines = lines[index_start:i]
-            index_str = '\n'.join(index_lines)
+            index_str = "\n".join(index_lines)
 
             # Extract just the models.Index(...) part
-            index_match = re.search(r'index=(models\.Index\([^)]+\))', index_str, re.DOTALL)
+            index_match = re.search(r"index=(models\.Index\([^)]+\))", index_str, re.DOTALL)
             if index_match:
                 index_def = index_match.group(1)
                 if model_name not in model_indexes:
@@ -55,6 +55,7 @@ while i < len(lines):
 print(f"Extracted indexes for {len(model_indexes)} models")
 for model, indexes in model_indexes.items():
     print(f"  {model}: {len(indexes)} indexes")
+
 
 # Now extract CreateModel operations and inject indexes
 def extract_create_model_with_indexes(content, model_name):
@@ -71,10 +72,10 @@ def extract_create_model_with_indexes(content, model_name):
     end_pos = start_pos
 
     for i, char in enumerate(rest_content):
-        if char == '(':
+        if char == "(":
             paren_count += 1
             in_create_model = True
-        elif char == ')':
+        elif char == ")":
             paren_count -= 1
             if in_create_model and paren_count == 0:
                 end_pos = start_pos + i + 1
@@ -86,9 +87,9 @@ def extract_create_model_with_indexes(content, model_name):
     model_lower = model_name.lower()
     if model_lower in model_indexes:
         # Find the options section or create one
-        if 'options={' in operation:
+        if "options={" in operation:
             # Has options, add indexes to it
-            options_match = re.search(r'(options=\{[^}]+)\}', operation, re.DOTALL)
+            options_match = re.search(r"(options=\{[^}]+)\}", operation, re.DOTALL)
             if options_match:
                 options_content = options_match.group(1)
 
@@ -98,40 +99,58 @@ def extract_create_model_with_indexes(content, model_name):
                 else:
                     # Add indexes to options
                     indexes_str = ",\n".join([f"                {idx}" for idx in model_indexes[model_lower]])
-                    new_options = f'{options_content},\n            "indexes": [\n{indexes_str}\n            ]\n        }}'
+                    new_options = (
+                        f'{options_content},\n            "indexes": [\n{indexes_str}\n            ]\n        }}'
+                    )
                     operation = operation.replace(options_match.group(0), new_options)
         else:
             # No options, create options block with indexes
             indexes_str = ",\n".join([f"                {idx}" for idx in model_indexes[model_lower]])
             # Find where to insert (before the closing paren and comma of CreateModel)
-            operation = operation.rstrip(',)')
-            operation += f''',
+            operation = operation.rstrip(",)")
+            operation += f""",
         options={{
             "indexes": [
 {indexes_str}
             ]
         }}
-    ),'''
+    ),"""
 
     # Add proper indentation
-    lines = operation.split('\n')
+    lines = operation.split("\n")
     indented_lines = []
     for line in lines:
         if line.strip():
-            indented_lines.append(' ' * 8 + line.strip())
+            indented_lines.append(" " * 8 + line.strip())
         else:
-            indented_lines.append('')
+            indented_lines.append("")
 
-    return '\n'.join(indented_lines) + ','
+    return "\n".join(indented_lines) + ","
 
 
 # Model sequence (21 models)
 MODELS = [
-    "Agent", "AgentExecution", "AgentSchedulerTask", "Tool", "ToolInvocation",
-    "ApprovalRequest", "SoDPolicy", "SoDViolation", "TenantQuota", "QuotaUsage",
-    "CostRecord", "CostSummary", "TokenUsage", "AuditEvent", "AuditTrail",
-    "EgressRequest", "EgressRule", "Secret", "SecretAccess", "KillSwitch",
-    "ShardSaturation"
+    "Agent",
+    "AgentExecution",
+    "AgentSchedulerTask",
+    "Tool",
+    "ToolInvocation",
+    "ApprovalRequest",
+    "SoDPolicy",
+    "SoDViolation",
+    "TenantQuota",
+    "QuotaUsage",
+    "CostRecord",
+    "CostSummary",
+    "TokenUsage",
+    "AuditEvent",
+    "AuditTrail",
+    "EgressRequest",
+    "EgressRule",
+    "Secret",
+    "SecretAccess",
+    "KillSwitch",
+    "ShardSaturation",
 ]
 
 # Import mapping
@@ -182,19 +201,20 @@ for i, model_name in enumerate(MODELS, start=1):
 
     # Create migration
     if i == 1:
-        dependency = 'dependencies = []'
+        dependency = "dependencies = []"
         is_initial = True
     else:
-        prev_name = MODELS[i-2].lower().replace('sod', 'sod_')
-        prev_name = re.sub(r'([a-z])([A-Z])', r'\1_\2', MODELS[i-2]).lower()
+        prev_name = MODELS[i - 2].lower().replace("sod", "sod_")
+        prev_name = re.sub(r"([a-z])([A-Z])", r"\1_\2", MODELS[i - 2]).lower()
         dependency = f'dependencies = [\n        ("ai_agent_management", "{i-1:04d}_create_{prev_name}"),\n    ]'
         is_initial = False
 
-    initial_flag = '\n    initial = True\n' if is_initial else '\n'
+    initial_flag = "\n    initial = True\n" if is_initial else "\n"
 
-    file_name = f"{i:04d}_create_{re.sub(r'([a-z])([A-Z])', r'\\1_\\2', model_name).lower()}.py"
+    model_slug = re.sub(r"([a-z])([A-Z])", r"\1_\2", model_name).lower()
+    file_name = f"{i:04d}_create_{model_slug}.py"
 
-    content_str = f'''# Generated by Django 4.2.27 on 2026-01-09 (split from 0001)
+    content_str = f"""# Generated by Django 4.2.27 on 2026-01-09 (split from 0001)
 
 {imports}
 
@@ -206,17 +226,17 @@ class Migration(migrations.Migration):
     operations = [
 {operation}
     ]
-'''
+"""
 
     output_path = MIGRATIONS_DIR / file_name
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         f.write(content_str)
 
     lines = len(content_str.splitlines())
     print(f"  ✅ Created: {file_name} ({lines} lines)")
     created_files.append((file_name, lines))
 
-    prev_migration = file_name.replace('.py', '')
+    prev_migration = file_name.replace(".py", "")
 
 print("\n" + "=" * 70)
 print("📊 Summary:")

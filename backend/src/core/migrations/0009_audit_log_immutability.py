@@ -19,7 +19,8 @@ def create_audit_immutability(apps, schema_editor):
     if connection.vendor != "postgresql":
         return
 
-    schema_editor.execute("""
+    schema_editor.execute(
+        """
         CREATE OR REPLACE FUNCTION saraise_audit_immutable()
         RETURNS TRIGGER AS $$
         BEGIN
@@ -45,7 +46,8 @@ def create_audit_immutability(apps, schema_editor):
             RETURN NULL;
         END;
         $$ LANGUAGE plpgsql;
-    """)
+    """
+    )
 
 
 def drop_audit_immutability(apps, schema_editor):

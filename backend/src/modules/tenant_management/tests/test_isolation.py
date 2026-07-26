@@ -14,7 +14,6 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from src.core.user_models import UserProfile
-
 from src.modules.tenant_management.models import Tenant
 
 User = get_user_model()
@@ -32,7 +31,6 @@ def platform_owner(db):
     user = User.objects.create_user(
         username="platform_owner",
         email="platform@example.com",
-        password="testpass123",
     )
     with patch.object(UserProfile, "clean"):
         profile, created = UserProfile.objects.get_or_create(
@@ -47,9 +45,7 @@ def platform_owner(db):
             profile.platform_role = "platform_owner"
             profile.tenant_id = None
             profile.save()
-    # Force reload user to ensure profile is accessible
-    user = User.objects.select_related("profile").get(pk=user.pk)
-    return user
+    return User.objects.select_related("profile").get(pk=user.pk)
 
 
 @pytest.fixture
@@ -59,18 +55,16 @@ def tenant_a_user(db):
     user = User.objects.create_user(
         username="user_a",
         email="user_a@example.com",
-        password="testpass123",
     )
     with patch.object(UserProfile, "clean"):
         profile, _ = UserProfile.objects.get_or_create(
             user=user,
             defaults={"tenant_id": str(tenant_a.id), "tenant_role": "tenant_admin"},
         )
-        if not profile.tenant_id:
-            profile.tenant_id = str(tenant_a.id)
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return user
+        profile.tenant_id = str(tenant_a.id)
+        profile.tenant_role = "tenant_admin"
+        profile.save()
+    return User.objects.select_related("profile").get(pk=user.pk)
 
 
 @pytest.fixture
@@ -80,18 +74,16 @@ def tenant_b_user(db):
     user = User.objects.create_user(
         username="user_b",
         email="user_b@example.com",
-        password="testpass123",
     )
     with patch.object(UserProfile, "clean"):
         profile, _ = UserProfile.objects.get_or_create(
             user=user,
             defaults={"tenant_id": str(tenant_b.id), "tenant_role": "tenant_admin"},
         )
-        if not profile.tenant_id:
-            profile.tenant_id = str(tenant_b.id)
-            profile.tenant_role = "tenant_admin"
-            profile.save()
-    return user
+        profile.tenant_id = str(tenant_b.id)
+        profile.tenant_role = "tenant_admin"
+        profile.save()
+    return User.objects.select_related("profile").get(pk=user.pk)
 
 
 @pytest.mark.django_db

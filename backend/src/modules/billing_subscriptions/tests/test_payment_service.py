@@ -6,12 +6,9 @@ SPDX-License-Identifier: Apache-2.0
 
 import uuid
 from decimal import Decimal
-from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
-import pytest
 from django.test import TestCase
-from django.utils import timezone
 
 from src.modules.billing_subscriptions.models import Invoice, Payment
 from src.modules.billing_subscriptions.services import PaymentService
@@ -25,8 +22,9 @@ class PaymentServiceTestCase(TestCase):
         self.tenant_id = str(uuid.uuid4())
 
         # Create test invoice
-        from django.utils import timezone
         from datetime import timedelta
+
+        from django.utils import timezone
 
         self.invoice = Invoice.objects.create(
             tenant_id=self.tenant_id,
@@ -52,7 +50,7 @@ class PaymentServiceTestCase(TestCase):
         with patch("src.modules.billing_subscriptions.services.stripe") as mock_stripe:
             with patch("src.modules.billing_subscriptions.services.settings") as mock_settings:
                 mock_settings.STRIPE_SECRET_KEY = "sk_test_123"
-                
+
                 mock_intent = MagicMock()
                 mock_intent.id = "pi_test_123"
                 mock_intent.status = "succeeded"
@@ -73,7 +71,7 @@ class PaymentServiceTestCase(TestCase):
         with patch("src.modules.billing_subscriptions.services.stripe") as mock_stripe:
             with patch("src.modules.billing_subscriptions.services.settings") as mock_settings:
                 mock_settings.STRIPE_SECRET_KEY = "sk_test_123"
-                
+
                 mock_intent = MagicMock()
                 mock_intent.id = "pi_test_123"
                 mock_intent.status = "requires_action"
@@ -92,7 +90,7 @@ class PaymentServiceTestCase(TestCase):
             with patch("src.modules.billing_subscriptions.services.settings") as mock_settings:
                 mock_settings.RAZORPAY_KEY_ID = "rzp_test_123"
                 mock_settings.RAZORPAY_KEY_SECRET = "secret_123"
-                
+
                 mock_client = MagicMock()
                 mock_order = {"id": "order_test_123"}
                 mock_client.order.create.return_value = mock_order
@@ -119,7 +117,7 @@ class PaymentServiceTestCase(TestCase):
         with patch("src.modules.billing_subscriptions.services.stripe") as mock_stripe:
             with patch("src.modules.billing_subscriptions.services.settings") as mock_settings:
                 mock_settings.STRIPE_WEBHOOK_SECRET = "whsec_test_123"
-                
+
                 mock_webhook = MagicMock()
                 mock_webhook.construct_event.return_value = {"type": "payment_intent.succeeded"}
                 mock_stripe.Webhook = mock_webhook

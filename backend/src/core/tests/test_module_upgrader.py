@@ -8,11 +8,10 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-from django.utils import timezone
 
 from src.core.module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
 from src.core.module_upgrade_models import ModuleUpgrade, UpgradeStatus
-from src.core.module_upgrader import ModuleUpgrader, RollbackError, UpgradeError, module_upgrader
+from src.core.module_upgrader import ModuleUpgrader, RollbackError, UpgradeError
 from src.core.module_versioning import Version
 
 

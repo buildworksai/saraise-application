@@ -48,6 +48,7 @@ class UserProfile(models.Model):
         db_index=True,
         choices=[
             ("tenant_admin", "Tenant Admin"),
+            ("security_admin", "Security Administrator"),
             ("tenant_user", "Tenant User"),
         ],
         help_text="Tenant-level role",

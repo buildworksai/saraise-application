@@ -37,7 +37,6 @@ dependencies = [
 
     # Security & Cryptography
     "cryptography>=42.0.0",
-    "PyJWT>=2.8.0",
     "defusedxml>=0.7.1",  # Secure XML parsing
 
     # Versioning
@@ -82,14 +81,15 @@ dev = [
     "pytest-asyncio>=0.23.2",
     "factory-boy>=3.3.0",
     "faker>=22.0.0",
+    "mutmut==2.5.1",
 
     # Code Quality
     "black>=24.0.0",
     "isort>=5.13.2",
     "flake8>=7.0.0",
-    "mypy>=1.8.0",
-    "django-stubs>=4.2.7",
-    "djangorestframework-stubs>=3.14.0",
+    "mypy==2.3.0",
+    "django-stubs==6.0.7",
+    "djangorestframework-stubs==3.17.0",
 ]
 
 [build-system]
@@ -139,7 +139,13 @@ module = [
 ignore_missing_imports = true
 
 [tool.django-stubs]
-django_settings_module = "saraise_backend.settings"
+django_settings_module = "saraise_backend.settings_static_analysis"
+
+[tool.mutmut]
+paths_to_mutate = "src"
+paths_to_exclude = "migrations,tests,test,test_*.py,*_test.py,*_tests.py,settings*.py,generated"
+runner = "sh -c 'SARAISE_MODE=development DJANGO_USE_SQLITE_FOR_TESTS=1 python -m pytest -x -q'"
+tests_dir = "src"
 
 # Pytest configuration is in pytest.ini
 # [tool.pytest.ini_options]

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.core.module_versioning import CompatibilityChecker, Version, VersionComparison, VersionError, compatibility_checker
+from src.core.module_versioning import CompatibilityChecker, Version, VersionComparison, VersionError
 
 
 class TestVersion:

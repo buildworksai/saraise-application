@@ -33,7 +33,6 @@ def tenant_a_user(db):
     user = User.objects.create_user(
         username="user_a",
         email="usera@example.com",
-        password="testpass123",
     )
     # Create UserProfile with tenant_id (skip tenant validation for tests)
     # Mock the clean method to skip tenant existence check
@@ -45,8 +44,10 @@ def tenant_a_user(db):
             profile.tenant_id = tenant_id
             profile.tenant_role = "tenant_admin"
             profile.save()
-    # Force reload profile
+    # Force reload profile and attach the delegated platform authorization
+    # required to exercise tenant filtering instead of failing at RBAC.
     user = User.objects.get(pk=user.pk)
+    user.roles = ["platform_admin"]
     return user
 
 
@@ -61,7 +62,6 @@ def tenant_b_user(db):
     user = User.objects.create_user(
         username="user_b",
         email="userb@example.com",
-        password="testpass123",
     )
     # Create UserProfile with tenant_id (skip tenant validation for tests)
     with patch.object(UserProfile, "clean"):
@@ -72,8 +72,10 @@ def tenant_b_user(db):
             profile.tenant_id = tenant_id
             profile.tenant_role = "tenant_admin"
             profile.save()
-    # Force reload profile
+    # Force reload profile and attach the delegated platform authorization
+    # required to exercise tenant filtering instead of failing at RBAC.
     user = User.objects.get(pk=user.pk)
+    user.roles = ["platform_admin"]
     return user
 
 

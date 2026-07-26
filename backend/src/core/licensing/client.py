@@ -63,7 +63,7 @@ class _CircuitBreaker:
             result = fn(*args, **kwargs)
             self._failures = 0
             return result
-        except Exception as e:
+        except Exception:
             self._failures += 1
             self._last_failure_time = now
             raise
@@ -88,8 +88,7 @@ class LicenseClient:
             base_url: License server URL. Defaults to SARAISE_LICENSE_SERVER_URL.
         """
         self.base_url = (
-            base_url
-            or getattr(settings, "SARAISE_LICENSE_SERVER_URL", "https://license.saraise.com")
+            base_url or getattr(settings, "SARAISE_LICENSE_SERVER_URL", "https://license.saraise.com")
         ).rstrip("/")
         self._cached_license: Optional[LicenseInfo] = None
         self._cache_timestamp: Optional[datetime] = None
@@ -156,11 +155,7 @@ class LicenseClient:
                 return self._parse_success_response(data, organization_id)
             error = data.get("error", "unknown")
             message = data.get("message", "License invalid")
-            status = (
-                LicenseValidationStatus.EXPIRED
-                if error == "license_expired"
-                else LicenseValidationStatus.INVALID
-            )
+            status = LicenseValidationStatus.EXPIRED if error == "license_expired" else LicenseValidationStatus.INVALID
             raise LicenseValidationError(message, status)
 
         raise LicenseValidationError(

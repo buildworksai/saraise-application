@@ -33,54 +33,54 @@ jobs:
           pip install -e .[dev]
           pip install openapi-spec-validator
 
+      - name: Configure Django
+        run: |
+          echo "SECRET_KEY=$(python -c 'from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())')" >> "$GITHUB_ENV"
+          echo "ALLOWED_HOSTS=localhost" >> "$GITHUB_ENV"
+
       - name: Generate OpenAPI Schema
         run: |
           cd backend
-          python manage.py spectacular --file schema.yaml --format openapi-json || true
-          
-          # Alternative: Use DRF's schema endpoint if available
-          # curl http://localhost:8000/api/schema/ -o schema.yaml || true
+          set -o pipefail
+          python manage.py spectacular --file schema.yaml --format openapi-json --validate 2>&1 | tee /tmp/spectacular-output.txt
+
+          schema_errors="$(sed -n 's/^Errors: *\([0-9][0-9]*\).*/\1/p' /tmp/spectacular-output.txt | tail -1)"
+          if [ -z "$schema_errors" ]; then
+            echo "drf-spectacular did not report an error count"
+            exit 1
+          fi
+          if [ "$schema_errors" -ne 0 ]; then
+            echo "drf-spectacular reported $schema_errors schema-generation errors"
+            exit 1
+          fi
 
       - name: Validate OpenAPI Schema
         run: |
-          if [ -f backend/schema.yaml ]; then
-            python3 -c "
-import yaml
-from openapi_spec_validator import validate_spec
+          python3 - <<'PY'
+          import yaml
+          from openapi_spec_validator import validate_spec
 
-with open('backend/schema.yaml') as f:
-    spec = yaml.safe_load(f)
+          with open("backend/schema.yaml") as schema_file:
+              spec = yaml.safe_load(schema_file)
 
-try:
-    validate_spec(spec)
-    print('✅ OpenAPI schema is valid')
-except Exception as e:
-    print(f'❌ OpenAPI schema validation failed: {e}')
-    exit(1)
-"
-          else
-            echo "⚠️  OpenAPI schema file not found. Skipping validation."
-          fi
+          validate_spec(spec)
+          print("OpenAPI schema is valid")
+          PY
 
       - name: Check Schema Completeness
         run: |
-          if [ -f backend/schema.yaml ]; then
-            python -c "
-            import yaml
-            
-            with open('backend/schema.yaml') as f:
-                spec = yaml.safe_load(f)
-            
-            required_paths = ['/api/v1/crm/', '/api/v1/platform/']
-            missing = []
-            
-            for path in required_paths:
-                if path not in spec.get('paths', {}):
-                    missing.append(path)
-            
-            if missing:
-                print(f'⚠️  Missing API paths in schema: {missing}')
-            else:
-                print('✅ All required API paths present in schema')
-            "
-          fi
+          python3 - <<'PY'
+          import yaml
+
+          with open("backend/schema.yaml") as schema_file:
+              spec = yaml.safe_load(schema_file)
+
+          paths = spec.get("paths", {})
+          required_prefixes = ("/api/v1/crm/", "/api/v1/platform/")
+          missing = [prefix for prefix in required_prefixes if not any(path.startswith(prefix) for path in paths)]
+
+          if missing:
+              raise SystemExit(f"Missing API path prefixes in schema: {missing}")
+
+          print("All required API path prefixes are present")
+          PY

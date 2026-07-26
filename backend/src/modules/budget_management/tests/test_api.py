@@ -3,8 +3,9 @@ API tests for Budget Management module.
 """
 
 import uuid
-import pytest
 from datetime import date
+
+import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
@@ -38,6 +39,7 @@ def allow_declared_access(monkeypatch):
 def authenticated_user(db):
     """Create authenticated user with tenant."""
     from unittest.mock import patch
+
     from src.core.user_models import UserProfile
 
     tenant_id = str(uuid.uuid4())

@@ -89,11 +89,8 @@ jobs:
         if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           cd backend
-          if [ -f ./scripts/mypy-baseline.sh ]; then
-            ./scripts/mypy-baseline.sh check
-          else
-            mypy src --ignore-missing-imports
-          fi
+          python scripts/mypy_baseline.py check
+          python scripts/test_mypy_baseline.py
         continue-on-error: false
 
       - name: Run Python tests with coverage

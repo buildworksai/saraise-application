@@ -15,6 +15,10 @@ permissions:
   - platform.feature-flags:delete
   - platform.health:read
   - platform.audit:read
+  - platform.metrics:create
+  - platform.metrics:read
+  - platform.metrics:update
+  - platform.metrics:delete
 sod_actions:
   - platform.settings:update
   - platform.settings:approve

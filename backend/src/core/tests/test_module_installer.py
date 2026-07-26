@@ -5,13 +5,12 @@ Task: 502.1 - Module Installation
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 
 import pytest
-from django.utils import timezone
 
 from src.core.module_installation_models import InstallationStatus, ModuleInstallation
-from src.core.module_installer import InstallationError, ModuleInstaller, module_installer
+from src.core.module_installer import InstallationError, ModuleInstaller
 from src.core.module_registry_models import ModuleRegistryEntry, TenantModuleInstallation
 
 

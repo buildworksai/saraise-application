@@ -13,9 +13,12 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from src.core.user_models import UserProfile
-
 from src.modules.tenant_management.models import (
-    Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
+    Tenant,
+    TenantHealthScore,
+    TenantModule,
+    TenantResourceUsage,
+    TenantSettings,
 )
 
 User = get_user_model()
@@ -51,7 +54,7 @@ def platform_owner(db):
             profile.save()
     # Force reload user to ensure profile is accessible
     user = User.objects.select_related("profile").get(pk=user.pk)
-    return user
+    return User.objects.select_related("profile").get(pk=user.pk)
 
 
 @pytest.fixture
@@ -72,7 +75,7 @@ def tenant_user(db):
             profile.tenant_id = str(tenant.id)
             profile.tenant_role = "tenant_admin"
             profile.save()
-    return user
+    return User.objects.select_related("profile").get(pk=user.pk)
 
 
 @pytest.fixture

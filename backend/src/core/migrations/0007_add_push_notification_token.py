@@ -1,6 +1,7 @@
 # Generated manually for Phase 7 - Push Notification Token support
 
 import uuid
+
 from django.db import migrations, models
 
 
@@ -35,7 +36,9 @@ class Migration(migrations.Migration):
             options={
                 "db_table": "push_notification_tokens",
                 "indexes": [
-                    models.Index(fields=["tenant_id", "user_id", "is_active"], name="push_token_tenant_user_active_idx"),
+                    models.Index(
+                        fields=["tenant_id", "user_id", "is_active"], name="push_token_tenant_user_active_idx"
+                    ),
                     models.Index(fields=["tenant_id", "token"], name="push_token_tenant_token_idx"),
                 ],
                 "unique_together": {("tenant_id", "user_id", "token")},

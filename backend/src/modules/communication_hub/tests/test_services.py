@@ -3,9 +3,9 @@ Service tests for Communication Hub module.
 """
 
 import uuid
+
 import pytest
 
-from src.modules.communication_hub.models import Channel
 from src.modules.communication_hub.services import ChannelService
 
 

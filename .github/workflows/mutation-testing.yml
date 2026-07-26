@@ -1,0 +1,141 @@
+name: Incremental Mutation Testing
+
+on:
+  pull_request:
+    paths:
+      - "backend/src/**/*.py"
+      - "!backend/src/**/migrations/**"
+      - "!backend/src/**/tests/**"
+      - "!backend/src/**/test_*.py"
+      - "!backend/src/**/*_test.py"
+      - "!backend/src/**/*_tests.py"
+      - "!backend/src/**/settings*.py"
+      - "frontend/src/**/*.ts"
+      - "frontend/src/**/*.tsx"
+      - "!frontend/src/**/*.test.ts"
+      - "!frontend/src/**/*.test.tsx"
+      - "!frontend/src/**/*.spec.ts"
+      - "!frontend/src/**/*.spec.tsx"
+      - "!frontend/src/**/*.d.ts"
+      - "!frontend/src/**/__tests__/**"
+      - "!frontend/src/types/api.ts"
+      - "!frontend/src/**/contracts.ts"
+      - "!frontend/src/setupTests.ts"
+  push:
+    branches: [main]
+    paths:
+      - "backend/src/**/*.py"
+      - "!backend/src/**/migrations/**"
+      - "!backend/src/**/tests/**"
+      - "!backend/src/**/test_*.py"
+      - "!backend/src/**/*_test.py"
+      - "!backend/src/**/*_tests.py"
+      - "!backend/src/**/settings*.py"
+      - "frontend/src/**/*.ts"
+      - "frontend/src/**/*.tsx"
+      - "!frontend/src/**/*.test.ts"
+      - "!frontend/src/**/*.test.tsx"
+      - "!frontend/src/**/*.spec.ts"
+      - "!frontend/src/**/*.spec.tsx"
+      - "!frontend/src/**/*.d.ts"
+      - "!frontend/src/**/__tests__/**"
+      - "!frontend/src/types/api.ts"
+      - "!frontend/src/**/contracts.ts"
+      - "!frontend/src/setupTests.ts"
+
+permissions:
+  contents: read
+
+jobs:
+  mutation-testing:
+    name: Changed-source mutation gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute changed source files
+        id: changes
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            git diff --name-only "origin/${GITHUB_BASE_REF}...HEAD" > /tmp/changed-files.txt
+          else
+            git diff --name-only HEAD^ HEAD > /tmp/changed-files.txt
+          fi
+
+          while IFS= read -r file; do
+            if [[ -f "$file" && "$file" =~ ^backend/src/.*\.py$ \
+              && ! "$file" =~ /migrations/ \
+              && ! "$file" =~ /tests?/ \
+              && ! "$file" =~ /test_[^/]*\.py$ \
+              && ! "$file" =~ /[^/]*_tests?\.py$ \
+              && ! "$file" =~ /settings[^/]*\.py$ ]]; then
+              printf '%s\n' "$file" >> /tmp/backend-changed.txt
+            fi
+            if [[ -f "$file" && "$file" =~ ^frontend/src/.*\.(ts|tsx)$ \
+              && ! "$file" =~ \.(test|spec)\.(ts|tsx)$ \
+              && ! "$file" =~ \.d\.ts$ \
+              && ! "$file" =~ /__tests__/ \
+              && "$file" != "frontend/src/types/api.ts" \
+              && ! "$file" =~ /contracts\.ts$ \
+              && "$file" != "frontend/src/setupTests.ts" ]]; then
+              printf '%s\n' "$file" >> /tmp/frontend-changed.txt
+            fi
+          done < /tmp/changed-files.txt
+
+          if [[ -s /tmp/backend-changed.txt ]]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [[ -s /tmp/frontend-changed.txt ]]; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: ${{ steps.changes.outputs.backend == 'true' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend development dependencies
+        if: ${{ steps.changes.outputs.backend == 'true' }}
+        run: python -m pip install -e './backend[dev]'
+
+      - name: Run backend mutation gate
+        if: ${{ steps.changes.outputs.backend == 'true' }}
+        shell: bash
+        run: |
+          mapfile -t backend_files < <(sed 's#^backend/##' /tmp/backend-changed.txt)
+          cd backend
+          python scripts/mutation_gate.py "${backend_files[@]}"
+
+      - name: Set up Node.js
+        if: ${{ steps.changes.outputs.frontend == 'true' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        if: ${{ steps.changes.outputs.frontend == 'true' }}
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend mutation gate
+        if: ${{ steps.changes.outputs.frontend == 'true' }}
+        working-directory: frontend
+        shell: bash
+        run: |
+          mutate=$(sed 's#^frontend/##' /tmp/frontend-changed.txt | paste -sd, -)
+          npx stryker run --mutate "$mutate"

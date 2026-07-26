@@ -8,7 +8,11 @@ import pytest
 from django.utils import timezone
 
 from src.modules.tenant_management.models import (
-    Tenant, TenantHealthScore, TenantModule, TenantResourceUsage, TenantSettings
+    Tenant,
+    TenantHealthScore,
+    TenantModule,
+    TenantResourceUsage,
+    TenantSettings,
 )
 
 

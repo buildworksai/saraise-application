@@ -1,8 +1,9 @@
 # Generated migration for Data Migration models
 
-import src.modules.data_migration.models
-from django.db import migrations, models
 import django.db.models.deletion
+from django.db import migrations, models
+
+import src.modules.data_migration.models
 
 
 class Migration(migrations.Migration):

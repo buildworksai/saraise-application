@@ -1,10 +1,11 @@
+from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
-from django.contrib.auth import get_user_model
-from src.modules.tenant_management.models import Tenant
-from src.core.licensing.models import Organization, License, LicenseStatus
+
+from src.core.licensing.models import License, LicenseStatus, Organization
 from src.modules.metadata_modeling.models import EntityDefinition, FieldDefinition
+from src.modules.tenant_management.models import Tenant
 
 User = get_user_model()
 

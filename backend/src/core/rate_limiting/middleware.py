@@ -28,7 +28,9 @@ class RateLimitMiddleware(MiddlewareMixin):
         if request.path in ["/api/health/", "/api/metrics/"]:
             return None
 
-        tenant_id = get_user_tenant_id(request.user) if hasattr(request, "user") and request.user.is_authenticated else None
+        tenant_id = (
+            get_user_tenant_id(request.user) if hasattr(request, "user") and request.user.is_authenticated else None
+        )
 
         if not tenant_id:
             # No tenant ID - allow request (will be handled by auth middleware)
@@ -42,7 +44,10 @@ class RateLimitMiddleware(MiddlewareMixin):
             return JsonResponse(
                 {
                     "error": "Rate limit exceeded",
-                    "message": "You have exceeded your daily API call limit. Please upgrade your plan or try again tomorrow.",
+                    "message": (
+                        "You have exceeded your daily API call limit. "
+                        "Please upgrade your plan or try again tomorrow."
+                    ),
                 },
                 status=429,
             )

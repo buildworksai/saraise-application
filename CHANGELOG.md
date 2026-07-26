@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Pinned the mutation-testing toolchain's transitive `qs` dependency to `6.15.3`, removing the
+  `GHSA-q8mj-m7cp-5q26` denial-of-service advisory introduced with StrykerJS.
+- **data-migration (CRITICAL):** Closed a cross-tenant read. The external-database source path executed a
+  caller-controlled query/DSN against the application's own primary database with no tenant scoping, so a
+  privileged tenant user could read another tenant's rows. Caller-supplied connection strings are removed
+  entirely: a migration job now references an operator-registered `ExternalConnection` by opaque id, the
+  connection is built from server-side parameters (never a caller string), the validated IP is pinned via
+  `hostaddr` to defeat DNS rebinding, and connections to the primary/internal network are denied fail-closed.
+  Connection registration is restricted to platform operators (#9).
+
+### Changed
+- Replaced broad per-module MyPy exemptions with a pinned, fingerprint-based ratchet that preserves the
+  repository's existing type-checking debt while rejecting every new or changed finding (#14).
+- **BREAKING (data-migration):** A database migration source's `source_config` no longer accepts
+  `connection_string` (or any raw connection/SQL field); it must supply a `connection_id` referencing an
+  operator-registered `ExternalConnection`. Existing jobs that still carry a `connection_string` fail closed
+  with a migration-required error and must be re-registered (#9).
+
 ### Fixed
 - Application boot failure: removed an orphaned `ModeAuthMiddleware` registration that referenced a
   module which never existed, and reordered the mode-aware session middleware to run after Django's
@@ -20,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enforced and AI attribution is rejected by a `commit-msg` hook (#12).
 
 ### Added
+- Incremental mutation-testing gates require a mutation score of at least 90% for changed Python and
+  TypeScript source files, with source-only path filters keeping unrelated pull requests out of the workflow.
+- Envelope encryption with pluggable key-management backends and master-key rewrapping
+- Reversible initial migrations for the notifications module
+- Policy-backed tenant-management permission declarations
 - Initial changelog
 - Phase 7.5: Licensing subsystem for self-hosted deployments
   - 14-day trial period for new installations
@@ -48,10 +72,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 
 ### Removed
+- Unused direct PyJWT dependency and committed backend test/coverage/migration-backup artifacts
+- Nine unfinished scaffold modules from the always-enabled foundation entitlement list
 
 ### Fixed
+- Authenticated tenant and security health endpoints retain their 200/503 readiness semantics
+- Authorized tenant-scoped platform and security requests now reach row-level isolation checks
+- User-bound AI executions now validate active sessions on every execution transition
+- AI approval separation-of-duties checks now use attributed tool invocations
+- Provider base URLs can now be overridden through deployment configuration
+- Placeholder workflow triggers, AI revenue predictions, and module lifecycle operations fail explicitly
 
 ### Security
+- Policy Engine circuit breaking now counts HTTP 429 and 5xx responses as dependency failures
+- Policy evaluation fails closed in SaaS when configuration or the Policy Engine is unavailable
+- Login rejects the unsupported MFA field instead of silently ignoring it
 - Phase 7.5: License validation prevents unauthorized module access
 - Phase 7.6: Mode-aware authentication ensures proper session validation per deployment mode
 

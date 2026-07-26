@@ -1,8 +1,9 @@
 # Generated migration for DMS document models
 
-import src.modules.dms.models
-from django.db import migrations, models
 import django.db.models.deletion
+from django.db import migrations, models
+
+import src.modules.dms.models
 
 
 class Migration(migrations.Migration):

@@ -1,36 +1,65 @@
-"""
-Platform Management Permissions
-"""
+"""Policy-engine-backed permissions for platform management."""
 
-from rest_framework import permissions
+from rest_framework.permissions import SAFE_METHODS
+
+from src.core.auth.policy_permissions import PolicyRequiredPermission
 
 
-class PlatformAdminPermission(permissions.BasePermission):
-    """Permission check for platform administrators."""
+class PlatformAdminPermission(PolicyRequiredPermission):
+    """Require the exact manifest permission for the ViewSet resource/action."""
+
+    ACTIONS = {
+        "create": "create",
+        "destroy": "delete",
+        "list": "read",
+        "retrieve": "read",
+        "update": "update",
+        "partial_update": "update",
+        "current": "read",
+        "save": "create",
+        "summary": "read",
+        "toggle": "update",
+    }
+    ALLOWED_PERMISSIONS = {
+        "platform.settings:create",
+        "platform.settings:read",
+        "platform.settings:update",
+        "platform.settings:delete",
+        "platform.feature-flags:create",
+        "platform.feature-flags:read",
+        "platform.feature-flags:update",
+        "platform.feature-flags:delete",
+        "platform.health:read",
+        "platform.audit:read",
+        "platform.metrics:create",
+        "platform.metrics:read",
+        "platform.metrics:update",
+        "platform.metrics:delete",
+    }
 
     def has_permission(self, request, view):
-        """Check if user has platform admin permissions."""
-        # TODO: Integrate with Policy Engine
-        # For now, check if user has platform admin role
-        if not request.user or not request.user.is_authenticated:
+        resource = getattr(view, "permission_resource", None)
+        action = self.ACTIONS.get(getattr(view, "action", ""))
+        if not resource or not action:
             return False
+        permission = f"{resource}:{action}"
+        if permission not in self.ALLOWED_PERMISSIONS:
+            return False
+        view.required_permissions = [permission]
+        return super().has_permission(request, view)
 
-        # Check user roles (to be integrated with Policy Engine)
-        user_roles = getattr(request.user, "roles", [])
-        return "platform_admin" in user_roles or "super_admin" in user_roles
 
-
-class PlatformViewerPermission(permissions.BasePermission):
-    """Permission check for platform viewers (read-only)."""
+class PlatformViewerPermission(PolicyRequiredPermission):
+    """Require read access and reject mutation attempts."""
 
     def has_permission(self, request, view):
-        """Check if user has platform viewer permissions."""
-        if not request.user or not request.user.is_authenticated:
+        if request.method not in SAFE_METHODS:
             return False
-
-        # Allow read-only access for platform viewers
-        if request.method in permissions.SAFE_METHODS:
-            user_roles = getattr(request.user, "roles", [])
-            return "platform_viewer" in user_roles or "platform_admin" in user_roles
-
-        return False
+        resource = getattr(view, "permission_resource", None)
+        if not resource:
+            return False
+        permission = f"{resource}:read"
+        if permission not in PlatformAdminPermission.ALLOWED_PERMISSIONS:
+            return False
+        view.required_permissions = [permission]
+        return super().has_permission(request, view)

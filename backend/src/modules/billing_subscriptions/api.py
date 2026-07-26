@@ -4,12 +4,11 @@ Provides REST API endpoints for all models.
 """
 
 import logging
-import secrets
 
-from django.http import HttpResponse
+from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
@@ -17,11 +16,9 @@ from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
 from src.core.rate_limiting.service import RateLimitService
 from src.modules.tenant_management.models import Tenant, TenantResourceUsage
-from django.utils import timezone
 
-from .models import Invoice, InvoiceLineItem, Payment, Subscription, SubscriptionPlan, UsageRecord
+from .models import Invoice, Payment, Subscription, SubscriptionPlan, UsageRecord
 from .serializers import (
-    InvoiceLineItemSerializer,
     InvoiceSerializer,
     PaymentSerializer,
     SubscriptionPlanSerializer,
@@ -304,8 +301,8 @@ class PaymentViewSet(viewsets.ModelViewSet):
             payment.status = "failed"
             payment.save(update_fields=["status"])
             # Return error response
-            from rest_framework.response import Response
             from rest_framework import status
+            from rest_framework.response import Response
 
             return Response(
                 {"error": result.get("error", "Payment processing failed")},
