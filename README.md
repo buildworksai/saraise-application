@@ -1,7 +1,10 @@
 <p align="center">
+  <img alt="SARAISE — the living mark" src="frontend/public/brand/pulse-mark.gif" width="120" />
+</p>
+<p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="frontend/public/brand/symphony-white.svg" />
-    <img alt="SARAISE" src="frontend/public/brand/symphony-azure.svg" width="132" />
+    <img alt="SARAISE" src="frontend/public/brand/symphony-azure.svg" width="120" />
   </picture>
 </p>
 
