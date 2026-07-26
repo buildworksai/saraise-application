@@ -36,17 +36,17 @@ BEGIN
        AND NOT attribute.attisdropped;
 
     IF tenant_type IS NULL THEN
-        RAISE EXCEPTION 'RLS target % has no tenant_id column', target_table;
+        RAISE EXCEPTION 'RLS target %% has no tenant_id column', target_table;
     END IF;
     IF tenant_type <> 'uuid'::REGTYPE THEN
-        RAISE EXCEPTION 'RLS target %.tenant_id must be UUID, found %', target_table, tenant_type;
+        RAISE EXCEPTION 'RLS target %%.tenant_id must be UUID, found %%', target_table, tenant_type;
     END IF;
 
-    EXECUTE format('ALTER TABLE %s ENABLE ROW LEVEL SECURITY', target_table);
-    EXECUTE format('ALTER TABLE %s FORCE ROW LEVEL SECURITY', target_table);
-    EXECUTE format('DROP POLICY IF EXISTS %I ON %s', 'tenant_isolation_' || target_name, target_table);
+    EXECUTE format('ALTER TABLE %%s ENABLE ROW LEVEL SECURITY', target_table);
+    EXECUTE format('ALTER TABLE %%s FORCE ROW LEVEL SECURITY', target_table);
+    EXECUTE format('DROP POLICY IF EXISTS %%I ON %%s', 'tenant_isolation_' || target_name, target_table);
     EXECUTE format(
-        'CREATE POLICY %I ON %s USING (tenant_id = saraise_current_tenant_id()) '
+        'CREATE POLICY %%I ON %%s USING (tenant_id = saraise_current_tenant_id()) '
         'WITH CHECK (tenant_id = saraise_current_tenant_id())',
         'tenant_isolation_' || target_name,
         target_table
@@ -80,17 +80,17 @@ RETURNS VOID
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
-    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);
+    EXECUTE format('ALTER TABLE %%I ENABLE ROW LEVEL SECURITY', table_name);
+    EXECUTE format('ALTER TABLE %%I FORCE ROW LEVEL SECURITY', table_name);
     EXECUTE format(
-        'CREATE POLICY tenant_isolation_%I ON %I USING '
+        'CREATE POLICY tenant_isolation_%%I ON %%I USING '
         '(tenant_id = saraise_current_tenant_id()) WITH CHECK '
         '(tenant_id = saraise_current_tenant_id())',
         table_name,
         table_name
     );
     EXECUTE format(
-        'CREATE POLICY superuser_bypass_%I ON %I USING '
+        'CREATE POLICY superuser_bypass_%%I ON %%I USING '
         '(current_setting(''app.is_superuser'', TRUE) = ''true'')',
         table_name,
         table_name

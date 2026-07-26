@@ -110,6 +110,12 @@ class Migration(migrations.Migration):
             model_name="aiproviderconfigurationresource",
             name="aiprov_res_tenant_name_idx",
         ),
+        # Postgres refuses to ALTER TYPE of a column referenced by an RLS policy;
+        # drop the policy, run the type changes, then recreate it in UUID form.
+        migrations.RunSQL(
+            "DROP POLICY IF EXISTS aiprov_resources_tenant_policy ON ai_provider_configuration_resources;",
+            reverse_sql=migrations.RunSQL.noop,
+        ),
         migrations.AlterField(
             model_name="aiproviderconfigurationresource",
             name="id",
@@ -124,6 +130,12 @@ class Migration(migrations.Migration):
             model_name="aiproviderconfigurationresource",
             name="created_by",
             field=models.UUIDField(db_index=True),
+        ),
+        migrations.RunSQL(
+            """CREATE POLICY aiprov_resources_tenant_policy ON ai_provider_configuration_resources
+               USING (tenant_id = saraise_current_tenant_id())
+               WITH CHECK (tenant_id = saraise_current_tenant_id());""",
+            reverse_sql="DROP POLICY IF EXISTS aiprov_resources_tenant_policy ON ai_provider_configuration_resources;",
         ),
         migrations.AddField(
             model_name="aiproviderconfigurationresource",

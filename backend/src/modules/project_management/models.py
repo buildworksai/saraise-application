@@ -337,10 +337,10 @@ class ProjectManagementConfigurationVersion(TenantScopedModel):
     class Meta:
         db_table = "project_management_configuration_versions"
         constraints = [
-            models.UniqueConstraint(fields=("tenant_id", "configuration", "version"), name="pm_config_version_uniq"),
+            models.UniqueConstraint(fields=("tenant_id", "configuration", "version"), name="pmgmt_config_version_uniq"),
             models.UniqueConstraint(fields=("tenant_id", "id"), name="pm_configver_tenant_id_uniq"),
             models.UniqueConstraint(fields=("tenant_id", "configuration"), condition=Q(state=ConfigurationState.ACTIVE), name="pm_config_one_active_uniq"),
-            models.CheckConstraint(condition=Q(version__gte=1), name="pm_config_version_positive"),
+            models.CheckConstraint(condition=Q(version__gte=1), name="pmgmt_config_version_positive"),
             models.CheckConstraint(condition=Q(max_daily_hours__gt=0, max_daily_hours__lte=24), name="pm_config_hours_range"),
             models.CheckConstraint(condition=Q(max_allocation_percentage__gt=0, max_allocation_percentage__lte=100), name="pm_config_allocation_range"),
         ]

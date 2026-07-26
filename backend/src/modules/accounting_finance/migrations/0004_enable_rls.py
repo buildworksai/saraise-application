@@ -63,7 +63,7 @@ def enable_security(apps, schema_editor) -> None:
             IF related_id IS NULL THEN
                 RETURN NEW;
             END IF;
-            EXECUTE format('SELECT tenant_id FROM %I WHERE id = $1', TG_ARGV[1])
+            EXECUTE format('SELECT tenant_id FROM %%I WHERE id = $1', TG_ARGV[1])
                 INTO related_tenant USING related_id;
             IF related_tenant IS NULL OR related_tenant <> NEW.tenant_id THEN
                 RAISE EXCEPTION 'cross-tenant accounting relationship rejected'

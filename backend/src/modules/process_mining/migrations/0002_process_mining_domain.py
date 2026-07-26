@@ -50,7 +50,7 @@ def install_same_tenant_guards(apps, schema_editor):
         BEGIN
             parent_id := (to_jsonb(NEW) ->> TG_ARGV[0])::UUID;
             IF parent_id IS NULL THEN RETURN NEW; END IF;
-            EXECUTE format('SELECT tenant_id FROM %I WHERE id = $1', TG_ARGV[1]) INTO parent_tenant USING parent_id;
+            EXECUTE format('SELECT tenant_id FROM %%I WHERE id = $1', TG_ARGV[1]) INTO parent_tenant USING parent_id;
             IF parent_tenant IS NULL OR parent_tenant <> NEW.tenant_id THEN
                 RAISE EXCEPTION 'cross-tenant process-mining relationship rejected' USING ERRCODE = '23514';
             END IF;

@@ -92,7 +92,7 @@ class Migration(migrations.Migration):
             model_name="regionalresource",
             index=models.Index(
                 fields=["tenant_id", "deleted_at"],
-                name="regional_re_tenant__deleted_idx",
+                name="regional_re_tenant_del_idx",
             ),
         ),
         migrations.CreateModel(
@@ -159,7 +159,7 @@ class Migration(migrations.Migration):
                 "indexes": [
                     models.Index(
                         fields=["tenant_id", "environment", "-version"],
-                        name="regional_cv_tenant__version_idx",
+                        name="regional_cv_tenant_ver_idx",
                     ),
                     models.Index(
                         fields=["tenant_id", "correlation_id"],
@@ -209,7 +209,7 @@ class Migration(migrations.Migration):
                     ),
                     models.Index(
                         fields=["tenant_id", "-created_at"],
-                        name="regional_ar_tenant__created_idx",
+                        name="regional_ar_tenant_crt_idx",
                     ),
                 ],
             },

@@ -76,7 +76,7 @@ def add_postgres_guards(apps, schema_editor):
         CREATE OR REPLACE FUNCTION inventory_reject_evidence_mutation()
         RETURNS TRIGGER LANGUAGE plpgsql AS $$
         BEGIN
-            RAISE EXCEPTION 'inventory evidence in % is append-only', TG_TABLE_NAME;
+            RAISE EXCEPTION 'inventory evidence in %% is append-only', TG_TABLE_NAME;
         END;
         $$;
         CREATE TRIGGER inventory_ledger_immutable

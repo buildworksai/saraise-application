@@ -78,7 +78,7 @@ def install_relationship_guards(apps, schema_editor) -> None:
             IF parent_id IS NULL THEN
                 RETURN NEW;
             END IF;
-            EXECUTE format('SELECT tenant_id FROM %I WHERE id = $1', TG_ARGV[1])
+            EXECUTE format('SELECT tenant_id FROM %%I WHERE id = $1', TG_ARGV[1])
                INTO parent_tenant
               USING parent_id;
             IF parent_tenant IS NULL OR parent_tenant <> NEW.tenant_id THEN

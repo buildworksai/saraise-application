@@ -220,7 +220,7 @@ class Integration(GuardedStateModel, MutableTenantModel):
             models.UniqueConstraint(fields=("tenant_id", "name"), condition=Q(is_deleted=False), name="intplat_integ_tenant_name_live_uniq"),
         ]
         indexes = [
-            models.Index(fields=("tenant_id", "status", "created_at"), name="intplat_integ_tenant_status_idx"),
+            models.Index(fields=("tenant_id", "status", "created_at"), name="intplat_integ_tenant_stat_idx"),
             models.Index(fields=("tenant_id", "connector", "status"), name="intplat_integ_tenant_conn_idx"),
             models.Index(fields=("tenant_id", "integration_type", "is_deleted"), name="intplat_integ_tenant_type_idx"),
         ]

@@ -30,7 +30,7 @@ def create_audit_immutability(apps, schema_editor):
 
             IF TG_OP = 'DELETE' THEN
                 RAISE EXCEPTION 'SARAISE-26001: Audit log records cannot be deleted. '
-                    'Table: %, Record ID: %',
+                    'Table: %%, Record ID: %%',
                     TG_TABLE_NAME, OLD.id;
             END IF;
 
@@ -38,7 +38,7 @@ def create_audit_immutability(apps, schema_editor):
                 -- Allow updating only specific non-content fields (e.g., metadata)
                 -- Core audit fields are immutable
                 RAISE EXCEPTION 'SARAISE-26001: Audit log records cannot be modified. '
-                    'Table: %, Record ID: %',
+                    'Table: %%, Record ID: %%',
                     TG_TABLE_NAME, OLD.id;
             END IF;
 

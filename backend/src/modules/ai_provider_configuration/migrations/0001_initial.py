@@ -149,7 +149,7 @@ class Migration(migrations.Migration):
                 "db_table": "ai_provider_configuration_credentials",
                 "ordering": ("-created_at",),
                 "indexes": [
-                    models.Index(fields=["tenant_id", "provider", "status"], name="aiprov_cred_tenant_provider_idx"),
+                    models.Index(fields=["tenant_id", "provider", "status"], name="aiprov_cred_tenant_prov_idx"),
                     models.Index(fields=["tenant_id", "is_deleted", "created_at"], name="aiprov_cred_tenant_created_idx"),
                 ],
                 "constraints": [
@@ -205,9 +205,9 @@ class Migration(migrations.Migration):
                 "db_table": "ai_provider_configuration_deployments",
                 "ordering": ("-created_at",),
                 "indexes": [
-                    models.Index(fields=["tenant_id", "status", "created_at"], name="aiprov_deploy_tenant_status_idx"),
+                    models.Index(fields=["tenant_id", "status", "created_at"], name="aiprov_deploy_tenant_stat_idx"),
                     models.Index(fields=["tenant_id", "model"], name="aiprov_deploy_tenant_model_idx"),
-                    models.Index(fields=["tenant_id", "is_deleted"], name="aiprov_deploy_tenant_deleted_idx"),
+                    models.Index(fields=["tenant_id", "is_deleted"], name="aiprov_deploy_tenant_del_idx"),
                 ],
                 "constraints": [
                     models.UniqueConstraint(
@@ -253,7 +253,7 @@ class Migration(migrations.Migration):
                 "ordering": ("-created_at",),
                 "indexes": [
                     models.Index(fields=["tenant_id", "deployment", "created_at"], name="aiprov_usage_tenant_deploy_idx"),
-                    models.Index(fields=["tenant_id", "created_at"], name="aiprov_usage_tenant_created_idx"),
+                    models.Index(fields=["tenant_id", "created_at"], name="aiprov_usage_tenant_crt_idx"),
                 ],
                 "constraints": [
                     models.CheckConstraint(

@@ -35,14 +35,14 @@ def create_rls_functions(apps, schema_editor):
         RETURNS VOID AS $$
         BEGIN
             -- Enable RLS on the table
-            EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
+            EXECUTE format('ALTER TABLE %%I ENABLE ROW LEVEL SECURITY', table_name);
 
             -- Force RLS even for table owners (prevents bypass)
-            EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);
+            EXECUTE format('ALTER TABLE %%I FORCE ROW LEVEL SECURITY', table_name);
 
             -- Create tenant isolation policy
             EXECUTE format(
-                'CREATE POLICY tenant_isolation_%I ON %I
+                'CREATE POLICY tenant_isolation_%%I ON %%I
                  USING (tenant_id = saraise_current_tenant_id())
                  WITH CHECK (tenant_id = saraise_current_tenant_id())',
                 table_name, table_name
@@ -50,7 +50,7 @@ def create_rls_functions(apps, schema_editor):
 
             -- Create superuser bypass policy (for migrations, admin tasks)
             EXECUTE format(
-                'CREATE POLICY superuser_bypass_%I ON %I
+                'CREATE POLICY superuser_bypass_%%I ON %%I
                  USING (current_setting(''app.is_superuser'', TRUE) = ''true'')',
                 table_name, table_name
             );

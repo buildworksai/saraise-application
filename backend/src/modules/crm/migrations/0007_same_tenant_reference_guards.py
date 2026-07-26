@@ -106,7 +106,7 @@ BEGIN
     IF target_table IS NULL THEN
         RAISE EXCEPTION 'unsupported activity relation type' USING ERRCODE = '23514';
     END IF;
-    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %s WHERE id = $1 AND tenant_id = $2 AND NOT is_deleted)', target_table)
+    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %%s WHERE id = $1 AND tenant_id = $2 AND NOT is_deleted)', target_table)
        INTO found USING NEW.related_to_id, NEW.tenant_id;
     IF NOT found THEN
         RAISE EXCEPTION 'active same-tenant activity parent required' USING ERRCODE = '23514';

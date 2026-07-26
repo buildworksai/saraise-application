@@ -23,7 +23,7 @@ def install_triggers(apps, schema_editor):
         LANGUAGE plpgsql
         AS $$
         BEGIN
-            RAISE EXCEPTION 'append-only compliance record cannot be %', TG_OP
+            RAISE EXCEPTION 'append-only compliance record cannot be %%', TG_OP
                 USING ERRCODE = '55000';
         END;
         $$;

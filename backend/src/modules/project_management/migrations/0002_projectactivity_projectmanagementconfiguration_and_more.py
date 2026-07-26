@@ -612,7 +612,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='projectmanagementconfigurationversion',
-            constraint=models.UniqueConstraint(fields=('tenant_id', 'configuration', 'version'), name='pm_config_version_uniq'),
+            constraint=models.UniqueConstraint(fields=('tenant_id', 'configuration', 'version'), name='pmgmt_config_version_uniq'),
         ),
         migrations.AddConstraint(
             model_name='projectmanagementconfigurationversion',
@@ -620,7 +620,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='projectmanagementconfigurationversion',
-            constraint=models.CheckConstraint(condition=models.Q(('version__gte', 1)), name='pm_config_version_positive'),
+            constraint=models.CheckConstraint(condition=models.Q(('version__gte', 1)), name='pmgmt_config_version_positive'),
         ),
         migrations.AddConstraint(
             model_name='projectmanagementconfigurationversion',
