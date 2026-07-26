@@ -29,6 +29,16 @@ def retire_legacy_table(apps, schema_editor) -> None:
             uuid.UUID(str(resource_id))
             uuid.UUID(str(created_by))
     if schema_editor.connection.vendor == "postgresql":
+        # A varchar db_index leaves a `*_like` index using varchar_pattern_ops, which
+        # cannot survive the conversion to uuid — drop those opclass indexes first.
+        with schema_editor.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT indexname FROM pg_indexes WHERE tablename = %s AND indexdef LIKE %s",
+                [LEGACY_TABLE, "%varchar_pattern_ops%"],
+            )
+            legacy_pattern_indexes = [row[0] for row in cursor.fetchall()]
+        for index_name in legacy_pattern_indexes:
+            schema_editor.execute(f'DROP INDEX IF EXISTS "{index_name}"')
         schema_editor.execute(
             f'ALTER TABLE "{LEGACY_TABLE}" ALTER COLUMN "tenant_id" TYPE uuid USING "tenant_id"::uuid'
         )

@@ -229,7 +229,7 @@ class Migration(migrations.Migration):
         migrations.AlterField("datamapping", "tenant_id", models.UUIDField(db_index=True)),
 
         migrations.AlterField("connector", "name", models.CharField(max_length=255)),
-        migrations.AddField("connector", "key", models.SlugField(max_length=100, null=True)),
+        migrations.AddField("connector", "key", models.SlugField(max_length=100, null=True, db_index=False)),
         migrations.AddField("connector", "adapter_key", models.CharField(max_length=200, null=True)),
         migrations.AddField("connector", "version", models.CharField(max_length=32, default="1.0.0")),
         migrations.AddField("connector", "credential_schema", models.JSONField(default=dict)),

@@ -24,6 +24,14 @@ def convert_legacy_identifiers_to_uuid(apps, schema_editor):
     if schema_editor.connection.vendor != "postgresql":
         return
     table = schema_editor.quote_name("document_intelligence_resources")
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT indexname FROM pg_indexes WHERE tablename = %s AND indexdef LIKE %s",
+            ["document_intelligence_resources", "%varchar_pattern_ops%"],
+        )
+        _pattern_indexes = [row[0] for row in cursor.fetchall()]
+    for _index_name in _pattern_indexes:
+        schema_editor.execute(f'DROP INDEX IF EXISTS "{_index_name}"')
     for column in ("id", "tenant_id", "created_by"):
         quoted = schema_editor.quote_name(column)
         # PostgreSQL's UUID cast is the validation gate: an invalid legacy

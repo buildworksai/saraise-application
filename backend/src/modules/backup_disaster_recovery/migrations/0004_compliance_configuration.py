@@ -53,6 +53,14 @@ def archive_legacy_table(apps, schema_editor):
         f"ALTER TABLE {qn(LEGACY_TABLE)} RENAME TO {qn(LEGACY_ARCHIVE_TABLE)}"
     )
     if schema_editor.connection.vendor == "postgresql":
+        with schema_editor.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT indexname FROM pg_indexes WHERE tablename = %s AND indexdef LIKE %s",
+                [LEGACY_ARCHIVE_TABLE, "%varchar_pattern_ops%"],
+            )
+            _pattern_indexes = [row[0] for row in cursor.fetchall()]
+        for _index_name in _pattern_indexes:
+            schema_editor.execute(f'DROP INDEX IF EXISTS "{_index_name}"')
         for column in ("tenant_id", "id", "created_by"):
             schema_editor.execute(
                 f"ALTER TABLE {qn(LEGACY_ARCHIVE_TABLE)} "

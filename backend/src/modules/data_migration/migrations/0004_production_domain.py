@@ -204,6 +204,14 @@ def install_rls(apps, schema_editor):
     if schema_editor.connection.vendor != "postgresql":
         return
     with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT indexname FROM pg_indexes WHERE tablename = %s AND indexdef LIKE %s",
+            ["data_migration_resources", "%varchar_pattern_ops%"],
+        )
+        _pattern_indexes = [row[0] for row in cursor.fetchall()]
+    for _index_name in _pattern_indexes:
+        schema_editor.execute(f'DROP INDEX IF EXISTS "{_index_name}"')
+    with schema_editor.connection.cursor() as cursor:
         cursor.execute("ALTER TABLE data_migration_resources ALTER COLUMN id TYPE uuid USING id::uuid")
         cursor.execute("ALTER TABLE data_migration_resources ALTER COLUMN tenant_id TYPE uuid USING tenant_id::uuid")
         for table in RLS_TABLES:

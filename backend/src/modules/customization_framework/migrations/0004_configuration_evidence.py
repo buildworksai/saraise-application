@@ -204,6 +204,14 @@ def convert_legacy_tenant_to_uuid(apps, schema_editor) -> None:
         raise RuntimeError(
             "Legacy customization tenant_id contains a non-UUID value; " "conversion stopped without changing storage"
         )
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT indexname FROM pg_indexes WHERE tablename = %s AND indexdef LIKE %s",
+            ["customization_framework_resources", "%varchar_pattern_ops%"],
+        )
+        _pattern_indexes = [row[0] for row in cursor.fetchall()]
+    for _index_name in _pattern_indexes:
+        schema_editor.execute(f'DROP INDEX IF EXISTS "{_index_name}"')
     schema_editor.execute("""
         ALTER TABLE customization_framework_resources
         ALTER COLUMN tenant_id TYPE UUID USING tenant_id::UUID;

@@ -22,6 +22,14 @@ def validate_legacy_uuids(apps, schema_editor):
             raise ValueError(f"Legacy blockchain traceability row {row_id!r} contains a non-UUID identifier.") from exc
 
     if schema_editor.connection.vendor == "postgresql":
+        with schema_editor.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT indexname FROM pg_indexes WHERE tablename = %s AND indexdef LIKE %s",
+                ["blockchain_traceability_resources", "%varchar_pattern_ops%"],
+            )
+            _pattern_indexes = [row[0] for row in cursor.fetchall()]
+        for _index_name in _pattern_indexes:
+            schema_editor.execute(f'DROP INDEX IF EXISTS "{_index_name}"')
         schema_editor.execute(f"ALTER TABLE {table} ALTER COLUMN tenant_id TYPE uuid USING tenant_id::uuid")
         schema_editor.execute(f"ALTER TABLE {table} ALTER COLUMN id TYPE uuid USING id::uuid")
 
