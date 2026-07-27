@@ -548,7 +548,7 @@ Mode-conditional behavior belongs in the policy layer, never inside a security p
 | Build | **WIRED** | `npm run build` |
 | Secret detection | **WIRED** | pre-commit security hook |
 | Tenant isolation check | **WIRED** | `.github/workflows/tenant-isolation-check.yml` |
-| **Mutation score ≥ 90%** | **NOT WIRED** | **STANDING TODO** — no `stryker.config.json`, no Python mutation config, no `.github/workflows/mutation-testing.yml` in this repository. Do not claim a mutation score here until wired. |
+| **Mutation score ≥ 90%** | **WIRED — changed source** | `.github/workflows/mutation-testing.yml`; backend uses `backend/scripts/mutation_gate.py` with `mutmut==2.5.1`; frontend uses `frontend/stryker.conf.json` with Stryker. This is an incremental changed-source gate, not evidence of a completed repo-wide historical mutation score. |
 
 ### Gate Commands
 
@@ -572,7 +572,9 @@ npm run build              # must succeed
 # All
 pre-commit run --all-files
 
-# Mutation testing — NOT WIRED (standing TODO, see Gate Status)
+# Mutation testing — changed-source gate (see Gate Status)
+# Backend: python scripts/mutation_gate.py <changed backend/src/*.py files>
+# Frontend: npx stryker run --mutate <changed frontend/src/*.ts,tsx files>
 ```
 
 ### Frontend Asset Status (HONEST)
