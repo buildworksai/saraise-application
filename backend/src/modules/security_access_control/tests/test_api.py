@@ -100,6 +100,12 @@ def test_cross_tenant_detail_update_delete_are_404_and_byte_unchanged(authentica
     assert tuple(getattr(foreign, field.attname) for field in foreign._meta.concrete_fields) == before
 
 
+def test_malformed_detail_id_returns_404_not_500(authenticated_tenant_a_client) -> None:
+    response = authenticated_tenant_a_client.get(f"{BASE}/user-roles/__uat_invalid_id__/")
+
+    assert response.status_code == 404
+
+
 def test_catalog_read_only_filter_search_order_and_methods(authenticated_tenant_a_client) -> None:
     permission = Permission.objects.create(
         module="finance", resource="journals", action="read", name="Read journals", risk_level="low"

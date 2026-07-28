@@ -2,6 +2,7 @@
 
 import os
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.management.base import BaseCommand, CommandError
@@ -82,11 +83,37 @@ class Command(BaseCommand):
 
         # ===== Tenant Users =====
 
-        # Ensure a real Tenant exists (Tenant Management module)
+        # Ensure real organization/tenant records exist for the configured runtime.
+        #
+        # UserProfile.clean is mode-aware: development/self-hosted identities are
+        # bound to licensing.Organization, while SaaS identities are bound to
+        # tenant_management.Tenant. Keep both records available for local module
+        # data, but bind seeded users to the authority required by the guardrail.
         tenant_id = None
         tenant_slug = "buildworks"
         try:
+            from src.core.licensing.models import License, LicenseStatus, Organization
             from src.modules.tenant_management.models import Tenant  # type: ignore
+
+            organization, organization_created = Organization.objects.get_or_create(
+                domain="buildworks.ai",
+                defaults={"name": "BuildWorks AI"},
+            )
+            License.objects.get_or_create(
+                organization=organization,
+                defaults={
+                    "status": LicenseStatus.ACTIVE,
+                    "core_tier": "enterprise",
+                    "max_companies": -1,
+                    "max_users": -1,
+                },
+            )
+            if organization_created:
+                self.stdout.write(
+                    self.style.SUCCESS(f"✅ Created default organization: {organization.name} ({organization.id})")
+                )
+            else:
+                self.stdout.write(self.style.WARNING(f"ℹ️  Default organization already exists: {organization.name}"))
 
             # Idempotent: ensure stable dev tenant exists
             tenant_obj, tenant_created = Tenant.objects.get_or_create(
@@ -108,7 +135,8 @@ class Command(BaseCommand):
                     "created_by": None,
                 },
             )
-            tenant_id = str(tenant_obj.id)  # Ensure string format
+            mode = getattr(settings, "SARAISE_MODE", "development")
+            tenant_id = str(organization.id if mode in {"development", "self-hosted"} else tenant_obj.id)
             if tenant_created:
                 self.stdout.write(
                     self.style.SUCCESS(f"✅ Created default tenant: {tenant_obj.name} ({tenant_obj.slug})")
@@ -117,9 +145,10 @@ class Command(BaseCommand):
                 self.stdout.write(
                     self.style.WARNING(f"ℹ️  Default tenant already exists: {tenant_obj.name} ({tenant_obj.slug})")
                 )
+            self.stdout.write(self.style.SUCCESS(f"✅ Binding tenant users to {mode} identity scope: {tenant_id}"))
         except Exception as e:
             # Keep seeding users functional even if tenant module isn't available for some reason
-            self.stdout.write(self.style.ERROR(f"⚠️  Could not create default tenant (Tenant Management): {e}"))
+            self.stdout.write(self.style.ERROR(f"⚠️  Could not create default identity scope: {e}"))
             self.stdout.write(self.style.WARNING("⚠️  Tenant users will not be created without a valid tenant."))
 
         if tenant_id:
@@ -214,9 +243,9 @@ class Command(BaseCommand):
         username: str,
         is_staff: bool,
         is_superuser: bool,
-        platform_role: str = None,
-        tenant_id: str = None,
-        tenant_role: str = None,
+        platform_role: str | None = None,
+        tenant_id: str | None = None,
+        tenant_role: str | None = None,
         force: bool = False,
     ):
         """Create or update a user with profile."""
@@ -262,7 +291,8 @@ class Command(BaseCommand):
                         profile = None
                 except Exception:
                     # If we can't verify, delete to be safe
-                    profile.delete()
+                    if profile is not None:
+                        profile.delete()
                     profile = None
 
             if profile is None:
@@ -355,7 +385,8 @@ class Command(BaseCommand):
                         profile = None
                 except Exception:
                     # If we can't verify, delete to be safe
-                    profile.delete()
+                    if profile is not None:
+                        profile.delete()
                     profile = None
 
             if profile is None:

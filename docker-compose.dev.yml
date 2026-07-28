@@ -172,6 +172,58 @@ services:
     networks:
       - saraise-network
 
+  outbox-dispatcher:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: application-outbox-dispatcher
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    environment:
+      - DATABASE_URL=postgresql://saraise_app:saraise_app@application-db:5432/saraise
+      - DB_NAME=saraise
+      - DB_USER=saraise_app
+      - DB_PASSWORD=saraise_app
+      - DB_HOST=application-db
+      - DB_PORT=5432
+      - REDIS_URL=redis://application-redis:6379/0
+      - DJANGO_SETTINGS_MODULE=saraise_backend.settings
+      - PYTHONPATH=/app
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - DEBUG=True
+      - ALLOWED_HOSTS=localhost,backend,backend:8000,0.0.0.0
+      - SARAISE_MODE=${SARAISE_MODE:-development}
+      - SARAISE_LICENSE_MODE=${SARAISE_LICENSE_MODE:-connected}
+      - DOCUMENT_INTELLIGENCE_ARTIFACT_ROOT=/app/runtime/document-intelligence/artifacts
+      - BDR_LOCAL_STORAGE_ROOT=/app/runtime/bdr/storage
+      - BDR_LOCAL_RESTORE_ROOT=/app/runtime/bdr/restore
+      - EMAIL_BACKEND=django.core.mail.backends.locmem.EmailBackend
+      - EMAIL_MARKETING_DEFAULT_GATEWAY=local_development
+    volumes:
+      - ./backend:/app
+      - backend_venv:/app/venv
+      - backend_runtime:/app/runtime
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    command:
+      [
+        "python",
+        "manage.py",
+        "run_outbox_dispatcher",
+        "--acknowledge-domain-events",
+        "--interval",
+        "1",
+      ]
+    networks:
+      - saraise-network
+
   # ===== Application Frontend (Runtime Plane) =====
   # React UI for tenant users - serves application layer only
 

@@ -413,7 +413,7 @@ class QueryExecution(TenantScopedModel, TimestampedModel):
         null=True,
         blank=True,
     )
-    async_job = models.ForeignKey(AsyncJob, on_delete=models.PROTECT, related_name="bi_executions", unique=True)
+    async_job = models.OneToOneField(AsyncJob, on_delete=models.PROTECT, related_name="bi_execution")
     actor_id = models.CharField(max_length=255)
     idempotency_key = models.CharField(max_length=255)
     definition_version = models.PositiveIntegerField()

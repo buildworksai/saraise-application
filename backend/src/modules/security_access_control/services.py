@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
-from typing import Any, Final
+from typing import Any, Final, cast
 from uuid import UUID
 
 from django.conf import settings
@@ -25,6 +25,7 @@ from django.utils import timezone
 from src.core.access import PolicyEvaluation
 from src.core.async_jobs.models import OutboxEvent
 from src.core.resilience.http import ResilientHttpClient
+from src.core.tenancy.rls import tenant_context
 
 from .models import (
     FieldSecurity,
@@ -473,7 +474,7 @@ class ConfigurationService:
             if (
                 isinstance(value, bool)
                 or not isinstance(value, int)
-                or not int(limits[low]) <= value <= int(limits[high])
+                or not _configured_int(limits, low) <= value <= _configured_int(limits, high)
             ):
                 raise SecurityValidationError(
                     "Invalid security configuration", detail={f"{path}.{key}": ["Out of configured bounds."]}
@@ -516,59 +517,61 @@ class ConfigurationService:
         cls, tenant_id: UUID, *, actor_id: UUID, correlation_id: str, environment: str | None = None
     ) -> SecurityConfiguration:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
-        current = SecurityConfiguration.objects.select_for_update().for_tenant(tenant).first()
-        if current is not None:
-            cls.validate_document(current.document)
-            cls.validate_rollout(current.rollout)
+        with tenant_context(tenant):
+            current = SecurityConfiguration.objects.select_for_update().for_tenant(tenant).first()
+            if current is not None:
+                cls.validate_document(current.document)
+                cls.validate_rollout(current.rollout)
+                return current
+            env = str(environment or getattr(settings, "SARAISE_ENVIRONMENT", "development")).lower()
+            if env not in cls.ENVIRONMENTS:
+                raise SecurityConfigurationMissing("A valid tenant security environment is required")
+            document = cls.validate_document(default_security_configuration())
+            rollout = cls.validate_rollout(DEFAULT_ROLLOUT)
+            current = SecurityConfiguration(
+                tenant_id=tenant,
+                environment=env,
+                version=1,
+                document=document,
+                rollout=rollout,
+                updated_by=actor,
+                correlation_id=correlation_id,
+            )
+            current.save(force_insert=True)
+            SecurityConfigurationVersion.objects.create(
+                tenant_id=tenant,
+                version=1,
+                environment=env,
+                previous_document=None,
+                current_document=document,
+                previous_rollout=None,
+                current_rollout=rollout,
+                actor_id=actor,
+                correlation_id=correlation_id,
+                reason="Initial governed tenant configuration",
+                change_kind="bootstrap",
+            )
+            _security_event(
+                tenant,
+                event_type="security.configuration.changed",
+                aggregate_type="security_configuration",
+                aggregate_id=current.id,
+                actor_id=actor,
+                correlation_id=correlation_id,
+                payload={"operation": "bootstrap", "version": 1},
+            )
             return current
-        env = str(environment or getattr(settings, "SARAISE_ENVIRONMENT", "development")).lower()
-        if env not in cls.ENVIRONMENTS:
-            raise SecurityConfigurationMissing("A valid tenant security environment is required")
-        document = cls.validate_document(default_security_configuration())
-        rollout = cls.validate_rollout(DEFAULT_ROLLOUT)
-        current = SecurityConfiguration(
-            tenant_id=tenant,
-            environment=env,
-            version=1,
-            document=document,
-            rollout=rollout,
-            updated_by=actor,
-            correlation_id=correlation_id,
-        )
-        current.save(force_insert=True)
-        SecurityConfigurationVersion.objects.create(
-            tenant_id=tenant,
-            version=1,
-            environment=env,
-            previous_document=None,
-            current_document=document,
-            previous_rollout=None,
-            current_rollout=rollout,
-            actor_id=actor,
-            correlation_id=correlation_id,
-            reason="Initial governed tenant configuration",
-            change_kind="bootstrap",
-        )
-        _security_event(
-            tenant,
-            event_type="security.configuration.changed",
-            aggregate_type="security_configuration",
-            aggregate_id=current.id,
-            actor_id=actor,
-            correlation_id=correlation_id,
-            payload={"operation": "bootstrap", "version": 1},
-        )
-        return current
 
     @classmethod
     def require_existing(cls, tenant_id: UUID) -> SecurityConfiguration:
         tenant = _uuid(tenant_id, "tenant_id")
-        current = SecurityConfiguration.objects.for_tenant(tenant).first()
-        if current is None:
-            raise SecurityConfigurationMissing("Tenant security configuration is required")
-        cls.validate_document(current.document)
-        cls.validate_rollout(current.rollout)
-        return current
+        with tenant_context(tenant):
+            current = SecurityConfiguration.objects.for_tenant(tenant).first()
+            if current is None:
+                raise SecurityConfigurationMissing("Tenant security configuration is required")
+            cls.validate_document(current.document)
+            cls.validate_rollout(current.rollout)
+            return current
 
     @staticmethod
     def _diff(
@@ -613,40 +616,45 @@ class ConfigurationService:
         change_kind: str = "update",
     ) -> SecurityConfiguration:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
-        current = cls.current(tenant, actor_id=actor, correlation_id=correlation_id, environment=environment)
-        current = SecurityConfiguration.objects.select_for_update().get(pk=current.pk)
-        if environment not in cls.ENVIRONMENTS:
-            raise SecurityValidationError("Invalid environment", detail={"environment": ["Unsupported value."]})
-        normalized_document = cls.validate_document(document)
-        normalized_rollout = cls.validate_rollout(current.rollout if rollout is None else rollout)
-        previous_document, previous_rollout = deepcopy(current.document), deepcopy(current.rollout)
-        current.version += 1
-        current.environment, current.document, current.rollout = environment, normalized_document, normalized_rollout
-        current.updated_by, current.correlation_id = actor, correlation_id
-        current.save()
-        SecurityConfigurationVersion.objects.create(
-            tenant_id=tenant,
-            version=current.version,
-            environment=environment,
-            previous_document=previous_document,
-            current_document=normalized_document,
-            previous_rollout=previous_rollout,
-            current_rollout=normalized_rollout,
-            actor_id=actor,
-            correlation_id=correlation_id,
-            reason=_required_text(reason, "reason"),
-            change_kind=change_kind,
-        )
-        _security_event(
-            tenant,
-            event_type="security.configuration.changed",
-            aggregate_type="security_configuration",
-            aggregate_id=current.id,
-            actor_id=actor,
-            correlation_id=correlation_id,
-            payload={"operation": change_kind, "version": current.version},
-        )
-        return current
+        with tenant_context(tenant):
+            current = cls.current(tenant, actor_id=actor, correlation_id=correlation_id, environment=environment)
+            current = SecurityConfiguration.objects.select_for_update().get(pk=current.pk)
+            if environment not in cls.ENVIRONMENTS:
+                raise SecurityValidationError("Invalid environment", detail={"environment": ["Unsupported value."]})
+            normalized_document = cls.validate_document(document)
+            normalized_rollout = cls.validate_rollout(current.rollout if rollout is None else rollout)
+            previous_document, previous_rollout = deepcopy(current.document), deepcopy(current.rollout)
+            current.version += 1
+            current.environment, current.document, current.rollout = (
+                environment,
+                normalized_document,
+                normalized_rollout,
+            )
+            current.updated_by, current.correlation_id = actor, correlation_id
+            current.save()
+            SecurityConfigurationVersion.objects.create(
+                tenant_id=tenant,
+                version=current.version,
+                environment=environment,
+                previous_document=previous_document,
+                current_document=normalized_document,
+                previous_rollout=previous_rollout,
+                current_rollout=normalized_rollout,
+                actor_id=actor,
+                correlation_id=correlation_id,
+                reason=_required_text(reason, "reason"),
+                change_kind=change_kind,
+            )
+            _security_event(
+                tenant,
+                event_type="security.configuration.changed",
+                aggregate_type="security_configuration",
+                aggregate_id=current.id,
+                actor_id=actor,
+                correlation_id=correlation_id,
+                payload={"operation": change_kind, "version": current.version},
+            )
+            return current
 
     @classmethod
     def update_rollout(
@@ -669,19 +677,20 @@ class ConfigurationService:
         cls, tenant_id: UUID, version: int, *, actor_id: UUID, correlation_id: str, reason: str
     ) -> SecurityConfiguration:
         tenant = _uuid(tenant_id, "tenant_id")
-        target = SecurityConfigurationVersion.objects.for_tenant(tenant).filter(version=version).first()
-        if target is None:
-            raise SecurityNotFound("Configuration version was not found")
-        return cls.replace(
-            tenant,
-            document=target.current_document,
-            environment=target.environment,
-            rollout=target.current_rollout,
-            actor_id=actor_id,
-            correlation_id=correlation_id,
-            reason=reason,
-            change_kind="rollback",
-        )
+        with tenant_context(tenant):
+            target = SecurityConfigurationVersion.objects.for_tenant(tenant).filter(version=version).first()
+            if target is None:
+                raise SecurityNotFound("Configuration version was not found")
+            return cls.replace(
+                tenant,
+                document=target.current_document,
+                environment=target.environment,
+                rollout=target.current_rollout,
+                actor_id=actor_id,
+                correlation_id=correlation_id,
+                reason=reason,
+                change_kind="rollback",
+            )
 
     @staticmethod
     def export_document(current: SecurityConfiguration) -> dict[str, object]:
@@ -714,25 +723,26 @@ class MutationReplayService:
             raise SecurityValidationError(
                 "A valid Idempotency-Key is required", detail={"idempotency_key": ["Required for mutations."]}
             )
-        encoded = json.dumps(request_document, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
-        request_hash = hashlib.sha256(operation.encode("utf-8") + b"\0" + encoded).hexdigest()
-        replay = MutationReplay.objects.select_for_update().for_tenant(tenant).filter(idempotency_key=key).first()
-        if replay is not None:
-            if replay.request_hash != request_hash or replay.operation != operation:
-                raise SecurityConflict("Idempotency-Key was already used for a different mutation")
-            return deepcopy(replay.response_document), replay.response_status, True
-        response_document, response_status, resource_id = callback()
-        MutationReplay.objects.create(
-            tenant_id=tenant,
-            idempotency_key=key,
-            request_hash=request_hash,
-            operation=operation,
-            resource_id=resource_id,
-            response_status=response_status,
-            response_document=response_document,
-            correlation_id=correlation_id,
-        )
-        return deepcopy(response_document), response_status, False
+        with tenant_context(tenant):
+            encoded = json.dumps(request_document, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+            request_hash = hashlib.sha256(operation.encode("utf-8") + b"\0" + encoded).hexdigest()
+            replay = MutationReplay.objects.select_for_update().for_tenant(tenant).filter(idempotency_key=key).first()
+            if replay is not None:
+                if replay.request_hash != request_hash or replay.operation != operation:
+                    raise SecurityConflict("Idempotency-Key was already used for a different mutation")
+                return deepcopy(replay.response_document), replay.response_status, True
+            response_document, response_status, resource_id = callback()
+            MutationReplay.objects.create(
+                tenant_id=tenant,
+                idempotency_key=key,
+                request_hash=request_hash,
+                operation=operation,
+                resource_id=resource_id,
+                response_status=response_status,
+                response_document=response_document,
+                correlation_id=correlation_id,
+            )
+            return deepcopy(response_document), response_status, False
 
 
 @dataclass(frozen=True, slots=True)
@@ -803,6 +813,24 @@ def _actor_uuid(value: object) -> UUID:
         return uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:user:{value}")
 
 
+def _configured_int(values: Mapping[str, object], key: str) -> int:
+    value = values[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SecurityConfigurationMissing(f"{key} must be configured as an integer")
+    return value
+
+
+def _coerce_int(value: object, field: str) -> int:
+    if isinstance(value, bool):
+        raise SecurityValidationError(f"{field} must be an integer", detail={field: ["Invalid integer."]})
+    if not isinstance(value, (int, str)):
+        raise SecurityValidationError(f"{field} must be an integer", detail={field: ["Invalid integer."]})
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise SecurityValidationError(f"{field} must be an integer", detail={field: ["Invalid integer."]}) from exc
+
+
 def _slug(value: object, field: str) -> str:
     normalized = str(value).strip().lower().replace(" ", "_")
     if not SLUG_RE.fullmatch(normalized):
@@ -833,9 +861,9 @@ def _model_validation(instance: Any) -> None:
         ) from exc
 
 
-def _tenant_user(tenant_id: UUID, user_id: UUID | str) -> Any:
+def _tenant_user(tenant_id: UUID, user_id: UUID | int | str) -> Any:
     user = (
-        get_user_model().objects.filter(id=user_id).first()
+        get_user_model().objects.filter(id=cast(Any, user_id)).first()
     )  # nosemgrep: semgrep.tenant-id-required-in-queries -- reviewed false positive; scope enforced by surrounding domain policy.  # noqa: E501
     profile_tenant = getattr(getattr(user, "profile", None), "tenant_id", None) if user is not None else None
     if user is None or str(profile_tenant) != str(tenant_id):
@@ -1086,7 +1114,7 @@ class RoleService:
         before = {key: str(getattr(role, key, "")) for key in allowed if key in changes}
         if "parent_role_id" in changes:
             parent_id = changes["parent_role_id"]
-            parent = _role(tenant, parent_id, lock=True) if parent_id else None
+            parent = _role(tenant, cast(UUID | str, parent_id), lock=True) if parent_id else None
             role.parent_role = parent
             role.hierarchy_level = parent.hierarchy_level + 1 if parent else 0
         for key in allowed - {"parent_role_id"}:
@@ -1950,7 +1978,7 @@ class RowSecurityService:
             role=previous.role,
             rule_type=str(changes.get("rule_type", previous.rule_type)),
             filter_criteria=criteria,
-            priority=int(changes.get("priority", previous.priority)),
+            priority=_coerce_int(changes.get("priority", previous.priority), "priority"),
             is_active=bool(changes.get("is_active", True)),
             version=previous.version + 1,
             created_by=actor,
@@ -2404,17 +2432,17 @@ class PolicyEvaluatorComposition:
 
 class AccessEvaluationService:
     @staticmethod
-    def active_role_ids(tenant_id: UUID, user_id: UUID, *, at: datetime | None = None) -> tuple[UUID, ...]:
+    def active_role_ids(tenant_id: UUID, user_id: UUID | int | str, *, at: datetime | None = None) -> tuple[UUID, ...]:
         configuration = ConfigurationService.require_existing(tenant_id)
         limits = configuration.document.get("limits")
         if not isinstance(limits, Mapping):
             raise SecurityConfigurationMissing("Role hierarchy limits are required")
-        maximum_depth = int(limits["role_hierarchy_max_depth"])
+        maximum_depth = _configured_int(limits, "role_hierarchy_max_depth")
         when = at or timezone.now()
         direct = (
             UserRole.objects.for_tenant(tenant_id)
             .filter(
-                user_id=user_id,
+                user_id=cast(Any, user_id),
                 revoked_at__isnull=True,
                 valid_from__lte=when,
                 role__is_active=True,
@@ -2425,7 +2453,7 @@ class AccessEvaluationService:
         )
         result: set[UUID] = set()
         for assignment in direct:
-            role = assignment.role
+            role: Role | None = assignment.role
             depth = 0
             while role is not None and role.id not in result and depth <= maximum_depth:
                 if role.is_active and not role.is_deleted:
@@ -2442,7 +2470,7 @@ class AccessEvaluationService:
 
     @classmethod
     def get_effective_permissions(
-        cls, tenant_id: UUID, user_id: UUID, *, at: datetime | None = None
+        cls, tenant_id: UUID, user_id: UUID | int | str, *, at: datetime | None = None
     ) -> EffectivePermissionSet:
         tenant = _uuid(tenant_id, "tenant_id")
         _tenant_user(tenant, user_id)
@@ -2452,7 +2480,7 @@ class AccessEvaluationService:
         allowed = {item.permission.code for item in decisions if item.is_granted}
         denied = {item.permission.code for item in decisions if not item.is_granted}
         grants = UserPermissionSet.objects.for_tenant(tenant).filter(
-            user_id=user_id,
+            user_id=cast(Any, user_id),
             revoked_at__isnull=True,
             granted_at__lte=when,
             expires_at__gt=when,

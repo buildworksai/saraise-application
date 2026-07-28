@@ -24,18 +24,13 @@ export default defineConfig({
         cookieDomainRewrite: '',
         cookiePathRewrite: '/',
         // CRITICAL: Configure proxy to preserve all headers including Set-Cookie
-        configure: (proxy, _options) => {
-          proxy.on('proxyRes', (proxyRes, req, res) => {
-            // Log and preserve Set-Cookie headers from backend
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes) => {
             const setCookieHeaders = proxyRes.headers['set-cookie'];
             if (setCookieHeaders && Array.isArray(setCookieHeaders) && setCookieHeaders.length > 0) {
-              // Log the actual cookie values for debugging
               console.log('[Vite Proxy] Set-Cookie headers detected:', setCookieHeaders.length, 'cookies');
-              setCookieHeaders.forEach((cookie, idx) => {
-                console.log(`[Vite Proxy] Cookie ${idx + 1}:`, cookie.substring(0, 50) + '...');
-              });
             } else if (setCookieHeaders) {
-              console.log('[Vite Proxy] Set-Cookie headers (non-array):', typeof setCookieHeaders, setCookieHeaders);
+              console.log('[Vite Proxy] Set-Cookie headers detected.');
             }
             // Note: http-proxy-middleware should automatically forward Set-Cookie headers
             // We don't need to manually set them as that could cause conflicts

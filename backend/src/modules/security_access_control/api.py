@@ -7,10 +7,11 @@ import re
 import uuid
 from collections.abc import Callable, Mapping
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.utils import timezone
@@ -143,11 +144,11 @@ class SecurityRateThrottle(SimpleRateThrottle):
                 if not isinstance(limits, Mapping):
                     return False
                 self.num_requests = int(limits["rate_requests_per_minute"])
-                self.duration = timedelta(minutes=1).total_seconds()
+                self.duration = int(timedelta(minutes=1).total_seconds())
                 self.rate = f"{self.num_requests}/min"
             except (SecurityValidationError, SecurityConfigurationMissing):
                 return False
-        return super().allow_request(request, view)
+        return super().allow_request(request, cast(Any, view))
 
     def get_cache_key(self, request: Any, view: object) -> str | None:
         if not getattr(request.user, "is_authenticated", False):
@@ -186,6 +187,13 @@ def _actor(request: Any) -> UUID:
         return uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:user:{raw}")
 
 
+def _path_uuid(value: object) -> UUID:
+    try:
+        return value if isinstance(value, UUID) else UUID(str(value))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise NotFound() from exc
+
+
 def _call(service_operation: Callable[..., Any], *args: object, **kwargs: object) -> Any:
     try:
         return service_operation(*args, **kwargs)
@@ -194,7 +202,7 @@ def _call(service_operation: Callable[..., Any], *args: object, **kwargs: object
     except SecurityConflict as exc:
         raise OperationFailed(error_code="CONFLICT", message=str(exc), http_status=409) from exc
     except SecurityValidationError as exc:
-        raise ValidationError(exc.detail or {"non_field_errors": [str(exc)]}) from exc
+        raise ValidationError(cast(Any, exc.detail or {"non_field_errors": [str(exc)]})) from exc
     except (SecurityConfigurationMissing, SecurityDependencyUnavailable) as exc:
         raise OperationFailed(error_code=exc.code, message=str(exc), http_status=503) from exc
 
@@ -248,7 +256,7 @@ class GovernedSecurityViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
         self.headers = self.default_response_headers
         try:
             self.initial(governed_request, *args, **kwargs)
-            method = governed_request.method.lower()
+            method = str(governed_request.method).lower()
             handler = (
                 getattr(self, method, self.http_method_not_allowed)
                 if method in self.http_method_names
@@ -327,11 +335,11 @@ class GovernedSecurityViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
         pattern = str(limits["correlation_id_pattern"])
         maximum = int(limits["correlation_id_max_length"])
         if supplied and len(supplied) <= maximum and re.fullmatch(pattern, supplied):
-            self.request.correlation_id = supplied
+            setattr(self.request, "correlation_id", supplied)
             return supplied
         return generated
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[object]:  # type: ignore[override]
         if not bool(getattr(self.request.user, "is_authenticated", False)):
             return [IsAuthenticated()]
         _tenant(self.request)
@@ -339,6 +347,12 @@ class GovernedSecurityViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
         if code is None:
             return [IsAuthenticated(), requires_access("")]
         return [IsAuthenticated(), requires_access(code, catalog=self.catalog_objects)]
+
+    def get_object(self) -> object:
+        try:
+            return super().get_object()
+        except (DjangoValidationError, ValueError, TypeError) as exc:
+            raise NotFound() from exc
 
     def query(self, queryset: QuerySet[Any]) -> QuerySet[Any]:
         if _optional_tenant(self.request) is None:
@@ -429,7 +443,7 @@ class RoleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSecu
         item = _call(
             RoleService.update_role,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             changes=serializer.validated_data,
             actor_id=self.actor_id,
             correlation_id=self.correlation_id,
@@ -442,7 +456,7 @@ class RoleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSecu
         _call(
             RoleService.delete_role,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             actor_id=self.actor_id,
             reason=_deletion_reason(request),
             correlation_id=self.correlation_id,
@@ -457,7 +471,7 @@ class RoleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSecu
         item = _call(
             RoleService.set_role_permission,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             serializer.validated_data["permission_id"],
             is_granted=serializer.validated_data["is_granted"],
             actor_id=self.actor_id,
@@ -474,8 +488,8 @@ class RoleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSecu
         _call(
             RoleService.remove_role_permission,
             self.tenant_id,
-            UUID(str(pk)),
-            UUID(str(permission_id)),
+            _path_uuid(pk),
+            _path_uuid(permission_id),
             actor_id=self.actor_id,
             correlation_id=self.correlation_id,
         )
@@ -521,8 +535,11 @@ class UserRoleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Governed
         tenant_id = _optional_tenant(self.request)
         if tenant_id is None:
             return UserRole.objects.none()
-        queryset = UserRole.objects.for_tenant(tenant_id).select_related("role")
-        queryset = _apply_filters(queryset, self.request.query_params, {"user_id": "user_id", "role_id": "role_id"})
+        queryset: QuerySet[UserRole] = UserRole.objects.for_tenant(tenant_id).select_related("role")
+        queryset = cast(
+            QuerySet[UserRole],
+            _apply_filters(queryset, self.request.query_params, {"user_id": "user_id", "role_id": "role_id"}),
+        )
         if self.request.query_params.get("revoked") in {"true", "false"}:
             queryset = queryset.filter(revoked_at__isnull=self.request.query_params["revoked"] == "false")
         active_at = self.request.query_params.get("active_at")
@@ -567,7 +584,7 @@ class UserRoleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Governed
         item = _call(
             RoleService.update_role_assignment,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             **values,
             actor_id=self.actor_id,
             correlation_id=self.correlation_id,
@@ -580,7 +597,7 @@ class UserRoleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Governed
         _call(
             RoleService.revoke_role_assignment,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             reason=_deletion_reason(request),
             actor_id=self.actor_id,
             correlation_id=self.correlation_id,
@@ -653,7 +670,7 @@ class PermissionSetViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Gov
         item = _call(
             PermissionSetService.update_permission_set,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             changes=serializer.validated_data,
             actor_id=self.actor_id,
             correlation_id=self.correlation_id,
@@ -666,7 +683,7 @@ class PermissionSetViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Gov
         _call(
             PermissionSetService.delete_permission_set,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             actor_id=self.actor_id,
             reason=_deletion_reason(request),
             correlation_id=self.correlation_id,
@@ -681,7 +698,7 @@ class PermissionSetViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Gov
         item = _call(
             PermissionSetService.set_permissions,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             permission_ids=serializer.validated_data["permission_ids"],
             actor_id=self.actor_id,
             correlation_id=self.correlation_id,
@@ -705,9 +722,16 @@ class UserPermissionSetViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         tenant_id = _optional_tenant(self.request)
         if tenant_id is None:
             return UserPermissionSet.objects.none()
-        queryset = UserPermissionSet.objects.for_tenant(tenant_id).select_related("permission_set")
-        queryset = _apply_filters(
-            queryset, self.request.query_params, {"user_id": "user_id", "permission_set_id": "permission_set_id"}
+        queryset: QuerySet[UserPermissionSet] = UserPermissionSet.objects.for_tenant(tenant_id).select_related(
+            "permission_set"
+        )
+        queryset = cast(
+            QuerySet[UserPermissionSet],
+            _apply_filters(
+                queryset,
+                self.request.query_params,
+                {"user_id": "user_id", "permission_set_id": "permission_set_id"},
+            ),
         )
         if self.request.query_params.get("revoked") in {"true", "false"}:
             queryset = queryset.filter(revoked_at__isnull=self.request.query_params["revoked"] == "false")
@@ -753,7 +777,7 @@ class UserPermissionSetViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         item = _call(
             PermissionSetService.update_user_grant,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             **serializer.validated_data,
             actor_id=self.actor_id,
             correlation_id=self.correlation_id,
@@ -766,7 +790,7 @@ class UserPermissionSetViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         _call(
             PermissionSetService.revoke_user_grant,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             reason=_deletion_reason(request),
             actor_id=self.actor_id,
             correlation_id=self.correlation_id,
@@ -810,7 +834,7 @@ class _RuleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSec
         item = _call(
             self.service.update_rule,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             changes=serializer.validated_data,
             actor_id=self.actor_id,
             correlation_id=self.correlation_id,
@@ -823,7 +847,7 @@ class _RuleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedSec
         _call(
             self.service.delete_rule,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             actor_id=self.actor_id,
             reason=_deletion_reason(request),
             correlation_id=self.correlation_id,
@@ -962,7 +986,7 @@ class SecurityProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, G
         item = _call(
             SecurityProfileService.update_profile,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             changes=serializer.validated_data,
             actor_id=self.actor_id,
             correlation_id=self.correlation_id,
@@ -975,7 +999,7 @@ class SecurityProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, G
         _call(
             SecurityProfileService.delete_profile,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             actor_id=self.actor_id,
             reason=_deletion_reason(request),
             correlation_id=self.correlation_id,
@@ -999,11 +1023,16 @@ class SecurityProfileAssignmentViewSet(mixins.ListModelMixin, mixins.RetrieveMod
         tenant_id = _optional_tenant(self.request)
         if tenant_id is None:
             return SecurityProfileAssignment.objects.none()
-        queryset = SecurityProfileAssignment.objects.for_tenant(tenant_id).select_related("security_profile", "role")
-        queryset = _apply_filters(
-            queryset,
-            self.request.query_params,
-            {"profile_id": "security_profile_id", "user_id": "user_id", "role_id": "role_id"},
+        queryset: QuerySet[SecurityProfileAssignment] = SecurityProfileAssignment.objects.for_tenant(
+            tenant_id
+        ).select_related("security_profile", "role")
+        queryset = cast(
+            QuerySet[SecurityProfileAssignment],
+            _apply_filters(
+                queryset,
+                self.request.query_params,
+                {"profile_id": "security_profile_id", "user_id": "user_id", "role_id": "role_id"},
+            ),
         )
         if self.request.query_params.get("revoked") in {"true", "false"}:
             queryset = queryset.filter(revoked_at__isnull=self.request.query_params["revoked"] == "false")
@@ -1048,7 +1077,7 @@ class SecurityProfileAssignmentViewSet(mixins.ListModelMixin, mixins.RetrieveMod
         item = _call(
             SecurityProfileService.update_profile_assignment,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             changes=serializer.validated_data,
             actor_id=self.actor_id,
             correlation_id=self.correlation_id,
@@ -1061,7 +1090,7 @@ class SecurityProfileAssignmentViewSet(mixins.ListModelMixin, mixins.RetrieveMod
         _call(
             SecurityProfileService.revoke_profile_assignment,
             self.tenant_id,
-            UUID(str(pk)),
+            _path_uuid(pk),
             reason=_deletion_reason(request),
             actor_id=self.actor_id,
             correlation_id=self.correlation_id,
@@ -1079,19 +1108,22 @@ class SecurityAuditLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, 
         tenant_id = _optional_tenant(self.request)
         if tenant_id is None:
             return SecurityAuditLog.objects.none()
-        queryset = SecurityAuditLog.objects.for_tenant(tenant_id)
-        queryset = _apply_filters(
-            queryset,
-            self.request.query_params,
-            {
-                "action": "action",
-                "actor_type": "actor_type",
-                "actor_id": "actor_id",
-                "resource_type": "resource_type",
-                "resource_id": "resource_id",
-                "decision": "decision",
-                "correlation_id": "correlation_id",
-            },
+        queryset: QuerySet[SecurityAuditLog] = SecurityAuditLog.objects.for_tenant(tenant_id)
+        queryset = cast(
+            QuerySet[SecurityAuditLog],
+            _apply_filters(
+                queryset,
+                self.request.query_params,
+                {
+                    "action": "action",
+                    "actor_type": "actor_type",
+                    "actor_id": "actor_id",
+                    "resource_type": "resource_type",
+                    "resource_id": "resource_id",
+                    "decision": "decision",
+                    "correlation_id": "correlation_id",
+                },
+            ),
         )
         start = parse_datetime(self.request.query_params["from"]) if "from" in self.request.query_params else None
         end = parse_datetime(self.request.query_params["to"]) if "to" in self.request.query_params else None

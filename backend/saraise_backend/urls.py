@@ -37,8 +37,14 @@ urlpatterns = [
     path("api/v1/tenant-management/", include("src.modules.tenant_management.urls")),
     # Security & Access Control
     path("api/v2/security-access-control/", include("src.modules.security_access_control.urls")),
-    path("api/v2/workflow-automation/", include("src.modules.workflow_automation.urls")),
-    path("api/v1/workflow-automation/", include("src.modules.workflow_automation.urls")),
+    path(
+        "api/v2/workflow-automation/",
+        include(("src.modules.workflow_automation.urls", "workflow_automation"), namespace="workflow_automation_v2"),
+    ),
+    path(
+        "api/v1/workflow-automation/",
+        include(("src.modules.workflow_automation.urls", "workflow_automation"), namespace="workflow_automation_v1"),
+    ),
     path("api/v1/api-management/", include("src.modules.api_management.urls")),
     path("api/v2/integration-platform/", include("src.modules.integration_platform.urls")),
     path("api/v2/customization-framework/", include("src.modules.customization_framework.urls")),
@@ -48,8 +54,14 @@ urlpatterns = [
     path("api/v2/document-intelligence/", include("src.modules.document_intelligence.urls")),
     path("api/v2/dms/", include("src.modules.dms.urls")),
     # v2 is authoritative. v1 remains a deprecation shim for existing clients.
-    path("api/v2/data-migration/", include("src.modules.data_migration.urls")),
-    path("api/v1/data-migration/", include("src.modules.data_migration.urls")),
+    path(
+        "api/v2/data-migration/",
+        include(("src.modules.data_migration.urls", "data_migration"), namespace="data_migration_v2"),
+    ),
+    path(
+        "api/v1/data-migration/",
+        include(("src.modules.data_migration.urls", "data_migration"), namespace="data_migration_v1"),
+    ),
     path("api/v2/metadata-modeling/", include("src.modules.metadata_modeling.urls")),
     # Keep v1 after v2 so un-namespaced reverse() calls from deployed legacy
     # integrations resolve to the applied compatibility route.
@@ -80,10 +92,22 @@ urlpatterns = [
     path("api/v1/multi-company/", include("src.modules.multi_company.urls")),
     path("api/v2/multi-company/", include("src.modules.multi_company.v2_urls")),
     path("api/v1/asset-management/", include("src.modules.asset_management.urls")),
-    path("api/v1/bank-reconciliation/", include("src.modules.bank_reconciliation.urls")),
-    path("api/v2/bank-reconciliation/", include("src.modules.bank_reconciliation.urls")),
-    path("api/v1/budget-management/", include("src.modules.budget_management.urls")),
-    path("api/v2/budget-management/", include("src.modules.budget_management.urls")),
+    path(
+        "api/v1/bank-reconciliation/",
+        include(("src.modules.bank_reconciliation.urls", "bank_reconciliation"), namespace="bank_reconciliation_v1"),
+    ),
+    path(
+        "api/v2/bank-reconciliation/",
+        include(("src.modules.bank_reconciliation.urls", "bank_reconciliation"), namespace="bank_reconciliation_v2"),
+    ),
+    path(
+        "api/v1/budget-management/",
+        include(("src.modules.budget_management.urls", "budget_management"), namespace="budget_management_v1"),
+    ),
+    path(
+        "api/v2/budget-management/",
+        include(("src.modules.budget_management.urls", "budget_management"), namespace="budget_management_v2"),
+    ),
     path("api/v2/business-intelligence/", include("src.modules.business_intelligence.urls")),
     path("api/v2/compliance-management/", include("src.modules.compliance_management.urls")),
     path("api/v1/compliance-risk-management/", include("src.modules.compliance_risk_management.urls")),

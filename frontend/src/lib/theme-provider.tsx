@@ -1,7 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 import * as React from "react";
-
-type Theme = "dark" | "light" | "system";
+import { ThemeContext, type Theme } from "./theme-context";
 
 interface ThemeProviderProps {
   children: React.ReactNode;
@@ -9,21 +8,29 @@ interface ThemeProviderProps {
   storageKey?: string;
 }
 
-interface ThemeProviderState {
-  theme: Theme;
+function getThemeStorage(): Storage | undefined {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) {
+      return undefined;
+    }
+
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
 }
 
-const initialState: ThemeProviderState = {
-  theme: "system",
-};
+function getStoredTheme(storageKey: string, defaultTheme: Theme): Theme {
+  return (getThemeStorage()?.getItem(storageKey) as Theme | null) ?? defaultTheme;
+}
 
-const ThemeProviderContext = React.createContext<{
-  theme: Theme;
-  setTheme: (theme: Theme) => void;
-}>({
-  theme: initialState.theme,
-  setTheme: () => null,
-});
+function getSystemTheme(): Exclude<Theme, "system"> {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return "light";
+  }
+
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
 
 export function ThemeProvider({
   children,
@@ -31,9 +38,7 @@ export function ThemeProvider({
   storageKey = "saraise-theme",
   ...props
 }: ThemeProviderProps) {
-  const [theme, setTheme] = React.useState<Theme>(
-    () => (localStorage.getItem(storageKey) as Theme) || defaultTheme
-  );
+  const [theme, setTheme] = React.useState<Theme>(() => getStoredTheme(storageKey, defaultTheme));
 
   React.useEffect(() => {
     const root = window.document.documentElement;
@@ -41,11 +46,7 @@ export function ThemeProvider({
     root.classList.remove("light", "dark");
 
     if (theme === "system") {
-      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
-
-      root.classList.add(systemTheme);
+      root.classList.add(getSystemTheme());
       return;
     }
 
@@ -55,22 +56,16 @@ export function ThemeProvider({
   const value = {
     theme,
     setTheme: (theme: Theme) => {
-      localStorage.setItem(storageKey, theme);
+      getThemeStorage()?.setItem(storageKey, theme);
       setTheme(theme);
     },
   };
 
   return (
-    <ThemeProviderContext.Provider {...props} value={value}>
+    <ThemeContext.Provider {...props} value={value}>
       {children}
-    </ThemeProviderContext.Provider>
+    </ThemeContext.Provider>
   );
 }
 
-export const useTheme = () => {
-  const context = React.useContext(ThemeProviderContext);
-
-  if (context === undefined) throw new Error("useTheme must be used within a ThemeProvider");
-
-  return context;
-};
+export { useTheme } from "./theme-context";

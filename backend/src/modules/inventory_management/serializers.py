@@ -168,9 +168,9 @@ class StorageLocationCreateSerializer(StrictSerializer):
     location_type = serializers.ChoiceField(choices=StorageLocation.LocationType.choices)
     barcode = serializers.CharField(max_length=128, required=False, allow_blank=True)
     pick_sequence = serializers.IntegerField(min_value=0, required=False)
-    capacity_units = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=0)
-    capacity_weight_kg = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=0)
-    capacity_volume_cbm = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=0)
+    capacity_units = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=Decimal("0"))
+    capacity_weight_kg = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=Decimal("0"))
+    capacity_volume_cbm = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=Decimal("0"))
     temperature_controlled = serializers.BooleanField(required=False)
     hazmat_approved = serializers.BooleanField(required=False)
     is_default = serializers.BooleanField(required=False)
@@ -236,10 +236,10 @@ class ItemCreateSerializer(StrictSerializer):
     tracking_mode = serializers.ChoiceField(choices=Item.TrackingMode.choices)
     tracks_expiry = serializers.BooleanField(required=False)
     valuation_method = serializers.ChoiceField(choices=Item.ValuationMethod.choices)
-    standard_cost = serializers.DecimalField(19, 4, required=False, allow_null=True, min_value=0)
-    reorder_point = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=0)
-    reorder_quantity = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=0)
-    safety_stock = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=0)
+    standard_cost = serializers.DecimalField(19, 4, required=False, allow_null=True, min_value=Decimal("0"))
+    reorder_point = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=Decimal("0"))
+    reorder_quantity = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=Decimal("0"))
+    safety_stock = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=Decimal("0"))
     default_warehouse_id = serializers.UUIDField(required=False, allow_null=True)
     abc_classification = serializers.ChoiceField(
         choices=Item.ABCClassification.choices, required=False, allow_blank=True
@@ -356,7 +356,7 @@ class StockEntryLineInputSerializer(StrictSerializer):
     serial_number_id = serializers.UUIDField(required=False, allow_null=True)
     quantity = serializers.DecimalField(18, 6, min_value=Decimal("0.000001"))
     uom = serializers.CharField(max_length=32)
-    unit_cost = serializers.DecimalField(19, 4, required=False, allow_null=True, min_value=0)
+    unit_cost = serializers.DecimalField(19, 4, required=False, allow_null=True, min_value=Decimal("0"))
     notes = serializers.CharField(required=False, allow_blank=True)
 
 
@@ -541,7 +541,7 @@ class CycleCountLineInputSerializer(StrictSerializer):
     location_id = serializers.UUIDField()
     batch_id = serializers.UUIDField(required=False, allow_null=True)
     serial_number_id = serializers.UUIDField(required=False, allow_null=True)
-    counted_quantity = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=0)
+    counted_quantity = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=Decimal("0"))
 
 
 class CycleCountLineSerializer(serializers.Serializer):

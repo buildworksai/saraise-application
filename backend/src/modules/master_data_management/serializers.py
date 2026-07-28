@@ -515,8 +515,12 @@ class MatchingRuleWriteSerializer(StrictSerializer):
     algorithm = serializers.ChoiceField(choices=("exact", "normalized", "fuzzy", "phonetic"))
     field_weights = serializers.DictField(child=serializers.DecimalField(max_digits=5, decimal_places=4))
     blocking_fields = serializers.ListField(child=serializers.CharField(max_length=255))
-    review_threshold = serializers.DecimalField(max_digits=5, decimal_places=4, min_value=0, max_value=1)
-    auto_confirm_threshold = serializers.DecimalField(max_digits=5, decimal_places=4, min_value=0, max_value=1)
+    review_threshold = serializers.DecimalField(
+        max_digits=5, decimal_places=4, min_value=Decimal("0"), max_value=Decimal("1")
+    )
+    auto_confirm_threshold = serializers.DecimalField(
+        max_digits=5, decimal_places=4, min_value=Decimal("0"), max_value=Decimal("1")
+    )
     is_active = serializers.BooleanField(required=False)
     idempotency_key = serializers.CharField(max_length=255)
 
@@ -529,10 +533,10 @@ class MatchingRuleChangesSerializer(StrictSerializer):
     )
     blocking_fields = serializers.ListField(child=serializers.CharField(max_length=255), required=False)
     review_threshold = serializers.DecimalField(
-        max_digits=5, decimal_places=4, min_value=0, max_value=1, required=False
+        max_digits=5, decimal_places=4, min_value=Decimal("0"), max_value=Decimal("1"), required=False
     )
     auto_confirm_threshold = serializers.DecimalField(
-        max_digits=5, decimal_places=4, min_value=0, max_value=1, required=False
+        max_digits=5, decimal_places=4, min_value=Decimal("0"), max_value=Decimal("1"), required=False
     )
     is_active = serializers.BooleanField(required=False)
 
@@ -615,14 +619,14 @@ class MatchCandidateListSerializer(StrictModelSerializer):
 
 class MatchCandidateDetailSerializer(MatchCandidateListSerializer):
     class Meta(MatchCandidateListSerializer.Meta):
-        fields = MatchCandidateListSerializer.Meta.fields + (
+        fields = MatchCandidateListSerializer.Meta.fields + (  # type: ignore[assignment]
             "field_scores",
             "evidence",
             "review_note",
             "merge_history",
             "transition_history",
         )
-        read_only_fields = fields
+        read_only_fields = fields  # type: ignore[assignment]
 
 
 class MatchReviewSerializer(StrictSerializer):
@@ -660,7 +664,7 @@ class MergePreviewSerializer(StrictSerializer):
     golden_record = serializers.DictField(source="golden_values", read_only=True)
     provenance = serializers.DictField(read_only=True)
     source_versions = serializers.DictField(read_only=True)
-    fields = serializers.SerializerMethodField(method_name="get_survivorship_fields")
+    fields = serializers.SerializerMethodField(method_name="get_survivorship_fields")  # type: ignore[assignment]
     conflicts = serializers.SerializerMethodField()
     survivorship_overrides = serializers.DictField(
         child=serializers.UUIDField(), write_only=True, required=False, default=dict
@@ -760,7 +764,7 @@ class MergeHistoryDetailSerializer(MergeHistoryListSerializer):
     reversal_reason = serializers.SerializerMethodField()
 
     class Meta(MergeHistoryListSerializer.Meta):
-        fields = MergeHistoryListSerializer.Meta.fields + (
+        fields = MergeHistoryListSerializer.Meta.fields + (  # type: ignore[assignment]
             "survivorship_policy",
             "golden_snapshot_before",
             "golden_snapshot_after",
@@ -768,7 +772,7 @@ class MergeHistoryDetailSerializer(MergeHistoryListSerializer):
             "transition_history",
             "participants",
         )
-        read_only_fields = fields
+        read_only_fields = fields  # type: ignore[assignment]
 
     def get_golden_snapshot_before(self, obj: MergeHistory) -> dict[str, object]:
         return _masked_snapshot(obj.golden_snapshot_before, obj.golden_record, self.context)

@@ -346,7 +346,9 @@ class AttendanceCreateSerializer(CommandSerializer):
 class AttendanceUpdateSerializer(CommandSerializer):
     check_in_time = serializers.DateTimeField(required=False, allow_null=True)
     check_out_time = serializers.DateTimeField(required=False, allow_null=True)
-    hours_worked = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=24, required=False)
+    hours_worked = serializers.DecimalField(
+        max_digits=5, decimal_places=2, min_value=Decimal("0"), max_value=Decimal("24"), required=False
+    )
     status = serializers.ChoiceField(choices=ATTENDANCE_STATUSES, required=False)
     notes = serializers.CharField(allow_blank=False, trim_whitespace=True)
     correction_reason = serializers.CharField(required=False, allow_blank=False, trim_whitespace=True, write_only=True)
@@ -406,11 +408,11 @@ class LeaveBalanceCreateSerializer(CommandSerializer):
     leave_type = serializers.ChoiceField(choices=LEAVE_TYPES)
     period_start = serializers.DateField()
     period_end = serializers.DateField()
-    entitled_days = serializers.DecimalField(max_digits=7, decimal_places=2, min_value=0)
+    entitled_days = serializers.DecimalField(max_digits=7, decimal_places=2, min_value=Decimal("0"))
     carried_days = serializers.DecimalField(
         max_digits=7,
         decimal_places=2,
-        min_value=0,
+        min_value=Decimal("0"),
         required=False,
         default=Decimal("0"),
     )
@@ -420,8 +422,8 @@ class LeaveBalanceCreateSerializer(CommandSerializer):
 
 
 class LeaveBalanceUpdateSerializer(CommandSerializer):
-    entitled_days = serializers.DecimalField(max_digits=7, decimal_places=2, min_value=0)
-    carried_days = serializers.DecimalField(max_digits=7, decimal_places=2, min_value=0)
+    entitled_days = serializers.DecimalField(max_digits=7, decimal_places=2, min_value=Decimal("0"))
+    carried_days = serializers.DecimalField(max_digits=7, decimal_places=2, min_value=Decimal("0"))
     expected_version = serializers.IntegerField(min_value=1)
     note = serializers.CharField(min_length=1, trim_whitespace=True)
 

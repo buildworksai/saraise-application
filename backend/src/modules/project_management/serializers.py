@@ -1,5 +1,7 @@
 """Explicit read, write, lifecycle, audit, and configuration contracts."""
 
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from .models import (
@@ -78,7 +80,9 @@ class ProjectCreateSerializer(StrictSerializer):
     start_date = serializers.DateField(required=False, allow_null=True)
     end_date = serializers.DateField(required=False, allow_null=True)
     project_manager_id = serializers.UUIDField(required=False, allow_null=True)
-    budget = serializers.DecimalField(max_digits=15, decimal_places=2, required=False, allow_null=True, min_value=0)
+    budget = serializers.DecimalField(
+        max_digits=15, decimal_places=2, required=False, allow_null=True, min_value=Decimal("0")
+    )
     currency = serializers.CharField(max_length=3, required=False)
 
     def validate(self, attrs):
@@ -198,7 +202,7 @@ class ProjectMemberDetailSerializer(AllowedActionsMixin, ProjectMemberListSerial
     allowed_actions = serializers.SerializerMethodField()
 
     class Meta(ProjectMemberListSerializer.Meta):
-        fields = ProjectMemberListSerializer.Meta.fields + ("created_at", "allowed_actions")
+        fields = ProjectMemberListSerializer.Meta.fields + ("created_at", "allowed_actions")  # type: ignore[assignment]
 
 
 class ProjectMemberCreateSerializer(StrictSerializer):
@@ -206,7 +210,7 @@ class ProjectMemberCreateSerializer(StrictSerializer):
     employee_id = serializers.UUIDField()
     role = serializers.ChoiceField(choices=("project_manager", "team_lead", "member", "stakeholder"), required=False)
     allocation_percentage = serializers.DecimalField(
-        max_digits=5, decimal_places=2, min_value=0.01, max_value=100, required=False
+        max_digits=5, decimal_places=2, min_value=Decimal("0.01"), max_value=Decimal("100"), required=False
     )
     joined_at = serializers.DateField(required=False)
     left_at = serializers.DateField(required=False, allow_null=True)
@@ -215,7 +219,7 @@ class ProjectMemberCreateSerializer(StrictSerializer):
 class ProjectMemberUpdateSerializer(StrictSerializer):
     role = serializers.ChoiceField(choices=("project_manager", "team_lead", "member", "stakeholder"), required=False)
     allocation_percentage = serializers.DecimalField(
-        max_digits=5, decimal_places=2, min_value=0.01, max_value=100, required=False
+        max_digits=5, decimal_places=2, min_value=Decimal("0.01"), max_value=Decimal("100"), required=False
     )
     joined_at = serializers.DateField(required=False)
     left_at = serializers.DateField(required=False, allow_null=True)
@@ -248,7 +252,11 @@ class TimeEntryDetailSerializer(AllowedActionsMixin, TimeEntryListSerializer):
     allowed_actions = serializers.SerializerMethodField()
 
     class Meta(TimeEntryListSerializer.Meta):
-        fields = TimeEntryListSerializer.Meta.fields + ("description", "updated_at", "allowed_actions")
+        fields = TimeEntryListSerializer.Meta.fields + (  # type: ignore[assignment]
+            "description",
+            "updated_at",
+            "allowed_actions",
+        )
 
 
 class TimeEntryCreateSerializer(StrictSerializer):
@@ -256,7 +264,9 @@ class TimeEntryCreateSerializer(StrictSerializer):
     task = serializers.UUIDField(required=False, allow_null=True)
     employee_id = serializers.UUIDField()
     entry_date = serializers.DateField()
-    hours_worked = serializers.DecimalField(max_digits=6, decimal_places=2, min_value=0.01, max_value=24)
+    hours_worked = serializers.DecimalField(
+        max_digits=6, decimal_places=2, min_value=Decimal("0.01"), max_value=Decimal("24")
+    )
     description = serializers.CharField(max_length=4000, required=False, allow_blank=True)
     billable = serializers.BooleanField(required=False)
 
@@ -266,7 +276,7 @@ class TimeEntryUpdateSerializer(TimeEntryCreateSerializer):
     employee_id = serializers.UUIDField(required=False)
     entry_date = serializers.DateField(required=False)
     hours_worked = serializers.DecimalField(
-        max_digits=6, decimal_places=2, min_value=0.01, max_value=24, required=False
+        max_digits=6, decimal_places=2, min_value=Decimal("0.01"), max_value=Decimal("24"), required=False
     )
     version = serializers.IntegerField(min_value=1)
     idempotency_key = serializers.CharField(max_length=255)
@@ -295,7 +305,11 @@ class ProjectMilestoneDetailSerializer(AllowedActionsMixin, ProjectMilestoneList
     allowed_actions = serializers.SerializerMethodField()
 
     class Meta(ProjectMilestoneListSerializer.Meta):
-        fields = ProjectMilestoneListSerializer.Meta.fields + ("description", "created_at", "allowed_actions")
+        fields = ProjectMilestoneListSerializer.Meta.fields + (  # type: ignore[assignment]
+            "description",
+            "created_at",
+            "allowed_actions",
+        )
 
 
 class ProjectMilestoneCreateSerializer(StrictSerializer):

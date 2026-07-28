@@ -12,7 +12,7 @@ route:
   repeat_interval: 2h
 
 receivers:
+  # Local application UAT has no alert webhook receiver in docker-compose.dev.yml.
+  # Route alerts to an explicit no-op receiver so Alertmanager does not retry
+  # against its own container localhost and flood logs with delivery failures.
   - name: default
-    webhook_configs:
-      - url: http://localhost:9099/alerts
-        send_resolved: true
