@@ -371,13 +371,16 @@ class Command(BaseCommand):
         for manifest in backend_root.glob("*/manifest.yaml"):
             module_name = manifest.parent.name
             capabilities.add(module_name)
+            capabilities.add(f"module.{module_name}")
             try:
                 document = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
             except (OSError, yaml.YAMLError):
                 continue
             self._collect_manifest_access_values(document, permissions, resources, capabilities)
 
-        for permissions_file in backend_root.glob("*/permissions.py"):
+        for permissions_file in backend_root.glob("*/*.py"):
+            if permissions_file.parent.name in {"migrations", "tests"} or permissions_file.name.startswith("test_"):
+                continue
             try:
                 text = permissions_file.read_text(encoding="utf-8")
             except OSError:
@@ -386,6 +389,8 @@ class Command(BaseCommand):
                 if PERMISSION_CODE_RE.fullmatch(token):
                     permissions.add(token)
                     capabilities.add(token.split(".", maxsplit=1)[0])
+                elif token.startswith("module."):
+                    capabilities.add(token)
                 elif "." in token:
                     resources.add(token)
                     capabilities.add(token.split(".", maxsplit=1)[0])
@@ -393,6 +398,8 @@ class Command(BaseCommand):
         for capability in tuple(capabilities):
             for action in ("get", "post", "put", "patch", "delete", "list", "retrieve", "create", "update"):
                 resources.add(f"{capability}.{action}")
+        for permission in tuple(permissions):
+            resources.add(f"{permission}:read")
 
         return permissions, resources, capabilities
 

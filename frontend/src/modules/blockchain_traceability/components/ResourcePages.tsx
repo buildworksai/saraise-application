@@ -115,7 +115,7 @@ export function ResourceListPage<T extends { id: string }, F extends PageFilters
   const canMutate = useCanMutateTraceability();
   const capabilities = useTraceabilityCapabilities();
   const [params, setParams] = useSearchParams();
-  const pageSize = capabilities.data?.document.list_policy.default_page_size;
+  const pageSize = capabilities.data?.document?.list_policy?.default_page_size;
   const governedParams = new URLSearchParams(params);
   if (pageSize !== undefined) governedParams.set(EFFECTIVE_PAGE_SIZE_PARAMETER, String(pageSize));
   const filters = pageSize === undefined ? ({} as F) : config.filters(governedParams, pageSize);

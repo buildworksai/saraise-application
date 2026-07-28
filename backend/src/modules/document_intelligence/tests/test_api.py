@@ -333,6 +333,26 @@ def test_all_read_only_detail_and_child_endpoints_return_enveloped_evidence(
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"{BASE}/extractions/__uat_invalid_id__/",
+        f"{BASE}/classifications/__uat_invalid_id__/",
+        f"{BASE}/templates/__uat_invalid_id__/",
+    ],
+)
+def test_invalid_detail_identifiers_are_client_errors_not_500(
+    authenticated_tenant_a_client: object,
+    path: str,
+) -> None:
+    response = authenticated_tenant_a_client.get(path)
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["error"]["code"] == "invalid_uuid"
+    assert payload["error"]["correlation_id"]
+
+
+@pytest.mark.django_db
 def test_extraction_filters_search_ordering_and_invalid_queries_are_server_side(
     authenticated_tenant_a_client: object,
     api_graph: dict[str, object],

@@ -21,9 +21,12 @@ def _encrypt(value):
 
 
 def import_legacy(apps, schema_editor):
-    LegacyNotification = apps.get_model("core", "Notification")
-    LegacyPreference = apps.get_model("core", "NotificationPreference")
-    LegacyToken = apps.get_model("core", "PushNotificationToken")
+    try:
+        LegacyNotification = apps.get_model("core", "Notification")
+        LegacyPreference = apps.get_model("core", "NotificationPreference")
+        LegacyToken = apps.get_model("core", "PushNotificationToken")
+    except LookupError:
+        return
     Notification = apps.get_model("notifications", "Notification")
     Preference = apps.get_model("notifications", "NotificationPreference")
     Endpoint = apps.get_model("notifications", "NotificationEndpoint")

@@ -267,38 +267,54 @@ export function attemptQuery(filters: VerificationAttemptFilters): string {
 
 export const blockchainTraceabilityService = {
   getConfiguration: (environment?: string) =>
-    call(() =>
-      apiClient.get<TraceabilityConfiguration>(
+    getData(() =>
+      apiClient.get<ApiV2Envelope<TraceabilityConfiguration>>(
         configurationQuery(ENDPOINTS.CONFIGURATION.DETAIL, environment)
       )
     ),
   updateConfiguration: (request: ConfigurationDocumentRequest) =>
-    call(() => apiClient.put<TraceabilityConfiguration>(ENDPOINTS.CONFIGURATION.UPDATE, request)),
+    getData(() =>
+      apiClient.put<ApiV2Envelope<TraceabilityConfiguration>>(
+        ENDPOINTS.CONFIGURATION.UPDATE,
+        request
+      )
+    ),
   previewConfiguration: (request: ConfigurationDocumentRequest) =>
-    call(() =>
-      apiClient.post<TraceabilityConfigurationPreview>(ENDPOINTS.CONFIGURATION.PREVIEW, request)
+    getData(() =>
+      apiClient.post<ApiV2Envelope<TraceabilityConfigurationPreview>>(
+        ENDPOINTS.CONFIGURATION.PREVIEW,
+        request
+      )
     ),
   listConfigurationHistory: (environment?: string) =>
-    call(() =>
-      apiClient.get<readonly TraceabilityConfigurationVersion[]>(
+    getData(() =>
+      apiClient.get<ApiV2Envelope<readonly TraceabilityConfigurationVersion[]>>(
         configurationQuery(ENDPOINTS.CONFIGURATION.HISTORY, environment)
       )
     ),
   rollbackConfiguration: (request: ConfigurationRollbackRequest) =>
-    call(() =>
-      apiClient.post<TraceabilityConfiguration>(ENDPOINTS.CONFIGURATION.ROLLBACK, request)
+    getData(() =>
+      apiClient.post<ApiV2Envelope<TraceabilityConfiguration>>(
+        ENDPOINTS.CONFIGURATION.ROLLBACK,
+        request
+      )
     ),
   importConfiguration: (request: ConfigurationDocumentRequest) =>
-    call(() => apiClient.post<TraceabilityConfiguration>(ENDPOINTS.CONFIGURATION.IMPORT, request)),
+    getData(() =>
+      apiClient.post<ApiV2Envelope<TraceabilityConfiguration>>(
+        ENDPOINTS.CONFIGURATION.IMPORT,
+        request
+      )
+    ),
   exportConfiguration: (environment?: string) =>
-    call(() =>
-      apiClient.get<TraceabilityConfigurationExport>(
+    getData(() =>
+      apiClient.get<ApiV2Envelope<TraceabilityConfigurationExport>>(
         configurationQuery(ENDPOINTS.CONFIGURATION.EXPORT, environment)
       )
     ),
   getCapabilities: (environment?: string) =>
-    call(() =>
-      apiClient.get<TraceabilityCapabilities>(
+    getData(() =>
+      apiClient.get<ApiV2Envelope<TraceabilityCapabilities>>(
         configurationQuery(ENDPOINTS.CONFIGURATION.CAPABILITIES, environment)
       )
     ),

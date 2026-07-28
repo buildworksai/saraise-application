@@ -71,6 +71,12 @@ def test_unknown_ordering_returns_validation_envelope(authenticated_tenant_a_cli
     assert response.status_code == 400 and response.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
+@pytest.mark.parametrize("path", ["discoveries", "conformance-checks", "bottleneck-analyses"])
+def test_invalid_detail_identifiers_are_404_not_500(authenticated_tenant_a_client, path):
+    response = authenticated_tenant_a_client.get(f"{BASE}/{path}/__uat_invalid_id__/")
+    assert response.status_code == 404
+
+
 def test_append_only_event_methods_are_not_routed(authenticated_tenant_a_client, tenant_a):
     event = EventFactory(tenant_id=tenant_a.id)
     assert authenticated_tenant_a_client.patch(f"{BASE}/events/{event.id}/", {}, format="json").status_code == 405

@@ -110,7 +110,7 @@ describe("blockchain traceability v2 service", () => {
     expect(failure.fieldErrors.get("network_id")).toBe("Network unavailable");
   });
 
-  it("uses the governed singleton configuration endpoints without inventing an envelope", async () => {
+  it("unwraps the governed singleton configuration endpoints", async () => {
     const configuration = {
       id: "configuration-1",
       tenant_id: "tenant-1",
@@ -120,11 +120,12 @@ describe("blockchain traceability v2 service", () => {
       updated_at: meta.timestamp,
       updated_by: "actor-1",
     };
-    const get = vi.spyOn(apiClient, "get").mockResolvedValue(configuration);
+    const envelope = { data: configuration, meta } satisfies ApiV2Envelope<typeof configuration>;
+    const get = vi.spyOn(apiClient, "get").mockResolvedValue(envelope);
     await expect(blockchainTraceabilityService.getConfiguration()).resolves.toBe(configuration);
     expect(get).toHaveBeenCalledWith("/api/v2/blockchain-traceability/configuration/");
 
-    const put = vi.spyOn(apiClient, "put").mockResolvedValue(configuration);
+    const put = vi.spyOn(apiClient, "put").mockResolvedValue(envelope);
     await blockchainTraceabilityService.updateConfiguration({
       document: configuration.document as never,
     });

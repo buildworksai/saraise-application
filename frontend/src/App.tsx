@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Routes, Route, useLocation, useParams } from "react-router-dom";
 import { lazy, Suspense, useEffect, type ReactNode } from "react";
 import { AnimatePresence } from "framer-motion";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
@@ -439,6 +439,13 @@ function RouteTitle({ title, children }: { title?: string; children: ReactNode }
   }, [title]);
 
   return children;
+}
+
+function LegacyEmailMarketingRedirect({ target }: { target: "recipients" | "attempts" }) {
+  const { id } = useParams();
+  return (
+    <Navigate to={`/email-marketing/delivery/${target}/${encodeURIComponent(id ?? "")}`} replace />
+  );
 }
 
 // Legacy route inventory is being migrated module-by-module into the typed registry.
@@ -1078,6 +1085,34 @@ function AnimatedRoutes() {
               }
             />
           ))}
+          <Route
+            path="/performance-monitoring/overview"
+            element={<Navigate to="/performance-monitoring/dashboard" replace />}
+          />
+          <Route
+            path="/performance-monitoring/alert-rules"
+            element={<Navigate to="/performance-monitoring/alerts/rules" replace />}
+          />
+          <Route
+            path="/performance-monitoring/slos"
+            element={<Navigate to="/performance-monitoring/sla" replace />}
+          />
+          <Route
+            path="/inventory-management/dashboard"
+            element={<Navigate to="/inventory-management" replace />}
+          />
+          <Route
+            path="/api-management/resources"
+            element={<Navigate to="/api-management" replace />}
+          />
+          <Route
+            path="/email-marketing/recipients/:id"
+            element={<LegacyEmailMarketingRedirect target="recipients" />}
+          />
+          <Route
+            path="/email-marketing/deliveries/:id"
+            element={<LegacyEmailMarketingRedirect target="attempts" />}
+          />
           <Route path="*" element={<div className="p-8">Page not found</div>} />
         </Routes>
       </AnimatePresence>

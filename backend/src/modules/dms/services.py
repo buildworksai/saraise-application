@@ -28,6 +28,7 @@ from django.utils import timezone
 
 from src.core.access.entitlements import Quota, QuotaService
 from src.core.observability import get_correlation_id
+from src.core.tenancy.rls import tenant_context
 
 from .events import (
     DmsOperation,
@@ -54,6 +55,7 @@ logger = logging.getLogger("saraise.dms")
 
 DOCUMENT_ACTIONS = frozenset({"read", "write", "delete", "share", "manage", "move", "download"})
 RESERVED_METADATA_NAMESPACE = "_extensions"
+NUL_CHARACTER_TOKEN = "\\u0000"
 
 DEFAULT_DMS_CONFIGURATION: dict[str, object] = {
     "max_folder_depth": 10,
@@ -75,7 +77,7 @@ DEFAULT_DMS_CONFIGURATION: dict[str, object] = {
     "principal_query_min_length": 2,
     "principal_query_max_length": 100,
     "max_name_length": 255,
-    "forbidden_name_characters": ["/", "\u0000"],
+    "forbidden_name_characters": ["/", NUL_CHARACTER_TOKEN],
     "max_metadata_key_length": 255,
     "folder_deletion_policy": "empty_only",
     "download_verification_chunk_size": 64 * 1024,
@@ -230,16 +232,24 @@ class DmsConfigurationService:
     def _copy(values: Mapping[str, object]) -> dict[str, object]:
         return json.loads(json.dumps(dict(values), allow_nan=False))
 
+    @staticmethod
+    def forbidden_name_characters(values: Mapping[str, object]) -> tuple[str, ...]:
+        configured = values.get("forbidden_name_characters", [])
+        if not isinstance(configured, Sequence) or isinstance(configured, (str, bytes)):
+            return ()
+        return tuple("\u0000" if item == NUL_CHARACTER_TOKEN else item for item in configured if isinstance(item, str))
+
     @classmethod
     def runtime_values(cls, tenant_id: UUID | None) -> dict[str, object]:
         if tenant_id is None:
             return cls._copy(DEFAULT_DMS_CONFIGURATION)
         environment = str(getattr(settings, "SARAISE_ENVIRONMENT", "default")).strip().lower()
-        stored = (
-            DmsConfiguration.objects.filter(tenant_id=tenant_id, environment=environment)
-            .values_list("values", flat=True)
-            .first()
-        )
+        with tenant_context(tenant_id):
+            stored = (
+                DmsConfiguration.objects.filter(tenant_id=tenant_id, environment=environment)
+                .values_list("values", flat=True)
+                .first()
+            )
         return cls._copy(stored if stored is not None else DEFAULT_DMS_CONFIGURATION)
 
     @staticmethod
@@ -393,6 +403,9 @@ class DmsConfigurationService:
                 if field == "governance_required_operations" and value == []:
                     continue
                 errors[field] = ["Must be a list of non-empty strings."]
+        forbidden_characters = cls.forbidden_name_characters(values)
+        if "\u0000" not in forbidden_characters or any(character == "" for character in forbidden_characters):
+            errors["forbidden_name_characters"] = ["Must include the portable NUL token and non-empty characters."]
 
         safe_ordering = {"name", "-name", "updated_at", "-updated_at", "created_at", "-created_at"}
         configured_ordering = values["document_ordering_fields"]
@@ -472,7 +485,7 @@ class DmsConfigurationService:
     @classmethod
     def current(cls, tenant_id: UUID, actor_id: UUID, environment: str = "default") -> DmsConfiguration:
         environment = cls.validate_environment(environment)
-        with transaction.atomic():
+        with tenant_context(tenant_id), transaction.atomic():
             configuration = (
                 DmsConfiguration.objects.select_for_update()
                 .filter(tenant_id=tenant_id, environment=environment)
@@ -541,7 +554,7 @@ class DmsConfigurationService:
     ) -> DmsConfiguration:
         normalized = cls.validate_values(values)
         environment = cls.validate_environment(environment)
-        with transaction.atomic():
+        with tenant_context(tenant_id), transaction.atomic():
             cls.current(tenant_id, actor_id, environment)
             configuration = DmsConfiguration.objects.select_for_update().get(
                 tenant_id=tenant_id,
@@ -641,10 +654,9 @@ class DmsConfigurationService:
         environment: str = "default",
     ) -> QuerySet[DmsConfigurationVersion]:
         configuration = cls.current(tenant_id, actor_id, environment)
-        return DmsConfigurationVersion.objects.filter(
-            tenant_id=tenant_id,
-            configuration=configuration,
-        ).order_by("-version")
+        return DmsConfigurationVersion.objects.filter(tenant_id=tenant_id, configuration=configuration).order_by(
+            "-version"
+        )
 
     @classmethod
     def audit(
@@ -807,7 +819,7 @@ def _normalize_name(value: str, field: str = "name", *, tenant_id: UUID | None =
             f"{field.replace('_', ' ').title()} cannot be blank.", detail={field: ["Cannot be blank."]}
         )
     if len(normalized) > policy["max_name_length"] or any(
-        forbidden in normalized for forbidden in policy["forbidden_name_characters"]
+        forbidden in normalized for forbidden in DmsConfigurationService.forbidden_name_characters(policy)
     ):
         raise DmsValidationError(
             "Name is invalid.", detail={field: ["Name violates the configured length or character policy."]}

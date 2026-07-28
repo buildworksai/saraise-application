@@ -826,6 +826,7 @@ class DocumentExtractionService(_ServiceBase):
 
     def get_extraction(self, tenant_id: UUID, extraction_id: UUID) -> DocumentExtraction:
         tenant_id = self._tenant(tenant_id)
+        extraction_id = _uuid(extraction_id, "extraction_id")
         extraction = (
             DocumentExtraction.objects.for_tenant(tenant_id)
             .select_related("template")
@@ -1058,6 +1059,7 @@ class DocumentClassificationService(_ServiceBase):
 
     def get_classification(self, tenant_id: UUID, classification_id: UUID) -> DocumentClassification:
         tenant_id = self._tenant(tenant_id)
+        classification_id = _uuid(classification_id, "classification_id")
         value = (
             DocumentClassification.objects.for_tenant(tenant_id)
             .select_related("model_version")
@@ -2052,8 +2054,10 @@ class TemplateMatchingService(_ServiceBase):
         ).extract_by_template(tenant_id, actor_id, document_id, version_id, template_id, idempotency_key)
 
     def get_template(self, tenant_id: UUID, template_id: UUID) -> ExtractionTemplate:
+        tenant_id = self._tenant(tenant_id)
+        template_id = _uuid(template_id, "template_id")
         value = (
-            ExtractionTemplate.objects.for_tenant(self._tenant(tenant_id))
+            ExtractionTemplate.objects.for_tenant(tenant_id)
             .prefetch_related("zones")
             .filter(pk=template_id, is_deleted=False)
             .first()

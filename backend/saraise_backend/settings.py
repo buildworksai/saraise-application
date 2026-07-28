@@ -272,9 +272,11 @@ DATABASES = {
     }
 }
 
-# For tests, use SQLite (pytest/manage.py test)
-_use_sqlite = (
-    os.getenv("DJANGO_USE_SQLITE_FOR_TESTS") == "1" or "test" in sys.argv or any("pytest" in arg for arg in sys.argv)
+# For tests, use SQLite by default, while allowing PostgreSQL-required gates to
+# opt into the configured database with DJANGO_USE_SQLITE_FOR_TESTS=0.
+_sqlite_test_setting = os.getenv("DJANGO_USE_SQLITE_FOR_TESTS")
+_use_sqlite = _sqlite_test_setting == "1" or (
+    _sqlite_test_setting is None and ("test" in sys.argv or any("pytest" in arg for arg in sys.argv))
 )
 if _use_sqlite:
     DATABASES["default"] = {

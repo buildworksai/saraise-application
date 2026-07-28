@@ -13,7 +13,7 @@ export default defineConfig({
     host: '0.0.0.0', // Allow external connections (Docker)
     port: 5173,
     proxy: {
-      '/api': {
+      '^/api(?:/|$)': {
         // In Docker, use service name 'backend' on internal port 8000
         // Vite proxy runs inside Docker container, so it must use Docker network service name
         target: 'http://backend:8000',

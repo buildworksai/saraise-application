@@ -81,6 +81,17 @@ def _active(model: type[Any], tenant_id: uuid.UUID) -> QuerySet[Any]:
     return model.objects.for_tenant(tenant_id).filter(deleted_at__isnull=True)
 
 
+def _bool_filter(value: Any, field: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    raise ValidationError({field: "A valid boolean is required."})
+
+
 def _server_environment(environment: str | None = None) -> str:
     current = str(getattr(settings, "SARAISE_ENVIRONMENT", getattr(settings, "SARAISE_MODE", "development")))
     current = {"self_hosted": "self-hosted"}.get(current, current)
@@ -365,9 +376,10 @@ class CustomerService:
             qs = qs.filter(
                 Q(customer_code__icontains=search) | Q(customer_name__icontains=search) | Q(email__icontains=search)
             )
-        for key in ("is_active", "currency"):
-            if filters.get(key) not in (None, ""):
-                qs = qs.filter(**{key: filters[key]})
+        if filters.get("is_active") not in (None, ""):
+            qs = qs.filter(is_active=_bool_filter(filters["is_active"], "is_active"))
+        if filters.get("currency") not in (None, ""):
+            qs = qs.filter(currency=str(filters["currency"]).strip().upper())
         allowed = {"customer_code", "customer_name", "created_at"}
         selected = ordering if ordering.removeprefix("-") in allowed else "customer_code"
         return qs.order_by(selected, "id")

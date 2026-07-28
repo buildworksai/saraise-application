@@ -14,6 +14,7 @@ from src.modules.dms.services import (
     DmsConfigurationService,
     DmsPermissionDenied,
     DmsValidationError,
+    _normalize_name,
 )
 
 pytest_plugins = ["src.core.testing"]
@@ -27,6 +28,9 @@ def test_configuration_is_tenant_scoped_versioned_audited_and_reversible() -> No
     initial_a = DmsConfigurationService.current(tenant_a, actor_a)
     initial_b = DmsConfigurationService.current(tenant_b, actor_b)
     assert initial_a.values == DEFAULT_DMS_CONFIGURATION
+    assert initial_a.values["forbidden_name_characters"] == ["/", "\\u0000"]
+    with pytest.raises(DmsValidationError):
+        _normalize_name("bad\u0000name", tenant_id=tenant_a)
     assert initial_b.values == DEFAULT_DMS_CONFIGURATION
     assert DmsConfiguration.objects.filter(tenant_id=tenant_a).get() == initial_a
     assert not DmsConfiguration.objects.filter(tenant_id=tenant_a, id=initial_b.id).exists()

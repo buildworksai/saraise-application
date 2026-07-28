@@ -62,6 +62,22 @@ def test_list_uses_governed_envelope_and_pagination(authenticated_tenant_a_clien
     assert payload["meta"]["pagination"]["page_size"] == 1
 
 
+def test_dashboard_returns_frontend_contract(authenticated_tenant_a_client, tenant_a) -> None:
+    warehouse(tenant_a.id)
+    response = authenticated_tenant_a_client.get(f"{BASE}/dashboard/")
+    assert response.status_code == 200
+    payload = response.json()["data"]
+    assert set(payload) == {"metrics", "alerts", "recent_entries", "low_stock_items", "onboarding"}
+    assert {metric["label"] for metric in payload["metrics"]} == {
+        "On hand",
+        "Available",
+        "Active reservations",
+        "Open entries",
+    }
+    assert payload["alerts"] == []
+    assert payload["onboarding"]["warehouse_created"] is True
+
+
 def test_create_delegates_and_never_accepts_tenant_id(authenticated_tenant_a_client, tenant_a, tenant_b) -> None:
     payload = {
         "warehouse_code": "WH-02",

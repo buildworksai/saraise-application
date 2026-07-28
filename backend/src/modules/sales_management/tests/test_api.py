@@ -54,6 +54,8 @@ def test_customer_v2_crud_envelopes_idempotency_and_concurrency(authenticated_te
     listed = client.get(f"{API}/customers/?search=Buyer&page_size=1")
     assert listed.status_code == 200 and unwrap(listed)[0]["id"] == pk
     assert listed.json()["meta"]["pagination"]["page_size"] == 1
+    active_list = client.get(f"{API}/customers/?is_active=true&page_size=100")
+    assert active_list.status_code == 200 and unwrap(active_list)[0]["id"] == pk
     stale = client.patch(f"{API}/customers/{pk}/", {"customer_name": "Stale", "expected_version": 99}, format="json")
     assert stale.status_code == 409 and stale.json()["error"]["code"] == "CONCURRENT_MODIFICATION"
     updated = client.patch(f"{API}/customers/{pk}/", {"customer_name": "Updated", "expected_version": 1}, format="json")

@@ -869,11 +869,19 @@ class ProcessMiningQueryService:
 
     @staticmethod
     def find(queryset: QuerySet[Any], resource_id: UUID | str) -> Any | None:
-        return queryset.filter(pk=resource_id).first()
+        try:
+            lookup_id = resource_id if isinstance(resource_id, UUID) else UUID(str(resource_id))
+        except (TypeError, ValueError, AttributeError):
+            return None
+        return queryset.filter(pk=lookup_id).first()
 
     @staticmethod
     def exists(queryset: QuerySet[Any], resource_id: UUID | str) -> bool:
-        return queryset.filter(pk=resource_id).exists()
+        try:
+            lookup_id = resource_id if isinstance(resource_id, UUID) else UUID(str(resource_id))
+        except (TypeError, ValueError, AttributeError):
+            return False
+        return queryset.filter(pk=lookup_id).exists()
 
     @staticmethod
     def model_versions(tenant_id: UUID, process_model_id: UUID | str) -> QuerySet[ProcessModelVersion]:

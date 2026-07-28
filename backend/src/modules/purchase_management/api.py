@@ -604,8 +604,8 @@ class PurchaseOrderViewSet(PurchaseViewSet):
     def cancel(self, request, pk=None):
         return self._transition(PurchaseOrderService.cancel_purchase_order, pk)
 
-    @action(detail=True, methods=("post",))
-    def dispatch(self, request, pk=None):
+    @action(detail=True, methods=("post",), url_path="dispatch")
+    def dispatch_order(self, request, pk=None):
         order, job = PurchaseOrderService.dispatch_purchase_order(
             self.tenant_id, self.actor_id, pk, self._idempotency(), self.correlation_id
         )

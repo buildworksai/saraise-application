@@ -617,7 +617,7 @@ export function TraceabilityAssetDetailPage() {
     queryKey: ["blockchain-traceability", "asset", id],
     queryFn: () => blockchainTraceabilityService.getAsset(id),
   });
-  const historyPageSize = capabilities.data?.document.list_policy.max_page_size;
+  const historyPageSize = capabilities.data?.document?.list_policy?.max_page_size;
   const history = useQuery({
     queryKey: ["blockchain-traceability", "asset-history", id, historyPageSize],
     queryFn: () =>

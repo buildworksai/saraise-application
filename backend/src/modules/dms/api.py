@@ -21,6 +21,7 @@ from rest_framework.views import APIView
 from src.core.api.profile import GovernedAPIViewMixin, GovernedMultipartAPIViewMixin
 from src.core.api.results import OperationFailed
 from src.core.auth_utils import get_user_tenant_id
+from src.core.tenancy.rls import tenant_context
 
 from .filters import (
     DocumentFilterSet,
@@ -693,28 +694,30 @@ class DmsConfigurationViewSet(TenantGovernedViewSet):
     @action(detail=False, methods=("get",))
     def history(self, request: object) -> Response:
         del request
-        return self.paginated(
-            _call(
-                self.service_class.history,
-                self.tenant_id,
-                self.actor_id,
-                self.request.query_params.get("environment", "default"),
-            ),
-            DmsConfigurationVersionSerializer,
-        )
+        with tenant_context(self.tenant_id):
+            return self.paginated(
+                _call(
+                    self.service_class.history,
+                    self.tenant_id,
+                    self.actor_id,
+                    self.request.query_params.get("environment", "default"),
+                ),
+                DmsConfigurationVersionSerializer,
+            )
 
     @action(detail=False, methods=("get",))
     def audit(self, request: object) -> Response:
         del request
-        return self.paginated(
-            _call(
-                self.service_class.audit,
-                self.tenant_id,
-                self.actor_id,
-                self.request.query_params.get("environment", "default"),
-            ),
-            DmsConfigurationAuditSerializer,
-        )
+        with tenant_context(self.tenant_id):
+            return self.paginated(
+                _call(
+                    self.service_class.audit,
+                    self.tenant_id,
+                    self.actor_id,
+                    self.request.query_params.get("environment", "default"),
+                ),
+                DmsConfigurationAuditSerializer,
+            )
 
     @action(detail=False, methods=("post",))
     def rollback(self, request: object) -> Response:

@@ -1586,15 +1586,47 @@ class InventoryQueryService:
     def dashboard(cls, tenant_id: UUID | str) -> dict[str, Any]:
         tenant = _uuid(tenant_id, "tenant_id")
         with tenant_context(tenant):
-            return {
-                "stock": cls.stock_summary(tenant),
-                "active_reservations": StockReservation.objects.for_tenant(tenant).filter(status="active").count(),
-                "open_entries": StockEntry.objects.for_tenant(tenant)
-                .filter(status__in=("draft", "submitted", "approved"))
-                .count(),
-                "overdue_cycle_counts": CycleCount.objects.for_tenant(tenant)
+            stock = cls.stock_summary(tenant)
+            active_reservations = StockReservation.objects.for_tenant(tenant).filter(status="active").count()
+            open_entries = (
+                StockEntry.objects.for_tenant(tenant).filter(status__in=("draft", "submitted", "approved")).count()
+            )
+            overdue_cycle_counts = (
+                CycleCount.objects.for_tenant(tenant)
                 .filter(status="scheduled", scheduled_for__lt=timezone.localdate())
-                .count(),
+                .count()
+            )
+            warehouse_count = Warehouse.objects.for_tenant(tenant).filter(archived_at__isnull=True).count()
+            item_count = Item.objects.for_tenant(tenant).filter(archived_at__isnull=True).count()
+            posted_receipts = (
+                StockEntry.objects.for_tenant(tenant).filter(status="posted", entry_type="receipt").count()
+            )
+            alerts = []
+            if overdue_cycle_counts:
+                alerts.append(
+                    {
+                        "id": "overdue-cycle-counts",
+                        "severity": "warning",
+                        "title": "Overdue cycle counts",
+                        "detail": f"{overdue_cycle_counts} scheduled count(s) need attention.",
+                        "resource_url": "/inventory-management/cycle-counts",
+                    }
+                )
+            return {
+                "metrics": [
+                    {"label": "On hand", "value": str(stock["on_hand"]), "trend": None},
+                    {"label": "Available", "value": str(stock["available"]), "trend": None},
+                    {"label": "Active reservations", "value": str(active_reservations), "trend": None},
+                    {"label": "Open entries", "value": str(open_entries), "trend": None},
+                ],
+                "alerts": alerts,
+                "recent_entries": [],
+                "low_stock_items": [],
+                "onboarding": {
+                    "warehouse_created": warehouse_count > 0,
+                    "item_created": item_count > 0,
+                    "first_receipt_posted": posted_receipts > 0,
+                },
             }
 
 

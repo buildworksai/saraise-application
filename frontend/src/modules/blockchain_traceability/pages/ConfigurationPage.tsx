@@ -97,9 +97,9 @@ export function ConfigurationPage() {
     queryKey: [...configurationHistoryKey, environment],
     queryFn: () => blockchainTraceabilityService.listConfigurationHistory(environment),
   });
+  const capabilitiesDocument = capabilities.data?.document;
   const healthEnabled =
-    capabilities.data?.document.features.enabled === true &&
-    capabilities.data.document.features.enable_health;
+    capabilitiesDocument?.features?.enabled === true && capabilitiesDocument.features.enable_health;
   const health = useQuery({
     queryKey: ["blockchain-traceability", "health"],
     queryFn: blockchainTraceabilityService.getHealth,
@@ -170,6 +170,8 @@ export function ConfigurationPage() {
     capabilities.error ||
     !configuration.data ||
     !capabilities.data ||
+    !capabilitiesDocument?.features ||
+    !capabilitiesDocument.list_policy ||
     !draft
   )
     return (

@@ -33,7 +33,7 @@ ACTION_ACCESS = {
     "compare_quotes": "compare",
     "award": "award",
     "withdraw": "submit",
-    "dispatch": "dispatch",
+    "dispatch_order": "dispatch",
     "acknowledge": "acknowledge",
     "complete": "complete",
     "preview": "preview",

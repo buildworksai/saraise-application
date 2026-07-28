@@ -10,6 +10,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from src.modules.purchase_management.models import Supplier
+from src.modules.purchase_management.permissions import PurchaseRequiresAccess
 
 User = get_user_model()
 
@@ -83,3 +84,14 @@ class TestSupplierAPI:
         response = api_client.post("/api/v1/purchase-management/suppliers/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["supplier_code"] == "SUP-002"
+
+
+@pytest.mark.django_db
+def test_purchase_order_retrieve_uses_drf_dispatch_not_domain_dispatch(api_client, authenticated_user, monkeypatch):
+    monkeypatch.setattr(PurchaseRequiresAccess, "has_permission", lambda self, request, view: True)
+    api_client.force_authenticate(user=authenticated_user)
+
+    missing_id = "00000000-0000-4000-8000-000000000000"
+    response = api_client.get(f"/api/v2/purchase-management/purchase-orders/{missing_id}/")
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND

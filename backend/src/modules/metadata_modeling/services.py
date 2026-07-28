@@ -23,6 +23,7 @@ from rest_framework import status
 from rest_framework.exceptions import APIException, NotFound, ValidationError
 
 from src.core.async_jobs.models import OutboxEvent
+from src.core.tenancy import tenant_context
 
 from .models import (
     DynamicResource,
@@ -466,8 +467,9 @@ class EntityDefinitionService:
     @staticmethod
     def get_definition(tenant_id: uuid.UUID, definition_id: uuid.UUID | str) -> EntityDefinition:
         try:
-            return EntityDefinition.objects.for_tenant(tenant_id).select_related("active_version").get(pk=definition_id)
-        except (EntityDefinition.DoesNotExist, ValueError, TypeError) as exc:
+            lookup_id = _clean_id(definition_id, "definition_id")
+            return EntityDefinition.objects.for_tenant(tenant_id).select_related("active_version").get(pk=lookup_id)
+        except (EntityDefinition.DoesNotExist, ValueError, TypeError, ValidationError) as exc:
             raise NotFound("Entity definition not found.") from exc
 
     @classmethod
@@ -1247,7 +1249,10 @@ class DynamicResourceService:
             .select_related("entity_definition", "schema_version")
         )
         if entity_id:
-            queryset = queryset.filter(entity_definition_id=entity_id)
+            try:
+                queryset = queryset.filter(entity_definition_id=_clean_id(entity_id, "entity_id"))
+            except ValidationError:
+                return queryset.none()
         if entity_code:
             queryset = queryset.filter(entity_definition__code=entity_code)
         if state:
@@ -1270,11 +1275,12 @@ class DynamicResourceService:
             else DynamicResource.objects
         )
         try:
+            lookup_id = _clean_id(resource_id, "resource_id")
             queryset = manager.for_tenant(tenant_id)
             if not include_deleted:
                 queryset = queryset.filter(deleted_at__isnull=True)
-            return queryset.select_related("entity_definition", "schema_version").get(pk=resource_id)
-        except (DynamicResource.DoesNotExist, ValueError, TypeError) as exc:
+            return queryset.select_related("entity_definition", "schema_version").get(pk=lookup_id)
+        except (DynamicResource.DoesNotExist, ValueError, TypeError, ValidationError) as exc:
             raise NotFound("Dynamic resource not found.") from exc
 
     @staticmethod
@@ -1817,7 +1823,7 @@ class MetadataConfigurationService:
             {},
             expected_version=None,
             correlation_id=correlation_id,
-            operation="provision",
+            operation="create",
         )
 
     @classmethod
@@ -1875,6 +1881,30 @@ class MetadataConfigurationService:
         expected_version: int | None,
         correlation_id: str,
         operation: str = "update",
+    ) -> MetadataModelingConfiguration:
+        with tenant_context(tenant_id) as scoped_tenant_id:
+            tenant_id = scoped_tenant_id
+            return cls._update_configuration_in_tenant_context(
+                tenant_id,
+                actor_id,
+                environment,
+                payload,
+                expected_version=expected_version,
+                correlation_id=correlation_id,
+                operation=operation,
+            )
+
+    @classmethod
+    def _update_configuration_in_tenant_context(
+        cls,
+        tenant_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        environment: str,
+        payload: dict[str, JSONValue],
+        *,
+        expected_version: int | None,
+        correlation_id: str,
+        operation: str,
     ) -> MetadataModelingConfiguration:
         current = (
             MetadataModelingConfiguration.objects.for_tenant(tenant_id)

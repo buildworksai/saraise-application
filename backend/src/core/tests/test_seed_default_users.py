@@ -9,7 +9,9 @@ from io import StringIO
 
 import pytest
 
-if os.environ.get("DJANGO_USE_SQLITE_FOR_TESTS") == "1" or any("pytest" in arg for arg in sys.argv):
+if os.environ.get("DJANGO_USE_SQLITE_FOR_TESTS") == "1" or (
+    os.environ.get("DJANGO_USE_SQLITE_FOR_TESTS") is None and any("pytest" in arg for arg in sys.argv)
+):
     pytest.skip(
         "seed_default_users identity-scope regression requires PostgreSQL migrations",
         allow_module_level=True,
@@ -79,7 +81,7 @@ def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
             .exists()
         )
         assert (
-            Entitlement.objects.for_tenant(tenant_uuid)
+            Entitlement.objects.filter(tenant_id=tenant_uuid)
             .filter(
                 capability="document_intelligence.configuration:read",
                 enabled=True,
@@ -87,7 +89,33 @@ def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
             .exists()
         )
         assert (
-            Quota.objects.for_tenant(tenant_uuid)
+            Entitlement.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                capability="module.workflow_automation",
+                enabled=True,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="budget_management.api_reads",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="automation_orchestration.definition:view:read",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
             .filter(
                 resource="document_intelligence.configuration:read",
                 limit__gte=1,
