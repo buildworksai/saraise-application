@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-import uuid
 from argparse import ArgumentParser
 from typing import Any
 

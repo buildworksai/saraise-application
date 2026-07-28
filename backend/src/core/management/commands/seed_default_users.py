@@ -1,17 +1,27 @@
 """Django management command to seed default development users."""
 
 import os
+import re
+import uuid
+from datetime import timedelta
+from pathlib import Path
 
+import yaml
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.utils import timezone
 
 from src.core.user_models import UserProfile
 
 User = get_user_model()
 PASSWORD_ENV = "SARAISE_SEED_DEFAULT_PASSWORD"  # pragma: allowlist secret
+PERMISSION_CODE_RE = re.compile(
+    r"^(?P<module>[a-z][a-z0-9_-]{0,99})\.(?P<resource>[a-z][a-z0-9_-]{0,99}):(?P<action>[a-z][a-z0-9_-]{0,49})$"
+)
+ACCESS_RESOURCE_RE = re.compile(r"['\"]([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_-]*)+(?::[a-z][a-z0-9_-]*)?)['\"]")
 
 
 class Command(BaseCommand):
@@ -218,6 +228,12 @@ class Command(BaseCommand):
                 else:
                     self.stdout.write(self.style.WARNING(f"ℹ️  {user_description} already exists: {user_email}"))
 
+            if getattr(settings, "SARAISE_MODE", "development") in {"development", "self-hosted"}:
+                admin_user = User.objects.get(
+                    email="admin@buildworks.ai"
+                )  # nosemgrep: semgrep.tenant-id-required-in-queries
+                self._bootstrap_local_access(tenant_id, admin_user)
+
         # Summary
         self.stdout.write(self.style.SUCCESS("\n✅ Default users seeded successfully!"))
         self.stdout.write("\n📋 Created Users:")
@@ -235,6 +251,184 @@ class Command(BaseCommand):
             self.stdout.write("     - viewer@buildworks.ai (Tenant User)")
             self.stdout.write("\n   Note: Functional roles (developer, operator, billing, auditor, viewer)")
             self.stdout.write("         are managed via Role model in security_access_control module.")
+
+    def _bootstrap_local_access(self, tenant_id: str, admin_user) -> None:
+        """Create explicit local access state for seeded tenant administration."""
+
+        try:
+            from src.core.access.entitlements import Entitlement, Quota
+            from src.modules.security_access_control.models import (
+                Permission,
+                PermissionSet,
+                PermissionSetPermission,
+                UserPermissionSet,
+            )
+            from src.modules.security_access_control.services import ConfigurationService
+        except Exception as exc:
+            self.stdout.write(self.style.WARNING(f"⚠️  Could not bootstrap local access state: {exc}"))
+            return
+
+        tenant_uuid = uuid.UUID(str(tenant_id))
+        actor_id = uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:seed:{admin_user.email}")
+        correlation_id = "seed-default-users-local-access"
+        ConfigurationService.current(tenant_uuid, actor_id=actor_id, correlation_id=correlation_id)
+
+        permissions, resources, capabilities = self._collect_local_access_contracts()
+        created_permissions = []
+        for code in sorted(permissions):
+            match = PERMISSION_CODE_RE.fullmatch(code)
+            if match is None:
+                continue
+            item, _ = Permission.objects.get_or_create(
+                **match.groupdict(),
+                defaults={
+                    "name": code,
+                    "description": "Seeded local development permission",
+                    "risk_level": Permission.RiskLevel.MEDIUM,
+                },
+            )
+            created_permissions.append(item)
+
+        permission_set, _ = PermissionSet.objects.get_or_create(
+            tenant_id=tenant_uuid,
+            name="Local development administrator",
+            defaults={
+                "description": "Explicit seeded grant for local end-to-end UAT.",
+                "default_duration_days": 365,
+                "is_active": True,
+                "created_by": actor_id,
+                "updated_by": actor_id,
+            },
+        )
+        if not permission_set.is_active or permission_set.is_deleted:
+            permission_set.is_active = True
+            permission_set.is_deleted = False
+            permission_set.deleted_at = None
+            permission_set.updated_by = actor_id
+            permission_set.save(update_fields=("is_active", "is_deleted", "deleted_at", "updated_by", "updated_at"))
+
+        existing_members = set(
+            PermissionSetPermission.objects.for_tenant(tenant_uuid)
+            .filter(permission_set=permission_set, removed_at__isnull=True)
+            .values_list("permission_id", flat=True)
+        )
+        for permission in created_permissions:
+            if permission.id not in existing_members:
+                PermissionSetPermission.objects.create(
+                    tenant_id=tenant_uuid,
+                    permission_set=permission_set,
+                    permission=permission,
+                    added_by=actor_id,
+                )
+
+        expiry = timezone.now() + timedelta(days=365)
+        grant = (
+            UserPermissionSet.objects.for_tenant(tenant_uuid)
+            .filter(user=admin_user, permission_set=permission_set, revoked_at__isnull=True)
+            .first()
+        )
+        if grant is None:
+            UserPermissionSet.objects.create(
+                tenant_id=tenant_uuid,
+                user=admin_user,
+                permission_set=permission_set,
+                expires_at=expiry,
+                granted_by=actor_id,
+                reason="Seeded local development administrator access",
+            )
+        elif grant.expires_at <= expiry:
+            grant.expires_at = expiry
+            grant.reason = "Seeded local development administrator access"
+            grant.save(update_fields=("expires_at", "reason", "updated_at"))
+
+        for capability in sorted(capabilities | permissions):
+            Entitlement.objects.update_or_create(
+                tenant_id=tenant_uuid,
+                capability=capability,
+                defaults={"enabled": True, "starts_at": None, "expires_at": None},
+            )
+        for resource in sorted(resources | permissions):
+            Quota.objects.update_or_create(
+                tenant_id=tenant_uuid,
+                resource=resource,
+                defaults={"limit": 1_000_000, "remaining": 1_000_000, "reset_at": None},
+            )
+
+        self.stdout.write(
+            self.style.SUCCESS(
+                "✅ Bootstrapped local access: "
+                f"{len(created_permissions)} permissions, {len(capabilities | permissions)} entitlements, "
+                f"{len(resources | permissions)} quotas"
+            )
+        )
+
+    def _collect_local_access_contracts(self) -> tuple[set[str], set[str], set[str]]:
+        permissions: set[str] = set()
+        resources: set[str] = set()
+        capabilities: set[str] = set()
+        backend_root = Path(settings.BASE_DIR) / "src" / "modules"
+
+        for manifest in backend_root.glob("*/manifest.yaml"):
+            module_name = manifest.parent.name
+            capabilities.add(module_name)
+            try:
+                document = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
+            except (OSError, yaml.YAMLError):
+                continue
+            self._collect_manifest_access_values(document, permissions, resources, capabilities)
+
+        for permissions_file in backend_root.glob("*/permissions.py"):
+            try:
+                text = permissions_file.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            for token in ACCESS_RESOURCE_RE.findall(text):
+                if PERMISSION_CODE_RE.fullmatch(token):
+                    permissions.add(token)
+                    capabilities.add(token.split(".", maxsplit=1)[0])
+                elif "." in token:
+                    resources.add(token)
+                    capabilities.add(token.split(".", maxsplit=1)[0])
+
+        for capability in tuple(capabilities):
+            for action in ("get", "post", "put", "patch", "delete", "list", "retrieve", "create", "update"):
+                resources.add(f"{capability}.{action}")
+
+        return permissions, resources, capabilities
+
+    def _collect_manifest_access_values(
+        self,
+        value: object,
+        permissions: set[str],
+        resources: set[str],
+        capabilities: set[str],
+        *,
+        key: str | None = None,
+    ) -> None:
+        if isinstance(value, dict):
+            for child_key, child_value in value.items():
+                self._collect_manifest_access_values(
+                    child_value,
+                    permissions,
+                    resources,
+                    capabilities,
+                    key=str(child_key),
+                )
+            return
+        if isinstance(value, list):
+            for item in value:
+                self._collect_manifest_access_values(item, permissions, resources, capabilities, key=key)
+            return
+        if not isinstance(value, str):
+            return
+
+        if key in {"permission", "permissions"} and PERMISSION_CODE_RE.fullmatch(value):
+            permissions.add(value)
+            capabilities.add(value.split(".", maxsplit=1)[0])
+        elif key in {"entitlement", "entitlements"}:
+            capabilities.add(value)
+        elif key in {"quota_resource", "quota_resources"}:
+            resources.add(value)
 
     def _create_or_update_user(
         self,

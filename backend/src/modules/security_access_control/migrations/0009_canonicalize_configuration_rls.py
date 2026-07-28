@@ -16,7 +16,7 @@ def install_canonical_security_configuration_rls(apps, schema_editor) -> None:
     if schema_editor.connection.vendor != "postgresql":
         return
     for table in TENANT_TABLES:
-        schema_editor.execute(f'SELECT saraise_enable_rls(\'"{table}"\'::REGCLASS)')
+        schema_editor.execute(f"SELECT saraise_enable_rls('\"{table}\"'::REGCLASS)")
 
 
 def restore_legacy_security_configuration_rls(apps, schema_editor) -> None:

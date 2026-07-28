@@ -18,6 +18,7 @@ from rest_framework import mixins, status, viewsets
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, NotFound, PermissionDenied, ValidationError
+from rest_framework.pagination import BasePagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -290,7 +291,7 @@ class GovernedAccessMixin:
 
     authentication_classes = (CanonicalSessionAuthentication,)
     permission_classes = (IsAuthenticated, RequiresAccess)
-    pagination_class = GovernedPageNumberPagination
+    pagination_class: type[BasePagination] | None = GovernedPageNumberPagination
     access_by_action: Mapping[str, AccessRequirement] = {}
 
     def check_permissions(self, request: Request) -> None:
@@ -361,7 +362,7 @@ class GovernedTenantReadOnlyViewSet(GovernedAccessMixin, GovernedAPIViewMixin, T
 class IntegrationPlatformConfigurationViewSet(
     GovernedAccessMixin,
     GovernedAPIViewMixin,
-    viewsets.ViewSet,
+    viewsets.GenericViewSet,
 ):
     """Singleton-style tenant configuration API with immutable evidence."""
 

@@ -2515,51 +2515,52 @@ class AccessEvaluationService:
         if subject_id is None:
             return PolicyEvaluation(False, ("SUBJECT_ID_REQUIRED",), ())
         correlation = correlation_id or str(getattr(request, "correlation_id", "")) or f"evaluation-{uuid.uuid4()}"
-        ConfigurationService.current(tenant, actor_id=_actor_uuid(subject_id), correlation_id=correlation)
-        effective = cls.get_effective_permissions(tenant, subject_id)
-        if permission_code in effective.denied:
-            return PolicyEvaluation(False, ("EXPLICIT_DENY",), effective.role_ids)
-        if permission_code not in effective.allowed:
-            return PolicyEvaluation(False, ("DENY_DEFAULT",), ())
-        context_values = dict(resource_context or {})
-        profile = SecurityProfileService.resolve_effective_profile(tenant, subject_id, context=context_values)
-        if not profile.profile_ids or not profile.restrictions:
-            return PolicyEvaluation(False, ("PROFILE_CONFIGURATION_MISSING",), ())
-        module, resource = context_values.get("module"), context_values.get("resource")
-        if bool(module) != bool(resource):
-            return PolicyEvaluation(False, ("INVALID_RESOURCE_CONTEXT",), ())
-        applied = list(effective.role_ids + effective.permission_set_ids + profile.profile_ids)
-        if isinstance(module, str) and isinstance(resource, str):
-            requested_fields = context_values.get("requested_fields", [])
-            if not isinstance(requested_fields, Sequence) or isinstance(requested_fields, (str, bytes)):
-                return PolicyEvaluation(False, ("INVALID_RESOURCE_CONTEXT",), tuple(applied))
-            try:
-                field_decisions = FieldSecurityService.resolve_field_access(
-                    tenant,
-                    subject_id,
-                    module,
-                    resource,
-                    fields=tuple(str(value) for value in requested_fields),
-                    context=context_values,
-                )
-                row = RowSecurityService.explain_row_access(
-                    tenant,
-                    subject_id,
-                    module,
-                    resource,
-                    record_attributes=context_values,
-                    context=context_values,
-                )
-            except (SecurityValidationError, SecurityNotFound):
-                return PolicyEvaluation(False, ("INVALID_RESOURCE_CONTEXT",), tuple(applied))
-            applied.extend(rule for decision in field_decisions.values() for rule in decision.applied_rule_ids)
-            applied.extend(row.applied_rule_ids)
-            if (
-                any(decision.visibility in {"hidden", "redacted"} for decision in field_decisions.values())
-                or not row.allowed
-            ):
-                return PolicyEvaluation(False, ("RESOURCE_POLICY_DENIED",), tuple(dict.fromkeys(applied)))
-        return PolicyEvaluation(True, ("ALLOW",), tuple(dict.fromkeys(applied)))
+        with tenant_context(tenant):
+            ConfigurationService.current(tenant, actor_id=_actor_uuid(subject_id), correlation_id=correlation)
+            effective = cls.get_effective_permissions(tenant, subject_id)
+            if permission_code in effective.denied:
+                return PolicyEvaluation(False, ("EXPLICIT_DENY",), effective.role_ids)
+            if permission_code not in effective.allowed:
+                return PolicyEvaluation(False, ("DENY_DEFAULT",), ())
+            context_values = dict(resource_context or {})
+            profile = SecurityProfileService.resolve_effective_profile(tenant, subject_id, context=context_values)
+            if not profile.profile_ids or not profile.restrictions:
+                return PolicyEvaluation(False, ("PROFILE_CONFIGURATION_MISSING",), ())
+            module, resource = context_values.get("module"), context_values.get("resource")
+            if bool(module) != bool(resource):
+                return PolicyEvaluation(False, ("INVALID_RESOURCE_CONTEXT",), ())
+            applied = list(effective.role_ids + effective.permission_set_ids + profile.profile_ids)
+            if isinstance(module, str) and isinstance(resource, str):
+                requested_fields = context_values.get("requested_fields", [])
+                if not isinstance(requested_fields, Sequence) or isinstance(requested_fields, (str, bytes)):
+                    return PolicyEvaluation(False, ("INVALID_RESOURCE_CONTEXT",), tuple(applied))
+                try:
+                    field_decisions = FieldSecurityService.resolve_field_access(
+                        tenant,
+                        subject_id,
+                        module,
+                        resource,
+                        fields=tuple(str(value) for value in requested_fields),
+                        context=context_values,
+                    )
+                    row = RowSecurityService.explain_row_access(
+                        tenant,
+                        subject_id,
+                        module,
+                        resource,
+                        record_attributes=context_values,
+                        context=context_values,
+                    )
+                except (SecurityValidationError, SecurityNotFound):
+                    return PolicyEvaluation(False, ("INVALID_RESOURCE_CONTEXT",), tuple(applied))
+                applied.extend(rule for decision in field_decisions.values() for rule in decision.applied_rule_ids)
+                applied.extend(row.applied_rule_ids)
+                if (
+                    any(decision.visibility in {"hidden", "redacted"} for decision in field_decisions.values())
+                    or not row.allowed
+                ):
+                    return PolicyEvaluation(False, ("RESOURCE_POLICY_DENIED",), tuple(dict.fromkeys(applied)))
+            return PolicyEvaluation(True, ("ALLOW",), tuple(dict.fromkeys(applied)))
 
     @staticmethod
     def evaluate_remote(

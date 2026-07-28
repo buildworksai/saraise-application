@@ -74,6 +74,10 @@ function commandInit(): RequestInit {
   };
 }
 
+async function unwrap<T>(operation: Promise<ApiV2Envelope<T>>): Promise<T> {
+  return (await operation).data;
+}
+
 export const customizationFrameworkService = {
   listResourceContracts: (includeUnavailable = true) =>
     apiClient.get<ApiV2Envelope<readonly ResourceContract[]>>(
@@ -250,26 +254,53 @@ export const customizationFrameworkService = {
     ),
   getExecution: (id: UUID) =>
     apiClient.get<ApiV2Envelope<RuleExecution>>(ENDPOINTS.RULE_EXECUTIONS.DETAIL(id)),
-  getConfiguration: () => apiClient.get<RuntimeConfiguration>(ENDPOINTS.CONFIGURATION.DETAIL),
+  getConfiguration: () =>
+    unwrap(apiClient.get<ApiV2Envelope<RuntimeConfiguration>>(ENDPOINTS.CONFIGURATION.DETAIL)),
   updateConfiguration: (request: ConfigurationUpdateRequest) =>
-    apiClient.patch<RuntimeConfiguration>(ENDPOINTS.CONFIGURATION.UPDATE, request, commandInit()),
+    unwrap(
+      apiClient.patch<ApiV2Envelope<RuntimeConfiguration>>(
+        ENDPOINTS.CONFIGURATION.UPDATE,
+        request,
+        commandInit()
+      )
+    ),
   previewConfiguration: (request: ConfigurationPreviewRequest) =>
-    apiClient.post<ConfigurationPreview>(ENDPOINTS.CONFIGURATION.PREVIEW, request, commandInit()),
+    unwrap(
+      apiClient.post<ApiV2Envelope<ConfigurationPreview>>(
+        ENDPOINTS.CONFIGURATION.PREVIEW,
+        request,
+        commandInit()
+      )
+    ),
   listConfigurationVersions: () =>
     apiClient.get<ApiV2Envelope<readonly RuntimeConfigurationVersion[]>>(
       ENDPOINTS.CONFIGURATION.VERSIONS
     ),
   rollbackConfiguration: (request: ConfigurationRollbackRequest) =>
-    apiClient.post<RuntimeConfiguration>(ENDPOINTS.CONFIGURATION.ROLLBACK, request, commandInit()),
+    unwrap(
+      apiClient.post<ApiV2Envelope<RuntimeConfiguration>>(
+        ENDPOINTS.CONFIGURATION.ROLLBACK,
+        request,
+        commandInit()
+      )
+    ),
   listConfigurationAudit: () =>
     apiClient.get<ApiV2Envelope<readonly ConfigurationAuditRecord[]>>(
       ENDPOINTS.CONFIGURATION.AUDIT
     ),
   importConfiguration: (request: ConfigurationImportRequest) =>
-    apiClient.post<RuntimeConfiguration>(ENDPOINTS.CONFIGURATION.IMPORT, request, commandInit()),
+    unwrap(
+      apiClient.post<ApiV2Envelope<RuntimeConfiguration>>(
+        ENDPOINTS.CONFIGURATION.IMPORT,
+        request,
+        commandInit()
+      )
+    ),
   exportConfiguration: () =>
-    apiClient.get<import("../contracts").ConfigurationExportDocument>(
-      ENDPOINTS.CONFIGURATION.EXPORT
+    unwrap(
+      apiClient.get<ApiV2Envelope<import("../contracts").ConfigurationExportDocument>>(
+        ENDPOINTS.CONFIGURATION.EXPORT
+      )
     ),
   getHealth: () => apiClient.get<ApiV2Envelope<CustomizationHealth>>(ENDPOINTS.HEALTH),
 };

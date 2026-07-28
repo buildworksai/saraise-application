@@ -2,7 +2,12 @@
 /* eslint-disable @typescript-eslint/unbound-method -- assertions intentionally reference mocked client methods. */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiClient } from "@/services/api-client";
-import { ENDPOINTS, type ApiV2Envelope, type CustomFieldDefinition } from "../contracts";
+import {
+  ENDPOINTS,
+  type ApiV2Envelope,
+  type CustomFieldDefinition,
+  type RuntimeConfiguration,
+} from "../contracts";
 import { customizationFrameworkService as service } from "../services/customization-framework-service";
 
 vi.mock("@/services/api-client", () => ({
@@ -55,6 +60,80 @@ const envelope: ApiV2Envelope<readonly CustomFieldDefinition[]> = {
     },
   },
 };
+const runtimeConfiguration: RuntimeConfiguration = {
+  id: "00000000-0000-4000-8000-000000000010",
+  tenant_id: "00000000-0000-4000-8000-000000000002",
+  version: 1,
+  environment: "default",
+  document: {
+    limits: {
+      json_bytes: 65536,
+      ast_nodes: 256,
+      ast_depth: 16,
+      evaluation_ms: 50,
+      field_key_length: 100,
+      field_label_length: 160,
+      resource_key_length: 120,
+      contract_version_length: 32,
+      form_key_length: 100,
+      form_name_length: 160,
+      change_summary_length: 500,
+      idempotency_key_length: 128,
+      rule_priority_min: 1,
+      rule_priority_max: 1000,
+    },
+    policies: {
+      slug_pattern: "^[a-z][a-z0-9-]*$",
+      field_types: ["text"],
+      rule_triggers: ["validate"],
+      condition_operators: ["eq"],
+      action_types: ["reject-with-message"],
+      value_sources: ["ui"],
+      value_allowed_statuses: ["active"],
+      field_delete_statuses: ["draft"],
+      form_delete_statuses: ["draft"],
+      field_transitions: {},
+      form_transitions: {},
+      rule_transitions: {},
+    },
+    defaults: {
+      field_required: false,
+      field_searchable: false,
+      field_status: "draft",
+      form_status: "draft",
+      layout_schema_version: 1,
+      layout_status: "candidate",
+      form_surface: "default",
+      form_layout: { schema_version: 1, sections: [] },
+      rule_priority: 100,
+      rule_stop_on_match: false,
+      rule_status: "draft",
+      rule_language_version: 1,
+      rule_version_status: "candidate",
+      contract_version: "1.0",
+    },
+    list_preferences: {
+      page_size: 25,
+      field_ordering: "key",
+      form_ordering: "key",
+      rule_ordering: "priority",
+      execution_ordering: "-executed_at",
+    },
+    navigation: {
+      fields_order: 70,
+      field_values_order: 71,
+      forms_order: 72,
+      rules_order: 73,
+      executions_order: 74,
+      configuration_order: 75,
+    },
+    rollout: { enabled: true, roles: [], cohorts: [] },
+    rbac: { action_access: {}, sod_actions: [] },
+  },
+  updated_by: "00000000-0000-4000-8000-000000000003",
+  created_at: "2026-07-22T00:00:00Z",
+  updated_at: "2026-07-22T00:00:00Z",
+};
 
 describe("customization framework service", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -79,6 +158,16 @@ describe("customization framework service", () => {
         headers: expect.objectContaining({ "Idempotency-Key": expect.any(String) }),
       })
     );
+  });
+
+  it("unwraps singleton configuration envelopes before page rendering", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: runtimeConfiguration,
+      meta: envelope.meta,
+    });
+
+    await expect(service.getConfiguration()).resolves.toEqual(runtimeConfiguration);
+    expect(apiClient.get).toHaveBeenCalledWith(ENDPOINTS.CONFIGURATION.DETAIL);
   });
 
   it("targets exact lifecycle and non-persisting validation endpoints", async () => {

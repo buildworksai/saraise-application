@@ -337,15 +337,17 @@ export const TenantSidebar = ({ user }: { user: User }) => {
     queryKey: ["integration-platform", "configuration"],
     queryFn: () => integrationPlatformService.getConfiguration(),
   });
+  const documentIntelligenceNavigationOrder =
+    documentIntelligenceConfiguration.data?.document?.ui?.navigation_order;
+  const traceabilitySidebarOrder = traceabilityCapabilities.data?.document?.ui?.sidebar_order;
+  const integrationNavigation = integrationPlatformConfiguration.data?.document?.navigation;
+  const customizationNavigation = customizationConfiguration.data?.document?.navigation;
   const runtimeRegistryItems = applyCustomizationNavigationOrder(
     applyApiManagementNavigationOrder(
-      applyRuntimeNavigationOrder(
-        registryTenantItems,
-        documentIntelligenceConfiguration.data?.document.ui.navigation_order
-      ),
+      applyRuntimeNavigationOrder(registryTenantItems, documentIntelligenceNavigationOrder),
       apiManagementSchema.data
     ),
-    customizationConfiguration.data?.document.navigation
+    customizationNavigation
   );
   const renderedTenantItems = [...tenantItems, ...runtimeRegistryItems]
     .filter((item) => !item.adminOnly || isAdmin)
@@ -354,19 +356,16 @@ export const TenantSidebar = ({ user }: { user: User }) => {
       children: item.children?.filter((child) => !child.adminOnly || isAdmin),
     }))
     .map((item) =>
-      item.module === "blockchain_traceability" && traceabilityCapabilities.data
-        ? { ...item, order: traceabilityCapabilities.data.document.ui.sidebar_order }
-        : item.module === "integration_platform" && integrationPlatformConfiguration.data
+      item.module === "blockchain_traceability" && traceabilitySidebarOrder !== undefined
+        ? { ...item, order: traceabilitySidebarOrder }
+        : item.module === "integration_platform" && integrationNavigation
           ? {
               ...item,
-              order: integrationPlatformConfiguration.data.document.navigation.base_order,
+              order: integrationNavigation.base_order,
               children: item.children
                 ?.map((child) => ({
                   ...child,
-                  order:
-                    integrationPlatformConfiguration.data.document.navigation.route_order[
-                      child.routeId ?? ""
-                    ] ?? child.order,
+                  order: integrationNavigation.route_order[child.routeId ?? ""] ?? child.order,
                 }))
                 .sort(
                   (left, right) =>

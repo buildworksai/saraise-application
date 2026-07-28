@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Count, Max, Q, QuerySet
 from django.http import StreamingHttpResponse
 from rest_framework import status, viewsets
@@ -75,6 +77,9 @@ from .services import (
     StatementService,
 )
 
+if TYPE_CHECKING:
+    from rest_framework.permissions import _SupportsHasPermission
+
 
 class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.GenericViewSet):
     """Resolve the trusted tenant and actor projections once per request."""
@@ -85,7 +90,7 @@ class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.Ge
             value = UUID(str(raw))
         except (TypeError, ValueError, AttributeError) as exc:
             raise PermissionDenied("Authenticated identity has no valid tenant.") from exc
-        self.request.tenant_id = value
+        setattr(self.request, "tenant_id", value)
         return value
 
     def actor_id(self) -> UUID:
@@ -104,7 +109,14 @@ class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.Ge
         return self.get_paginated_response(serializer(page, many=True, context=context).data)
 
     def object_or_404(self, queryset: QuerySet[Any]) -> Any:
-        value = queryset.filter(pk=self.kwargs["pk"]).first()
+        try:
+            object_id = UUID(str(self.kwargs["pk"]))
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise NotFound() from exc
+        try:
+            value = queryset.filter(pk=object_id).first()
+        except DjangoValidationError as exc:
+            raise NotFound() from exc
         if value is None:
             raise NotFound()
         return value
@@ -115,6 +127,15 @@ def _ordering(request: Any, allowed: set[str], default: str) -> str:
     if value.lstrip("-") not in allowed:
         raise ValidationError({"ordering": "Unsupported ordering field."})
     return value
+
+
+def _uuid_query_value(raw: object, field_name: str) -> UUID | None:
+    if raw in (None, ""):
+        return None
+    try:
+        return UUID(str(raw))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValidationError({field_name: "Must be a valid UUID."}) from exc
 
 
 class BankAccountViewSet(TenantGovernedViewSet):
@@ -198,8 +219,9 @@ class BankStatementViewSet(TenantGovernedViewSet):
             .annotate(transaction_count=Count("transactions"))
         )
         account = self.request.query_params.get("account") or self.request.query_params.get("bank_account")
-        if account:
-            qs = qs.filter(bank_account_id=account)
+        account_id = _uuid_query_value(account, "account")
+        if account_id is not None:
+            qs = qs.filter(bank_account_id=account_id)
         if self.request.query_params.get("status"):
             qs = qs.filter(status=self.request.query_params["status"])
         period_from = self.request.query_params.get("period_from") or self.request.query_params.get(
@@ -250,7 +272,7 @@ class BankStatementViewSet(TenantGovernedViewSet):
         )
         return Response(StatementDetailSerializer(value).data)
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> Sequence[_SupportsHasPermission]:
         if getattr(self, "action", "") == "transactions" and self.request.method == "POST":
             self.action_permissions = {
                 **type(self).action_permissions,
@@ -287,11 +309,13 @@ class BankTransactionViewSet(TenantGovernedViewSet):
             "bank_statement", "bank_statement__statement_import"
         )
         statement_id = self.request.query_params.get("statement") or self.request.query_params.get("bank_statement")
-        if statement_id:
-            qs = qs.filter(bank_statement_id=statement_id)
+        bank_statement_id = _uuid_query_value(statement_id, "statement")
+        if bank_statement_id is not None:
+            qs = qs.filter(bank_statement_id=bank_statement_id)
         account_id = self.request.query_params.get("account") or self.request.query_params.get("bank_account")
-        if account_id:
-            qs = qs.filter(bank_statement__bank_account_id=account_id)
+        bank_account_id = _uuid_query_value(account_id, "account")
+        if bank_account_id is not None:
+            qs = qs.filter(bank_statement__bank_account_id=bank_account_id)
         for param in ("match_status", "transaction_type"):
             if self.request.query_params.get(param):
                 qs = qs.filter(**{param: self.request.query_params[param]})
@@ -371,8 +395,9 @@ class StatementImportViewSet(TenantGovernedViewSet):
         qs = BankStatementImport.objects.for_tenant(self.tenant_id()).select_related("bank_account")
         account_id = self.request.query_params.get("account") or self.request.query_params.get("bank_account")
         file_format = self.request.query_params.get("format") or self.request.query_params.get("file_format")
-        if account_id:
-            qs = qs.filter(bank_account_id=account_id)
+        bank_account_id = _uuid_query_value(account_id, "account")
+        if bank_account_id is not None:
+            qs = qs.filter(bank_account_id=bank_account_id)
         if file_format:
             qs = qs.filter(file_format=file_format)
         if self.request.query_params.get("status"):
@@ -538,10 +563,12 @@ class ReconciliationViewSet(TenantGovernedViewSet):
         )
         account_id = self.request.query_params.get("account") or self.request.query_params.get("bank_account")
         statement_id = self.request.query_params.get("statement") or self.request.query_params.get("bank_statement")
-        if account_id:
-            qs = qs.filter(bank_account_id=account_id)
-        if statement_id:
-            qs = qs.filter(bank_statement_id=statement_id)
+        bank_account_id = _uuid_query_value(account_id, "account")
+        bank_statement_id = _uuid_query_value(statement_id, "statement")
+        if bank_account_id is not None:
+            qs = qs.filter(bank_account_id=bank_account_id)
+        if bank_statement_id is not None:
+            qs = qs.filter(bank_statement_id=bank_statement_id)
         if self.request.query_params.get("status"):
             qs = qs.filter(status=self.request.query_params["status"])
         date_from = self.request.query_params.get("date_from") or self.request.query_params.get("date_after")
@@ -740,7 +767,7 @@ class ReconciliationMatchViewSet(TenantGovernedViewSet):
 class ModuleHealthAPIView(GovernedAPIViewMixin, ActionAccessMixin, APIView):
     action_permissions = {"health": "bank_reconciliation.health:read"}
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> Sequence[_SupportsHasPermission]:
         self.action = "health"
         return super().get_permissions()
 
