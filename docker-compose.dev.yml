@@ -90,18 +90,18 @@ services:
         reservations:
           memory: 256M
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/saraise
+      - DATABASE_URL=postgresql://postgres:postgres@application-db:5432/saraise
       - DB_NAME=saraise
       - DB_USER=postgres
       - DB_PASSWORD=postgres
-      - DB_HOST=postgres
+      - DB_HOST=application-db
       - DB_PORT=5432
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://application-redis:6379/0
       - DJANGO_SETTINGS_MODULE=saraise_backend.settings
       - PYTHONPATH=/app
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
       - DEBUG=True
-      - ALLOWED_HOSTS=localhost,backend,0.0.0.0
+      - ALLOWED_HOSTS=localhost,backend,backend:8000,0.0.0.0
       - SARAISE_MODE=${SARAISE_MODE:-development}
       - SARAISE_LICENSE_MODE=${SARAISE_LICENSE_MODE:-connected}
     ports:

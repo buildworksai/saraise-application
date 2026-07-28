@@ -142,11 +142,19 @@ SECRET_KEY = _secret_key_env or "django-insecure-dev-only-not-for-production"  #
 DEBUG = os.getenv("DEBUG", "false").lower() == "true" if SARAISE_MODE != "development" else True
 
 _allowed_hosts_env = os.getenv("ALLOWED_HOSTS", "")
-if SARAISE_MODE == "development":
-    ALLOWED_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0"]
-elif _allowed_hosts_env:
-    ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_env.split(",") if h.strip()]
-else:
+
+
+def _parse_allowed_hosts(mode: str, raw_hosts: str) -> list[str]:
+    configured_hosts = [host.strip() for host in raw_hosts.split(",") if host.strip()]
+    if configured_hosts:
+        return configured_hosts
+    if mode == "development":
+        return ["localhost", "127.0.0.1", "0.0.0.0"]
+    return []
+
+
+ALLOWED_HOSTS = _parse_allowed_hosts(SARAISE_MODE, _allowed_hosts_env)
+if not ALLOWED_HOSTS:
     from django.core.exceptions import ImproperlyConfigured
 
     raise ImproperlyConfigured(
@@ -411,6 +419,14 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
         "src.core.auth.policy_permissions.PolicyRequiredPermission",
     ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": os.getenv("DRF_THROTTLE_RATE_ANON", "60/min"),
+        "user": os.getenv("DRF_THROTTLE_RATE_USER", "600/min"),
+    },
 }
 
 # DRF Spectacular (OpenAPI) Configuration
