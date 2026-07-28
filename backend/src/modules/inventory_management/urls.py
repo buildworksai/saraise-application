@@ -4,10 +4,19 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .api import (
-    BatchViewSet, ConfigurationViewSet, CycleCountViewSet, DashboardViewSet,
-    ImportViewSet, ItemViewSet, ReservationViewSet, SerialNumberViewSet,
-    StockBalanceViewSet, StockEntryViewSet, StockLedgerViewSet,
-    StorageLocationViewSet, WarehouseViewSet,
+    BatchViewSet,
+    ConfigurationViewSet,
+    CycleCountViewSet,
+    DashboardViewSet,
+    ImportViewSet,
+    ItemViewSet,
+    ReservationViewSet,
+    SerialNumberViewSet,
+    StockBalanceViewSet,
+    StockEntryViewSet,
+    StockLedgerViewSet,
+    StorageLocationViewSet,
+    WarehouseViewSet,
 )
 from .health import InventoryHealthView
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Any, Final
 from uuid import UUID
 
 from rest_framework.authentication import SessionAuthentication
@@ -12,12 +12,37 @@ from src.core.access import RequiresAccess
 from src.core.auth_utils import get_user_tenant_id
 
 PERMISSIONS: Final[tuple[str, ...]] = (
-    "accounting.account:create", "accounting.account:read", "accounting.account:update", "accounting.account:delete",
-    "accounting.posting_period:create", "accounting.posting_period:read", "accounting.posting_period:update", "accounting.posting_period:close", "accounting.posting_period:lock",
-    "accounting.journal_entry:create", "accounting.journal_entry:read", "accounting.journal_entry:update", "accounting.journal_entry:delete", "accounting.journal_entry:post", "accounting.journal_entry:reverse", "accounting.journal_entry:import",
-    "accounting.ap_invoice:create", "accounting.ap_invoice:read", "accounting.ap_invoice:update", "accounting.ap_invoice:delete", "accounting.ap_invoice:approve", "accounting.ap_invoice:post",
-    "accounting.ar_invoice:create", "accounting.ar_invoice:read", "accounting.ar_invoice:update", "accounting.ar_invoice:delete", "accounting.ar_invoice:post",
-    "accounting.payment:create", "accounting.payment:read", "accounting.payment:update", "accounting.payment:void",
+    "accounting.account:create",
+    "accounting.account:read",
+    "accounting.account:update",
+    "accounting.account:delete",
+    "accounting.posting_period:create",
+    "accounting.posting_period:read",
+    "accounting.posting_period:update",
+    "accounting.posting_period:close",
+    "accounting.posting_period:lock",
+    "accounting.journal_entry:create",
+    "accounting.journal_entry:read",
+    "accounting.journal_entry:update",
+    "accounting.journal_entry:delete",
+    "accounting.journal_entry:post",
+    "accounting.journal_entry:reverse",
+    "accounting.journal_entry:import",
+    "accounting.ap_invoice:create",
+    "accounting.ap_invoice:read",
+    "accounting.ap_invoice:update",
+    "accounting.ap_invoice:delete",
+    "accounting.ap_invoice:approve",
+    "accounting.ap_invoice:post",
+    "accounting.ar_invoice:create",
+    "accounting.ar_invoice:read",
+    "accounting.ar_invoice:update",
+    "accounting.ar_invoice:delete",
+    "accounting.ar_invoice:post",
+    "accounting.payment:create",
+    "accounting.payment:read",
+    "accounting.payment:update",
+    "accounting.payment:void",
     "accounting.report:read",
 )
 
@@ -31,6 +56,7 @@ class SessionAuthentication401(SessionAuthentication):
 
 
 class AccountingAccessMixin:
+    request: Any
     authentication_classes = (SessionAuthentication401,)
     permission_classes = (IsAuthenticated, RequiresAccess)
     action_permissions: dict[str, str] = {}

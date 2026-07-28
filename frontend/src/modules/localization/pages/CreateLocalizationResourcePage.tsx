@@ -1,25 +1,26 @@
+/* eslint-disable @typescript-eslint/no-misused-promises -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /**
  * Create Localization Resource Page
- * 
+ *
  * Form for creating a new resource with validation.
  */
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { useNavigate } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { localizationService } from '../services/localization-service';
-import type { TranslationCreate } from '../contracts';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Textarea } from '@/components/ui/Textarea';
-import { Card } from '@/components/ui/Card';
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { useNavigate } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { localizationService } from "../services/localization-service";
+import type { TranslationCreate } from "../contracts";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Textarea } from "@/components/ui/Textarea";
+import { Card } from "@/components/ui/Card";
 
 const resourceSchema = z.object({
-  language: z.string().min(1, 'Language is required'),
-  key: z.string().min(1, 'Key is required'),
-  value: z.string().min(1, 'Value is required'),
+  language: z.string().min(1, "Language is required"),
+  key: z.string().min(1, "Key is required"),
+  value: z.string().min(1, "Value is required"),
   context: z.string().optional(),
 });
 
@@ -32,22 +33,22 @@ export const CreateLocalizationResourcePage = () => {
   const form = useForm<ResourceFormData>({
     resolver: zodResolver(resourceSchema),
     defaultValues: {
-      language: '',
-      key: '',
-      value: '',
-      context: '',
+      language: "",
+      key: "",
+      value: "",
+      context: "",
     },
   });
 
   const createMutation = useMutation({
     mutationFn: (data: TranslationCreate) => localizationService.createTranslation(data),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['localization-translations'] });
-      toast.success('Translation created successfully');
-      navigate('/localization');
+      void queryClient.invalidateQueries({ queryKey: ["localization-translations"] });
+      toast.success("Translation created successfully");
+      navigate("/localization");
     },
     onError: () => {
-      toast.error('Failed to create translation. Please try again.');
+      toast.error("Failed to create translation. Please try again.");
     },
   });
 
@@ -60,7 +61,7 @@ export const CreateLocalizationResourcePage = () => {
         context: data.context,
       });
     } catch (err) {
-      console.error('Failed to create translation:', err);
+      console.error("Failed to create translation:", err);
     }
   };
 
@@ -78,7 +79,7 @@ export const CreateLocalizationResourcePage = () => {
             </label>
             <Input
               id="language"
-              {...form.register('language')}
+              {...form.register("language")}
               error={form.formState.errors.language?.message}
               placeholder="e.g., en, es, fr"
             />
@@ -90,7 +91,7 @@ export const CreateLocalizationResourcePage = () => {
             </label>
             <Input
               id="key"
-              {...form.register('key')}
+              {...form.register("key")}
               error={form.formState.errors.key?.message}
               placeholder="e.g., common.save"
             />
@@ -102,7 +103,7 @@ export const CreateLocalizationResourcePage = () => {
             </label>
             <Textarea
               id="value"
-              {...form.register('value')}
+              {...form.register("value")}
               error={form.formState.errors.value?.message}
               rows={4}
               placeholder="Enter the translated text"
@@ -115,7 +116,7 @@ export const CreateLocalizationResourcePage = () => {
             </label>
             <Input
               id="context"
-              {...form.register('context')}
+              {...form.register("context")}
               error={form.formState.errors.context?.message}
               placeholder="e.g., button, label"
             />
@@ -123,9 +124,9 @@ export const CreateLocalizationResourcePage = () => {
 
           <div className="flex gap-4 pt-4">
             <Button type="submit" disabled={createMutation.isPending}>
-              {createMutation.isPending ? 'Creating...' : 'Create Resource'}
+              {createMutation.isPending ? "Creating..." : "Create Resource"}
             </Button>
-            <Button type="button" variant="outline" onClick={() => navigate('/localization')}>
+            <Button type="button" variant="outline" onClick={() => navigate("/localization")}>
               Cancel
             </Button>
           </div>

@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Final
+from typing import Final
 from uuid import UUID
 
 from src.core.api.results import OperationResult
@@ -133,7 +133,9 @@ class ConnectorAdapter(ABC):
         """Validate and normalize non-secret connector configuration."""
 
     @abstractmethod
-    def test_connection(self, config: Mapping[str, object], credential: CredentialBundle | None) -> OperationResult[object]:
+    def test_connection(
+        self, config: Mapping[str, object], credential: CredentialBundle | None
+    ) -> OperationResult[object]:
         """Perform a real provider connection check."""
 
     @abstractmethod

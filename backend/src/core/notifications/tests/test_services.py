@@ -137,9 +137,7 @@ class NotificationServiceTestCase(TestCase):
             data={"notification_id": str(notification.id), "type": "info"},
             tokens=["test-fcm-token"],
         )
-        mock_messaging.send_multicast.assert_called_once_with(
-            mock_messaging.MulticastMessage.return_value
-        )
+        mock_messaging.send_multicast.assert_called_once_with(mock_messaging.MulticastMessage.return_value)
         notification.refresh_from_db()
         self.assertEqual(notification.metadata["push_success_count"], 1)
         self.assertEqual(notification.metadata["push_failure_count"], 0)

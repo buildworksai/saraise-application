@@ -19,7 +19,6 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from pathlib import Path
 from typing import Protocol, TextIO, runtime_checkable
 from xml.etree.ElementTree import Element, SubElement, tostring
 
@@ -132,7 +131,9 @@ class BottleneckAlgorithm(Protocol):
     metadata: AdapterMetadata
 
     def analyze(
-        self, traces: Mapping[str, Sequence[CanonicalEvent]], time_range: tuple[datetime, datetime],
+        self,
+        traces: Mapping[str, Sequence[CanonicalEvent]],
+        time_range: tuple[datetime, datetime],
         configuration: Mapping[str, object],
     ) -> BottleneckResult: ...
 
@@ -182,7 +183,9 @@ class AdapterRegistry:
 
     def catalog(self) -> tuple[AdapterMetadata, ...]:
         with self._lock:
-            return tuple(sorted((getattr(value, "metadata") for value in self._items.values()), key=lambda item: item.adapter_id))
+            return tuple(
+                sorted((getattr(value, "metadata") for value in self._items.values()), key=lambda item: item.adapter_id)
+            )
 
 
 registry = AdapterRegistry()
@@ -315,8 +318,16 @@ class TokenReplayConformance:
         nodes = model.get("nodes")
         if not isinstance(edges, list) or not isinstance(nodes, list):
             raise InvalidAdapterResult("Conformance requires a canonical graph")
-        labels = {str(node["id"]): str(node.get("label", node["id"])) for node in nodes if isinstance(node, dict) and "id" in node}
-        allowed = {(labels.get(str(edge.get("source")), "Start"), labels.get(str(edge.get("target")), "End")) for edge in edges if isinstance(edge, dict)}
+        labels = {
+            str(node["id"]): str(node.get("label", node["id"]))
+            for node in nodes
+            if isinstance(node, dict) and "id" in node
+        }
+        allowed = {
+            (labels.get(str(edge.get("source")), "Start"), labels.get(str(edge.get("target")), "End"))
+            for edge in edges
+            if isinstance(edge, dict)
+        }
         case_results: list[CaseFitnessResult] = []
         deviations: list[ConformanceDeviationResult] = []
         observed_transitions: set[tuple[str, str]] = set()
@@ -340,7 +351,11 @@ class TokenReplayConformance:
                     )
             denominator = max(1, len(sequence) - 1)
             fitness = Decimal(max(0, denominator - case_deviations)) / Decimal(denominator)
-            case_results.append(CaseFitnessResult(case_id, fitness.quantize(Decimal("0.0001")), case_deviations == 0, case_deviations, len(trace)))
+            case_results.append(
+                CaseFitnessResult(
+                    case_id, fitness.quantize(Decimal("0.0001")), case_deviations == 0, case_deviations, len(trace)
+                )
+            )
         if not case_results:
             raise InvalidAdapterResult("Conformance requires at least one trace")
         fitness = sum((item.fitness for item in case_results), Decimal(0)) / Decimal(len(case_results))
@@ -375,10 +390,14 @@ def _severity(median: float, p95: float, configuration: Mapping[str, object]) ->
 
 
 class TransitionDurationAnalyzer:
-    metadata = AdapterMetadata("process_mining.transition_duration", "1.0", "1.0.0", ("bottleneck", "variants", "resource_concentration"))
+    metadata = AdapterMetadata(
+        "process_mining.transition_duration", "1.0", "1.0.0", ("bottleneck", "variants", "resource_concentration")
+    )
 
     def analyze(
-        self, traces: Mapping[str, Sequence[CanonicalEvent]], time_range: tuple[datetime, datetime],
+        self,
+        traces: Mapping[str, Sequence[CanonicalEvent]],
+        time_range: tuple[datetime, datetime],
         configuration: Mapping[str, object],
     ) -> BottleneckResult:
         start, end = time_range
@@ -408,7 +427,9 @@ class TransitionDurationAnalyzer:
         if not case_durations:
             raise InvalidAdapterResult("Bottleneck analysis requires traces")
         percentile = float(configuration["tail_duration_percentile"])
-        ranked = sorted(transition_durations, key=lambda key: (-_percentile(transition_durations[key], percentile), key))
+        ranked = sorted(
+            transition_durations, key=lambda key: (-_percentile(transition_durations[key], percentile), key)
+        )
         findings: list[Mapping[str, object]] = []
         for rank, key in enumerate(ranked, 1):
             values = transition_durations[key]
@@ -425,7 +446,11 @@ class TransitionDurationAnalyzer:
                     "p95_duration_seconds": Decimal(str(round(_percentile(values, percentile), 2))),
                     "case_count": cases,
                     "severity": _severity(median, _percentile(values, percentile), configuration),
-                    "resource_bottleneck": top_resource if cases and top_count / cases > float(configuration["resource_concentration_threshold"]) else "",
+                    "resource_bottleneck": (
+                        top_resource
+                        if cases and top_count / cases > float(configuration["resource_concentration_threshold"])
+                        else ""
+                    ),
                     "rank": rank,
                 }
             )
@@ -442,10 +467,32 @@ class TransitionDurationAnalyzer:
                 grouped_weighted_duration += duration * count
                 continue
             key = hashlib.sha256("\0".join(activities).encode()).hexdigest()
-            rows.append({"variant_key": key, "activities": list(activities), "case_count": count, "percentage": Decimal(str(round(percentage, 4))), "avg_duration_seconds": Decimal(str(round(duration, 2))), "is_happy_path": activities == happy, "is_grouped_other": False})
+            rows.append(
+                {
+                    "variant_key": key,
+                    "activities": list(activities),
+                    "case_count": count,
+                    "percentage": Decimal(str(round(percentage, 4))),
+                    "avg_duration_seconds": Decimal(str(round(duration, 2))),
+                    "is_happy_path": activities == happy,
+                    "is_grouped_other": False,
+                }
+            )
         if grouped_count:
-            rows.append({"variant_key": hashlib.sha256(b"__other__").hexdigest(), "activities": ["Other variants"], "case_count": grouped_count, "percentage": Decimal(str(round(grouped_count * 100 / total, 4))), "avg_duration_seconds": Decimal(str(round(grouped_weighted_duration / grouped_count, 2))), "is_happy_path": False, "is_grouped_other": True})
-        return BottleneckResult(tuple(findings), tuple(rows), total, Decimal(str(round(statistics.mean(case_durations), 2))))
+            rows.append(
+                {
+                    "variant_key": hashlib.sha256(b"__other__").hexdigest(),
+                    "activities": ["Other variants"],
+                    "case_count": grouped_count,
+                    "percentage": Decimal(str(round(grouped_count * 100 / total, 4))),
+                    "avg_duration_seconds": Decimal(str(round(grouped_weighted_duration / grouped_count, 2))),
+                    "is_happy_path": False,
+                    "is_grouped_other": True,
+                }
+            )
+        return BottleneckResult(
+            tuple(findings), tuple(rows), total, Decimal(str(round(statistics.mean(case_durations), 2)))
+        )
 
 
 def _event_row(event: CanonicalEvent) -> dict[str, object]:
@@ -466,7 +513,19 @@ class CSVExportFormatter:
     extension = "csv"
 
     def write(self, events: Iterable[CanonicalEvent], destination: TextIO) -> int:
-        writer = csv.DictWriter(destination, fieldnames=("case_id", "activity", "occurred_at", "resource", "source_module", "source_event_id", "attributes"), lineterminator="\n")
+        writer = csv.DictWriter(
+            destination,
+            fieldnames=(
+                "case_id",
+                "activity",
+                "occurred_at",
+                "resource",
+                "source_module",
+                "source_event_id",
+                "attributes",
+            ),
+            lineterminator="\n",
+        )
         writer.writeheader()
         count = 0
         for event in events:
@@ -500,7 +559,9 @@ class XESExportFormatter:
     extension = "xes"
 
     def write(self, events: Iterable[CanonicalEvent], destination: TextIO) -> int:
-        root = Element("log", {"xes.version": "1.0", "xes.features": "nested-attributes", "xmlns": "http://www.xes-standard.org/"})
+        root = Element(
+            "log", {"xes.version": "1.0", "xes.features": "nested-attributes", "xmlns": "http://www.xes-standard.org/"}
+        )
         grouped: dict[str, list[CanonicalEvent]] = defaultdict(list)
         for event in events:
             grouped[event.case_id].append(event)
@@ -508,7 +569,9 @@ class XESExportFormatter:
         for case_id, trace_events in sorted(grouped.items()):
             trace = SubElement(root, "trace")
             SubElement(trace, "string", {"key": "concept:name", "value": case_id})
-            for event in sorted(trace_events, key=lambda value: (value.occurred_at, value.source_event_id, value.activity)):
+            for event in sorted(
+                trace_events, key=lambda value: (value.occurred_at, value.source_event_id, value.activity)
+            ):
                 element = SubElement(trace, "event")
                 SubElement(element, "string", {"key": "concept:name", "value": event.activity})
                 SubElement(element, "date", {"key": "time:timestamp", "value": event.occurred_at.isoformat()})
@@ -566,10 +629,31 @@ def deterministic_text(formatter: ExportFormatter, events: Iterable[CanonicalEve
 
 
 __all__ = [
-    "AdapterMetadata", "AdapterRegistry", "BottleneckAlgorithm", "BottleneckResult", "CSVExportFormatter",
-    "CanonicalEvent", "CanonicalEventSource", "CapabilityUnavailable", "ConformanceAlgorithm", "ConformanceResult",
-    "DirectlyFollowsMiner", "DuplicateAdapterError", "EventSourceAdapter", "ExportFormatter", "HeuristicMiner",
-    "InductiveMiner", "InsightProvider", "InvalidAdapterResult", "JSONExportFormatter", "MiningAlgorithm",
-    "TokenReplayConformance", "TransitionDurationAnalyzer", "XESExportFormatter", "canonical_events",
-    "deterministic_text", "register_local_adapters", "registry",
+    "AdapterMetadata",
+    "AdapterRegistry",
+    "BottleneckAlgorithm",
+    "BottleneckResult",
+    "CSVExportFormatter",
+    "CanonicalEvent",
+    "CanonicalEventSource",
+    "CapabilityUnavailable",
+    "ConformanceAlgorithm",
+    "ConformanceResult",
+    "DirectlyFollowsMiner",
+    "DuplicateAdapterError",
+    "EventSourceAdapter",
+    "ExportFormatter",
+    "HeuristicMiner",
+    "InductiveMiner",
+    "InsightProvider",
+    "InvalidAdapterResult",
+    "JSONExportFormatter",
+    "MiningAlgorithm",
+    "TokenReplayConformance",
+    "TransitionDurationAnalyzer",
+    "XESExportFormatter",
+    "canonical_events",
+    "deterministic_text",
+    "register_local_adapters",
+    "registry",
 ]

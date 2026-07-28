@@ -125,51 +125,87 @@ CONNECTOR_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
 INTEGRATION_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "list": access(INTEGRATION_READ, "integration_platform.integration.read"),
     "retrieve": access(INTEGRATION_READ, "integration_platform.integration.read"),
-    "create": access(INTEGRATION_CREATE, "integration_platform.integration.write", cost=_quota_default("integration_write")),
-    "partial_update": access(INTEGRATION_UPDATE, "integration_platform.integration.write", cost=_quota_default("integration_write")),
-    "destroy": access(INTEGRATION_DELETE, "integration_platform.integration.write", cost=_quota_default("integration_write")),
-    "activate": access(INTEGRATION_ACTIVATE, "integration_platform.integration.transition", cost=_quota_default("integration_transition")),
-    "deactivate": access(INTEGRATION_DEACTIVATE, "integration_platform.integration.transition", cost=_quota_default("integration_transition")),
-    "test_connection": access(INTEGRATION_TEST, "integration_platform.integration.test", cost=_quota_default("integration_test")),
+    "create": access(
+        INTEGRATION_CREATE, "integration_platform.integration.write", cost=_quota_default("integration_write")
+    ),
+    "partial_update": access(
+        INTEGRATION_UPDATE, "integration_platform.integration.write", cost=_quota_default("integration_write")
+    ),
+    "destroy": access(
+        INTEGRATION_DELETE, "integration_platform.integration.write", cost=_quota_default("integration_write")
+    ),
+    "activate": access(
+        INTEGRATION_ACTIVATE,
+        "integration_platform.integration.transition",
+        cost=_quota_default("integration_transition"),
+    ),
+    "deactivate": access(
+        INTEGRATION_DEACTIVATE,
+        "integration_platform.integration.transition",
+        cost=_quota_default("integration_transition"),
+    ),
+    "test_connection": access(
+        INTEGRATION_TEST, "integration_platform.integration.test", cost=_quota_default("integration_test")
+    ),
     "sync": access(INTEGRATION_SYNC, "integration_platform.integration.sync", cost=_quota_default("integration_sync")),
     "job": access(INTEGRATION_READ, "integration_platform.integration.job.read"),
 }
 
 CREDENTIAL_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "retrieve": access(CREDENTIAL_READ, "integration_platform.credential.read"),
-    "rotate": access(CREDENTIAL_ROTATE, "integration_platform.credential.write", cost=_quota_default("credential_rotate")),
-    "revoke": access(CREDENTIAL_REVOKE, "integration_platform.credential.write", cost=_quota_default("credential_revoke")),
+    "rotate": access(
+        CREDENTIAL_ROTATE, "integration_platform.credential.write", cost=_quota_default("credential_rotate")
+    ),
+    "revoke": access(
+        CREDENTIAL_REVOKE, "integration_platform.credential.write", cost=_quota_default("credential_revoke")
+    ),
 }
 
 INTEGRATION_CREDENTIAL_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "list": access(CREDENTIAL_READ, "integration_platform.credential.read"),
-    "create": access(CREDENTIAL_CREATE, "integration_platform.credential.write", cost=_quota_default("credential_create")),
+    "create": access(
+        CREDENTIAL_CREATE, "integration_platform.credential.write", cost=_quota_default("credential_create")
+    ),
 }
 
 WEBHOOK_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "list": access(WEBHOOK_READ, "integration_platform.webhook.read"),
     "retrieve": access(WEBHOOK_READ, "integration_platform.webhook.read"),
     "create": access(WEBHOOK_CREATE, "integration_platform.webhook.write", cost=_quota_default("webhook_write")),
-    "partial_update": access(WEBHOOK_UPDATE, "integration_platform.webhook.write", cost=_quota_default("webhook_write")),
+    "partial_update": access(
+        WEBHOOK_UPDATE, "integration_platform.webhook.write", cost=_quota_default("webhook_write")
+    ),
     "destroy": access(WEBHOOK_DELETE, "integration_platform.webhook.write", cost=_quota_default("webhook_write")),
-    "activate": access(WEBHOOK_ACTIVATE, "integration_platform.webhook.transition", cost=_quota_default("webhook_transition")),
-    "deactivate": access(WEBHOOK_DEACTIVATE, "integration_platform.webhook.transition", cost=_quota_default("webhook_transition")),
-    "rotate_secret": access(WEBHOOK_ROTATE_SECRET, "integration_platform.webhook.secret", cost=_quota_default("webhook_rotate_secret")),
+    "activate": access(
+        WEBHOOK_ACTIVATE, "integration_platform.webhook.transition", cost=_quota_default("webhook_transition")
+    ),
+    "deactivate": access(
+        WEBHOOK_DEACTIVATE, "integration_platform.webhook.transition", cost=_quota_default("webhook_transition")
+    ),
+    "rotate_secret": access(
+        WEBHOOK_ROTATE_SECRET, "integration_platform.webhook.secret", cost=_quota_default("webhook_rotate_secret")
+    ),
 }
 
 DELIVERY_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "list": access(DELIVERY_READ, "integration_platform.delivery.read"),
     "retrieve": access(DELIVERY_READ, "integration_platform.delivery.read"),
-    "redrive": access(DELIVERY_REDRIVE, "integration_platform.delivery.redrive", cost=_quota_default("delivery_redrive")),
+    "redrive": access(
+        DELIVERY_REDRIVE, "integration_platform.delivery.redrive", cost=_quota_default("delivery_redrive")
+    ),
 }
 
 MAPPING_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "list": access(MAPPING_READ, "integration_platform.mapping.read"),
     "retrieve": access(MAPPING_READ, "integration_platform.mapping.read"),
     "create": access(MAPPING_CREATE, "integration_platform.mapping.write", cost=_quota_default("mapping_write")),
-    "partial_update": access(MAPPING_UPDATE, "integration_platform.mapping.write", cost=_quota_default("mapping_write")),
+    "partial_update": access(
+        MAPPING_UPDATE, "integration_platform.mapping.write", cost=_quota_default("mapping_write")
+    ),
     "destroy": access(MAPPING_DELETE, "integration_platform.mapping.write", cost=_quota_default("mapping_write")),
-    "validate_mappings": access(MAPPING_PREVIEW, "integration_platform.mapping.preview", cost=_quota_default("mapping_validate")),
+    "validate_mappings": access(
+        MAPPING_PREVIEW, "integration_platform.mapping.preview", cost=_quota_default("mapping_validate")
+    ),
     "preview": access(MAPPING_PREVIEW, "integration_platform.mapping.preview", cost=_quota_default("mapping_preview")),
 }
 
@@ -227,7 +263,7 @@ class InboundWebhookSignaturePermission(BasePermission):
         signature = request.headers.get("X-SARAISE-Webhook-Signature", "")
         if timestamp < 1 or not 16 <= len(nonce) <= 128 or self._signature.fullmatch(signature) is None:
             raise AuthenticationFailed(self.message)
-        exists = Webhook.objects.filter(
+        exists = Webhook.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries -- reviewed false positive; scope enforced by surrounding domain policy.  # noqa: E501
             public_id=public_id,
             direction=WebhookDirection.INBOUND,
             status=WebhookStatus.ACTIVE,

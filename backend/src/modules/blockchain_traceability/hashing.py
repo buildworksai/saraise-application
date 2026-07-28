@@ -134,4 +134,3 @@ def compute_merkle_root(event_hashes: Sequence[str]) -> str:
             level.append(level[-1])
         level = [hashlib.sha256(level[index] + level[index + 1]).digest() for index in range(0, len(level), 2)]
     return level[0].hex()
-

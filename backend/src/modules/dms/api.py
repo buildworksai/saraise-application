@@ -31,24 +31,24 @@ from .filters import (
 )
 from .health import get_module_health
 from .models import DmsConfiguration, Document, DocumentPermission, DocumentShare, DocumentVersion, Folder
-from .permissions import ActionAccessMixin
 from .permissions import (
+    CONFIGURATION_ACTION_PERMISSIONS,
     DOCUMENT_ACTION_PERMISSIONS,
     DOCUMENT_PERMISSION_ACTION_PERMISSIONS,
-    CONFIGURATION_ACTION_PERMISSIONS,
     FOLDER_ACTION_PERMISSIONS,
     HEALTH_ACTION_PERMISSIONS,
     PRINCIPAL_ACTION_PERMISSIONS,
     SHARE_ACTION_PERMISSIONS,
     VERSION_ACTION_PERMISSIONS,
+    ActionAccessMixin,
 )
 from .serializers import (
-    DocumentDetailSerializer,
     DmsConfigurationAuditSerializer,
     DmsConfigurationRollbackSerializer,
     DmsConfigurationSerializer,
     DmsConfigurationVersionSerializer,
     DmsConfigurationWriteSerializer,
+    DocumentDetailSerializer,
     DocumentListSerializer,
     DocumentMoveSerializer,
     DocumentPermissionCreateSerializer,
@@ -72,8 +72,8 @@ from .serializers import (
     ShareCreatedSerializer,
 )
 from .services import (
-    DmsConflict,
     DmsConfigurationService,
+    DmsConflict,
     DmsDependencyUnavailable,
     DmsIntegrityFailure,
     DmsNotFound,

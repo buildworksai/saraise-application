@@ -168,9 +168,13 @@ class TestBudgetIsolationContract(TenantIsolationContract):
     list_url = "/api/v2/budget-management/budgets/"
     detail_url_template = "/api/v2/budget-management/budgets/{pk}/"
     create_payload = {
-        "budget_code": "SPOOF", "budget_name": "Spoof attempt", "fiscal_year": 2025,
-        "start_date": "2025-01-01", "end_date": "2025-12-31",
-        "budget_type": "operating", "currency": "USD",
+        "budget_code": "SPOOF",
+        "budget_name": "Spoof attempt",
+        "fiscal_year": 2025,
+        "start_date": "2025-01-01",
+        "end_date": "2025-12-31",
+        "budget_type": "operating",
+        "currency": "USD",
     }
     update_payload = {"expected_updated_at": "2025-01-01T00:00:00Z", "budget_name": "Blocked"}
     read_denial_statuses = frozenset({status.HTTP_404_NOT_FOUND})
@@ -179,14 +183,28 @@ class TestBudgetIsolationContract(TenantIsolationContract):
     def isolation_context(self, api_client, tenant_a_user, tenant_b_user):
         actor = uuid.uuid4()
         self.tenant_a_row = Budget.objects.create(
-            tenant_id=uuid.UUID(get_user_tenant_id(tenant_a_user)), created_by=actor, updated_by=actor,
-            budget_code="CONTRACT-A", budget_name="Contract A", fiscal_year=2025,
-            start_date="2025-01-01", end_date="2025-12-31", budget_type="operating", currency="USD",
+            tenant_id=uuid.UUID(get_user_tenant_id(tenant_a_user)),
+            created_by=actor,
+            updated_by=actor,
+            budget_code="CONTRACT-A",
+            budget_name="Contract A",
+            fiscal_year=2025,
+            start_date="2025-01-01",
+            end_date="2025-12-31",
+            budget_type="operating",
+            currency="USD",
         )
         self.tenant_b_row = Budget.objects.create(
-            tenant_id=uuid.UUID(get_user_tenant_id(tenant_b_user)), created_by=actor, updated_by=actor,
-            budget_code="CONTRACT-B", budget_name="Contract B", fiscal_year=2025,
-            start_date="2025-01-01", end_date="2025-12-31", budget_type="operating", currency="USD",
+            tenant_id=uuid.UUID(get_user_tenant_id(tenant_b_user)),
+            created_by=actor,
+            updated_by=actor,
+            budget_code="CONTRACT-B",
+            budget_name="Contract B",
+            fiscal_year=2025,
+            start_date="2025-01-01",
+            end_date="2025-12-31",
+            budget_type="operating",
+            currency="USD",
         )
         api_client.force_login(user=tenant_a_user)
         self.client = api_client
@@ -208,30 +226,59 @@ class TestBudgetLineIsolationContract(TenantIsolationContract):
         actor = uuid.uuid4()
         tenant_a, tenant_b = uuid.UUID(get_user_tenant_id(tenant_a_user)), uuid.UUID(get_user_tenant_id(tenant_b_user))
         budget_a = Budget.objects.create(
-            tenant_id=tenant_a, created_by=actor, updated_by=actor, budget_code="LINE-A",
-            budget_name="Line A", fiscal_year=2025, start_date="2025-01-01", end_date="2025-12-31",
-            budget_type="operating", currency="USD",
+            tenant_id=tenant_a,
+            created_by=actor,
+            updated_by=actor,
+            budget_code="LINE-A",
+            budget_name="Line A",
+            fiscal_year=2025,
+            start_date="2025-01-01",
+            end_date="2025-12-31",
+            budget_type="operating",
+            currency="USD",
         )
         budget_b = Budget.objects.create(
-            tenant_id=tenant_b, created_by=actor, updated_by=actor, budget_code="LINE-B",
-            budget_name="Line B", fiscal_year=2025, start_date="2025-01-01", end_date="2025-12-31",
-            budget_type="operating", currency="USD",
+            tenant_id=tenant_b,
+            created_by=actor,
+            updated_by=actor,
+            budget_code="LINE-B",
+            budget_name="Line B",
+            fiscal_year=2025,
+            start_date="2025-01-01",
+            end_date="2025-12-31",
+            budget_type="operating",
+            currency="USD",
         )
         self.tenant_a_row = BudgetLine.objects.create(
-            tenant_id=tenant_a, budget=budget_a, created_by=actor, updated_by=actor,
-            account_code="6000", period_type="annual", period_number=1, budget_amount="1.00",
+            tenant_id=tenant_a,
+            budget=budget_a,
+            created_by=actor,
+            updated_by=actor,
+            account_code="6000",
+            period_type="annual",
+            period_number=1,
+            budget_amount="1.00",
         )
         self.tenant_b_row = BudgetLine.objects.create(
-            tenant_id=tenant_b, budget=budget_b, created_by=actor, updated_by=actor,
-            account_code="6000", period_type="annual", period_number=1, budget_amount="1.00",
+            tenant_id=tenant_b,
+            budget=budget_b,
+            created_by=actor,
+            updated_by=actor,
+            account_code="6000",
+            period_type="annual",
+            period_number=1,
+            budget_amount="1.00",
         )
         api_client.force_login(user=tenant_a_user)
         self.client = api_client
 
     def get_create_payload(self):
         return {
-            "budget_id": str(self.tenant_a_row.budget_id), "account_code": "7000",
-            "period_type": "annual", "period_number": 1, "budget_amount": "2.00",
+            "budget_id": str(self.tenant_a_row.budget_id),
+            "account_code": "7000",
+            "period_type": "annual",
+            "period_number": 1,
+            "budget_amount": "2.00",
         }
 
     def get_list_items(self, response):

@@ -1,8 +1,8 @@
 import copy
 
-import src.modules.api_management.models
 from django.db import migrations, models
 
+import src.modules.api_management.models
 
 GOVERNED_DOCUMENT_ADDITIONS = {
     "environment_registry": ["development", "staging", "production"],
@@ -121,9 +121,7 @@ def restore_legacy_documents(apps, schema_editor):
         for row in model.objects.all().iterator():
             document = row.document if isinstance(row.document, dict) else {}
             legacy_document = {
-                key: copy.deepcopy(value)
-                for key, value in document.items()
-                if key in LEGACY_DOCUMENT_KEYS
+                key: copy.deepcopy(value) for key, value in document.items() if key in LEGACY_DOCUMENT_KEYS
             }
             model.objects.filter(pk=row.pk).update(document=legacy_document)
 

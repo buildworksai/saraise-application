@@ -154,21 +154,26 @@ def create_immutability_triggers(apps, schema_editor):
     del apps
     vendor = schema_editor.connection.vendor
     if vendor == "postgresql":
-        schema_editor.execute("""
+        schema_editor.execute(
+            """
             CREATE OR REPLACE FUNCTION mdm_reject_immutable_evidence_change()
             RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
                 RAISE EXCEPTION 'immutable MDM evidence cannot be changed';
             END;
             $$;
-            """)
+            """
+        )
         for table_name in APPEND_ONLY_TABLES:
-            schema_editor.execute(f"""
+            schema_editor.execute(
+                f"""
                 CREATE TRIGGER {table_name}_append_only
                 BEFORE UPDATE OR DELETE ON {table_name}
                 FOR EACH ROW EXECUTE FUNCTION mdm_reject_immutable_evidence_change();
-                """)
-        schema_editor.execute("""
+                """
+            )
+        schema_editor.execute(
+            """
             CREATE OR REPLACE FUNCTION mdm_reject_quality_issue_evidence_change()
             RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
@@ -181,8 +186,10 @@ def create_immutability_triggers(apps, schema_editor):
             CREATE TRIGGER mdm_quality_issue_evidence_immutable
             BEFORE UPDATE ON mdm_quality_issues
             FOR EACH ROW EXECUTE FUNCTION mdm_reject_quality_issue_evidence_change();
-            """)
-        schema_editor.execute("""
+            """
+        )
+        schema_editor.execute(
+            """
             CREATE OR REPLACE FUNCTION mdm_reject_match_candidate_evidence_change()
             RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
@@ -196,24 +203,31 @@ def create_immutability_triggers(apps, schema_editor):
             CREATE TRIGGER mdm_match_candidate_evidence_immutable
             BEFORE UPDATE ON mdm_match_candidates
             FOR EACH ROW EXECUTE FUNCTION mdm_reject_match_candidate_evidence_change();
-            """)
+            """
+        )
     elif vendor == "sqlite":
         for table_name in APPEND_ONLY_TABLES:
-            schema_editor.execute(f"""
+            schema_editor.execute(
+                f"""
                 CREATE TRIGGER {table_name}_append_only_update
                 BEFORE UPDATE ON {table_name}
                 BEGIN SELECT RAISE(ABORT, 'immutable MDM evidence cannot be changed'); END;
-                """)
-        schema_editor.execute("""
+                """
+            )
+        schema_editor.execute(
+            """
             CREATE TRIGGER mdm_quality_issue_evidence_immutable
             BEFORE UPDATE OF evidence ON mdm_quality_issues
             BEGIN SELECT RAISE(ABORT, 'quality issue evidence is immutable'); END;
-            """)
-        schema_editor.execute("""
+            """
+        )
+        schema_editor.execute(
+            """
             CREATE TRIGGER mdm_match_candidate_evidence_immutable
             BEFORE UPDATE OF evidence, field_scores ON mdm_match_candidates
             BEGIN SELECT RAISE(ABORT, 'match candidate evidence is immutable'); END;
-            """)
+            """
+        )
 
 
 def drop_immutability_triggers(apps, schema_editor):

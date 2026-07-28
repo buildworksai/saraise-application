@@ -6,7 +6,6 @@ import uuid
 
 from django.db import migrations, models
 
-
 CONFIGURATION_TABLES = (
     ("document_intelligence_configurations", "docintel_tenant_config_policy"),
     ("document_intelligence_configuration_versions", "docintel_tenant_cfgver_policy"),
@@ -36,9 +35,7 @@ def convert_legacy_identifiers_to_uuid(apps, schema_editor):
         quoted = schema_editor.quote_name(column)
         # PostgreSQL's UUID cast is the validation gate: an invalid legacy
         # identifier aborts the migration instead of silently re-keying data.
-        schema_editor.execute(
-            f"ALTER TABLE {table} ALTER COLUMN {quoted} TYPE uuid USING {quoted}::uuid;"
-        )
+        schema_editor.execute(f"ALTER TABLE {table} ALTER COLUMN {quoted} TYPE uuid USING {quoted}::uuid;")
 
 
 def restore_legacy_identifier_text(apps, schema_editor):
@@ -49,9 +46,7 @@ def restore_legacy_identifier_text(apps, schema_editor):
     table = schema_editor.quote_name("document_intelligence_resources")
     for column in ("id", "tenant_id", "created_by"):
         quoted = schema_editor.quote_name(column)
-        schema_editor.execute(
-            f"ALTER TABLE {table} ALTER COLUMN {quoted} TYPE varchar(36) USING {quoted}::text;"
-        )
+        schema_editor.execute(f"ALTER TABLE {table} ALTER COLUMN {quoted} TYPE varchar(36) USING {quoted}::text;")
 
 
 def install_configuration_guards(apps, schema_editor):
@@ -104,12 +99,9 @@ def remove_configuration_guards(apps, schema_editor):
         for table in reversed(IMMUTABLE_TABLES):
             trigger = f"docintel_append_only_{table.rsplit('_', 1)[-1]}"
             schema_editor.execute(
-                f"DROP TRIGGER IF EXISTS {schema_editor.quote_name(trigger)} "
-                f"ON {schema_editor.quote_name(table)};"
+                f"DROP TRIGGER IF EXISTS {schema_editor.quote_name(trigger)} " f"ON {schema_editor.quote_name(table)};"
             )
-        schema_editor.execute(
-            "DROP FUNCTION IF EXISTS document_intelligence_reject_config_evidence_mutation();"
-        )
+        schema_editor.execute("DROP FUNCTION IF EXISTS document_intelligence_reject_config_evidence_mutation();")
         for table, policy in reversed(CONFIGURATION_TABLES):
             quoted_table = schema_editor.quote_name(table)
             quoted_policy = schema_editor.quote_name(policy)
@@ -168,9 +160,7 @@ class Migration(migrations.Migration):
             options={
                 "db_table": "document_intelligence_configuration_versions",
                 "indexes": [
-                    models.Index(
-                        fields=["tenant_id", "environment", "-version"], name="di_cfgver_tenant_env_ver"
-                    )
+                    models.Index(fields=["tenant_id", "environment", "-version"], name="di_cfgver_tenant_env_ver")
                 ],
                 "constraints": [
                     models.UniqueConstraint(
@@ -213,9 +203,7 @@ class Migration(migrations.Migration):
             options={
                 "db_table": "document_intelligence_configuration_audits",
                 "indexes": [
-                    models.Index(
-                        fields=["tenant_id", "environment", "-version"], name="di_cfgaudit_tenant_env_ver"
-                    )
+                    models.Index(fields=["tenant_id", "environment", "-version"], name="di_cfgaudit_tenant_env_ver")
                 ],
                 "constraints": [
                     models.UniqueConstraint(

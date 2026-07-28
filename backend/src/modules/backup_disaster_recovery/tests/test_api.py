@@ -17,12 +17,7 @@ from ..adapter_registry import register_backup_catalog, register_storage_adapter
 from ..models import RecoveryPointStatus, RestoreRun, RestoreRunStatus, ScopeType
 from ..ports import BackupArtifactDescriptor, BackupType
 from ..ports import ScopeType as PortScopeType
-from .factories import (
-    recovery_point_factory,
-    runbook_factory,
-    runbook_step_factory,
-    step_execution_factory,
-)
+from .factories import recovery_point_factory, runbook_factory, runbook_step_factory, step_execution_factory
 from .test_services import Catalog, Storage
 
 pytest_plugins = ["src.core.testing"]

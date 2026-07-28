@@ -27,7 +27,9 @@ describe("inventory tenant routes", () => {
   });
 
   it("keeps sidebar and route contract parity", () => {
-    const sidebarPaths = tenantRoutes.filter((route) => route.navigation.type === "sidebar").map((route) => route.path);
+    const sidebarPaths = tenantRoutes
+      .filter((route) => route.navigation.type === "sidebar")
+      .map((route) => route.path);
     expect(sidebarPaths).toEqual([
       ROUTES.DASHBOARD,
       ROUTES.WAREHOUSES,
@@ -49,7 +51,8 @@ describe("inventory tenant routes", () => {
 
   it("centralizes API URLs in contracts.ts", () => {
     for (const [path, source] of Object.entries(moduleSources)) {
-      if (path.endsWith("contracts.ts") || path.endsWith(".test.ts") || path.endsWith(".test.tsx")) continue;
+      if (path.endsWith("contracts.ts") || path.endsWith(".test.ts") || path.endsWith(".test.tsx"))
+        continue;
       expect(source, path).not.toMatch(/\/api\/v[0-9]+\/inventory/u);
     }
   });

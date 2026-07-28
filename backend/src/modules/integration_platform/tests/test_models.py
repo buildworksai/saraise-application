@@ -21,7 +21,7 @@ from ..models import (
     WebhookDelivery,
 )
 from ..state_machines import CREDENTIAL_STATE_MACHINE, DELIVERY_STATE_MACHINE, INTEGRATION_STATE_MACHINE
-from .factories import connector_factory, credential_factory, delivery_factory, integration_factory, mapping_factory, webhook_factory
+from .factories import credential_factory, delivery_factory, integration_factory, mapping_factory, webhook_factory
 
 pytest_plugins = ["src.core.testing"]
 pytestmark = pytest.mark.django_db

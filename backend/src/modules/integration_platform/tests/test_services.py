@@ -9,8 +9,8 @@ from src.core.api.results import OperationResult
 from src.core.async_jobs.models import OutboxEvent
 
 from ..adapter_registry import connector_adapter_registry
-from ..adapters import AdapterDescriptor, ConnectorAdapter, PushEvidence, RecordBatch, RecordCursor
-from ..services import CredentialService, DataMappingService, IntegrationPlatformError, IntegrationService
+from ..adapters import AdapterDescriptor, ConnectorAdapter, PushEvidence, RecordBatch
+from ..services import CredentialService, DataMappingService, IntegrationService
 from .factories import connector_factory, integration_factory, mapping_factory
 
 pytest_plugins = ["src.core.testing"]
@@ -96,7 +96,12 @@ def test_mapping_preview_is_deterministic_and_reports_per_record_failures():
         integration,
         source_field="name",
         target_field="display_name",
-        transform={"operations": [{"operation": "trim", "options": {}}, {"operation": "string_case", "options": {"case": "upper"}}]},
+        transform={
+            "operations": [
+                {"operation": "trim", "options": {}},
+                {"operation": "string_case", "options": {"case": "upper"}},
+            ]
+        },
     )
     result = DataMappingService().preview(
         integration.tenant_id,

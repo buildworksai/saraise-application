@@ -15,8 +15,6 @@ class ProviderError(Exception):
 class ProviderTimeoutError(ProviderError):
     """Provider request timed out."""
 
-    pass
-
 
 class ProviderRateLimitError(ProviderError):
     """Provider rate limit exceeded."""

@@ -1,1 +1,1 @@
-export { CreateCompanyPage } from './workspaces';
+export { CreateCompanyPage } from "./workspaces";

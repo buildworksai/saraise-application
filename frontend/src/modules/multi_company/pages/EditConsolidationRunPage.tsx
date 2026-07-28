@@ -1,1 +1,1 @@
-export { EditConsolidationRunPage } from './workspaces';
+export { EditConsolidationRunPage } from "./workspaces";

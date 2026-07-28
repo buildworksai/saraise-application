@@ -1,8 +1,8 @@
 # CRM initial schema (history repair: schema operations moved from former 0002).
 
 import uuid
-from django.db import migrations, models
 
+from django.db import migrations, models
 
 
 class Migration(migrations.Migration):

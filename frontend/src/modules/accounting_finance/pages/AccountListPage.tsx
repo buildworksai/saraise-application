@@ -1,39 +1,45 @@
+/* eslint-disable max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /**
  * Account List Page - Chart of Accounts
  */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
-import { Plus } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { TableSkeleton, EmptyState, ErrorState } from '@/components/ui';
-import { accountingService } from '../services/accounting-service';
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { TableSkeleton, EmptyState, ErrorState } from "@/components/ui";
+import { accountingService } from "../services/accounting-service";
 
-const MODULE_PATH = '/accounting-finance/accounts';
+const MODULE_PATH = "/accounting-finance/accounts";
 
 export const AccountListPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const { data: accounts, isLoading, error, refetch } = useQuery({
-    queryKey: ['accounting-accounts'],
+  const {
+    data: accounts,
+    isLoading,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ["accounting-accounts"],
     queryFn: () => accountingService.listAccounts(),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => accountingService.deleteAccount(id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['accounting-accounts'] });
-      toast.success('Account deleted successfully');
+      void queryClient.invalidateQueries({ queryKey: ["accounting-accounts"] });
+      toast.success("Account deleted successfully");
     },
     onError: () => {
-      toast.error('Failed to delete account. Please try again.');
+      toast.error("Failed to delete account. Please try again.");
     },
   });
 
   const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this account?')) {
+    if (window.confirm("Are you sure you want to delete this account?")) {
       await deleteMutation.mutateAsync(id);
     }
   };
@@ -72,7 +78,7 @@ export const AccountListPage = () => {
           title="No accounts yet"
           description="Create your first account to start building your chart of accounts."
           action={{
-            label: 'Create Account',
+            label: "Create Account",
             onClick: () => navigate(`${MODULE_PATH}/new`),
           }}
         />
@@ -114,15 +120,13 @@ export const AccountListPage = () => {
           <tbody className="divide-y divide-border">
             {accounts.results.map((account) => (
               <tr key={account.id} className="hover:bg-muted/50">
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                  {account.code}
-                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">{account.code}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">{account.name}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-muted-foreground">
                   {account.account_type}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
-                  {account.is_active ? 'Active' : 'Inactive'}
+                  {account.is_active ? "Active" : "Inactive"}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                   <button

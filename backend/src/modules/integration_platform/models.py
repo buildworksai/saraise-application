@@ -28,6 +28,7 @@ assert isinstance(_WEBHOOK_POLICY, dict)
 assert isinstance(_VALIDATION_POLICY, dict)
 assert isinstance(_MAPPING_POLICY, dict)
 
+
 def generate_uuid() -> str:
     """Compatibility callable retained for the immutable 0001/0002 migrations."""
     return str(uuid.uuid4())
@@ -145,7 +146,11 @@ class GuardedStateModel(models.Model):
         if not isinstance(history, list) or len(history) != len(old_history) + 1:
             raise ValidationError({"status": "Lifecycle changes must use the registered state machine."})
         record = history[-1]
-        if not isinstance(record, dict) or record.get("from_state") != previous["status"] or record.get("to_state") != self.status:
+        if (
+            not isinstance(record, dict)
+            or record.get("from_state") != previous["status"]
+            or record.get("to_state") != self.status
+        ):
             raise ValidationError({"status": "Transition evidence does not match the lifecycle change."})
 
     def save(self, *args: Any, **kwargs: Any) -> None:
@@ -217,7 +222,9 @@ class Integration(GuardedStateModel, MutableTenantModel):
         db_table = "integration_platform_integrations"
         ordering = ("name", "id")
         constraints = [
-            models.UniqueConstraint(fields=("tenant_id", "name"), condition=Q(is_deleted=False), name="intplat_integ_tenant_name_live_uniq"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "name"), condition=Q(is_deleted=False), name="intplat_integ_tenant_name_live_uniq"
+            ),
         ]
         indexes = [
             models.Index(fields=("tenant_id", "status", "created_at"), name="intplat_integ_tenant_stat_idx"),
@@ -256,8 +263,14 @@ class IntegrationCredential(GuardedStateModel, TenantScopedModel, TimestampedMod
         db_table = "integration_platform_credentials"
         ordering = ("credential_type", "-version", "id")
         constraints = [
-            models.UniqueConstraint(fields=("tenant_id", "integration", "credential_type", "version"), name="intplat_cred_version_uniq"),
-            models.UniqueConstraint(fields=("tenant_id", "integration", "credential_type"), condition=Q(status=CredentialStatus.ACTIVE), name="intplat_cred_one_active_uniq"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "integration", "credential_type", "version"), name="intplat_cred_version_uniq"
+            ),
+            models.UniqueConstraint(
+                fields=("tenant_id", "integration", "credential_type"),
+                condition=Q(status=CredentialStatus.ACTIVE),
+                name="intplat_cred_one_active_uniq",
+            ),
         ]
         indexes = [models.Index(fields=("tenant_id", "integration", "status"), name="intplat_cred_tenant_int_idx")]
 
@@ -297,9 +310,15 @@ class Webhook(GuardedStateModel, MutableTenantModel):
         db_table = "integration_platform_webhooks"
         ordering = ("name", "id")
         constraints = [
-            models.UniqueConstraint(fields=("tenant_id", "name"), condition=Q(is_deleted=False), name="intplat_hook_tenant_name_live_uniq"),
-            models.CheckConstraint(condition=Q(timeout_seconds__gte=1, timeout_seconds__lte=30), name="intplat_hook_timeout_range"),
-            models.CheckConstraint(condition=Q(max_attempts__gte=1, max_attempts__lte=10), name="intplat_hook_attempt_range"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "name"), condition=Q(is_deleted=False), name="intplat_hook_tenant_name_live_uniq"
+            ),
+            models.CheckConstraint(
+                condition=Q(timeout_seconds__gte=1, timeout_seconds__lte=30), name="intplat_hook_timeout_range"
+            ),
+            models.CheckConstraint(
+                condition=Q(max_attempts__gte=1, max_attempts__lte=10), name="intplat_hook_attempt_range"
+            ),
         ]
         indexes = [
             models.Index(fields=("tenant_id", "direction", "status"), name="intplat_hook_tenant_dir_idx"),
@@ -312,11 +331,17 @@ class Webhook(GuardedStateModel, MutableTenantModel):
             raise ValidationError({"url": "Outbound webhooks require a URL."})
         if self.direction == WebhookDirection.INBOUND and self.url:
             raise ValidationError({"url": "Inbound webhooks cannot define an outbound URL."})
-        if not isinstance(self.events, list) or not self.events or any(not isinstance(item, str) or not _EVENT_RE.fullmatch(item) for item in self.events):
+        if (
+            not isinstance(self.events, list)
+            or not self.events
+            or any(not isinstance(item, str) or not _EVENT_RE.fullmatch(item) for item in self.events)
+        ):
             raise ValidationError({"events": "A non-empty list of registered event names is required."})
         if len(self.events) != len(set(self.events)):
             raise ValidationError({"events": "Event names must be unique."})
-        timeout_min, timeout_max = int(_WEBHOOK_POLICY["timeout_seconds_min"]), int(_WEBHOOK_POLICY["timeout_seconds_max"])
+        timeout_min, timeout_max = int(_WEBHOOK_POLICY["timeout_seconds_min"]), int(
+            _WEBHOOK_POLICY["timeout_seconds_max"]
+        )
         attempts_min, attempts_max = int(_WEBHOOK_POLICY["max_attempts_min"]), int(_WEBHOOK_POLICY["max_attempts_max"])
         if not timeout_min <= self.timeout_seconds <= timeout_max:
             raise ValidationError({"timeout_seconds": f"Must be between {timeout_min} and {timeout_max}."})
@@ -478,13 +503,26 @@ class WebhookDelivery(GuardedStateModel, TenantScopedModel, TimestampedModel):
     correlation_id = models.CharField(max_length=64, db_index=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
 
-    IMMUTABLE_FIELDS = ("tenant_id", "webhook_id", "event", "payload", "payload_hash", "idempotency_key", "max_attempts", "correlation_id")
+    IMMUTABLE_FIELDS = (
+        "tenant_id",
+        "webhook_id",
+        "event",
+        "payload",
+        "payload_hash",
+        "idempotency_key",
+        "max_attempts",
+        "correlation_id",
+    )
 
     class Meta:
         app_label = "integration_platform"
         db_table = "integration_platform_webhook_deliveries"
         ordering = ("-created_at", "id")
-        constraints = [models.UniqueConstraint(fields=("tenant_id", "webhook", "idempotency_key"), name="intplat_delivery_idem_uniq")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "webhook", "idempotency_key"), name="intplat_delivery_idem_uniq"
+            )
+        ]
         indexes = [
             models.Index(fields=("tenant_id", "webhook", "status", "created_at"), name="intplat_deliv_tenant_hook_idx"),
             models.Index(fields=("tenant_id", "status", "next_attempt_at"), name="intplat_deliv_tenant_retry_idx"),
@@ -564,8 +602,16 @@ class DataMapping(MutableTenantModel):
         db_table = "integration_platform_data_mappings"
         ordering = ("position", "name", "id")
         constraints = [
-            models.UniqueConstraint(fields=("tenant_id", "integration", "source_field", "target_field"), condition=Q(is_deleted=False), name="intplat_map_fields_live_uniq"),
-            models.UniqueConstraint(fields=("tenant_id", "integration", "name"), condition=Q(is_deleted=False), name="intplat_map_name_live_uniq"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "integration", "source_field", "target_field"),
+                condition=Q(is_deleted=False),
+                name="intplat_map_fields_live_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant_id", "integration", "name"),
+                condition=Q(is_deleted=False),
+                name="intplat_map_name_live_uniq",
+            ),
         ]
         indexes = [models.Index(fields=("tenant_id", "integration", "position"), name="intplat_map_tenant_pos_idx")]
 
@@ -582,9 +628,26 @@ class DataMapping(MutableTenantModel):
 
 
 __all__ = [
-    "Connector", "ConnectorAccessPolicy", "ConnectorCapability", "ConnectorType", "CredentialStatus", "CredentialType",
-    "DataMapping", "DeliveryStatus", "Integration", "IntegrationCredential", "IntegrationStatus",
-    "ImmutableDeliveryError", "ImmutableRecordError", "IntegrationPlatformConfiguration",
-    "IntegrationPlatformConfigurationAudit", "IntegrationPlatformConfigurationVersion",
-    "Webhook", "WebhookDelivery", "WebhookDeliveryAttempt", "WebhookDirection", "WebhookStatus", "generate_uuid",
+    "Connector",
+    "ConnectorAccessPolicy",
+    "ConnectorCapability",
+    "ConnectorType",
+    "CredentialStatus",
+    "CredentialType",
+    "DataMapping",
+    "DeliveryStatus",
+    "Integration",
+    "IntegrationCredential",
+    "IntegrationStatus",
+    "ImmutableDeliveryError",
+    "ImmutableRecordError",
+    "IntegrationPlatformConfiguration",
+    "IntegrationPlatformConfigurationAudit",
+    "IntegrationPlatformConfigurationVersion",
+    "Webhook",
+    "WebhookDelivery",
+    "WebhookDeliveryAttempt",
+    "WebhookDirection",
+    "WebhookStatus",
+    "generate_uuid",
 ]

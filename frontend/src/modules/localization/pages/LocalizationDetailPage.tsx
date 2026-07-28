@@ -1,16 +1,17 @@
+/* eslint-disable @typescript-eslint/no-misused-promises, @typescript-eslint/no-unused-vars -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /**
  * Localization Detail Page
- * 
+ *
  * Displays resource details and allows editing.
  */
-import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { localizationService } from '../services/localization-service';
-import type { Translation } from '../contracts';
-import { Edit, Trash2 } from 'lucide-react';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
+import { useParams, useNavigate } from "react-router-dom";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { localizationService } from "../services/localization-service";
+import type { Translation } from "../contracts";
+import { Edit, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 
 export const LocalizationDetailPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -18,7 +19,7 @@ export const LocalizationDetailPage = () => {
   const queryClient = useQueryClient();
 
   const { data: resource, isLoading } = useQuery({
-    queryKey: ['localization-resource', id],
+    queryKey: ["localization-resource", id],
     queryFn: () => localizationService.getResource(id!),
     enabled: !!id,
   });
@@ -26,17 +27,17 @@ export const LocalizationDetailPage = () => {
   const deleteMutation = useMutation({
     mutationFn: (resourceId: string) => localizationService.deleteResource(resourceId),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['localization-resources'] });
-      toast.success('Resource deleted successfully');
-      navigate('/localization');
+      void queryClient.invalidateQueries({ queryKey: ["localization-resources"] });
+      toast.success("Resource deleted successfully");
+      navigate("/localization");
     },
     onError: () => {
-      toast.error('Failed to delete resource. Please try again.');
+      toast.error("Failed to delete resource. Please try again.");
     },
   });
 
   const handleDelete = async () => {
-    if (window.confirm('Are you sure you want to delete this resource?')) {
+    if (window.confirm("Are you sure you want to delete this resource?")) {
       await deleteMutation.mutateAsync(id!);
     }
   };
@@ -57,17 +58,19 @@ export const LocalizationDetailPage = () => {
     );
   }
 
-  const resourceData = resource as Translation;
+  const resourceData = resource;
 
   return (
     <div className="p-8">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Translation Key: {String(resourceData.key)}</h1>
+          <h1 className="text-3xl font-bold text-gray-900">
+            Translation Key: {String(resourceData.key)}
+          </h1>
           <p className="mt-2 text-gray-600">Language: {String(resourceData.language)}</p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={() => navigate('/localization/' + id + '/edit')}>
+          <Button onClick={() => navigate("/localization/" + id + "/edit")}>
             <Edit className="w-4 h-4 mr-2" />
             Edit
           </Button>

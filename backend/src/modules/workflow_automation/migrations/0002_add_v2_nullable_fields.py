@@ -1,7 +1,8 @@
 """Add the v2 workflow contract without assuming legacy rows are clean."""
 
-import django.db.models.deletion
 import uuid
+
+import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
 

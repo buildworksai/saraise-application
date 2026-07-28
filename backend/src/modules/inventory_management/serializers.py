@@ -35,9 +35,7 @@ class StrictSerializer(serializers.Serializer):
     def validate(self, attrs):  # type: ignore[no-untyped-def]
         unknown = set(getattr(self, "initial_data", {})) - set(self.fields)
         if unknown:
-            raise serializers.ValidationError(
-                {name: "Field is not accepted from clients." for name in sorted(unknown)}
-            )
+            raise serializers.ValidationError({name: "Field is not accepted from clients." for name in sorted(unknown)})
         return super().validate(attrs)
 
 
@@ -61,10 +59,28 @@ class CommandAwareModelSerializer(serializers.ModelSerializer):
 
 
 WAREHOUSE_READ_FIELDS = [
-    "id", "warehouse_code", "warehouse_name", "warehouse_type", "address_line1",
-    "address_line2", "city", "state_region", "postal_code", "country_code", "timezone",
-    "contact_name", "contact_email", "contact_phone", "is_default", "is_active", "version",
-    "archived_at", "created_at", "updated_at", "allowed_commands", "denial_reasons",
+    "id",
+    "warehouse_code",
+    "warehouse_name",
+    "warehouse_type",
+    "address_line1",
+    "address_line2",
+    "city",
+    "state_region",
+    "postal_code",
+    "country_code",
+    "timezone",
+    "contact_name",
+    "contact_email",
+    "contact_phone",
+    "is_default",
+    "is_active",
+    "version",
+    "archived_at",
+    "created_at",
+    "updated_at",
+    "allowed_commands",
+    "denial_reasons",
 ]
 
 
@@ -107,10 +123,27 @@ class WarehouseUpdateSerializer(WarehouseCreateSerializer):
 
 
 LOCATION_READ_FIELDS = [
-    "id", "warehouse_id", "parent_id", "location_code", "location_name", "zone_type",
-    "location_type", "barcode", "pick_sequence", "capacity_units", "capacity_weight_kg",
-    "capacity_volume_cbm", "temperature_controlled", "hazmat_approved", "is_default",
-    "is_active", "version", "archived_at", "created_at", "updated_at", "allowed_commands",
+    "id",
+    "warehouse_id",
+    "parent_id",
+    "location_code",
+    "location_name",
+    "zone_type",
+    "location_type",
+    "barcode",
+    "pick_sequence",
+    "capacity_units",
+    "capacity_weight_kg",
+    "capacity_volume_cbm",
+    "temperature_controlled",
+    "hazmat_approved",
+    "is_default",
+    "is_active",
+    "version",
+    "archived_at",
+    "created_at",
+    "updated_at",
+    "allowed_commands",
     "denial_reasons",
 ]
 
@@ -154,10 +187,30 @@ class StorageLocationUpdateSerializer(StorageLocationCreateSerializer):
 
 
 ITEM_READ_FIELDS = [
-    "id", "item_code", "item_name", "description", "category", "brand", "barcode", "base_uom",
-    "tracking_mode", "tracks_expiry", "valuation_method", "standard_cost", "reorder_point",
-    "reorder_quantity", "safety_stock", "default_warehouse_id", "abc_classification", "is_active",
-    "version", "archived_at", "created_at", "updated_at", "allowed_commands", "denial_reasons",
+    "id",
+    "item_code",
+    "item_name",
+    "description",
+    "category",
+    "brand",
+    "barcode",
+    "base_uom",
+    "tracking_mode",
+    "tracks_expiry",
+    "valuation_method",
+    "standard_cost",
+    "reorder_point",
+    "reorder_quantity",
+    "safety_stock",
+    "default_warehouse_id",
+    "abc_classification",
+    "is_active",
+    "version",
+    "archived_at",
+    "created_at",
+    "updated_at",
+    "allowed_commands",
+    "denial_reasons",
 ]
 
 
@@ -188,7 +241,9 @@ class ItemCreateSerializer(StrictSerializer):
     reorder_quantity = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=0)
     safety_stock = serializers.DecimalField(18, 6, required=False, allow_null=True, min_value=0)
     default_warehouse_id = serializers.UUIDField(required=False, allow_null=True)
-    abc_classification = serializers.ChoiceField(choices=Item.ABCClassification.choices, required=False, allow_blank=True)
+    abc_classification = serializers.ChoiceField(
+        choices=Item.ABCClassification.choices, required=False, allow_blank=True
+    )
     is_active = serializers.BooleanField(required=False)
 
 
@@ -202,8 +257,18 @@ class ItemUpdateSerializer(ItemCreateSerializer):
 
 
 BATCH_READ_FIELDS = [
-    "id", "item_id", "batch_number", "supplier_batch_number", "manufactured_on", "expires_on",
-    "status", "version", "transition_history", "created_at", "updated_at", "allowed_commands",
+    "id",
+    "item_id",
+    "batch_number",
+    "supplier_batch_number",
+    "manufactured_on",
+    "expires_on",
+    "status",
+    "version",
+    "transition_history",
+    "created_at",
+    "updated_at",
+    "allowed_commands",
     "denial_reasons",
 ]
 
@@ -235,9 +300,22 @@ class BatchUpdateSerializer(StrictSerializer):
 
 
 SERIAL_READ_FIELDS = [
-    "id", "item_id", "serial_number", "status", "current_warehouse_id", "current_location_id",
-    "manufacturer", "model_number", "warranty_starts_on", "warranty_ends_on", "version",
-    "transition_history", "created_at", "updated_at", "allowed_commands", "denial_reasons",
+    "id",
+    "item_id",
+    "serial_number",
+    "status",
+    "current_warehouse_id",
+    "current_location_id",
+    "manufacturer",
+    "model_number",
+    "warranty_starts_on",
+    "warranty_ends_on",
+    "version",
+    "transition_history",
+    "created_at",
+    "updated_at",
+    "allowed_commands",
+    "denial_reasons",
 ]
 
 
@@ -298,10 +376,27 @@ class StockEntryLineSerializer(serializers.Serializer):
 
 
 STOCK_ENTRY_READ_FIELDS = [
-    "id", "entry_number", "entry_type", "posting_at", "source_warehouse_id",
-    "destination_warehouse_id", "reference_module", "reference_type", "reference_id", "reason",
-    "status", "approved_at", "posted_at", "reversed_at", "reversal_of_id", "version",
-    "archived_at", "created_at", "updated_at", "allowed_commands", "denial_reasons",
+    "id",
+    "entry_number",
+    "entry_type",
+    "posting_at",
+    "source_warehouse_id",
+    "destination_warehouse_id",
+    "reference_module",
+    "reference_type",
+    "reference_id",
+    "reason",
+    "status",
+    "approved_at",
+    "posted_at",
+    "reversed_at",
+    "reversal_of_id",
+    "version",
+    "archived_at",
+    "created_at",
+    "updated_at",
+    "allowed_commands",
+    "denial_reasons",
 ]
 
 
@@ -344,9 +439,20 @@ class StockBalanceSerializer(serializers.ModelSerializer):
     class Meta:
         model = StockBalance
         fields = [
-            "id", "item_id", "warehouse_id", "location_id", "batch_id", "serial_number_id",
-            "quantity_on_hand", "quantity_allocated", "quantity_available", "stock_value",
-            "valuation_rate", "last_ledger_entry_id", "created_at", "updated_at",
+            "id",
+            "item_id",
+            "warehouse_id",
+            "location_id",
+            "batch_id",
+            "serial_number_id",
+            "quantity_on_hand",
+            "quantity_allocated",
+            "quantity_available",
+            "stock_value",
+            "valuation_rate",
+            "last_ledger_entry_id",
+            "created_at",
+            "updated_at",
         ]
         read_only_fields = fields
 
@@ -355,17 +461,46 @@ class StockLedgerSerializer(serializers.ModelSerializer):
     class Meta:
         model = StockLedgerEntry
         fields = [
-            "id", "stock_entry_id", "stock_entry_line_id", "sequence", "item_id", "warehouse_id",
-            "location_id", "batch_id", "serial_number_id", "quantity_delta", "quantity_after",
-            "unit_cost", "value_delta", "value_after", "posted_at", "correlation_id", "created_at",
+            "id",
+            "stock_entry_id",
+            "stock_entry_line_id",
+            "sequence",
+            "item_id",
+            "warehouse_id",
+            "location_id",
+            "batch_id",
+            "serial_number_id",
+            "quantity_delta",
+            "quantity_after",
+            "unit_cost",
+            "value_delta",
+            "value_after",
+            "posted_at",
+            "correlation_id",
+            "created_at",
         ]
         read_only_fields = fields
 
 
 RESERVATION_READ_FIELDS = [
-    "id", "reservation_number", "reference_module", "reference_type", "reference_id", "item_id",
-    "warehouse_id", "location_id", "batch_id", "serial_number_id", "quantity", "status",
-    "expires_at", "version", "transition_history", "created_at", "updated_at", "allowed_commands",
+    "id",
+    "reservation_number",
+    "reference_module",
+    "reference_type",
+    "reference_id",
+    "item_id",
+    "warehouse_id",
+    "location_id",
+    "batch_id",
+    "serial_number_id",
+    "quantity",
+    "status",
+    "expires_at",
+    "version",
+    "transition_history",
+    "created_at",
+    "updated_at",
+    "allowed_commands",
     "denial_reasons",
 ]
 
@@ -423,9 +558,23 @@ class CycleCountLineSerializer(serializers.Serializer):
 
 
 CYCLE_COUNT_READ_FIELDS = [
-    "id", "count_number", "warehouse_id", "location_id", "count_type", "scheduled_for", "status",
-    "started_at", "submitted_at", "approved_at", "posted_at", "version", "transition_history",
-    "created_at", "updated_at", "allowed_commands", "denial_reasons",
+    "id",
+    "count_number",
+    "warehouse_id",
+    "location_id",
+    "count_type",
+    "scheduled_for",
+    "status",
+    "started_at",
+    "submitted_at",
+    "approved_at",
+    "posted_at",
+    "version",
+    "transition_history",
+    "created_at",
+    "updated_at",
+    "allowed_commands",
+    "denial_reasons",
 ]
 
 
@@ -463,10 +612,24 @@ class CycleCountUpdateSerializer(CycleCountCreateSerializer):
 
 
 CONFIGURATION_READ_FIELDS = [
-    "id", "environment", "status", "default_valuation_method", "allow_negative_stock",
-    "require_stock_entry_approval", "enforce_creator_approver_separation", "max_lines_per_entry",
-    "reservation_ttl_minutes", "expiry_warning_days", "auto_expire_batches", "enabled_capabilities",
-    "rollout_rules", "active_revision", "version", "created_at", "updated_at", "allowed_commands",
+    "id",
+    "environment",
+    "status",
+    "default_valuation_method",
+    "allow_negative_stock",
+    "require_stock_entry_approval",
+    "enforce_creator_approver_separation",
+    "max_lines_per_entry",
+    "reservation_ttl_minutes",
+    "expiry_warning_days",
+    "auto_expire_batches",
+    "enabled_capabilities",
+    "rollout_rules",
+    "active_revision",
+    "version",
+    "created_at",
+    "updated_at",
+    "allowed_commands",
     "denial_reasons",
 ]
 
@@ -505,7 +668,16 @@ class ConfigurationUpdateSerializer(ConfigurationCreateSerializer):
 class ConfigurationRevisionSerializer(serializers.ModelSerializer):
     class Meta:
         model = InventoryConfigurationRevision
-        fields = ["id", "configuration_id", "revision", "snapshot", "change_reason", "changed_by_id", "correlation_id", "created_at"]
+        fields = [
+            "id",
+            "configuration_id",
+            "revision",
+            "snapshot",
+            "change_reason",
+            "changed_by_id",
+            "correlation_id",
+            "created_at",
+        ]
         read_only_fields = fields
 
 
@@ -549,10 +721,18 @@ class ConfigurationImportSerializer(StrictSerializer):
 
 
 class BulkImportSerializer(StrictSerializer):
-    resource_type = serializers.ChoiceField(choices=(
-        "warehouses", "locations", "items", "batches", "serial_numbers",
-        "stock_entries", "reservations", "cycle_counts",
-    ))
+    resource_type = serializers.ChoiceField(
+        choices=(
+            "warehouses",
+            "locations",
+            "items",
+            "batches",
+            "serial_numbers",
+            "stock_entries",
+            "reservations",
+            "cycle_counts",
+        )
+    )
     document_ref = serializers.CharField(max_length=2048)
     row_count = serializers.IntegerField(min_value=1, max_value=100000)
 
@@ -563,8 +743,14 @@ class InventoryJobSerializer(serializers.ModelSerializer):
     class Meta:
         model = AsyncJob
         fields = [
-            "id", "command", "status", "idempotency_key", "correlation_id",
-            "attempts", "created_at", "updated_at",
+            "id",
+            "command",
+            "status",
+            "idempotency_key",
+            "correlation_id",
+            "attempts",
+            "created_at",
+            "updated_at",
         ]
         read_only_fields = fields
 

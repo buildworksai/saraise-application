@@ -11,10 +11,7 @@ from django.utils import timezone
 from src.core.async_jobs.models import OutboxEvent
 from src.core.async_jobs.services import enqueue
 from src.core.health import HealthCheckResult, HealthRegistry
-from src.modules.backup_disaster_recovery.adapter_registry import (
-    register_storage_adapter,
-    unregister_storage_adapter,
-)
+from src.modules.backup_disaster_recovery.adapter_registry import register_storage_adapter, unregister_storage_adapter
 from src.modules.backup_disaster_recovery.health import (
     adapter_registry_probe,
     circuit_state_probe,

@@ -1,1 +1,1 @@
-export { AuthenticityCredentialListPage } from './domain-pages';
+export { AuthenticityCredentialListPage } from "./domain-pages";

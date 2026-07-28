@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from typing import Final, Mapping
+from typing import Final
 
 from django.db import connection
 from django.db.migrations.recorder import MigrationRecorder
@@ -107,11 +107,7 @@ def _schema_and_migrations() -> bool:
     tables = set(connection.introspection.table_names())
     if not DOMAIN_TABLES.issubset(tables):
         return False
-    applied = {
-        name
-        for app, name in MigrationRecorder(connection).applied_migrations()
-        if app == "accounting_finance"
-    }
+    applied = {name for app, name in MigrationRecorder(connection).applied_migrations() if app == "accounting_finance"}
     return REQUIRED_MIGRATIONS.issubset(applied)
 
 

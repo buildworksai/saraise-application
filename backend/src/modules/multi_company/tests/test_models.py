@@ -1,8 +1,8 @@
 """Structural and financial-integrity tests for multi-company models."""
 
+import uuid
 from datetime import date
 from decimal import Decimal
-import uuid
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -18,7 +18,6 @@ from src.modules.multi_company.models import (
     IntercompanyApproval,
     IntercompanyTransaction,
     MultiCompanyConfigurationVersion,
-    TransferPricingRule,
 )
 from src.modules.multi_company.state_machines import (
     CONSOLIDATION_STATES,

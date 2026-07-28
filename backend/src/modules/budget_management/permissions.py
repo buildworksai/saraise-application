@@ -12,11 +12,22 @@ from src.core.access.permissions import RequiresAccess
 from src.core.auth_utils import get_user_tenant_id
 
 PERMISSIONS: Final[tuple[str, ...]] = (
-    "budget.budget:create", "budget.budget:read", "budget.budget:update", "budget.budget:delete",
-    "budget.budget:submit", "budget.budget:approve", "budget.budget:close",
-    "budget.budget_line:create", "budget.budget_line:read", "budget.budget_line:update",
-    "budget.budget_line:delete", "budget.availability:read", "budget.actuals:sync",
-    "budget.variance:read", "budget.variance:generate", "budget.variance:acknowledge",
+    "budget.budget:create",
+    "budget.budget:read",
+    "budget.budget:update",
+    "budget.budget:delete",
+    "budget.budget:submit",
+    "budget.budget:approve",
+    "budget.budget:close",
+    "budget.budget_line:create",
+    "budget.budget_line:read",
+    "budget.budget_line:update",
+    "budget.budget_line:delete",
+    "budget.availability:read",
+    "budget.actuals:sync",
+    "budget.variance:read",
+    "budget.variance:generate",
+    "budget.variance:acknowledge",
     "budget.health:read",
 )
 

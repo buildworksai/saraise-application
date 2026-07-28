@@ -1,8 +1,70 @@
-import type {ApiPage,ApiSuccess,ArchiveRequest,ListFilters,PortfolioSummary,Project,ProjectCreateRequest,ProjectSummary,ProjectUpdateRequest,TransitionRequest} from '../contracts';
-import {ENDPOINTS} from '../contracts';
-import {apiClient,archive,detail,idempotencyHeaders,page,withQuery} from './client';
-export const projectService={
- list:(filters:ListFilters={})=>page(apiClient.get<ApiPage<Project>>(withQuery(ENDPOINTS.PROJECTS.LIST,filters))),get:(id:string)=>detail(apiClient.get<ApiSuccess<Project>>(ENDPOINTS.PROJECTS.DETAIL(id))),summary:(id:string)=>detail(apiClient.get<ApiSuccess<ProjectSummary>>(ENDPOINTS.PROJECTS.SUMMARY(id))),dashboard:()=>detail(apiClient.get<ApiSuccess<PortfolioSummary>>(ENDPOINTS.DASHBOARD)),
- create:(data:ProjectCreateRequest,key:string)=>detail(apiClient.post<ApiSuccess<Project>>(ENDPOINTS.PROJECTS.CREATE,data,idempotencyHeaders(key))),update:(id:string,data:ProjectUpdateRequest)=>detail(apiClient.patch<ApiSuccess<Project>>(ENDPOINTS.PROJECTS.UPDATE(id),data,idempotencyHeaders(data.idempotency_key))),archive:(id:string,data:ArchiveRequest)=>archive(ENDPOINTS.PROJECTS.ARCHIVE(id),data.version,data.idempotency_key),restore:(id:string,data:ArchiveRequest)=>detail(apiClient.post<ApiSuccess<Project>>(ENDPOINTS.PROJECTS.RESTORE(id),data,idempotencyHeaders(data.idempotency_key))),transition:(id:string,command:'activate'|'hold'|'resume'|'complete'|'cancel',data:TransitionRequest)=>detail(apiClient.post<ApiSuccess<Project>>(ENDPOINTS.PROJECTS[command.toUpperCase() as 'ACTIVATE'|'HOLD'|'RESUME'|'COMPLETE'|'CANCEL'](id),data,idempotencyHeaders(data.transition_key))),duplicate:(id:string,data:{project_code:string;project_name:string;idempotency_key:string})=>detail(apiClient.post<ApiSuccess<Project>>(ENDPOINTS.PROJECTS.DUPLICATE(id),data,idempotencyHeaders(data.idempotency_key)))
+import type {
+  ApiPage,
+  ApiSuccess,
+  ArchiveRequest,
+  ListFilters,
+  PortfolioSummary,
+  Project,
+  ProjectCreateRequest,
+  ProjectSummary,
+  ProjectUpdateRequest,
+  TransitionRequest,
+} from "../contracts";
+import { ENDPOINTS } from "../contracts";
+import { apiClient, archive, detail, idempotencyHeaders, page, withQuery } from "./client";
+export const projectService = {
+  list: (filters: ListFilters = {}) =>
+    page(apiClient.get<ApiPage<Project>>(withQuery(ENDPOINTS.PROJECTS.LIST, filters))),
+  get: (id: string) => detail(apiClient.get<ApiSuccess<Project>>(ENDPOINTS.PROJECTS.DETAIL(id))),
+  summary: (id: string) =>
+    detail(apiClient.get<ApiSuccess<ProjectSummary>>(ENDPOINTS.PROJECTS.SUMMARY(id))),
+  dashboard: () => detail(apiClient.get<ApiSuccess<PortfolioSummary>>(ENDPOINTS.DASHBOARD)),
+  create: (data: ProjectCreateRequest, key: string) =>
+    detail(
+      apiClient.post<ApiSuccess<Project>>(ENDPOINTS.PROJECTS.CREATE, data, idempotencyHeaders(key))
+    ),
+  update: (id: string, data: ProjectUpdateRequest) =>
+    detail(
+      apiClient.patch<ApiSuccess<Project>>(
+        ENDPOINTS.PROJECTS.UPDATE(id),
+        data,
+        idempotencyHeaders(data.idempotency_key)
+      )
+    ),
+  archive: (id: string, data: ArchiveRequest) =>
+    archive(ENDPOINTS.PROJECTS.ARCHIVE(id), data.version, data.idempotency_key),
+  restore: (id: string, data: ArchiveRequest) =>
+    detail(
+      apiClient.post<ApiSuccess<Project>>(
+        ENDPOINTS.PROJECTS.RESTORE(id),
+        data,
+        idempotencyHeaders(data.idempotency_key)
+      )
+    ),
+  transition: (
+    id: string,
+    command: "activate" | "hold" | "resume" | "complete" | "cancel",
+    data: TransitionRequest
+  ) =>
+    detail(
+      apiClient.post<ApiSuccess<Project>>(
+        ENDPOINTS.PROJECTS[
+          command.toUpperCase() as "ACTIVATE" | "HOLD" | "RESUME" | "COMPLETE" | "CANCEL"
+        ](id),
+        data,
+        idempotencyHeaders(data.transition_key)
+      )
+    ),
+  duplicate: (
+    id: string,
+    data: { project_code: string; project_name: string; idempotency_key: string }
+  ) =>
+    detail(
+      apiClient.post<ApiSuccess<Project>>(
+        ENDPOINTS.PROJECTS.DUPLICATE(id),
+        data,
+        idempotencyHeaders(data.idempotency_key)
+      )
+    ),
 };
-export const createIdempotencyKey=(scope:string)=>`${scope}:${crypto.randomUUID()}`;
+export const createIdempotencyKey = (scope: string) => `${scope}:${crypto.randomUUID()}`;

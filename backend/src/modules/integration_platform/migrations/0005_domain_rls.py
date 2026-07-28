@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 TABLES = (
     "integration_platform_integrations",
     "integration_platform_credentials",
@@ -22,9 +21,9 @@ def enable_rls(apps, schema_editor) -> None:
             cursor.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
             cursor.execute(f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY')
             cursor.execute(
-                f'''CREATE POLICY "{policy}" ON "{table}"
+                f"""CREATE POLICY "{policy}" ON "{table}"
                     USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
-                    WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)'''
+                    WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)"""
             )
 
 

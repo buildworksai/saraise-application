@@ -51,8 +51,12 @@ def health_check(request):
     # Check tenant statistics
     try:
         total_tenants = Tenant.objects.count()
-        active_tenants = Tenant.objects.filter(status=Tenant.TenantStatus.ACTIVE).count()
-        trial_tenants = Tenant.objects.filter(status=Tenant.TenantStatus.TRIAL).count()
+        active_tenants = Tenant.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
+            status=Tenant.TenantStatus.ACTIVE
+        ).count()
+        trial_tenants = Tenant.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
+            status=Tenant.TenantStatus.TRIAL
+        ).count()
 
         health_status["checks"]["tenants"] = {
             "status": "ok",

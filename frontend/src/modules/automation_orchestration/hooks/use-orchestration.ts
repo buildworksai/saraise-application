@@ -11,10 +11,12 @@ import { automationOrchestrationService as service } from "../services/automatio
 export const orchestrationKeys = {
   all: ["automation-orchestration"] as const,
   configuration: () => [...orchestrationKeys.all, "configuration", "development", "all"] as const,
-  definitions: (filters: DefinitionFilters) => [...orchestrationKeys.all, "definitions", filters] as const,
+  definitions: (filters: DefinitionFilters) =>
+    [...orchestrationKeys.all, "definitions", filters] as const,
   definition: (id: string) => [...orchestrationKeys.all, "definition", id] as const,
   nodeTypes: (pageSize: number) => [...orchestrationKeys.all, "node-types", pageSize] as const,
-  schedules: (filters: ScheduleFilters) => [...orchestrationKeys.all, "schedules", filters] as const,
+  schedules: (filters: ScheduleFilters) =>
+    [...orchestrationKeys.all, "schedules", filters] as const,
   schedule: (id: string) => [...orchestrationKeys.all, "schedule", id] as const,
   runs: (filters: RunFilters) => [...orchestrationKeys.all, "runs", filters] as const,
   run: (id: string) => [...orchestrationKeys.all, "run", id] as const,
@@ -79,7 +81,9 @@ export function useRuns(filters: RunFilters) {
     queryKey: orchestrationKeys.runs(filters),
     queryFn: () => service.listRuns(filters),
     refetchInterval: (query) => {
-      const hasLiveRun = query.state.data?.items.some((run) => NONTERMINAL_RUNS.includes(run.status));
+      const hasLiveRun = query.state.data?.items.some((run) =>
+        NONTERMINAL_RUNS.includes(run.status)
+      );
       return hasLiveRun ? configuration.data?.document.ui.run_poll_interval_ms ?? false : false;
     },
   });

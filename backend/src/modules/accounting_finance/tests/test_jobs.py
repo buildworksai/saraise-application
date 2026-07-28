@@ -56,7 +56,10 @@ def test_enqueue_is_durable_and_tenant_idempotent() -> None:
         "report-1",
     )
     assert duplicate.id == first.id
-    assert OutboxEvent.objects.filter(tenant_id=tenant, aggregate_id=first.id, event_type="async_job.enqueued").count() == 1
+    assert (
+        OutboxEvent.objects.filter(tenant_id=tenant, aggregate_id=first.id, event_type="async_job.enqueued").count()
+        == 1
+    )
 
 
 @pytest.mark.django_db

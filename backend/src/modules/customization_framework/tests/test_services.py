@@ -66,9 +66,7 @@ def rule_payload(**overrides):
 
 
 def test_registry_rejects_incompatible_duplicates_and_marks_unavailable(tenant_a) -> None:
-    contract = CustomizationRegistry.resolve_resource_contract(
-        tenant_a.id, "crm", "customer", "1.0"
-    )
+    contract = CustomizationRegistry.resolve_resource_contract(tenant_a.id, "crm", "customer", "1.0")
     assert contract.available is True
     with pytest.raises(CustomizationValidationError):
         CustomizationRegistry.register_resource_contract(
@@ -78,27 +76,25 @@ def test_registry_rejects_incompatible_duplicates_and_marks_unavailable(tenant_a
             {},
             {"custom_field_types": ["text"], "rule_triggers": ["validate"]},
         )
-    unavailable = CustomizationRegistry.unregister_resource_contract(
-        "crm", "customer", "1.0"
-    )
+    unavailable = CustomizationRegistry.unregister_resource_contract("crm", "customer", "1.0")
     assert unavailable is not None and unavailable.available is False
     with pytest.raises(Exception) as caught:
-        CustomizationRegistry.resolve_resource_contract(
-            tenant_a.id, "crm", "customer", "1.0"
-        )
+        CustomizationRegistry.resolve_resource_contract(tenant_a.id, "crm", "customer", "1.0")
     assert getattr(caught.value, "status_code", None) == 503
 
 
 def test_field_definition_lifecycle_value_and_impact_are_real(tenant_a, actor_id) -> None:
     service = CustomFieldService()
-    definition = service.create_definition(
-        tenant_a.id, actor_id=actor_id, data=field_payload(default_value="CUST-1")
-    )
+    definition = service.create_definition(tenant_a.id, actor_id=actor_id, data=field_payload(default_value="CUST-1"))
     assert definition.status == "draft"
-    assert OutboxEvent.objects.for_tenant(tenant_a.id).filter(
-        aggregate_id=definition.id,
-        event_type="customization_framework.field_definition.created",
-    ).exists()
+    assert (
+        OutboxEvent.objects.for_tenant(tenant_a.id)
+        .filter(
+            aggregate_id=definition.id,
+            event_type="customization_framework.field_definition.created",
+        )
+        .exists()
+    )
 
     definition = service.transition_definition(
         tenant_a.id,
@@ -109,9 +105,7 @@ def test_field_definition_lifecycle_value_and_impact_are_real(tenant_a, actor_id
     )
     assert definition.status == "active"
     assert definition.activated_at is not None
-    assert service.validate_value(
-        tenant_a.id, definition_id=definition.id, value="CUST-2"
-    )["valid"] is True
+    assert service.validate_value(tenant_a.id, definition_id=definition.id, value="CUST-2")["valid"] is True
 
     record_id = uuid.uuid4()
     value = service.upsert_value(
@@ -124,12 +118,8 @@ def test_field_definition_lifecycle_value_and_impact_are_real(tenant_a, actor_id
         actor_id=actor_id,
     )
     assert value.definition_revision == definition.lock_version
-    assert service.get_value(
-        tenant_a.id, definition_id=definition.id, target_record_id=record_id
-    ).id == value.id
-    assert service.get_definition_impact(
-        tenant_a.id, definition_id=definition.id
-    )["blocking"] is True
+    assert service.get_value(tenant_a.id, definition_id=definition.id, target_record_id=record_id).id == value.id
+    assert service.get_definition_impact(tenant_a.id, definition_id=definition.id)["blocking"] is True
     with pytest.raises(CustomizationValidationError):
         service.delete_definition(
             tenant_a.id,
@@ -139,9 +129,7 @@ def test_field_definition_lifecycle_value_and_impact_are_real(tenant_a, actor_id
         )
 
 
-def test_field_value_validation_rejects_type_source_and_duplicate_create(
-    tenant_a, actor_id
-) -> None:
+def test_field_value_validation_rejects_type_source_and_duplicate_create(tenant_a, actor_id) -> None:
     service = CustomFieldService()
     definition = service.create_definition(
         tenant_a.id,
@@ -184,9 +172,7 @@ def test_optimistic_lock_and_cross_tenant_not_found(field_pair, actor_id) -> Non
         service.get_definition(own.tenant_id, definition_id=foreign.id)
 
 
-def test_form_layout_publication_is_atomic_versioned_and_renderable(
-    tenant_a, actor_id
-) -> None:
+def test_form_layout_publication_is_atomic_versioned_and_renderable(tenant_a, actor_id) -> None:
     service = FormService()
     form = service.create_form(tenant_a.id, actor_id=actor_id, data=form_payload())
     layout = {
@@ -222,9 +208,7 @@ def test_form_layout_publication_is_atomic_versioned_and_renderable(
     assert render["layout"] == layout
 
 
-def test_layout_rejects_duplicate_and_unresolved_field_references(
-    tenant_a, actor_id
-) -> None:
+def test_layout_rejects_duplicate_and_unresolved_field_references(tenant_a, actor_id) -> None:
     service = FormService()
     form = service.create_form(tenant_a.id, actor_id=actor_id, data=form_payload())
     invalid = {
@@ -247,9 +231,7 @@ def test_layout_rejects_duplicate_and_unresolved_field_references(
     }
 
 
-def test_rule_version_rejects_dangerous_ast_and_evaluates_idempotently(
-    tenant_a, actor_id
-) -> None:
+def test_rule_version_rejects_dangerous_ast_and_evaluates_idempotently(tenant_a, actor_id) -> None:
     service = BusinessRuleService()
     rule = service.create_rule(tenant_a.id, actor_id=actor_id, data=rule_payload())
     with pytest.raises(CustomizationValidationError):

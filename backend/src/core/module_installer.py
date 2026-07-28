@@ -24,8 +24,6 @@ logger = logging.getLogger(__name__)
 class InstallationError(Exception):
     """Installation error."""
 
-    pass
-
 
 class ModuleInstaller:
     """Module installer service.

@@ -12,16 +12,8 @@ from rest_framework.test import APIClient
 
 from src.core.user_models import UserProfile
 from src.modules.email_marketing import api
-from src.modules.email_marketing.models import (
-    ConsentRecord,
-    EmailCampaign,
-    EmailTemplate,
-    SuppressionEntry,
-)
-from src.modules.email_marketing.serializers import (
-    CampaignCreateSerializer,
-    CampaignUpdateSerializer,
-)
+from src.modules.email_marketing.models import ConsentRecord, EmailCampaign, EmailTemplate, SuppressionEntry
+from src.modules.email_marketing.serializers import CampaignCreateSerializer, CampaignUpdateSerializer
 
 pytestmark = pytest.mark.django_db
 User = get_user_model()

@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
 import uuid
+from typing import Any
 from uuid import UUID
 
 from django.db.models import Count, Q, QuerySet
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from src.core.auth_utils import get_user_tenant_id
@@ -34,11 +33,11 @@ from .serializers import (
     AIModelDeploymentUpdateSerializer,
     AIModelDetailSerializer,
     AIModelListSerializer,
+    AIProviderConfigurationResourceSerializer,
     AIProviderCredentialCreateSerializer,
     AIProviderCredentialDetailSerializer,
     AIProviderCredentialListSerializer,
     AIProviderCredentialUpdateSerializer,
-    AIProviderConfigurationResourceSerializer,
     AIProviderDetailSerializer,
     AIProviderListSerializer,
     AIProviderRuntimeConfigurationAuditSerializer,
@@ -221,8 +220,8 @@ class AIProviderCredentialViewSet(ActionPermissionMixin, TenantContextMixin, vie
             return AIProviderCredential.objects.none()
         policy = AIProviderRuntimeConfigurationService.runtime_values(tenant_id)
         fields = _section(policy, "field_limits")
-        queryset = AIProviderCredential.objects.for_tenant(tenant_id).filter(is_deleted=False).select_related(
-            "provider"
+        queryset = (
+            AIProviderCredential.objects.for_tenant(tenant_id).filter(is_deleted=False).select_related("provider")
         )
         provider_id = self.request.query_params.get("provider_id") or self.request.query_params.get("provider")
         if provider_id:
@@ -302,10 +301,14 @@ class AIModelViewSet(ActionPermissionMixin, TenantContextMixin, viewsets.ReadOnl
         policy = AIProviderRuntimeConfigurationService.runtime_values(tenant_id)
         fields = _section(policy, "field_limits")
         visibility = _section(policy, "catalog_visibility")
-        queryset = AIModel.objects.all().select_related("provider").annotate(
-            deployments_count=Count(
-                "deployments",
-                filter=Q(deployments__tenant_id=tenant_id, deployments__is_deleted=False),
+        queryset = (
+            AIModel.objects.all()
+            .select_related("provider")
+            .annotate(
+                deployments_count=Count(
+                    "deployments",
+                    filter=Q(deployments__tenant_id=tenant_id, deployments__is_deleted=False),
+                )
             )
         )
         if bool(visibility["models_active_only"]):
@@ -398,9 +401,7 @@ class AIModelDeploymentViewSet(ActionPermissionMixin, TenantContextMixin, viewse
             if source in data:
                 changes[target] = data.pop(source)
         changes.update(data)
-        deployment = self.service_class().update_deployment(
-            self.tenant_id(), self.kwargs["pk"], **changes
-        )
+        deployment = self.service_class().update_deployment(self.tenant_id(), self.kwargs["pk"], **changes)
         return Response(AIModelDeploymentDetailSerializer(deployment).data)
 
     def update(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -444,9 +445,7 @@ class AIUsageLogViewSet(ActionPermissionMixin, TenantContextMixin, viewsets.Read
         tenant_id = self.tenant_id_or_none()
         if tenant_id is None:
             return AIUsageLog.objects.none()
-        queryset = AIUsageLog.objects.for_tenant(tenant_id).select_related(
-            "deployment__model__provider"
-        )
+        queryset = AIUsageLog.objects.for_tenant(tenant_id).select_related("deployment__model__provider")
         deployment_id = self.request.query_params.get("deployment_id") or self.request.query_params.get("deployment")
         if deployment_id:
             queryset = queryset.filter(deployment_id=deployment_id)

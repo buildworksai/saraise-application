@@ -14,7 +14,8 @@ def install_guards(apps, schema_editor) -> None:
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute("""
+    schema_editor.execute(
+        """
         CREATE OR REPLACE FUNCTION document_intelligence_reject_evidence_mutation()
         RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
@@ -22,14 +23,18 @@ def install_guards(apps, schema_editor) -> None:
                 USING ERRCODE = 'integrity_constraint_violation';
         END;
         $$;
-        """)
+        """
+    )
     for table in APPEND_ONLY_TABLES:
-        schema_editor.execute(f"""
+        schema_editor.execute(
+            f"""
             CREATE TRIGGER {table}_append_only
             BEFORE UPDATE OR DELETE ON {table}
             FOR EACH ROW EXECUTE FUNCTION document_intelligence_reject_evidence_mutation();
-            """)
-    schema_editor.execute("""
+            """
+        )
+    schema_editor.execute(
+        """
         CREATE OR REPLACE FUNCTION document_intelligence_guard_terminal_history()
         RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
@@ -54,7 +59,8 @@ def install_guards(apps, schema_editor) -> None:
         CREATE TRIGGER document_intelligence_classification_history_immutable
         BEFORE UPDATE ON document_intelligence_classifications
         FOR EACH ROW EXECUTE FUNCTION document_intelligence_guard_terminal_history();
-        """)
+        """
+    )
 
 
 def remove_guards(apps, schema_editor) -> None:
@@ -63,14 +69,16 @@ def remove_guards(apps, schema_editor) -> None:
         return
     for table in APPEND_ONLY_TABLES:
         schema_editor.execute(f"DROP TRIGGER IF EXISTS {table}_append_only ON {table};")
-    schema_editor.execute("""
+    schema_editor.execute(
+        """
         DROP TRIGGER IF EXISTS document_intelligence_extraction_history_immutable
             ON document_intelligence_extractions;
         DROP TRIGGER IF EXISTS document_intelligence_classification_history_immutable
             ON document_intelligence_classifications;
         DROP FUNCTION IF EXISTS document_intelligence_guard_terminal_history();
         DROP FUNCTION IF EXISTS document_intelligence_reject_evidence_mutation();
-        """)
+        """
+    )
 
 
 class Migration(migrations.Migration):

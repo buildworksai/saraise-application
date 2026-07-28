@@ -1,1 +1,1 @@
-export { CreateComplianceEvidencePage } from './domain-pages';
+export { CreateComplianceEvidencePage } from "./domain-pages";

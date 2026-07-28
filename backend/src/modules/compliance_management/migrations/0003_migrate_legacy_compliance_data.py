@@ -8,7 +8,6 @@ from datetime import timedelta
 
 from django.db import migrations, models
 
-
 LEGACY_MARKER = "legacy_compliance_0001"
 LEGACY_VERSION_SUMMARY = "Imported from the legacy compliance policy record."
 LEGACY_REVIEW_DAYS = 365
@@ -147,9 +146,7 @@ def forwards(apps, schema_editor):
                 "legacy_status": legacy_status,
             }
         ]
-        requirement.save(
-            update_fields=("framework", "code", "title", "lifecycle_status", "transition_history")
-        )
+        requirement.save(update_fields=("framework", "code", "title", "lifecycle_status", "transition_history"))
         coverage = "full" if legacy_status == "compliant" else "none"
         mapping = Mapping.objects.create(
             tenant_id=tenant_id,
@@ -259,15 +256,34 @@ class Migration(migrations.Migration):
         # Nullable staging is essential for a data-preserving reverse: Django
         # recreates removed columns before calling ``backwards``. The reverse
         # of these operations tightens them only after reconstruction.
-        migrations.AlterField("compliancepolicy", "policy_code", models.CharField(db_index=True, max_length=50, null=True)),
+        migrations.AlterField(
+            "compliancepolicy", "policy_code", models.CharField(db_index=True, max_length=50, null=True)
+        ),
         migrations.AlterField("compliancepolicy", "policy_name", models.CharField(max_length=255, null=True)),
-        migrations.AlterField("compliancepolicy", "regulation_type", models.CharField(db_index=True, max_length=100, null=True)),
+        migrations.AlterField(
+            "compliancepolicy", "regulation_type", models.CharField(db_index=True, max_length=100, null=True)
+        ),
         migrations.AlterField("compliancepolicy", "description", models.TextField(blank=True, null=True)),
-        migrations.AlterField("compliancerequirement", "policy", models.ForeignKey(null=True, on_delete=models.CASCADE, related_name="requirements", to="compliance_management.compliancepolicy")),
-        migrations.AlterField("compliancerequirement", "requirement_code", models.CharField(db_index=True, max_length=50, null=True)),
+        migrations.AlterField(
+            "compliancerequirement",
+            "policy",
+            models.ForeignKey(
+                null=True,
+                on_delete=models.CASCADE,
+                related_name="requirements",
+                to="compliance_management.compliancepolicy",
+            ),
+        ),
+        migrations.AlterField(
+            "compliancerequirement", "requirement_code", models.CharField(db_index=True, max_length=50, null=True)
+        ),
         migrations.AlterField("compliancerequirement", "requirement_name", models.CharField(max_length=255, null=True)),
         migrations.AlterField("compliancerequirement", "description", models.TextField(blank=True, null=True)),
-        migrations.AlterField("compliancerequirement", "status", models.CharField(db_index=True, default="pending", max_length=50, null=True)),
+        migrations.AlterField(
+            "compliancerequirement",
+            "status",
+            models.CharField(db_index=True, default="pending", max_length=50, null=True),
+        ),
         migrations.RunPython(forwards, backwards),
         migrations.RemoveConstraint("compliancepolicy", "unique_policy_code_per_tenant"),
         migrations.RemoveIndex("compliancepolicy", "compliance__tenant__bf0bc5_idx"),
@@ -286,30 +302,112 @@ class Migration(migrations.Migration):
         migrations.RemoveField("compliancerequirement", "status"),
         migrations.RenameField("compliancepolicy", "lifecycle_status", "status"),
         migrations.RenameField("compliancerequirement", "lifecycle_status", "status"),
-        migrations.AlterField("compliancepolicy", "status", models.CharField(choices=[("draft", "Draft"), ("in_review", "In review"), ("approved", "Approved"), ("published", "Published"), ("archived", "Archived")], default="draft", max_length=20)),
+        migrations.AlterField(
+            "compliancepolicy",
+            "status",
+            models.CharField(
+                choices=[
+                    ("draft", "Draft"),
+                    ("in_review", "In review"),
+                    ("approved", "Approved"),
+                    ("published", "Published"),
+                    ("archived", "Archived"),
+                ],
+                default="draft",
+                max_length=20,
+            ),
+        ),
         migrations.AlterField("compliancepolicy", "code", models.CharField(max_length=100)),
         migrations.AlterField("compliancepolicy", "title", models.CharField(max_length=500)),
         migrations.AlterField("compliancepolicy", "category", models.CharField(max_length=50)),
         migrations.AlterField("compliancepolicy", "review_frequency_days", models.PositiveSmallIntegerField()),
         migrations.AlterField("compliancepolicy", "effective_date", models.DateField(blank=True, null=True)),
         migrations.AlterField("compliancepolicy", "created_at", models.DateTimeField(auto_now_add=True)),
-        migrations.AlterField("compliancerequirement", "framework", models.ForeignKey(on_delete=models.PROTECT, related_name="requirements", to="compliance_management.complianceframework")),
+        migrations.AlterField(
+            "compliancerequirement",
+            "framework",
+            models.ForeignKey(
+                on_delete=models.PROTECT, related_name="requirements", to="compliance_management.complianceframework"
+            ),
+        ),
         migrations.AlterField("compliancerequirement", "code", models.CharField(max_length=100)),
         migrations.AlterField("compliancerequirement", "title", models.CharField(max_length=500)),
         migrations.AlterField("compliancerequirement", "description", models.TextField()),
         migrations.AlterField("compliancerequirement", "created_at", models.DateTimeField(auto_now_add=True)),
-        migrations.AddIndex("compliancepolicy", models.Index(fields=["tenant_id", "status", "title"], name="cmp_pol_tenant_status_title_ix")),
-        migrations.AddIndex("compliancepolicy", models.Index(fields=["tenant_id", "owner", "status"], name="cmp_pol_tenant_owner_status_ix")),
-        migrations.AddIndex("compliancepolicy", models.Index(fields=["tenant_id", "next_review_date", "status"], name="cmp_pol_tenant_review_ix")),
-        migrations.AddIndex("compliancepolicy", models.Index(fields=["tenant_id", "expiry_date", "status"], name="cmp_pol_tenant_exp_status_ix")),
-        migrations.AddIndex("compliancepolicy", models.Index(fields=["tenant_id", "deleted_at"], name="cmp_pol_tenant_deleted_ix")),
-        migrations.AddConstraint("compliancepolicy", models.UniqueConstraint(condition=models.Q(("deleted_at__isnull", True)), fields=("tenant_id", "code"), name="cmp_policy_tenant_code_uq")),
-        migrations.AddConstraint("compliancepolicy", models.CheckConstraint(condition=models.Q(("expiry_date__isnull", True)) | models.Q(("effective_date__isnull", True)) | models.Q(("expiry_date__gt", models.F("effective_date"))), name="cmp_policy_expiry_after_eff_ck")),
-        migrations.AddConstraint("compliancepolicy", models.CheckConstraint(condition=models.Q(("current_version__gte", 0)), name="cmp_policy_version_nonneg_ck")),
-        migrations.AddConstraint("compliancepolicy", models.CheckConstraint(condition=~models.Q(status="published") | (models.Q(current_version__gt=0) & models.Q(effective_date__isnull=False)), name="cmp_policy_published_ready_ck")),
-        migrations.AddIndex("compliancerequirement", models.Index(fields=["tenant_id", "framework", "status", "sort_order"], name="cmp_req_tenant_fw_status_ix")),
-        migrations.AddIndex("compliancerequirement", models.Index(fields=["tenant_id", "applicability", "status"], name="cmp_req_tenant_app_status_ix")),
-        migrations.AddIndex("compliancerequirement", models.Index(fields=["tenant_id", "deleted_at"], name="cmp_req_tenant_deleted_ix")),
-        migrations.AddConstraint("compliancerequirement", models.UniqueConstraint(condition=models.Q(("deleted_at__isnull", True)), fields=("tenant_id", "framework", "code"), name="cmp_req_tenant_fw_code_uq")),
-        migrations.AddConstraint("compliancerequirement", models.CheckConstraint(condition=~models.Q(applicability="not_applicable") | ~models.Q(applicability_rationale=""), name="cmp_req_na_rationale_ck")),
+        migrations.AddIndex(
+            "compliancepolicy",
+            models.Index(fields=["tenant_id", "status", "title"], name="cmp_pol_tenant_status_title_ix"),
+        ),
+        migrations.AddIndex(
+            "compliancepolicy",
+            models.Index(fields=["tenant_id", "owner", "status"], name="cmp_pol_tenant_owner_status_ix"),
+        ),
+        migrations.AddIndex(
+            "compliancepolicy",
+            models.Index(fields=["tenant_id", "next_review_date", "status"], name="cmp_pol_tenant_review_ix"),
+        ),
+        migrations.AddIndex(
+            "compliancepolicy",
+            models.Index(fields=["tenant_id", "expiry_date", "status"], name="cmp_pol_tenant_exp_status_ix"),
+        ),
+        migrations.AddIndex(
+            "compliancepolicy", models.Index(fields=["tenant_id", "deleted_at"], name="cmp_pol_tenant_deleted_ix")
+        ),
+        migrations.AddConstraint(
+            "compliancepolicy",
+            models.UniqueConstraint(
+                condition=models.Q(("deleted_at__isnull", True)),
+                fields=("tenant_id", "code"),
+                name="cmp_policy_tenant_code_uq",
+            ),
+        ),
+        migrations.AddConstraint(
+            "compliancepolicy",
+            models.CheckConstraint(
+                condition=models.Q(("expiry_date__isnull", True))
+                | models.Q(("effective_date__isnull", True))
+                | models.Q(("expiry_date__gt", models.F("effective_date"))),
+                name="cmp_policy_expiry_after_eff_ck",
+            ),
+        ),
+        migrations.AddConstraint(
+            "compliancepolicy",
+            models.CheckConstraint(
+                condition=models.Q(("current_version__gte", 0)), name="cmp_policy_version_nonneg_ck"
+            ),
+        ),
+        migrations.AddConstraint(
+            "compliancepolicy",
+            models.CheckConstraint(
+                condition=~models.Q(status="published")
+                | (models.Q(current_version__gt=0) & models.Q(effective_date__isnull=False)),
+                name="cmp_policy_published_ready_ck",
+            ),
+        ),
+        migrations.AddIndex(
+            "compliancerequirement",
+            models.Index(fields=["tenant_id", "framework", "status", "sort_order"], name="cmp_req_tenant_fw_status_ix"),
+        ),
+        migrations.AddIndex(
+            "compliancerequirement",
+            models.Index(fields=["tenant_id", "applicability", "status"], name="cmp_req_tenant_app_status_ix"),
+        ),
+        migrations.AddIndex(
+            "compliancerequirement", models.Index(fields=["tenant_id", "deleted_at"], name="cmp_req_tenant_deleted_ix")
+        ),
+        migrations.AddConstraint(
+            "compliancerequirement",
+            models.UniqueConstraint(
+                condition=models.Q(("deleted_at__isnull", True)),
+                fields=("tenant_id", "framework", "code"),
+                name="cmp_req_tenant_fw_code_uq",
+            ),
+        ),
+        migrations.AddConstraint(
+            "compliancerequirement",
+            models.CheckConstraint(
+                condition=~models.Q(applicability="not_applicable") | ~models.Q(applicability_rationale=""),
+                name="cmp_req_na_rationale_ck",
+            ),
+        ),
     ]

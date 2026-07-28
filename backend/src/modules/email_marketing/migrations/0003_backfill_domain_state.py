@@ -24,11 +24,7 @@ def _append_marker(history, legacy_status, occurred_at):
 def _remove_marker(history):
     if not isinstance(history, list):
         return []
-    return [
-        item
-        for item in history
-        if not (isinstance(item, dict) and item.get("transition_key") == MIGRATION_MARKER)
-    ]
+    return [item for item in history if not (isinstance(item, dict) and item.get("transition_key") == MIGRATION_MARKER)]
 
 
 def forwards(apps, schema_editor):

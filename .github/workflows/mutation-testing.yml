@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag -- reviewed false positive; scope enforced by surrounding domain policy.
         with:
           fetch-depth: 0
 

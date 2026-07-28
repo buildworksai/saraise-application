@@ -68,9 +68,7 @@ class TestRegionalResourceViewSet:
                 status.HTTP_403_FORBIDDEN,
             }
 
-    def test_list_is_paginated_ordered_and_omits_internal_ids(
-        self, authenticated_client, tenant_user
-    ):
+    def test_list_is_paginated_ordered_and_omits_internal_ids(self, authenticated_client, tenant_user):
         tenant_id = get_user_tenant_id(tenant_user)
         for name in ("Bravo", "Alpha"):
             RegionalResource.objects.create(
@@ -87,12 +85,8 @@ class TestRegionalResourceViewSet:
         assert "tenant_id" not in response.data["results"][0]
         assert "created_by" not in response.data["results"][0]
 
-    def test_create_requires_idempotency_and_returns_original_on_replay(
-        self, authenticated_client
-    ):
-        missing = authenticated_client.post(
-            f"{PREFIX}/resources/", create_payload(), format="json"
-        )
+    def test_create_requires_idempotency_and_returns_original_on_replay(self, authenticated_client):
+        missing = authenticated_client.post(f"{PREFIX}/resources/", create_payload(), format="json")
         assert missing.status_code == status.HTTP_400_BAD_REQUEST
 
         key = str(uuid.uuid4())
@@ -114,9 +108,7 @@ class TestRegionalResourceViewSet:
         assert replay.status_code == status.HTTP_201_CREATED
         assert replay.data["id"] == first.data["id"]
 
-    def test_detail_update_lifecycle_and_soft_delete(
-        self, authenticated_client, tenant_user
-    ):
+    def test_detail_update_lifecycle_and_soft_delete(self, authenticated_client, tenant_user):
         resource = RegionalResource.objects.create(
             tenant_id=get_user_tenant_id(tenant_user),
             name="Original",
@@ -156,19 +148,13 @@ class TestRegionalResourceViewSet:
         assert deleted.status_code == status.HTTP_204_NO_CONTENT
         resource.refresh_from_db()
         assert resource.deleted_at is not None
-        assert authenticated_client.get(
-            f"{PREFIX}/resources/{resource.id}/"
-        ).status_code == status.HTTP_404_NOT_FOUND
-        assert RegionalAuditRecord.objects.filter(
-            entity_id=resource.id, operation="resource.delete"
-        ).exists()
+        assert authenticated_client.get(f"{PREFIX}/resources/{resource.id}/").status_code == status.HTTP_404_NOT_FOUND
+        assert RegionalAuditRecord.objects.filter(entity_id=resource.id, operation="resource.delete").exists()
 
 
 @pytest.mark.django_db
 class TestRegionalConfigurationViewSet:
-    def test_current_preview_update_history_export_import_and_rollback(
-        self, authenticated_client
-    ):
+    def test_current_preview_update_history_export_import_and_rollback(self, authenticated_client):
         current = authenticated_client.get(f"{PREFIX}/configuration/current/")
         assert current.status_code == status.HTTP_200_OK
         assert current.data["version"] == 1
@@ -192,15 +178,11 @@ class TestRegionalConfigurationViewSet:
         assert updated.status_code == status.HTTP_200_OK
         assert updated.data["version"] == 2
 
-        history = authenticated_client.get(
-            f"{PREFIX}/configuration/history/?environment=development"
-        )
+        history = authenticated_client.get(f"{PREFIX}/configuration/history/?environment=development")
         assert history.status_code == status.HTTP_200_OK
         assert [item["version"] for item in history.data] == [2, 1]
 
-        exported = authenticated_client.get(
-            f"{PREFIX}/configuration/export_document/?environment=development"
-        )
+        exported = authenticated_client.get(f"{PREFIX}/configuration/export_document/?environment=development")
         assert exported.status_code == status.HTTP_200_OK
         assert exported.data["document"] == proposed
 
@@ -224,9 +206,7 @@ class TestRegionalConfigurationViewSet:
         assert rollback.status_code == status.HTTP_200_OK
         assert rollback.data["version"] == 4
 
-    def test_non_admin_is_denied_configuration_write(
-        self, authenticated_client, tenant_user
-    ):
+    def test_non_admin_is_denied_configuration_write(self, authenticated_client, tenant_user):
         profile = tenant_user.profile
         profile.tenant_role = "tenant_user"
         profile.save()

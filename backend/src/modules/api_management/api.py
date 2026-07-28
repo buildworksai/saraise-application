@@ -47,12 +47,7 @@ from .serializers import (
     ConfigurationRollbackSerializer,
     ResourceRollbackSerializer,
 )
-from .services import (
-    ApiManagementService,
-    ConfigurationValidationError,
-    IdempotencyConflictError,
-    runtime_environment,
-)
+from .services import ApiManagementService, ConfigurationValidationError, IdempotencyConflictError, runtime_environment
 
 
 class Conflict(APIException):

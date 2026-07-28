@@ -27,7 +27,7 @@ export interface LicenseActivationRequest {
 
 export const ENDPOINTS = {
   LICENSING: {
-    STATUS: '/api/v1/licensing/status/',
-    ACTIVATE: '/api/v1/licensing/activate/',
+    STATUS: "/api/v1/licensing/status/",
+    ACTIVATE: "/api/v1/licensing/activate/",
   },
 } as const;

@@ -14,11 +14,11 @@ from src.modules.master_data_management import api
 from src.modules.master_data_management.permissions import PERMISSIONS
 from src.modules.master_data_management.serializers import (
     DataQualityRuleWriteSerializer,
-    MatchingRuleWriteSerializer,
     MasterDataEntityCreateSerializer,
     MasterDataEntityDetailSerializer,
     MasterDataEntityUpdateSerializer,
     MasterEntityTypeCreateSerializer,
+    MatchingRuleWriteSerializer,
 )
 
 from .factories import (
@@ -359,34 +359,43 @@ def test_cross_tenant_detail_patch_delete_and_actions_are_exact_404(
     }
     detail = f"{BASE}/entities/{entity.id}/"
     assert authenticated_tenant_a_client.get(detail).status_code == 404
-    assert authenticated_tenant_a_client.patch(
-        detail,
-        {
-            "expected_version": entity.version,
-            "entity_name": "Spoofed",
-            "reason": "Cross tenant",
-            "idempotency_key": "foreign-patch",
-        },
-        format="json",
-    ).status_code == 404
-    assert authenticated_tenant_a_client.delete(
-        detail,
-        {
-            "expected_version": entity.version,
-            "reason": "Cross tenant",
-            "idempotency_key": "foreign-delete",
-        },
-        format="json",
-    ).status_code == 404
-    assert authenticated_tenant_a_client.post(
-        f"{detail}restore/",
-        {
-            "expected_version": entity.version,
-            "reason": "Cross tenant",
-            "idempotency_key": "foreign-restore",
-        },
-        format="json",
-    ).status_code == 404
+    assert (
+        authenticated_tenant_a_client.patch(
+            detail,
+            {
+                "expected_version": entity.version,
+                "entity_name": "Spoofed",
+                "reason": "Cross tenant",
+                "idempotency_key": "foreign-patch",
+            },
+            format="json",
+        ).status_code
+        == 404
+    )
+    assert (
+        authenticated_tenant_a_client.delete(
+            detail,
+            {
+                "expected_version": entity.version,
+                "reason": "Cross tenant",
+                "idempotency_key": "foreign-delete",
+            },
+            format="json",
+        ).status_code
+        == 404
+    )
+    assert (
+        authenticated_tenant_a_client.post(
+            f"{detail}restore/",
+            {
+                "expected_version": entity.version,
+                "reason": "Cross tenant",
+                "idempotency_key": "foreign-restore",
+            },
+            format="json",
+        ).status_code
+        == 404
+    )
     entity.refresh_from_db()
     assert {
         "name": entity.entity_name,
@@ -605,16 +614,22 @@ def test_legacy_v1_route_put_and_hard_delete_are_not_exposed(
 ) -> None:
     entity = make_entity(tenant_a.id)  # type: ignore[attr-defined]
     assert authenticated_tenant_a_client.get("/api/v1/master-data-management/entities/").status_code == 404
-    assert authenticated_tenant_a_client.put(
-        f"{BASE}/entities/{entity.id}/",
-        {},
-        format="json",
-    ).status_code == 405
-    assert authenticated_tenant_a_client.post(
-        f"{BASE}/entities/{entity.id}/hard-delete/",
-        {},
-        format="json",
-    ).status_code == 404
+    assert (
+        authenticated_tenant_a_client.put(
+            f"{BASE}/entities/{entity.id}/",
+            {},
+            format="json",
+        ).status_code
+        == 405
+    )
+    assert (
+        authenticated_tenant_a_client.post(
+            f"{BASE}/entities/{entity.id}/hard-delete/",
+            {},
+            format="json",
+        ).status_code
+        == 404
+    )
 
 
 def test_viewsets_contain_no_direct_model_mutation_bypass() -> None:

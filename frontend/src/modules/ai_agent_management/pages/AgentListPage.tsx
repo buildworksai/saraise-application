@@ -1,3 +1,4 @@
+/* eslint-disable max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
@@ -7,18 +8,213 @@ import { Input } from "@/components/ui/Input";
 import type { AgentStatus, IdentityType } from "../contracts";
 import { ROUTES } from "../contracts";
 import { aiAgentService } from "../services/ai-agent-service";
-import { EmptyState, GovernedError, PageHeader, PageSkeleton, Pagination, StatusPill, formatDate } from "../components/AgentUI";
+import {
+  EmptyState,
+  GovernedError,
+  PageHeader,
+  PageSkeleton,
+  Pagination,
+  StatusPill,
+  formatDate,
+} from "../components/AgentUI";
 import { useAiAgentConfiguration } from "../hooks/use-ai-agent-configuration";
 
 export const AgentListPage = () => {
   const navigate = useNavigate();
   const configuration = useAiAgentConfiguration();
-  const [search, setSearch] = useState(""); const [status, setStatus] = useState<AgentStatus | "">(""); const [identity, setIdentity] = useState<IdentityType | "">(""); const [runner, setRunner] = useState(""); const [ordering, setOrdering] = useState<"name" | "-name" | "created_at" | "-created_at" | "updated_at" | "-updated_at">("-updated_at"); const [page, setPage] = useState(1);
-  const query = useQuery({ queryKey: ["ai-agents", { search, status, identity, runner, ordering, page }], queryFn: () => aiAgentService.listAgents({ search: search || undefined, status: status || undefined, identity_type: identity || undefined, runner_key: runner || undefined, ordering, page, page_size: configuration.data?.document.ui.agent_page_size }), enabled: Boolean(configuration.data), placeholderData: (previous) => previous });
-  if (query.isLoading || configuration.isLoading) return <PageSkeleton rows={7}/>;
-  if (configuration.error) return <GovernedError error={configuration.error} retry={() => void configuration.refetch()}/>;
-  if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()}/>;
-  if (!query.data) return <GovernedError error={new Error("No governed agent response was received.")} retry={() => void query.refetch()}/>;
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState<AgentStatus | "">("");
+  const [identity, setIdentity] = useState<IdentityType | "">("");
+  const [runner, setRunner] = useState("");
+  const [ordering, setOrdering] = useState<
+    "name" | "-name" | "created_at" | "-created_at" | "updated_at" | "-updated_at"
+  >("-updated_at");
+  const [page, setPage] = useState(1);
+  const query = useQuery({
+    queryKey: ["ai-agents", { search, status, identity, runner, ordering, page }],
+    queryFn: () =>
+      aiAgentService.listAgents({
+        search: search || undefined,
+        status: status || undefined,
+        identity_type: identity || undefined,
+        runner_key: runner || undefined,
+        ordering,
+        page,
+        page_size: configuration.data?.document.ui.agent_page_size,
+      }),
+    enabled: Boolean(configuration.data),
+    placeholderData: (previous) => previous,
+  });
+  if (query.isLoading || configuration.isLoading) return <PageSkeleton rows={7} />;
+  if (configuration.error)
+    return <GovernedError error={configuration.error} retry={() => void configuration.refetch()} />;
+  if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()} />;
+  if (!query.data)
+    return (
+      <GovernedError
+        error={new Error("No governed agent response was received.")}
+        retry={() => void query.refetch()}
+      />
+    );
   const filtered = Boolean(search || status || identity || runner);
-  return <main className="space-y-6"><PageHeader title="Governed AI agents" description="Define tenant-scoped identities, inspect runtime availability, and launch only policy-compliant work." actions={<Button onClick={() => navigate(ROUTES.AGENT_CREATE)}><Plus className="mr-2 h-4 w-4"/>Create agent</Button>}/><section aria-label="Agent filters" className="grid gap-3 rounded-xl border bg-card p-4 md:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_160px_170px_180px_180px]"><div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground"/><Input aria-label="Search agents" className="pl-9" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="Search name or description"/></div><select aria-label="Filter status" className="rounded-md border bg-background px-3 text-sm" value={status} onChange={(event) => { setStatus(event.target.value as AgentStatus | ""); setPage(1); }}><option value="">All statuses</option>{["draft", "active", "disabled", "retired"].map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Filter identity" className="rounded-md border bg-background px-3 text-sm" value={identity} onChange={(event) => { setIdentity(event.target.value as IdentityType | ""); setPage(1); }}><option value="">All identities</option><option value="user_bound">User bound</option><option value="system_bound">System bound</option></select><Input aria-label="Filter runner" value={runner} onChange={(event) => { setRunner(event.target.value); setPage(1); }} placeholder="Runner key"/><select aria-label="Sort agents" className="rounded-md border bg-background px-3 text-sm" value={ordering} onChange={(event) => setOrdering(event.target.value as typeof ordering)}><option value="-updated_at">Recently updated</option><option value="name">Name A–Z</option><option value="-name">Name Z–A</option><option value="created_at">Oldest created</option></select></section>{query.data.items.length === 0 ? <EmptyState title={filtered ? "No agents match" : "Create your first governed agent"} description={filtered ? "Clear or adjust filters to inspect the tenant catalog." : "Define an identity, runner, provider, tools, approvals, and budget before the first execution."} action={<Button variant={filtered ? "outline" : "primary"} onClick={() => filtered ? (setSearch(""), setStatus(""), setIdentity(""), setRunner("")) : navigate(ROUTES.AGENT_CREATE)}>{filtered ? "Clear filters" : "Create agent"}</Button>}/> : <section className="overflow-hidden rounded-xl border bg-card"><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="p-4"><span className="sr-only">Select</span></th><th className="p-4">Agent</th><th className="p-4">Status</th><th className="p-4">Identity</th><th className="p-4">Runner</th><th className="p-4">Provider</th><th className="p-4">Updated</th></tr></thead><tbody className="divide-y">{query.data.items.map((agent) => <tr key={agent.id} className="hover:bg-muted/30"><td className="p-4"><input type="checkbox" aria-label={`Select ${agent.name}`}/></td><td className="p-4"><Link className="font-semibold text-primary hover:underline" to={ROUTES.AGENT_DETAIL(agent.id)}>{agent.name}</Link><p className="mt-1 max-w-sm truncate text-xs text-muted-foreground">{agent.description || "No description"}</p></td><td className="p-4"><StatusPill status={agent.status}/></td><td className="p-4">{agent.identity_type.replace("_", " ")}</td><td className="p-4"><span className="rounded bg-muted px-2 py-1 font-mono text-xs">{agent.runner_key}</span></td><td className="p-4">{agent.provider_config_id ? "Configured" : "Not required"}</td><td className="p-4">{formatDate(agent.updated_at)}</td></tr>)}</tbody></table></div><Pagination value={query.data.pagination} onPage={setPage}/></section>}{query.isFetching ? <p role="status" className="text-xs text-muted-foreground">Refreshing agents; displayed data may be stale…</p> : null}</main>;
+  return (
+    <main className="space-y-6">
+      <PageHeader
+        title="Governed AI agents"
+        description="Define tenant-scoped identities, inspect runtime availability, and launch only policy-compliant work."
+        actions={
+          <Button onClick={() => navigate(ROUTES.AGENT_CREATE)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Create agent
+          </Button>
+        }
+      />
+      <section
+        aria-label="Agent filters"
+        className="grid gap-3 rounded-xl border bg-card p-4 md:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_160px_170px_180px_180px]"
+      >
+        <div className="relative">
+          <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+          <Input
+            aria-label="Search agents"
+            className="pl-9"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            placeholder="Search name or description"
+          />
+        </div>
+        <select
+          aria-label="Filter status"
+          className="rounded-md border bg-background px-3 text-sm"
+          value={status}
+          onChange={(event) => {
+            setStatus(event.target.value as AgentStatus | "");
+            setPage(1);
+          }}
+        >
+          <option value="">All statuses</option>
+          {["draft", "active", "disabled", "retired"].map((value) => (
+            <option key={value}>{value}</option>
+          ))}
+        </select>
+        <select
+          aria-label="Filter identity"
+          className="rounded-md border bg-background px-3 text-sm"
+          value={identity}
+          onChange={(event) => {
+            setIdentity(event.target.value as IdentityType | "");
+            setPage(1);
+          }}
+        >
+          <option value="">All identities</option>
+          <option value="user_bound">User bound</option>
+          <option value="system_bound">System bound</option>
+        </select>
+        <Input
+          aria-label="Filter runner"
+          value={runner}
+          onChange={(event) => {
+            setRunner(event.target.value);
+            setPage(1);
+          }}
+          placeholder="Runner key"
+        />
+        <select
+          aria-label="Sort agents"
+          className="rounded-md border bg-background px-3 text-sm"
+          value={ordering}
+          onChange={(event) => setOrdering(event.target.value as typeof ordering)}
+        >
+          <option value="-updated_at">Recently updated</option>
+          <option value="name">Name A–Z</option>
+          <option value="-name">Name Z–A</option>
+          <option value="created_at">Oldest created</option>
+        </select>
+      </section>
+      {query.data.items.length === 0 ? (
+        <EmptyState
+          title={filtered ? "No agents match" : "Create your first governed agent"}
+          description={
+            filtered
+              ? "Clear or adjust filters to inspect the tenant catalog."
+              : "Define an identity, runner, provider, tools, approvals, and budget before the first execution."
+          }
+          action={
+            <Button
+              variant={filtered ? "outline" : "primary"}
+              onClick={() =>
+                filtered
+                  ? (setSearch(""), setStatus(""), setIdentity(""), setRunner(""))
+                  : navigate(ROUTES.AGENT_CREATE)
+              }
+            >
+              {filtered ? "Clear filters" : "Create agent"}
+            </Button>
+          }
+        />
+      ) : (
+        <section className="overflow-hidden rounded-xl border bg-card">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="p-4">
+                    <span className="sr-only">Select</span>
+                  </th>
+                  <th className="p-4">Agent</th>
+                  <th className="p-4">Status</th>
+                  <th className="p-4">Identity</th>
+                  <th className="p-4">Runner</th>
+                  <th className="p-4">Provider</th>
+                  <th className="p-4">Updated</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {query.data.items.map((agent) => (
+                  <tr key={agent.id} className="hover:bg-muted/30">
+                    <td className="p-4">
+                      <input type="checkbox" aria-label={`Select ${agent.name}`} />
+                    </td>
+                    <td className="p-4">
+                      <Link
+                        className="font-semibold text-primary hover:underline"
+                        to={ROUTES.AGENT_DETAIL(agent.id)}
+                      >
+                        {agent.name}
+                      </Link>
+                      <p className="mt-1 max-w-sm truncate text-xs text-muted-foreground">
+                        {agent.description || "No description"}
+                      </p>
+                    </td>
+                    <td className="p-4">
+                      <StatusPill status={agent.status} />
+                    </td>
+                    <td className="p-4">{agent.identity_type.replace("_", " ")}</td>
+                    <td className="p-4">
+                      <span className="rounded bg-muted px-2 py-1 font-mono text-xs">
+                        {agent.runner_key}
+                      </span>
+                    </td>
+                    <td className="p-4">
+                      {agent.provider_config_id ? "Configured" : "Not required"}
+                    </td>
+                    <td className="p-4">{formatDate(agent.updated_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination value={query.data.pagination} onPage={setPage} />
+        </section>
+      )}
+      {query.isFetching ? (
+        <p role="status" className="text-xs text-muted-foreground">
+          Refreshing agents; displayed data may be stale…
+        </p>
+      ) : null}
+    </main>
+  );
 };

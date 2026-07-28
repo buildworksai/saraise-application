@@ -1,4 +1,4 @@
-import { apiClient } from '@/services/api-client';
+import { apiClient } from "@/services/api-client";
 import {
   ENDPOINTS,
   type PaginatedRegionalResources,
@@ -12,24 +12,21 @@ import {
   type RegionalResource,
   type RegionalResourceCreate,
   type RegionalResourceUpdate,
-} from '../contracts';
+} from "../contracts";
 
 const withEnvironment = (endpoint: string, environment: string): string =>
   `${endpoint}?environment=${encodeURIComponent(environment)}`;
 
 const correlationHeaders = (): Record<string, string> => ({
-  'X-Correlation-ID': crypto.randomUUID(),
+  "X-Correlation-ID": crypto.randomUUID(),
 });
 
 export const regionalService = {
-  listResources: (
-    search?: string,
-    page = 1,
-  ): Promise<PaginatedRegionalResources> => {
+  listResources: (search?: string, page = 1): Promise<PaginatedRegionalResources> => {
     const parameters = new URLSearchParams({ page: String(page) });
-    if (search) parameters.set('search', search);
+    if (search) parameters.set("search", search);
     return apiClient.get<PaginatedRegionalResources>(
-      `${ENDPOINTS.RESOURCES.LIST}?${parameters.toString()}`,
+      `${ENDPOINTS.RESOURCES.LIST}?${parameters.toString()}`
     );
   },
 
@@ -38,19 +35,16 @@ export const regionalService = {
 
   createResource: (
     data: RegionalResourceCreate,
-    idempotencyKey = crypto.randomUUID(),
+    idempotencyKey = crypto.randomUUID()
   ): Promise<RegionalResource> =>
     apiClient.post<RegionalResource>(ENDPOINTS.RESOURCES.CREATE, data, {
       headers: {
         ...correlationHeaders(),
-        'Idempotency-Key': idempotencyKey,
+        "Idempotency-Key": idempotencyKey,
       },
     }),
 
-  updateResource: (
-    id: string,
-    data: RegionalResourceUpdate,
-  ): Promise<RegionalResource> =>
+  updateResource: (id: string, data: RegionalResourceUpdate): Promise<RegionalResource> =>
     apiClient.patch<RegionalResource>(ENDPOINTS.RESOURCES.UPDATE(id), data, {
       headers: correlationHeaders(),
     }),
@@ -75,62 +69,62 @@ export const regionalService = {
       headers: correlationHeaders(),
     }),
 
-  getConfiguration: (environment: RegionalConfigurationEnvironment): Promise<RegionalConfiguration> =>
+  getConfiguration: (
+    environment: RegionalConfigurationEnvironment
+  ): Promise<RegionalConfiguration> =>
     apiClient.get<RegionalConfiguration>(
-      withEnvironment(ENDPOINTS.CONFIGURATION.CURRENT, environment),
+      withEnvironment(ENDPOINTS.CONFIGURATION.CURRENT, environment)
     ),
 
   getActiveConfiguration: (): Promise<RegionalConfiguration> =>
     apiClient.get<RegionalConfiguration>(ENDPOINTS.CONFIGURATION.ROOT),
 
-  updateConfiguration: (
-    request: RegionalConfigurationWrite,
-  ): Promise<RegionalConfiguration> =>
+  updateConfiguration: (request: RegionalConfigurationWrite): Promise<RegionalConfiguration> =>
     apiClient.put<RegionalConfiguration>(ENDPOINTS.CONFIGURATION.CURRENT, request, {
       headers: correlationHeaders(),
     }),
 
   previewConfiguration: (
     environment: RegionalConfigurationEnvironment,
-    document: RegionalConfigurationDocument,
+    document: RegionalConfigurationDocument
   ): Promise<RegionalConfigurationPreview> =>
     apiClient.post<RegionalConfigurationPreview>(
       ENDPOINTS.CONFIGURATION.PREVIEW,
       { environment, document },
-      { headers: correlationHeaders() },
+      { headers: correlationHeaders() }
     ),
 
   listConfigurationHistory: (
-    environment: RegionalConfigurationEnvironment,
+    environment: RegionalConfigurationEnvironment
   ): Promise<RegionalConfigurationHistoryItem[]> =>
     apiClient.get<RegionalConfigurationHistoryItem[]>(
-      withEnvironment(ENDPOINTS.CONFIGURATION.HISTORY, environment),
+      withEnvironment(ENDPOINTS.CONFIGURATION.HISTORY, environment)
     ),
 
   rollbackConfiguration: (
     environment: RegionalConfigurationEnvironment,
-    version: number,
+    version: number
   ): Promise<RegionalConfiguration> =>
     apiClient.post<RegionalConfiguration>(
       ENDPOINTS.CONFIGURATION.ROLLBACK,
       { environment, version },
-      { headers: correlationHeaders() },
+      { headers: correlationHeaders() }
     ),
 
   importConfiguration: (
     environment: RegionalConfigurationEnvironment,
-    document: RegionalConfigurationDocument,
+    document: RegionalConfigurationDocument
   ): Promise<RegionalConfiguration> =>
     apiClient.post<RegionalConfiguration>(
       ENDPOINTS.CONFIGURATION.IMPORT,
       { environment, document },
-      { headers: correlationHeaders() },
+      { headers: correlationHeaders() }
     ),
 
   exportConfiguration: (
-    environment: RegionalConfigurationEnvironment,
+    environment: RegionalConfigurationEnvironment
   ): Promise<RegionalConfigurationExport> =>
     apiClient.get<RegionalConfigurationExport>(
-      withEnvironment(ENDPOINTS.CONFIGURATION.EXPORT, environment),
+      withEnvironment(ENDPOINTS.CONFIGURATION.EXPORT, environment)
     ),
 };

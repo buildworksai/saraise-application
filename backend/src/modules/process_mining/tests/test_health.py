@@ -1,5 +1,11 @@
 """Readiness probes are comprehensive and sanitized."""
-from src.modules.process_mining.health import DOMAIN_TABLES, adapter_readiness_probe, database_readiness_probe, get_module_health
+
+from src.modules.process_mining.health import (
+    DOMAIN_TABLES,
+    adapter_readiness_probe,
+    database_readiness_probe,
+    get_module_health,
+)
 
 
 def test_adapter_probe_requires_real_local_algorithm():

@@ -4,7 +4,9 @@ export type UUID = string;
 export type ISODateTime = string;
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonArray = readonly JsonValue[];
-export interface JsonObject { readonly [key: string]: JsonValue; }
+export interface JsonObject {
+  readonly [key: string]: JsonValue;
+}
 export type JsonValue = JsonPrimitive | JsonObject | JsonArray;
 
 export type WorkflowType = "approval" | "state_machine" | "sequential" | "parallel" | "conditional";
@@ -12,7 +14,13 @@ export type TriggerType = "manual" | "event" | "scheduled";
 export type WorkflowStatus = "draft" | "published" | "archived";
 export type StepType = "action" | "approval" | "notification" | "decision";
 export type TimeoutAction = "fail" | "notify" | "escalate" | "cancel";
-export type InstanceState = "pending" | "running" | "waiting" | "completed" | "failed" | "cancelled";
+export type InstanceState =
+  | "pending"
+  | "running"
+  | "waiting"
+  | "completed"
+  | "failed"
+  | "cancelled";
 export type TaskStatus = "pending" | "completed" | "rejected" | "cancelled" | "expired";
 export type AssignmentKind = "user" | "role";
 export type CapabilityAvailability = "available" | "locked" | "setup_required" | "degraded";
@@ -45,7 +53,11 @@ export interface DecisionStepConfig {
   readonly false_step_key: string;
 }
 
-export type WorkflowStepConfig = ActionStepConfig | ApprovalStepConfig | NotificationStepConfig | DecisionStepConfig;
+export type WorkflowStepConfig =
+  | ActionStepConfig
+  | ApprovalStepConfig
+  | NotificationStepConfig
+  | DecisionStepConfig;
 
 export interface WorkflowStepReadDTO {
   readonly id: UUID;
@@ -156,8 +168,12 @@ export interface DefinitionValidationResultDTO {
   readonly warnings: readonly ValidationIssueDTO[];
 }
 
-export interface WorkflowPublishDTO { readonly transition_key: string; }
-export interface WorkflowCloneDTO { readonly name?: string; }
+export interface WorkflowPublishDTO {
+  readonly transition_key: string;
+}
+export interface WorkflowCloneDTO {
+  readonly name?: string;
+}
 
 export interface WorkflowInstanceListDTO {
   readonly id: UUID;
@@ -223,9 +239,19 @@ export interface WorkflowInstanceStartDTO {
   readonly priority?: number;
 }
 
-export interface WorkflowInstanceCancelDTO { readonly transition_key: string; readonly reason?: string; }
-export interface WorkflowTaskCompleteDTO { readonly meta_data: JsonObject; readonly transition_key: string; }
-export interface WorkflowTaskRejectDTO { readonly reason: string; readonly meta_data: JsonObject; readonly transition_key: string; }
+export interface WorkflowInstanceCancelDTO {
+  readonly transition_key: string;
+  readonly reason?: string;
+}
+export interface WorkflowTaskCompleteDTO {
+  readonly meta_data: JsonObject;
+  readonly transition_key: string;
+}
+export interface WorkflowTaskRejectDTO {
+  readonly reason: string;
+  readonly meta_data: JsonObject;
+  readonly transition_key: string;
+}
 
 export interface PaginationMeta {
   readonly count: number;
@@ -236,12 +262,36 @@ export interface PaginationMeta {
   readonly has_previous: boolean;
 }
 
-export interface ResponseMeta { readonly correlation_id: string; readonly timestamp: string; readonly pagination?: PaginationMeta; }
-export interface GovernedEnvelope<T> { readonly data: T; readonly meta: ResponseMeta; }
-export interface PaginatedResult<T> { readonly items: readonly T[]; readonly pagination: PaginationMeta; readonly correlationId: string; readonly receivedAt: string; }
-export interface ApiFieldError { readonly field: string; readonly code: string; readonly message: string; }
+export interface ResponseMeta {
+  readonly correlation_id: string;
+  readonly timestamp: string;
+  readonly pagination?: PaginationMeta;
+}
+export interface GovernedEnvelope<T> {
+  readonly data: T;
+  readonly meta: ResponseMeta;
+}
+export interface PaginatedResult<T> {
+  readonly items: readonly T[];
+  readonly pagination: PaginationMeta;
+  readonly correlationId: string;
+  readonly receivedAt: string;
+}
+export interface ApiFieldError {
+  readonly field: string;
+  readonly code: string;
+  readonly message: string;
+}
 export interface StableApiErrorBody {
-  readonly error: { readonly code: string; readonly message: string; readonly detail: { readonly field_errors?: readonly ApiFieldError[]; readonly retryable?: boolean; }; readonly correlation_id: string; };
+  readonly error: {
+    readonly code: string;
+    readonly message: string;
+    readonly detail: {
+      readonly field_errors?: readonly ApiFieldError[];
+      readonly retryable?: boolean;
+    };
+    readonly correlation_id: string;
+  };
 }
 
 export interface WorkflowConfigurationDocument {
@@ -327,11 +377,16 @@ export interface WorkflowConfigurationDocument {
     readonly minimum_due_time_units: number;
     readonly reject_reason_max_length: number;
   };
-  readonly feature_flags: Readonly<Record<string, {
-    readonly enabled: boolean;
-    readonly roles: readonly string[];
-    readonly cohorts: readonly string[];
-  }>>;
+  readonly feature_flags: Readonly<
+    Record<
+      string,
+      {
+        readonly enabled: boolean;
+        readonly roles: readonly string[];
+        readonly cohorts: readonly string[];
+      }
+    >
+  >;
 }
 
 export interface WorkflowConfigurationDTO {
@@ -373,22 +428,105 @@ export interface WorkflowConfigurationExportDTO {
   readonly document: WorkflowConfigurationDocument;
 }
 
-export interface PageFilters { readonly page?: number; readonly page_size?: number; readonly search?: string; }
-export type WorkflowOrdering = "name" | "-name" | "version" | "-version" | "created_at" | "-created_at" | "updated_at" | "-updated_at";
-export interface WorkflowFilters extends PageFilters { readonly status?: WorkflowStatus; readonly workflow_type?: WorkflowType; readonly trigger_type?: TriggerType; readonly key?: string; readonly created_by?: UUID; readonly updated_after?: ISODateTime; readonly ordering?: WorkflowOrdering; }
-export type InstanceOrdering = "priority" | "-priority" | "created_at" | "-created_at" | "completed_at" | "-completed_at";
-export interface InstanceFilters extends PageFilters { readonly workflow_id?: UUID; readonly state?: InstanceState; readonly entity_type?: string; readonly entity_id?: UUID; readonly started_by?: UUID; readonly created_after?: ISODateTime; readonly created_before?: ISODateTime; readonly ordering?: InstanceOrdering; }
+export interface PageFilters {
+  readonly page?: number;
+  readonly page_size?: number;
+  readonly search?: string;
+}
+export type WorkflowOrdering =
+  | "name"
+  | "-name"
+  | "version"
+  | "-version"
+  | "created_at"
+  | "-created_at"
+  | "updated_at"
+  | "-updated_at";
+export interface WorkflowFilters extends PageFilters {
+  readonly status?: WorkflowStatus;
+  readonly workflow_type?: WorkflowType;
+  readonly trigger_type?: TriggerType;
+  readonly key?: string;
+  readonly created_by?: UUID;
+  readonly updated_after?: ISODateTime;
+  readonly ordering?: WorkflowOrdering;
+}
+export type InstanceOrdering =
+  | "priority"
+  | "-priority"
+  | "created_at"
+  | "-created_at"
+  | "completed_at"
+  | "-completed_at";
+export interface InstanceFilters extends PageFilters {
+  readonly workflow_id?: UUID;
+  readonly state?: InstanceState;
+  readonly entity_type?: string;
+  readonly entity_id?: UUID;
+  readonly started_by?: UUID;
+  readonly created_after?: ISODateTime;
+  readonly created_before?: ISODateTime;
+  readonly ordering?: InstanceOrdering;
+}
 export type TaskOrdering = "due_date" | "-due_date" | "created_at" | "-created_at";
-export interface TaskFilters extends PageFilters { readonly status?: TaskStatus; readonly workflow_id?: UUID; readonly instance_id?: UUID; readonly assignment_kind?: AssignmentKind; readonly overdue?: boolean; readonly due_before?: ISODateTime; readonly scope?: "mine" | "all"; readonly ordering?: TaskOrdering; }
+export interface TaskFilters extends PageFilters {
+  readonly status?: TaskStatus;
+  readonly workflow_id?: UUID;
+  readonly instance_id?: UUID;
+  readonly assignment_kind?: AssignmentKind;
+  readonly overdue?: boolean;
+  readonly due_before?: ISODateTime;
+  readonly scope?: "mine" | "all";
+  readonly ordering?: TaskOrdering;
+}
 
 export type UISchemaField =
-  | { readonly kind: "text"; readonly key: string; readonly label: string; readonly required: boolean; readonly description?: string; readonly placeholder?: string }
-  | { readonly kind: "number"; readonly key: string; readonly label: string; readonly required: boolean; readonly description?: string; readonly minimum?: number; readonly maximum?: number }
-  | { readonly kind: "boolean"; readonly key: string; readonly label: string; readonly required: boolean; readonly description?: string }
-  | { readonly kind: "select"; readonly key: string; readonly label: string; readonly required: boolean; readonly description?: string; readonly options: readonly { readonly value: string; readonly label: string }[] }
-  | { readonly kind: "lookup"; readonly key: string; readonly label: string; readonly required: boolean; readonly description?: string; readonly lookup_key: string };
+  | {
+      readonly kind: "text";
+      readonly key: string;
+      readonly label: string;
+      readonly required: boolean;
+      readonly description?: string;
+      readonly placeholder?: string;
+    }
+  | {
+      readonly kind: "number";
+      readonly key: string;
+      readonly label: string;
+      readonly required: boolean;
+      readonly description?: string;
+      readonly minimum?: number;
+      readonly maximum?: number;
+    }
+  | {
+      readonly kind: "boolean";
+      readonly key: string;
+      readonly label: string;
+      readonly required: boolean;
+      readonly description?: string;
+    }
+  | {
+      readonly kind: "select";
+      readonly key: string;
+      readonly label: string;
+      readonly required: boolean;
+      readonly description?: string;
+      readonly options: readonly { readonly value: string; readonly label: string }[];
+    }
+  | {
+      readonly kind: "lookup";
+      readonly key: string;
+      readonly label: string;
+      readonly required: boolean;
+      readonly description?: string;
+      readonly lookup_key: string;
+    };
 
-export interface CapabilityHealth { readonly key: string; readonly availability: CapabilityAvailability; readonly reason: string | null; }
+export interface CapabilityHealth {
+  readonly key: string;
+  readonly availability: CapabilityAvailability;
+  readonly reason: string | null;
+}
 export interface HandlerDescriptorDTO extends CapabilityHealth {
   readonly display_name: string;
   readonly description: string;
@@ -404,14 +542,32 @@ export interface HandlerDescriptorDTO extends CapabilityHealth {
   readonly idempotent: boolean;
   readonly network_access: boolean;
 }
-export interface ConditionDescriptorDTO extends CapabilityHealth { readonly display_name: string; readonly description: string; readonly owning_module: string; readonly schema_version: string; readonly descriptor_fingerprint: string; readonly ui_schema: readonly UISchemaField[]; }
-export interface SubjectResolverDescriptorDTO extends CapabilityHealth { readonly entity_type: string; readonly display_name: string; readonly owning_module: string; }
-export interface LookupOptionDTO { readonly id: UUID; readonly label: string; readonly description: string | null; readonly kind: string; }
+export interface ConditionDescriptorDTO extends CapabilityHealth {
+  readonly display_name: string;
+  readonly description: string;
+  readonly owning_module: string;
+  readonly schema_version: string;
+  readonly descriptor_fingerprint: string;
+  readonly ui_schema: readonly UISchemaField[];
+}
+export interface SubjectResolverDescriptorDTO extends CapabilityHealth {
+  readonly entity_type: string;
+  readonly display_name: string;
+  readonly owning_module: string;
+}
+export interface LookupOptionDTO {
+  readonly id: UUID;
+  readonly label: string;
+  readonly description: string | null;
+  readonly kind: string;
+}
 
 export const MODULE_API_PREFIX = "/api/v2/workflow-automation";
 export const ENDPOINTS = {
   WORKFLOWS: {
-    LIST: `${MODULE_API_PREFIX}/workflows/`, CREATE: `${MODULE_API_PREFIX}/workflows/`, VALIDATE: `${MODULE_API_PREFIX}/workflows/validate/`,
+    LIST: `${MODULE_API_PREFIX}/workflows/`,
+    CREATE: `${MODULE_API_PREFIX}/workflows/`,
+    VALIDATE: `${MODULE_API_PREFIX}/workflows/validate/`,
     DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/workflows/${id}/` as const,
     UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/workflows/${id}/` as const,
     DELETE: (id: UUID) => `${MODULE_API_PREFIX}/workflows/${id}/` as const,
@@ -419,9 +575,26 @@ export const ENDPOINTS = {
     ARCHIVE: (id: UUID) => `${MODULE_API_PREFIX}/workflows/${id}/archive/` as const,
     CLONE: (id: UUID) => `${MODULE_API_PREFIX}/workflows/${id}/clone/` as const,
   },
-  INSTANCES: { LIST: `${MODULE_API_PREFIX}/instances/`, START: `${MODULE_API_PREFIX}/instances/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/instances/${id}/` as const, CANCEL: (id: UUID) => `${MODULE_API_PREFIX}/instances/${id}/cancel/` as const },
-  TASKS: { LIST: `${MODULE_API_PREFIX}/tasks/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/tasks/${id}/` as const, COMPLETE: (id: UUID) => `${MODULE_API_PREFIX}/tasks/${id}/complete/` as const, REJECT: (id: UUID) => `${MODULE_API_PREFIX}/tasks/${id}/reject/` as const },
-  CATALOG: { ACTIONS: `${MODULE_API_PREFIX}/catalog/actions/`, CONDITIONS: `${MODULE_API_PREFIX}/catalog/conditions/`, SUBJECTS: `${MODULE_API_PREFIX}/catalog/subjects/`, ASSIGNEES: `${MODULE_API_PREFIX}/catalog/assignees/`, LOOKUP: (key: string) => `${MODULE_API_PREFIX}/catalog/lookups/${encodeURIComponent(key)}/` as const },
+  INSTANCES: {
+    LIST: `${MODULE_API_PREFIX}/instances/`,
+    START: `${MODULE_API_PREFIX}/instances/`,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/instances/${id}/` as const,
+    CANCEL: (id: UUID) => `${MODULE_API_PREFIX}/instances/${id}/cancel/` as const,
+  },
+  TASKS: {
+    LIST: `${MODULE_API_PREFIX}/tasks/`,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/tasks/${id}/` as const,
+    COMPLETE: (id: UUID) => `${MODULE_API_PREFIX}/tasks/${id}/complete/` as const,
+    REJECT: (id: UUID) => `${MODULE_API_PREFIX}/tasks/${id}/reject/` as const,
+  },
+  CATALOG: {
+    ACTIONS: `${MODULE_API_PREFIX}/catalog/actions/`,
+    CONDITIONS: `${MODULE_API_PREFIX}/catalog/conditions/`,
+    SUBJECTS: `${MODULE_API_PREFIX}/catalog/subjects/`,
+    ASSIGNEES: `${MODULE_API_PREFIX}/catalog/assignees/`,
+    LOOKUP: (key: string) =>
+      `${MODULE_API_PREFIX}/catalog/lookups/${encodeURIComponent(key)}/` as const,
+  },
   CONFIGURATION: {
     GET: `${MODULE_API_PREFIX}/configuration/`,
     UPDATE: `${MODULE_API_PREFIX}/configuration/current/`,
@@ -434,8 +607,13 @@ export const ENDPOINTS = {
 } as const;
 
 export const ROUTES = {
-  WORKFLOWS: "/workflow-automation/workflows", WORKFLOW_CREATE: "/workflow-automation/workflows/new", WORKFLOW_DETAIL: (id: string) => `/workflow-automation/workflows/${id}` as const, WORKFLOW_EDIT: (id: string) => `/workflow-automation/workflows/${id}/edit` as const,
-  INSTANCES: "/workflow-automation/instances", INSTANCE_DETAIL: (id: string) => `/workflow-automation/instances/${id}` as const,
-  TASKS: "/workflow-automation/tasks", TASK_DETAIL: (id: string) => `/workflow-automation/tasks/${id}` as const,
+  WORKFLOWS: "/workflow-automation/workflows",
+  WORKFLOW_CREATE: "/workflow-automation/workflows/new",
+  WORKFLOW_DETAIL: (id: string) => `/workflow-automation/workflows/${id}` as const,
+  WORKFLOW_EDIT: (id: string) => `/workflow-automation/workflows/${id}/edit` as const,
+  INSTANCES: "/workflow-automation/instances",
+  INSTANCE_DETAIL: (id: string) => `/workflow-automation/instances/${id}` as const,
+  TASKS: "/workflow-automation/tasks",
+  TASK_DETAIL: (id: string) => `/workflow-automation/tasks/${id}` as const,
   CONFIGURATION: "/workflow-automation/configuration",
 } as const;

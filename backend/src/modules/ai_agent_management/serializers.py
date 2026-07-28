@@ -76,8 +76,15 @@ class AgentListSerializer(serializers.ModelSerializer[Agent]):
     class Meta:
         model = Agent
         fields = (
-            "id", "name", "description", "identity_type", "runner_key",
-            "provider_config_id", "status", "created_at", "updated_at",
+            "id",
+            "name",
+            "description",
+            "identity_type",
+            "runner_key",
+            "provider_config_id",
+            "status",
+            "created_at",
+            "updated_at",
             "allowed_actions",
         )
 
@@ -99,17 +106,36 @@ class AgentDetailSerializer(serializers.ModelSerializer[Agent]):
     class Meta:
         model = Agent
         fields = (
-            "id", "name", "description", "identity_type", "subject_id",
-            "runner_key", "provider_config_id", "config", "status",
-            "transition_history", "created_at", "updated_at", "deleted_at",
-            "allowed_actions", "runner_status",
+            "id",
+            "name",
+            "description",
+            "identity_type",
+            "subject_id",
+            "runner_key",
+            "provider_config_id",
+            "config",
+            "status",
+            "transition_history",
+            "created_at",
+            "updated_at",
+            "deleted_at",
+            "allowed_actions",
+            "runner_status",
         )
         read_only_fields = fields
 
     def get_config(self, obj: Agent) -> dict[str, Any]:
         allowed = {
-            "schema_version", "budget", "cost_ceiling", "approval", "require_approval", "tools",
-            "model", "temperature", "max_tokens", "version",
+            "schema_version",
+            "budget",
+            "cost_ceiling",
+            "approval",
+            "require_approval",
+            "tools",
+            "model",
+            "temperature",
+            "max_tokens",
+            "version",
         }
         return {key: value for key, value in obj.config.items() if key in allowed}
 
@@ -188,8 +214,15 @@ class AgentExecutionListSerializer(serializers.ModelSerializer[AgentExecution]):
     class Meta:
         model = AgentExecution
         fields = (
-            "id", "agent_id", "async_job_id", "state", "started_at",
-            "completed_at", "error_code", "created_at", "updated_at",
+            "id",
+            "agent_id",
+            "async_job_id",
+            "state",
+            "started_at",
+            "completed_at",
+            "error_code",
+            "created_at",
+            "updated_at",
             "allowed_actions",
         )
 
@@ -210,9 +243,19 @@ class AgentExecutionDetailSerializer(serializers.ModelSerializer[AgentExecution]
     class Meta:
         model = AgentExecution
         fields = (
-            "id", "agent_id", "async_job_id", "state", "transition_history",
-            "initiating_actor_id", "started_at", "completed_at", "error_code",
-            "error_message", "provider_config_id", "created_at", "updated_at",
+            "id",
+            "agent_id",
+            "async_job_id",
+            "state",
+            "transition_history",
+            "initiating_actor_id",
+            "started_at",
+            "completed_at",
+            "error_code",
+            "error_message",
+            "provider_config_id",
+            "created_at",
+            "updated_at",
             "allowed_actions",
         )
         read_only_fields = fields
@@ -272,10 +315,22 @@ class ApprovalRequestSerializer(serializers.ModelSerializer[ApprovalRequest]):
     class Meta:
         model = ApprovalRequest
         fields = (
-            "id", "tool_id", "agent_execution_id", "tool_invocation_id",
-            "requested_by", "requested_for", "approver_id", "status",
-            "transition_history", "justification", "rejection_reason",
-            "requested_at", "expires_at", "decided_at", "created_at", "updated_at",
+            "id",
+            "tool_id",
+            "agent_execution_id",
+            "tool_invocation_id",
+            "requested_by",
+            "requested_for",
+            "approver_id",
+            "status",
+            "transition_history",
+            "justification",
+            "rejection_reason",
+            "requested_at",
+            "expires_at",
+            "decided_at",
+            "created_at",
+            "updated_at",
             "allowed_actions",
         )
         read_only_fields = fields
@@ -303,7 +358,9 @@ class ToolWriteSerializer(ClosedSerializer):
     required_permissions = StrictJSONField(expected_type=list, required=False)
     input_schema = StrictJSONField(required=False)
     output_schema = StrictJSONField(required=False)
-    side_effect_class = serializers.ChoiceField(choices=("read_only", "workflow_transition", "data_mutation", "external_integration"), required=False)
+    side_effect_class = serializers.ChoiceField(
+        choices=("read_only", "workflow_transition", "data_mutation", "external_integration"), required=False
+    )
     is_active = serializers.BooleanField(required=False)
     metadata = StrictJSONField(required=False)
 
@@ -340,7 +397,18 @@ class SecretRotateSerializer(ClosedSerializer):
 class SecretMetadataSerializer(serializers.ModelSerializer[Secret]):
     class Meta:
         model = Secret
-        fields = ("id", "name", "description", "secret_type", "is_active", "expires_at", "last_rotated_at", "rotation_interval_days", "created_at", "updated_at")
+        fields = (
+            "id",
+            "name",
+            "description",
+            "secret_type",
+            "is_active",
+            "expires_at",
+            "last_rotated_at",
+            "rotation_interval_days",
+            "created_at",
+            "updated_at",
+        )
         read_only_fields = fields
 
 
@@ -366,23 +434,43 @@ class CostRecalculationSerializer(ClosedSerializer):
     idempotency_key = serializers.CharField(max_length=255)
 
 
-def evidence_serializer(name: str, model: type, *, exclude: tuple[str, ...] = ("tenant_id",)) -> type[serializers.ModelSerializer]:
-    meta = type("Meta", (), {"model": model, "exclude": exclude, "read_only_fields": tuple(field.name for field in model._meta.fields)})
+def evidence_serializer(
+    name: str, model: type, *, exclude: tuple[str, ...] = ("tenant_id",)
+) -> type[serializers.ModelSerializer]:
+    meta = type(
+        "Meta",
+        (),
+        {"model": model, "exclude": exclude, "read_only_fields": tuple(field.name for field in model._meta.fields)},
+    )
     return type(name, (serializers.ModelSerializer,), {"Meta": meta, "__module__": __name__})
 
 
 SoDPolicySerializer = evidence_serializer("SoDPolicySerializer", SoDPolicy)
 SoDViolationSerializer = evidence_serializer("SoDViolationSerializer", SoDViolation)
 ToolSerializer = evidence_serializer("ToolSerializer", Tool)
+
+
 class ToolInvocationSerializer(serializers.ModelSerializer[ToolInvocation]):
     class Meta:
         model = ToolInvocation
         fields = (
-            "id", "tool_id", "agent_execution_id", "approval_request_id", "status",
-            "transition_history", "error_code", "error_message", "invoked_at",
-            "completed_at", "duration_ms", "created_at", "updated_at",
+            "id",
+            "tool_id",
+            "agent_execution_id",
+            "approval_request_id",
+            "status",
+            "transition_history",
+            "error_code",
+            "error_message",
+            "invoked_at",
+            "completed_at",
+            "duration_ms",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
+
+
 EgressRuleSerializer = evidence_serializer("EgressRuleSerializer", EgressRule)
 EgressRequestSerializer = evidence_serializer("EgressRequestSerializer", EgressRequest)
 SecretAccessSerializer = evidence_serializer("SecretAccessSerializer", SecretAccess)
@@ -391,6 +479,8 @@ QuotaUsageSerializer = evidence_serializer("QuotaUsageSerializer", QuotaUsage)
 ShardSaturationSerializer = evidence_serializer("ShardSaturationSerializer", ShardSaturation)
 KillSwitchSerializer = evidence_serializer("KillSwitchSerializer", KillSwitch)
 TokenUsageSerializer = evidence_serializer("TokenUsageSerializer", TokenUsage)
+
+
 class CostRecordSerializer(serializers.ModelSerializer[CostRecord]):
     pricing_available = serializers.SerializerMethodField()
 
@@ -403,8 +493,12 @@ class CostRecordSerializer(serializers.ModelSerializer[CostRecord]):
         # A record is only persisted after versioned pricing resolves; unknown
         # pricing returns 503/unavailable and creates no cost record.
         return bool(obj.pricing_version)
+
+
 CostSummarySerializer = evidence_serializer("CostSummarySerializer", CostSummary)
 AuditEventSerializer = evidence_serializer("AuditEventSerializer", AuditEvent)
+
+
 class AuditTrailSerializer(serializers.ModelSerializer[AuditTrail]):
     events = serializers.SerializerMethodField()
     completed_timestamp = serializers.SerializerMethodField()
@@ -414,16 +508,24 @@ class AuditTrailSerializer(serializers.ModelSerializer[AuditTrail]):
     class Meta:
         model = AuditTrail
         fields = (
-            "id", "request_id", "correlation_id", "agent_execution_id",
-            "initiating_principal", "request_timestamp", "completed_timestamp",
-            "final_outcome", "summary", "events", "created_at", "updated_at",
+            "id",
+            "request_id",
+            "correlation_id",
+            "agent_execution_id",
+            "initiating_principal",
+            "request_timestamp",
+            "completed_timestamp",
+            "final_outcome",
+            "summary",
+            "events",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 
     def get_events(self, obj: AuditTrail) -> list[dict[str, Any]]:
         events = [
-            link.audit_event
-            for link in obj.ordered_events.select_related("audit_event").order_by("position", "id")
+            link.audit_event for link in obj.ordered_events.select_related("audit_event").order_by("position", "id")
         ]
         return AuditEventSerializer(events, many=True).data
 
@@ -449,8 +551,14 @@ class AsyncJobSerializer(serializers.ModelSerializer[AsyncJob]):
     class Meta:
         model = AsyncJob
         fields = (
-            "id", "status", "attempts",
-            "correlation_id", "started_at", "completed_at", "created_at", "updated_at",
+            "id",
+            "status",
+            "attempts",
+            "correlation_id",
+            "started_at",
+            "completed_at",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 
@@ -500,6 +608,7 @@ class ConfigurationRollbackSerializer(ClosedSerializer):
         default="production",
     )
     target_version = serializers.IntegerField(min_value=1)
+
 
 # Compatibility aliases for legacy imports while v1 is phased out.
 AgentSerializer = AgentDetailSerializer

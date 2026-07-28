@@ -16,7 +16,9 @@ from ..extensions import (
 )
 
 
-def _invocation(handler_key: str, *, config: dict[str, object], input_data: dict[str, object]) -> WorkflowActionInvocation:
+def _invocation(
+    handler_key: str, *, config: dict[str, object], input_data: dict[str, object]
+) -> WorkflowActionInvocation:
     handler = action_registry.get(handler_key) if handler_key in action_registry.keys() else None
     descriptor_version = handler.descriptor.contract_version if handler else "1.0"
     descriptor_fingerprint = handler.descriptor.contract_fingerprint if handler else "missing"

@@ -1,1 +1,1 @@
-export { ComplianceEvidenceDetailPage } from './domain-pages';
+export { ComplianceEvidenceDetailPage } from "./domain-pages";

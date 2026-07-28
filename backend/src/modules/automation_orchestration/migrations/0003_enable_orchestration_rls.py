@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 TENANT_TABLES = (
     "automation_orchestration_definitions",
     "automation_orchestration_nodes",
@@ -43,4 +42,3 @@ class Migration(migrations.Migration):
     ]
 
     operations = [migrations.RunPython(enable_orchestration_rls, disable_orchestration_rls)]
-

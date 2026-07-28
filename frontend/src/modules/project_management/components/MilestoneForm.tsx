@@ -1,1 +1,1 @@
-export {MilestoneForm} from './ProjectForms';
+export { MilestoneForm } from "./ProjectForms";

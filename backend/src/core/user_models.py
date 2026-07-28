@@ -108,7 +108,9 @@ class UserProfile(models.Model):
                 if mode in ["self-hosted", "development"]:
                     from src.core.licensing.models import Organization
 
-                    if not Organization.objects.filter(id=self.tenant_id).exists():
+                    if not Organization.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
+                        id=self.tenant_id
+                    ).exists():
                         errors["tenant_id"] = (
                             f"tenant_id '{self.tenant_id}' does not reference an existing organization in {mode} mode."
                         )
@@ -116,7 +118,9 @@ class UserProfile(models.Model):
                     # In SaaS mode, tenant_id must reference Tenant
                     from src.modules.tenant_management.models import Tenant
 
-                    if not Tenant.objects.filter(id=self.tenant_id).exists():
+                    if not Tenant.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
+                        id=self.tenant_id
+                    ).exists():
                         errors["tenant_id"] = f"tenant_id '{self.tenant_id}' does not reference an existing tenant."
             except Exception as e:
                 errors["tenant_id"] = f"Unable to validate tenant_id: {e}"

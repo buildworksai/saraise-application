@@ -12,8 +12,8 @@ class MetadataModelingConfig(AppConfig):
     def ready(self) -> None:
         # Importing registers the checks through Django's check registry.
         from . import registry  # noqa: F401
-        from .state_machine import register_entity_state_machine
         from .handlers import register_handlers
+        from .state_machine import register_entity_state_machine
 
         register_entity_state_machine()
         register_handlers()

@@ -1009,6 +1009,61 @@ class DjangoEmailDeliveryGateway:
             )
 
 
+class LocalDevelopmentEmailDeliveryGateway:
+    """Local transport with deterministic reconciliation evidence for development."""
+
+    schema_version = SPI_VERSION
+    gateway_key = "local_development"
+    reconciliation_supported = True
+
+    def __init__(self) -> None:
+        self._receipts: dict[str, DeliveryReceipt] = {}
+        self._lock = threading.RLock()
+
+    def submit(
+        self,
+        message: DeliveryMessage,
+        idempotency_key: str,
+        correlation_id: str,
+    ) -> OperationResult[DeliveryReceipt]:
+        if not _SAFE_IDENTIFIER.fullmatch(idempotency_key) or not _SAFE_IDENTIFIER.fullmatch(correlation_id):
+            raise ValueError("idempotency and correlation identifiers must be bounded and safe")
+        digest = hashlib.sha256(
+            f"{message.tenant_id}:{message.recipient}:{idempotency_key}:{correlation_id}".encode("utf-8")
+        ).hexdigest()
+        provider_message_id = f"local-dev-{digest[:32]}"
+        receipt = DeliveryReceipt(
+            provider_message_id=provider_message_id,
+            gateway_key=self.gateway_key,
+            acknowledgement="provider_accepted",
+            accepted_at=timezone.now(),
+            evidence={"transport": "local_development", "reconciliable": True},
+        )
+        with self._lock:
+            self._receipts[provider_message_id] = receipt
+        return OperationResult.success(receipt, code="provider_accepted")
+
+    def lookup(self, provider_message_id: str) -> OperationResult[DeliveryReceipt]:
+        if not provider_message_id or len(provider_message_id) > 255:
+            raise ValueError("provider_message_id is invalid")
+        with self._lock:
+            receipt = self._receipts.get(provider_message_id)
+        if receipt is None:
+            return OperationResult.failure(
+                "provider_message_not_found",
+                retryable=True,
+                detail="Local development gateway has no delivery evidence for this message",
+            )
+        return OperationResult.success(receipt, code="provider_accepted")
+
+    def health(self) -> DependencyHealth:
+        return self.health_for_tenant(None)
+
+    def health_for_tenant(self, tenant_id: UUID | None) -> DependencyHealth:
+        del tenant_id
+        return DependencyHealth(True, "ready", timezone.now(), "not_applicable", True)
+
+
 audience_resolver_registry: ExtensionRegistry[AudienceResolver] = ExtensionRegistry("audience resolver")
 renderer_registry: ExtensionRegistry[EmailRenderer] = ExtensionRegistry("email renderer")
 delivery_gateway_registry: ExtensionRegistry[EmailDeliveryGateway] = ExtensionRegistry("delivery gateway")
@@ -1019,16 +1074,20 @@ provider_event_verifier_registry: ExtensionRegistry[ProviderEventVerifier] = Ext
 _INLINE_RESOLVER = InlineAudienceResolver()
 _DJANGO_RENDERER = DjangoTemplateEmailRenderer()
 _DJANGO_GATEWAY: DjangoEmailDeliveryGateway | None = None
+_LOCAL_DEVELOPMENT_GATEWAY: LocalDevelopmentEmailDeliveryGateway | None = None
 
 
 def register_builtin_adapters() -> None:
     """Install OSS adapters idempotently without permitting replacement."""
-    global _DJANGO_GATEWAY
+    global _DJANGO_GATEWAY, _LOCAL_DEVELOPMENT_GATEWAY
     audience_resolver_registry.register(_INLINE_RESOLVER.resolver_key, _INLINE_RESOLVER)
     renderer_registry.register(_DJANGO_RENDERER.renderer_key, _DJANGO_RENDERER)
     if _DJANGO_GATEWAY is None:
         _DJANGO_GATEWAY = DjangoEmailDeliveryGateway()
     delivery_gateway_registry.register(_DJANGO_GATEWAY.gateway_key, _DJANGO_GATEWAY)
+    if _LOCAL_DEVELOPMENT_GATEWAY is None:
+        _LOCAL_DEVELOPMENT_GATEWAY = LocalDevelopmentEmailDeliveryGateway()
+    delivery_gateway_registry.register(_LOCAL_DEVELOPMENT_GATEWAY.gateway_key, _LOCAL_DEVELOPMENT_GATEWAY)
 
 
 def get_audience_resolver(key: str = "manual") -> AudienceResolver:

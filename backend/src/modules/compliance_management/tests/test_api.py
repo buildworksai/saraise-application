@@ -52,7 +52,15 @@ def test_framework_create_and_paginated_list_are_governed(authenticated_tenant_a
 def test_unknown_and_client_lifecycle_fields_are_rejected(authenticated_tenant_a_client):
     response = authenticated_tenant_a_client.post(
         f"{BASE}/frameworks/",
-        {"code": "FW", "name": "Framework", "version": "1", "category": "General", "source_kind": "custom", "status": "active", "tenant_id": str(uuid.uuid4())},
+        {
+            "code": "FW",
+            "name": "Framework",
+            "version": "1",
+            "category": "General",
+            "source_kind": "custom",
+            "status": "active",
+            "tenant_id": str(uuid.uuid4()),
+        },
         format="json",
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
@@ -67,7 +75,17 @@ def test_foreign_detail_is_exact_404(authenticated_tenant_a_client, tenant_b):
 
 
 def test_endpoint_matrix_routes_resolve_without_legacy_prefix(authenticated_tenant_a_client):
-    for path in ("dashboard/", "frameworks/", "requirements/", "policies/", "mappings/", "assessments/", "evidence/", "configuration/", "activity/"):
+    for path in (
+        "dashboard/",
+        "frameworks/",
+        "requirements/",
+        "policies/",
+        "mappings/",
+        "assessments/",
+        "evidence/",
+        "configuration/",
+        "activity/",
+    ):
         response = authenticated_tenant_a_client.get(f"{BASE}/{path}")
         assert response.status_code != status.HTTP_404_NOT_FOUND, path
     assert APIClient().get("/api/v1/compliance-management/policies/").status_code == status.HTTP_404_NOT_FOUND

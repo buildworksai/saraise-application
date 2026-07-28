@@ -18,11 +18,7 @@ from src.modules.master_data_management.models import (
     MatchingRuleVersion,
     MergeReversal,
 )
-from src.modules.master_data_management.services import (
-    MatchingService,
-    MergeService,
-    QualityRuleService,
-)
+from src.modules.master_data_management.services import MatchingService, MergeService, QualityRuleService
 
 from .factories import (
     actor_id,

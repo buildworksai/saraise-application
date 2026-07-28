@@ -15,56 +15,56 @@
 // =============================================================================
 
 /** SubscriptionPlan entity */
-export type SubscriptionPlan = {
+export interface SubscriptionPlan {
   id: string;
   name: string;
   description?: string;
   price: string;
-  billing_cycle: 'monthly' | 'yearly';
+  billing_cycle: "monthly" | "yearly";
   features: Record<string, unknown>;
   is_active: boolean;
   created_at: string;
   updated_at: string;
-};
+}
 
 /** Subscription entity */
-export type Subscription = {
+export interface Subscription {
   id: string;
   tenant_id: string;
   plan: string;
   plan_id?: string;
-  status: 'active' | 'cancelled' | 'expired' | 'pending';
+  status: "active" | "cancelled" | "expired" | "pending";
   current_period_start: string;
   current_period_end: string;
   created_at: string;
   updated_at: string;
-};
+}
 
 /** Subscription create request */
-export type SubscriptionCreate = {
+export interface SubscriptionCreate {
   plan: string;
-  billing_cycle?: 'monthly' | 'yearly';
-};
+  billing_cycle?: "monthly" | "yearly";
+}
 
 /** Subscription update request (partial) */
 export type SubscriptionUpdate = Partial<SubscriptionCreate>;
 
 /** Invoice entity */
-export type Invoice = {
+export interface Invoice {
   id: string;
   tenant_id: string;
   subscription: string;
   subscription_id?: string;
   invoice_number: string;
   amount: string;
-  status: 'draft' | 'open' | 'paid' | 'void';
+  status: "draft" | "open" | "paid" | "void";
   due_date: string;
   created_at: string;
   updated_at: string;
-};
+}
 
 /** InvoiceLineItem entity */
-export type InvoiceLineItem = {
+export interface InvoiceLineItem {
   id: string;
   invoice: string;
   invoice_id?: string;
@@ -74,31 +74,31 @@ export type InvoiceLineItem = {
   total: string;
   created_at: string;
   updated_at: string;
-};
+}
 
 /** Payment entity */
-export type Payment = {
+export interface Payment {
   id: string;
   tenant_id: string;
   invoice: string;
   invoice_id?: string;
   amount: string;
-  status: 'pending' | 'completed' | 'failed' | 'refunded';
+  status: "pending" | "completed" | "failed" | "refunded";
   payment_method: string;
   transaction_id?: string;
   created_at: string;
   updated_at: string;
-};
+}
 
 /** Payment create request */
-export type PaymentCreate = {
+export interface PaymentCreate {
   invoice: string;
   amount: string;
   payment_method: string;
-};
+}
 
 /** UsageRecord entity */
-export type UsageRecord = {
+export interface UsageRecord {
   id: string;
   tenant_id: string;
   subscription: string;
@@ -109,16 +109,16 @@ export type UsageRecord = {
   period_end: string;
   created_at: string;
   updated_at: string;
-};
+}
 
 /** UsageRecord create request */
-export type UsageRecordCreate = {
+export interface UsageRecordCreate {
   subscription: string;
   metric: string;
   quantity: number;
   period_start: string;
   period_end: string;
-};
+}
 
 // =============================================================================
 // ENDPOINT REGISTRY - Use these for all API calls
@@ -136,7 +136,7 @@ export type UsageRecordCreate = {
  * apiClient.get(ENDPOINTS.SUBSCRIPTIONS.DETAIL(id));
  * ```
  */
-export const MODULE_API_PREFIX = '/api/v1/billing-subscriptions';
+export const MODULE_API_PREFIX = "/api/v1/billing-subscriptions";
 
 export const ENDPOINTS = {
   PLANS: {

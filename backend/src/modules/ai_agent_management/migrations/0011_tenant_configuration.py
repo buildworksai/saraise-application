@@ -1,7 +1,7 @@
-from django.db import migrations, models
-import django.db.models.deletion
 import uuid
 
+import django.db.models.deletion
+from django.db import migrations, models
 
 TENANT_TABLES = (
     "ai_agent_management_configuration",
@@ -68,9 +68,7 @@ def remove_tenant_security(apps, schema_editor):
         return
     qn = connection.ops.quote_name
     with connection.cursor() as cursor:
-        cursor.execute(
-            "DROP TRIGGER IF EXISTS ai_tenant_guard_secret_rotation ON ai_secret_rotation_records"
-        )
+        cursor.execute("DROP TRIGGER IF EXISTS ai_tenant_guard_secret_rotation ON ai_secret_rotation_records")
         cursor.execute("DROP FUNCTION IF EXISTS ai_tenant_guard_fn_secret_rotation()")
         for table in reversed(TENANT_TABLES):
             policy = f"{table}_tenant_isolation"[:63]
@@ -159,7 +157,9 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name="agentmanagementconfiguration",
-            constraint=models.CheckConstraint(condition=models.Q(("version__gte", 1)), name="ai_config_version_positive"),
+            constraint=models.CheckConstraint(
+                condition=models.Q(("version__gte", 1)), name="ai_config_version_positive"
+            ),
         ),
         migrations.AddIndex(
             model_name="agentmanagementconfiguration",

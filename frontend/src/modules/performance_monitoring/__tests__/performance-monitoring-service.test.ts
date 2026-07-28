@@ -1,29 +1,42 @@
+/* eslint-disable max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /* eslint-disable @typescript-eslint/unbound-method -- assertions intentionally reference Vitest mocks. */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiClient } from '@/services/api-client';
-import { ENDPOINTS, type ApiEnvelope, type Metric, type MonitoringConfigurationDocument } from '../contracts';
-import { performanceMonitoringService as service } from '../services/performance-monitoring-service';
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { apiClient } from "@/services/api-client";
+import {
+  ENDPOINTS,
+  type ApiEnvelope,
+  type Metric,
+  type MonitoringConfigurationDocument,
+} from "../contracts";
+import { performanceMonitoringService as service } from "../services/performance-monitoring-service";
 
-vi.mock('@/services/api-client', () => ({
+vi.mock("@/services/api-client", () => ({
   ApiError: class ApiError extends Error {},
   apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }));
 
 const meta = {
-  correlation_id: 'corr-performance-1',
-  timestamp: '2026-07-22T00:00:00Z',
-  pagination: { page: 1, page_size: 25, count: 1, total_pages: 1, has_next: false, has_previous: false },
+  correlation_id: "corr-performance-1",
+  timestamp: "2026-07-22T00:00:00Z",
+  pagination: {
+    page: 1,
+    page_size: 25,
+    count: 1,
+    total_pages: 1,
+    has_next: false,
+    has_previous: false,
+  },
 };
 
 const metric: Metric = {
-  id: '00000000-0000-4000-8000-000000000001',
-  tenant_id: '00000000-0000-4000-8000-000000000002',
-  metric_name: 'api.response_time',
-  display_name: 'API response time',
-  namespace: 'api',
-  description: '',
-  metric_type: 'histogram',
-  unit: 'ms',
+  id: "00000000-0000-4000-8000-000000000001",
+  tenant_id: "00000000-0000-4000-8000-000000000002",
+  metric_name: "api.response_time",
+  display_name: "API response time",
+  namespace: "api",
+  description: "",
+  metric_type: "histogram",
+  unit: "ms",
   source: null,
   service: null,
   environment: null,
@@ -31,67 +44,134 @@ const metric: Metric = {
   expected_interval_seconds: 60,
   retention_days: 30,
   is_active: true,
-  created_at: '2026-07-22T00:00:00Z',
-  updated_at: '2026-07-22T00:00:00Z',
+  created_at: "2026-07-22T00:00:00Z",
+  updated_at: "2026-07-22T00:00:00Z",
 };
 
-describe('performanceMonitoringService', () => {
+describe("performanceMonitoringService", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('unwraps governed paginated responses and preserves trace metadata', async () => {
+  it("unwraps governed paginated responses and preserves trace metadata", async () => {
     const envelope: ApiEnvelope<readonly Metric[]> = { data: [metric], meta };
     vi.mocked(apiClient.get).mockResolvedValue(envelope);
-    await expect(service.listMetrics({ page: 1, search: 'response' })).resolves.toMatchObject({ items: [metric], correlationId: 'corr-performance-1' });
+    await expect(service.listMetrics({ page: 1, search: "response" })).resolves.toMatchObject({
+      items: [metric],
+      correlationId: "corr-performance-1",
+    });
     expect(apiClient.get).toHaveBeenCalledWith(`${ENDPOINTS.METRICS.LIST}?page=1&search=response`);
   });
 
-  it('rejects a list that omits pagination instead of fabricating counts', async () => {
-    vi.mocked(apiClient.get).mockResolvedValue({ data: [], meta: { correlation_id: 'corr', timestamp: meta.timestamp } });
-    await expect(service.listMetrics()).rejects.toThrow('without pagination metadata');
+  it("rejects a list that omits pagination instead of fabricating counts", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: [],
+      meta: { correlation_id: "corr", timestamp: meta.timestamp },
+    });
+    await expect(service.listMetrics()).rejects.toThrow("without pagination metadata");
   });
 
-  it('uses the governed batch shape and preserves partial failures', async () => {
-    const result = { accepted: 1, rejected: 1, errors: [{ index: 1, code: 'invalid_value', message: 'Value is not finite' }] };
+  it("uses the governed batch shape and preserves partial failures", async () => {
+    const result = {
+      accepted: 1,
+      rejected: 1,
+      errors: [{ index: 1, code: "invalid_value", message: "Value is not finite" }],
+    };
     vi.mocked(apiClient.post).mockResolvedValue({ data: result, meta });
-    const points = [{ metric_name: 'api.requests', value: 1 }, { metric_name: 'api.requests', value: Number.NaN }];
+    const points = [
+      { metric_name: "api.requests", value: 1 },
+      { metric_name: "api.requests", value: Number.NaN },
+    ];
     await expect(service.ingestMetricBatch(points)).resolves.toEqual(result);
     expect(apiClient.post).toHaveBeenCalledWith(ENDPOINTS.METRICS.BATCH, { data_points: points });
   });
 
-  it('encodes the documented metric query contract', async () => {
-    vi.mocked(apiClient.get).mockResolvedValue({ data: { metric_name: 'api.response_time', aggregation: 'p95', interval: '5m', data: [] }, meta });
-    await service.queryMetric({ metric_name: 'api.response_time', start: '2026-07-21T00:00:00Z', end: '2026-07-22T00:00:00Z', aggregation: 'p95', interval: '5m', tags: { region: 'in' } });
-    expect(apiClient.get).toHaveBeenCalledWith(expect.stringContaining(`${ENDPOINTS.METRICS.QUERY}?metric_name=api.response_time`));
-    expect(apiClient.get).toHaveBeenCalledWith(expect.stringContaining('tags=region%3Din'));
+  it("encodes the documented metric query contract", async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: { metric_name: "api.response_time", aggregation: "p95", interval: "5m", data: [] },
+      meta,
+    });
+    await service.queryMetric({
+      metric_name: "api.response_time",
+      start: "2026-07-21T00:00:00Z",
+      end: "2026-07-22T00:00:00Z",
+      aggregation: "p95",
+      interval: "5m",
+      tags: { region: "in" },
+    });
+    expect(apiClient.get).toHaveBeenCalledWith(
+      expect.stringContaining(`${ENDPOINTS.METRICS.QUERY}?metric_name=api.response_time`)
+    );
+    expect(apiClient.get).toHaveBeenCalledWith(expect.stringContaining("tags=region%3Din"));
   });
 
-  it('posts alert transitions and complete SLA report requests', async () => {
-    vi.mocked(apiClient.post).mockResolvedValue({ data: { id: metric.id, status: 'accepted' }, meta });
-    await service.acknowledgeAlert(metric.id, { note: 'Investigating' });
-    await service.resolveAlert(metric.id, { note: 'Recovered' });
-    await service.generateSLAReport({ sla_id: metric.id, period: 'calendar_month', format: 'json' });
-    expect(apiClient.post).toHaveBeenNthCalledWith(1, ENDPOINTS.ALERTS.ACKNOWLEDGE(metric.id), { note: 'Investigating' });
-    expect(apiClient.post).toHaveBeenNthCalledWith(2, ENDPOINTS.ALERTS.RESOLVE(metric.id), { note: 'Recovered' });
-    expect(apiClient.post).toHaveBeenNthCalledWith(3, ENDPOINTS.SLA.REPORTS, { sla_id: metric.id, period: 'calendar_month', format: 'json' });
+  it("posts alert transitions and complete SLA report requests", async () => {
+    vi.mocked(apiClient.post).mockResolvedValue({
+      data: { id: metric.id, status: "accepted" },
+      meta,
+    });
+    await service.acknowledgeAlert(metric.id, { note: "Investigating" });
+    await service.resolveAlert(metric.id, { note: "Recovered" });
+    await service.generateSLAReport({
+      sla_id: metric.id,
+      period: "calendar_month",
+      format: "json",
+    });
+    expect(apiClient.post).toHaveBeenNthCalledWith(1, ENDPOINTS.ALERTS.ACKNOWLEDGE(metric.id), {
+      note: "Investigating",
+    });
+    expect(apiClient.post).toHaveBeenNthCalledWith(2, ENDPOINTS.ALERTS.RESOLVE(metric.id), {
+      note: "Recovered",
+    });
+    expect(apiClient.post).toHaveBeenNthCalledWith(3, ENDPOINTS.SLA.REPORTS, {
+      sla_id: metric.id,
+      period: "calendar_month",
+      format: "json",
+    });
   });
 
-  it('keeps single-rule and all-rule alert evaluation distinct', async () => {
-    vi.mocked(apiClient.post).mockResolvedValue({ data: { id: metric.id, status: 'evaluated' }, meta });
+  it("keeps single-rule and all-rule alert evaluation distinct", async () => {
+    vi.mocked(apiClient.post).mockResolvedValue({
+      data: { id: metric.id, status: "evaluated" },
+      meta,
+    });
     await service.evaluateAlertRule(metric.id);
     await service.evaluateAllAlertRules();
-    expect(apiClient.post).toHaveBeenNthCalledWith(1, ENDPOINTS.ALERT_RULES.EVALUATE(metric.id), {});
+    expect(apiClient.post).toHaveBeenNthCalledWith(
+      1,
+      ENDPOINTS.ALERT_RULES.EVALUATE(metric.id),
+      {}
+    );
     expect(apiClient.post).toHaveBeenNthCalledWith(2, ENDPOINTS.ALERTS.EVALUATE, {});
   });
 
-  it('uses only the configuration endpoint registry for the complete lifecycle', async () => {
+  it("uses only the configuration endpoint registry for the complete lifecycle", async () => {
     const document = {} as MonitoringConfigurationDocument;
-    const current = { id: metric.id, tenant_id: metric.tenant_id, environment: 'default', version: 2, document, updated_by: metric.id, correlation_id: meta.correlation_id, created_at: meta.timestamp, updated_at: meta.timestamp };
+    const current = {
+      id: metric.id,
+      tenant_id: metric.tenant_id,
+      environment: "default",
+      version: 2,
+      document,
+      updated_by: metric.id,
+      correlation_id: meta.correlation_id,
+      created_at: meta.timestamp,
+      updated_at: meta.timestamp,
+    };
     vi.mocked(apiClient.get).mockResolvedValue({ data: current, meta });
     await service.getConfiguration();
-    expect(apiClient.get).toHaveBeenCalledWith(`${ENDPOINTS.CONFIGURATION.CURRENT}?environment=default`);
+    expect(apiClient.get).toHaveBeenCalledWith(
+      `${ENDPOINTS.CONFIGURATION.CURRENT}?environment=default`
+    );
 
-    vi.mocked(apiClient.post).mockResolvedValue({ data: { valid: true, current_version: 2, proposed_document: document, diff: [] }, meta });
-    const request = { document, environment: 'default', expected_version: 2, change_reason: 'Audit correction' } as const;
+    vi.mocked(apiClient.post).mockResolvedValue({
+      data: { valid: true, current_version: 2, proposed_document: document, diff: [] },
+      meta,
+    });
+    const request = {
+      document,
+      environment: "default",
+      expected_version: 2,
+      change_reason: "Audit correction",
+    } as const;
     await service.previewConfiguration(request);
     expect(apiClient.post).toHaveBeenCalledWith(ENDPOINTS.CONFIGURATION.PREVIEW, request);
 
@@ -100,10 +180,12 @@ describe('performanceMonitoringService', () => {
     expect(apiClient.patch).toHaveBeenCalledWith(ENDPOINTS.CONFIGURATION.CURRENT, request);
   });
 
-  it('uses the implemented evidence and SLO evaluation endpoints', async () => {
+  it("uses the implemented evidence and SLO evaluation endpoints", async () => {
     vi.mocked(apiClient.get).mockResolvedValue({ data: [], meta });
     await service.listMetricDataPoints({ metric_name: metric.metric_name });
-    expect(apiClient.get).toHaveBeenCalledWith(`${ENDPOINTS.DATA_POINTS.LIST}?metric_name=api.response_time`);
+    expect(apiClient.get).toHaveBeenCalledWith(
+      `${ENDPOINTS.DATA_POINTS.LIST}?metric_name=api.response_time`
+    );
     vi.mocked(apiClient.post).mockResolvedValue({ data: { id: metric.id }, meta });
     await service.evaluateSLO(metric.id);
     expect(apiClient.post).toHaveBeenCalledWith(ENDPOINTS.SLOS.EVALUATE(metric.id), {});

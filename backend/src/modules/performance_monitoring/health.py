@@ -70,21 +70,30 @@ def notifications_probe() -> HealthCheckResult:
     """
 
     try:
-        from src.core.notifications.services import NotificationService
-
-        readiness_probe = getattr(NotificationService, "readiness_probe", None)
-        if not callable(readiness_probe):
+        required_tables = {
+            "notifications_templates",
+            "notifications_deliveries",
+            "notifications_notifications",
+            "notifications_preferences",
+            "notifications_endpoints",
+            "notifications_configurations",
+        }
+        if not required_tables.issubset(set(connection.introspection.table_names())):
             return HealthCheckResult(
                 False,
                 "notification_unavailable",
                 timezone.now(),
-                {"code": "readiness_contract_unavailable"},
+                {"code": "schema_unavailable"},
             )
-        result = readiness_probe()
-        healthy = getattr(result, "healthy", None)
-        if healthy is not True:
-            code = "dependency_unavailable" if healthy is False else "readiness_inconclusive"
-            return HealthCheckResult(False, "notification_unavailable", timezone.now(), {"code": code})
+        from src.modules.notifications.health import _handlers_status
+
+        if not _handlers_status().healthy:
+            return HealthCheckResult(
+                False,
+                "notification_unavailable",
+                timezone.now(),
+                {"code": "handlers_unavailable"},
+            )
         return HealthCheckResult(
             True,
             "ready",

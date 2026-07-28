@@ -1,1 +1,1 @@
-export { LedgerNetworkDetailPage } from './domain-pages';
+export { LedgerNetworkDetailPage } from "./domain-pages";

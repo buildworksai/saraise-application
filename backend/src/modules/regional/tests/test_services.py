@@ -6,16 +6,8 @@ import uuid
 import pytest
 from django.core.exceptions import ValidationError
 
-from src.modules.regional.models import (
-    RegionalAuditRecord,
-    RegionalConfigurationVersion,
-    RegionalResource,
-)
-from src.modules.regional.services import (
-    DEFAULT_CONFIGURATION_DOCUMENT,
-    RegionalConfigurationService,
-    RegionalService,
-)
+from src.modules.regional.models import RegionalAuditRecord, RegionalConfigurationVersion, RegionalResource
+from src.modules.regional.services import DEFAULT_CONFIGURATION_DOCUMENT, RegionalConfigurationService, RegionalService
 
 
 @pytest.fixture
@@ -51,9 +43,7 @@ class TestRegionalService:
         assert first.config == {"country_code": "IN"}
         assert first.is_active is True
         assert RegionalResource.objects.filter(tenant_id=tenant_id).count() == 1
-        assert RegionalAuditRecord.objects.filter(
-            tenant_id=tenant_id, operation="resource.create"
-        ).count() == 1
+        assert RegionalAuditRecord.objects.filter(tenant_id=tenant_id, operation="resource.create").count() == 1
 
     def test_idempotency_key_cannot_be_reused_for_different_request(self, service, tenant_id):
         key = str(uuid.uuid4())
@@ -90,13 +80,9 @@ class TestRegionalService:
         )
         assert updated is not None and updated.name == "Updated"
 
-        deactivated = service.deactivate_resource(
-            resource.id, tenant_id, "user-123", uuid.uuid4(), "development"
-        )
+        deactivated = service.deactivate_resource(resource.id, tenant_id, "user-123", uuid.uuid4(), "development")
         assert deactivated is not None and deactivated.is_active is False
-        activated = service.activate_resource(
-            resource.id, tenant_id, "user-123", uuid.uuid4(), "development"
-        )
+        activated = service.activate_resource(resource.id, tenant_id, "user-123", uuid.uuid4(), "development")
         assert activated is not None and activated.is_active is True
 
         assert service.delete_resource(resource.id, tenant_id, "user-123", uuid.uuid4())
@@ -122,14 +108,10 @@ class TestRegionalConfigurationService:
         assert preview["valid"] is True
         assert preview["changes"][0]["path"] == "resource.name_max_length"
 
-        updated = RegionalConfigurationService.update(
-            tenant_id, "development", proposed, "actor", uuid.uuid4()
-        )
+        updated = RegionalConfigurationService.update(tenant_id, "development", proposed, "actor", uuid.uuid4())
         assert updated.version == 2
         assert list(
-            RegionalConfigurationService.history(tenant_id, "development").values_list(
-                "version", flat=True
-            )
+            RegionalConfigurationService.history(tenant_id, "development").values_list("version", flat=True)
         ) == [2, 1]
         exported = RegionalConfigurationService.export_document(tenant_id, "development")
         assert exported["document"] == proposed
@@ -140,9 +122,7 @@ class TestRegionalConfigurationService:
             tenant_id, "development", imported, "actor", uuid.uuid4()
         )
         assert current.version == 3
-        rolled_back = RegionalConfigurationService.rollback(
-            tenant_id, "development", 1, "actor", uuid.uuid4()
-        )
+        rolled_back = RegionalConfigurationService.rollback(tenant_id, "development", 1, "actor", uuid.uuid4())
         assert rolled_back.version == 4
         assert rolled_back.document == DEFAULT_CONFIGURATION_DOCUMENT
         assert RegionalConfigurationVersion.objects.filter(tenant_id=tenant_id).count() == 4
@@ -151,11 +131,7 @@ class TestRegionalConfigurationService:
         invalid = copy.deepcopy(DEFAULT_CONFIGURATION_DOCUMENT)
         invalid["api"]["default_page_size"] = 501
         with pytest.raises(ValidationError):
-            RegionalConfigurationService.update(
-                tenant_id, "development", invalid, "actor", uuid.uuid4()
-            )
+            RegionalConfigurationService.update(tenant_id, "development", invalid, "actor", uuid.uuid4())
         other = uuid.uuid4()
         RegionalConfigurationService.get_or_create(other, "development")
-        assert not RegionalConfigurationService.history(
-            tenant_id, "development"
-        ).filter(tenant_id=other).exists()
+        assert not RegionalConfigurationService.history(tenant_id, "development").filter(tenant_id=other).exists()

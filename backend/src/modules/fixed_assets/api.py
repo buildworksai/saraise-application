@@ -7,7 +7,8 @@ from decimal import Decimal
 from typing import Any, Iterable
 from uuid import UUID, uuid4
 
-from django.core.exceptions import ObjectDoesNotExist, ValidationError as DjangoValidationError
+from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Count, Prefetch, Q, QuerySet, Subquery, Sum
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
@@ -24,12 +25,8 @@ from src.core.middleware.correlation import get_correlation_id
 from src.core.state_machine import IdempotencyConflictError, StateMachineError
 
 from .health import get_module_health
-from .integrations import (
-    AccountingPeriodClosed,
-    AccountingPostingRejected,
-    AccountMappingError,
-    CapabilityUnavailable as IntegrationCapabilityUnavailable,
-)
+from .integrations import AccountingPeriodClosed, AccountingPostingRejected, AccountMappingError
+from .integrations import CapabilityUnavailable as IntegrationCapabilityUnavailable
 from .models import AssetCategory, AssetTransaction, DepreciationLine, DepreciationSchedule, FixedAsset
 from .permissions import ActionAccessMixin
 from .serializers import (
@@ -344,9 +341,7 @@ class FixedAssetViewSet(TenantGovernedViewSet):
         if params.get("status"):
             queryset = queryset.filter(status=_choice(params["status"], "status", ASSET_STATUSES))
         if params.get("method"):
-            queryset = queryset.filter(
-                depreciation_method=_choice(params["method"], "method", DEPRECIATION_METHODS)
-            )
+            queryset = queryset.filter(depreciation_method=_choice(params["method"], "method", DEPRECIATION_METHODS))
         if params.get("currency"):
             currency = str(params["currency"]).strip().upper()
             if len(currency) != 3 or not currency.isalpha():

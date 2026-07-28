@@ -138,11 +138,7 @@ def test_dimension_validation_is_namespaced_and_provider_backed() -> None:
 
 @pytest.mark.django_db
 def test_fixed_asset_facade_returns_exact_fixed_assets_result(monkeypatch) -> None:
-    from src.modules.fixed_assets.integrations import (
-        AccountingPostingRequest,
-        AccountingPostingResult,
-        JournalLeg,
-    )
+    from src.modules.fixed_assets.integrations import AccountingPostingRequest, AccountingPostingResult, JournalLeg
 
     tenant, asset, line = uuid4(), uuid4(), uuid4()
     captured = {}

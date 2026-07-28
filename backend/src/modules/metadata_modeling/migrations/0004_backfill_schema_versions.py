@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import uuid
 
 from django.db import migrations, models
 

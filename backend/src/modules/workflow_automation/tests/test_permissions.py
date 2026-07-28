@@ -8,7 +8,6 @@ from rest_framework.authentication import SessionAuthentication
 from ..api import StrictSessionAuthentication
 from ..permissions import ACTION_ACCESS, MODULE_ENTITLEMENT, PERMISSIONS, SOD_ACTIONS, access_metadata
 
-
 EXPECTED_PERMISSIONS = {
     "workflow_automation.workflow:read",
     "workflow_automation.workflow:create",

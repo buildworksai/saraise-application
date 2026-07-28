@@ -156,21 +156,33 @@ class BudgetViewSet(TenantGovernedViewSet):
     """Budget commands and projections; no mutation uses serializer.save()."""
 
     action_permissions = {
-        "list": "budget.budget:read", "retrieve": "budget.budget:read",
-        "create": "budget.budget:create", "partial_update": "budget.budget:update",
-        "destroy": "budget.budget:delete", "allocations": "budget.budget_line:update",
-        "submit": "budget.budget:submit", "approve": "budget.budget:approve",
-        "reject": "budget.budget:approve", "revise": "budget.budget:update",
-        "close": "budget.budget:close", "variance": "budget.variance:read",
+        "list": "budget.budget:read",
+        "retrieve": "budget.budget:read",
+        "create": "budget.budget:create",
+        "partial_update": "budget.budget:update",
+        "destroy": "budget.budget:delete",
+        "allocations": "budget.budget_line:update",
+        "submit": "budget.budget:submit",
+        "approve": "budget.budget:approve",
+        "reject": "budget.budget:approve",
+        "revise": "budget.budget:update",
+        "close": "budget.budget:close",
+        "variance": "budget.variance:read",
         "sync_actuals": "budget.actuals:sync",
     }
     action_quotas = {
-        "list": "budget_management.api_reads", "retrieve": "budget_management.api_reads",
-        "variance": "budget_management.api_reads", "create": "budget_management.api_writes",
-        "partial_update": "budget_management.api_writes", "destroy": "budget_management.api_writes",
-        "allocations": "budget_management.api_writes", "submit": "budget_management.api_writes",
-        "approve": "budget_management.api_writes", "reject": "budget_management.api_writes",
-        "revise": "budget_management.api_writes", "close": "budget_management.api_writes",
+        "list": "budget_management.api_reads",
+        "retrieve": "budget_management.api_reads",
+        "variance": "budget_management.api_reads",
+        "create": "budget_management.api_writes",
+        "partial_update": "budget_management.api_writes",
+        "destroy": "budget_management.api_writes",
+        "allocations": "budget_management.api_writes",
+        "submit": "budget_management.api_writes",
+        "approve": "budget_management.api_writes",
+        "reject": "budget_management.api_writes",
+        "revise": "budget_management.api_writes",
+        "close": "budget_management.api_writes",
         "sync_actuals": "budget_management.actual_sync",
     }
 
@@ -236,8 +248,11 @@ class BudgetViewSet(TenantGovernedViewSet):
         data = dict(serializer.validated_data)
         expected = data.pop("expected_updated_at")
         budget = BudgetService.update_budget(
-            self.tenant_id(), UUID(str(self.kwargs["pk"])), self.actor_id(),
-            expected_updated_at=expected, changes=data,
+            self.tenant_id(),
+            UUID(str(self.kwargs["pk"])),
+            self.actor_id(),
+            expected_updated_at=expected,
+            changes=data,
         )
         return Response(BudgetDetailSerializer(budget).data)
 
@@ -247,7 +262,9 @@ class BudgetViewSet(TenantGovernedViewSet):
         serializer = BudgetDeleteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         BudgetService.delete_budget(
-            self.tenant_id(), UUID(str(self.kwargs["pk"])), self.actor_id(),
+            self.tenant_id(),
+            UUID(str(self.kwargs["pk"])),
+            self.actor_id(),
             expected_updated_at=serializer.validated_data["expected_updated_at"],
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -259,7 +276,9 @@ class BudgetViewSet(TenantGovernedViewSet):
         serializer = AllocationReplaceSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         budget = BudgetService.replace_allocations(
-            self.tenant_id(), UUID(str(self.kwargs["pk"])), self.actor_id(),
+            self.tenant_id(),
+            UUID(str(self.kwargs["pk"])),
+            self.actor_id(),
             list(serializer.validated_data["allocations"]),
             expected_updated_at=serializer.validated_data["expected_updated_at"],
         )
@@ -270,8 +289,11 @@ class BudgetViewSet(TenantGovernedViewSet):
         serializer = serializer_class(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         budget = getattr(BudgetService, method)(
-            self.tenant_id(), UUID(str(self.kwargs["pk"])), self.actor_id(),
-            idempotency_key=self.idempotency_key(), **serializer.validated_data,
+            self.tenant_id(),
+            UUID(str(self.kwargs["pk"])),
+            self.actor_id(),
+            idempotency_key=self.idempotency_key(),
+            **serializer.validated_data,
         )
         return Response(BudgetDetailSerializer(budget).data)
 
@@ -305,17 +327,22 @@ class BudgetViewSet(TenantGovernedViewSet):
         del pk
         self.get_object()
         report = BudgetControlService.calculate_variance(
-            self.tenant_id(), UUID(str(self.kwargs["pk"])),
+            self.tenant_id(),
+            UUID(str(self.kwargs["pk"])),
             period_type=(
                 _choice_filter(request.query_params["period_type"], "period_type", {"annual", "monthly", "quarterly"})
-                if request.query_params.get("period_type") else None
+                if request.query_params.get("period_type")
+                else None
             ),
             period_number=(
                 _integer_filter(request.query_params["period_number"], "period_number", maximum=12)
-                if request.query_params.get("period_number") else None
+                if request.query_params.get("period_number")
+                else None
             ),
             account_code=request.query_params.get("account_code"),
-            threshold_percentage=_decimal_filter(request.query_params.get("threshold_percentage", "10.00"), "threshold_percentage"),
+            threshold_percentage=_decimal_filter(
+                request.query_params.get("threshold_percentage", "10.00"), "threshold_percentage"
+            ),
         )
         return Response(VarianceReportSerializer(report).data)
 
@@ -326,7 +353,9 @@ class BudgetViewSet(TenantGovernedViewSet):
         serializer = ActualsSyncRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         job = BudgetControlService.request_actuals_sync(
-            self.tenant_id(), UUID(str(self.kwargs["pk"])), self.actor_id(),
+            self.tenant_id(),
+            UUID(str(self.kwargs["pk"])),
+            self.actor_id(),
             idempotency_key=self.idempotency_key(),
         )
         return Response(AsyncJobSummarySerializer(job).data, status=status.HTTP_202_ACCEPTED)
@@ -334,8 +363,10 @@ class BudgetViewSet(TenantGovernedViewSet):
 
 class BudgetLineViewSet(TenantGovernedViewSet):
     action_permissions = {
-        "list": "budget.budget_line:read", "retrieve": "budget.budget_line:read",
-        "create": "budget.budget_line:create", "partial_update": "budget.budget_line:update",
+        "list": "budget.budget_line:read",
+        "retrieve": "budget.budget_line:read",
+        "create": "budget.budget_line:create",
+        "partial_update": "budget.budget_line:update",
         "destroy": "budget.budget_line:delete",
     }
     action_quotas = {name: "budget_management.api_reads" for name in ("list", "retrieve")} | {
@@ -350,22 +381,24 @@ class BudgetLineViewSet(TenantGovernedViewSet):
         if params.get("account_code") not in (None, ""):
             queryset = queryset.filter(account_code=str(params["account_code"]).strip().upper())
         if params.get("period_type") not in (None, ""):
-            queryset = queryset.filter(period_type=_choice_filter(
-                params["period_type"], "period_type", {"annual", "monthly", "quarterly"}
-            ))
+            queryset = queryset.filter(
+                period_type=_choice_filter(params["period_type"], "period_type", {"annual", "monthly", "quarterly"})
+            )
         if params.get("period_number") not in (None, ""):
-            queryset = queryset.filter(period_number=_integer_filter(params["period_number"], "period_number", maximum=12))
+            queryset = queryset.filter(
+                period_number=_integer_filter(params["period_number"], "period_number", maximum=12)
+            )
         if params.get("source") not in (None, ""):
-            queryset = queryset.filter(source=_choice_filter(
-                params["source"], "source", {"manual", "accounting_sync"}
-            ))
+            queryset = queryset.filter(source=_choice_filter(params["source"], "source", {"manual", "accounting_sync"}))
         if params.get("account_id"):
             queryset = queryset.filter(account_id=_uuid_filter(params["account_id"], "account_id"))
-        return queryset.order_by(*_ordering(
-            params.get("ordering"),
-            {"account_code", "period_type", "period_number", "budget_amount", "actual_amount", "variance"},
-            "account_code,period_type,period_number",
-        ))
+        return queryset.order_by(
+            *_ordering(
+                params.get("ordering"),
+                {"account_code", "period_type", "period_number", "budget_amount", "actual_amount", "variance"},
+                "account_code,period_type,period_number",
+            )
+        )
 
     def list(self, request: Any) -> Response:
         del request
@@ -391,8 +424,11 @@ class BudgetLineViewSet(TenantGovernedViewSet):
         data = dict(serializer.validated_data)
         expected = data.pop("expected_updated_at")
         line = BudgetService.update_line(
-            self.tenant_id(), UUID(str(self.kwargs["pk"])), self.actor_id(),
-            expected_updated_at=expected, changes=data,
+            self.tenant_id(),
+            UUID(str(self.kwargs["pk"])),
+            self.actor_id(),
+            expected_updated_at=expected,
+            changes=data,
         )
         return Response(BudgetLineReadSerializer(line).data)
 
@@ -402,7 +438,9 @@ class BudgetLineViewSet(TenantGovernedViewSet):
         serializer = BudgetDeleteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         BudgetService.delete_line(
-            self.tenant_id(), UUID(str(self.kwargs["pk"])), self.actor_id(),
+            self.tenant_id(),
+            UUID(str(self.kwargs["pk"])),
+            self.actor_id(),
             expected_updated_at=serializer.validated_data["expected_updated_at"],
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -414,9 +452,9 @@ class ApprovalViewSet(TenantGovernedViewSet, mixins.ListModelMixin, mixins.Retri
     serializer_class = BudgetApprovalSerializer
 
     def get_queryset(self) -> QuerySet[BudgetApproval]:
-        queryset = BudgetApproval.objects.filter(
-            tenant_id=self.tenant_id(), budget__is_deleted=False
-        ).prefetch_related("decisions")
+        queryset = BudgetApproval.objects.filter(tenant_id=self.tenant_id(), budget__is_deleted=False).prefetch_related(
+            "decisions"
+        )
         params = self.request.query_params
         for field in ("budget_id", "approver_id"):
             if params.get(field):
@@ -437,12 +475,16 @@ class ApprovalViewSet(TenantGovernedViewSet, mixins.ListModelMixin, mixins.Retri
 
 class VarianceAlertViewSet(TenantGovernedViewSet):
     action_permissions = {
-        "list": "budget.variance:read", "retrieve": "budget.variance:read",
-        "generate": "budget.variance:generate", "acknowledge": "budget.variance:acknowledge",
+        "list": "budget.variance:read",
+        "retrieve": "budget.variance:read",
+        "generate": "budget.variance:generate",
+        "acknowledge": "budget.variance:acknowledge",
     }
     action_quotas = {
-        "list": "budget_management.api_reads", "retrieve": "budget_management.api_reads",
-        "generate": "budget_management.alert_generation", "acknowledge": "budget_management.api_writes",
+        "list": "budget_management.api_reads",
+        "retrieve": "budget_management.api_reads",
+        "generate": "budget_management.alert_generation",
+        "acknowledge": "budget_management.api_writes",
     }
 
     def get_queryset(self) -> QuerySet[VarianceAlert]:
@@ -452,13 +494,17 @@ class VarianceAlertViewSet(TenantGovernedViewSet):
             if params.get(field):
                 queryset = queryset.filter(**{field: _uuid_filter(params[field], field)})
         if params.get("alert_type"):
-            queryset = queryset.filter(alert_type=_choice_filter(
-                params["alert_type"], "alert_type", {"over_budget", "approaching_limit", "underspend"}
-            ))
+            queryset = queryset.filter(
+                alert_type=_choice_filter(
+                    params["alert_type"], "alert_type", {"over_budget", "approaching_limit", "underspend"}
+                )
+            )
         if params.get("notification_status"):
-            queryset = queryset.filter(notification_status=_choice_filter(
-                params["notification_status"], "notification_status", {"pending", "sent", "failed", "unavailable"}
-            ))
+            queryset = queryset.filter(
+                notification_status=_choice_filter(
+                    params["notification_status"], "notification_status", {"pending", "sent", "failed", "unavailable"}
+                )
+            )
         if params.get("acknowledged"):
             normalized = str(params["acknowledged"]).lower()
             if normalized not in {"true", "false"}:
@@ -483,7 +529,9 @@ class VarianceAlertViewSet(TenantGovernedViewSet):
         serializer = VarianceAlertGenerateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         job = VarianceAlertService.request_alert_generation(
-            self.tenant_id(), self.actor_id(), idempotency_key=self.idempotency_key(),
+            self.tenant_id(),
+            self.actor_id(),
+            idempotency_key=self.idempotency_key(),
             **serializer.validated_data,
         )
         return Response(AsyncJobSummarySerializer(job).data, status=status.HTTP_202_ACCEPTED)
@@ -494,9 +542,7 @@ class VarianceAlertViewSet(TenantGovernedViewSet):
         self.get_object()
         serializer = VarianceAlertAcknowledgeSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        alert = VarianceAlertService.acknowledge_alert(
-            self.tenant_id(), UUID(str(self.kwargs["pk"])), self.actor_id()
-        )
+        alert = VarianceAlertService.acknowledge_alert(self.tenant_id(), UUID(str(self.kwargs["pk"])), self.actor_id())
         return Response(VarianceAlertDetailSerializer(alert).data)
 
 

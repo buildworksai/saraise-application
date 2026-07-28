@@ -5,7 +5,6 @@ import uuid
 import django.db.models.deletion
 from django.db import migrations, models
 
-
 LEGACY_TABLE = "automation_orchestration_resources"
 TENANT_TABLES = (
     "automation_orchestration_commands",
@@ -93,7 +92,11 @@ class Migration(migrations.Migration):
             options={
                 "db_table": "automation_orchestration_commands",
                 "indexes": [models.Index(fields=["tenant_id", "created_at"], name="ao_command_tenant_created_idx")],
-                "constraints": [models.UniqueConstraint(fields=("tenant_id", "operation", "idempotency_key"), name="ao_command_tenant_op_key_uniq")],
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=("tenant_id", "operation", "idempotency_key"), name="ao_command_tenant_op_key_uniq"
+                    )
+                ],
             },
         ),
         migrations.CreateModel(
@@ -103,7 +106,13 @@ class Migration(migrations.Migration):
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),
                 ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ("environment", models.CharField(choices=[("development", "Development"), ("self-hosted", "Self-hosted"), ("saas", "SaaS")], max_length=24)),
+                (
+                    "environment",
+                    models.CharField(
+                        choices=[("development", "Development"), ("self-hosted", "Self-hosted"), ("saas", "SaaS")],
+                        max_length=24,
+                    ),
+                ),
                 ("cohort", models.CharField(default="all", max_length=64)),
                 ("version", models.PositiveIntegerField(default=1)),
                 ("document", models.JSONField(default=dict)),
@@ -115,8 +124,20 @@ class Migration(migrations.Migration):
             ],
             options={
                 "db_table": "automation_orchestration_configurations",
-                "indexes": [models.Index(fields=["tenant_id", "environment", "cohort"], name="ao_config_tenant_scope_idx"), models.Index(fields=["tenant_id", "updated_at"], name="ao_config_tenant_updated_idx")],
-                "constraints": [models.UniqueConstraint(fields=("tenant_id", "environment", "cohort"), name="ao_config_tenant_scope_uniq"), models.CheckConstraint(condition=models.Q(rollout_percentage__gte=0, rollout_percentage__lte=100), name="ao_config_rollout_0_100"), models.CheckConstraint(condition=models.Q(version__gte=1), name="ao_config_version_gte_1")],
+                "indexes": [
+                    models.Index(fields=["tenant_id", "environment", "cohort"], name="ao_config_tenant_scope_idx"),
+                    models.Index(fields=["tenant_id", "updated_at"], name="ao_config_tenant_updated_idx"),
+                ],
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=("tenant_id", "environment", "cohort"), name="ao_config_tenant_scope_uniq"
+                    ),
+                    models.CheckConstraint(
+                        condition=models.Q(rollout_percentage__gte=0, rollout_percentage__lte=100),
+                        name="ao_config_rollout_0_100",
+                    ),
+                    models.CheckConstraint(condition=models.Q(version__gte=1), name="ao_config_version_gte_1"),
+                ],
             },
         ),
         migrations.CreateModel(
@@ -131,9 +152,23 @@ class Migration(migrations.Migration):
                 ("before", models.JSONField(blank=True, null=True)),
                 ("after", models.JSONField()),
                 ("changed_at", models.DateTimeField(auto_now_add=True)),
-                ("configuration", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="audits", to="automation_orchestration.orchestrationconfiguration")),
+                (
+                    "configuration",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="audits",
+                        to="automation_orchestration.orchestrationconfiguration",
+                    ),
+                ),
             ],
-            options={"db_table": "automation_orchestration_configuration_audits", "ordering": ("-changed_at", "-version"), "indexes": [models.Index(fields=["tenant_id", "configuration", "version"], name="ao_cfgaudit_tenant_cfg_idx"), models.Index(fields=["tenant_id", "correlation_id"], name="ao_cfgaudit_tenant_corr_idx")]},
+            options={
+                "db_table": "automation_orchestration_configuration_audits",
+                "ordering": ("-changed_at", "-version"),
+                "indexes": [
+                    models.Index(fields=["tenant_id", "configuration", "version"], name="ao_cfgaudit_tenant_cfg_idx"),
+                    models.Index(fields=["tenant_id", "correlation_id"], name="ao_cfgaudit_tenant_corr_idx"),
+                ],
+            },
         ),
         migrations.CreateModel(
             name="OrchestrationConfigurationVersion",
@@ -148,11 +183,47 @@ class Migration(migrations.Migration):
                 ("actor_id", models.UUIDField()),
                 ("correlation_id", models.CharField(max_length=64)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
-                ("configuration", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="versions", to="automation_orchestration.orchestrationconfiguration")),
-                ("parent_version", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name="children", to="automation_orchestration.orchestrationconfigurationversion")),
-                ("rollback_of", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name="rollbacks", to="automation_orchestration.orchestrationconfigurationversion")),
+                (
+                    "configuration",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="versions",
+                        to="automation_orchestration.orchestrationconfiguration",
+                    ),
+                ),
+                (
+                    "parent_version",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="children",
+                        to="automation_orchestration.orchestrationconfigurationversion",
+                    ),
+                ),
+                (
+                    "rollback_of",
+                    models.ForeignKey(
+                        blank=True,
+                        null=True,
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="rollbacks",
+                        to="automation_orchestration.orchestrationconfigurationversion",
+                    ),
+                ),
             ],
-            options={"db_table": "automation_orchestration_configuration_versions", "ordering": ("-version",), "indexes": [models.Index(fields=["tenant_id", "configuration", "version"], name="ao_cfgver_tenant_config_idx"), models.Index(fields=["tenant_id", "created_at"], name="ao_cfgver_tenant_created_idx")], "constraints": [models.UniqueConstraint(fields=("configuration", "version"), name="ao_config_version_uniq"), models.CheckConstraint(condition=models.Q(version__gte=1), name="ao_config_ver_version_gte_1")]},
+            options={
+                "db_table": "automation_orchestration_configuration_versions",
+                "ordering": ("-version",),
+                "indexes": [
+                    models.Index(fields=["tenant_id", "configuration", "version"], name="ao_cfgver_tenant_config_idx"),
+                    models.Index(fields=["tenant_id", "created_at"], name="ao_cfgver_tenant_created_idx"),
+                ],
+                "constraints": [
+                    models.UniqueConstraint(fields=("configuration", "version"), name="ao_config_version_uniq"),
+                    models.CheckConstraint(condition=models.Q(version__gte=1), name="ao_config_ver_version_gte_1"),
+                ],
+            },
         ),
         migrations.CreateModel(
             name="OrchestrationReconciliation",
@@ -162,15 +233,39 @@ class Migration(migrations.Migration):
                 ("updated_at", models.DateTimeField(auto_now=True)),
                 ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
                 ("provider_key", models.CharField(max_length=150)),
-                ("status", models.CharField(choices=[("required", "Required"), ("reconciling", "Reconciling"), ("compensated", "Compensated"), ("confirmed", "Confirmed")], default="required", max_length=20)),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("required", "Required"),
+                            ("reconciling", "Reconciling"),
+                            ("compensated", "Compensated"),
+                            ("confirmed", "Confirmed"),
+                        ],
+                        default="required",
+                        max_length=20,
+                    ),
+                ),
                 ("evidence", models.JSONField(default=dict)),
                 ("resolution", models.JSONField(blank=True, null=True)),
                 ("requested_by", models.UUIDField(blank=True, null=True)),
                 ("resolved_by", models.UUIDField(blank=True, null=True)),
                 ("correlation_id", models.CharField(max_length=64)),
-                ("attempt", models.OneToOneField(on_delete=django.db.models.deletion.PROTECT, related_name="reconciliation", to="automation_orchestration.retryattempt")),
+                (
+                    "attempt",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="reconciliation",
+                        to="automation_orchestration.retryattempt",
+                    ),
+                ),
             ],
-            options={"db_table": "automation_orchestration_reconciliations", "indexes": [models.Index(fields=["tenant_id", "status", "created_at"], name="ao_recon_tenant_status_idx")]},
+            options={
+                "db_table": "automation_orchestration_reconciliations",
+                "indexes": [
+                    models.Index(fields=["tenant_id", "status", "created_at"], name="ao_recon_tenant_status_idx")
+                ],
+            },
         ),
         migrations.RunPython(retire_legacy_table, restore_legacy_table),
         migrations.RunPython(enable_rls, disable_rls),

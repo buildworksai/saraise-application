@@ -1,12 +1,17 @@
 /**
  * BillingSubscriptions Service
- * 
+ *
  * Service client for BillingSubscriptions module API calls.
- * 
+ *
  * Uses contracts.ts for types and endpoints.
  */
-import { apiClient } from '@/services/api-client';
-import { ENDPOINTS, type Subscription, type SubscriptionCreate, type SubscriptionUpdate } from '../contracts';
+import { apiClient } from "@/services/api-client";
+import {
+  ENDPOINTS,
+  type Subscription,
+  type SubscriptionCreate,
+  type SubscriptionUpdate,
+} from "../contracts";
 
 export const billing_subscriptionsService = {
   /**

@@ -1,17 +1,56 @@
 """Persistence invariants for all eleven domain entities."""
+
 import uuid
 
 import pytest
 from django.core.exceptions import ValidationError
+
 from src.core.tenancy import TenantScopedModel
 
-from ..models import BottleneckAnalysis, BottleneckFinding, ConformanceCaseMetric, ConformanceCheck, ConformanceDeviation, EventExportJob, ProcessDiscoveryJob, ProcessEvent, ProcessModel, ProcessModelVersion, ProcessVariant, validate_graph
-from .factories import AnalysisFactory, DeviationFactory, EventFactory, FindingFactory, ModelFactory, VariantFactory, VersionFactory, graph
+from ..models import (
+    BottleneckAnalysis,
+    BottleneckFinding,
+    ConformanceCaseMetric,
+    ConformanceCheck,
+    ConformanceDeviation,
+    EventExportJob,
+    ProcessDiscoveryJob,
+    ProcessEvent,
+    ProcessModel,
+    ProcessModelVersion,
+    ProcessVariant,
+    validate_graph,
+)
+from .factories import (
+    AnalysisFactory,
+    DeviationFactory,
+    EventFactory,
+    FindingFactory,
+    ModelFactory,
+    VariantFactory,
+    VersionFactory,
+    graph,
+)
 
 pytestmark = pytest.mark.django_db
 
 
-@pytest.mark.parametrize("model", [ProcessEvent, EventExportJob, ProcessDiscoveryJob, ProcessModel, ProcessModelVersion, ConformanceCheck, ConformanceDeviation, ConformanceCaseMetric, BottleneckAnalysis, BottleneckFinding, ProcessVariant])
+@pytest.mark.parametrize(
+    "model",
+    [
+        ProcessEvent,
+        EventExportJob,
+        ProcessDiscoveryJob,
+        ProcessModel,
+        ProcessModelVersion,
+        ConformanceCheck,
+        ConformanceDeviation,
+        ConformanceCaseMetric,
+        BottleneckAnalysis,
+        BottleneckFinding,
+        ProcessVariant,
+    ],
+)
 def test_all_domain_models_use_indexed_uuid_tenant(model):
     assert issubclass(model, TenantScopedModel)
     field = model._meta.get_field("tenant_id")

@@ -1,26 +1,16 @@
-"""
-Django management command to seed default users for development.
+"""Django management command to seed default development users."""
 
-Creates:
-- admin@saraise.com / admin@134 - Platform Owner
-- operator@saraise.com / admin@134 - Platform Operator
-- admin@buildworks.ai / admin@134 - Tenant Admin
-- user@buildworks.ai / admin@134 - Tenant User
-
-This command is idempotent - it will not create duplicate users.
-All passwords are set to 'admin@134' for developer ease.
-"""
+import os
 
 from django.contrib.auth import get_user_model
-from django.core.management.base import BaseCommand
+from django.contrib.auth.password_validation import validate_password
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from src.core.user_models import UserProfile
 
 User = get_user_model()
-
-# Common password for all users (developer ease)
-COMMON_PASSWORD = "admin@134"
+PASSWORD_ENV = "SARAISE_SEED_DEFAULT_PASSWORD"  # pragma: allowlist secret
 
 
 class Command(BaseCommand):
@@ -32,10 +22,18 @@ class Command(BaseCommand):
             action="store_true",
             help="Force recreate users even if they exist",
         )
+        parser.add_argument(
+            "--password",
+            default=None,
+            help=f"Password for seeded users. Defaults to {PASSWORD_ENV}.",
+        )
 
     @transaction.atomic
     def handle(self, *args, **options):
         force = options.get("force", False)
+        common_password = options.get("password") or os.environ.get(PASSWORD_ENV)
+        if not common_password:
+            raise CommandError(f"Provide --password or set {PASSWORD_ENV}; seeded users must not use a source default.")
 
         self.stdout.write(self.style.SUCCESS("🌱 Seeding default users..."))
 
@@ -48,7 +46,7 @@ class Command(BaseCommand):
         platform_owner_email = "admin@saraise.com"
         platform_owner_user, created = self._create_or_update_user(
             email=platform_owner_email,
-            password=COMMON_PASSWORD,
+            password=common_password,
             username=platform_owner_email,
             is_staff=True,
             is_superuser=True,
@@ -67,7 +65,7 @@ class Command(BaseCommand):
         platform_operator_email = "operator@saraise.com"
         platform_operator_user, created = self._create_or_update_user(
             email=platform_operator_email,
-            password=COMMON_PASSWORD,
+            password=common_password,
             username=platform_operator_email,
             is_staff=True,
             is_superuser=False,
@@ -174,7 +172,7 @@ class Command(BaseCommand):
 
                 user, created = self._create_or_update_user(
                     email=user_email,
-                    password=COMMON_PASSWORD,
+                    password=common_password,
                     username=user_email,
                     is_staff=False,
                     is_superuser=False,
@@ -224,7 +222,7 @@ class Command(BaseCommand):
         """Create or update a user with profile."""
         try:
             # Get user and refresh from database to ensure it's not stale
-            user = User.objects.get(email=email)
+            user = User.objects.get(email=email)  # nosemgrep: semgrep.tenant-id-required-in-queries
             # Refresh user from database to ensure it exists
             user.refresh_from_db()
             created = False
@@ -234,6 +232,7 @@ class Command(BaseCommand):
                 user.username = username
                 user.is_staff = is_staff
                 user.is_superuser = is_superuser
+                validate_password(password, user=user)
                 user.set_password(password)
                 user.save()
 
@@ -241,12 +240,12 @@ class Command(BaseCommand):
             # Filter by primary key (user_id) directly to avoid issues with orphaned users
             try:
                 # Since user is the primary key, filter by pk directly
-                profile = UserProfile.objects.get(pk=user.pk)
+                profile = UserProfile.objects.get(pk=user.pk)  # nosemgrep: semgrep.tenant-id-required-in-queries
             except UserProfile.DoesNotExist:
                 profile = None
             except UserProfile.MultipleObjectsReturned:
                 # Handle duplicates - keep first, delete rest (shouldn't happen with pk, but be safe)
-                profiles = UserProfile.objects.filter(pk=user.pk)
+                profiles = UserProfile.objects.filter(pk=user.pk)  # nosemgrep: semgrep.tenant-id-required-in-queries
                 profile = profiles.first()
                 for dup in profiles[1:]:
                     dup.delete()
@@ -255,7 +254,9 @@ class Command(BaseCommand):
             if profile is not None:
                 try:
                     # Verify the user referenced by the profile actually exists
-                    if not User.objects.filter(pk=profile.user_id).exists():
+                    if not User.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
+                        pk=profile.user_id
+                    ).exists():
                         # Orphaned profile - delete it
                         profile.delete()
                         profile = None
@@ -266,15 +267,15 @@ class Command(BaseCommand):
 
             if profile is None:
                 # Verify user still exists before creating profile
-                if not User.objects.filter(pk=user.pk).exists():
+                if not User.objects.filter(pk=user.pk).exists():  # nosemgrep: semgrep.tenant-id-required-in-queries
                     # User was deleted - refresh from database
-                    user = User.objects.get(email=email)
+                    user = User.objects.get(email=email)  # nosemgrep: semgrep.tenant-id-required-in-queries
                 # Check if profile exists by pk (might be orphaned)
                 # Delete any orphaned profile first
                 try:
-                    orphaned = UserProfile.objects.get(pk=user.pk)
+                    orphaned = UserProfile.objects.get(pk=user.pk)  # nosemgrep: semgrep.tenant-id-required-in-queries
                     # If we got here, profile exists - verify user exists
-                    if not User.objects.filter(pk=user.pk).exists():
+                    if not User.objects.filter(pk=user.pk).exists():  # nosemgrep: semgrep.tenant-id-required-in-queries
                         # Orphaned profile - delete it
                         orphaned.delete()
                     else:
@@ -332,12 +333,12 @@ class Command(BaseCommand):
             # Filter by primary key (user_id) directly to avoid issues with orphaned users
             try:
                 # Since user is the primary key, filter by pk directly
-                profile = UserProfile.objects.get(pk=user.pk)
+                profile = UserProfile.objects.get(pk=user.pk)  # nosemgrep: semgrep.tenant-id-required-in-queries
             except UserProfile.DoesNotExist:
                 profile = None
             except UserProfile.MultipleObjectsReturned:
                 # Handle duplicates - keep first, delete rest (shouldn't happen with pk, but be safe)
-                profiles = UserProfile.objects.filter(pk=user.pk)
+                profiles = UserProfile.objects.filter(pk=user.pk)  # nosemgrep: semgrep.tenant-id-required-in-queries
                 profile = profiles.first()
                 for dup in profiles[1:]:
                     dup.delete()
@@ -346,7 +347,9 @@ class Command(BaseCommand):
             if profile is not None:
                 try:
                     # Verify the user referenced by the profile actually exists
-                    if not User.objects.filter(pk=profile.user_id).exists():
+                    if not User.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
+                        pk=profile.user_id
+                    ).exists():
                         # Orphaned profile - delete it
                         profile.delete()
                         profile = None
@@ -357,15 +360,15 @@ class Command(BaseCommand):
 
             if profile is None:
                 # Verify user still exists before creating profile
-                if not User.objects.filter(pk=user.pk).exists():
+                if not User.objects.filter(pk=user.pk).exists():  # nosemgrep: semgrep.tenant-id-required-in-queries
                     # User was deleted - this shouldn't happen for new users, but handle it
                     raise ValueError(f"User {user.email} (id={user.pk}) does not exist in database")
                 # Check if profile exists by pk (might be orphaned)
                 # Delete any orphaned profile first
                 try:
-                    orphaned = UserProfile.objects.get(pk=user.pk)
+                    orphaned = UserProfile.objects.get(pk=user.pk)  # nosemgrep: semgrep.tenant-id-required-in-queries
                     # If we got here, profile exists - verify user exists
-                    if not User.objects.filter(pk=user.pk).exists():
+                    if not User.objects.filter(pk=user.pk).exists():  # nosemgrep: semgrep.tenant-id-required-in-queries
                         # Orphaned profile - delete it
                         orphaned.delete()
                     else:
@@ -428,7 +431,9 @@ class Command(BaseCommand):
                         profile.delete()
                     except Exception:
                         # If delete fails, try to delete by pk directly
-                        UserProfile.objects.filter(pk=profile.pk).delete()
+                        UserProfile.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
+                            pk=profile.pk
+                        ).delete()
                 self.stdout.write(self.style.WARNING(f"🧹 Cleaned up {orphaned_count} orphaned user profile(s)"))
         except Exception as e:
             # Don't fail the entire command if cleanup fails

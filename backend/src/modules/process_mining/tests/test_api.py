@@ -1,4 +1,5 @@
 """Governed v2 routing, envelope, serializer, and service delegation tests."""
+
 import uuid
 from unittest.mock import patch
 
@@ -34,14 +35,32 @@ def test_model_list_is_paginated_governed_envelope(authenticated_tenant_a_client
 
 
 def test_event_ingestion_delegates_to_service(authenticated_tenant_a_client):
-    payload = {"process_name": "orders", "source_module": "canonical", "events": [{"case_id": "c", "activity": "a", "occurred_at": "2026-07-21T08:00:00Z"}]}
+    payload = {
+        "process_name": "orders",
+        "source_module": "canonical",
+        "events": [{"case_id": "c", "activity": "a", "occurred_at": "2026-07-21T08:00:00Z"}],
+    }
     with patch.object(api.EventLogService, "ingest_events", return_value=IngestResult(1, 0, 0, ())) as method:
         response = authenticated_tenant_a_client.post(f"{BASE}/events/", payload, format="json")
     assert response.status_code == 201 and response.json()["data"]["accepted"] == 1
     method.assert_called_once()
 
 
-@pytest.mark.parametrize("serializer,payload", [(EventBatchIngestSerializer, {"process_name": "p", "source_module": "canonical", "events": [{"case_id": "c", "activity": "a", "occurred_at": "2026-07-21T08:00:00Z"}]}), (ProcessModelCreateSerializer, {"name": "m", "process_name": "p", "description": "", "model_data": graph()}), (TransitionActionSerializer, {"transition_key": "key"})])
+@pytest.mark.parametrize(
+    "serializer,payload",
+    [
+        (
+            EventBatchIngestSerializer,
+            {
+                "process_name": "p",
+                "source_module": "canonical",
+                "events": [{"case_id": "c", "activity": "a", "occurred_at": "2026-07-21T08:00:00Z"}],
+            },
+        ),
+        (ProcessModelCreateSerializer, {"name": "m", "process_name": "p", "description": "", "model_data": graph()}),
+        (TransitionActionSerializer, {"transition_key": "key"}),
+    ],
+)
 def test_mutation_serializers_reject_tenant_spoofing(serializer, payload):
     value = serializer(data={**payload, "tenant_id": str(uuid.uuid4())})
     assert not value.is_valid() and "tenant_id" in value.errors

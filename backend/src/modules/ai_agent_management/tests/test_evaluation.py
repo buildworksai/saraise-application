@@ -10,8 +10,8 @@ from src.modules.ai_agent_management.evaluation.harness import (
     EvaluationResult,
     EvaluationStatus,
     EvaluationSuite,
-    TestCase as EvaluationCase,
 )
+from src.modules.ai_agent_management.evaluation.harness import TestCase as EvaluationCase
 from src.modules.ai_agent_management.evaluation.metrics import CorrectnessMetric
 from src.modules.ai_agent_management.evaluation.red_team import (
     AttackCategory,

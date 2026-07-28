@@ -10,7 +10,6 @@ from uuid import UUID
 
 from django.db import migrations, models
 
-
 LEGACY_SYSTEM_ACTOR_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 
@@ -39,14 +38,16 @@ def backfill_budget_domain(apps, schema_editor):
     BudgetLine.objects.using(database).update(variance=models.F("budget_amount") - models.F("actual_amount"))
 
     for budget in Budget.objects.using(database).all().iterator():
-        result = BudgetLine.objects.using(database).filter(
-            tenant_id=budget.tenant_id,
-            budget_id=budget.pk,
-            is_deleted=False,
-        ).aggregate(total=models.Sum("budget_amount"))
-        Budget.objects.using(database).filter(pk=budget.pk).update(
-            total_budget=result["total"] or Decimal("0.00")
+        result = (
+            BudgetLine.objects.using(database)
+            .filter(
+                tenant_id=budget.tenant_id,
+                budget_id=budget.pk,
+                is_deleted=False,
+            )
+            .aggregate(total=models.Sum("budget_amount"))
         )
+        Budget.objects.using(database).filter(pk=budget.pk).update(total_budget=result["total"] or Decimal("0.00"))
 
 
 def restore_legacy_domain(apps, schema_editor):

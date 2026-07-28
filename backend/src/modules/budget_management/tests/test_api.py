@@ -109,9 +109,13 @@ class TestBudgetAPI:
         response = client.post(
             "/api/v2/budget-management/budgets/",
             {
-                "budget_code": "CSRF-1", "budget_name": "CSRF proof", "fiscal_year": 2024,
-                "start_date": "2024-01-01", "end_date": "2024-12-31",
-                "budget_type": "operating", "currency": "USD",
+                "budget_code": "CSRF-1",
+                "budget_name": "CSRF proof",
+                "fiscal_year": 2024,
+                "start_date": "2024-01-01",
+                "end_date": "2024-12-31",
+                "budget_type": "operating",
+                "currency": "USD",
             },
             format="json",
         )

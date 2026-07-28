@@ -64,9 +64,7 @@ def test_missing_policy_entitlement_and_quota_fail_closed(authenticated_tenant_a
 
 
 @pytest.mark.django_db
-def test_entitlement_denial_occurs_after_real_policy_allow(
-    authenticated_tenant_a_client, monkeypatch, settings
-):
+def test_entitlement_denial_occurs_after_real_policy_allow(authenticated_tenant_a_client, monkeypatch, settings):
     calls = _allow_policy_engine(monkeypatch, settings)
 
     response = authenticated_tenant_a_client.get("/api/v2/notifications/inbox/")
@@ -116,9 +114,7 @@ def test_governed_collection_envelope_and_bounded_pagination(
 
 
 @pytest.mark.django_db
-def test_invalid_filter_has_stable_error_envelope(
-    authenticated_tenant_a_client, tenant_a, monkeypatch, settings
-):
+def test_invalid_filter_has_stable_error_envelope(authenticated_tenant_a_client, tenant_a, monkeypatch, settings):
     _allow_policy_engine(monkeypatch, settings)
     _grant(tenant_a.id, "notifications.inbox:read", "notifications.api_reads")
 
@@ -140,11 +136,14 @@ def test_unauthenticated_request_is_rejected(api_client):
 @pytest.mark.django_db
 def test_unsafe_request_without_csrf_is_rejected(tenant_a_user):
     from rest_framework.test import APIClient
+
     from src.core.testing import TEST_PASSWORD
 
     client = APIClient(enforce_csrf_checks=True)
     assert client.login(username=tenant_a_user.username, password=TEST_PASSWORD)
-    response = client.post("/api/v2/notifications/inbox/mark-all-read/", {"transition_key": "csrf-proof"}, format="json")
+    response = client.post(
+        "/api/v2/notifications/inbox/mark-all-read/", {"transition_key": "csrf-proof"}, format="json"
+    )
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
@@ -157,14 +156,20 @@ def test_unsafe_request_without_csrf_is_rejected(tenant_a_user):
         ("/api/v2/notifications/inbox/mark-all-read/", {"post": "mark_all_read"}),
         ("/api/v2/notifications/inbox/unread-count/", {"get": "unread_count"}),
         ("/api/v2/notifications/templates/", {"get": "list", "post": "create"}),
-        (f"/api/v2/notifications/templates/{uuid4()}/", {"get": "retrieve", "patch": "partial_update", "delete": "destroy"}),
+        (
+            f"/api/v2/notifications/templates/{uuid4()}/",
+            {"get": "retrieve", "patch": "partial_update", "delete": "destroy"},
+        ),
         (f"/api/v2/notifications/templates/{uuid4()}/versions/", {"get": "versions", "post": "versions"}),
         (f"/api/v2/notifications/templates/{uuid4()}/activate/", {"post": "activate"}),
         ("/api/v2/notifications/deliveries/", {"get": "list", "post": "create"}),
         ("/api/v2/notifications/deliveries/bulk/", {"post": "bulk"}),
         (f"/api/v2/notifications/deliveries/{uuid4()}/attempts/", {"get": "attempts"}),
         ("/api/v2/notifications/endpoints/", {"get": "list", "post": "create"}),
-        (f"/api/v2/notifications/endpoints/{uuid4()}/", {"get": "retrieve", "patch": "partial_update", "delete": "destroy"}),
+        (
+            f"/api/v2/notifications/endpoints/{uuid4()}/",
+            {"get": "retrieve", "patch": "partial_update", "delete": "destroy"},
+        ),
     ],
 )
 def test_router_path_method_contract(path, methods):

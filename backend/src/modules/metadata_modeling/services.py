@@ -9,7 +9,6 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import math
 import re
 import uuid
 from datetime import date, datetime
@@ -134,9 +133,7 @@ def _prior_result(
     model: type[EntityDefinition] | type[DynamicResource] | type[EntitySchemaVersion],
 ):
     if not idempotency_key:
-        raise ValidationError(
-            {"idempotency_key": [{"code": "REQUIRED", "message": "Idempotency-Key is required."}]}
-        )
+        raise ValidationError({"idempotency_key": [{"code": "REQUIRED", "message": "Idempotency-Key is required."}]})
     event = (
         OutboxEvent.objects.for_tenant(tenant_id)
         .filter(event_type=event_type, payload__idempotency_key=idempotency_key)
@@ -222,7 +219,9 @@ def _normalize_field(raw: object, order: int) -> dict[str, JSONValue]:
         raise ValidationError({"field_type": [{"code": "INVALID_CHOICE", "message": "Unsupported field type."}]})
     key = _require_text(raw.get("key"), "key", 100)
     if not re.fullmatch(r"[a-z][a-z0-9_]*", key):
-        raise ValidationError({"key": [{"code": "INVALID_KEY", "message": "Use lowercase letters, digits and underscores."}]})
+        raise ValidationError(
+            {"key": [{"code": "INVALID_KEY", "message": "Use lowercase letters, digits and underscores."}]}
+        )
     rules = raw.get("validation_rules", {})
     options = raw.get("options", [])
     if not isinstance(rules, dict):
@@ -241,13 +240,21 @@ def _normalize_field(raw: object, order: int) -> dict[str, JSONValue]:
     unsupported_rules = set(rules) - supported_rules
     if unsupported_rules:
         raise ValidationError(
-            {"validation_rules": [{"code": "UNKNOWN_KEYS", "message": f"Unsupported rules: {', '.join(sorted(unsupported_rules))}."}]}
+            {
+                "validation_rules": [
+                    {"code": "UNKNOWN_KEYS", "message": f"Unsupported rules: {', '.join(sorted(unsupported_rules))}."}
+                ]
+            }
         )
     if field_type == "select":
         if not options or any(not isinstance(item, str) for item in options) or len(options) != len(set(options)):
-            raise ValidationError({"options": [{"code": "INVALID_OPTIONS", "message": "Select options must be unique strings."}]})
+            raise ValidationError(
+                {"options": [{"code": "INVALID_OPTIONS", "message": "Select options must be unique strings."}]}
+            )
     elif options:
-        raise ValidationError({"options": [{"code": "NOT_APPLICABLE", "message": "Only select fields accept options."}]})
+        raise ValidationError(
+            {"options": [{"code": "NOT_APPLICABLE", "message": "Only select fields accept options."}]}
+        )
     reference_code = raw.get("reference_entity_code")
     if field_type == "reference" and not reference_code:
         raise ValidationError(
@@ -259,7 +266,9 @@ def _normalize_field(raw: object, order: int) -> dict[str, JSONValue]:
         )
     field_order = raw.get("order", order)
     if isinstance(field_order, bool) or not isinstance(field_order, int) or field_order < 0:
-        raise ValidationError({"order": [{"code": "INVALID_ORDER", "message": "Order must be a non-negative integer."}]})
+        raise ValidationError(
+            {"order": [{"code": "INVALID_ORDER", "message": "Order must be a non-negative integer."}]}
+        )
     normalized: dict[str, JSONValue] = {
         "name": _require_text(raw.get("name"), "name", 160),
         "key": key,
@@ -410,12 +419,16 @@ def _validate_value(
             target_id = uuid.UUID(str(value))
         except (TypeError, ValueError) as exc:
             raise ValueError("REFERENCE_NOT_FOUND") from exc
-        exists = DynamicResource.objects.for_tenant(tenant_id).filter(
-            pk=target_id,
-            entity_definition__code=target_code,
-            entity_definition__status="published",
-            deleted_at__isnull=True,
-        ).exists()
+        exists = (
+            DynamicResource.objects.for_tenant(tenant_id)
+            .filter(
+                pk=target_id,
+                entity_definition__code=target_code,
+                entity_definition__status="published",
+                deleted_at__isnull=True,
+            )
+            .exists()
+        )
         if not exists:
             raise ValueError("REFERENCE_NOT_FOUND")
         return str(target_id)
@@ -495,7 +508,9 @@ class EntityDefinitionService:
         }
         unknown = set(payload) - allowed
         if unknown:
-            raise ValidationError({key: [{"code": "READ_ONLY", "message": "Field is not writable."}] for key in unknown})
+            raise ValidationError(
+                {key: [{"code": "READ_ONLY", "message": "Field is not writable."}] for key in unknown}
+            )
         strategy = str(payload.get("naming_strategy", "uuid"))
         naming_config = _validate_naming(strategy, payload.get("naming_config", {}))
         try:
@@ -558,7 +573,9 @@ class EntityDefinitionService:
         }
         unknown = set(payload) - mutable
         if unknown:
-            raise ValidationError({key: [{"code": "READ_ONLY", "message": "Field is not writable."}] for key in unknown})
+            raise ValidationError(
+                {key: [{"code": "READ_ONLY", "message": "Field is not writable."}] for key in unknown}
+            )
         if entity.status != "draft" and "code" in payload and payload["code"] != entity.code:
             raise ValidationError({"code": [{"code": "IMMUTABLE", "message": "Code is immutable after publication."}]})
         strategy = str(payload.get("naming_strategy", entity.naming_strategy))
@@ -619,7 +636,9 @@ class EntityDefinitionService:
     ) -> EntityDefinition:
         entity = cls.get_definition(tenant_id, definition_id)
         if entity.status != "archived":
-            raise ValidationError({"status": [{"code": "INVALID_TRANSITION", "message": "Only archived definitions restore."}]})
+            raise ValidationError(
+                {"status": [{"code": "INVALID_TRANSITION", "message": "Only archived definitions restore."}]}
+            )
         entity.status = "published" if entity.active_version_id else "draft"
         entity.archived_at = None
         entity.archived_by = None
@@ -683,7 +702,11 @@ class EntityDefinitionService:
         if sample_data is not None:
             errors = DynamicResourceService.validate_descriptors(tenant_id, fields, sample_data)[1]
         error_list: list[JSONValue] = [
-            {"field": key, "code": str(item.get("code", "INVALID")), "message": str(item.get("message", "Invalid value."))}
+            {
+                "field": key,
+                "code": str(item.get("code", "INVALID")),
+                "message": str(item.get("message", "Invalid value.")),
+            }
             for key, items in errors.items()
             if isinstance(items, list)
             for item in items
@@ -714,17 +737,29 @@ class EntityDefinitionService:
         fields = _normalize_fields(candidate_schema.get("fields", []))
         errors = DynamicResourceService.validate_descriptors(tenant_id, fields, sample_data)[1] if sample_data else {}
         error_list: list[JSONValue] = [
-            {"field": key, "code": str(item.get("code", "INVALID")), "message": str(item.get("message", "Invalid value."))}
-            for key, items in errors.items() if isinstance(items, list)
-            for item in items if isinstance(item, dict)
+            {
+                "field": key,
+                "code": str(item.get("code", "INVALID")),
+                "message": str(item.get("message", "Invalid value.")),
+            }
+            for key, items in errors.items()
+            if isinstance(items, list)
+            for item in items
+            if isinstance(item, dict)
         ]
         report: dict[str, JSONValue] = {
-            "valid": not errors, "compatibility": "compatible", "resource_count": 0,
-            "incompatible_resource_count": 0, "errors": error_list, "warnings": [],
+            "valid": not errors,
+            "compatibility": "compatible",
+            "resource_count": 0,
+            "incompatible_resource_count": 0,
+            "errors": error_list,
+            "warnings": [],
         }
         return {
-            "normalized_schema": {"fields": fields}, "form_descriptor": fields,
-            "sample_validation": report, "impact": report,
+            "normalized_schema": {"fields": fields},
+            "form_descriptor": fields,
+            "sample_validation": report,
+            "impact": report,
         }
 
     @classmethod
@@ -767,13 +802,19 @@ class EntityDefinitionService:
         checksum = document.get("checksum")
         body = {key: value for key, value in document.items() if key != "checksum"}
         if document.get("format_version") != FORMAT_VERSION:
-            raise ValidationError({"format_version": [{"code": "UNSUPPORTED_VERSION", "message": "Unsupported format."}]})
+            raise ValidationError(
+                {"format_version": [{"code": "UNSUPPORTED_VERSION", "message": "Unsupported format."}]}
+            )
         if checksum != _schema_hash(body):
-            raise ValidationError({"checksum": [{"code": "CHECKSUM_MISMATCH", "message": "Document checksum is invalid."}]})
+            raise ValidationError(
+                {"checksum": [{"code": "CHECKSUM_MISMATCH", "message": "Document checksum is invalid."}]}
+            )
         entity_payload = document.get("entity")
         schema = document.get("schema")
         if not isinstance(entity_payload, dict) or not isinstance(schema, dict):
-            raise ValidationError({"document": [{"code": "MALFORMED_DOCUMENT", "message": "Entity and schema are required."}]})
+            raise ValidationError(
+                {"document": [{"code": "MALFORMED_DOCUMENT", "message": "Entity and schema are required."}]}
+            )
         fields = _normalize_fields(schema.get("fields", []))
         if mode == "validate_only":
             return {
@@ -823,7 +864,9 @@ class EntityDefinitionService:
     ) -> None:
         entity = cls.get_definition(tenant_id, definition_id)
         if entity.versions.filter(status__in=("published", "superseded")).exists() or entity.resources.exists():
-            raise ValidationError({"status": [{"code": "DELETE_FORBIDDEN", "message": "Published or used definitions archive."}]})
+            raise ValidationError(
+                {"status": [{"code": "DELETE_FORBIDDEN", "message": "Published or used definitions archive."}]}
+            )
         entity.delete()
 
 
@@ -833,12 +876,14 @@ class SchemaVersionService:
     @staticmethod
     def list_versions(tenant_id: uuid.UUID, definition_id: uuid.UUID) -> QuerySet[EntitySchemaVersion]:
         EntityDefinitionService.get_definition(tenant_id, definition_id)
-        return EntitySchemaVersion.objects.for_tenant(tenant_id).filter(entity_definition_id=definition_id).order_by("-version")
+        return (
+            EntitySchemaVersion.objects.for_tenant(tenant_id)
+            .filter(entity_definition_id=definition_id)
+            .order_by("-version")
+        )
 
     @staticmethod
-    def get_version(
-        tenant_id: uuid.UUID, definition_id: uuid.UUID, version_id: uuid.UUID | str
-    ) -> EntitySchemaVersion:
+    def get_version(tenant_id: uuid.UUID, definition_id: uuid.UUID, version_id: uuid.UUID | str) -> EntitySchemaVersion:
         try:
             return EntitySchemaVersion.objects.for_tenant(tenant_id).get(
                 pk=version_id, entity_definition_id=definition_id
@@ -948,13 +993,11 @@ class SchemaVersionService:
         added = sorted(set(new_fields) - set(old_fields))
         removed = sorted(set(old_fields) - set(new_fields))
         changed = sorted(key for key in set(old_fields) & set(new_fields) if old_fields[key] != new_fields[key])
-        changes: list[JSONValue] = [
-            {"key": key, "kind": "added", "after": new_fields[key]} for key in added
-        ] + [
-            {"key": key, "kind": "removed", "before": old_fields[key]} for key in removed
-        ] + [
-            {"key": key, "kind": "changed", "before": old_fields[key], "after": new_fields[key]} for key in changed
-        ]
+        changes: list[JSONValue] = (
+            [{"key": key, "kind": "added", "after": new_fields[key]} for key in added]
+            + [{"key": key, "kind": "removed", "before": old_fields[key]} for key in removed]
+            + [{"key": key, "kind": "changed", "before": old_fields[key], "after": new_fields[key]} for key in changed]
+        )
         return {
             "from_version": old.version,
             "to_version": new.version,
@@ -984,7 +1027,9 @@ class SchemaVersionService:
             raise ValidationError({"status": [{"code": "INVALID_TRANSITION", "message": "Only candidates publish."}]})
         report = cls.validate_candidate(tenant_id, definition_id, version_id)
         if report["incompatible_resources"]:
-            raise ValidationError({"schema": [{"code": "INCOMPATIBLE_RESOURCES", "message": "Existing records are invalid."}]})
+            raise ValidationError(
+                {"schema": [{"code": "INCOMPATIBLE_RESOURCES", "message": "Existing records are invalid."}]}
+            )
         now = timezone.now()
         EntitySchemaVersion.objects.for_tenant(tenant_id).filter(
             entity_definition_id=definition_id, status="published"
@@ -1093,14 +1138,18 @@ class NamingService:
             key = entity.naming_config.get("field_key")
             value = data.get(key) if isinstance(key, str) else None
             if value in (None, ""):
-                raise ValidationError({str(key): [{"code": "REQUIRED_FOR_NAMING", "message": "Naming field is required."}]})
+                raise ValidationError(
+                    {str(key): [{"code": "REQUIRED_FOR_NAMING", "message": "Naming field is required."}]}
+                )
             return str(value)
         config = _validate_naming("sequence", entity.naming_config)
         template = str(config["prefix_template"])
         preview_value = 1
-        sequence = NamingSequence.objects.for_tenant(tenant_id).filter(
-            entity_definition=entity, sequence_key=config["sequence_key"], is_active=True
-        ).first()
+        sequence = (
+            NamingSequence.objects.for_tenant(tenant_id)
+            .filter(entity_definition=entity, sequence_key=config["sequence_key"], is_active=True)
+            .first()
+        )
         if sequence:
             preview_value = sequence.next_value
         return NamingService._render(template, preview_value)
@@ -1120,17 +1169,21 @@ class NamingService:
             period_key = now.strftime("%Y")
         elif config["reset_period"] == "monthly":
             period_key = now.strftime("%Y-%m")
-        sequence, _ = NamingSequence.objects.for_tenant(tenant_id).select_for_update().get_or_create(
-            tenant_id=tenant_id,
-            entity_definition=entity,
-            sequence_key=sequence_key,
-            period_key=period_key,
-            defaults={
-                "prefix_template": config["prefix_template"],
-                "padding": config["padding"],
-                "reset_period": config["reset_period"],
-                "is_active": True,
-            },
+        sequence, _ = (
+            NamingSequence.objects.for_tenant(tenant_id)
+            .select_for_update()
+            .get_or_create(
+                tenant_id=tenant_id,
+                entity_definition=entity,
+                sequence_key=sequence_key,
+                period_key=period_key,
+                defaults={
+                    "prefix_template": config["prefix_template"],
+                    "padding": config["padding"],
+                    "reset_period": config["reset_period"],
+                    "is_active": True,
+                },
+            )
         )
         if not sequence.is_active:
             raise ServiceUnavailableError("The configured naming sequence is inactive.")
@@ -1145,7 +1198,9 @@ class NamingService:
         result = template.replace("{YYYY}", now.strftime("%Y")).replace("{MM}", now.strftime("%m"))
         token = re.search(r"\{(#+)\}", result)
         if token is None:
-            raise ValidationError({"prefix_template": [{"code": "INVALID_TEMPLATE", "message": "Numeric token missing."}]})
+            raise ValidationError(
+                {"prefix_template": [{"code": "INVALID_TEMPLATE", "message": "Numeric token missing."}]}
+            )
         return result.replace(token.group(0), str(value).zfill(len(token.group(1))))
 
     @staticmethod
@@ -1159,7 +1214,9 @@ class NamingService:
         correlation_id: str,
     ) -> NamingSequence:
         if isinstance(next_value, bool) or not 1 <= next_value <= 9_999_999_999_999:
-            raise ValidationError({"next_value": [{"code": "OUT_OF_RANGE", "message": "Must be a positive safe integer."}]})
+            raise ValidationError(
+                {"next_value": [{"code": "OUT_OF_RANGE", "message": "Must be a positive safe integer."}]}
+            )
         try:
             sequence = NamingSequence.objects.for_tenant(tenant_id).select_for_update().get(pk=sequence_id)
         except NamingSequence.DoesNotExist as exc:
@@ -1184,8 +1241,10 @@ class DynamicResourceService:
         created_before: datetime | None = None,
         ordering: str | None = None,
     ) -> QuerySet[DynamicResource]:
-        queryset = DynamicResource.objects.for_tenant(tenant_id).filter(deleted_at__isnull=True).select_related(
-            "entity_definition", "schema_version"
+        queryset = (
+            DynamicResource.objects.for_tenant(tenant_id)
+            .filter(deleted_at__isnull=True)
+            .select_related("entity_definition", "schema_version")
         )
         if entity_id:
             queryset = queryset.filter(entity_definition_id=entity_id)
@@ -1202,8 +1261,14 @@ class DynamicResourceService:
         return queryset.order_by(ordering if ordering in ALLOWED_ORDERINGS else "-created_at")
 
     @staticmethod
-    def get_resource(tenant_id: uuid.UUID, resource_id: uuid.UUID | str, *, include_deleted: bool = False) -> DynamicResource:
-        manager = getattr(DynamicResource, "all_objects", DynamicResource.objects) if include_deleted else DynamicResource.objects
+    def get_resource(
+        tenant_id: uuid.UUID, resource_id: uuid.UUID | str, *, include_deleted: bool = False
+    ) -> DynamicResource:
+        manager = (
+            getattr(DynamicResource, "all_objects", DynamicResource.objects)
+            if include_deleted
+            else DynamicResource.objects
+        )
         try:
             queryset = manager.for_tenant(tenant_id)
             if not include_deleted:
@@ -1258,7 +1323,11 @@ class DynamicResourceService:
         existing_resource: DynamicResource | None = None,
         apply_defaults: bool = True,
     ) -> dict[str, JSONValue]:
-        if entity.tenant_id != tenant_id or schema_version.tenant_id != tenant_id or schema_version.entity_definition_id != entity.id:
+        if (
+            entity.tenant_id != tenant_id
+            or schema_version.tenant_id != tenant_id
+            or schema_version.entity_definition_id != entity.id
+        ):
             raise NotFound("Schema not found.")
         cleaned, errors = cls.validate_descriptors(
             tenant_id, schema_version.schema.get("fields", []), data, apply_defaults=apply_defaults
@@ -1285,7 +1354,9 @@ class DynamicResourceService:
             return prior
         entity = EntityDefinitionService.get_definition(tenant_id, entity_id)
         if entity.status != "published" or entity.active_version_id is None:
-            raise ValidationError({"entity_definition": [{"code": "NOT_PUBLISHED", "message": "Schema is not published."}]})
+            raise ValidationError(
+                {"entity_definition": [{"code": "NOT_PUBLISHED", "message": "Schema is not published."}]}
+            )
         cleaned = cls.validate_data(tenant_id, entity, entity.active_version, data)
         record_key = NamingService.allocate_record_key(tenant_id, entity, cleaned)
         resource = DynamicResource.objects.create(
@@ -1333,11 +1404,16 @@ class DynamicResourceService:
             schema_version = entity.active_version
             cleaned = cls.validate_data(tenant_id, entity, schema_version, data)
         else:
-            schema_version = EntitySchemaVersion.objects.for_tenant(tenant_id).filter(
-                entity_definition=entity
-            ).order_by("-version").first()
+            schema_version = (
+                EntitySchemaVersion.objects.for_tenant(tenant_id)
+                .filter(entity_definition=entity)
+                .order_by("-version")
+                .first()
+            )
             if schema_version is None:
-                raise ValidationError({"schema": [{"code": "SCHEMA_REQUIRED", "message": "Define fields before records."}]})
+                raise ValidationError(
+                    {"schema": [{"code": "SCHEMA_REQUIRED", "message": "Define fields before records."}]}
+                )
             descriptors = [
                 {
                     "name": field.name,
@@ -1582,7 +1658,9 @@ class DynamicResourceService:
         if resource.state == "cancelled":
             return resource
         if resource.state != "submitted":
-            raise ValidationError({"state": [{"code": "INVALID_TRANSITION", "message": "Only submitted records cancel."}]})
+            raise ValidationError(
+                {"state": [{"code": "INVALID_TRANSITION", "message": "Only submitted records cancel."}]}
+            )
         if resource.lock_version != expected_lock_version:
             raise ConflictError()
         _require_text(reason, "reason", 2000)
@@ -1618,7 +1696,12 @@ class DynamicResourceService:
         correlation_id: str,
         changed_fields: list[str],
     ) -> DynamicResourceVersion:
-        latest = DynamicResourceVersion.objects.for_tenant(resource.tenant_id).filter(resource=resource).order_by("-version").first()
+        latest = (
+            DynamicResourceVersion.objects.for_tenant(resource.tenant_id)
+            .filter(resource=resource)
+            .order_by("-version")
+            .first()
+        )
         return DynamicResourceVersion.objects.create(
             tenant_id=resource.tenant_id,
             resource=resource,
@@ -1724,9 +1807,7 @@ class MetadataConfigurationService:
         deployment or an undocumented bootstrap command.  Provisioning is
         idempotent and uses the same validation/audit path as an explicit update.
         """
-        existing = MetadataModelingConfiguration.objects.for_tenant(tenant_id).filter(
-            environment=environment
-        ).first()
+        existing = MetadataModelingConfiguration.objects.for_tenant(tenant_id).filter(environment=environment).first()
         if existing is not None:
             return existing
         return cls.update_configuration(
@@ -1758,7 +1839,9 @@ class MetadataConfigurationService:
             )
         unknown = set(payload) - set(cls.FIELDS)
         if unknown:
-            raise ValidationError({key: [{"code": "UNKNOWN_FIELD", "message": "Configuration key is unsupported."}] for key in unknown})
+            raise ValidationError(
+                {key: [{"code": "UNKNOWN_FIELD", "message": "Configuration key is unsupported."}] for key in unknown}
+            )
         for field, value in payload.items():
             setattr(candidate, field, copy.deepcopy(value))
         try:
@@ -1767,12 +1850,8 @@ class MetadataConfigurationService:
             raise ValidationError(exc.message_dict) from exc
         after = cls._document(candidate)
         changed = sorted(key for key in cls.FIELDS if before.get(key) != after.get(key))
-        diff: list[JSONValue] = [
-            {"path": key, "before": before.get(key), "after": after.get(key)} for key in changed
-        ]
-        effective_values: dict[str, JSONValue] = {
-            field: copy.deepcopy(after[field]) for field in cls.FIELDS
-        }
+        diff: list[JSONValue] = [{"path": key, "before": before.get(key), "after": after.get(key)} for key in changed]
+        effective_values: dict[str, JSONValue] = {field: copy.deepcopy(after[field]) for field in cls.FIELDS}
         return {
             "valid": True,
             "errors": [],
@@ -1797,9 +1876,12 @@ class MetadataConfigurationService:
         correlation_id: str,
         operation: str = "update",
     ) -> MetadataModelingConfiguration:
-        current = MetadataModelingConfiguration.objects.for_tenant(tenant_id).select_for_update().filter(
-            environment=environment
-        ).first()
+        current = (
+            MetadataModelingConfiguration.objects.for_tenant(tenant_id)
+            .select_for_update()
+            .filter(environment=environment)
+            .first()
+        )
         if current and expected_version is not None and current.version != expected_version:
             raise ConflictError("Configuration has changed since it was loaded.")
         preview = cls.preview_configuration(tenant_id, environment, payload)
@@ -1836,11 +1918,11 @@ class MetadataConfigurationService:
         return current
 
     @classmethod
-    def list_history(
-        cls, tenant_id: uuid.UUID, environment: str
-    ) -> QuerySet[MetadataConfigurationAudit]:
+    def list_history(cls, tenant_id: uuid.UUID, environment: str) -> QuerySet[MetadataConfigurationAudit]:
         config = cls.get_configuration(tenant_id, environment)
-        return MetadataConfigurationAudit.objects.for_tenant(tenant_id).filter(configuration=config).order_by("-version")
+        return (
+            MetadataConfigurationAudit.objects.for_tenant(tenant_id).filter(configuration=config).order_by("-version")
+        )
 
     @classmethod
     @transaction.atomic
@@ -1893,11 +1975,15 @@ class MetadataConfigurationService:
         checksum = document.get("checksum")
         body = {key: value for key, value in document.items() if key != "checksum"}
         if body.get("format_version") != FORMAT_VERSION or checksum != _schema_hash(body):
-            raise ValidationError({"document": [{"code": "CHECKSUM_MISMATCH", "message": "Configuration document is invalid."}]})
+            raise ValidationError(
+                {"document": [{"code": "CHECKSUM_MISMATCH", "message": "Configuration document is invalid."}]}
+            )
         environment = str(body.get("environment", ""))
         values = body.get("values")
         if not isinstance(values, dict):
-            raise ValidationError({"document": [{"code": "MALFORMED_DOCUMENT", "message": "Configuration values are required."}]})
+            raise ValidationError(
+                {"document": [{"code": "MALFORMED_DOCUMENT", "message": "Configuration values are required."}]}
+            )
         payload = {field: values[field] for field in cls.FIELDS if field in values}
         current = MetadataModelingConfiguration.objects.for_tenant(tenant_id).filter(environment=environment).first()
         return cls.update_configuration(

@@ -18,10 +18,22 @@ from src.modules.data_migration import api
     (
         ("/api/v2/data-migration/jobs/", "data_migration:job-list"),
         ("/api/v2/data-migration/jobs/import/", "data_migration:job-import-definition"),
-        ("/api/v2/data-migration/jobs/00000000-0000-0000-0000-000000000001/validate/", "data_migration:job-validate-definition"),
-        ("/api/v2/data-migration/jobs/00000000-0000-0000-0000-000000000001/dry-runs/", "data_migration:job-request-dry-run"),
-        ("/api/v2/data-migration/runs/00000000-0000-0000-0000-000000000001/issues/export/", "data_migration:run-export-issues"),
-        ("/api/v2/data-migration/connections/00000000-0000-0000-0000-000000000001/test/", "data_migration:connection-test-connection"),
+        (
+            "/api/v2/data-migration/jobs/00000000-0000-0000-0000-000000000001/validate/",
+            "data_migration:job-validate-definition",
+        ),
+        (
+            "/api/v2/data-migration/jobs/00000000-0000-0000-0000-000000000001/dry-runs/",
+            "data_migration:job-request-dry-run",
+        ),
+        (
+            "/api/v2/data-migration/runs/00000000-0000-0000-0000-000000000001/issues/export/",
+            "data_migration:run-export-issues",
+        ),
+        (
+            "/api/v2/data-migration/connections/00000000-0000-0000-0000-000000000001/test/",
+            "data_migration:connection-test-connection",
+        ),
         ("/api/v2/data-migration/configuration/", "data_migration:configuration"),
         ("/api/v2/data-migration/configuration/versions/1/restore/", "data_migration:configuration-restore"),
         ("/api/v2/data-migration/health/live/", "data_migration:health-live"),
@@ -35,8 +47,12 @@ def test_required_routes_resolve(path: str, view_name: str) -> None:
 @pytest.mark.parametrize(
     "viewset",
     (
-        api.MigrationJobViewSet, api.MigrationMappingViewSet, api.ValidationRuleViewSet,
-        api.MigrationRunViewSet, api.MigrationRollbackViewSet, api.ExternalConnectionViewSet,
+        api.MigrationJobViewSet,
+        api.MigrationMappingViewSet,
+        api.ValidationRuleViewSet,
+        api.MigrationRunViewSet,
+        api.MigrationRollbackViewSet,
+        api.ExternalConnectionViewSet,
         api.DataMigrationConfigurationViewSet,
     ),
 )

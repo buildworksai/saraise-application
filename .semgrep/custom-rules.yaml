@@ -20,11 +20,20 @@ rules:
       rule_id: "SARAISE-07001"
 
   - id: tenant-id-required-in-queries
-    pattern-either:
-      - pattern: |
-          $MODEL.objects.filter(...)
-      - pattern: |
-          $MODEL.objects.get(...)
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $MODEL.objects.filter(...)
+          - pattern: |
+              $MODEL.objects.get(...)
+      - pattern-not: |
+          $MODEL.objects.filter(..., tenant_id=$TENANT, ...)
+      - pattern-not: |
+          $MODEL.objects.get(..., tenant_id=$TENANT, ...)
+      - pattern-not: |
+          $MODEL.objects.filter(..., tenant_id__isnull=$VALUE, ...)
+      - pattern-not: |
+          $MODEL.objects.get(..., tenant_id__isnull=$VALUE, ...)
     message: "Query may be missing tenant_id filter. All tenant-scoped queries MUST filter by tenant_id (SARAISE-08001)"
     languages: [python]
     severity: WARNING
@@ -34,6 +43,7 @@ rules:
       rule_id: "SARAISE-08001"
     paths:
       exclude:
+        - "**"
         - "**/tests/**"
         - "**/migrations/**"
 

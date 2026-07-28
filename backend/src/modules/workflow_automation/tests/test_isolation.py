@@ -72,9 +72,7 @@ def test_nested_step_tenant_spoof_is_rejected_on_create_and_update(
 ) -> None:
     payload = action_payload(key="nested-create-spoof")
     payload["steps"][0]["tenant_id"] = str(tenant_b.id)
-    response = tenant_a_client.post(
-        "/api/v2/workflow-automation/workflows/", payload, format="json"
-    )
+    response = tenant_a_client.post("/api/v2/workflow-automation/workflows/", payload, format="json")
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
     workflow = WorkflowDefinitionService.create_workflow(
@@ -97,9 +95,7 @@ def test_cross_tenant_definition_actions_and_start_are_404_without_side_effects(
     workflow = WorkflowDefinitionService.create_workflow(
         tenant_b.id, tenant_b_user, action_payload(key="tenant-b-actions")
     )
-    workflow = WorkflowDefinitionService.publish_workflow(
-        tenant_b.id, workflow.id, tenant_b_user, "tenant-b-publish"
-    )
+    workflow = WorkflowDefinitionService.publish_workflow(tenant_b.id, workflow.id, tenant_b_user, "tenant-b-publish")
     before = (workflow.status, workflow.version, workflow.updated_at)
     for suffix, payload in (
         ("publish", {"transition_key": "foreign-publish"}),
@@ -141,9 +137,10 @@ def test_cross_tenant_instance_list_detail_and_cancel(
     identifiers = {item["id"] for item in listing.json()["data"]}
     assert str(instance_a.id) in identifiers
     assert str(instance_b.id) not in identifiers
-    assert tenant_a_client.get(
-        f"/api/v2/workflow-automation/instances/{instance_b.id}/"
-    ).status_code == status.HTTP_404_NOT_FOUND
+    assert (
+        tenant_a_client.get(f"/api/v2/workflow-automation/instances/{instance_b.id}/").status_code
+        == status.HTTP_404_NOT_FOUND
+    )
     before = (instance_b.state, instance_b.updated_at)
     response = tenant_a_client.post(
         f"/api/v2/workflow-automation/instances/{instance_b.id}/cancel/",
@@ -176,9 +173,9 @@ def test_cross_tenant_task_list_detail_complete_and_reject(
     identifiers = {item["id"] for item in listing.json()["data"]}
     assert str(task_a.id) in identifiers
     assert str(task_b.id) not in identifiers
-    assert tenant_a_client.get(
-        f"/api/v2/workflow-automation/tasks/{task_b.id}/"
-    ).status_code == status.HTTP_404_NOT_FOUND
+    assert (
+        tenant_a_client.get(f"/api/v2/workflow-automation/tasks/{task_b.id}/").status_code == status.HTTP_404_NOT_FOUND
+    )
     before = (task_b.status, task_b.meta_data, task_b.updated_at)
     for suffix, payload in (
         ("complete", {"meta_data": {}, "transition_key": "foreign-complete"}),
@@ -195,9 +192,7 @@ def test_cross_tenant_task_list_detail_complete_and_reject(
     assert (task_b.status, task_b.meta_data, task_b.updated_at) == before
 
 
-def test_role_assignment_cannot_resolve_another_tenant_role(
-    tenant_a, tenant_b, tenant_a_user
-) -> None:
+def test_role_assignment_cannot_resolve_another_tenant_role(tenant_a, tenant_b, tenant_a_user) -> None:
     foreign_role = Role.objects.create(
         tenant_id=tenant_b.id,
         name="Tenant B approver",

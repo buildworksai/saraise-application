@@ -6,7 +6,6 @@ import json
 import threading
 import uuid
 from datetime import datetime, timedelta
-from datetime import timezone as dt_timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +20,7 @@ from ..models import (
     AuthenticityCredentialStatus,
     ComplianceEvidenceStatus,
     ImmutableEvidenceError,
-    LedgerAnchor,
     LedgerAnchorStatus,
-    LedgerNetworkStatus,
     LifecycleTransition,
     MutationIdempotencyRecord,
     TraceabilityAsset,

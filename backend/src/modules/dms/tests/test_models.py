@@ -12,14 +12,7 @@ from django.utils import timezone
 
 from src.core.tenancy import TenantScopedModel, TimestampedModel
 from src.modules.dms.managers import ImmutableVersionError
-from src.modules.dms.models import (
-    Document,
-    DocumentPermission,
-    DocumentShare,
-    DocumentVersion,
-    Folder,
-    PermissionLevel,
-)
+from src.modules.dms.models import Document, DocumentPermission, DocumentShare, DocumentVersion, Folder, PermissionLevel
 from src.modules.dms.tests.factories import make_document_graph, make_folder, make_share
 
 pytest_plugins = ["src.core.testing"]

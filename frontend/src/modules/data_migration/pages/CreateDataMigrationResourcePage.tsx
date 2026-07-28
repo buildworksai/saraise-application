@@ -1,1 +1,1 @@
-export { CreateDataMigrationJobPage as CreateDataMigrationResourcePage } from './CreateDataMigrationJobPage';
+export { CreateDataMigrationJobPage as CreateDataMigrationResourcePage } from "./CreateDataMigrationJobPage";

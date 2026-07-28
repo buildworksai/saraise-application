@@ -1,1 +1,1 @@
-export {ConfigurationHistoryPage} from './ModulePages';
+export { ConfigurationHistoryPage } from "./ModulePages";

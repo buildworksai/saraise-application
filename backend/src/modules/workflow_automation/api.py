@@ -19,7 +19,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from src.core.access import RequiresAccess
-from src.core.api import GovernedAPIViewMixin
+from src.core.api import GovernedAPIViewMixin, OperationFailed
 from src.core.auth_utils import get_user_tenant_id
 
 from .extensions import (
@@ -64,6 +64,12 @@ from .services import (
 SUCCESSOR = '</api/v2/workflow-automation/>; rel="successor-version"'
 
 
+def _detail_pk(pk: str | None) -> str:
+    if pk is None:
+        raise ValidationError({"id": "Detail route identifier is required."})
+    return pk
+
+
 class StrictSessionAuthentication(SessionAuthentication):
     """Standard session/CSRF authentication plus a typed tenant binding."""
 
@@ -94,9 +100,7 @@ class DeprecatedV1HeadersMixin:
             response["Deprecation"] = "true"
             tenant_id = getattr(request, "tenant_id", None)
             if isinstance(tenant_id, uuid.UUID):
-                response["Sunset"] = str(
-                    WorkflowConfigurationService.value(tenant_id, "operational.v1_sunset")
-                )
+                response["Sunset"] = str(WorkflowConfigurationService.value(tenant_id, "operational.v1_sunset"))
             response["Link"] = SUCCESSOR
         return response
 
@@ -107,7 +111,7 @@ class GovernedWorkflowViewSet(DeprecatedV1HeadersMixin, GovernedAPIViewMixin, vi
     required_entitlement = MODULE_ENTITLEMENT
     access_prefix = ""
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self):
         action_name = getattr(self, "action", "")
         try:
             permission, quota = access_metadata(f"{self.access_prefix}_{action_name}")
@@ -254,7 +258,7 @@ class WorkflowViewSet(
         serializer.is_valid(raise_exception=True)
         workflow = WorkflowDefinitionService.publish_workflow(
             self.tenant_id,
-            pk,
+            _detail_pk(pk),
             request.user,
             serializer.validated_data["transition_key"],
         )
@@ -266,7 +270,7 @@ class WorkflowViewSet(
         serializer.is_valid(raise_exception=True)
         workflow = WorkflowDefinitionService.archive_workflow(
             self.tenant_id,
-            pk,
+            _detail_pk(pk),
             request.user,
             serializer.validated_data["transition_key"],
         )
@@ -276,7 +280,7 @@ class WorkflowViewSet(
     def clone(self, request: Request, pk: str | None = None) -> Response:
         serializer = WorkflowCloneSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        workflow = WorkflowDefinitionService.clone_version(self.tenant_id, pk, request.user)
+        workflow = WorkflowDefinitionService.clone_version(self.tenant_id, _detail_pk(pk), request.user)
         return Response(WorkflowDetailSerializer(workflow).data, status=status.HTTP_201_CREATED)
 
 
@@ -289,8 +293,10 @@ class WorkflowInstanceViewSet(
     access_prefix = "instance"
 
     def get_serializer_class(self) -> type[Any]:
-        return WorkflowInstanceStartSerializer if self.action == "create" else (
-            WorkflowInstanceListSerializer if self.action == "list" else WorkflowInstanceDetailSerializer
+        return (
+            WorkflowInstanceStartSerializer
+            if self.action == "create"
+            else (WorkflowInstanceListSerializer if self.action == "list" else WorkflowInstanceDetailSerializer)
         )
 
     def _filters(self) -> dict[str, Any]:
@@ -336,7 +342,9 @@ class WorkflowInstanceViewSet(
             values.get("entity_id"),
             values.get("priority"),
         )
-        response_status = status.HTTP_200_OK if instance.state in {"completed", "failed", "cancelled"} else status.HTTP_202_ACCEPTED
+        response_status = (
+            status.HTTP_200_OK if instance.state in {"completed", "failed", "cancelled"} else status.HTTP_202_ACCEPTED
+        )
         return Response(WorkflowInstanceDetailSerializer(instance).data, status=response_status)
 
     @action(detail=True, methods=("post",), url_path="cancel")
@@ -345,7 +353,7 @@ class WorkflowInstanceViewSet(
         serializer.is_valid(raise_exception=True)
         instance = WorkflowExecutionService.cancel_instance(
             self.tenant_id,
-            pk,
+            _detail_pk(pk),
             request.user,
             serializer.validated_data["transition_key"],
         )
@@ -402,7 +410,7 @@ class WorkflowTaskViewSet(
         serializer.is_valid(raise_exception=True)
         task = WorkflowTaskService.complete_task(
             self.tenant_id,
-            pk,
+            _detail_pk(pk),
             request.user,
             serializer.validated_data["meta_data"],
             serializer.validated_data["transition_key"],
@@ -415,7 +423,7 @@ class WorkflowTaskViewSet(
         serializer.is_valid(raise_exception=True)
         task = WorkflowTaskService.reject_task(
             self.tenant_id,
-            pk,
+            _detail_pk(pk),
             request.user,
             serializer.validated_data["reason"],
             serializer.validated_data["meta_data"],
@@ -440,11 +448,7 @@ def _ui_schema(raw: Mapping[str, Any]) -> list[dict[str, Any]]:
     schema = raw.get("configuration_schema") or raw.get("condition_schema") or {}
     properties = schema.get("properties", {}) if isinstance(schema, Mapping) else {}
     required = set(schema.get("required", [])) if isinstance(schema, Mapping) else set()
-    lookups = {
-        item.get("field"): item
-        for item in raw.get("lookup_descriptors", [])
-        if isinstance(item, Mapping)
-    }
+    lookups = {item.get("field"): item for item in raw.get("lookup_descriptors", []) if isinstance(item, Mapping)}
     output: list[dict[str, Any]] = []
     for key, definition in properties.items() if isinstance(properties, Mapping) else ():
         if key == "handler" or not isinstance(definition, Mapping):
@@ -491,7 +495,9 @@ def _catalog_item(descriptor: object, kind: str) -> dict[str, Any]:
     availability = raw.get("availability", "available")
     if availability == "unavailable":
         availability = "degraded"
-    configuration_schema = raw.get("configuration_schema") or raw.get("condition_schema") or raw.get("result_schema") or {"type": "object"}
+    configuration_schema = (
+        raw.get("configuration_schema") or raw.get("condition_schema") or raw.get("result_schema") or {"type": "object"}
+    )
     return {
         **raw,
         "kind": kind,
@@ -517,9 +523,7 @@ class CatalogViewSet(GovernedWorkflowViewSet):
         maximum = int(limits["catalog_max_limit"])
         raw_limit = self.request.query_params.get("limit", str(default_limit))
         ordering = self.request.query_params.get("ordering", "key")
-        allowed_orderings = WorkflowConfigurationService.value(
-            self.tenant_id, "allowed_values.catalog_orderings"
-        )
+        allowed_orderings = WorkflowConfigurationService.value(self.tenant_id, "allowed_values.catalog_orderings")
         try:
             limit = int(raw_limit)
         except ValueError as exc:
@@ -572,9 +576,7 @@ class CatalogViewSet(GovernedWorkflowViewSet):
             raise ValidationError({"limit": [f"Must be between 1 and {maximum}."]})
         search = self.request.query_params.get("search", "")
         if len(search) > search_max_length:
-            raise ValidationError(
-                {"search": [f"Must not exceed {search_max_length} characters."]}
-            )
+            raise ValidationError({"search": [f"Must not exceed {search_max_length} characters."]})
         result = provider.search(
             AssigneeSearchInvocation(
                 tenant_id=self.tenant_id,
@@ -796,7 +798,7 @@ class HealthView(DeprecatedV1HeadersMixin, GovernedAPIViewMixin, APIView):
     required_entitlement = MODULE_ENTITLEMENT
     quota_cost = None
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self):
         tenant_id = getattr(self.request, "tenant_id", None)
         self.quota_cost = (
             WorkflowConfigurationService.value(tenant_id, "operational.api_quota_cost")

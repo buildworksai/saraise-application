@@ -14,10 +14,10 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any
+from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 
-from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import F, Q, QuerySet, Sum
 from django.utils import timezone
@@ -35,14 +35,14 @@ from .integrations import (
     extension_registry,
 )
 from .models import (
+    LEGACY_UNATTRIBUTED_ACTOR,
+    Account,
     APInvoice,
     APInvoiceLine,
     ARInvoice,
     ARInvoiceLine,
-    Account,
     JournalEntry,
     JournalLine,
-    LEGACY_UNATTRIBUTED_ACTOR,
     Payment,
     PostingPeriod,
 )
@@ -201,9 +201,7 @@ def _not_found(resource: str) -> AccountingServiceError:
     return AccountingServiceError("RESOURCE_NOT_FOUND", f"{resource} was not found.", http_status=404)
 
 
-def _idempotent_create(
-    model: type[Any], tenant_id: UUID, key: str, fingerprint: str
-) -> object | None:
+def _idempotent_create(model: type[Any], tenant_id: UUID, key: str, fingerprint: str) -> object | None:
     existing = model.objects.for_tenant(tenant_id).filter(creation_idempotency_key=key).first()
     if existing is None:
         return None
@@ -221,7 +219,9 @@ def _dimensions(tenant_id: UUID, values: object) -> dict[str, object]:
     return dict(extension_registry.validate_dimensions(tenant_id, result))
 
 
-def _apply(machine: object, aggregate: object, command: str, tenant: UUID, key: str, actor: str, **metadata: object) -> Any:
+def _apply(
+    machine: object, aggregate: object, command: str, tenant: UUID, key: str, actor: str, **metadata: object
+) -> Any:
     try:
         return machine.apply(  # type: ignore[attr-defined]
             aggregate,
@@ -278,7 +278,9 @@ class AccountService:
         values.pop("tenant_id", None)
         values["currency"] = _currency(values.get("currency", "USD"))
         if not values.get("normal_balance"):
-            values["normal_balance"] = "credit" if values.get("account_type") in {"liability", "equity", "revenue"} else "debit"
+            values["normal_balance"] = (
+                "credit" if values.get("account_type") in {"liability", "equity", "revenue"} else "debit"
+            )
         parent_id = values.pop("parent_id", values.pop("parent_account_id", None))
         fingerprint = _fingerprint({**values, "parent_id": parent_id})
         with transaction.atomic():
@@ -287,7 +289,14 @@ class AccountService:
                 return replay  # type: ignore[return-value]
             parent = None
             if parent_id:
-                parent = Account.objects.for_tenant(tenant).filter(pk=_identifier(parent_id, "parent_id"), is_deleted=False).first()
+                parent = (
+                    Account.objects.for_tenant(tenant)
+                    .filter(
+                        pk=_identifier(cast(UUID | str, parent_id), "parent_id"),
+                        is_deleted=False,
+                    )
+                    .first()
+                )
                 if parent is None:
                     raise AccountingServiceError("INVALID_PARENT", "Parent account was not found in this tenant.")
             account = Account(
@@ -303,7 +312,9 @@ class AccountService:
             try:
                 account.save()
             except IntegrityError as exc:
-                raise AccountingServiceError("ACCOUNT_CODE_EXISTS", "An active account already uses this code.", http_status=409) from exc
+                raise AccountingServiceError(
+                    "ACCOUNT_CODE_EXISTS", "An active account already uses this code.", http_status=409
+                ) from exc
             _log("account.create", tenant, actor, account, "succeeded")
             return account
 
@@ -327,12 +338,26 @@ class AccountService:
         tenant_id: UUID, account_id: UUID, *, actor_id: str, version: int, changes: Mapping[str, object]
     ) -> Account:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
-        allowed = {"code", "name", "parent_id", "is_group", "is_active", "currency", "allow_multi_currency", "cash_flow_category", "description", "account_type", "normal_balance"}
+        allowed = {
+            "code",
+            "name",
+            "parent_id",
+            "is_group",
+            "is_active",
+            "currency",
+            "allow_multi_currency",
+            "cash_flow_category",
+            "description",
+            "account_type",
+            "normal_balance",
+        }
         unknown = set(changes) - allowed
         if unknown:
             raise AccountingServiceError("VALIDATION_ERROR", "Unsupported account fields.", detail=sorted(unknown))
         with transaction.atomic():
-            account = Account.objects.for_tenant(tenant).select_for_update().filter(pk=account_id, is_deleted=False).first()
+            account = (
+                Account.objects.for_tenant(tenant).select_for_update().filter(pk=account_id, is_deleted=False).first()
+            )
             if account is None:
                 raise _not_found("Account")
             _version(account, version)
@@ -340,9 +365,18 @@ class AccountService:
                 if field == "parent_id":
                     parent = None
                     if value:
-                        parent = Account.objects.for_tenant(tenant).filter(pk=value, is_deleted=False).first()
+                        parent = (
+                            Account.objects.for_tenant(tenant)
+                            .filter(
+                                pk=cast(UUID | str, value),
+                                is_deleted=False,
+                            )
+                            .first()
+                        )
                         if parent is None:
-                            raise AccountingServiceError("INVALID_PARENT", "Parent account was not found in this tenant.")
+                            raise AccountingServiceError(
+                                "INVALID_PARENT", "Parent account was not found in this tenant."
+                            )
                     account.parent = parent
                 else:
                     setattr(account, field, _currency(value) if field == "currency" else value)
@@ -357,18 +391,32 @@ class AccountService:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         _text(reason, "reason", maximum=1000)
         with transaction.atomic():
-            account = Account.objects.for_tenant(tenant).select_for_update().filter(pk=account_id, is_deleted=False).first()
+            account = (
+                Account.objects.for_tenant(tenant).select_for_update().filter(pk=account_id, is_deleted=False).first()
+            )
             if account is None:
                 raise _not_found("Account")
             if JournalLine.objects.for_tenant(tenant).filter(account=account).exists():
-                raise AccountingServiceError("ACCOUNT_HAS_HISTORY", "Accounts with journal history must be deactivated.", http_status=409)
+                raise AccountingServiceError(
+                    "ACCOUNT_HAS_HISTORY", "Accounts with journal history must be deactivated.", http_status=409
+                )
             account.is_deleted = True
             account.is_active = False
             account.deleted_at = timezone.now()
             account.deleted_by = actor
             account.updated_by = actor
             account.version += 1
-            account.save(update_fields=["is_deleted", "is_active", "deleted_at", "deleted_by", "updated_by", "version", "updated_at"])
+            account.save(
+                update_fields=[
+                    "is_deleted",
+                    "is_active",
+                    "deleted_at",
+                    "deleted_by",
+                    "updated_by",
+                    "version",
+                    "updated_at",
+                ]
+            )
 
     @staticmethod
     def get_hierarchy(tenant_id: UUID, *, active_only: bool = True) -> list[AccountNode]:
@@ -401,12 +449,16 @@ class AccountService:
             .values_list("id", flat=True)
         )
         if valid != identifiers:
-            raise AccountingServiceError("INVALID_POSTING_ACCOUNT", "A posting account is missing, inactive, grouped, or foreign.")
+            raise AccountingServiceError(
+                "INVALID_POSTING_ACCOUNT", "A posting account is missing, inactive, grouped, or foreign."
+            )
 
 
 class PostingPeriodService:
     @staticmethod
-    def create_period(tenant_id: UUID, *, actor_id: str, data: Mapping[str, object], idempotency_key: str) -> PostingPeriod:
+    def create_period(
+        tenant_id: UUID, *, actor_id: str, data: Mapping[str, object], idempotency_key: str
+    ) -> PostingPeriod:
         tenant, actor, key = _tenant(tenant_id), _text(actor_id, "actor_id"), _text(idempotency_key, "idempotency_key")
         values = dict(data)
         values.pop("tenant_id", None)
@@ -418,7 +470,12 @@ class PostingPeriodService:
             start, end = values.get("start_date"), values.get("end_date")
             if not isinstance(start, date) or not isinstance(end, date) or start > end:
                 raise AccountingServiceError("INVALID_PERIOD_RANGE", "start_date must not be after end_date.")
-            if PostingPeriod.objects.for_tenant(tenant).select_for_update().filter(start_date__lte=end, end_date__gte=start).exists():
+            if (
+                PostingPeriod.objects.for_tenant(tenant)
+                .select_for_update()
+                .filter(start_date__lte=end, end_date__gte=start)
+                .exists()
+            ):
                 raise AccountingServiceError("PERIOD_OVERLAP", "Posting periods may not overlap.", http_status=409)
             period = PostingPeriod(
                 tenant_id=tenant,
@@ -448,7 +505,9 @@ class PostingPeriodService:
         return queryset.order_by("-start_date", "id")
 
     @staticmethod
-    def update_period(tenant_id: UUID, period_id: UUID, *, actor_id: str, version: int, changes: Mapping[str, object]) -> PostingPeriod:
+    def update_period(
+        tenant_id: UUID, period_id: UUID, *, actor_id: str, version: int, changes: Mapping[str, object]
+    ) -> PostingPeriod:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         if set(changes) - {"period_name", "start_date", "end_date", "fiscal_year"}:
             raise AccountingServiceError("VALIDATION_ERROR", "Unsupported posting-period fields.")
@@ -461,7 +520,12 @@ class PostingPeriodService:
                 raise AccountingServiceError("PERIOD_NOT_OPEN", "Only open periods may be edited.", http_status=409)
             for field, value in changes.items():
                 setattr(period, field, value)
-            if PostingPeriod.objects.for_tenant(tenant).exclude(pk=period.id).filter(start_date__lte=period.end_date, end_date__gte=period.start_date).exists():
+            if (
+                PostingPeriod.objects.for_tenant(tenant)
+                .exclude(pk=period.id)
+                .filter(start_date__lte=period.end_date, end_date__gte=period.start_date)
+                .exists()
+            ):
                 raise AccountingServiceError("PERIOD_OVERLAP", "Posting periods may not overlap.", http_status=409)
             period.updated_by = actor
             period.version += 1
@@ -470,15 +534,23 @@ class PostingPeriodService:
             return period
 
     @staticmethod
-    def close_period(tenant_id: UUID, period_id: UUID, *, actor_id: str, transition_key: str, reason: str) -> PostingPeriod:
+    def close_period(
+        tenant_id: UUID, period_id: UUID, *, actor_id: str, transition_key: str, reason: str
+    ) -> PostingPeriod:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         _text(reason, "reason", maximum=1000)
         with transaction.atomic():
             period = PostingPeriod.objects.for_tenant(tenant).select_for_update().filter(pk=period_id).first()
             if period is None:
                 raise _not_found("Posting period")
-            if JournalEntry.objects.for_tenant(tenant).filter(posting_period=period, status="draft", is_deleted=False).exists():
-                raise AccountingServiceError("PERIOD_HAS_DRAFTS", "Draft journal entries block period close.", http_status=409)
+            if (
+                JournalEntry.objects.for_tenant(tenant)
+                .filter(posting_period=period, status="draft", is_deleted=False)
+                .exists()
+            ):
+                raise AccountingServiceError(
+                    "PERIOD_HAS_DRAFTS", "Draft journal entries block period close.", http_status=409
+                )
             for evidence_port in extension_registry.period_close_evidence():
                 evidence = evidence_port.check(
                     tenant,
@@ -500,15 +572,23 @@ class PostingPeriodService:
             return period
 
     @staticmethod
-    def reopen_period(tenant_id: UUID, period_id: UUID, *, actor_id: str, transition_key: str, reason: str) -> PostingPeriod:
+    def reopen_period(
+        tenant_id: UUID, period_id: UUID, *, actor_id: str, transition_key: str, reason: str
+    ) -> PostingPeriod:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         _text(reason, "reason", maximum=1000)
         with transaction.atomic():
             period = PostingPeriod.objects.for_tenant(tenant).select_for_update().filter(pk=period_id).first()
             if period is None:
                 raise _not_found("Posting period")
-            if PostingPeriod.objects.for_tenant(tenant).filter(start_date__gt=period.start_date, status="locked").exists():
-                raise AccountingServiceError("LATER_PERIOD_LOCKED", "A later locked period prevents reopening.", http_status=409)
+            if (
+                PostingPeriod.objects.for_tenant(tenant)
+                .filter(start_date__gt=period.start_date, status="locked")
+                .exists()
+            ):
+                raise AccountingServiceError(
+                    "LATER_PERIOD_LOCKED", "A later locked period prevents reopening.", http_status=409
+                )
             period = _apply(POSTING_PERIOD_MACHINE, period, "reopen", tenant, transition_key, actor, reason=reason)
             period.closed_at = None
             period.closed_by = None
@@ -518,7 +598,9 @@ class PostingPeriodService:
             return period
 
     @staticmethod
-    def lock_period(tenant_id: UUID, period_id: UUID, *, actor_id: str, transition_key: str, reason: str) -> PostingPeriod:
+    def lock_period(
+        tenant_id: UUID, period_id: UUID, *, actor_id: str, transition_key: str, reason: str
+    ) -> PostingPeriod:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         _text(reason, "reason", maximum=1000)
         with transaction.atomic():
@@ -538,12 +620,14 @@ class PostingPeriodService:
         )
         period = matches.first()
         if period is None:
-            raise AccountingServiceError("POSTING_PERIOD_CLOSED", "No open posting period covers this date.", http_status=409)
+            raise AccountingServiceError(
+                "POSTING_PERIOD_CLOSED", "No open posting period covers this date.", http_status=409
+            )
         return period
 
 
 def _line_values(tenant: UUID, payload: Mapping[str, object], entry_currency: str) -> dict[str, object]:
-    account_id = _identifier(payload.get("account_id", payload.get("account")), "account_id")
+    account_id = _identifier(cast(UUID | str, payload.get("account_id", payload.get("account"))), "account_id")
     account = Account.objects.for_tenant(tenant).filter(pk=account_id, is_deleted=False).first()
     if account is None:
         raise AccountingServiceError("INVALID_POSTING_ACCOUNT", "Journal line account is not in this tenant.")
@@ -568,7 +652,9 @@ def _line_values(tenant: UUID, payload: Mapping[str, object], entry_currency: st
 
 class JournalEntryService:
     @staticmethod
-    def create_draft(tenant_id: UUID, *, actor_id: str, payload: Mapping[str, object], idempotency_key: str) -> JournalEntry:
+    def create_draft(
+        tenant_id: UUID, *, actor_id: str, payload: Mapping[str, object], idempotency_key: str
+    ) -> JournalEntry:
         tenant, actor, key = _tenant(tenant_id), _text(actor_id, "actor_id"), _text(idempotency_key, "idempotency_key")
         values = dict(payload)
         values.pop("tenant_id", None)
@@ -578,7 +664,7 @@ class JournalEntryService:
         currency = _currency(values.get("currency", "USD"))
         values["currency"] = currency
         period_id = values.pop("posting_period_id", values.pop("posting_period", None))
-        period = PostingPeriod.objects.for_tenant(tenant).filter(pk=period_id).first()
+        period = PostingPeriod.objects.for_tenant(tenant).filter(pk=cast(UUID | str, period_id)).first()
         if period is None:
             raise AccountingServiceError("INVALID_POSTING_PERIOD", "Posting period is not in this tenant.")
         fingerprint = _fingerprint({**values, "posting_period_id": period_id, "lines": list(lines)})
@@ -600,21 +686,32 @@ class JournalEntryService:
             for number, raw in enumerate(lines, 1):
                 if not isinstance(raw, Mapping):
                     raise AccountingServiceError("VALIDATION_ERROR", "Each journal line must be an object.")
-                line = JournalLine(tenant_id=tenant, journal_entry=entry, line_number=number, **_line_values(tenant, raw, currency))
+                line = JournalLine(
+                    tenant_id=tenant, journal_entry=entry, line_number=number, **_line_values(tenant, raw, currency)
+                )
                 _clean(line)
                 line.save()
             return entry
 
     @staticmethod
     def get_entry(tenant_id: UUID, entry_id: UUID) -> JournalEntry:
-        entry = JournalEntry.objects.for_tenant(_tenant(tenant_id)).prefetch_related("lines__account").filter(pk=entry_id, is_deleted=False).first()
+        entry = (
+            JournalEntry.objects.for_tenant(_tenant(tenant_id))
+            .prefetch_related("lines__account")
+            .filter(pk=entry_id, is_deleted=False)
+            .first()
+        )
         if entry is None:
             raise _not_found("Journal entry")
         return entry
 
     @staticmethod
     def list_entries(tenant_id: UUID, *, filters: Mapping[str, object] | None = None) -> QuerySet[JournalEntry]:
-        queryset = JournalEntry.objects.for_tenant(_tenant(tenant_id)).filter(is_deleted=False).select_related("posting_period")
+        queryset = (
+            JournalEntry.objects.for_tenant(_tenant(tenant_id))
+            .filter(is_deleted=False)
+            .select_related("posting_period")
+        )
         for field in ("status", "posting_period_id", "source_module"):
             if filters and filters.get(field) not in (None, ""):
                 queryset = queryset.filter(**{field: filters[field]})
@@ -625,24 +722,41 @@ class JournalEntryService:
         return queryset.order_by("-posting_date", "-entry_number", "id")
 
     @staticmethod
-    def update_draft(tenant_id: UUID, entry_id: UUID, *, actor_id: str, version: int, payload: Mapping[str, object]) -> JournalEntry:
+    def update_draft(
+        tenant_id: UUID, entry_id: UUID, *, actor_id: str, version: int, payload: Mapping[str, object]
+    ) -> JournalEntry:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         values = dict(payload)
         values.pop("tenant_id", None)
         lines = values.pop("lines", None)
-        allowed = {"posting_date", "posting_period_id", "reference", "description", "currency", "source_module", "source_reference"}
+        allowed = {
+            "posting_date",
+            "posting_period_id",
+            "reference",
+            "description",
+            "currency",
+            "source_module",
+            "source_reference",
+        }
         if set(values) - allowed:
             raise AccountingServiceError("VALIDATION_ERROR", "Unsupported journal fields.")
         with transaction.atomic():
-            entry = JournalEntry.objects.for_tenant(tenant).select_for_update().filter(pk=entry_id, is_deleted=False).first()
+            entry = (
+                JournalEntry.objects.for_tenant(tenant)
+                .select_for_update()
+                .filter(pk=entry_id, is_deleted=False)
+                .first()
+            )
             if entry is None:
                 raise _not_found("Journal entry")
             _version(entry, version)
             if entry.status != "draft":
-                raise AccountingServiceError("POSTED_ENTRY_IMMUTABLE", "Only draft entries may be edited.", http_status=409)
+                raise AccountingServiceError(
+                    "POSTED_ENTRY_IMMUTABLE", "Only draft entries may be edited.", http_status=409
+                )
             for field, value in values.items():
                 if field == "posting_period_id":
-                    period = PostingPeriod.objects.for_tenant(tenant).filter(pk=value).first()
+                    period = PostingPeriod.objects.for_tenant(tenant).filter(pk=cast(UUID | str, value)).first()
                     if period is None:
                         raise AccountingServiceError("INVALID_POSTING_PERIOD", "Posting period is not in this tenant.")
                     entry.posting_period = period
@@ -653,12 +767,19 @@ class JournalEntryService:
             entry.save()
             if lines is not None:
                 if not isinstance(lines, Sequence) or isinstance(lines, (str, bytes)) or len(lines) < 2:
-                    raise AccountingServiceError("JOURNAL_LINES_REQUIRED", "A journal draft requires at least two lines.")
+                    raise AccountingServiceError(
+                        "JOURNAL_LINES_REQUIRED", "A journal draft requires at least two lines."
+                    )
                 entry.lines.all().delete()
                 for number, raw in enumerate(lines, 1):
                     if not isinstance(raw, Mapping):
                         raise AccountingServiceError("VALIDATION_ERROR", "Each journal line must be an object.")
-                    line = JournalLine(tenant_id=tenant, journal_entry=entry, line_number=number, **_line_values(tenant, raw, entry.currency))
+                    line = JournalLine(
+                        tenant_id=tenant,
+                        journal_entry=entry,
+                        line_number=number,
+                        **_line_values(tenant, raw, entry.currency),
+                    )
                     _clean(line)
                     line.save()
             return entry
@@ -668,11 +789,18 @@ class JournalEntryService:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         _text(reason, "reason", maximum=1000)
         with transaction.atomic():
-            entry = JournalEntry.objects.for_tenant(tenant).select_for_update().filter(pk=entry_id, is_deleted=False).first()
+            entry = (
+                JournalEntry.objects.for_tenant(tenant)
+                .select_for_update()
+                .filter(pk=entry_id, is_deleted=False)
+                .first()
+            )
             if entry is None:
                 raise _not_found("Journal entry")
             if entry.status != "draft":
-                raise AccountingServiceError("POSTED_ENTRY_IMMUTABLE", "Posted entries cannot be deleted.", http_status=409)
+                raise AccountingServiceError(
+                    "POSTED_ENTRY_IMMUTABLE", "Posted entries cannot be deleted.", http_status=409
+                )
             entry.is_deleted, entry.deleted_at, entry.deleted_by = True, timezone.now(), actor
             entry.updated_by, entry.version = actor, entry.version + 1
             entry.save(update_fields=["is_deleted", "deleted_at", "deleted_by", "updated_by", "version", "updated_at"])
@@ -681,30 +809,75 @@ class JournalEntryService:
     def post_entry(tenant_id: UUID, entry_id: UUID, *, actor_id: str, transition_key: str) -> JournalEntry:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         with transaction.atomic():
-            entry = JournalEntry.objects.for_tenant(tenant).select_for_update().filter(pk=entry_id, is_deleted=False).first()
+            entry = (
+                JournalEntry.objects.for_tenant(tenant)
+                .select_for_update()
+                .filter(pk=entry_id, is_deleted=False)
+                .first()
+            )
             if entry is None:
                 raise _not_found("Journal entry")
-            if entry.status == "posted" and any(row.get("transition_key") == transition_key for row in entry.transition_history):
+            if entry.status == "posted" and any(
+                row.get("transition_key") == transition_key for row in entry.transition_history
+            ):
                 return entry
             if entry.created_by == actor and not entry.source_module:
-                raise AccountingServiceError("SOD_CREATOR_CANNOT_POST", "The journal creator cannot post the same entry.", http_status=403)
-            period = PostingPeriod.objects.for_tenant(tenant).select_for_update().filter(pk=entry.posting_period_id).first()
-            if period is None or period.status != "open" or not period.start_date <= entry.posting_date <= period.end_date:
-                raise AccountingServiceError("POSTING_PERIOD_CLOSED", "The selected period is not open for this date.", http_status=409)
-            lines = list(JournalLine.objects.for_tenant(tenant).select_related("account").filter(journal_entry=entry).order_by("line_number"))
+                raise AccountingServiceError(
+                    "SOD_CREATOR_CANNOT_POST", "The journal creator cannot post the same entry.", http_status=403
+                )
+            period = (
+                PostingPeriod.objects.for_tenant(tenant).select_for_update().filter(pk=entry.posting_period_id).first()
+            )
+            if (
+                period is None
+                or period.status != "open"
+                or not period.start_date <= entry.posting_date <= period.end_date
+            ):
+                raise AccountingServiceError(
+                    "POSTING_PERIOD_CLOSED", "The selected period is not open for this date.", http_status=409
+                )
+            lines = list(
+                JournalLine.objects.for_tenant(tenant)
+                .select_related("account")
+                .filter(journal_entry=entry)
+                .order_by("line_number")
+            )
             if len(lines) < 2:
                 raise AccountingServiceError("JOURNAL_LINES_REQUIRED", "At least two lines are required to post.")
             AccountService.validate_posting_accounts(tenant, [line.account_id for line in lines])
             debit = sum((line.base_debit_amount for line in lines), Decimal("0.00"))
             credit = sum((line.base_credit_amount for line in lines), Decimal("0.00"))
             if debit <= 0 or debit != credit:
-                raise AccountingServiceError("JOURNAL_UNBALANCED", "Base-currency debits and credits must balance exactly.")
+                raise AccountingServiceError(
+                    "JOURNAL_UNBALANCED", "Base-currency debits and credits must balance exactly."
+                )
             entry = _apply(JOURNAL_ENTRY_MACHINE, entry, "post", tenant, transition_key, actor)
             entry.debit_total, entry.credit_total = _money(debit), _money(credit)
             entry.posted_at, entry.posted_by, entry.updated_by = timezone.now(), actor, actor
             entry.version += 1
-            entry.save(update_fields=["debit_total", "credit_total", "posted_at", "posted_by", "updated_by", "version", "updated_at"])
-            _event(tenant, "accounting.journal_entry.posted.v1", "journal_entry", entry.id, actor, {"posting_date": entry.posting_date, "debit_total": entry.debit_total, "credit_total": entry.credit_total})
+            entry.save(
+                update_fields=[
+                    "debit_total",
+                    "credit_total",
+                    "posted_at",
+                    "posted_by",
+                    "updated_by",
+                    "version",
+                    "updated_at",
+                ]
+            )
+            _event(
+                tenant,
+                "accounting.journal_entry.posted.v1",
+                "journal_entry",
+                entry.id,
+                actor,
+                {
+                    "posting_date": entry.posting_date,
+                    "debit_total": entry.debit_total,
+                    "credit_total": entry.credit_total,
+                },
+            )
             _log("journal.post", tenant, actor, entry, "succeeded")
             return entry
 
@@ -719,18 +892,31 @@ class JournalEntryService:
         )
 
     @staticmethod
-    def reverse_entry(tenant_id: UUID, entry_id: UUID, *, actor_id: str, transition_key: str, posting_date: date, reason: str) -> JournalEntry:
+    def reverse_entry(
+        tenant_id: UUID, entry_id: UUID, *, actor_id: str, transition_key: str, posting_date: date, reason: str
+    ) -> JournalEntry:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         _text(reason, "reason", maximum=1000)
         with transaction.atomic():
-            original = JournalEntry.objects.for_tenant(tenant).select_for_update().filter(pk=entry_id, is_deleted=False).first()
+            original = (
+                JournalEntry.objects.for_tenant(tenant)
+                .select_for_update()
+                .filter(pk=entry_id, is_deleted=False)
+                .first()
+            )
             if original is None:
                 raise _not_found("Journal entry")
-            existing = JournalEntry.objects.for_tenant(tenant).filter(reversed_entry=original, source_idempotency_key=transition_key).first()
+            existing = (
+                JournalEntry.objects.for_tenant(tenant)
+                .filter(reversed_entry=original, source_idempotency_key=transition_key)
+                .first()
+            )
             if existing is not None:
                 return existing
             if original.status != "posted":
-                raise AccountingServiceError("JOURNAL_NOT_POSTED", "Only posted entries can be reversed.", http_status=409)
+                raise AccountingServiceError(
+                    "JOURNAL_NOT_POSTED", "Only posted entries can be reversed.", http_status=409
+                )
             period = PostingPeriodService.resolve_open_period(tenant, posting_date)
             lines = list(JournalLine.objects.for_tenant(tenant).filter(journal_entry=original).order_by("line_number"))
             payload_lines = [
@@ -764,12 +950,21 @@ class JournalEntryService:
                     "lines": payload_lines,
                 },
             )
-            reversal = JournalEntryService.post_entry(tenant, reversal.id, actor_id=actor, transition_key=f"reversal-post:{transition_key}")
+            reversal = JournalEntryService.post_entry(
+                tenant, reversal.id, actor_id=actor, transition_key=f"reversal-post:{transition_key}"
+            )
             original = _apply(JOURNAL_ENTRY_MACHINE, original, "reverse", tenant, transition_key, actor, reason=reason)
             original.reversed_at, original.reversed_by, original.updated_by = timezone.now(), actor, actor
             original.version += 1
             original.save(update_fields=["reversed_at", "reversed_by", "updated_by", "version", "updated_at"])
-            _event(tenant, "accounting.journal_entry.reversed.v1", "journal_entry", original.id, actor, {"reversal_entry_id": reversal.id})
+            _event(
+                tenant,
+                "accounting.journal_entry.reversed.v1",
+                "journal_entry",
+                original.id,
+                actor,
+                {"reversal_entry_id": reversal.id},
+            )
             return reversal
 
     @staticmethod
@@ -777,13 +972,21 @@ class JournalEntryService:
         reference = _text(file_reference, "file_reference", maximum=512)
         if reference.startswith(("http://", "https://")) or ".." in reference:
             raise AccountingServiceError("INVALID_FILE_REFERENCE", "Use an opaque managed file reference.")
-        return enqueue(_tenant(tenant_id), actor_id, "accounting.journal_entries.import", {"file_reference": reference}, idempotency_key)
+        return enqueue(
+            _tenant(tenant_id),
+            actor_id,
+            "accounting.journal_entries.import",
+            {"file_reference": reference},
+            idempotency_key,
+        )
 
     @staticmethod
     def post_from_source(tenant_id: UUID, *, actor_id: str, request: JournalPostingRequestV1) -> JournalPostingResultV1:
         tenant = _tenant(tenant_id)
         if request.tenant_id != tenant:
-            raise AccountingServiceError("TENANT_MISMATCH", "Posting request tenant does not match authority.", http_status=404)
+            raise AccountingServiceError(
+                "TENANT_MISMATCH", "Posting request tenant does not match authority.", http_status=404
+            )
         period = PostingPeriodService.resolve_open_period(tenant, request.posting_date)
         lines = [
             {
@@ -815,8 +1018,12 @@ class JournalEntryService:
                 "lines": lines,
             },
         )
-        entry = JournalEntryService.post_entry(tenant, entry.id, actor_id=actor_id, transition_key=f"source-post:{request.idempotency_key}")
-        return JournalPostingResultV1("1.0", entry.id, entry.entry_number, entry.posted_at.isoformat() if entry.posted_at else "")
+        entry = JournalEntryService.post_entry(
+            tenant, entry.id, actor_id=actor_id, transition_key=f"source-post:{request.idempotency_key}"
+        )
+        return JournalPostingResultV1(
+            "1.0", entry.id, entry.entry_number, entry.posted_at.isoformat() if entry.posted_at else ""
+        )
 
 
 def _invoice_lines(
@@ -830,34 +1037,46 @@ def _invoice_lines(
     for number, raw in enumerate(lines, 1):
         if not isinstance(raw, Mapping):
             raise AccountingServiceError("VALIDATION_ERROR", "Each invoice line must be an object.")
-        account = Account.objects.for_tenant(tenant).filter(pk=raw.get("account_id", raw.get("account")), is_deleted=False).first()
+        account = (
+            Account.objects.for_tenant(tenant)
+            .filter(pk=raw.get("account_id", raw.get("account")), is_deleted=False)
+            .first()
+        )
         if account is None:
             raise AccountingServiceError("INVALID_POSTING_ACCOUNT", "Invoice line account is not in this tenant.")
         quantity = Decimal(str(raw.get("quantity", 1))).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
         unit_price, tax_amount = _money(raw.get("unit_price", 0)), _money(raw.get("tax_amount", 0))
         line_total = _money(quantity * unit_price)
-        line = model(
-            tenant_id=tenant,
-            invoice=invoice,
-            line_number=number,
-            description=_text(raw.get("description"), "description", maximum=500),
-            account=account,
-            quantity=quantity,
-            unit_price=unit_price,
-            tax_amount=tax_amount,
-            line_total=line_total,
-            cost_center=str(raw.get("cost_center", ""))[:100],
-            dimension_values=_dimensions(tenant, raw.get("dimension_values", {})),
-        )
+        line_kwargs = {
+            "tenant_id": tenant,
+            "line_number": number,
+            "description": _text(raw.get("description"), "description", maximum=500),
+            "account": account,
+            "quantity": quantity,
+            "unit_price": unit_price,
+            "tax_amount": tax_amount,
+            "line_total": line_total,
+            "cost_center": str(raw.get("cost_center", ""))[:100],
+            "dimension_values": _dimensions(tenant, raw.get("dimension_values", {})),
+        }
+        line: APInvoiceLine | ARInvoiceLine
+        if model is APInvoiceLine:
+            line = APInvoiceLine(invoice=cast(APInvoice, invoice), **line_kwargs)
+        else:
+            line = ARInvoiceLine(invoice=cast(ARInvoice, invoice), **line_kwargs)
         _clean(line)
         line.save()
         subtotal += line_total
         tax_total += tax_amount
-    invoice.amount, invoice.tax_amount, invoice.total_amount = _money(subtotal), _money(tax_total), _money(subtotal + tax_total)
+    invoice.amount, invoice.tax_amount, invoice.total_amount = (
+        _money(subtotal),
+        _money(tax_total),
+        _money(subtotal + tax_total),
+    )
     invoice.save(update_fields=["amount", "tax_amount", "total_amount", "updated_at"])
 
 
-def _party(kind: str, tenant: UUID, party_id: UUID, amount: Decimal, currency: str) -> None:
+def _party(kind: Literal["supplier", "customer"], tenant: UUID, party_id: UUID, amount: Decimal, currency: str) -> None:
     extension_registry.resolve_party(
         tenant,
         party_id,
@@ -876,7 +1095,9 @@ def _control_account(tenant: UUID, account_type: str, *, cash: bool = False) -> 
     account = queryset.order_by("code").first()
     if account is None:
         code = "CASH_ACCOUNT_UNAVAILABLE" if cash else "CONTROL_ACCOUNT_UNAVAILABLE"
-        raise AccountingServiceError(code, "A configured posting account is required before this command can run.", http_status=503)
+        raise AccountingServiceError(
+            code, "A configured posting account is required before this command can run.", http_status=503
+        )
     return account
 
 
@@ -884,19 +1105,29 @@ class _InvoiceBase:
     model: type[APInvoice] | type[ARInvoice]
     line_model: type[APInvoiceLine] | type[ARInvoiceLine]
     party_field: str
-    kind: str
+    kind: Literal["supplier", "customer"]
 
     @classmethod
-    def _create(cls, tenant_id: UUID, actor_id: str, payload: Mapping[str, object], idempotency_key: str) -> APInvoice | ARInvoice:
+    def _create(
+        cls, tenant_id: UUID, actor_id: str, payload: Mapping[str, object], idempotency_key: str
+    ) -> APInvoice | ARInvoice:
         tenant, actor, key = _tenant(tenant_id), _text(actor_id, "actor_id"), _text(idempotency_key, "idempotency_key")
         values = dict(payload)
         values.pop("tenant_id", None)
         lines = values.pop("lines", None)
         if not isinstance(lines, Sequence) or isinstance(lines, (str, bytes)) or not lines:
             raise AccountingServiceError("INVOICE_LINES_REQUIRED", "New invoices require at least one real line.")
-        party_id = _identifier(values.get(cls.party_field), cls.party_field)
+        party_id = _identifier(cast(UUID | str, values.get(cls.party_field)), cls.party_field)
         currency = _currency(values.get("currency", "USD"))
-        provisional = sum((_money(Decimal(str(row.get("quantity", 1))) * Decimal(str(row.get("unit_price", 0)))) + _money(row.get("tax_amount", 0)) for row in lines if isinstance(row, Mapping)), Decimal("0"))
+        provisional = sum(
+            (
+                _money(Decimal(str(row.get("quantity", 1))) * Decimal(str(row.get("unit_price", 0))))
+                + _money(row.get("tax_amount", 0))
+                for row in lines
+                if isinstance(row, Mapping)
+            ),
+            Decimal("0"),
+        )
         _party(cls.kind, tenant, party_id, provisional, currency)
         values[cls.party_field] = party_id
         values["currency"] = currency
@@ -931,37 +1162,62 @@ class _InvoiceBase:
 
     @classmethod
     def _get(cls, tenant_id: UUID, invoice_id: UUID) -> APInvoice | ARInvoice:
-        invoice = cls.model.objects.for_tenant(_tenant(tenant_id)).prefetch_related("lines__account", "payments").filter(pk=invoice_id, is_deleted=False).first()
+        invoice = (
+            cls.model.objects.for_tenant(_tenant(tenant_id))
+            .prefetch_related("lines__account", "payments")
+            .filter(pk=invoice_id, is_deleted=False)
+            .first()
+        )
         if invoice is None:
             raise _not_found("Invoice")
         return invoice
 
     @classmethod
     def _list(cls, tenant_id: UUID, filters: Mapping[str, object] | None) -> QuerySet[Any]:
-        queryset = cls.model.objects.for_tenant(_tenant(tenant_id)).filter(is_deleted=False).select_related("journal_entry")
+        queryset = (
+            cls.model.objects.for_tenant(_tenant(tenant_id)).filter(is_deleted=False).select_related("journal_entry")
+        )
         for field in ("status", cls.party_field, "currency"):
             if filters and filters.get(field) not in (None, ""):
                 queryset = queryset.filter(**{field: filters[field]})
         return queryset.order_by("-invoice_date", "-invoice_number", "id")
 
     @classmethod
-    def _update(cls, tenant_id: UUID, invoice_id: UUID, actor_id: str, version: int, payload: Mapping[str, object]) -> Any:
+    def _update(
+        cls, tenant_id: UUID, invoice_id: UUID, actor_id: str, version: int, payload: Mapping[str, object]
+    ) -> Any:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         values = dict(payload)
         values.pop("tenant_id", None)
         lines = values.pop("lines", None)
-        allowed = {"invoice_number", cls.party_field, "invoice_date", "due_date", "currency", "exchange_rate", "description"}
+        allowed = {
+            "invoice_number",
+            cls.party_field,
+            "invoice_date",
+            "due_date",
+            "currency",
+            "exchange_rate",
+            "description",
+        }
         if set(values) - allowed:
             raise AccountingServiceError("VALIDATION_ERROR", "Unsupported invoice fields.")
         with transaction.atomic():
-            invoice = cls.model.objects.for_tenant(tenant).select_for_update().filter(pk=invoice_id, is_deleted=False).first()
+            invoice = (
+                cls.model.objects.for_tenant(tenant).select_for_update().filter(pk=invoice_id, is_deleted=False).first()
+            )
             if invoice is None:
                 raise _not_found("Invoice")
             _version(invoice, version)
             if invoice.status != "draft" or invoice.legacy_without_lines:
-                raise AccountingServiceError("INVOICE_IMMUTABLE", "Only reconciled draft invoices may be edited.", http_status=409)
+                raise AccountingServiceError(
+                    "INVOICE_IMMUTABLE", "Only reconciled draft invoices may be edited.", http_status=409
+                )
             for field, value in values.items():
-                setattr(invoice, field, _currency(value) if field == "currency" else (_rate(value) if field == "exchange_rate" else value))
+                setattr(
+                    invoice,
+                    field,
+                    _currency(value) if field == "currency" else (_rate(value) if field == "exchange_rate" else value),
+                )
             invoice.updated_by, invoice.version = actor, invoice.version + 1
             _clean(invoice)
             invoice.save()
@@ -978,54 +1234,119 @@ class _InvoiceBase:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         _text(reason, "reason", maximum=1000)
         with transaction.atomic():
-            invoice = cls.model.objects.for_tenant(tenant).select_for_update().filter(pk=invoice_id, is_deleted=False).first()
+            invoice = (
+                cls.model.objects.for_tenant(tenant).select_for_update().filter(pk=invoice_id, is_deleted=False).first()
+            )
             if invoice is None:
                 raise _not_found("Invoice")
             if invoice.status != "draft":
-                raise AccountingServiceError("INVOICE_IMMUTABLE", "Only draft invoices may be deleted.", http_status=409)
+                raise AccountingServiceError(
+                    "INVOICE_IMMUTABLE", "Only draft invoices may be deleted.", http_status=409
+                )
             invoice.is_deleted, invoice.deleted_at, invoice.deleted_by = True, timezone.now(), actor
             invoice.updated_by, invoice.version = actor, invoice.version + 1
-            invoice.save(update_fields=["is_deleted", "deleted_at", "deleted_by", "updated_by", "version", "updated_at"])
+            invoice.save(
+                update_fields=["is_deleted", "deleted_at", "deleted_by", "updated_by", "version", "updated_at"]
+            )
 
     @classmethod
     def _aging(cls, tenant_id: UUID, as_of_date: date) -> dict[str, object]:
         tenant = _tenant(tenant_id)
-        buckets = {"current": Decimal("0.00"), "1_30": Decimal("0.00"), "31_60": Decimal("0.00"), "61_90": Decimal("0.00"), "over_90": Decimal("0.00")}
+        buckets = {
+            "current": Decimal("0.00"),
+            "1_30": Decimal("0.00"),
+            "31_60": Decimal("0.00"),
+            "61_90": Decimal("0.00"),
+            "over_90": Decimal("0.00"),
+        }
         items: list[dict[str, object]] = []
-        for invoice in cls.model.objects.for_tenant(tenant).filter(is_deleted=False, invoice_date__lte=as_of_date).exclude(status__in=("draft", "cancelled", "paid")):
+        for invoice in (
+            cls.model.objects.for_tenant(tenant)
+            .filter(is_deleted=False, invoice_date__lte=as_of_date)
+            .exclude(status__in=("draft", "cancelled", "paid"))
+        ):
             outstanding = _money(invoice.total_amount - invoice.paid_amount)
             days = (as_of_date - invoice.due_date).days
-            bucket = "current" if days <= 0 else "1_30" if days <= 30 else "31_60" if days <= 60 else "61_90" if days <= 90 else "over_90"
+            bucket = (
+                "current"
+                if days <= 0
+                else "1_30" if days <= 30 else "31_60" if days <= 60 else "61_90" if days <= 90 else "over_90"
+            )
             buckets[bucket] += outstanding
-            items.append({"invoice_id": invoice.id, "invoice_number": invoice.invoice_number, "due_date": invoice.due_date, "days_overdue": max(0, days), "outstanding": outstanding, "bucket": bucket})
-        return {"as_of_date": as_of_date, "currency": _single_currency(cls.model.objects.for_tenant(tenant).filter(is_deleted=False)), "generated_at": timezone.now(), "correlation_id": _correlation(f"aging:{tenant}:{as_of_date}"), "buckets": buckets, "items": items}
+            items.append(
+                {
+                    "invoice_id": invoice.id,
+                    "invoice_number": invoice.invoice_number,
+                    "due_date": invoice.due_date,
+                    "days_overdue": max(0, days),
+                    "outstanding": outstanding,
+                    "bucket": bucket,
+                }
+            )
+        return {
+            "as_of_date": as_of_date,
+            "currency": _single_currency(cls.model.objects.for_tenant(tenant).filter(is_deleted=False)),
+            "generated_at": timezone.now(),
+            "correlation_id": _correlation(f"aging:{tenant}:{as_of_date}"),
+            "buckets": buckets,
+            "items": items,
+        }
 
 
 class APInvoiceService(_InvoiceBase):
     model, line_model, party_field, kind = APInvoice, APInvoiceLine, "supplier_id", "supplier"
 
-    create_invoice = staticmethod(lambda tenant_id, *, actor_id, payload, idempotency_key: APInvoiceService._create(tenant_id, actor_id, payload, idempotency_key))
+    create_invoice = staticmethod(
+        lambda tenant_id, *, actor_id, payload, idempotency_key: APInvoiceService._create(
+            tenant_id, actor_id, payload, idempotency_key
+        )
+    )
     get_invoice = staticmethod(lambda tenant_id, invoice_id: APInvoiceService._get(tenant_id, invoice_id))
     list_invoices = staticmethod(lambda tenant_id, *, filters=None: APInvoiceService._list(tenant_id, filters))
-    update_draft = staticmethod(lambda tenant_id, invoice_id, *, actor_id, version, payload: APInvoiceService._update(tenant_id, invoice_id, actor_id, version, payload))
-    soft_delete_draft = staticmethod(lambda tenant_id, invoice_id, *, actor_id, reason: APInvoiceService._delete(tenant_id, invoice_id, actor_id, reason))
+    update_draft = staticmethod(
+        lambda tenant_id, invoice_id, *, actor_id, version, payload: APInvoiceService._update(
+            tenant_id, invoice_id, actor_id, version, payload
+        )
+    )
+    soft_delete_draft = staticmethod(
+        lambda tenant_id, invoice_id, *, actor_id, reason: APInvoiceService._delete(
+            tenant_id, invoice_id, actor_id, reason
+        )
+    )
 
     @staticmethod
-    def _transition(tenant_id: UUID, invoice_id: UUID, actor_id: str, key: str, command: str, **metadata: object) -> APInvoice:
+    def _transition(
+        tenant_id: UUID, invoice_id: UUID, actor_id: str, key: str, command: str, **metadata: object
+    ) -> APInvoice:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         with transaction.atomic():
-            invoice = APInvoice.objects.for_tenant(tenant).select_for_update().filter(pk=invoice_id, is_deleted=False).first()
+            invoice = (
+                APInvoice.objects.for_tenant(tenant).select_for_update().filter(pk=invoice_id, is_deleted=False).first()
+            )
             if invoice is None:
                 raise _not_found("AP invoice")
             if command in {"approve", "post"} and invoice.created_by == actor:
-                raise AccountingServiceError("SOD_CREATOR_CONFLICT", "The invoice creator cannot approve or post it.", http_status=403)
+                raise AccountingServiceError(
+                    "SOD_CREATOR_CONFLICT", "The invoice creator cannot approve or post it.", http_status=403
+                )
             if command == "post" and invoice.approved_by == actor:
-                raise AccountingServiceError("SOD_APPROVER_POSTER_CONFLICT", "The same actor cannot approve and post this invoice.", http_status=403)
+                raise AccountingServiceError(
+                    "SOD_APPROVER_POSTER_CONFLICT",
+                    "The same actor cannot approve and post this invoice.",
+                    http_status=403,
+                )
             invoice = _apply(AP_INVOICE_MACHINE, invoice, command, tenant, key, actor, **metadata)
             now = timezone.now()
             if command == "approve":
                 invoice.approved_at, invoice.approved_by = now, actor
-                _event(tenant, "accounting.ap_invoice.approved.v1", "ap_invoice", invoice.id, actor, {"status": invoice.status})
+                _event(
+                    tenant,
+                    "accounting.ap_invoice.approved.v1",
+                    "ap_invoice",
+                    invoice.id,
+                    actor,
+                    {"status": invoice.status},
+                )
             elif command == "post":
                 invoice.posted_at, invoice.posted_by = now, actor
             elif command == "cancel":
@@ -1039,35 +1360,95 @@ class APInvoiceService(_InvoiceBase):
         return APInvoiceService._transition(tenant_id, invoice_id, actor_id, transition_key, "submit")
 
     @staticmethod
-    def approve(tenant_id: UUID, invoice_id: UUID, *, actor_id: str, transition_key: str, comments: str = "") -> APInvoice:
-        return APInvoiceService._transition(tenant_id, invoice_id, actor_id, transition_key, "approve", comments=comments[:1000])
+    def approve(
+        tenant_id: UUID, invoice_id: UUID, *, actor_id: str, transition_key: str, comments: str = ""
+    ) -> APInvoice:
+        return APInvoiceService._transition(
+            tenant_id, invoice_id, actor_id, transition_key, "approve", comments=comments[:1000]
+        )
 
     @staticmethod
     def reject(tenant_id: UUID, invoice_id: UUID, *, actor_id: str, transition_key: str, reason: str) -> APInvoice:
-        return APInvoiceService._transition(tenant_id, invoice_id, actor_id, transition_key, "reject", reason=_text(reason, "reason", maximum=1000))
+        return APInvoiceService._transition(
+            tenant_id, invoice_id, actor_id, transition_key, "reject", reason=_text(reason, "reason", maximum=1000)
+        )
 
     @staticmethod
     def post_to_gl(tenant_id: UUID, invoice_id: UUID, *, actor_id: str, transition_key: str) -> APInvoice:
         tenant = _tenant(tenant_id)
         with transaction.atomic():
-            invoice = APInvoice.objects.for_tenant(tenant).select_for_update().prefetch_related("lines").filter(pk=invoice_id, is_deleted=False).first()
+            invoice = (
+                APInvoice.objects.for_tenant(tenant)
+                .select_for_update()
+                .prefetch_related("lines")
+                .filter(pk=invoice_id, is_deleted=False)
+                .first()
+            )
             if invoice is None:
                 raise _not_found("AP invoice")
             control = _control_account(tenant, "liability")
             period = PostingPeriodService.resolve_open_period(tenant, invoice.invoice_date)
-            lines = [{"account_id": line.account_id, "debit_amount": line.line_total + line.tax_amount, "credit_amount": 0, "currency": invoice.currency, "exchange_rate": invoice.exchange_rate, "description": line.description, "cost_center": line.cost_center, "dimension_values": line.dimension_values} for line in invoice.lines.all()]
-            lines.append({"account_id": control.id, "debit_amount": 0, "credit_amount": invoice.total_amount, "currency": invoice.currency, "exchange_rate": invoice.exchange_rate, "description": "Accounts payable control"})
-            entry = JournalEntryService.create_draft(tenant, actor_id=actor_id, idempotency_key=f"ap-gl-create:{transition_key}", payload={"entry_number": f"AP-{invoice.invoice_number}-{str(invoice.id)[:8]}", "posting_date": invoice.invoice_date, "posting_period_id": period.id, "reference": invoice.invoice_number, "description": "AP invoice posting", "currency": invoice.currency, "source_module": "accounting_finance.ap", "source_reference": str(invoice.id), "source_idempotency_key": transition_key, "lines": lines})
-            entry = JournalEntryService.post_entry(tenant, entry.id, actor_id=actor_id, transition_key=f"ap-gl-post:{transition_key}")
+            lines = [
+                {
+                    "account_id": line.account_id,
+                    "debit_amount": line.line_total + line.tax_amount,
+                    "credit_amount": 0,
+                    "currency": invoice.currency,
+                    "exchange_rate": invoice.exchange_rate,
+                    "description": line.description,
+                    "cost_center": line.cost_center,
+                    "dimension_values": line.dimension_values,
+                }
+                for line in invoice.lines.all()
+            ]
+            lines.append(
+                {
+                    "account_id": control.id,
+                    "debit_amount": 0,
+                    "credit_amount": invoice.total_amount,
+                    "currency": invoice.currency,
+                    "exchange_rate": invoice.exchange_rate,
+                    "description": "Accounts payable control",
+                }
+            )
+            entry = JournalEntryService.create_draft(
+                tenant,
+                actor_id=actor_id,
+                idempotency_key=f"ap-gl-create:{transition_key}",
+                payload={
+                    "entry_number": f"AP-{invoice.invoice_number}-{str(invoice.id)[:8]}",
+                    "posting_date": invoice.invoice_date,
+                    "posting_period_id": period.id,
+                    "reference": invoice.invoice_number,
+                    "description": "AP invoice posting",
+                    "currency": invoice.currency,
+                    "source_module": "accounting_finance.ap",
+                    "source_reference": str(invoice.id),
+                    "source_idempotency_key": transition_key,
+                    "lines": lines,
+                },
+            )
+            entry = JournalEntryService.post_entry(
+                tenant, entry.id, actor_id=actor_id, transition_key=f"ap-gl-post:{transition_key}"
+            )
             invoice = APInvoiceService._transition(tenant, invoice.id, actor_id, transition_key, "post")
             invoice.journal_entry = entry
             invoice.save(update_fields=["journal_entry", "updated_at"])
-            _event(tenant, "accounting.ap_invoice.posted.v1", "ap_invoice", invoice.id, actor_id, {"journal_entry_id": entry.id})
+            _event(
+                tenant,
+                "accounting.ap_invoice.posted.v1",
+                "ap_invoice",
+                invoice.id,
+                actor_id,
+                {"journal_entry_id": entry.id},
+            )
             return invoice
 
     @staticmethod
     def cancel(tenant_id: UUID, invoice_id: UUID, *, actor_id: str, transition_key: str, reason: str) -> APInvoice:
-        return APInvoiceService._transition(tenant_id, invoice_id, actor_id, transition_key, "cancel", reason=_text(reason, "reason", maximum=1000))
+        return APInvoiceService._transition(
+            tenant_id, invoice_id, actor_id, transition_key, "cancel", reason=_text(reason, "reason", maximum=1000)
+        )
 
     @staticmethod
     def aging(tenant_id: UUID, *, as_of_date: date) -> dict[str, object]:
@@ -1077,40 +1458,114 @@ class APInvoiceService(_InvoiceBase):
 class ARInvoiceService(_InvoiceBase):
     model, line_model, party_field, kind = ARInvoice, ARInvoiceLine, "customer_id", "customer"
 
-    create_invoice = staticmethod(lambda tenant_id, *, actor_id, payload, idempotency_key: ARInvoiceService._create(tenant_id, actor_id, payload, idempotency_key))
+    create_invoice = staticmethod(
+        lambda tenant_id, *, actor_id, payload, idempotency_key: ARInvoiceService._create(
+            tenant_id, actor_id, payload, idempotency_key
+        )
+    )
     get_invoice = staticmethod(lambda tenant_id, invoice_id: ARInvoiceService._get(tenant_id, invoice_id))
     list_invoices = staticmethod(lambda tenant_id, *, filters=None: ARInvoiceService._list(tenant_id, filters))
-    update_draft = staticmethod(lambda tenant_id, invoice_id, *, actor_id, version, payload: ARInvoiceService._update(tenant_id, invoice_id, actor_id, version, payload))
-    soft_delete_draft = staticmethod(lambda tenant_id, invoice_id, *, actor_id, reason: ARInvoiceService._delete(tenant_id, invoice_id, actor_id, reason))
+    update_draft = staticmethod(
+        lambda tenant_id, invoice_id, *, actor_id, version, payload: ARInvoiceService._update(
+            tenant_id, invoice_id, actor_id, version, payload
+        )
+    )
+    soft_delete_draft = staticmethod(
+        lambda tenant_id, invoice_id, *, actor_id, reason: ARInvoiceService._delete(
+            tenant_id, invoice_id, actor_id, reason
+        )
+    )
 
     @staticmethod
     def post_to_gl(tenant_id: UUID, invoice_id: UUID, *, actor_id: str, transition_key: str) -> ARInvoice:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         with transaction.atomic():
-            invoice = ARInvoice.objects.for_tenant(tenant).select_for_update().prefetch_related("lines").filter(pk=invoice_id, is_deleted=False).first()
+            invoice = (
+                ARInvoice.objects.for_tenant(tenant)
+                .select_for_update()
+                .prefetch_related("lines")
+                .filter(pk=invoice_id, is_deleted=False)
+                .first()
+            )
             if invoice is None:
                 raise _not_found("AR invoice")
             control = _control_account(tenant, "asset")
             period = PostingPeriodService.resolve_open_period(tenant, invoice.invoice_date)
-            lines = [{"account_id": control.id, "debit_amount": invoice.total_amount, "credit_amount": 0, "currency": invoice.currency, "exchange_rate": invoice.exchange_rate, "description": "Accounts receivable control"}]
-            lines.extend({"account_id": line.account_id, "debit_amount": 0, "credit_amount": line.line_total + line.tax_amount, "currency": invoice.currency, "exchange_rate": invoice.exchange_rate, "description": line.description, "cost_center": line.cost_center, "dimension_values": line.dimension_values} for line in invoice.lines.all())
-            entry = JournalEntryService.create_draft(tenant, actor_id=actor, idempotency_key=f"ar-gl-create:{transition_key}", payload={"entry_number": f"AR-{invoice.invoice_number}-{str(invoice.id)[:8]}", "posting_date": invoice.invoice_date, "posting_period_id": period.id, "reference": invoice.invoice_number, "description": "AR invoice posting", "currency": invoice.currency, "source_module": "accounting_finance.ar", "source_reference": str(invoice.id), "source_idempotency_key": transition_key, "lines": lines})
-            entry = JournalEntryService.post_entry(tenant, entry.id, actor_id=actor, transition_key=f"ar-gl-post:{transition_key}")
+            lines = [
+                {
+                    "account_id": control.id,
+                    "debit_amount": invoice.total_amount,
+                    "credit_amount": 0,
+                    "currency": invoice.currency,
+                    "exchange_rate": invoice.exchange_rate,
+                    "description": "Accounts receivable control",
+                }
+            ]
+            lines.extend(
+                {
+                    "account_id": line.account_id,
+                    "debit_amount": 0,
+                    "credit_amount": line.line_total + line.tax_amount,
+                    "currency": invoice.currency,
+                    "exchange_rate": invoice.exchange_rate,
+                    "description": line.description,
+                    "cost_center": line.cost_center,
+                    "dimension_values": line.dimension_values,
+                }
+                for line in invoice.lines.all()
+            )
+            entry = JournalEntryService.create_draft(
+                tenant,
+                actor_id=actor,
+                idempotency_key=f"ar-gl-create:{transition_key}",
+                payload={
+                    "entry_number": f"AR-{invoice.invoice_number}-{str(invoice.id)[:8]}",
+                    "posting_date": invoice.invoice_date,
+                    "posting_period_id": period.id,
+                    "reference": invoice.invoice_number,
+                    "description": "AR invoice posting",
+                    "currency": invoice.currency,
+                    "source_module": "accounting_finance.ar",
+                    "source_reference": str(invoice.id),
+                    "source_idempotency_key": transition_key,
+                    "lines": lines,
+                },
+            )
+            entry = JournalEntryService.post_entry(
+                tenant, entry.id, actor_id=actor, transition_key=f"ar-gl-post:{transition_key}"
+            )
             invoice = _apply(AR_INVOICE_MACHINE, invoice, "post", tenant, transition_key, actor)
             invoice.posted_at, invoice.posted_by, invoice.journal_entry = timezone.now(), actor, entry
             invoice.updated_by, invoice.version = actor, invoice.version + 1
             invoice.save()
-            _event(tenant, "accounting.ar_invoice.posted.v1", "ar_invoice", invoice.id, actor, {"journal_entry_id": entry.id})
+            _event(
+                tenant,
+                "accounting.ar_invoice.posted.v1",
+                "ar_invoice",
+                invoice.id,
+                actor,
+                {"journal_entry_id": entry.id},
+            )
             return invoice
 
     @staticmethod
     def cancel(tenant_id: UUID, invoice_id: UUID, *, actor_id: str, transition_key: str, reason: str) -> ARInvoice:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         with transaction.atomic():
-            invoice = ARInvoice.objects.for_tenant(tenant).select_for_update().filter(pk=invoice_id, is_deleted=False).first()
+            invoice = (
+                ARInvoice.objects.for_tenant(tenant).select_for_update().filter(pk=invoice_id, is_deleted=False).first()
+            )
             if invoice is None:
                 raise _not_found("AR invoice")
-            invoice = _apply(AR_INVOICE_MACHINE, invoice, "cancel", tenant, transition_key, actor, reason=_text(reason, "reason", maximum=1000))
+            invoice = _apply(
+                AR_INVOICE_MACHINE,
+                invoice,
+                "cancel",
+                tenant,
+                transition_key,
+                actor,
+                reason=_text(reason, "reason", maximum=1000),
+            )
             invoice.cancelled_at, invoice.cancelled_by = timezone.now(), actor
             invoice.updated_by, invoice.version = actor, invoice.version + 1
             invoice.save()
@@ -1120,7 +1575,9 @@ class ARInvoiceService(_InvoiceBase):
     def mark_overdue(tenant_id: UUID, *, as_of_date: date, actor_id: str) -> int:
         tenant, actor = _tenant(tenant_id), _text(actor_id, "actor_id")
         count = 0
-        for invoice in ARInvoice.objects.for_tenant(tenant).filter(status__in=("posted", "partially_paid"), due_date__lt=as_of_date, is_deleted=False):
+        for invoice in ARInvoice.objects.for_tenant(tenant).filter(
+            status__in=("posted", "partially_paid"), due_date__lt=as_of_date, is_deleted=False
+        ):
             _apply(AR_INVOICE_MACHINE, invoice, "mark_overdue", tenant, f"overdue:{as_of_date}:{invoice.id}", actor)
             count += 1
         return count
@@ -1145,14 +1602,18 @@ def _recompute_invoice(invoice: APInvoice | ARInvoice, tenant: UUID, actor: str,
 
 class PaymentService:
     @staticmethod
-    def record_payment(tenant_id: UUID, *, actor_id: str, payload: Mapping[str, object], idempotency_key: str) -> Payment:
+    def record_payment(
+        tenant_id: UUID, *, actor_id: str, payload: Mapping[str, object], idempotency_key: str
+    ) -> Payment:
         tenant, actor, key = _tenant(tenant_id), _text(actor_id, "actor_id"), _text(idempotency_key, "idempotency_key")
         values = dict(payload)
         values.pop("tenant_id", None)
         amount = _money(values.get("amount"))
         if amount <= 0:
             raise AccountingServiceError("INVALID_PAYMENT_AMOUNT", "Payment amount must be positive.")
-        ap_id, ar_id = values.pop("ap_invoice_id", values.pop("ap_invoice", None)), values.pop("ar_invoice_id", values.pop("ar_invoice", None))
+        ap_id, ar_id = values.pop("ap_invoice_id", values.pop("ap_invoice", None)), values.pop(
+            "ar_invoice_id", values.pop("ar_invoice", None)
+        )
         if bool(ap_id) == bool(ar_id):
             raise AccountingServiceError("PAYMENT_INVOICE_XOR", "Exactly one AP or AR invoice is required.")
         fingerprint = _fingerprint({**values, "amount": amount, "ap_invoice_id": ap_id, "ar_invoice_id": ar_id})
@@ -1160,23 +1621,59 @@ class PaymentService:
             existing = Payment.objects.for_tenant(tenant).filter(idempotency_key=key).first()
             if existing:
                 if existing.request_fingerprint != fingerprint:
-                    raise AccountingServiceError("IDEMPOTENCY_CONFLICT", "Idempotency-Key was reused with a different payment.", http_status=409)
+                    raise AccountingServiceError(
+                        "IDEMPOTENCY_CONFLICT", "Idempotency-Key was reused with a different payment.", http_status=409
+                    )
                 return existing
-            model = APInvoice if ap_id else ARInvoice
-            invoice = model.objects.for_tenant(tenant).select_for_update().filter(pk=ap_id or ar_id, is_deleted=False).first()
+            invoice_id = cast(UUID | str, ap_id or ar_id)
+            invoice: APInvoice | ARInvoice | None
+            if ap_id:
+                invoice = (
+                    APInvoice.objects.for_tenant(tenant)
+                    .select_for_update()
+                    .filter(
+                        pk=invoice_id,
+                        is_deleted=False,
+                    )
+                    .first()
+                )
+            else:
+                invoice = (
+                    ARInvoice.objects.for_tenant(tenant)
+                    .select_for_update()
+                    .filter(
+                        pk=invoice_id,
+                        is_deleted=False,
+                    )
+                    .first()
+                )
             if invoice is None:
                 raise _not_found("Invoice")
             if invoice.status not in ("posted", "partially_paid", "overdue"):
-                raise AccountingServiceError("INVOICE_NOT_PAYABLE", "The invoice is not in a payable state.", http_status=409)
+                raise AccountingServiceError(
+                    "INVOICE_NOT_PAYABLE", "The invoice is not in a payable state.", http_status=409
+                )
             if isinstance(invoice, APInvoice) and invoice.created_by == actor:
-                raise AccountingServiceError("SOD_CREATOR_PAYMENT_CONFLICT", "The AP creator cannot record its payment.", http_status=403)
+                raise AccountingServiceError(
+                    "SOD_CREATOR_PAYMENT_CONFLICT", "The AP creator cannot record its payment.", http_status=403
+                )
             currency = _currency(values.get("currency", invoice.currency))
             payment_date = values.get("payment_date")
-            if currency != invoice.currency or not isinstance(payment_date, date) or payment_date < invoice.invoice_date:
-                raise AccountingServiceError("PAYMENT_INVOICE_MISMATCH", "Payment currency/date does not match the invoice.")
-            paid = Payment.objects.for_tenant(tenant).filter(Q(ap_invoice=invoice) | Q(ar_invoice=invoice), status="recorded").aggregate(total=Sum("amount"))["total"] or Decimal("0")
+            if (
+                currency != invoice.currency
+                or not isinstance(payment_date, date)
+                or payment_date < invoice.invoice_date
+            ):
+                raise AccountingServiceError(
+                    "PAYMENT_INVOICE_MISMATCH", "Payment currency/date does not match the invoice."
+                )
+            paid = Payment.objects.for_tenant(tenant).filter(
+                Q(ap_invoice=invoice) | Q(ar_invoice=invoice), status="recorded"
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
             if _money(paid + amount) > invoice.total_amount:
-                raise AccountingServiceError("OVERPAYMENT", "Payment exceeds the remaining invoice balance.", http_status=409)
+                raise AccountingServiceError(
+                    "OVERPAYMENT", "Payment exceeds the remaining invoice balance.", http_status=409
+                )
             payment = Payment(
                 tenant_id=tenant,
                 created_by=actor,
@@ -1207,19 +1704,37 @@ class PaymentService:
                     posting_date=payment.payment_date,
                     currency=payment.currency,
                     description="Payment posting",
-                    legs=(JournalLegV1(debit.id, "debit", amount, payment.currency), JournalLegV1(credit.id, "credit", amount, payment.currency)),
-                    metadata={"accounting_finance.payment_id": str(payment.id), "accounting_finance.period_id": str(period.id)},
+                    legs=(
+                        JournalLegV1(debit.id, "debit", amount, payment.currency),
+                        JournalLegV1(credit.id, "credit", amount, payment.currency),
+                    ),
+                    metadata={
+                        "accounting_finance.payment_id": str(payment.id),
+                        "accounting_finance.period_id": str(period.id),
+                    },
                     correlation_id=_correlation(key),
                     actor_id=actor,
                 ),
             )
             _recompute_invoice(invoice, tenant, actor, f"payment:{payment.id}")
-            _event(tenant, "accounting.payment.recorded.v1", "payment", payment.id, actor, {"invoice_id": invoice.id, "amount": amount})
+            _event(
+                tenant,
+                "accounting.payment.recorded.v1",
+                "payment",
+                payment.id,
+                actor,
+                {"invoice_id": invoice.id, "amount": amount},
+            )
             return payment
 
     @staticmethod
     def get_payment(tenant_id: UUID, payment_id: UUID) -> Payment:
-        payment = Payment.objects.for_tenant(_tenant(tenant_id)).select_related("ap_invoice", "ar_invoice").filter(pk=payment_id).first()
+        payment = (
+            Payment.objects.for_tenant(_tenant(tenant_id))
+            .select_related("ap_invoice", "ar_invoice")
+            .filter(pk=payment_id)
+            .first()
+        )
         if payment is None:
             raise _not_found("Payment")
         return payment
@@ -1233,14 +1748,18 @@ class PaymentService:
         return queryset.order_by("-payment_date", "-created_at", "id")
 
     @staticmethod
-    def update_reference(tenant_id: UUID, payment_id: UUID, *, actor_id: str, description: str, reference_number: str) -> Payment:
+    def update_reference(
+        tenant_id: UUID, payment_id: UUID, *, actor_id: str, description: str, reference_number: str
+    ) -> Payment:
         tenant = _tenant(tenant_id)
         with transaction.atomic():
             payment = Payment.objects.for_tenant(tenant).select_for_update().filter(pk=payment_id).first()
             if payment is None:
                 raise _not_found("Payment")
             if payment.status != "recorded":
-                raise AccountingServiceError("VOIDED_PAYMENT_IMMUTABLE", "Voided payments cannot be edited.", http_status=409)
+                raise AccountingServiceError(
+                    "VOIDED_PAYMENT_IMMUTABLE", "Voided payments cannot be edited.", http_status=409
+                )
             payment.description, payment.reference_number = str(description)[:10000], str(reference_number)[:100]
             payment.save(update_fields=["description", "reference_number", "updated_at"])
             return payment
@@ -1253,22 +1772,65 @@ class PaymentService:
             if payment is None:
                 raise _not_found("Payment")
             invoice = payment.ap_invoice or payment.ar_invoice
-            invoice = type(invoice).objects.for_tenant(tenant).select_for_update().get(pk=invoice.pk)
-            payment = _apply(PAYMENT_MACHINE, payment, "void", tenant, transition_key, actor, reason=_text(reason, "reason", maximum=1000))
+            if invoice is None:
+                raise _not_found("Invoice")
+            if isinstance(invoice, APInvoice):
+                invoice = APInvoice.objects.for_tenant(tenant).select_for_update().get(pk=invoice.pk)
+            else:
+                invoice = ARInvoice.objects.for_tenant(tenant).select_for_update().get(pk=invoice.pk)
+            payment = _apply(
+                PAYMENT_MACHINE,
+                payment,
+                "void",
+                tenant,
+                transition_key,
+                actor,
+                reason=_text(reason, "reason", maximum=1000),
+            )
             payment.voided_at, payment.voided_by, payment.void_reason = timezone.now(), actor, reason
             payment.save(update_fields=["voided_at", "voided_by", "void_reason", "updated_at"])
-            original = JournalEntry.objects.for_tenant(tenant).filter(source_module="accounting_finance.payment", source_reference=str(payment.id), status="posted").first()
+            original = (
+                JournalEntry.objects.for_tenant(tenant)
+                .filter(source_module="accounting_finance.payment", source_reference=str(payment.id), status="posted")
+                .first()
+            )
             if original is None:
-                raise AccountingServiceError("PAYMENT_LEDGER_MISSING", "The payment journal could not be located.", http_status=503)
-            JournalEntryService.reverse_entry(tenant, original.id, actor_id=actor, transition_key=f"payment-void:{transition_key}", posting_date=payment.payment_date, reason=reason)
-            total = Payment.objects.for_tenant(tenant).filter(Q(ap_invoice=invoice) | Q(ar_invoice=invoice), status="recorded").aggregate(total=Sum("amount"))["total"] or Decimal("0")
+                raise AccountingServiceError(
+                    "PAYMENT_LEDGER_MISSING", "The payment journal could not be located.", http_status=503
+                )
+            JournalEntryService.reverse_entry(
+                tenant,
+                original.id,
+                actor_id=actor,
+                transition_key=f"payment-void:{transition_key}",
+                posting_date=payment.payment_date,
+                reason=reason,
+            )
+            total = Payment.objects.for_tenant(tenant).filter(
+                Q(ap_invoice=invoice) | Q(ar_invoice=invoice), status="recorded"
+            ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
             invoice.paid_amount = _money(total)
             desired = "paid" if total == invoice.total_amount else "partially_paid" if total > 0 else "posted"
             # Payment reversal is a system-derived correction; append evidence
             # while restoring the derived invoice state without faking a user command.
             history = list(invoice.transition_history)
-            history.append({"transition_key": f"payment-void:{transition_key}", "command": "payment_void_recompute", "from_state": invoice.status, "to_state": desired, "occurred_at": timezone.now().isoformat(), "metadata": {"actor_id": actor, "correlation_id": _correlation(transition_key)}})
-            type(invoice)._base_manager.filter(pk=invoice.pk, tenant_id=tenant).update(status=desired, transition_history=history, paid_amount=invoice.paid_amount, updated_by=actor, version=F("version") + 1)
+            history.append(
+                {
+                    "transition_key": f"payment-void:{transition_key}",
+                    "command": "payment_void_recompute",
+                    "from_state": invoice.status,
+                    "to_state": desired,
+                    "occurred_at": timezone.now().isoformat(),
+                    "metadata": {"actor_id": actor, "correlation_id": _correlation(transition_key)},
+                }
+            )
+            type(invoice)._base_manager.filter(pk=invoice.pk, tenant_id=tenant).update(
+                status=desired,
+                transition_history=history,
+                paid_amount=invoice.paid_amount,
+                updated_by=actor,
+                version=F("version") + 1,
+            )
             _event(tenant, "accounting.payment.voided.v1", "payment", payment.id, actor, {"invoice_id": invoice.id})
             return payment
 
@@ -1279,18 +1841,27 @@ def _single_currency(queryset: QuerySet[Any]) -> str:
 
 
 def _report_lines(tenant: UUID, *, start: date | None = None, end: date) -> QuerySet[JournalLine]:
-    queryset = JournalLine.objects.for_tenant(tenant).filter(
-        journal_entry__is_deleted=False,
-        journal_entry__status__in=("posted", "reversed"),
-        journal_entry__posting_date__lte=end,
-    ).select_related("account", "journal_entry")
+    queryset = (
+        JournalLine.objects.for_tenant(tenant)
+        .filter(
+            journal_entry__is_deleted=False,
+            journal_entry__status__in=("posted", "reversed"),
+            journal_entry__posting_date__lte=end,
+        )
+        .select_related("account", "journal_entry")
+    )
     if start is not None:
         queryset = queryset.filter(journal_entry__posting_date__gte=start)
     return queryset
 
 
 def _report_meta(tenant: UUID, parameters: Mapping[str, object], currency: str) -> dict[str, object]:
-    return {"parameters": dict(parameters), "currency": currency, "generated_at": timezone.now(), "correlation_id": _correlation(f"report:{tenant}:{parameters}")}
+    return {
+        "parameters": dict(parameters),
+        "currency": currency,
+        "generated_at": timezone.now(),
+        "correlation_id": _correlation(f"report:{tenant}:{parameters}"),
+    }
 
 
 class FinancialReportingService:
@@ -1300,24 +1871,68 @@ class FinancialReportingService:
         rows: list[dict[str, object]] = []
         total_debit = total_credit = Decimal("0.00")
         for account in Account.objects.for_tenant(tenant).filter(is_deleted=False, is_group=False).order_by("code"):
-            aggregate = _report_lines(tenant, end=as_of_date).filter(account=account).aggregate(debit=Sum("base_debit_amount"), credit=Sum("base_credit_amount"))
+            aggregate = (
+                _report_lines(tenant, end=as_of_date)
+                .filter(account=account)
+                .aggregate(debit=Sum("base_debit_amount"), credit=Sum("base_credit_amount"))
+            )
             net = _money((aggregate["debit"] or 0) - (aggregate["credit"] or 0))
             debit, credit = (net, Decimal("0.00")) if net >= 0 else (Decimal("0.00"), -net)
             total_debit += debit
             total_credit += credit
-            rows.append({"account_id": account.id, "code": account.code, "name": account.name, "debit": debit, "credit": credit, "journal_line_ids": list(_report_lines(tenant, end=as_of_date).filter(account=account).values_list("id", flat=True))})
-        return {**_report_meta(tenant, {"as_of_date": as_of_date}, _single_currency(Account.objects.for_tenant(tenant))), "as_of_date": as_of_date, "rows": rows, "total_debit": _money(total_debit), "total_credit": _money(total_credit), "balanced": _money(total_debit) == _money(total_credit)}
+            rows.append(
+                {
+                    "account_id": account.id,
+                    "code": account.code,
+                    "name": account.name,
+                    "debit": debit,
+                    "credit": credit,
+                    "journal_line_ids": list(
+                        _report_lines(tenant, end=as_of_date).filter(account=account).values_list("id", flat=True)
+                    ),
+                }
+            )
+        return {
+            **_report_meta(tenant, {"as_of_date": as_of_date}, _single_currency(Account.objects.for_tenant(tenant))),
+            "as_of_date": as_of_date,
+            "rows": rows,
+            "total_debit": _money(total_debit),
+            "total_credit": _money(total_credit),
+            "balanced": _money(total_debit) == _money(total_credit),
+        }
 
     @staticmethod
-    def general_ledger(tenant_id: UUID, *, account_id: UUID, start_date: date, end_date: date) -> list[dict[str, object]]:
+    def general_ledger(
+        tenant_id: UUID, *, account_id: UUID, start_date: date, end_date: date
+    ) -> list[dict[str, object]]:
         tenant = _tenant(tenant_id)
         account = AccountService.get_account(tenant, account_id)
-        opening = _report_lines(tenant, end=start_date).filter(account=account, journal_entry__posting_date__lt=start_date).aggregate(debit=Sum("base_debit_amount"), credit=Sum("base_credit_amount"))
+        opening = (
+            _report_lines(tenant, end=start_date)
+            .filter(account=account, journal_entry__posting_date__lt=start_date)
+            .aggregate(debit=Sum("base_debit_amount"), credit=Sum("base_credit_amount"))
+        )
         running = _money((opening["debit"] or 0) - (opening["credit"] or 0))
         rows: list[dict[str, object]] = []
-        for line in _report_lines(tenant, start=start_date, end=end_date).filter(account=account).order_by("journal_entry__posting_date", "journal_entry__entry_number", "line_number"):
+        for line in (
+            _report_lines(tenant, start=start_date, end=end_date)
+            .filter(account=account)
+            .order_by("journal_entry__posting_date", "journal_entry__entry_number", "line_number")
+        ):
             running = _money(running + line.base_debit_amount - line.base_credit_amount)
-            rows.append({"line_id": line.id, "journal_entry_id": line.journal_entry_id, "entry_number": line.journal_entry.entry_number, "posting_date": line.journal_entry.posting_date, "debit": line.base_debit_amount, "credit": line.base_credit_amount, "running_balance": running, "source_module": line.journal_entry.source_module, "source_reference": line.journal_entry.source_reference})
+            rows.append(
+                {
+                    "line_id": line.id,
+                    "journal_entry_id": line.journal_entry_id,
+                    "entry_number": line.journal_entry.entry_number,
+                    "posting_date": line.journal_entry.posting_date,
+                    "debit": line.base_debit_amount,
+                    "credit": line.base_credit_amount,
+                    "running_balance": running,
+                    "source_module": line.journal_entry.source_module,
+                    "source_reference": line.journal_entry.source_reference,
+                }
+            )
         return rows
 
     @staticmethod
@@ -1327,21 +1942,51 @@ class FinancialReportingService:
         assets = grouped.get("asset", Decimal("0"))
         liabilities = grouped.get("liability", Decimal("0"))
         equity = grouped.get("equity", Decimal("0"))
-        earnings = sum(FinancialReportingService._statement(tenant, None, as_of_date, {"revenue", "expense"}).values(), Decimal("0"))
-        return {**_report_meta(tenant, {"as_of_date": as_of_date}, _single_currency(Account.objects.for_tenant(tenant))), "as_of_date": as_of_date, "sections": grouped, "assets": _money(assets), "liabilities": _money(liabilities), "equity": _money(equity + earnings), "retained_earnings": _money(earnings), "balanced": _money(assets) == _money(liabilities + equity + earnings)}
+        earnings = sum(
+            FinancialReportingService._statement(tenant, None, as_of_date, {"revenue", "expense"}).values(),
+            Decimal("0"),
+        )
+        return {
+            **_report_meta(tenant, {"as_of_date": as_of_date}, _single_currency(Account.objects.for_tenant(tenant))),
+            "as_of_date": as_of_date,
+            "sections": grouped,
+            "assets": _money(assets),
+            "liabilities": _money(liabilities),
+            "equity": _money(equity + earnings),
+            "retained_earnings": _money(earnings),
+            "balanced": _money(assets) == _money(liabilities + equity + earnings),
+        }
 
     @staticmethod
     def income_statement(tenant_id: UUID, *, start_date: date, end_date: date) -> dict[str, object]:
         tenant = _tenant(tenant_id)
         grouped = FinancialReportingService._statement(tenant, start_date, end_date, {"revenue", "expense"})
         revenue, expense = grouped.get("revenue", Decimal("0")), grouped.get("expense", Decimal("0"))
-        return {**_report_meta(tenant, {"start_date": start_date, "end_date": end_date}, _single_currency(Account.objects.for_tenant(tenant))), "start_date": start_date, "end_date": end_date, "revenue": _money(revenue), "expenses": _money(expense), "net_income": _money(revenue - expense), "sections": grouped}
+        return {
+            **_report_meta(
+                tenant,
+                {"start_date": start_date, "end_date": end_date},
+                _single_currency(Account.objects.for_tenant(tenant)),
+            ),
+            "start_date": start_date,
+            "end_date": end_date,
+            "revenue": _money(revenue),
+            "expenses": _money(expense),
+            "net_income": _money(revenue - expense),
+            "sections": grouped,
+        }
 
     @staticmethod
     def _statement(tenant: UUID, start: date | None, end: date, types: set[str]) -> dict[str, Decimal]:
         result: dict[str, Decimal] = {}
-        for account in Account.objects.for_tenant(tenant).filter(account_type__in=types, is_deleted=False, is_group=False):
-            sums = _report_lines(tenant, start=start, end=end).filter(account=account).aggregate(debit=Sum("base_debit_amount"), credit=Sum("base_credit_amount"))
+        for account in Account.objects.for_tenant(tenant).filter(
+            account_type__in=types, is_deleted=False, is_group=False
+        ):
+            sums = (
+                _report_lines(tenant, start=start, end=end)
+                .filter(account=account)
+                .aggregate(debit=Sum("base_debit_amount"), credit=Sum("base_credit_amount"))
+            )
             debit, credit = sums["debit"] or Decimal("0"), sums["credit"] or Decimal("0")
             natural = credit - debit if account.normal_balance == "credit" else debit - credit
             result[account.account_type] = result.get(account.account_type, Decimal("0")) + _money(natural)
@@ -1350,25 +1995,44 @@ class FinancialReportingService:
     @staticmethod
     def cash_flow(tenant_id: UUID, *, start_date: date, end_date: date) -> dict[str, object]:
         tenant = _tenant(tenant_id)
-        cash_accounts = Account.objects.for_tenant(tenant).filter(account_type="asset", is_deleted=False, is_group=False)
+        cash_accounts = Account.objects.for_tenant(tenant).filter(
+            account_type="asset", is_deleted=False, is_group=False
+        )
         if cash_accounts.filter(cash_flow_category__isnull=True).exists():
-            raise AccountingServiceError("UNCLASSIFIED_CASH_FLOW", "All cash-flow accounts must be classified before generating this statement.")
+            raise AccountingServiceError(
+                "UNCLASSIFIED_CASH_FLOW", "All cash-flow accounts must be classified before generating this statement."
+            )
         sections = {"operating": Decimal("0.00"), "investing": Decimal("0.00"), "financing": Decimal("0.00")}
         drilldown: dict[str, list[UUID]] = {key: [] for key in sections}
         for account in cash_accounts.exclude(cash_flow_category__isnull=True):
             lines = _report_lines(tenant, start=start_date, end=end_date).filter(account=account)
             sums = lines.aggregate(debit=Sum("base_debit_amount"), credit=Sum("base_credit_amount"))
-            category = account.cash_flow_category
+            category = cast(str, account.cash_flow_category)
             sections[category] += _money((sums["debit"] or 0) - (sums["credit"] or 0))
             drilldown[category].extend(lines.values_list("id", flat=True))
-        return {**_report_meta(tenant, {"start_date": start_date, "end_date": end_date}, _single_currency(cash_accounts)), "start_date": start_date, "end_date": end_date, "sections": sections, "net_change": _money(sum(sections.values(), Decimal("0"))), "drilldown": drilldown}
+        return {
+            **_report_meta(tenant, {"start_date": start_date, "end_date": end_date}, _single_currency(cash_accounts)),
+            "start_date": start_date,
+            "end_date": end_date,
+            "sections": sections,
+            "net_change": _money(sum(sections.values(), Decimal("0"))),
+            "drilldown": drilldown,
+        }
 
     @staticmethod
-    def enqueue_report(tenant_id: UUID, *, actor_id: str, report_type: str, parameters: Mapping[str, object], idempotency_key: str) -> AsyncJob:
+    def enqueue_report(
+        tenant_id: UUID, *, actor_id: str, report_type: str, parameters: Mapping[str, object], idempotency_key: str
+    ) -> AsyncJob:
         supported = {"trial_balance", "general_ledger", "balance_sheet", "income_statement", "cash_flow"}
         if report_type not in supported:
             raise AccountingServiceError("INVALID_REPORT_TYPE", "Unsupported financial report type.")
-        return enqueue(_tenant(tenant_id), actor_id, "accounting.reports.generate", {"report_type": report_type, "parameters": _canonical(parameters)}, idempotency_key)
+        return enqueue(
+            _tenant(tenant_id),
+            actor_id,
+            "accounting.reports.generate",
+            {"report_type": report_type, "parameters": _canonical(parameters)},
+            idempotency_key,
+        )
 
 
 __all__ = [

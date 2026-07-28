@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 TENANT_TABLES = (
     "multi_company_companies",
     "multi_company_access_grants",

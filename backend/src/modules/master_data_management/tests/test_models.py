@@ -10,7 +10,6 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
-from src.core.tenancy import TenantScopedModel, TimestampedModel
 from src.core.state_machine import (
     GuardFailedError,
     IdempotencyConflictError,
@@ -18,6 +17,7 @@ from src.core.state_machine import (
     TerminalStateError,
     UnknownCommandError,
 )
+from src.core.tenancy import TenantScopedModel, TimestampedModel
 from src.modules.master_data_management.models import (
     DataQualityIssue,
     DataQualityRule,
@@ -358,11 +358,7 @@ def test_database_table_and_required_index_contracts() -> None:
         "mdm_merge_history",
         "mdm_merge_participants",
     }
-    index_names = {
-        index.name
-        for model in TENANT_MODELS
-        for index in model._meta.indexes
-    }
+    index_names = {index.name for model in TENANT_MODELS for index in model._meta.indexes}
     assert {
         "mdm_type_active_key_idx",
         "mdm_entity_type_stat_code_idx",

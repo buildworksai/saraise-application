@@ -160,7 +160,9 @@ class ActionAccessMixin:
                 request.tenant_id = None
 
         action = getattr(self, "action", "")
-        permission = self.method_permissions.get(action, {}).get(request.method.upper()) or self.action_permissions.get(action)
+        permission = self.method_permissions.get(action, {}).get(request.method.upper()) or self.action_permissions.get(
+            action
+        )
         self.required_permission = permission
         self.required_entitlement = CORE_ENTITLEMENT if permission else None
         self.quota_resource = self.action_quotas.get(getattr(self, "action", ""))

@@ -9,18 +9,13 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from datetime import datetime
-from typing import Any, Final
+from typing import Final
 from uuid import UUID
 
 from django.utils.dateparse import parse_datetime
 
 from src.core.async_jobs.models import AsyncJob
-from src.core.async_jobs.services import (
-    HandlerAlreadyRegistered,
-    HandlerNotRegistered,
-    get_handler,
-    register_handler,
-)
+from src.core.async_jobs.services import HandlerAlreadyRegistered, HandlerNotRegistered, get_handler, register_handler
 from src.core.tenancy import tenant_context_worker
 
 EXECUTE_DELIVERY_COMMAND: Final[str] = "notifications.delivery.execute"
@@ -231,9 +226,7 @@ def register_async_handlers() -> None:
             register_handler(command, handler)
             continue
         if existing is not handler:
-            raise HandlerAlreadyRegistered(
-                f"async command {command!r} is already owned by a different handler"
-            )
+            raise HandlerAlreadyRegistered(f"async command {command!r} is already owned by a different handler")
 
 
 __all__ = [

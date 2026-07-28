@@ -24,15 +24,7 @@ from src.core.api.results import OperationFailed
 from src.core.async_jobs.models import AsyncJob
 from src.core.views.tenant_scoped import TenantScopedModelViewSet
 
-from .models import (
-    BDRConfiguration,
-    DRExercise,
-    DRRunbook,
-    DRStepExecution,
-    RecoveryPoint,
-    RestoreRun,
-    RunbookStep,
-)
+from .models import BDRConfiguration, DRExercise, DRRunbook, DRStepExecution, RecoveryPoint, RestoreRun, RunbookStep
 from .permissions import (
     BACKUP_EXECUTE,
     BACKUP_READ,

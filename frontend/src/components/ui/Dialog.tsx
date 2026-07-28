@@ -3,11 +3,11 @@
  *
  * Modal dialog using Radix UI primitives.
  */
-import * as DialogPrimitive from '@radix-ui/react-dialog';
-import type { ReactNode } from 'react';
-import { X } from 'lucide-react';
-import { clsx } from 'clsx';
-import { Button } from './Button';
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import type { ReactNode } from "react";
+import { X } from "lucide-react";
+import { clsx } from "clsx";
+import { Button } from "./Button";
 
 interface DialogProps {
   open: boolean;
@@ -15,7 +15,7 @@ interface DialogProps {
   title?: string;
   description?: string;
   children: ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: "sm" | "md" | "lg" | "xl";
 }
 
 export const Dialog = ({
@@ -24,7 +24,7 @@ export const Dialog = ({
   title,
   description,
   children,
-  size = 'md',
+  size = "md",
 }: DialogProps) => {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -33,12 +33,12 @@ export const Dialog = ({
         <DialogPrimitive.Content
           className={clsx(
             // Root-cause fix: semantic tokens for theme consistency.
-            'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-popover text-popover-foreground border border-border rounded-lg shadow-lg z-50',
+            "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-popover text-popover-foreground border border-border rounded-lg shadow-lg z-50",
             {
-              'w-full max-w-sm': size === 'sm',
-              'w-full max-w-md': size === 'md',
-              'w-full max-w-lg': size === 'lg',
-              'w-full max-w-xl': size === 'xl',
+              "w-full max-w-sm": size === "sm",
+              "w-full max-w-md": size === "md",
+              "w-full max-w-lg": size === "lg",
+              "w-full max-w-xl": size === "xl",
             }
           )}
         >
@@ -73,7 +73,7 @@ interface ConfirmDialogProps {
   description: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  variant?: 'default' | 'danger';
+  variant?: "default" | "danger";
   onConfirm: () => void;
 }
 
@@ -82,9 +82,9 @@ export const ConfirmDialog = ({
   onOpenChange,
   title,
   description,
-  confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
-  variant = 'default',
+  confirmLabel = "Confirm",
+  cancelLabel = "Cancel",
+  variant = "default",
   onConfirm,
 }: ConfirmDialogProps) => {
   const handleConfirm = () => {
@@ -93,12 +93,22 @@ export const ConfirmDialog = ({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} title={title} description={description} size="sm">
+    <Dialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={title}
+      description={description}
+      size="sm"
+    >
       <div className="flex justify-end gap-3 mt-4">
         <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
           {cancelLabel}
         </Button>
-        <Button type="button" variant={variant === 'danger' ? 'danger' : 'primary'} onClick={handleConfirm}>
+        <Button
+          type="button"
+          variant={variant === "danger" ? "danger" : "primary"}
+          onClick={handleConfirm}
+        >
           {confirmLabel}
         </Button>
       </div>

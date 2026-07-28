@@ -3451,7 +3451,9 @@ class QualityRuleService:
         with tenant_context(tenant):
             if not DataQualityRule.objects.for_tenant(tenant).filter(pk=identifier).exists():
                 raise MDMDomainError("RESOURCE_NOT_FOUND", "Quality rule not found.", http_status=404)
-            return DataQualityRuleVersion.objects.for_tenant(tenant).filter(rule_id=identifier).order_by("-version_number")
+            return (
+                DataQualityRuleVersion.objects.for_tenant(tenant).filter(rule_id=identifier).order_by("-version_number")
+            )
 
     @classmethod
     def export_document(cls, tenant_id: UUID, rule_id: UUID) -> dict[str, object]:

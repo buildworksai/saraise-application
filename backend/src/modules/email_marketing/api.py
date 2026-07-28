@@ -12,11 +12,7 @@ from django.http import HttpResponse, HttpResponseRedirect
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import (
-    NotFound,
-    PermissionDenied,
-    ValidationError,
-)
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView

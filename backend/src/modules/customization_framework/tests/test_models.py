@@ -152,21 +152,15 @@ def test_duplicate_execution_idempotency_key_is_rejected() -> None:
     "instance",
     (
         pytest.param(
-            lambda: CustomFieldValueFactory.build(
-                tenant_id=uuid.uuid4(), definition=CustomFieldDefinitionFactory()
-            ),
+            lambda: CustomFieldValueFactory.build(tenant_id=uuid.uuid4(), definition=CustomFieldDefinitionFactory()),
             id="field-value",
         ),
         pytest.param(
-            lambda: FormLayoutVersionFactory.build(
-                tenant_id=uuid.uuid4(), form=FormDefinitionFactory()
-            ),
+            lambda: FormLayoutVersionFactory.build(tenant_id=uuid.uuid4(), form=FormDefinitionFactory()),
             id="layout",
         ),
         pytest.param(
-            lambda: BusinessRuleVersionFactory.build(
-                tenant_id=uuid.uuid4(), rule=BusinessRuleFactory()
-            ),
+            lambda: BusinessRuleVersionFactory.build(tenant_id=uuid.uuid4(), rule=BusinessRuleFactory()),
             id="rule-version",
         ),
     ),

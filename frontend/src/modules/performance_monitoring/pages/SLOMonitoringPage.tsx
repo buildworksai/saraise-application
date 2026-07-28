@@ -1,1 +1,1 @@
-export { SLAManagementPage as SLOMonitoringPage } from './SLAManagementPage';
+export { SLAManagementPage as SLOMonitoringPage } from "./SLAManagementPage";

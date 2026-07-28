@@ -1,6 +1,7 @@
-from django.db import migrations, models
-import django.db.models.deletion
 import uuid
+
+import django.db.models.deletion
+from django.db import migrations, models
 
 
 def enable_configuration_guards(apps, schema_editor):
@@ -124,8 +125,12 @@ class Migration(migrations.Migration):
             ],
             options={
                 "db_table": "asset_management_idempotency_records",
-                "indexes": [models.Index(fields=["tenant_id", "operation", "created_at"], name="asset_idem_operation_time")],
-                "constraints": [models.UniqueConstraint(fields=["tenant_id", "key"], name="asset_idem_tenant_key_uniq")],
+                "indexes": [
+                    models.Index(fields=["tenant_id", "operation", "created_at"], name="asset_idem_operation_time")
+                ],
+                "constraints": [
+                    models.UniqueConstraint(fields=["tenant_id", "key"], name="asset_idem_tenant_key_uniq")
+                ],
             },
         ),
         migrations.CreateModel(
@@ -139,12 +144,25 @@ class Migration(migrations.Migration):
                 ("correlation_id", models.CharField(db_index=True, max_length=128)),
                 ("created_by", models.UUIDField(db_index=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
-                ("configuration", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="versions", to="asset_management.assetmanagementconfiguration")),
+                (
+                    "configuration",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="versions",
+                        to="asset_management.assetmanagementconfiguration",
+                    ),
+                ),
             ],
             options={
                 "db_table": "asset_management_configuration_versions",
-                "indexes": [models.Index(fields=["tenant_id", "configuration", "version"], name="asset_config_history")],
-                "constraints": [models.UniqueConstraint(fields=["tenant_id", "configuration", "version"], name="asset_config_version_uniq")],
+                "indexes": [
+                    models.Index(fields=["tenant_id", "configuration", "version"], name="asset_config_history")
+                ],
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=["tenant_id", "configuration", "version"], name="asset_config_version_uniq"
+                    )
+                ],
             },
         ),
         migrations.CreateModel(
@@ -159,11 +177,20 @@ class Migration(migrations.Migration):
                 ("correlation_id", models.CharField(db_index=True, max_length=128)),
                 ("created_by", models.UUIDField(db_index=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
-                ("configuration", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="audits", to="asset_management.assetmanagementconfiguration")),
+                (
+                    "configuration",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="audits",
+                        to="asset_management.assetmanagementconfiguration",
+                    ),
+                ),
             ],
             options={
                 "db_table": "asset_management_configuration_audits",
-                "indexes": [models.Index(fields=["tenant_id", "configuration", "created_at"], name="asset_config_audit_time")],
+                "indexes": [
+                    models.Index(fields=["tenant_id", "configuration", "created_at"], name="asset_config_audit_time")
+                ],
             },
         ),
         migrations.RunPython(enable_configuration_guards, disable_configuration_guards),

@@ -6,11 +6,7 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError, connection, transaction
 
-from src.modules.api_management.models import (
-    ApiManagementAuditRecord,
-    ApiManagementResourceVersion,
-    TenantBaseModel,
-)
+from src.modules.api_management.models import ApiManagementAuditRecord, ApiManagementResourceVersion, TenantBaseModel
 
 
 @pytest.mark.django_db

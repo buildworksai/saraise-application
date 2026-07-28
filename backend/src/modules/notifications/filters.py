@@ -18,9 +18,7 @@ TEMPLATE_STATUSES = frozenset({"draft", "active", "archived"})
 DELIVERY_STATUSES = frozenset(
     {"pending", "queued", "sending", "sent", "delivered", "retry_wait", "failed", "cancelled", "skipped"}
 )
-ATTEMPT_OUTCOMES = frozenset(
-    {"accepted", "retryable_failure", "permanent_failure", "circuit_open", "timeout"}
-)
+ATTEMPT_OUTCOMES = frozenset({"accepted", "retryable_failure", "permanent_failure", "circuit_open", "timeout"})
 
 
 class FilterValidationError(ValueError):
@@ -92,9 +90,7 @@ class BaseNotificationFilterSet:
     def apply_ordering(self, queryset: QuerySet[Any]) -> QuerySet[Any]:
         raw = self.get("ordering")
         ordering = (
-            [part.strip() for part in str(raw).split(",") if part.strip()]
-            if raw
-            else list(self.default_ordering)
+            [part.strip() for part in str(raw).split(",") if part.strip()] if raw else list(self.default_ordering)
         )
         if not ordering or any(item.lstrip("-") not in self.ordering_fields | {"id"} for item in ordering):
             raise FilterValidationError({"ordering": "Ordering field is not allowed."})

@@ -1,19 +1,19 @@
-import { Moon, Sun } from 'lucide-react'
-import { useTheme } from '@/lib/theme-context'
-import { Button } from '@/components/ui/Button'
+import { Moon, Sun } from "lucide-react";
+import { useTheme } from "@/lib/theme-context";
+import { Button } from "@/components/ui/Button";
 
 export function ThemeToggle() {
-  const { theme, setTheme } = useTheme()
+  const { theme, setTheme } = useTheme();
 
   const cycleTheme = () => {
-    if (theme === 'light') {
-      setTheme('dark')
-    } else if (theme === 'dark') {
-      setTheme('system')
+    if (theme === "light") {
+      setTheme("dark");
+    } else if (theme === "dark") {
+      setTheme("system");
     } else {
-      setTheme('light')
+      setTheme("light");
     }
-  }
+  };
 
   return (
     <Button
@@ -27,5 +27,5 @@ export function ThemeToggle() {
       <Moon className="absolute h-5 w-5 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
       <span className="sr-only">Toggle theme (current: {theme})</span>
     </Button>
-  )
+  );
 }

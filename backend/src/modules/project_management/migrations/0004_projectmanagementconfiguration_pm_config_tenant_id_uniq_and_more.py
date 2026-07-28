@@ -6,16 +6,16 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('project_management', '0003_apply_tenant_rls'),
+        ("project_management", "0003_apply_tenant_rls"),
     ]
 
     operations = [
         migrations.AddConstraint(
-            model_name='projectmanagementconfiguration',
-            constraint=models.UniqueConstraint(fields=('tenant_id', 'id'), name='pm_config_tenant_id_uniq'),
+            model_name="projectmanagementconfiguration",
+            constraint=models.UniqueConstraint(fields=("tenant_id", "id"), name="pm_config_tenant_id_uniq"),
         ),
         migrations.AddConstraint(
-            model_name='projectmanagementconfigurationversion',
-            constraint=models.UniqueConstraint(fields=('tenant_id', 'id'), name='pm_configver_tenant_id_uniq'),
+            model_name="projectmanagementconfigurationversion",
+            constraint=models.UniqueConstraint(fields=("tenant_id", "id"), name="pm_configver_tenant_id_uniq"),
         ),
     ]

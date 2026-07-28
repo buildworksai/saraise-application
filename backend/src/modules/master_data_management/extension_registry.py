@@ -17,7 +17,6 @@ from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 from uuid import UUID
 
-
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{1,99}$")
 _VERSION = re.compile(r"^[0-9]+(?:\.[0-9]+){1,2}(?:[-+][A-Za-z0-9.-]+)?$")
 

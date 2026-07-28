@@ -9,13 +9,20 @@ from src.core.access.permissions import RequiresAccess
 from src.core.testing.tenant_contract import TenantIsolationContract
 
 from ..models import (
-    ComplianceConfigurationRevision, ComplianceEvidence, ComplianceFramework,
-    CompliancePolicy, ComplianceRequirement, RequirementPolicyMapping,
+    ComplianceConfigurationRevision,
+    ComplianceEvidence,
+    ComplianceFramework,
+    CompliancePolicy,
+    ComplianceRequirement,
+    RequirementPolicyMapping,
 )
 from .factories import (
-    ComplianceConfigurationRevisionFactory, ComplianceEvidenceFactory,
-    ComplianceFrameworkFactory, CompliancePolicyFactory,
-    ComplianceRequirementFactory, RequirementPolicyMappingFactory,
+    ComplianceConfigurationRevisionFactory,
+    ComplianceEvidenceFactory,
+    ComplianceFrameworkFactory,
+    CompliancePolicyFactory,
+    ComplianceRequirementFactory,
+    RequirementPolicyMappingFactory,
 )
 
 pytest_plugins = ["src.core.testing"]
@@ -61,7 +68,12 @@ class TestRequirementIsolation(GovernedIsolationContract):
     update_payload = {"title": "Cross-tenant change"}
 
     def get_create_payload(self):
-        return {"framework_id": str(self.tenant_a_row.framework_id), "code": "NEW", "title": "New", "description": "Normative text"}
+        return {
+            "framework_id": str(self.tenant_a_row.framework_id),
+            "code": "NEW",
+            "title": "New",
+            "description": "Normative text",
+        }
 
     @pytest.fixture(autouse=True)
     def context(self, authenticated_tenant_a_client, tenant_a, tenant_b):
@@ -91,7 +103,12 @@ class TestMappingIsolation(GovernedIsolationContract):
     update_payload = {"coverage": "partial", "rationale": "Partial coverage remains."}
 
     def get_create_payload(self):
-        return {"requirement_id": str(self.tenant_a_row.requirement_id), "policy_id": str(self.tenant_a_row.policy_id), "coverage": "full", "rationale": "Covered"}
+        return {
+            "requirement_id": str(self.tenant_a_row.requirement_id),
+            "policy_id": str(self.tenant_a_row.policy_id),
+            "coverage": "full",
+            "rationale": "Covered",
+        }
 
     @pytest.fixture(autouse=True)
     def context(self, authenticated_tenant_a_client, tenant_a, tenant_b):
@@ -104,7 +121,13 @@ class TestEvidenceIsolation(GovernedIsolationContract):
     model = ComplianceEvidence
     list_url = f"{BASE}/evidence/"
     detail_url_template = f"{BASE}/evidence/{{pk}}/"
-    create_payload = {"name": "New evidence", "evidence_type": "attestation", "reference_kind": "text_reference", "text_reference": "Reference", "classification": "internal"}
+    create_payload = {
+        "name": "New evidence",
+        "evidence_type": "attestation",
+        "reference_kind": "text_reference",
+        "text_reference": "Reference",
+        "classification": "internal",
+    }
     update_payload = {"name": "Cross-tenant change"}
 
     @pytest.fixture(autouse=True)

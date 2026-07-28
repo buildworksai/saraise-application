@@ -3,7 +3,18 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from .api import BottleneckViewSet, ConformanceViewSet, DiscoveryViewSet, EventExportViewSet, ModuleHealthAPIView, ProcessEventViewSet, ProcessMiningConfigurationViewSet, ProcessModelVersionViewSet, ProcessModelViewSet, ProcessOverviewViewSet
+from .api import (
+    BottleneckViewSet,
+    ConformanceViewSet,
+    DiscoveryViewSet,
+    EventExportViewSet,
+    ModuleHealthAPIView,
+    ProcessEventViewSet,
+    ProcessMiningConfigurationViewSet,
+    ProcessModelVersionViewSet,
+    ProcessModelViewSet,
+    ProcessOverviewViewSet,
+)
 
 app_name = "process_mining"
 router = DefaultRouter()

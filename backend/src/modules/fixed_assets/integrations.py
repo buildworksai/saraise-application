@@ -11,7 +11,7 @@ import threading
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Mapping, Protocol, Sequence
 from uuid import UUID
 
 

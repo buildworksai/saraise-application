@@ -8,7 +8,7 @@ same row update as the state transition.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
-from typing import Any
+from typing import Any, cast
 
 from django.utils import timezone
 
@@ -16,14 +16,7 @@ from src.core.state_machine import JSONFieldTransitionRecorder, StateMachine, Tr
 from src.core.state_machine import register as register_state_machine
 from src.core.state_machine import registry as state_machine_registry
 
-from .models import (
-    Workflow,
-    WorkflowInstance,
-    WorkflowInstanceState,
-    WorkflowStatus,
-    WorkflowTask,
-    WorkflowTaskStatus,
-)
+from .models import Workflow, WorkflowInstance, WorkflowInstanceState, WorkflowStatus, WorkflowTask, WorkflowTaskStatus
 
 
 def _actor_id(metadata: Mapping[str, Any]) -> Any | None:
@@ -208,7 +201,7 @@ def register_workflow_state_machines() -> None:
         ("workflow_automation.task", WORKFLOW_TASK_MACHINE),
     ):
         if name not in state_machine_registry.names():
-            register_state_machine(name, machine)
+            register_state_machine(name, cast(Any, machine))
 
 
 # Friendly aliases retained for service imports while uppercase constants are

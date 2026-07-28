@@ -21,7 +21,6 @@ from .models import (
     UserPermissionSet,
     UserRole,
 )
-from .predicates import validate_predicate
 from .validators import redact_sensitive
 
 UUID = serializers.UUIDField

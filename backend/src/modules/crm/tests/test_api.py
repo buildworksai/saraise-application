@@ -13,13 +13,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
-from src.modules.crm.models import (
-    Account,
-    Lead,
-    LeadStatus,
-    Opportunity,
-    OpportunityStatus,
-)
+from src.modules.crm.models import Account, Lead, LeadStatus, Opportunity, OpportunityStatus
 
 User = get_user_model()
 

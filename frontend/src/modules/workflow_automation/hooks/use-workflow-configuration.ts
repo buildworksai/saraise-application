@@ -3,7 +3,7 @@ import type { WorkflowConfigurationDTO } from "../contracts";
 import { workflowService } from "../services/workflow-service";
 
 export function useWorkflowConfiguration(
-  environment: WorkflowConfigurationDTO["environment"] = "production",
+  environment: WorkflowConfigurationDTO["environment"] = "production"
 ) {
   return useQuery({
     queryKey: ["workflow-automation", "configuration", environment],

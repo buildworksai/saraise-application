@@ -4,12 +4,29 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from .api import (
-    AgentExecutionViewSet, AgentViewSet, ApprovalRequestViewSet, AsyncJobViewSet,
-    AuditEventViewSet, AuditTrailViewSet, ConfigurationViewSet, CostRecordViewSet, CostSummaryViewSet,
-    EgressRequestViewSet, EgressRuleViewSet, KillSwitchViewSet, QuotaUsageViewSet,
-    QuotaViewSet, ScheduleViewSet, SecretAccessViewSet, SecretViewSet,
-    ShardSaturationViewSet, SoDPolicyViewSet, SoDViolationViewSet,
-    TokenUsageViewSet, ToolInvocationViewSet, ToolViewSet,
+    AgentExecutionViewSet,
+    AgentViewSet,
+    ApprovalRequestViewSet,
+    AsyncJobViewSet,
+    AuditEventViewSet,
+    AuditTrailViewSet,
+    ConfigurationViewSet,
+    CostRecordViewSet,
+    CostSummaryViewSet,
+    EgressRequestViewSet,
+    EgressRuleViewSet,
+    KillSwitchViewSet,
+    QuotaUsageViewSet,
+    QuotaViewSet,
+    ScheduleViewSet,
+    SecretAccessViewSet,
+    SecretViewSet,
+    ShardSaturationViewSet,
+    SoDPolicyViewSet,
+    SoDViolationViewSet,
+    TokenUsageViewSet,
+    ToolInvocationViewSet,
+    ToolViewSet,
 )
 from .health import ModuleHealthView
 

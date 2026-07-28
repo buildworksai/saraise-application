@@ -15,13 +15,13 @@ from typing import Any, Iterable
 
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.db.models import Count, Q, QuerySet
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, ValidationError
 
-from src.core.async_jobs.models import OutboxEvent
 from src.core.api.results import CapabilityUnavailable, OperationFailed
+from src.core.async_jobs.models import OutboxEvent
 from src.core.middleware.correlation import get_correlation_id
 from src.core.tenancy import tenant_context
 
@@ -331,7 +331,7 @@ class RiskConfigurationService:
     def preview(
         cls, tenant_id: object, actor_id: object, environment: str, candidate: dict[str, Any]
     ) -> dict[str, Any]:
-        tenant, _actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        tenant, _actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")  # noqa: F841
         checked = cls.validate_candidate(dict(candidate))
         active = cls.get_active(tenant, environment)
         affected = RiskAssessment.objects.for_tenant(tenant).filter(is_deleted=False).count()
@@ -1244,7 +1244,7 @@ class ComplianceCalendarService:
     def enqueue_due_reminders(cls, tenant_id: object, actor_id: object, as_of: date, idempotency_key: str) -> int:
         from .integrations import get_notification_adapter
 
-        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")  # noqa: F841
         adapter = get_notification_adapter()
         queued = 0
         for entry in ComplianceCalendarEntry.objects.for_tenant(tenant).filter(

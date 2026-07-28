@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.renderers import JSONRenderer
@@ -51,8 +52,8 @@ class V1PageNumberPagination(PageNumberPagination):
 class V1APIViewMixin:
     """Restore raw JSON, DRF errors, and ``results`` pagination for v1."""
 
-    renderer_classes = (JSONRenderer,)
-    pagination_class = V1PageNumberPagination
+    renderer_classes: Any = (JSONRenderer,)
+    pagination_class: Any = V1PageNumberPagination
 
     def get_exception_handler(self) -> Callable[..., Response | None]:
         return exception_handler

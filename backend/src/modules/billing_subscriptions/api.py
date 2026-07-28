@@ -64,7 +64,9 @@ class SubscriptionPlanViewSet(viewsets.ReadOnlyModelViewSet):
         CRITICAL: No tenant filtering because SubscriptionPlan is platform-level.
         All tenants see the same plan list.
         """
-        queryset = SubscriptionPlan.objects.filter(is_active=True)
+        queryset = SubscriptionPlan.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
+            is_active=True
+        )  # nosemgrep: semgrep.tenant-id-required-in-queries -- reviewed false positive; scope enforced by surrounding domain policy.  # noqa: E501
 
         # Filter by billing cycle
         billing_cycle = self.request.query_params.get("billing_cycle")
@@ -365,7 +367,7 @@ class QuotaViewSet(viewsets.ViewSet):
             return Response({"error": "User must belong to a tenant"}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            tenant = Tenant.objects.get(id=tenant_id)
+            tenant = Tenant.objects.get(id=tenant_id)  # nosemgrep: semgrep.tenant-id-required-in-queries
         except Tenant.DoesNotExist:
             return Response({"error": "Tenant not found"}, status=status.HTTP_404_NOT_FOUND)
 

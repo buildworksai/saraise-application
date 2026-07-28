@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
-import json
 from collections.abc import Callable, Mapping
 from datetime import timedelta
 from typing import Any
@@ -94,13 +94,13 @@ from .services import (
     AccessEvaluationService,
     ConfigurationService,
     FieldSecurityService,
+    MutationReplayService,
     PermissionCatalogService,
     PermissionSetService,
     RoleService,
     RowSecurityService,
-    MutationReplayService,
-    SecurityConflict,
     SecurityConfigurationMissing,
+    SecurityConflict,
     SecurityDependencyUnavailable,
     SecurityNotFound,
     SecurityProfileService,
@@ -158,9 +158,7 @@ class SecurityRateThrottle(SimpleRateThrottle):
 def _optional_tenant(request: Any) -> UUID | None:
     raw = getattr(request, "tenant_id", None) or get_current_tenant_id()
     if raw is None:
-        raw = getattr(
-            getattr(getattr(request, "user", None), "profile", None), "tenant_id", None
-        )
+        raw = getattr(getattr(getattr(request, "user", None), "profile", None), "tenant_id", None)
     if raw is None:
         return None
     try:
@@ -288,7 +286,9 @@ class GovernedSecurityViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
                     correlation_id=self.correlation_id,
                     callback=execute,
                 )
-                response = Response(status=status_code) if replay["empty"] else Response(replay["body"], status=status_code)
+                response = (
+                    Response(status=status_code) if replay["empty"] else Response(replay["body"], status=status_code)
+                )
         except Exception as exc:
             response = self.handle_exception(exc)
         self.response = self.finalize_response(governed_request, response, *args, **kwargs)
@@ -320,9 +320,7 @@ class GovernedSecurityViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
     def correlation_id(self) -> str:
         supplied = str(self.request.headers.get("X-Correlation-ID", "")).strip()
         generated = correlation_id_for_request(self.request)
-        configuration = ConfigurationService.current(
-            self.tenant_id, actor_id=self.actor_id, correlation_id=generated
-        )
+        configuration = ConfigurationService.current(self.tenant_id, actor_id=self.actor_id, correlation_id=generated)
         limits = configuration.document.get("limits")
         if not isinstance(limits, Mapping):
             raise PermissionDenied("Tenant correlation policy is unavailable.")
@@ -707,9 +705,7 @@ class UserPermissionSetViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         tenant_id = _optional_tenant(self.request)
         if tenant_id is None:
             return UserPermissionSet.objects.none()
-        queryset = UserPermissionSet.objects.for_tenant(tenant_id).select_related(
-            "permission_set"
-        )
+        queryset = UserPermissionSet.objects.for_tenant(tenant_id).select_related("permission_set")
         queryset = _apply_filters(
             queryset, self.request.query_params, {"user_id": "user_id", "permission_set_id": "permission_set_id"}
         )
@@ -856,11 +852,7 @@ class FieldSecurityViewSet(_RuleViewSet):
         tenant_id = _optional_tenant(self.request)
         if tenant_id is None:
             return FieldSecurity.objects.none()
-        queryset = (
-            FieldSecurity.objects.for_tenant(tenant_id)
-            .filter(is_deleted=False)
-            .select_related("role")
-        )
+        queryset = FieldSecurity.objects.for_tenant(tenant_id).filter(is_deleted=False).select_related("role")
         return self.query(
             _apply_filters(
                 queryset,
@@ -899,11 +891,7 @@ class RowSecurityRuleViewSet(_RuleViewSet):
         tenant_id = _optional_tenant(self.request)
         if tenant_id is None:
             return RowSecurityRule.objects.none()
-        queryset = (
-            RowSecurityRule.objects.for_tenant(tenant_id)
-            .filter(is_deleted=False)
-            .select_related("role")
-        )
+        queryset = RowSecurityRule.objects.for_tenant(tenant_id).filter(is_deleted=False).select_related("role")
         return self.query(
             _apply_filters(
                 queryset,
@@ -936,9 +924,7 @@ class SecurityProfileViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, G
         tenant_id = _optional_tenant(self.request)
         if tenant_id is None:
             return SecurityProfile.objects.none()
-        queryset = SecurityProfile.objects.for_tenant(tenant_id).filter(
-            is_deleted=False
-        )
+        queryset = SecurityProfile.objects.for_tenant(tenant_id).filter(is_deleted=False)
         return self.query(
             _apply_filters(
                 queryset,
@@ -1013,9 +999,7 @@ class SecurityProfileAssignmentViewSet(mixins.ListModelMixin, mixins.RetrieveMod
         tenant_id = _optional_tenant(self.request)
         if tenant_id is None:
             return SecurityProfileAssignment.objects.none()
-        queryset = SecurityProfileAssignment.objects.for_tenant(
-            tenant_id
-        ).select_related("security_profile", "role")
+        queryset = SecurityProfileAssignment.objects.for_tenant(tenant_id).select_related("security_profile", "role")
         queryset = _apply_filters(
             queryset,
             self.request.query_params,

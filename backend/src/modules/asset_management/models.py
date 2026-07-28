@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import F, Q
-
-from typing import Any
 
 from src.core.tenancy import TENANT_SCOPED, TenantQuerySet, TenantScopedModel, TimestampedModel, tenancy_scope
 
@@ -252,9 +251,7 @@ class AssetManagementConfigurationVersion(TenantScopedModel):
     """Immutable configuration snapshot for history, export, and rollback."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    configuration = models.ForeignKey(
-        AssetManagementConfiguration, on_delete=models.PROTECT, related_name="versions"
-    )
+    configuration = models.ForeignKey(AssetManagementConfiguration, on_delete=models.PROTECT, related_name="versions")
     version = models.PositiveIntegerField()
     document = models.JSONField()
     source = models.CharField(max_length=32)

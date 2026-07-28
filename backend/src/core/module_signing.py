@@ -29,13 +29,9 @@ from .module_manifest_schema import ModuleManifest
 class SigningError(Exception):
     """Signing error."""
 
-    pass
-
 
 class VerificationError(Exception):
     """Verification error."""
-
-    pass
 
 
 class ManifestSigner:

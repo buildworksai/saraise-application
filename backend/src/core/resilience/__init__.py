@@ -1,12 +1,6 @@
 """Shared fault-isolation and outbound HTTP primitives."""
 
-from .circuit_breaker import (
-    CircuitBreaker,
-    CircuitBreakerError,
-    CircuitBreakerRegistry,
-    CircuitOpenError,
-    CircuitState,
-)
+from .circuit_breaker import CircuitBreaker, CircuitBreakerError, CircuitBreakerRegistry, CircuitOpenError, CircuitState
 from .http import (
     ConfigurationError,
     DependencyConnectionError,

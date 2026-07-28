@@ -29,9 +29,7 @@ export interface TenantContextualNavigation {
   order?: number;
 }
 
-export type TenantRouteNavigation =
-  | TenantSidebarNavigation
-  | TenantContextualNavigation;
+export type TenantRouteNavigation = TenantSidebarNavigation | TenantContextualNavigation;
 
 /**
  * Module-owned tenant route descriptor.

@@ -174,9 +174,7 @@ class TestCompanyTenantIsolation:
             {"company_name": "Compromised"},
             format="json",
         )
-        delete_response = api_client.delete(
-            f"/api/v1/multi-company/companies/{company_b.id}/"
-        )
+        delete_response = api_client.delete(f"/api/v1/multi-company/companies/{company_b.id}/")
 
         assert patch_response.status_code == status.HTTP_404_NOT_FOUND
         assert delete_response.status_code == status.HTTP_404_NOT_FOUND

@@ -67,16 +67,25 @@ class PublishedProviderRunner:
         pricing_status = "unavailable"
         if usage_evidence == "provider_reported":
             UsageService.record_token_usage(
-                tenant, execution.id, response.provider, response.model,
-                response.usage.input_tokens, response.usage.output_tokens,
+                tenant,
+                execution.id,
+                response.provider,
+                response.model,
+                response.usage.input_tokens,
+                response.usage.output_tokens,
                 {"pricing_version": provider.config.pricing_version},
             )
             try:
                 amount = Decimal(str(provider.get_cost(response.usage)))
                 cost = UsageService.record_cost(
-                    tenant, amount, provider.config.pricing_version,
-                    agent_execution=execution, cost_type="token", provider=response.provider,
-                    currency="USD", metadata={},
+                    tenant,
+                    amount,
+                    provider.config.pricing_version,
+                    agent_execution=execution,
+                    cost_type="token",
+                    provider=response.provider,
+                    currency="USD",
+                    metadata={},
                 )
                 if cost.status == "succeeded":
                     pricing_status = "available"

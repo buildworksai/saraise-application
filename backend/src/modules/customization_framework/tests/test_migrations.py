@@ -20,14 +20,8 @@ LEGACY_TABLE = "customization_framework_resources"
 
 
 def test_domain_migration_creates_exact_tables_and_removes_only_legacy_state() -> None:
-    module = importlib.import_module(
-        "src.modules.customization_framework.migrations.0002_domain_models"
-    )
-    creates = [
-        operation
-        for operation in module.Migration.operations
-        if operation.__class__.__name__ == "CreateModel"
-    ]
+    module = importlib.import_module("src.modules.customization_framework.migrations.0002_domain_models")
+    creates = [operation for operation in module.Migration.operations if operation.__class__.__name__ == "CreateModel"]
     assert {operation.options["db_table"] for operation in creates} == DOMAIN_TABLES
     for operation in creates:
         tenant_field = dict(operation.fields)["tenant_id"]
@@ -40,18 +34,12 @@ def test_domain_migration_creates_exact_tables_and_removes_only_legacy_state() -
         if operation.__class__.__name__ == "SeparateDatabaseAndState"
     ]
     assert len(detached) == 1
-    assert [item.__class__.__name__ for item in detached[0].database_operations] == [
-        "RunPython"
-    ]
-    assert [item.__class__.__name__ for item in detached[0].state_operations] == [
-        "DeleteModel"
-    ]
+    assert [item.__class__.__name__ for item in detached[0].database_operations] == ["RunPython"]
+    assert [item.__class__.__name__ for item in detached[0].state_operations] == ["DeleteModel"]
 
 
 def test_rls_migration_covers_every_tenant_table_with_typed_policies() -> None:
-    module = importlib.import_module(
-        "src.modules.customization_framework.migrations.0003_domain_rls"
-    )
+    module = importlib.import_module("src.modules.customization_framework.migrations.0003_domain_rls")
     assert set(module.TENANT_TABLES) == DOMAIN_TABLES
     operation = module.Migration.operations[0]
     assert operation.reverse_code is module.disable_domain_rls
@@ -60,11 +48,7 @@ def test_rls_migration_covers_every_tenant_table_with_typed_policies() -> None:
         "0011_apply_typed_rls_to_notifications",
     ) in module.Migration.dependencies
     constants = set(module.enable_domain_rls.__code__.co_consts)
-    assert any(
-        "saraise_enable_rls" in value
-        for value in constants
-        if isinstance(value, str)
-    )
+    assert any("saraise_enable_rls" in value for value in constants if isinstance(value, str))
 
 
 @pytest.mark.django_db(transaction=True)

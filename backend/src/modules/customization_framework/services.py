@@ -33,11 +33,7 @@ from src.core.api import CapabilityUnavailable
 from src.core.async_jobs.models import OutboxEvent
 from src.core.observability import get_correlation_id
 from src.core.observability.correlation import correlation_id_var
-from src.core.state_machine import (
-    IdempotencyConflictError,
-    StateMachine,
-    Transition,
-)
+from src.core.state_machine import IdempotencyConflictError, StateMachine, Transition
 from src.core.state_machine import registry as state_machine_registry
 
 from .models import (
@@ -2389,11 +2385,11 @@ def _evaluate_condition(
     budget.visit(depth)
     operator = str(node["operator"])
     if operator == "and":
-        result = all(_evaluate_condition(item, record, changed, budget, diagnostics, depth + 1) for item in node["operands"])  # type: ignore[arg-type]
+        result = all(_evaluate_condition(item, record, changed, budget, diagnostics, depth + 1) for item in node["operands"])  # type: ignore[arg-type]  # noqa: E501
     elif operator == "or":
-        result = any(_evaluate_condition(item, record, changed, budget, diagnostics, depth + 1) for item in node["operands"])  # type: ignore[arg-type]
+        result = any(_evaluate_condition(item, record, changed, budget, diagnostics, depth + 1) for item in node["operands"])  # type: ignore[arg-type]  # noqa: E501
     elif operator == "not":
-        result = not _evaluate_condition(node["operand"], record, changed, budget, diagnostics, depth + 1)  # type: ignore[arg-type]
+        result = not _evaluate_condition(node["operand"], record, changed, budget, diagnostics, depth + 1)  # type: ignore[arg-type]  # noqa: E501
     else:
         field = str(node["field"])
         actual = record.get(field)

@@ -19,14 +19,16 @@ def protect_evidence(apps, schema_editor):
     del apps
     vendor = schema_editor.connection.vendor
     if vendor == "postgresql":
-        schema_editor.execute("""
+        schema_editor.execute(
+            """
             CREATE OR REPLACE FUNCTION performance_monitoring_reject_evidence_mutation()
             RETURNS trigger AS $$
             BEGIN
                 RAISE EXCEPTION 'Monitoring evidence is append-only';
             END;
             $$ LANGUAGE plpgsql;
-            """)
+            """
+        )
         for table in EVIDENCE_TABLES:
             trigger = f"pm_immutable_{table.removeprefix('performance_')}"
             schema_editor.execute(f'DROP TRIGGER IF EXISTS "{trigger}" ON "{table}";')

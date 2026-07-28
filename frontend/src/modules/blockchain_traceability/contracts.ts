@@ -4,27 +4,25 @@ export type UUID = string;
 export type ISODateTime = string;
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | readonly JsonValue[];
-export interface JsonObject { readonly [key: string]: JsonValue }
+export interface JsonObject {
+  readonly [key: string]: JsonValue;
+}
 
-export type LedgerNetworkStatus = 'draft' | 'active' | 'degraded' | 'disabled';
-export type TraceabilityAssetStatus = 'draft' | 'active' | 'recalled' | 'retired';
-export type LedgerAnchorStatus = 'queued' | 'submitting' | 'submitted' | 'confirmed' | 'failed';
-export type AuthenticityCredentialStatus = 'active' | 'revoked' | 'expired';
-export type ComplianceEvidenceStatus = 'draft' | 'finalized' | 'superseded';
-export type ComplianceResult = 'pass' | 'fail' | 'warning' | 'not_applicable';
-export type VerificationType = 'chain' | 'anchor' | 'authenticity' | 'compliance';
+export type LedgerNetworkStatus = "draft" | "active" | "degraded" | "disabled";
+export type TraceabilityAssetStatus = "draft" | "active" | "recalled" | "retired";
+export type LedgerAnchorStatus = "queued" | "submitting" | "submitted" | "confirmed" | "failed";
+export type AuthenticityCredentialStatus = "active" | "revoked" | "expired";
+export type ComplianceEvidenceStatus = "draft" | "finalized" | "superseded";
+export type ComplianceResult = "pass" | "fail" | "warning" | "not_applicable";
+export type VerificationType = "chain" | "anchor" | "authenticity" | "compliance";
 export type VerificationOutcome =
-  | 'verified'
-  | 'invalid'
-  | 'not_authentic'
-  | 'inconclusive'
-  | 'dependency_unavailable';
-export type ProofStatus =
-  | 'locally_consistent'
-  | 'externally_verified'
-  | 'invalid'
-  | 'unavailable';
-export type HealthStatus = 'healthy' | 'degraded' | 'unavailable';
+  | "verified"
+  | "invalid"
+  | "not_authentic"
+  | "inconclusive"
+  | "dependency_unavailable";
+export type ProofStatus = "locally_consistent" | "externally_verified" | "invalid" | "unavailable";
+export type HealthStatus = "healthy" | "degraded" | "unavailable";
 
 export interface TransitionEvidence {
   transition_key: string;
@@ -71,13 +69,26 @@ export interface LedgerNetwork extends MutableAuditFields {
 }
 
 /** Exact fields emitted by LedgerNetworkListSerializer. */
-export type LedgerNetworkListItem = Pick<LedgerNetwork,
-  | 'id' | 'tenant_id' | 'network_key' | 'name' | 'provider_type'
-  | 'network_namespace' | 'chain_id' | 'confirmation_depth'
-  | 'supports_batch_anchors' | 'supports_finality' | 'status'
-  | 'credential_configured' | 'last_health_status' | 'last_health_code'
-  | 'last_health_checked_at' | 'last_successful_anchor_at'
-  | 'created_at' | 'updated_at'
+export type LedgerNetworkListItem = Pick<
+  LedgerNetwork,
+  | "id"
+  | "tenant_id"
+  | "network_key"
+  | "name"
+  | "provider_type"
+  | "network_namespace"
+  | "chain_id"
+  | "confirmation_depth"
+  | "supports_batch_anchors"
+  | "supports_finality"
+  | "status"
+  | "credential_configured"
+  | "last_health_status"
+  | "last_health_code"
+  | "last_health_checked_at"
+  | "last_successful_anchor_at"
+  | "created_at"
+  | "updated_at"
 >;
 
 export interface TraceabilityAsset extends MutableAuditFields {
@@ -102,11 +113,25 @@ export interface TraceabilityAsset extends MutableAuditFields {
 }
 
 /** Exact fields emitted by TraceabilityAssetListSerializer. */
-export type TraceabilityAssetListItem = Pick<TraceabilityAsset,
-  | 'id' | 'tenant_id' | 'asset_key' | 'name' | 'product_ref'
-  | 'batch_ref' | 'serial_number' | 'gtin' | 'asset_type' | 'status'
-  | 'head_sequence' | 'head_hash' | 'activated_at' | 'recalled_at'
-  | 'retired_at' | 'created_at' | 'updated_at'
+export type TraceabilityAssetListItem = Pick<
+  TraceabilityAsset,
+  | "id"
+  | "tenant_id"
+  | "asset_key"
+  | "name"
+  | "product_ref"
+  | "batch_ref"
+  | "serial_number"
+  | "gtin"
+  | "asset_type"
+  | "status"
+  | "head_sequence"
+  | "head_hash"
+  | "activated_at"
+  | "recalled_at"
+  | "retired_at"
+  | "created_at"
+  | "updated_at"
 >;
 
 export interface TraceabilityEvent {
@@ -124,17 +149,28 @@ export interface TraceabilityEvent {
   payload: JsonObject;
   previous_hash: string;
   event_hash: string;
-  hash_algorithm: 'sha256';
+  hash_algorithm: "sha256";
   created_by: string;
   correlation_id: string;
   anchor_state?: string;
 }
 
 /** Exact fields emitted by TraceabilityEventListSerializer. */
-export type TraceabilityEventListItem = Pick<TraceabilityEvent,
-  | 'id' | 'tenant_id' | 'asset_id' | 'sequence' | 'event_type'
-  | 'schema_version' | 'occurred_at' | 'recorded_at' | 'actor_ref'
-  | 'previous_hash' | 'event_hash' | 'hash_algorithm' | 'correlation_id'
+export type TraceabilityEventListItem = Pick<
+  TraceabilityEvent,
+  | "id"
+  | "tenant_id"
+  | "asset_id"
+  | "sequence"
+  | "event_type"
+  | "schema_version"
+  | "occurred_at"
+  | "recorded_at"
+  | "actor_ref"
+  | "previous_hash"
+  | "event_hash"
+  | "hash_algorithm"
+  | "correlation_id"
 >;
 
 export interface LedgerAnchor {
@@ -145,7 +181,7 @@ export interface LedgerAnchor {
   start_sequence: number;
   end_sequence: number;
   root_hash: string;
-  hash_algorithm: 'sha256';
+  hash_algorithm: "sha256";
   idempotency_key: string;
   status: LedgerAnchorStatus;
   transition_history: readonly TransitionEvidence[];
@@ -167,13 +203,29 @@ export interface LedgerAnchor {
 }
 
 /** Exact fields emitted by LedgerAnchorListSerializer. */
-export type LedgerAnchorListItem = Pick<LedgerAnchor,
-  | 'id' | 'tenant_id' | 'asset_id' | 'network_id' | 'start_sequence'
-  | 'end_sequence' | 'root_hash' | 'hash_algorithm' | 'status'
-  | 'async_job_id' | 'provider_transaction_id' | 'transaction_hash'
-  | 'block_number' | 'block_hash' | 'confirmations' | 'failure_code'
-  | 'submitted_at' | 'confirmed_at' | 'last_checked_at' | 'created_at'
-  | 'updated_at'
+export type LedgerAnchorListItem = Pick<
+  LedgerAnchor,
+  | "id"
+  | "tenant_id"
+  | "asset_id"
+  | "network_id"
+  | "start_sequence"
+  | "end_sequence"
+  | "root_hash"
+  | "hash_algorithm"
+  | "status"
+  | "async_job_id"
+  | "provider_transaction_id"
+  | "transaction_hash"
+  | "block_number"
+  | "block_hash"
+  | "confirmations"
+  | "failure_code"
+  | "submitted_at"
+  | "confirmed_at"
+  | "last_checked_at"
+  | "created_at"
+  | "updated_at"
 >;
 
 export interface AuthenticityCredential {
@@ -199,10 +251,19 @@ export interface AuthenticityCredential {
 }
 
 /** Exact fields emitted by AuthenticityCredentialListSerializer. */
-export type AuthenticityCredentialListItem = Pick<AuthenticityCredential,
-  | 'id' | 'tenant_id' | 'asset_id' | 'public_id' | 'credential_type'
-  | 'status' | 'issued_at' | 'expires_at' | 'revoked_at' | 'created_at'
-  | 'updated_at'
+export type AuthenticityCredentialListItem = Pick<
+  AuthenticityCredential,
+  | "id"
+  | "tenant_id"
+  | "asset_id"
+  | "public_id"
+  | "credential_type"
+  | "status"
+  | "issued_at"
+  | "expires_at"
+  | "revoked_at"
+  | "created_at"
+  | "updated_at"
 >;
 
 export interface ComplianceEvidence extends MutableAuditFields {
@@ -227,11 +288,23 @@ export interface ComplianceEvidence extends MutableAuditFields {
 }
 
 /** Exact fields emitted by ComplianceEvidenceListSerializer. */
-export type ComplianceEvidenceListItem = Pick<ComplianceEvidence,
-  | 'id' | 'tenant_id' | 'asset_id' | 'event_id' | 'evidence_key'
-  | 'evidence_type' | 'standard' | 'jurisdiction' | 'result' | 'status'
-  | 'observed_at' | 'valid_until' | 'finalized_at' | 'created_at'
-  | 'updated_at'
+export type ComplianceEvidenceListItem = Pick<
+  ComplianceEvidence,
+  | "id"
+  | "tenant_id"
+  | "asset_id"
+  | "event_id"
+  | "evidence_key"
+  | "evidence_type"
+  | "standard"
+  | "jurisdiction"
+  | "result"
+  | "status"
+  | "observed_at"
+  | "valid_until"
+  | "finalized_at"
+  | "created_at"
+  | "updated_at"
 >;
 
 export interface ProofEvidence {
@@ -269,17 +342,38 @@ export interface VerificationAttempt {
 }
 
 /** Exact fields emitted by VerificationAttemptListSerializer. */
-export type VerificationAttemptListItem = Pick<VerificationAttempt,
-  | 'id' | 'tenant_id' | 'verification_type' | 'asset_id' | 'anchor_id'
-  | 'credential_id' | 'compliance_evidence_id' | 'outcome' | 'reason_code'
-  | 'chain_head_hash' | 'correlation_id' | 'latency_ms' | 'created_at'
+export type VerificationAttemptListItem = Pick<
+  VerificationAttempt,
+  | "id"
+  | "tenant_id"
+  | "verification_type"
+  | "asset_id"
+  | "anchor_id"
+  | "credential_id"
+  | "compliance_evidence_id"
+  | "outcome"
+  | "reason_code"
+  | "chain_head_hash"
+  | "correlation_id"
+  | "latency_ms"
+  | "created_at"
 >;
 
 export type AssetHistoryItem =
-  | { kind: 'event'; occurred_at: ISODateTime; sequence: number; event: TraceabilityEvent }
-  | { kind: 'anchor'; occurred_at: ISODateTime; sequence?: number; anchor: LedgerAnchor }
-  | { kind: 'credential'; occurred_at: ISODateTime; sequence?: number; credential: AuthenticityCredential }
-  | { kind: 'compliance'; occurred_at: ISODateTime; sequence?: number; evidence: ComplianceEvidence };
+  | { kind: "event"; occurred_at: ISODateTime; sequence: number; event: TraceabilityEvent }
+  | { kind: "anchor"; occurred_at: ISODateTime; sequence?: number; anchor: LedgerAnchor }
+  | {
+      kind: "credential";
+      occurred_at: ISODateTime;
+      sequence?: number;
+      credential: AuthenticityCredential;
+    }
+  | {
+      kind: "compliance";
+      occurred_at: ISODateTime;
+      sequence?: number;
+      evidence: ComplianceEvidence;
+    };
 
 export interface AssetHistory {
   asset: TraceabilityAsset;
@@ -307,8 +401,8 @@ export interface OperationResult<T> {
 
 export interface AsyncJobReference {
   id: UUID;
-  command: 'blockchain_traceability.submit_anchor';
-  status: 'queued';
+  command: "blockchain_traceability.submit_anchor";
+  status: "queued";
   correlation_id: string;
 }
 
@@ -325,11 +419,11 @@ export interface IssuedCredential {
 }
 
 export interface HealthDependency {
-  name: 'database' | 'cache' | 'async_outbox' | 'adapters' | 'network';
+  name: "database" | "cache" | "async_outbox" | "adapters" | "network";
   status: HealthStatus;
   code: string;
   checked_at: ISODateTime;
-  circuit_state?: 'closed' | 'open' | 'half_open' | 'not_applicable';
+  circuit_state?: "closed" | "open" | "half_open" | "not_applicable";
 }
 
 export interface ModuleHealth {
@@ -372,9 +466,17 @@ export interface TraceabilityHealthPolicy {
   cache_marker_ttl_seconds: number;
 }
 
-export interface TraceabilityInventoryPolicy { validation_required: boolean }
-export interface TraceabilityAnchorPolicy { default_start_sequence: number; use_current_head_default: boolean }
-export interface TraceabilityCredentialPolicy { issuer_type: string; token_entropy_bytes: number }
+export interface TraceabilityInventoryPolicy {
+  validation_required: boolean;
+}
+export interface TraceabilityAnchorPolicy {
+  default_start_sequence: number;
+  use_current_head_default: boolean;
+}
+export interface TraceabilityCredentialPolicy {
+  issuer_type: string;
+  token_entropy_bytes: number;
+}
 
 export interface TraceabilityResiliencePolicy {
   timeout_seconds: number;
@@ -433,7 +535,7 @@ export interface TraceabilityConfiguration {
 }
 
 export interface TraceabilityConfigurationExport {
-  schema: 'saraise.blockchain_traceability.configuration/v1';
+  schema: "saraise.blockchain_traceability.configuration/v1";
   environment: string;
   version: number;
   document: TraceabilityConfigurationDocument;
@@ -454,7 +556,7 @@ export interface TraceabilityConfigurationPreview {
 export interface TraceabilityConfigurationVersion {
   version: number;
   document: TraceabilityConfigurationDocument;
-  change_type: 'create' | 'update' | 'import' | 'rollback';
+  change_type: "create" | "update" | "import" | "rollback";
   created_by: string;
   created_at: ISODateTime;
   correlation_id: string;
@@ -471,8 +573,14 @@ export interface TraceabilityCapabilities {
   document: TraceabilityConfigurationDocument;
 }
 
-export interface ConfigurationDocumentRequest { document: TraceabilityConfigurationDocument; environment?: string }
-export interface ConfigurationRollbackRequest { version: number; environment?: string }
+export interface ConfigurationDocumentRequest {
+  document: TraceabilityConfigurationDocument;
+  environment?: string;
+}
+export interface ConfigurationRollbackRequest {
+  version: number;
+  environment?: string;
+}
 
 export interface ApiV2Pagination {
   page: number;
@@ -603,7 +711,7 @@ export interface LedgerNetworkCreate {
   supports_finality?: boolean;
   provider_options?: JsonObject;
 }
-export type LedgerNetworkUpdate = Partial<Omit<LedgerNetworkCreate, 'network_key'>>;
+export type LedgerNetworkUpdate = Partial<Omit<LedgerNetworkCreate, "network_key">>;
 
 export interface TraceabilityAssetCreate {
   asset_key: string;
@@ -616,7 +724,7 @@ export interface TraceabilityAssetCreate {
   asset_type: string;
   attributes?: JsonObject;
 }
-export type TraceabilityAssetUpdate = Partial<Omit<TraceabilityAssetCreate, 'asset_key'>>;
+export type TraceabilityAssetUpdate = Partial<Omit<TraceabilityAssetCreate, "asset_key">>;
 
 export interface TraceabilityEventAppend {
   asset_id: UUID;
@@ -657,16 +765,30 @@ export interface ComplianceEvidenceCreate {
   valid_until?: ISODateTime | null;
   supersedes_id?: UUID | null;
 }
-export type ComplianceEvidenceUpdate = Partial<Omit<ComplianceEvidenceCreate, 'asset_id' | 'evidence_key'>>;
+export type ComplianceEvidenceUpdate = Partial<
+  Omit<ComplianceEvidenceCreate, "asset_id" | "evidence_key">
+>;
 
-export interface TransitionRequest { transition_key: string }
-export interface RecallRequest extends TransitionRequest { reason: string }
-export interface CredentialRevokeRequest extends TransitionRequest { reason: string }
-export interface ChainVerificationRequest { idempotency_key: string }
-export interface AuthenticityVerificationRequest { public_id: string; token: string; idempotency_key: string }
+export interface TransitionRequest {
+  transition_key: string;
+}
+export interface RecallRequest extends TransitionRequest {
+  reason: string;
+}
+export interface CredentialRevokeRequest extends TransitionRequest {
+  reason: string;
+}
+export interface ChainVerificationRequest {
+  idempotency_key: string;
+}
+export interface AuthenticityVerificationRequest {
+  public_id: string;
+  token: string;
+  idempotency_key: string;
+}
 export type EvidenceSupersedeRequest = TransitionRequest & ComplianceEvidenceCreate;
 
-export const MODULE_API_PREFIX = '/api/v2/blockchain-traceability';
+export const MODULE_API_PREFIX = "/api/v2/blockchain-traceability";
 
 export const ENDPOINTS = {
   NETWORKS: {
@@ -734,30 +856,30 @@ export const ENDPOINTS = {
 } as const;
 
 export const ROUTE_PATHS = {
-  NETWORKS: '/blockchain-traceability/networks',
-  NETWORK_CREATE: '/blockchain-traceability/networks/new',
+  NETWORKS: "/blockchain-traceability/networks",
+  NETWORK_CREATE: "/blockchain-traceability/networks/new",
   NETWORK_DETAIL: (id: UUID) => `/blockchain-traceability/networks/${id}` as const,
   NETWORK_EDIT: (id: UUID) => `/blockchain-traceability/networks/${id}/edit` as const,
-  ASSETS: '/blockchain-traceability/assets',
-  ASSET_CREATE: '/blockchain-traceability/assets/new',
+  ASSETS: "/blockchain-traceability/assets",
+  ASSET_CREATE: "/blockchain-traceability/assets/new",
   ASSET_DETAIL: (id: UUID) => `/blockchain-traceability/assets/${id}` as const,
   ASSET_EDIT: (id: UUID) => `/blockchain-traceability/assets/${id}/edit` as const,
-  EVENTS: '/blockchain-traceability/events',
-  EVENT_APPEND: '/blockchain-traceability/events/new',
+  EVENTS: "/blockchain-traceability/events",
+  EVENT_APPEND: "/blockchain-traceability/events/new",
   EVENT_DETAIL: (id: UUID) => `/blockchain-traceability/events/${id}` as const,
-  ANCHORS: '/blockchain-traceability/anchors',
-  ANCHOR_CREATE: '/blockchain-traceability/anchors/new',
+  ANCHORS: "/blockchain-traceability/anchors",
+  ANCHOR_CREATE: "/blockchain-traceability/anchors/new",
   ANCHOR_DETAIL: (id: UUID) => `/blockchain-traceability/anchors/${id}` as const,
-  CREDENTIALS: '/blockchain-traceability/credentials',
-  CREDENTIAL_ISSUE: '/blockchain-traceability/credentials/new',
+  CREDENTIALS: "/blockchain-traceability/credentials",
+  CREDENTIAL_ISSUE: "/blockchain-traceability/credentials/new",
   CREDENTIAL_DETAIL: (id: UUID) => `/blockchain-traceability/credentials/${id}` as const,
-  COMPLIANCE: '/blockchain-traceability/compliance',
-  COMPLIANCE_CREATE: '/blockchain-traceability/compliance/new',
+  COMPLIANCE: "/blockchain-traceability/compliance",
+  COMPLIANCE_CREATE: "/blockchain-traceability/compliance/new",
   COMPLIANCE_DETAIL: (id: UUID) => `/blockchain-traceability/compliance/${id}` as const,
   COMPLIANCE_EDIT: (id: UUID) => `/blockchain-traceability/compliance/${id}/edit` as const,
-  COMPLIANCE_SUPERSEDE: '/blockchain-traceability/compliance/supersede',
-  VERIFY: '/blockchain-traceability/verify',
-  ATTEMPTS: '/blockchain-traceability/verification-attempts',
+  COMPLIANCE_SUPERSEDE: "/blockchain-traceability/compliance/supersede",
+  VERIFY: "/blockchain-traceability/verify",
+  ATTEMPTS: "/blockchain-traceability/verification-attempts",
   ATTEMPT_DETAIL: (id: UUID) => `/blockchain-traceability/verification-attempts/${id}` as const,
-  CONFIGURATION: '/blockchain-traceability/configuration',
+  CONFIGURATION: "/blockchain-traceability/configuration",
 } as const;

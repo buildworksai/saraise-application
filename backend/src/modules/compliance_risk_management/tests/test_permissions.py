@@ -12,12 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from src.core.access import RequiresAccess
 
-from ..permissions import (
-    ACTION_ACCESS,
-    PERMISSIONS,
-    ActionAccessMixin,
-    requirement_for,
-)
+from ..permissions import ACTION_ACCESS, PERMISSIONS, ActionAccessMixin, requirement_for
 
 
 def test_manifest_and_runtime_permission_catalog_are_exact() -> None:

@@ -2,7 +2,6 @@
 
 from django.db import migrations, models
 
-
 MIGRATION_ACTOR = "system:migration:multi-company-v2"
 
 
@@ -50,9 +49,7 @@ def backfill_company_contract(apps, schema_editor):
         company.updated_by = company.updated_by or MIGRATION_ACTOR
         pending.append(company)
     if pending:
-        Company.objects.bulk_update(
-            pending, ["company_code", "legal_name", "currency", "created_by", "updated_by"]
-        )
+        Company.objects.bulk_update(pending, ["company_code", "legal_name", "currency", "created_by", "updated_by"])
 
 
 def reverse_backfill(apps, schema_editor):
@@ -66,8 +63,6 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunPython(backfill_company_contract, reverse_backfill),
-        migrations.AlterField(
-            model_name="company", name="legal_name", field=models.CharField(max_length=255)
-        ),
+        migrations.AlterField(model_name="company", name="legal_name", field=models.CharField(max_length=255)),
         migrations.AlterField(model_name="company", name="currency", field=models.CharField(max_length=3)),
     ]

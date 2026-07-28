@@ -1,1 +1,1 @@
-export { AuthenticityCredentialDetailPage } from './domain-pages';
+export { AuthenticityCredentialDetailPage } from "./domain-pages";

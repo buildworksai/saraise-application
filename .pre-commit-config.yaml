@@ -136,7 +136,28 @@ repos:
     hooks:
       - id: semgrep
         name: "Security: SAST (Semgrep)"
-        args: ['--config', 'auto', '--config', '.semgrep/custom-rules.yaml', '--error', '--no-git-ignore']
+        args:
+          - '--config'
+          - 'auto'
+          - '--config'
+          - '.semgrep/custom-rules.yaml'
+          - '--error'
+          - '--exclude'
+          - 'backend/**/migrations/**'
+          - '--exclude'
+          - 'backend/**/tests/**'
+          - '--exclude'
+          - 'frontend/src/**/__tests__/**'
+          - '--exclude'
+          - 'frontend/src/**/*.test.ts'
+          - '--exclude'
+          - 'frontend/src/**/*.test.tsx'
+          - 'backend/src'
+          - 'frontend/src'
+          - 'frontend/Dockerfile'
+          - 'frontend/nginx.conf'
+          - 'scripts'
+        pass_filenames: false
         additional_dependencies: []
         exclude: |
           (?x)^(
@@ -144,7 +165,11 @@ repos:
             \.venv/|
             venv/|
             __pycache__/|
-            \.git/
+            \.git/|
+            backend/.*/migrations/|
+            backend/.*/tests/|
+            frontend/src/.*/__tests__/|
+            frontend/src/.*\.test\.(ts|tsx)$
           )
 
   # ===================================

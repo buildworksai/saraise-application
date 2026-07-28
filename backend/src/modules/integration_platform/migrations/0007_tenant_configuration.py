@@ -1,6 +1,7 @@
-from django.db import migrations, models
-import django.db.models.deletion
 import uuid
+
+import django.db.models.deletion
+from django.db import migrations, models
 
 
 def protect_immutable_evidence(apps, schema_editor):
@@ -83,7 +84,14 @@ class Migration(migrations.Migration):
                 ("created_by", models.UUIDField()),
                 ("correlation_id", models.CharField(db_index=True, max_length=64)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
-                ("configuration", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="versions", to="integration_platform.integrationplatformconfiguration")),
+                (
+                    "configuration",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="versions",
+                        to="integration_platform.integrationplatformconfiguration",
+                    ),
+                ),
             ],
             options={"db_table": "integration_platform_configuration_versions"},
         ),
@@ -101,9 +109,19 @@ class Migration(migrations.Migration):
                 ("changed_by", models.UUIDField()),
                 ("correlation_id", models.CharField(db_index=True, max_length=64)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
-                ("configuration", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="audits", to="integration_platform.integrationplatformconfiguration")),
+                (
+                    "configuration",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="audits",
+                        to="integration_platform.integrationplatformconfiguration",
+                    ),
+                ),
             ],
-            options={"db_table": "integration_platform_configuration_audits", "ordering": ("-created_at", "-to_version", "id")},
+            options={
+                "db_table": "integration_platform_configuration_audits",
+                "ordering": ("-created_at", "-to_version", "id"),
+            },
         ),
         migrations.CreateModel(
             name="WebhookDeliveryAttempt",
@@ -118,7 +136,14 @@ class Migration(migrations.Migration):
                 ("job_id", models.UUIDField(db_index=True)),
                 ("correlation_id", models.CharField(db_index=True, max_length=64)),
                 ("occurred_at", models.DateTimeField(auto_now_add=True)),
-                ("delivery", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="attempts", to="integration_platform.webhookdelivery")),
+                (
+                    "delivery",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="attempts",
+                        to="integration_platform.webhookdelivery",
+                    ),
+                ),
             ],
             options={
                 "db_table": "integration_platform_webhook_delivery_attempts",
@@ -127,7 +152,9 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name="integrationplatformconfiguration",
-            constraint=models.UniqueConstraint(fields=("tenant_id", "environment"), name="intplat_config_tenant_env_uniq"),
+            constraint=models.UniqueConstraint(
+                fields=("tenant_id", "environment"), name="intplat_config_tenant_env_uniq"
+            ),
         ),
         migrations.AddIndex(
             model_name="integrationplatformconfiguration",
@@ -135,7 +162,9 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name="integrationplatformconfigurationversion",
-            constraint=models.UniqueConstraint(fields=("tenant_id", "environment", "version"), name="intplat_config_version_uniq"),
+            constraint=models.UniqueConstraint(
+                fields=("tenant_id", "environment", "version"), name="intplat_config_version_uniq"
+            ),
         ),
         migrations.AddIndex(
             model_name="integrationplatformconfigurationversion",
@@ -147,7 +176,9 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name="webhookdeliveryattempt",
-            constraint=models.UniqueConstraint(fields=("tenant_id", "delivery", "attempt_number"), name="intplat_delivery_attempt_uniq"),
+            constraint=models.UniqueConstraint(
+                fields=("tenant_id", "delivery", "attempt_number"), name="intplat_delivery_attempt_uniq"
+            ),
         ),
         migrations.AddIndex(
             model_name="webhookdeliveryattempt",

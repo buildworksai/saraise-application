@@ -1,1 +1,1 @@
-export { RequirementListPage } from './CompliancePages';
+export { RequirementListPage } from "./CompliancePages";

@@ -26,20 +26,14 @@ from src.modules.master_data_management.services import (
     DashboardService,
     DataQualityService,
     EntityTypeService,
-    MDMDomainError,
     MasterEntityService,
     MatchingService,
+    MDMDomainError,
     MergeService,
     QualityRuleService,
 )
 
-from .factories import (
-    actor_id,
-    make_candidate,
-    make_entity,
-    make_entity_type,
-    make_matching_rule,
-)
+from .factories import actor_id, make_candidate, make_entity, make_entity_type, make_matching_rule
 
 pytestmark = pytest.mark.django_db
 
@@ -239,10 +233,14 @@ def test_create_entity_is_schema_validated_versioned_scoped_scored_and_evented()
     version = MasterDataVersion.objects.for_tenant(tenant).get(entity=entity, version_number=1)
     assert version.data_snapshot == entity.data
     assert version.changed_by == actor
-    assert OutboxEvent.objects.for_tenant(tenant).filter(
-        event_type="mdm.entity.created",
-        aggregate_id=entity.id,
-    ).exists()
+    assert (
+        OutboxEvent.objects.for_tenant(tenant)
+        .filter(
+            event_type="mdm.entity.created",
+            aggregate_id=entity.id,
+        )
+        .exists()
+    )
     # With no configured quality rules the record is explicitly unevaluated,
     # never silently awarded a perfect score.
     report = DataQualityService.evaluate_entity(
@@ -252,11 +250,16 @@ def test_create_entity_is_schema_validated_versioned_scoped_scored_and_evented()
         idempotency_key="no-rules-evaluation",
     )
     assert report.evaluated is False and report.score is None
-    assert OutboxEvent.objects.for_tenant(tenant).filter(
-        event_type="mdm.entity.quality_scored",
-        aggregate_id=entity.id,
-        payload__causation_id="no-rules-evaluation",
-    ).count() == 1
+    assert (
+        OutboxEvent.objects.for_tenant(tenant)
+        .filter(
+            event_type="mdm.entity.quality_scored",
+            aggregate_id=entity.id,
+            payload__causation_id="no-rules-evaluation",
+        )
+        .count()
+        == 1
+    )
 
     # A retry returns the durable original outcome even when rule configuration
     # changes between attempts; an idempotency key cannot become a fresh command.
@@ -444,7 +447,12 @@ def test_entity_update_archive_restore_rollback_and_version_conflicts() -> None:
         .filter(event_type="mdm.entity.quality_scored", aggregate_id=entity.id)
         .values_list("payload__causation_id", flat=True)
     )
-    assert {"entity-update-v2:quality", "archive-v3:quality", "restore-v4:quality", "rollback-v5:quality"} <= quality_causes
+    assert {
+        "entity-update-v2:quality",
+        "archive-v3:quality",
+        "restore-v4:quality",
+        "rollback-v5:quality",
+    } <= quality_causes
 
 
 def test_resolve_by_code_returns_tenant_record_and_excludes_merged_source() -> None:
@@ -551,10 +559,15 @@ def test_quality_validation_rules_scoring_issue_reconciliation_and_transitions()
     entity.refresh_from_db()
     assert replay == manual
     assert entity.quality_evaluated_at == evaluated_at
-    assert OutboxEvent.objects.for_tenant(tenant).filter(
-        event_type="mdm.entity.quality_scored",
-        payload__causation_id="manual-quality-replay",
-    ).count() == 1
+    assert (
+        OutboxEvent.objects.for_tenant(tenant)
+        .filter(
+            event_type="mdm.entity.quality_scored",
+            payload__causation_id="manual-quality-replay",
+        )
+        .count()
+        == 1
+    )
 
 
 def test_quality_rule_configuration_update_soft_delete_and_tenant_scope() -> None:
@@ -775,9 +788,7 @@ def test_merge_preview_survivorship_merge_idempotency_and_reverse() -> None:
     assert MergeParticipant.objects.for_tenant(tenant).filter(merge_history=merge).count() == 2
     assert MergeParticipant.objects.for_tenant(tenant).filter(merge_history=merge, role="survivor").count() == 1
     assert (
-        MasterDataEntity.objects.for_tenant(tenant)
-        .filter(status="merged", golden_record=merge.golden_record)
-        .count()
+        MasterDataEntity.objects.for_tenant(tenant).filter(status="merged", golden_record=merge.golden_record).count()
         == 1
     )
     replay = MergeService.merge_entities(
@@ -839,10 +850,15 @@ def test_merge_rejects_cross_tenant_type_mismatch_and_reversal_conflict() -> Non
         reason="Initially considered duplicates",
         idempotency_key="merge-conflict",
     )
-    source = MergeParticipant.objects.for_tenant(tenant_a).filter(
-        merge_history=merge,
-        role="merged_source",
-    ).get().source_entity
+    source = (
+        MergeParticipant.objects.for_tenant(tenant_a)
+        .filter(
+            merge_history=merge,
+            role="merged_source",
+        )
+        .get()
+        .source_entity
+    )
     MasterDataEntity.objects.filter(pk=source.id).update(version=source.version + 1)
     assert_domain_error(
         "MERGE_REVERSAL_CONFLICT",
@@ -872,8 +888,7 @@ def test_dashboard_aggregates_are_bounded_to_tenant_and_optional_type() -> None:
     assert summary["entity_status_counts"] == {"active": 2}
     assert summary["quality_distribution"]["not_evaluated"] == 2  # type: ignore[index]
     assert all(
-        item["entity_name"].startswith("Customer A-")
-        for item in summary["recent_activity"]  # type: ignore[union-attr]
+        item["entity_name"].startswith("Customer A-") for item in summary["recent_activity"]  # type: ignore[union-attr]
     )
     filtered = DashboardService.get_summary(tenant_a, entity_type_id=type_a.id)
     assert filtered["entity_count"] == 2

@@ -206,9 +206,10 @@ def _load_xml(coverage_file: Path):  # type: ignore[no-untyped-def]
     try:
         from defusedxml.ElementTree import parse
     except ImportError:  # pragma: no cover - dependency-free CLI fallback
-        from xml.etree.ElementTree import parse
+        from xml.etree.ElementTree import parse  # nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse -- fallback only when defusedxml is unavailable.
 
     try:
+        # nosemgrep: python.lang.security.use-defused-xml-parse.use-defused-xml-parse
         return parse(coverage_file)
     except (OSError, ValueError, SyntaxError) as error:
         raise CoverageReportError(f"malformed backend coverage report {coverage_file}: {error}") from error

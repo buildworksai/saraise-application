@@ -22,7 +22,6 @@ from django.utils import timezone
 
 from src.core.tenancy import TenantQuerySet, TenantScopedModel, TimestampedModel
 
-
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 MAX_TAGS = 50
 MAX_CATEGORIES = 100
@@ -266,8 +265,7 @@ class ComplianceRequirement(MutableComplianceModel):
                 name="cmp_req_tenant_fw_code_uq",
             ),
             models.CheckConstraint(
-                condition=~Q(applicability=RequirementApplicability.NOT_APPLICABLE)
-                | ~Q(applicability_rationale=""),
+                condition=~Q(applicability=RequirementApplicability.NOT_APPLICABLE) | ~Q(applicability_rationale=""),
                 name="cmp_req_na_rationale_ck",
             ),
         ]
@@ -337,10 +335,7 @@ class CompliancePolicy(MutableComplianceModel):
             models.CheckConstraint(condition=Q(current_version__gte=0), name="cmp_policy_version_nonneg_ck"),
             models.CheckConstraint(
                 condition=~Q(status=PolicyStatus.PUBLISHED)
-                | (
-                    Q(current_version__gt=0)
-                    & Q(effective_date__isnull=False)
-                ),
+                | (Q(current_version__gt=0) & Q(effective_date__isnull=False)),
                 name="cmp_policy_published_ready_ck",
             ),
         ]
@@ -532,7 +527,9 @@ class ComplianceAssessment(AppendOnlyComplianceModel):
         db_table = "compliance_assessments"
         constraints = [
             models.CheckConstraint(
-                condition=Q(status__in=(AssessmentStatus.NOT_ASSESSED, AssessmentStatus.IN_PROGRESS, AssessmentStatus.COMPLIANT))
+                condition=Q(
+                    status__in=(AssessmentStatus.NOT_ASSESSED, AssessmentStatus.IN_PROGRESS, AssessmentStatus.COMPLIANT)
+                )
                 | ~Q(notes=""),
                 name="cmp_assessment_notes_ck",
             ),
@@ -744,19 +741,13 @@ class ComplianceConfigurationRevision(TenantScopedModel):
     default_review_frequency_days = models.PositiveSmallIntegerField(
         validators=(MinValueValidator(1), MaxValueValidator(3650))
     )
-    expiry_warning_days = models.PositiveSmallIntegerField(
-        validators=(MinValueValidator(0), MaxValueValidator(365))
-    )
-    evidence_warning_days = models.PositiveSmallIntegerField(
-        validators=(MinValueValidator(0), MaxValueValidator(365))
-    )
+    expiry_warning_days = models.PositiveSmallIntegerField(validators=(MinValueValidator(0), MaxValueValidator(365)))
+    evidence_warning_days = models.PositiveSmallIntegerField(validators=(MinValueValidator(0), MaxValueValidator(365)))
     minimum_assessment_note_length = models.PositiveSmallIntegerField(
         validators=(MinValueValidator(0), MaxValueValidator(2000))
     )
     allow_external_evidence_urls = models.BooleanField()
-    bulk_import_row_limit = models.PositiveIntegerField(
-        validators=(MinValueValidator(1), MaxValueValidator(10_000))
-    )
+    bulk_import_row_limit = models.PositiveIntegerField(validators=(MinValueValidator(1), MaxValueValidator(10_000)))
     regulation_categories = models.JSONField(default=list, validators=(validate_regulation_categories,))
     rollout = models.JSONField(default=dict, blank=True, validators=(validate_rollout,))
     created_by = models.ForeignKey(

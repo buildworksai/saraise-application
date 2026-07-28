@@ -17,9 +17,7 @@ class StrictSerializer(serializers.Serializer):
         if isinstance(data, Mapping):
             unknown = set(data) - set(self.fields)
             if unknown:
-                raise serializers.ValidationError(
-                    {key: "Unknown field." for key in sorted(unknown)}
-                )
+                raise serializers.ValidationError({key: "Unknown field." for key in sorted(unknown)})
         return super().to_internal_value(data)
 
 

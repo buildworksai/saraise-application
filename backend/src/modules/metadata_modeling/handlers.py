@@ -19,9 +19,7 @@ def validate_schema(
     *,
     sample_limit: int,
 ) -> dict[str, object]:
-    return SchemaVersionService.validate_candidate(
-        tenant_id, definition_id, version_id, sample_limit=sample_limit
-    )
+    return SchemaVersionService.validate_candidate(tenant_id, definition_id, version_id, sample_limit=sample_limit)
 
 
 @tenant_context_worker
@@ -38,9 +36,7 @@ def revalidate_resources(
     sample_limit: int,
 ) -> dict[str, object]:
     # Candidate impact validation is the authoritative bulk revalidation path.
-    return SchemaVersionService.validate_candidate(
-        tenant_id, definition_id, version_id, sample_limit=sample_limit
-    )
+    return SchemaVersionService.validate_candidate(tenant_id, definition_id, version_id, sample_limit=sample_limit)
 
 
 def _validate_job(job: AsyncJob) -> dict[str, object]:

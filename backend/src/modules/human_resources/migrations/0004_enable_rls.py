@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 TENANT_TABLES = (
     "hr_departments",
     "hr_employees",

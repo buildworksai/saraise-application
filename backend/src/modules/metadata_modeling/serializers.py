@@ -5,8 +5,14 @@ from __future__ import annotations
 from rest_framework import serializers
 
 from .models import (
-    DynamicResource, DynamicResourceVersion, EntityDefinition, EntitySchemaVersion,
-    FieldDefinition, MetadataConfigurationAudit, MetadataModelingConfiguration, NamingSequence,
+    DynamicResource,
+    DynamicResourceVersion,
+    EntityDefinition,
+    EntitySchemaVersion,
+    FieldDefinition,
+    MetadataConfigurationAudit,
+    MetadataModelingConfiguration,
+    NamingSequence,
 )
 
 
@@ -14,9 +20,21 @@ class FieldDefinitionReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = FieldDefinition
         fields = (
-            "id", "name", "key", "field_type", "is_required", "is_read_only", "is_searchable",
-            "default_value", "validation_rules", "options", "reference_entity_code", "help_text",
-            "placeholder", "order", "created_at",
+            "id",
+            "name",
+            "key",
+            "field_type",
+            "is_required",
+            "is_read_only",
+            "is_searchable",
+            "default_value",
+            "validation_rules",
+            "options",
+            "reference_entity_code",
+            "help_text",
+            "placeholder",
+            "order",
+            "created_at",
         )
         read_only_fields = fields
 
@@ -44,9 +62,21 @@ class EntityDefinitionListSerializer(serializers.ModelSerializer):
     class Meta:
         model = EntityDefinition
         fields = (
-            "id", "name", "plural_name", "code", "description", "owner_module", "origin", "status", "icon",
+            "id",
+            "name",
+            "plural_name",
+            "code",
+            "description",
+            "owner_module",
+            "origin",
+            "status",
+            "icon",
             "active_version",
-            "active_version_number", "record_count", "lock_version", "created_at", "updated_at",
+            "active_version_number",
+            "record_count",
+            "lock_version",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 
@@ -61,8 +91,18 @@ class EntitySchemaVersionListSerializer(serializers.ModelSerializer):
     class Meta:
         model = EntitySchemaVersion
         fields = (
-            "id", "version", "status", "schema_hash", "change_summary", "compatibility",
-            "validation_report", "based_on_version", "published_at", "published_by", "created_by", "created_at",
+            "id",
+            "version",
+            "status",
+            "schema_hash",
+            "change_summary",
+            "compatibility",
+            "validation_report",
+            "based_on_version",
+            "published_at",
+            "published_by",
+            "created_by",
+            "created_at",
         )
         read_only_fields = fields
 
@@ -93,8 +133,17 @@ class EntityDefinitionDetailSerializer(EntityDefinitionListSerializer):
 
     class Meta(EntityDefinitionListSerializer.Meta):
         fields = EntityDefinitionListSerializer.Meta.fields + (
-            "description", "is_submittable", "track_changes", "naming_strategy", "naming_config",
-            "current_version", "active_fields", "created_by", "updated_by", "archived_at", "archived_by",
+            "description",
+            "is_submittable",
+            "track_changes",
+            "naming_strategy",
+            "naming_config",
+            "current_version",
+            "active_fields",
+            "created_by",
+            "updated_by",
+            "archived_at",
+            "archived_by",
         )
 
     def get_active_fields(self, obj: EntityDefinition):
@@ -171,8 +220,19 @@ class DynamicResourceListSerializer(serializers.ModelSerializer):
     class Meta:
         model = DynamicResource
         fields = (
-            "id", "entity_definition", "entity_code", "entity_name", "schema_version", "schema_version_number",
-            "record_key", "display_name", "state", "lock_version", "searchable_data", "created_at", "updated_at",
+            "id",
+            "entity_definition",
+            "entity_code",
+            "entity_name",
+            "schema_version",
+            "schema_version_number",
+            "record_key",
+            "display_name",
+            "state",
+            "lock_version",
+            "searchable_data",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 
@@ -186,7 +246,14 @@ class DynamicResourceDetailSerializer(DynamicResourceListSerializer):
 
     class Meta(DynamicResourceListSerializer.Meta):
         fields = DynamicResourceListSerializer.Meta.fields + (
-            "data", "fields", "created_by", "updated_by", "submitted_at", "submitted_by", "cancelled_at", "cancelled_by",
+            "data",
+            "fields",
+            "created_by",
+            "updated_by",
+            "submitted_at",
+            "submitted_by",
+            "cancelled_at",
+            "cancelled_by",
         )
 
 
@@ -232,8 +299,18 @@ class DynamicResourceVersionSerializer(serializers.ModelSerializer):
     class Meta:
         model = DynamicResourceVersion
         fields = (
-            "id", "version", "schema_version", "state", "record_key", "display_name", "data",
-            "changed_fields", "operation", "changed_by", "correlation_id", "changed_at",
+            "id",
+            "version",
+            "schema_version",
+            "state",
+            "record_key",
+            "display_name",
+            "data",
+            "changed_fields",
+            "operation",
+            "changed_by",
+            "correlation_id",
+            "changed_at",
         )
         read_only_fields = fields
 
@@ -242,8 +319,17 @@ class NamingSequenceSerializer(serializers.ModelSerializer):
     class Meta:
         model = NamingSequence
         fields = (
-            "id", "entity_definition", "sequence_key", "prefix_template", "next_value", "padding",
-            "reset_period", "period_key", "is_active", "created_at", "updated_at",
+            "id",
+            "entity_definition",
+            "sequence_key",
+            "prefix_template",
+            "next_value",
+            "padding",
+            "reset_period",
+            "period_key",
+            "is_active",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 
@@ -256,10 +342,23 @@ class MetadataConfigurationSerializer(serializers.ModelSerializer):
     class Meta:
         model = MetadataModelingConfiguration
         fields = (
-            "id", "environment", "version", "synchronous_validation_limit", "max_fields_per_schema",
-            "max_schema_bytes", "max_record_data_bytes", "max_regex_length", "default_page_size",
-            "max_page_size", "allowed_field_types", "feature_flags", "rollout", "created_by", "updated_by",
-            "created_at", "updated_at",
+            "id",
+            "environment",
+            "version",
+            "synchronous_validation_limit",
+            "max_fields_per_schema",
+            "max_schema_bytes",
+            "max_record_data_bytes",
+            "max_regex_length",
+            "default_page_size",
+            "max_page_size",
+            "allowed_field_types",
+            "feature_flags",
+            "rollout",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 
@@ -272,7 +371,9 @@ class MetadataConfigurationWriteSerializer(serializers.Serializer):
     max_regex_length = serializers.IntegerField(min_value=1, max_value=4_096, required=False)
     default_page_size = serializers.IntegerField(min_value=1, max_value=1_000, required=False)
     max_page_size = serializers.IntegerField(min_value=1, max_value=1_000, required=False)
-    allowed_field_types = serializers.ListField(child=serializers.ChoiceField(choices=FieldDefinition.FieldType.choices), required=False)
+    allowed_field_types = serializers.ListField(
+        child=serializers.ChoiceField(choices=FieldDefinition.FieldType.choices), required=False
+    )
     feature_flags = serializers.DictField(child=serializers.BooleanField(), required=False)
     rollout = serializers.DictField(required=False)
 
@@ -285,8 +386,15 @@ class MetadataConfigurationAuditSerializer(serializers.ModelSerializer):
     class Meta:
         model = MetadataConfigurationAudit
         fields = (
-            "id", "version", "operation", "before", "after", "changes",
-            "changed_by", "correlation_id", "changed_at",
+            "id",
+            "version",
+            "operation",
+            "before",
+            "after",
+            "changes",
+            "changed_by",
+            "correlation_id",
+            "changed_at",
         )
         read_only_fields = fields
 

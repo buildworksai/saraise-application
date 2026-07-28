@@ -124,12 +124,16 @@ class ExtensionProviderV1(Protocol):
 
 @runtime_checkable
 class ConsolidationContributorV1(ExtensionProviderV1, Protocol):
-    def contribute(self, companies: Sequence[CompanyDTO], period_start: date, period_end: date, context: ExtensionContext) -> ProviderResultV1: ...
+    def contribute(
+        self, companies: Sequence[CompanyDTO], period_start: date, period_end: date, context: ExtensionContext
+    ) -> ProviderResultV1: ...
 
 
 @runtime_checkable
 class EliminationRuleProviderV1(ExtensionProviderV1, Protocol):
-    def generate(self, transactions: Sequence[TransactionDTO], context: ExtensionContext) -> Sequence[ProviderResultV1]: ...
+    def generate(
+        self, transactions: Sequence[TransactionDTO], context: ExtensionContext
+    ) -> Sequence[ProviderResultV1]: ...
 
 
 @runtime_checkable
@@ -215,26 +219,42 @@ class ExtensionRegistry:
     def catalog(self, context: ExtensionContext) -> tuple[ExtensionCatalogEntry, ...]:
         with self._lock:
             providers = tuple(self._providers.values())
-        return tuple(self._catalog_entry(provider, context) for provider in sorted(providers, key=lambda item: item.key))
+        return tuple(
+            self._catalog_entry(provider, context) for provider in sorted(providers, key=lambda item: item.key)
+        )
 
     def _catalog_entry(self, provider: ExtensionProviderV1, context: ExtensionContext) -> ExtensionCatalogEntry:
         entitled = not provider.entitlement or provider.entitlement in context.entitlements
-        enabled = not provider.feature_flag or bool(context.settings.get("feature_flags", {}).get(provider.feature_flag, False))
+        enabled = not provider.feature_flag or bool(
+            context.settings.get("feature_flags", {}).get(provider.feature_flag, False)
+        )
         allowed = not provider.required_permission or provider.required_permission in context.permissions
         compatible = provider.spi_version == SPI_VERSION
         healthy = self._breakers.get(provider.key).state.value != "open"
         available = entitled and enabled and allowed and compatible and healthy
         reason = ""
-        if not compatible: reason = "INCOMPATIBLE_SPI"
-        elif not entitled: reason = "ENTITLEMENT_REQUIRED"
-        elif not enabled: reason = "FEATURE_DISABLED"
-        elif not allowed: reason = "ACCESS_DENIED"
-        elif not healthy: reason = "PROVIDER_UNHEALTHY"
+        if not compatible:
+            reason = "INCOMPATIBLE_SPI"
+        elif not entitled:
+            reason = "ENTITLEMENT_REQUIRED"
+        elif not enabled:
+            reason = "FEATURE_DISABLED"
+        elif not allowed:
+            reason = "ACCESS_DENIED"
+        elif not healthy:
+            reason = "PROVIDER_UNHEALTHY"
         return ExtensionCatalogEntry(
-            key=provider.key, version=provider.version, spi_version=provider.spi_version,
-            installed=True, entitled=entitled, feature_enabled=enabled,
-            access_allowed=allowed, compatible=compatible, healthy=healthy,
-            available=available, locked=not entitled or not allowed,
+            key=provider.key,
+            version=provider.version,
+            spi_version=provider.spi_version,
+            installed=True,
+            entitled=entitled,
+            feature_enabled=enabled,
+            access_allowed=allowed,
+            compatible=compatible,
+            healthy=healthy,
+            available=available,
+            locked=not entitled or not allowed,
             unavailable_reason=reason,
         )
 

@@ -49,9 +49,7 @@ def test_expand_backfill_switch_contract_order_is_linear():
 
 
 def test_rls_migration_covers_every_tenant_table_and_relation():
-    security = importlib.import_module(
-        "src.modules.ai_agent_management.migrations.0008_tenant_guards_and_rls"
-    )
+    security = importlib.import_module("src.modules.ai_agent_management.migrations.0008_tenant_guards_and_rls")
     assert len(security.TABLES) >= 21
     assert len(security.TENANT_RELATIONS) >= 20
     source = inspect.getsource(security)

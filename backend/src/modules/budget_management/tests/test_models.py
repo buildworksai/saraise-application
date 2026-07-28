@@ -28,9 +28,16 @@ def identity() -> tuple[uuid.UUID, uuid.UUID]:
 def budget(db, identity: tuple[uuid.UUID, uuid.UUID]) -> Budget:
     tenant, actor = identity
     return Budget.objects.create(
-        tenant_id=tenant, created_by=actor, updated_by=actor, budget_code="FY25-OPS",
-        budget_name="Operations", fiscal_year=2025, start_date=date(2025, 1, 1),
-        end_date=date(2025, 12, 31), budget_type="operating", currency="USD",
+        tenant_id=tenant,
+        created_by=actor,
+        updated_by=actor,
+        budget_code="FY25-OPS",
+        budget_name="Operations",
+        fiscal_year=2025,
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 12, 31),
+        budget_type="operating",
+        currency="USD",
     )
 
 
@@ -56,12 +63,21 @@ def test_budget_defaults_and_string_representation(budget: Budget) -> None:
 def test_append_only_transition_and_approval_reject_update_delete(budget: Budget, identity) -> None:
     tenant, actor = identity
     approval = BudgetApproval.objects.create(
-        tenant_id=tenant, budget=budget, approver_id=uuid.uuid4(), approval_level=1,
-        status="pending", created_by=actor,
+        tenant_id=tenant,
+        budget=budget,
+        approver_id=uuid.uuid4(),
+        approval_level=1,
+        status="pending",
+        created_by=actor,
     )
     transition = BudgetTransition.objects.create(
-        tenant_id=tenant, budget=budget, transition_key="submit-1", command="submit",
-        from_state="draft", to_state="pending_approval", actor_id=actor,
+        tenant_id=tenant,
+        budget=budget,
+        transition_key="submit-1",
+        command="submit",
+        from_state="draft",
+        to_state="pending_approval",
+        actor_id=actor,
     )
     approval.status = "approved"
     with pytest.raises(AppendOnlyDomainError):
@@ -79,8 +95,13 @@ def test_soft_delete_and_period_invariants_validate(budget: Budget, identity) ->
     with pytest.raises(ValidationError):
         budget.full_clean()
     line = BudgetLine(
-        tenant_id=tenant, budget=budget, created_by=actor, updated_by=actor,
-        account_code="6000", period_type="quarterly", period_number=5,
+        tenant_id=tenant,
+        budget=budget,
+        created_by=actor,
+        updated_by=actor,
+        account_code="6000",
+        period_type="quarterly",
+        period_number=5,
         budget_amount=Decimal("1.00"),
     )
     with pytest.raises(ValidationError):

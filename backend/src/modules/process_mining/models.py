@@ -115,9 +115,12 @@ class StatefulDomainModel(MutableDomainModel):
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self._state.adding and self.pk:
-            prior = type(self)._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id).values(
-                "status", "transition_history"
-            ).first()
+            prior = (
+                type(self)
+                ._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id)
+                .values("status", "transition_history")
+                .first()
+            )
             if prior and prior["status"] != self.status and prior["transition_history"] == self.transition_history:
                 raise ValidationError("Status changes must use the registered state machine.", code="state_machine")
         super().save(*args, **kwargs)
@@ -256,7 +259,9 @@ class ProcessDiscoveryJob(StatefulDomainModel):
             models.CheckConstraint(condition=models.Q(case_count__gte=0), name="pm_disc_case_nonneg"),
             models.CheckConstraint(condition=models.Q(activity_count__gte=0), name="pm_disc_activity_nonneg"),
         ]
-        indexes = [models.Index(fields=["tenant_id", "process_name", "status", "created_at"], name="pm_disc_status_time")]
+        indexes = [
+            models.Index(fields=["tenant_id", "process_name", "status", "created_at"], name="pm_disc_status_time")
+        ]
 
 
 class ProcessModel(MutableDomainModel):
@@ -302,7 +307,9 @@ class ProcessModelVersion(AppendOnlyDomainModel):
         constraints = [
             models.UniqueConstraint(fields=["tenant_id", "process_model", "version"], name="pm_model_version_uniq"),
             models.UniqueConstraint(
-                fields=["tenant_id", "process_model"], condition=models.Q(is_reference=True), name="pm_model_reference_uniq"
+                fields=["tenant_id", "process_model"],
+                condition=models.Q(is_reference=True),
+                name="pm_model_reference_uniq",
             ),
             models.CheckConstraint(condition=models.Q(event_count__gte=0), name="pm_ver_event_nonneg"),
             models.CheckConstraint(condition=models.Q(case_count__gte=0), name="pm_ver_case_nonneg"),
@@ -368,9 +375,7 @@ class ProcessMiningConfiguration(TenantScopedModel, TimestampedModel):
 class ProcessMiningConfigurationVersion(AppendOnlyDomainModel):
     """Immutable snapshot used for history, export, and rollback."""
 
-    configuration = models.ForeignKey(
-        ProcessMiningConfiguration, on_delete=models.PROTECT, related_name="versions"
-    )
+    configuration = models.ForeignKey(ProcessMiningConfiguration, on_delete=models.PROTECT, related_name="versions")
     version = models.PositiveIntegerField()
     document = models.JSONField()
     correlation_id = models.CharField(max_length=128, db_index=True)
@@ -415,9 +420,7 @@ class ProcessEventRetentionTombstone(AppendOnlyDomainModel):
 
     class Meta:
         db_table = "process_mining_event_retention_tombstones"
-        constraints = [
-            models.UniqueConstraint(fields=["tenant_id", "cutoff"], name="pm_retention_cutoff_uniq")
-        ]
+        constraints = [models.UniqueConstraint(fields=["tenant_id", "cutoff"], name="pm_retention_cutoff_uniq")]
 
 
 class ExportArtifactDeletion(AppendOnlyDomainModel):
@@ -429,9 +432,7 @@ class ExportArtifactDeletion(AppendOnlyDomainModel):
 
     class Meta:
         db_table = "process_mining_export_artifact_deletions"
-        constraints = [
-            models.UniqueConstraint(fields=["tenant_id", "export_job"], name="pm_export_delete_once")
-        ]
+        constraints = [models.UniqueConstraint(fields=["tenant_id", "export_job"], name="pm_export_delete_once")]
 
     def clean(self) -> None:
         _same_tenant(self, "export_job")
@@ -557,9 +558,13 @@ class BottleneckAnalysis(StatefulDomainModel):
         db_table = "process_mining_bottleneck_analyses"
         constraints = [
             models.UniqueConstraint(fields=["tenant_id", "idempotency_key"], name="pm_bneck_idem_uniq"),
-            models.CheckConstraint(condition=models.Q(time_range_end__gt=models.F("time_range_start")), name="pm_bneck_time_order"),
+            models.CheckConstraint(
+                condition=models.Q(time_range_end__gt=models.F("time_range_start")), name="pm_bneck_time_order"
+            ),
         ]
-        indexes = [models.Index(fields=["tenant_id", "process_name", "status", "created_at"], name="pm_bneck_status_time")]
+        indexes = [
+            models.Index(fields=["tenant_id", "process_name", "status", "created_at"], name="pm_bneck_status_time")
+        ]
 
 
 class BottleneckFinding(AppendOnlyDomainModel):
@@ -577,7 +582,9 @@ class BottleneckFinding(AppendOnlyDomainModel):
     class Meta:
         db_table = "process_mining_bottleneck_findings"
         constraints = [
-            models.UniqueConstraint(fields=["tenant_id", "analysis", "from_activity", "to_activity"], name="pm_find_transition_uniq"),
+            models.UniqueConstraint(
+                fields=["tenant_id", "analysis", "from_activity", "to_activity"], name="pm_find_transition_uniq"
+            ),
             models.UniqueConstraint(fields=["tenant_id", "analysis", "rank"], name="pm_find_rank_uniq"),
             *[
                 models.CheckConstraint(condition=models.Q(**{f"{field}__gte": 0}), name=f"pm_find_{label}_nonneg")
@@ -620,8 +627,10 @@ class ProcessVariant(AppendOnlyDomainModel):
 
     def clean(self) -> None:
         _same_tenant(self, "analysis")
-        if not isinstance(self.activities, list) or not self.activities or not all(
-            isinstance(value, str) and value.strip() for value in self.activities
+        if (
+            not isinstance(self.activities, list)
+            or not self.activities
+            or not all(isinstance(value, str) and value.strip() for value in self.activities)
         ):
             raise ValidationError({"activities": "Activities must be a nonempty ordered string list."})
 

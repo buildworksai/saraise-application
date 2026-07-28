@@ -8,13 +8,57 @@ import { AgentListPage } from "./AgentListPage";
 
 vi.mock("../services/ai-agent-service");
 
-const pagination = { count: 0, page: 1, page_size: 25, total_pages: 0, has_next: false, has_previous: false };
-const page = (items: readonly [{ readonly id: string; readonly name: string; readonly description: string; readonly identity_type: "system_bound"; readonly runner_key: string; readonly provider_config_id: null; readonly status: "draft"; readonly updated_at: string; readonly created_at: string }] | readonly []) => ({ items, pagination: { ...pagination, count: items.length }, correlationId: "correlation-1", receivedAt: "2026-07-23T00:00:00Z" });
-const agent = { id: "agent-1", name: "Close books", description: "Reconciles ledgers", identity_type: "system_bound" as const, runner_key: "finance_runner", provider_config_id: null, status: "draft" as const, updated_at: "2026-07-23T00:00:00Z", created_at: "2026-07-23T00:00:00Z" };
+const pagination = {
+  count: 0,
+  page: 1,
+  page_size: 25,
+  total_pages: 0,
+  has_next: false,
+  has_previous: false,
+};
+const page = (
+  items:
+    | readonly [
+        {
+          readonly id: string;
+          readonly name: string;
+          readonly description: string;
+          readonly identity_type: "system_bound";
+          readonly runner_key: string;
+          readonly provider_config_id: null;
+          readonly status: "draft";
+          readonly updated_at: string;
+          readonly created_at: string;
+        },
+      ]
+    | readonly []
+) => ({
+  items,
+  pagination: { ...pagination, count: items.length },
+  correlationId: "correlation-1",
+  receivedAt: "2026-07-23T00:00:00Z",
+});
+const agent = {
+  id: "agent-1",
+  name: "Close books",
+  description: "Reconciles ledgers",
+  identity_type: "system_bound" as const,
+  runner_key: "finance_runner",
+  provider_config_id: null,
+  status: "draft" as const,
+  updated_at: "2026-07-23T00:00:00Z",
+  created_at: "2026-07-23T00:00:00Z",
+};
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}><MemoryRouter><AgentListPage/></MemoryRouter></QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <AgentListPage />
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
 }
 
 describe("AgentListPage", () => {
@@ -31,7 +75,11 @@ describe("AgentListPage", () => {
     renderPage();
     expect(await screen.findByText("Close books")).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText("Search agents"), "ledger");
-    await waitFor(() => expect(aiAgentService.listAgents).toHaveBeenLastCalledWith(expect.objectContaining({ search: "ledger", page: 1, page_size: 25 })));
+    await waitFor(() =>
+      expect(aiAgentService.listAgents).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: "ledger", page: 1, page_size: 25 })
+      )
+    );
   });
 
   it("renders onboarding when the catalog is empty", async () => {

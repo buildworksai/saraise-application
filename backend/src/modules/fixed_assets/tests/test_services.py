@@ -27,7 +27,6 @@ from src.modules.fixed_assets.services import (
     StaleVersionError,
 )
 
-
 ACCOUNT_FIELDS = (
     "asset_account_id",
     "accumulated_depreciation_account_id",
@@ -76,9 +75,7 @@ class FixedAssetServiceTests(TestCase):
         extension_registry.set_accounting_port(DefaultAccountingAdapter())
 
     def create_category(self, key: str = "category-1"):
-        return AssetCategoryService.create_category(
-            self.tenant, self.actor, self.category_data, key
-        )
+        return AssetCategoryService.create_category(self.tenant, self.actor, self.category_data, key)
 
     def create_asset(self, *, key: str = "asset-1", cost: str = "1200.00"):
         category = AssetCategory.objects.filter(tenant_id=self.tenant, code="IT").first()
@@ -114,9 +111,7 @@ class FixedAssetServiceTests(TestCase):
         self.assertEqual(duplicate.id, category.id)
         changed = dict(self.category_data, name="Different")
         with self.assertRaises(IdempotencyConflictError):
-            AssetCategoryService.create_category(
-                self.tenant, self.actor, changed, "category-1"
-            )
+            AssetCategoryService.create_category(self.tenant, self.actor, changed, "category-1")
 
         asset = self.create_asset()
         duplicate_asset = FixedAssetService.create_asset(
@@ -137,13 +132,9 @@ class FixedAssetServiceTests(TestCase):
     def test_draft_version_and_cross_tenant_guards(self) -> None:
         asset = self.create_asset()
         with self.assertRaises(StaleVersionError):
-            FixedAssetService.update_draft(
-                self.tenant, asset.id, self.actor, {"asset_name": "Changed"}, 999
-            )
+            FixedAssetService.update_draft(self.tenant, asset.id, self.actor, {"asset_name": "Changed"}, 999)
         with self.assertRaises(ObjectDoesNotExist):
-            FixedAssetService.update_draft(
-                uuid.uuid4(), asset.id, self.actor, {"asset_name": "Changed"}, 1
-            )
+            FixedAssetService.update_draft(uuid.uuid4(), asset.id, self.actor, {"asset_name": "Changed"}, 1)
 
     def test_capitalize_transfer_impair_and_dispose_are_idempotent(self) -> None:
         asset = self.capitalize(self.create_asset())
@@ -204,12 +195,8 @@ class FixedAssetServiceTests(TestCase):
             depreciation_start_date=date(2026, 1, 15),
             expected_version=asset.version,
         )
-        schedule = DepreciationService.create_schedule_draft(
-            self.tenant, asset.id, self.actor, {}, "schedule-partial"
-        )
-        schedule = DepreciationService.calculate_schedule(
-            self.tenant, schedule.id, self.actor, {}, "calculate-partial"
-        )
+        schedule = DepreciationService.create_schedule_draft(self.tenant, asset.id, self.actor, {}, "schedule-partial")
+        schedule = DepreciationService.calculate_schedule(self.tenant, schedule.id, self.actor, {}, "calculate-partial")
         lines = list(schedule.lines.order_by("sequence"))
         self.assertEqual(len(lines), 13)
         self.assertLess(lines[0].depreciation_amount, Decimal("100.00"))
@@ -233,9 +220,7 @@ class FixedAssetServiceTests(TestCase):
             "schedule-units",
         )
         with self.assertRaises(FixedAssetServiceError):
-            DepreciationService.calculate_schedule(
-                self.tenant, schedule.id, self.actor, {}, "calculate-units-missing"
-            )
+            DepreciationService.calculate_schedule(self.tenant, schedule.id, self.actor, {}, "calculate-units-missing")
         schedule = DepreciationService.calculate_schedule(
             self.tenant,
             schedule.id,
@@ -248,19 +233,11 @@ class FixedAssetServiceTests(TestCase):
 
     def test_posting_worker_updates_line_asset_ledger_and_job(self) -> None:
         asset = self.capitalize(self.create_asset())
-        schedule = DepreciationService.create_schedule_draft(
-            self.tenant, asset.id, self.actor, {}, "schedule-post"
-        )
-        schedule = DepreciationService.calculate_schedule(
-            self.tenant, schedule.id, self.actor, {}, "calculate-post"
-        )
-        schedule = DepreciationService.activate_schedule(
-            self.tenant, schedule.id, self.actor, "activate-post"
-        )
+        schedule = DepreciationService.create_schedule_draft(self.tenant, asset.id, self.actor, {}, "schedule-post")
+        schedule = DepreciationService.calculate_schedule(self.tenant, schedule.id, self.actor, {}, "calculate-post")
+        schedule = DepreciationService.activate_schedule(self.tenant, schedule.id, self.actor, "activate-post")
         line = schedule.lines.order_by("sequence").first()
-        job = DepreciationService.enqueue_line_posting(
-            self.tenant, line.id, self.actor, "post-line-1", "corr-post"
-        )
+        job = DepreciationService.enqueue_line_posting(self.tenant, line.id, self.actor, "post-line-1", "corr-post")
         completed = execute(job.id, self.tenant)
         line.refresh_from_db()
         asset.refresh_from_db()
@@ -269,27 +246,17 @@ class FixedAssetServiceTests(TestCase):
         self.assertIsNotNone(line.journal_entry_id)
         self.assertEqual(asset.net_book_value, Decimal("1100.00"))
         self.assertEqual(
-            AssetTransaction.objects.filter(
-                asset=asset, transaction_type="depreciation"
-            ).count(),
+            AssetTransaction.objects.filter(asset=asset, transaction_type="depreciation").count(),
             1,
         )
 
     def test_accounting_failure_marks_line_and_job_without_balance_change(self) -> None:
         asset = self.capitalize(self.create_asset())
-        schedule = DepreciationService.create_schedule_draft(
-            self.tenant, asset.id, self.actor, {}, "schedule-fail"
-        )
-        schedule = DepreciationService.calculate_schedule(
-            self.tenant, schedule.id, self.actor, {}, "calculate-fail"
-        )
-        schedule = DepreciationService.activate_schedule(
-            self.tenant, schedule.id, self.actor, "activate-fail"
-        )
+        schedule = DepreciationService.create_schedule_draft(self.tenant, asset.id, self.actor, {}, "schedule-fail")
+        schedule = DepreciationService.calculate_schedule(self.tenant, schedule.id, self.actor, {}, "calculate-fail")
+        schedule = DepreciationService.activate_schedule(self.tenant, schedule.id, self.actor, "activate-fail")
         line: DepreciationLine = schedule.lines.order_by("sequence").first()
-        job = DepreciationService.enqueue_line_posting(
-            self.tenant, line.id, self.actor, "post-fail", "corr-fail"
-        )
+        job = DepreciationService.enqueue_line_posting(self.tenant, line.id, self.actor, "post-fail", "corr-fail")
         extension_registry.set_accounting_port(FakeAccounting(failure=True))
         with self.assertRaises(JobExecutionError):
             execute(job.id, self.tenant)

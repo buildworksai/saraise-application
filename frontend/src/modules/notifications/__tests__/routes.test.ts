@@ -12,16 +12,27 @@ describe("notification route registry", () => {
   it("publishes six sidebar destinations and real contextual parents", () => {
     const sidebar = tenantRoutes.filter((route) => route.navigation.type === "sidebar");
     expect(sidebar.map((route) => route.id)).toEqual([
-      "notifications.inbox", "notifications.templates", "notifications.deliveries",
-      "notifications.endpoints", "notifications.configuration", "notifications.health",
+      "notifications.inbox",
+      "notifications.templates",
+      "notifications.deliveries",
+      "notifications.endpoints",
+      "notifications.configuration",
+      "notifications.health",
     ]);
     const ids = new Set(sidebar.map((route) => route.id));
-    tenantRoutes.filter((route) => route.navigation.type === "contextual").forEach((route) => {
-      if (route.navigation.type === "contextual") expect(ids.has(route.navigation.parentRouteId)).toBe(true);
-    });
+    tenantRoutes
+      .filter((route) => route.navigation.type === "contextual")
+      .forEach((route) => {
+        if (route.navigation.type === "contextual")
+          expect(ids.has(route.navigation.parentRouteId)).toBe(true);
+      });
   });
 
   it("declares an explicit policy capability for every sidebar destination", () => {
-    expect(tenantRoutes.filter((route) => route.navigation.type === "sidebar").every((route) => route.requiredPermission?.startsWith("notifications."))).toBe(true);
+    expect(
+      tenantRoutes
+        .filter((route) => route.navigation.type === "sidebar")
+        .every((route) => route.requiredPermission?.startsWith("notifications."))
+    ).toBe(true);
   });
 });

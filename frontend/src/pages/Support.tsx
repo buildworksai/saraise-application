@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars, max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /**
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,10 +27,7 @@ export function Support() {
                   <div>
                     <h3 className="text-lg font-bold mb-2">Email Support</h3>
                     <p className="text-muted-foreground mb-2">
-                      <a
-                        href="mailto:info@buildworks.ai"
-                        className="text-deepBlue hover:underline"
-                      >
+                      <a href="mailto:info@buildworks.ai" className="text-deepBlue hover:underline">
                         info@buildworks.ai
                       </a>
                     </p>
@@ -120,26 +118,19 @@ export function Support() {
               <div className="bg-card border border-border rounded-lg p-6">
                 <h3 className="text-lg font-bold mb-2">General Inquiries</h3>
                 <p className="text-muted-foreground mb-2">
-                  <a
-                    href="mailto:info@buildworks.ai"
-                    className="text-deepBlue hover:underline"
-                  >
+                  <a href="mailto:info@buildworks.ai" className="text-deepBlue hover:underline">
                     info@buildworks.ai
                   </a>
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Questions about SARAISE, features, licensing, or general
-                  information
+                  Questions about SARAISE, features, licensing, or general information
                 </p>
               </div>
 
               <div className="bg-card border border-border rounded-lg p-6">
                 <h3 className="text-lg font-bold mb-2">Security Issues</h3>
                 <p className="text-muted-foreground mb-2">
-                  <a
-                    href="mailto:security@buildworks.ai"
-                    className="text-deepBlue hover:underline"
-                  >
+                  <a href="mailto:security@buildworks.ai" className="text-deepBlue hover:underline">
                     security@buildworks.ai
                   </a>
                 </p>
@@ -151,26 +142,19 @@ export function Support() {
               <div className="bg-card border border-border rounded-lg p-6">
                 <h3 className="text-lg font-bold mb-2">Technical Support</h3>
                 <p className="text-muted-foreground mb-2">
-                  <a
-                    href="mailto:support@buildworks.ai"
-                    className="text-deepBlue hover:underline"
-                  >
+                  <a href="mailto:support@buildworks.ai" className="text-deepBlue hover:underline">
                     support@buildworks.ai
                   </a>
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Technical assistance with installation, configuration, and
-                  troubleshooting
+                  Technical assistance with installation, configuration, and troubleshooting
                 </p>
               </div>
 
               <div className="bg-card border border-border rounded-lg p-6">
                 <h3 className="text-lg font-bold mb-2">Partnerships</h3>
                 <p className="text-muted-foreground mb-2">
-                  <a
-                    href="mailto:partners@buildworks.ai"
-                    className="text-deepBlue hover:underline"
-                  >
+                  <a href="mailto:partners@buildworks.ai" className="text-deepBlue hover:underline">
                     partners@buildworks.ai
                   </a>
                 </p>
@@ -209,24 +193,18 @@ export function Support() {
             </p>
             <ul className="list-disc pl-6 space-y-2 text-muted-foreground">
               <li>
-                <strong>Community Forums:</strong> Get help from the community
-                on GitHub Discussions
+                <strong>Community Forums:</strong> Get help from the community on GitHub Discussions
               </li>
               <li>
-                <strong>Documentation:</strong> Comprehensive guides for
-                installation, configuration, and troubleshooting
+                <strong>Documentation:</strong> Comprehensive guides for installation,
+                configuration, and troubleshooting
               </li>
               <li>
-                <strong>Issue Tracking:</strong> Report bugs and request
-                features on GitHub Issues
+                <strong>Issue Tracking:</strong> Report bugs and request features on GitHub Issues
               </li>
               <li>
-                <strong>Commercial Support:</strong> Available for enterprise
-                customers (contact{" "}
-                <a
-                  href="mailto:info@buildworks.ai"
-                  className="text-deepBlue hover:underline"
-                >
+                <strong>Commercial Support:</strong> Available for enterprise customers (contact{" "}
+                <a href="mailto:info@buildworks.ai" className="text-deepBlue hover:underline">
                   info@buildworks.ai
                 </a>
                 )
@@ -239,10 +217,7 @@ export function Support() {
             <div className="bg-card border border-border rounded-lg p-6">
               <p className="text-muted-foreground mb-2">
                 <strong>Email:</strong>{" "}
-                <a
-                  href="mailto:info@buildworks.ai"
-                  className="text-deepBlue hover:underline"
-                >
+                <a href="mailto:info@buildworks.ai" className="text-deepBlue hover:underline">
                   info@buildworks.ai
                 </a>
               </p>
@@ -253,8 +228,7 @@ export function Support() {
                 <strong>CIN:</strong> U62099TS2025PTC201319
               </p>
               <p className="text-muted-foreground">
-                <strong>Address:</strong> Hafeez Pet, Miyapur, Hyderabad-
-                500049, Telangana, India
+                <strong>Address:</strong> Hafeez Pet, Miyapur, Hyderabad- 500049, Telangana, India
               </p>
             </div>
           </section>

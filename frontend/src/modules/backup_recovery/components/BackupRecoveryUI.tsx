@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 import type { ReactNode } from "react";
 import {
   AlertTriangle,

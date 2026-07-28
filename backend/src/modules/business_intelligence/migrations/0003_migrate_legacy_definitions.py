@@ -48,7 +48,9 @@ def forwards(apps, schema_editor):
         base_code = f"{report.report_code}_QUERY"[:64].upper()
         query_code = base_code
         suffix = 1
-        while QueryDefinition.objects.filter(tenant_id=report.tenant_id, query_code=query_code, deleted_at__isnull=True).exists():
+        while QueryDefinition.objects.filter(
+            tenant_id=report.tenant_id, query_code=query_code, deleted_at__isnull=True
+        ).exists():
             marker = f"_{suffix}"
             query_code = f"{base_code[:64-len(marker)]}{marker}"
             suffix += 1
@@ -89,7 +91,9 @@ def forwards(apps, schema_editor):
             if item.get("report_code"):
                 report = Report.objects.filter(tenant_id=dashboard.tenant_id, report_code=item["report_code"]).first()
             elif item.get("query_code"):
-                query = QueryDefinition.objects.filter(tenant_id=dashboard.tenant_id, query_code=item["query_code"]).first()
+                query = QueryDefinition.objects.filter(
+                    tenant_id=dashboard.tenant_id, query_code=item["query_code"]
+                ).first()
             if bool(report) == bool(query):
                 continue
             widget_type = item.get("widget_type", "table")

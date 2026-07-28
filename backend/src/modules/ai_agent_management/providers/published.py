@@ -14,22 +14,11 @@ from uuid import UUID
 
 from src.core.encryption import EncryptionService
 from src.modules.ai_provider_configuration.models import AIModelDeployment, DeploymentStatus
-from src.modules.ai_provider_configuration.services import (
-    AIProviderFactory as ConfigurationProviderFactory,
-)
-from src.modules.ai_provider_configuration.services import (
-    ProviderUnavailable as ConfigurationProviderUnavailable,
-)
+from src.modules.ai_provider_configuration.services import AIProviderFactory as ConfigurationProviderFactory
+from src.modules.ai_provider_configuration.services import ProviderUnavailable as ConfigurationProviderUnavailable
 
 from ..services import ConfigurationService
-from .base import (
-    EmbeddingResponse,
-    LLMProvider,
-    LLMResponse,
-    ProviderConfig,
-    ProviderStatus,
-    TokenUsage,
-)
+from .base import EmbeddingResponse, LLMProvider, LLMResponse, ProviderConfig, ProviderStatus, TokenUsage
 
 ADAPTER_KEY = "tenant_provider_configuration"
 

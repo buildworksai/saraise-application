@@ -5,20 +5,12 @@
  *
  * Loading placeholder component with shimmer animation.
  */
-import { cn } from '@/lib/utils';
+import { cn } from "@/lib/utils";
 
 type SkeletonProps = React.HTMLAttributes<HTMLDivElement>;
 
 export const Skeleton = ({ className, ...props }: SkeletonProps) => {
-  return (
-    <div
-      className={cn(
-        'animate-pulse rounded-md bg-muted',
-        className
-      )}
-      {...props}
-    />
-  );
+  return <div className={cn("animate-pulse rounded-md bg-muted", className)} {...props} />;
 };
 
 /**
@@ -107,9 +99,12 @@ interface SkeletonListProps {
 
 export const SkeletonList = ({ items = 5, className }: SkeletonListProps) => {
   return (
-    <div className={cn('space-y-4', className)}>
+    <div className={cn("space-y-4", className)}>
       {Array.from({ length: items }).map((_, i) => (
-        <div key={i} className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0">
+        <div
+          key={i}
+          className="flex items-center justify-between border-b pb-2 last:border-0 last:pb-0"
+        >
           <div className="flex flex-col gap-1 flex-1">
             <Skeleton className="h-4 w-32" />
             <Skeleton className="h-3 w-24" />

@@ -5,9 +5,10 @@ import uuid
 
 import django.core.validators
 import django.db.models.deletion
-import src.modules.ai_provider_configuration.models
 from django.db import migrations, models
 from django.db.models.functions import Lower
+
+import src.modules.ai_provider_configuration.models
 
 
 class Migration(migrations.Migration):
@@ -150,7 +151,9 @@ class Migration(migrations.Migration):
                 "ordering": ("-created_at",),
                 "indexes": [
                     models.Index(fields=["tenant_id", "provider", "status"], name="aiprov_cred_tenant_prov_idx"),
-                    models.Index(fields=["tenant_id", "is_deleted", "created_at"], name="aiprov_cred_tenant_created_idx"),
+                    models.Index(
+                        fields=["tenant_id", "is_deleted", "created_at"], name="aiprov_cred_tenant_created_idx"
+                    ),
                 ],
                 "constraints": [
                     models.UniqueConstraint(
@@ -252,14 +255,14 @@ class Migration(migrations.Migration):
                 "db_table": "ai_provider_configuration_usage_logs",
                 "ordering": ("-created_at",),
                 "indexes": [
-                    models.Index(fields=["tenant_id", "deployment", "created_at"], name="aiprov_usage_tenant_deploy_idx"),
+                    models.Index(
+                        fields=["tenant_id", "deployment", "created_at"], name="aiprov_usage_tenant_deploy_idx"
+                    ),
                     models.Index(fields=["tenant_id", "created_at"], name="aiprov_usage_tenant_crt_idx"),
                 ],
                 "constraints": [
                     models.CheckConstraint(
-                        condition=models.Q(
-                            ("total_tokens", models.F("prompt_tokens") + models.F("completion_tokens"))
-                        ),
+                        condition=models.Q(("total_tokens", models.F("prompt_tokens") + models.F("completion_tokens"))),
                         name="aiprov_usage_total_tokens_match",
                     )
                 ],

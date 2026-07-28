@@ -30,7 +30,9 @@ HEALTH_READ: Final = "asset.health:read"
 HEALTH_ACTION_PERMISSIONS: Final[dict[str, str]] = {"health": HEALTH_READ}
 
 PERMISSIONS: Final = tuple(
-    value for name, value in globals().items() if name.isupper() and isinstance(value, str) and value.startswith("asset.")
+    value
+    for name, value in globals().items()
+    if name.isupper() and isinstance(value, str) and value.startswith("asset.")
 )
 SOD_ACTIONS: Final[tuple[str, ...]] = ()
 

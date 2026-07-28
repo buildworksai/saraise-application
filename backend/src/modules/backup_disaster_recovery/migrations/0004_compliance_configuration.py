@@ -3,9 +3,9 @@
 import uuid
 
 import django.db.models.deletion
-import src.modules.backup_disaster_recovery.models
 from django.db import migrations, models
 
+import src.modules.backup_disaster_recovery.models
 
 LEGACY_TABLE = "backup_disaster_recovery_resources"
 LEGACY_ARCHIVE_TABLE = "bdr_legacy_resources_archive"
@@ -24,9 +24,7 @@ def validate_legacy_ids(apps, schema_editor):
     if LEGACY_TABLE not in tables:
         return
     with schema_editor.connection.cursor() as cursor:
-        cursor.execute(
-            f'SELECT tenant_id, id, created_by FROM "{LEGACY_TABLE}"'  # noqa: S608 - static identifier
-        )
+        cursor.execute(f'SELECT tenant_id, id, created_by FROM "{LEGACY_TABLE}"')  # noqa: S608 - static identifier
         for tenant_id, resource_id, created_by in cursor.fetchall():
             for field, value in (
                 ("tenant_id", tenant_id),
@@ -36,9 +34,7 @@ def validate_legacy_ids(apps, schema_editor):
                 try:
                     uuid.UUID(str(value))
                 except (TypeError, ValueError, AttributeError) as exc:
-                    raise RuntimeError(
-                        f"Cannot migrate legacy disaster-recovery {field}: invalid UUID"
-                    ) from exc
+                    raise RuntimeError(f"Cannot migrate legacy disaster-recovery {field}: invalid UUID") from exc
 
 
 def archive_legacy_table(apps, schema_editor):
@@ -49,9 +45,7 @@ def archive_legacy_table(apps, schema_editor):
     if LEGACY_TABLE not in tables or LEGACY_ARCHIVE_TABLE in tables:
         return
     qn = schema_editor.quote_name
-    schema_editor.execute(
-        f"ALTER TABLE {qn(LEGACY_TABLE)} RENAME TO {qn(LEGACY_ARCHIVE_TABLE)}"
-    )
+    schema_editor.execute(f"ALTER TABLE {qn(LEGACY_TABLE)} RENAME TO {qn(LEGACY_ARCHIVE_TABLE)}")
     if schema_editor.connection.vendor == "postgresql":
         with schema_editor.connection.cursor() as cursor:
             cursor.execute(
@@ -82,9 +76,7 @@ def restore_legacy_table(apps, schema_editor):
                 f"ALTER TABLE {qn(LEGACY_ARCHIVE_TABLE)} "
                 f"ALTER COLUMN {qn(column)} TYPE varchar(36) USING {qn(column)}::text"
             )
-    schema_editor.execute(
-        f"ALTER TABLE {qn(LEGACY_ARCHIVE_TABLE)} RENAME TO {qn(LEGACY_TABLE)}"
-    )
+    schema_editor.execute(f"ALTER TABLE {qn(LEGACY_ARCHIVE_TABLE)} RENAME TO {qn(LEGACY_TABLE)}")
 
 
 def enable_new_rls(apps, schema_editor):
@@ -134,22 +126,16 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="drrunbook",
             name="idempotency_key",
-            field=models.CharField(
-                default=src.modules.backup_disaster_recovery.models.generate_uuid, max_length=255
-            ),
+            field=models.CharField(default=src.modules.backup_disaster_recovery.models.generate_uuid, max_length=255),
         ),
         migrations.AddField(
             model_name="runbookstep",
             name="idempotency_key",
-            field=models.CharField(
-                default=src.modules.backup_disaster_recovery.models.generate_uuid, max_length=255
-            ),
+            field=models.CharField(default=src.modules.backup_disaster_recovery.models.generate_uuid, max_length=255),
         ),
         migrations.AddConstraint(
             model_name="drrunbook",
-            constraint=models.UniqueConstraint(
-                fields=("tenant_id", "idempotency_key"), name="bdr_rb_tenant_idem_uniq"
-            ),
+            constraint=models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="bdr_rb_tenant_idem_uniq"),
         ),
         migrations.AddConstraint(
             model_name="runbookstep",
@@ -219,9 +205,7 @@ class Migration(migrations.Migration):
             options={
                 "db_table": "bdr_configuration_versions",
                 "indexes": [
-                    models.Index(
-                        fields=["tenant_id", "configuration", "-version"], name="bdr_cfgver_tenant_ver_idx"
-                    )
+                    models.Index(fields=["tenant_id", "configuration", "-version"], name="bdr_cfgver_tenant_ver_idx")
                 ],
                 "constraints": [
                     models.UniqueConstraint(
@@ -253,9 +237,7 @@ class Migration(migrations.Migration):
             options={
                 "db_table": "bdr_recovery_point_evidence",
                 "indexes": [
-                    models.Index(
-                        fields=["tenant_id", "recovery_point", "-sequence"], name="bdr_rpe_tenant_seq_idx"
-                    )
+                    models.Index(fields=["tenant_id", "recovery_point", "-sequence"], name="bdr_rpe_tenant_seq_idx")
                 ],
                 "constraints": [
                     models.UniqueConstraint(

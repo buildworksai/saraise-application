@@ -99,11 +99,7 @@ def test_every_viewset_is_governed_paginated_and_deny_by_default(viewset):
 )
 def test_required_custom_actions_are_routed(viewset_name, actions):
     viewset = getattr(api, viewset_name)
-    routed = {
-        name
-        for name in dir(viewset)
-        if getattr(getattr(viewset, name, None), "mapping", None) is not None
-    }
+    routed = {name for name in dir(viewset) if getattr(getattr(viewset, name, None), "mapping", None) is not None}
     assert actions <= routed
 
 

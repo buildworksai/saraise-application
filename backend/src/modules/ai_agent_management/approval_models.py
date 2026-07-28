@@ -10,7 +10,7 @@ from django.db.models import F, Q
 
 from src.core.tenancy.registry import TENANT_SCOPED, tenancy_scope
 
-from .models import AITenantModel, AgentExecution, AppendOnlyTenantModel, StatefulTenantModel, validate_same_tenant
+from .models import AgentExecution, AITenantModel, AppendOnlyTenantModel, StatefulTenantModel, validate_same_tenant
 
 
 def generate_uuid() -> str:

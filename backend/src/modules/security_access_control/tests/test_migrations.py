@@ -206,9 +206,7 @@ def test_tenant_backfill_aborts_for_null_audit_and_cross_tenant_relationship() -
 
 
 def test_migration_contract_is_reversible_concurrent_and_covers_every_tenant_table() -> None:
-    m2 = importlib.import_module(
-        "src.modules.security_access_control.migrations.0002_add_tenant_and_audit_fields"
-    )
+    m2 = importlib.import_module("src.modules.security_access_control.migrations.0002_add_tenant_and_audit_fields")
     m3 = importlib.import_module("src.modules.security_access_control.migrations.0003_normalize_permission_sets")
     m4 = importlib.import_module("src.modules.security_access_control.migrations.0004_safe_row_rule_predicates")
     m5 = importlib.import_module("src.modules.security_access_control.migrations.0005_constraints_indexes_rls")
@@ -217,5 +215,13 @@ def test_migration_contract_is_reversible_concurrent_and_covers_every_tenant_tab
     assert len(m5.TENANT_TABLES) == 11 and "security_permissions" not in m5.TENANT_TABLES
     assert "CONCURRENTLY" in inspect.getsource(m5.create_concurrent_indexes)
     assert len(m5.COMPOSITE_FOREIGN_KEYS) == 9
-    assert all(operation.reverse_code is not None for operation in [m2.Migration.operations[-5], m3.Migration.operations[-1], m4.Migration.operations[-2], m6.Migration.operations[-1]])
+    assert all(
+        operation.reverse_code is not None
+        for operation in [
+            m2.Migration.operations[-5],
+            m3.Migration.operations[-1],
+            m4.Migration.operations[-2],
+            m6.Migration.operations[-1],
+        ]
+    )
     assert json.dumps(sorted(m5.TENANT_TABLES))

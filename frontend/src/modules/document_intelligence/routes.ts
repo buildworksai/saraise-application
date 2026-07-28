@@ -1,4 +1,4 @@
-import { lazy } from 'react';
+import { lazy } from "react";
 import {
   Activity,
   BrainCircuit,
@@ -8,27 +8,255 @@ import {
   Pencil,
   Settings2,
   Tags,
-} from 'lucide-react';
-import type { TenantRoute } from '@/navigation/tenant-route-types';
-import { DOCUMENT_INTELLIGENCE_PATHS as PATHS } from './paths';
+} from "lucide-react";
+import type { TenantRoute } from "@/navigation/tenant-route-types";
+import { DOCUMENT_INTELLIGENCE_PATHS as PATHS } from "./paths";
 
 const navigationOrder = 0;
 
 export const tenantRoutes = [
-  { id: 'document-intelligence.extractions.list', module: 'document_intelligence', path: PATHS.EXTRACTIONS.LIST, title: 'Extraction evidence', sourceFile: 'modules/document_intelligence/pages/ExtractionDashboardPage.tsx', Page: lazy(() => import('./pages/ExtractionDashboardPage').then(({ ExtractionDashboardPage }) => ({ default: ExtractionDashboardPage }))), navigation: { type: 'sidebar', label: 'Extractions', icon: FileSearch, order: navigationOrder } },
-  { id: 'document-intelligence.extractions.create', module: 'document_intelligence', path: PATHS.EXTRACTIONS.CREATE, title: 'Process a document', sourceFile: 'modules/document_intelligence/pages/CreateExtractionPage.tsx', Page: lazy(() => import('./pages/CreateExtractionPage').then(({ CreateExtractionPage }) => ({ default: CreateExtractionPage }))), navigation: { type: 'sidebar', label: 'New extraction', icon: FilePlus2, order: navigationOrder } },
-  { id: 'document-intelligence.extractions.detail', module: 'document_intelligence', path: '/document-intelligence/extractions/:id', title: 'Extraction evidence detail', sourceFile: 'modules/document_intelligence/pages/ExtractionDetailPage.tsx', Page: lazy(() => import('./pages/ExtractionDetailPage').then(({ ExtractionDetailPage }) => ({ default: ExtractionDetailPage }))), navigation: { type: 'sidebar', path: PATHS.EXTRACTIONS.LIST, label: 'Extraction details', icon: FileSearch, order: navigationOrder } },
-  { id: 'document-intelligence.classifications.list', module: 'document_intelligence', path: PATHS.CLASSIFICATIONS.LIST, title: 'Classification and review', sourceFile: 'modules/document_intelligence/pages/ClassificationOverviewPage.tsx', Page: lazy(() => import('./pages/ClassificationOverviewPage').then(({ ClassificationOverviewPage }) => ({ default: ClassificationOverviewPage }))), navigation: { type: 'sidebar', label: 'Classifications', icon: Tags, order: navigationOrder } },
-  { id: 'document-intelligence.classifications.detail', module: 'document_intelligence', path: '/document-intelligence/classifications/:id', title: 'Classification evidence detail', sourceFile: 'modules/document_intelligence/pages/ClassificationDetailPage.tsx', Page: lazy(() => import('./pages/ClassificationDetailPage').then(({ ClassificationDetailPage }) => ({ default: ClassificationDetailPage }))), navigation: { type: 'sidebar', path: PATHS.CLASSIFICATIONS.LIST, label: 'Classification details', icon: Tags, order: navigationOrder } },
-  { id: 'document-intelligence.templates.list', module: 'document_intelligence', path: PATHS.TEMPLATES.LIST, title: 'Extraction templates', sourceFile: 'modules/document_intelligence/pages/TemplateListPage.tsx', Page: lazy(() => import('./pages/TemplateListPage').then(({ TemplateListPage }) => ({ default: TemplateListPage }))), navigation: { type: 'sidebar', label: 'Templates', icon: LayoutTemplate, order: navigationOrder } },
-  { id: 'document-intelligence.templates.create', module: 'document_intelligence', path: PATHS.TEMPLATES.CREATE, title: 'Create extraction template', sourceFile: 'modules/document_intelligence/pages/CreateTemplatePage.tsx', Page: lazy(() => import('./pages/CreateTemplatePage').then(({ CreateTemplatePage }) => ({ default: CreateTemplatePage }))), navigation: { type: 'sidebar', label: 'New template', icon: FilePlus2, order: navigationOrder } },
-  { id: 'document-intelligence.templates.detail', module: 'document_intelligence', path: '/document-intelligence/templates/:id', title: 'Extraction template detail', sourceFile: 'modules/document_intelligence/pages/TemplateDetailPage.tsx', Page: lazy(() => import('./pages/TemplateDetailPage').then(({ TemplateDetailPage }) => ({ default: TemplateDetailPage }))), navigation: { type: 'sidebar', path: PATHS.TEMPLATES.LIST, label: 'Template details', icon: LayoutTemplate, order: navigationOrder } },
-  { id: 'document-intelligence.templates.edit', module: 'document_intelligence', path: '/document-intelligence/templates/:id/edit', title: 'Edit extraction template', sourceFile: 'modules/document_intelligence/pages/EditTemplatePage.tsx', Page: lazy(() => import('./pages/EditTemplatePage').then(({ EditTemplatePage }) => ({ default: EditTemplatePage }))), navigation: { type: 'sidebar', path: PATHS.TEMPLATES.LIST, label: 'Edit template', icon: Pencil, order: navigationOrder } },
-  { id: 'document-intelligence.training.list', module: 'document_intelligence', path: PATHS.TRAINING.LIST, title: 'Training and model versions', sourceFile: 'modules/document_intelligence/pages/TrainingModelPage.tsx', Page: lazy(() => import('./pages/TrainingModelPage').then(({ TrainingModelPage }) => ({ default: TrainingModelPage }))), navigation: { type: 'sidebar', label: 'Training & models', icon: BrainCircuit, order: navigationOrder } },
-  { id: 'document-intelligence.training.create', module: 'document_intelligence', path: PATHS.TRAINING.CREATE, title: 'Train tenant classifier', sourceFile: 'modules/document_intelligence/pages/CreateTrainingJobPage.tsx', Page: lazy(() => import('./pages/CreateTrainingJobPage').then(({ CreateTrainingJobPage }) => ({ default: CreateTrainingJobPage }))), navigation: { type: 'sidebar', label: 'New training job', icon: FilePlus2, order: navigationOrder } },
-  { id: 'document-intelligence.training.detail', module: 'document_intelligence', path: '/document-intelligence/training/:id', title: 'Training job detail', sourceFile: 'modules/document_intelligence/pages/TrainingJobDetailPage.tsx', Page: lazy(() => import('./pages/TrainingJobDetailPage').then(({ TrainingJobDetailPage }) => ({ default: TrainingJobDetailPage }))), navigation: { type: 'sidebar', path: PATHS.TRAINING.LIST, label: 'Training job details', icon: BrainCircuit, order: navigationOrder } },
-  { id: 'document-intelligence.configuration', module: 'document_intelligence', path: PATHS.CONFIGURATION, title: 'Document intelligence configuration', sourceFile: 'modules/document_intelligence/pages/ConfigurationPage.tsx', Page: lazy(() => import('./pages/ConfigurationPage').then(({ ConfigurationPage }) => ({ default: ConfigurationPage }))), navigation: { type: 'sidebar', label: 'Configuration', icon: Settings2, order: navigationOrder } },
-  { id: 'document-intelligence.health', module: 'document_intelligence', path: PATHS.HEALTH, title: 'Document intelligence health', sourceFile: 'modules/document_intelligence/pages/HealthStatusPage.tsx', Page: lazy(() => import('./pages/HealthStatusPage').then(({ HealthStatusPage }) => ({ default: HealthStatusPage }))), navigation: { type: 'sidebar', label: 'Health & dependencies', icon: Activity, order: navigationOrder } },
+  {
+    id: "document-intelligence.extractions.list",
+    module: "document_intelligence",
+    path: PATHS.EXTRACTIONS.LIST,
+    title: "Extraction evidence",
+    sourceFile: "modules/document_intelligence/pages/ExtractionDashboardPage.tsx",
+    Page: lazy(() =>
+      import("./pages/ExtractionDashboardPage").then(({ ExtractionDashboardPage }) => ({
+        default: ExtractionDashboardPage,
+      }))
+    ),
+    navigation: { type: "sidebar", label: "Extractions", icon: FileSearch, order: navigationOrder },
+  },
+  {
+    id: "document-intelligence.extractions.create",
+    module: "document_intelligence",
+    path: PATHS.EXTRACTIONS.CREATE,
+    title: "Process a document",
+    sourceFile: "modules/document_intelligence/pages/CreateExtractionPage.tsx",
+    Page: lazy(() =>
+      import("./pages/CreateExtractionPage").then(({ CreateExtractionPage }) => ({
+        default: CreateExtractionPage,
+      }))
+    ),
+    navigation: {
+      type: "sidebar",
+      label: "New extraction",
+      icon: FilePlus2,
+      order: navigationOrder,
+    },
+  },
+  {
+    id: "document-intelligence.extractions.detail",
+    module: "document_intelligence",
+    path: "/document-intelligence/extractions/:id",
+    title: "Extraction evidence detail",
+    sourceFile: "modules/document_intelligence/pages/ExtractionDetailPage.tsx",
+    Page: lazy(() =>
+      import("./pages/ExtractionDetailPage").then(({ ExtractionDetailPage }) => ({
+        default: ExtractionDetailPage,
+      }))
+    ),
+    navigation: {
+      type: "sidebar",
+      path: PATHS.EXTRACTIONS.LIST,
+      label: "Extraction details",
+      icon: FileSearch,
+      order: navigationOrder,
+    },
+  },
+  {
+    id: "document-intelligence.classifications.list",
+    module: "document_intelligence",
+    path: PATHS.CLASSIFICATIONS.LIST,
+    title: "Classification and review",
+    sourceFile: "modules/document_intelligence/pages/ClassificationOverviewPage.tsx",
+    Page: lazy(() =>
+      import("./pages/ClassificationOverviewPage").then(({ ClassificationOverviewPage }) => ({
+        default: ClassificationOverviewPage,
+      }))
+    ),
+    navigation: { type: "sidebar", label: "Classifications", icon: Tags, order: navigationOrder },
+  },
+  {
+    id: "document-intelligence.classifications.detail",
+    module: "document_intelligence",
+    path: "/document-intelligence/classifications/:id",
+    title: "Classification evidence detail",
+    sourceFile: "modules/document_intelligence/pages/ClassificationDetailPage.tsx",
+    Page: lazy(() =>
+      import("./pages/ClassificationDetailPage").then(({ ClassificationDetailPage }) => ({
+        default: ClassificationDetailPage,
+      }))
+    ),
+    navigation: {
+      type: "sidebar",
+      path: PATHS.CLASSIFICATIONS.LIST,
+      label: "Classification details",
+      icon: Tags,
+      order: navigationOrder,
+    },
+  },
+  {
+    id: "document-intelligence.templates.list",
+    module: "document_intelligence",
+    path: PATHS.TEMPLATES.LIST,
+    title: "Extraction templates",
+    sourceFile: "modules/document_intelligence/pages/TemplateListPage.tsx",
+    Page: lazy(() =>
+      import("./pages/TemplateListPage").then(({ TemplateListPage }) => ({
+        default: TemplateListPage,
+      }))
+    ),
+    navigation: {
+      type: "sidebar",
+      label: "Templates",
+      icon: LayoutTemplate,
+      order: navigationOrder,
+    },
+  },
+  {
+    id: "document-intelligence.templates.create",
+    module: "document_intelligence",
+    path: PATHS.TEMPLATES.CREATE,
+    title: "Create extraction template",
+    sourceFile: "modules/document_intelligence/pages/CreateTemplatePage.tsx",
+    Page: lazy(() =>
+      import("./pages/CreateTemplatePage").then(({ CreateTemplatePage }) => ({
+        default: CreateTemplatePage,
+      }))
+    ),
+    navigation: { type: "sidebar", label: "New template", icon: FilePlus2, order: navigationOrder },
+  },
+  {
+    id: "document-intelligence.templates.detail",
+    module: "document_intelligence",
+    path: "/document-intelligence/templates/:id",
+    title: "Extraction template detail",
+    sourceFile: "modules/document_intelligence/pages/TemplateDetailPage.tsx",
+    Page: lazy(() =>
+      import("./pages/TemplateDetailPage").then(({ TemplateDetailPage }) => ({
+        default: TemplateDetailPage,
+      }))
+    ),
+    navigation: {
+      type: "sidebar",
+      path: PATHS.TEMPLATES.LIST,
+      label: "Template details",
+      icon: LayoutTemplate,
+      order: navigationOrder,
+    },
+  },
+  {
+    id: "document-intelligence.templates.edit",
+    module: "document_intelligence",
+    path: "/document-intelligence/templates/:id/edit",
+    title: "Edit extraction template",
+    sourceFile: "modules/document_intelligence/pages/EditTemplatePage.tsx",
+    Page: lazy(() =>
+      import("./pages/EditTemplatePage").then(({ EditTemplatePage }) => ({
+        default: EditTemplatePage,
+      }))
+    ),
+    navigation: {
+      type: "sidebar",
+      path: PATHS.TEMPLATES.LIST,
+      label: "Edit template",
+      icon: Pencil,
+      order: navigationOrder,
+    },
+  },
+  {
+    id: "document-intelligence.training.list",
+    module: "document_intelligence",
+    path: PATHS.TRAINING.LIST,
+    title: "Training and model versions",
+    sourceFile: "modules/document_intelligence/pages/TrainingModelPage.tsx",
+    Page: lazy(() =>
+      import("./pages/TrainingModelPage").then(({ TrainingModelPage }) => ({
+        default: TrainingModelPage,
+      }))
+    ),
+    navigation: {
+      type: "sidebar",
+      label: "Training & models",
+      icon: BrainCircuit,
+      order: navigationOrder,
+    },
+  },
+  {
+    id: "document-intelligence.training.create",
+    module: "document_intelligence",
+    path: PATHS.TRAINING.CREATE,
+    title: "Train tenant classifier",
+    sourceFile: "modules/document_intelligence/pages/CreateTrainingJobPage.tsx",
+    Page: lazy(() =>
+      import("./pages/CreateTrainingJobPage").then(({ CreateTrainingJobPage }) => ({
+        default: CreateTrainingJobPage,
+      }))
+    ),
+    navigation: {
+      type: "sidebar",
+      label: "New training job",
+      icon: FilePlus2,
+      order: navigationOrder,
+    },
+  },
+  {
+    id: "document-intelligence.training.detail",
+    module: "document_intelligence",
+    path: "/document-intelligence/training/:id",
+    title: "Training job detail",
+    sourceFile: "modules/document_intelligence/pages/TrainingJobDetailPage.tsx",
+    Page: lazy(() =>
+      import("./pages/TrainingJobDetailPage").then(({ TrainingJobDetailPage }) => ({
+        default: TrainingJobDetailPage,
+      }))
+    ),
+    navigation: {
+      type: "sidebar",
+      path: PATHS.TRAINING.LIST,
+      label: "Training job details",
+      icon: BrainCircuit,
+      order: navigationOrder,
+    },
+  },
+  {
+    id: "document-intelligence.configuration",
+    module: "document_intelligence",
+    path: PATHS.CONFIGURATION,
+    title: "Document intelligence configuration",
+    sourceFile: "modules/document_intelligence/pages/ConfigurationPage.tsx",
+    Page: lazy(() =>
+      import("./pages/ConfigurationPage").then(({ ConfigurationPage }) => ({
+        default: ConfigurationPage,
+      }))
+    ),
+    navigation: {
+      type: "sidebar",
+      label: "Configuration",
+      icon: Settings2,
+      order: navigationOrder,
+    },
+  },
+  {
+    id: "document-intelligence.health",
+    module: "document_intelligence",
+    path: PATHS.HEALTH,
+    title: "Document intelligence health",
+    sourceFile: "modules/document_intelligence/pages/HealthStatusPage.tsx",
+    Page: lazy(() =>
+      import("./pages/HealthStatusPage").then(({ HealthStatusPage }) => ({
+        default: HealthStatusPage,
+      }))
+    ),
+    navigation: {
+      type: "sidebar",
+      label: "Health & dependencies",
+      icon: Activity,
+      order: navigationOrder,
+    },
+  },
 ] satisfies readonly TenantRoute[];
 
 export default tenantRoutes;

@@ -1,1 +1,1 @@
-export { CreateDepartmentPage } from './form-pages';
+export { CreateDepartmentPage } from "./form-pages";

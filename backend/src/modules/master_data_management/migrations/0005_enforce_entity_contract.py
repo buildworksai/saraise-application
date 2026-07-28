@@ -46,40 +46,71 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="masterdataentity",
             name="entity_type",
-            field=models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="entities", to="master_data_management.masterentitytype"),
+            field=models.ForeignKey(
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="entities",
+                to="master_data_management.masterentitytype",
+            ),
         ),
         migrations.RemoveField(model_name="masterdataentity", name="legacy_entity_type"),
         migrations.RemoveField(model_name="masterdataentity", name="is_active"),
-        migrations.AlterField(model_name="masterdataentity", name="created_at", field=models.DateTimeField(auto_now_add=True)),
-        migrations.AlterField(model_name="masterdataentity", name="entity_code", field=models.CharField(max_length=100)),
+        migrations.AlterField(
+            model_name="masterdataentity", name="created_at", field=models.DateTimeField(auto_now_add=True)
+        ),
+        migrations.AlterField(
+            model_name="masterdataentity", name="entity_code", field=models.CharField(max_length=100)
+        ),
         migrations.AlterField(model_name="masterdataentity", name="data", field=models.JSONField(default=dict)),
         migrations.AlterModelOptions(name="masterdataentity", options={"ordering": ("entity_code",)}),
         migrations.AddConstraint(
             model_name="masterdataentity",
-            constraint=models.UniqueConstraint(condition=models.Q(("is_deleted", False)), fields=("tenant_id", "entity_type", "entity_code"), name="mdm_entity_live_business_key_uniq"),
+            constraint=models.UniqueConstraint(
+                condition=models.Q(("is_deleted", False)),
+                fields=("tenant_id", "entity_type", "entity_code"),
+                name="mdm_entity_live_business_key_uniq",
+            ),
         ),
         migrations.AddConstraint(
             model_name="masterdataentity",
-            constraint=models.CheckConstraint(condition=models.Q(("quality_score__gte", decimal.Decimal("0.00")), ("quality_score__lte", decimal.Decimal("100.00"))), name="mdm_entity_quality_0_100_ck"),
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("quality_score__gte", decimal.Decimal("0.00")), ("quality_score__lte", decimal.Decimal("100.00"))
+                ),
+                name="mdm_entity_quality_0_100_ck",
+            ),
         ),
         migrations.AddConstraint(
             model_name="masterdataentity",
-            constraint=models.CheckConstraint(condition=models.Q(("version__gte", 1)), name="mdm_entity_version_gte_1_ck"),
+            constraint=models.CheckConstraint(
+                condition=models.Q(("version__gte", 1)), name="mdm_entity_version_gte_1_ck"
+            ),
         ),
         migrations.AddConstraint(
             model_name="masterdataentity",
-            constraint=models.CheckConstraint(condition=~models.Q(("id", models.F("golden_record_id"))), name="mdm_entity_golden_not_self_ck"),
+            constraint=models.CheckConstraint(
+                condition=~models.Q(("id", models.F("golden_record_id"))), name="mdm_entity_golden_not_self_ck"
+            ),
         ),
         migrations.AddConstraint(
             model_name="masterdataentity",
-            constraint=models.CheckConstraint(condition=models.Q(("is_golden", False)) | models.Q(("golden_record__isnull", True)), name="mdm_entity_golden_has_no_parent_ck"),
+            constraint=models.CheckConstraint(
+                condition=models.Q(("is_golden", False)) | models.Q(("golden_record__isnull", True)),
+                name="mdm_entity_golden_has_no_parent_ck",
+            ),
         ),
         migrations.AddConstraint(
             model_name="masterdataentity",
-            constraint=models.CheckConstraint(condition=models.Q(("golden_record__isnull", False), ("status", "merged")) | ~models.Q(("golden_record__isnull", True), ("status", "merged")), name="mdm_entity_merged_has_golden_ck"),
+            constraint=models.CheckConstraint(
+                condition=models.Q(("golden_record__isnull", False), ("status", "merged"))
+                | ~models.Q(("golden_record__isnull", True), ("status", "merged")),
+                name="mdm_entity_merged_has_golden_ck",
+            ),
         ),
         migrations.AddConstraint(
             model_name="masterdataentity",
-            constraint=models.CheckConstraint(condition=models.Q(("status", "merged")) | models.Q(("golden_record__isnull", True)), name="mdm_entity_nonmerged_no_golden_ck"),
+            constraint=models.CheckConstraint(
+                condition=models.Q(("status", "merged")) | models.Q(("golden_record__isnull", True)),
+                name="mdm_entity_nonmerged_no_golden_ck",
+            ),
         ),
     ]

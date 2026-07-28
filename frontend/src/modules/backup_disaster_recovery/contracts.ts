@@ -9,46 +9,55 @@
 export type UUID = string;
 export type ISODateTime = string;
 
-export type ScopeType = 'tenant' | 'module' | 'database' | 'files';
-export type BackupType = 'full' | 'incremental' | 'differential';
+export type ScopeType = "tenant" | "module" | "database" | "files";
+export type BackupType = "full" | "incremental" | "differential";
 export type RecoveryPointStatus =
-  | 'discovered'
-  | 'verifying'
-  | 'available'
-  | 'corrupt'
-  | 'expired'
-  | 'deleted';
-export type RestoreTargetEnvironment = 'isolated' | 'standby' | 'production';
-export type RestoreMode = 'full' | 'selective';
+  | "discovered"
+  | "verifying"
+  | "available"
+  | "corrupt"
+  | "expired"
+  | "deleted";
+export type RestoreTargetEnvironment = "isolated" | "standby" | "production";
+export type RestoreMode = "full" | "selective";
 export type RestoreRunStatus =
-  | 'queued'
-  | 'validating'
-  | 'ready'
-  | 'restoring'
-  | 'verifying'
-  | 'succeeded'
-  | 'failed'
-  | 'cancelled';
-export type RunbookStatus = 'draft' | 'published' | 'retired';
+  | "queued"
+  | "validating"
+  | "ready"
+  | "restoring"
+  | "verifying"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+export type RunbookStatus = "draft" | "published" | "retired";
 export type RunbookActionType =
-  | 'validate_recovery_point'
-  | 'restore'
-  | 'verify'
-  | 'failover'
-  | 'failback'
-  | 'manual_approval'
-  | 'notify'
-  | 'extension';
-export type OnFailurePolicy = 'stop' | 'continue_degraded';
-export type ExerciseType = 'tabletop' | 'restore' | 'failover' | 'full';
-export type ExerciseEnvironment = 'isolated' | 'standby' | 'production';
-export type ExerciseStatus = 'scheduled' | 'queued' | 'running' | 'passed' | 'failed' | 'cancelled';
-export type StepExecutionStatus = 'pending' | 'running' | 'passed' | 'failed' | 'degraded' | 'skipped';
-export type ObjectiveBucket = 'day' | 'week' | 'month';
-export type HealthState = 'operational' | 'degraded' | 'unavailable';
+  | "validate_recovery_point"
+  | "restore"
+  | "verify"
+  | "failover"
+  | "failback"
+  | "manual_approval"
+  | "notify"
+  | "extension";
+export type OnFailurePolicy = "stop" | "continue_degraded";
+export type ExerciseType = "tabletop" | "restore" | "failover" | "full";
+export type ExerciseEnvironment = "isolated" | "standby" | "production";
+export type ExerciseStatus = "scheduled" | "queued" | "running" | "passed" | "failed" | "cancelled";
+export type StepExecutionStatus =
+  | "pending"
+  | "running"
+  | "passed"
+  | "failed"
+  | "degraded"
+  | "skipped";
+export type ObjectiveBucket = "day" | "week" | "month";
+export type HealthState = "operational" | "degraded" | "unavailable";
 
 export type JSONPrimitive = string | number | boolean | null;
-export type JSONValue = JSONPrimitive | readonly JSONValue[] | { readonly [key: string]: JSONValue };
+export type JSONValue =
+  | JSONPrimitive
+  | readonly JSONValue[]
+  | { readonly [key: string]: JSONValue };
 export type JSONObject = Readonly<Record<string, JSONValue>>;
 
 export interface TransitionRecord {
@@ -61,7 +70,7 @@ export interface TransitionRecord {
 }
 
 export interface ArtifactValidationEvidence {
-  readonly kind: 'artifact_validation';
+  readonly kind: "artifact_validation";
   readonly checksum_valid: boolean;
   readonly artifact_available: boolean;
   readonly encryption_metadata_valid: boolean;
@@ -70,7 +79,7 @@ export interface ArtifactValidationEvidence {
 }
 
 export interface RestoreValidationEvidence {
-  readonly kind: 'restore_validation';
+  readonly kind: "restore_validation";
   readonly artifact_valid: boolean;
   readonly target_registered: boolean;
   readonly capacity_available: boolean;
@@ -80,7 +89,7 @@ export interface RestoreValidationEvidence {
 }
 
 export interface RestoreVerificationEvidence {
-  readonly kind: 'restore_verification';
+  readonly kind: "restore_verification";
   readonly provider_acknowledged: boolean;
   readonly integrity_valid: boolean;
   readonly components_verified: readonly string[];
@@ -88,7 +97,7 @@ export interface RestoreVerificationEvidence {
 }
 
 export interface ManualApprovalEvidence {
-  readonly kind: 'manual_approval';
+  readonly kind: "manual_approval";
   readonly approved: boolean;
   readonly approver_id: UUID;
   readonly decided_at: ISODateTime;
@@ -96,14 +105,14 @@ export interface ManualApprovalEvidence {
 }
 
 export interface NotificationEvidence {
-  readonly kind: 'notification';
-  readonly channel: 'email' | 'in_app' | 'webhook';
+  readonly kind: "notification";
+  readonly channel: "email" | "in_app" | "webhook";
   readonly acknowledged: boolean;
   readonly delivered_at: ISODateTime | null;
 }
 
 export interface FailoverEvidence {
-  readonly kind: 'failover' | 'failback';
+  readonly kind: "failover" | "failback";
   readonly target_ref: string;
   readonly provider_acknowledged: boolean;
   readonly health_check_passed: boolean;
@@ -111,9 +120,9 @@ export interface FailoverEvidence {
 }
 
 export interface ExtensionEvidence {
-  readonly kind: 'extension';
+  readonly kind: "extension";
   readonly extension_action_key: string;
-  readonly outcome: 'passed' | 'failed' | 'degraded';
+  readonly outcome: "passed" | "failed" | "degraded";
   readonly summary: string;
   readonly completed_at: ISODateTime;
 }
@@ -127,40 +136,40 @@ export type StepExecutionEvidence =
   | ExtensionEvidence;
 
 export interface ValidateRecoveryPointParameters {
-  readonly action_type: 'validate_recovery_point';
+  readonly action_type: "validate_recovery_point";
   readonly require_checksum: boolean;
   readonly require_encryption: boolean;
 }
 
 export interface RestoreParameters {
-  readonly action_type: 'restore';
+  readonly action_type: "restore";
   readonly restore_mode: RestoreMode;
   readonly selected_components: readonly string[];
 }
 
 export interface VerifyParameters {
-  readonly action_type: 'verify';
+  readonly action_type: "verify";
   readonly checks: readonly string[];
 }
 
 export interface FailoverParameters {
-  readonly action_type: 'failover' | 'failback';
+  readonly action_type: "failover" | "failback";
   readonly target_ref: string;
 }
 
 export interface ManualApprovalParameters {
-  readonly action_type: 'manual_approval';
+  readonly action_type: "manual_approval";
   readonly instructions: string;
 }
 
 export interface NotifyParameters {
-  readonly action_type: 'notify';
+  readonly action_type: "notify";
   readonly channel_ref: string;
   readonly message_template: string;
 }
 
 export interface ExtensionParameters {
-  readonly action_type: 'extension';
+  readonly action_type: "extension";
   readonly configuration_ref: string;
 }
 
@@ -290,26 +299,30 @@ export interface BackupExecutionCreateRequest {
 export interface BackupExecutionReceipt {
   readonly backup_job_id: UUID;
   readonly async_job_id: UUID;
-  readonly status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  readonly status: "queued" | "running" | "completed" | "failed" | "cancelled";
   readonly requested_at: ISODateTime;
 }
 
 export interface DurableJobReceipt {
   readonly async_job_id: UUID;
-  readonly status: 'queued';
+  readonly status: "queued";
   readonly accepted_at: ISODateTime;
 }
 
 export interface BackupExecutionStatus {
   readonly backup_job_id: UUID;
-  readonly status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  readonly status: "queued" | "running" | "completed" | "failed" | "cancelled";
   readonly completed_at: ISODateTime | null;
   readonly recovery_point_id: UUID | null;
   readonly safe_error: string;
 }
 
-export interface RecoveryPointVerifyRequest { readonly idempotency_key: string; }
-export interface RecoveryPointExpireRequest { readonly transition_key: string; }
+export interface RecoveryPointVerifyRequest {
+  readonly idempotency_key: string;
+}
+export interface RecoveryPointExpireRequest {
+  readonly transition_key: string;
+}
 
 export interface RestoreRunCreateRequest {
   readonly recovery_point_id: UUID;
@@ -322,8 +335,12 @@ export interface RestoreRunCreateRequest {
   readonly idempotency_key: string;
 }
 
-export interface RestoreRunExecuteRequest { readonly idempotency_key: string; }
-export interface RestoreRunCancelRequest { readonly transition_key: string; }
+export interface RestoreRunExecuteRequest {
+  readonly idempotency_key: string;
+}
+export interface RestoreRunCancelRequest {
+  readonly transition_key: string;
+}
 
 export interface DRRunbookCreateRequest {
   readonly name: string;
@@ -337,7 +354,9 @@ export interface DRRunbookCreateRequest {
 }
 
 export type DRRunbookUpdateRequest = Partial<DRRunbookCreateRequest>;
-export interface RunbookTransitionRequest { readonly transition_key: string; }
+export interface RunbookTransitionRequest {
+  readonly transition_key: string;
+}
 export interface RunbookStepCreateRequest {
   readonly runbook_id: UUID;
   readonly step_key: string;
@@ -352,8 +371,10 @@ export interface RunbookStepCreateRequest {
   readonly retry_limit: number;
   readonly on_failure: OnFailurePolicy;
 }
-export type RunbookStepUpdateRequest = Partial<Omit<RunbookStepCreateRequest, 'runbook_id'>>;
-export interface RunbookStepReorderRequest { readonly step_ids: readonly UUID[]; }
+export type RunbookStepUpdateRequest = Partial<Omit<RunbookStepCreateRequest, "runbook_id">>;
+export interface RunbookStepReorderRequest {
+  readonly step_ids: readonly UUID[];
+}
 
 export interface DRExerciseCreateRequest {
   readonly name: string;
@@ -364,9 +385,16 @@ export interface DRExerciseCreateRequest {
   readonly scheduled_for: ISODateTime;
   readonly idempotency_key: string;
 }
-export type DRExerciseUpdateRequest = Pick<DRExerciseCreateRequest, 'name' | 'scheduled_for' | 'recovery_point_id'>;
-export interface DRExerciseStartRequest { readonly idempotency_key: string; }
-export interface DRExerciseCancelRequest { readonly transition_key: string; }
+export type DRExerciseUpdateRequest = Pick<
+  DRExerciseCreateRequest,
+  "name" | "scheduled_for" | "recovery_point_id"
+>;
+export interface DRExerciseStartRequest {
+  readonly idempotency_key: string;
+}
+export interface DRExerciseCancelRequest {
+  readonly transition_key: string;
+}
 
 export interface ObjectiveMeasurement {
   readonly restore_run_id: UUID;
@@ -378,7 +406,7 @@ export interface ObjectiveMeasurement {
   readonly rpo_met: boolean | null;
   readonly rto_met: boolean | null;
   readonly measured_at: ISODateTime;
-  readonly outcome: 'succeeded' | 'failed';
+  readonly outcome: "succeeded" | "failed";
 }
 
 export interface ObjectiveReportBucket {
@@ -601,7 +629,9 @@ export interface BDRConfigurationVersion {
   readonly created_at: ISODateTime;
 }
 
-export interface BDRConfigurationRollbackRequest { readonly version: number; }
+export interface BDRConfigurationRollbackRequest {
+  readonly version: number;
+}
 
 export interface BDRConfigurationSnapshot {
   readonly environment: string;
@@ -610,7 +640,7 @@ export interface BDRConfigurationSnapshot {
 }
 
 export interface BDRConfigurationExport extends BDRConfigurationSnapshot {
-  readonly schema: 'saraise.backup-disaster-recovery.configuration/v1';
+  readonly schema: "saraise.backup-disaster-recovery.configuration/v1";
   readonly version: number;
 }
 
@@ -693,7 +723,13 @@ export interface RecoveryPointFilters {
   readonly captured_after?: ISODateTime;
   readonly captured_before?: ISODateTime;
   readonly search?: string;
-  readonly ordering?: 'captured_at' | '-captured_at' | 'expires_at' | '-expires_at' | 'size_bytes' | '-size_bytes';
+  readonly ordering?:
+    | "captured_at"
+    | "-captured_at"
+    | "expires_at"
+    | "-expires_at"
+    | "size_bytes"
+    | "-size_bytes";
   readonly page?: number;
   readonly page_size?: number;
 }
@@ -713,7 +749,7 @@ export interface RunbookFilters {
   readonly scope_type?: ScopeType;
   readonly owner_id?: UUID;
   readonly search?: string;
-  readonly ordering?: 'updated_at' | '-updated_at' | 'name' | '-name' | 'version' | '-version';
+  readonly ordering?: "updated_at" | "-updated_at" | "name" | "-name" | "version" | "-version";
   readonly page?: number;
   readonly page_size?: number;
 }
@@ -743,12 +779,13 @@ export interface ObjectiveReportFilters {
   readonly bucket: ObjectiveBucket;
 }
 
-export const MODULE_API_PREFIX = '/api/v2/backup-disaster-recovery';
+export const MODULE_API_PREFIX = "/api/v2/backup-disaster-recovery";
 
 export const ENDPOINTS = {
   BACKUP_EXECUTIONS: {
     CREATE: `${MODULE_API_PREFIX}/backup-executions/`,
-    DETAIL: (backupJobId: UUID) => `${MODULE_API_PREFIX}/backup-executions/${backupJobId}/` as const,
+    DETAIL: (backupJobId: UUID) =>
+      `${MODULE_API_PREFIX}/backup-executions/${backupJobId}/` as const,
   },
   RECOVERY_POINTS: {
     LIST: `${MODULE_API_PREFIX}/recovery-points/`,

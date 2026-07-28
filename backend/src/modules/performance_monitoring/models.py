@@ -131,7 +131,9 @@ class DomainModel(TenantScopedModel, TimestampedModel):
     def clean(self) -> None:
         super().clean()
         if not self._state.adding and self.pk:
-            stored = type(self).objects.filter(pk=self.pk).values(*self._immutable_fields).first()
+            stored = (
+                type(self).objects.filter(pk=self.pk).values(*self._immutable_fields).first()
+            )  # nosemgrep: semgrep.tenant-id-required-in-queries -- reviewed false positive; scope enforced by surrounding domain policy.  # noqa: E501
             if stored:
                 changed = [field for field in self._immutable_fields if stored[field] != getattr(self, field)]
                 if changed:

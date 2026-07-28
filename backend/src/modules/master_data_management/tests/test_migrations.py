@@ -24,9 +24,7 @@ EXPECTED_DOMAIN_TABLES = {
 
 
 def migration(number_and_name: str):
-    return importlib.import_module(
-        f"src.modules.master_data_management.migrations.{number_and_name}"
-    )
+    return importlib.import_module(f"src.modules.master_data_management.migrations.{number_and_name}")
 
 
 def test_migration_graph_has_exact_reversible_sequence_and_preserves_0001() -> None:
@@ -46,9 +44,7 @@ def test_migration_graph_has_exact_reversible_sequence_and_preserves_0001() -> N
         assert ("master_data_management", expected_previous) in loaded[index].dependencies
     assert ("core", "0011_apply_typed_rls_to_notifications") in loaded[-1].dependencies
 
-    initial_creates = [
-        operation for operation in loaded[0].operations if isinstance(operation, migrations.CreateModel)
-    ]
+    initial_creates = [operation for operation in loaded[0].operations if isinstance(operation, migrations.CreateModel)]
     assert len(initial_creates) == 1
     legacy = initial_creates[0]
     assert legacy.name == "MasterDataEntity"
@@ -98,8 +94,7 @@ def test_contract_migration_verifies_before_removing_legacy_columns() -> None:
     verification_index = next(
         index
         for index, operation in enumerate(operations)
-        if isinstance(operation, migrations.RunPython)
-        and operation.code is module.verify_canonical_entity_values
+        if isinstance(operation, migrations.RunPython) and operation.code is module.verify_canonical_entity_values
     )
     removals = {
         operation.name: index

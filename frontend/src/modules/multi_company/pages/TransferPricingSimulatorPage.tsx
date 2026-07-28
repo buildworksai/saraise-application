@@ -1,1 +1,1 @@
-export { TransferPricingSimulatorPage } from './workspaces';
+export { TransferPricingSimulatorPage } from "./workspaces";

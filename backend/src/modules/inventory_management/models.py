@@ -10,7 +10,6 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import F, Q
@@ -235,7 +234,9 @@ class Item(UUIDIdentityModel, TenantScopedModel, TimestampedModel, VersionedMode
     reorder_point = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     reorder_quantity = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     safety_stock = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
-    default_warehouse = models.ForeignKey(Warehouse, models.PROTECT, null=True, blank=True, related_name="default_items")
+    default_warehouse = models.ForeignKey(
+        Warehouse, models.PROTECT, null=True, blank=True, related_name="default_items"
+    )
     abc_classification = models.CharField(max_length=1, choices=ABCClassification.choices, blank=True)
     is_active = models.BooleanField(default=True)
     archived_at = models.DateTimeField(null=True, blank=True)
@@ -250,11 +251,21 @@ class Item(UUIDIdentityModel, TenantScopedModel, TimestampedModel, VersionedMode
         constraints = (
             models.UniqueConstraint(fields=("tenant_id", "id"), name="inv_item_tenant_id_uq"),
             models.UniqueConstraint(fields=("tenant_id", "item_code"), name="unique_item_code_per_tenant"),
-            models.UniqueConstraint(fields=("tenant_id", "barcode"), condition=~Q(barcode=""), name="inv_item_barcode_uq"),
-            models.CheckConstraint(condition=Q(reorder_point__isnull=True) | Q(reorder_point__gte=0), name="inv_item_reorder_point_ck"),
-            models.CheckConstraint(condition=Q(reorder_quantity__isnull=True) | Q(reorder_quantity__gte=0), name="inv_item_reorder_qty_ck"),
-            models.CheckConstraint(condition=Q(safety_stock__isnull=True) | Q(safety_stock__gte=0), name="inv_item_safety_ck"),
-            models.CheckConstraint(condition=Q(standard_cost__isnull=True) | Q(standard_cost__gte=0), name="inv_item_std_cost_ck"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "barcode"), condition=~Q(barcode=""), name="inv_item_barcode_uq"
+            ),
+            models.CheckConstraint(
+                condition=Q(reorder_point__isnull=True) | Q(reorder_point__gte=0), name="inv_item_reorder_point_ck"
+            ),
+            models.CheckConstraint(
+                condition=Q(reorder_quantity__isnull=True) | Q(reorder_quantity__gte=0), name="inv_item_reorder_qty_ck"
+            ),
+            models.CheckConstraint(
+                condition=Q(safety_stock__isnull=True) | Q(safety_stock__gte=0), name="inv_item_safety_ck"
+            ),
+            models.CheckConstraint(
+                condition=Q(standard_cost__isnull=True) | Q(standard_cost__gte=0), name="inv_item_std_cost_ck"
+            ),
             models.CheckConstraint(
                 condition=~Q(valuation_method=ValuationMethod.STANDARD_COST) | Q(standard_cost__isnull=False),
                 name="inv_item_std_cost_required_ck",
@@ -299,7 +310,9 @@ class Batch(UUIDIdentityModel, TenantScopedModel, TimestampedModel, StatefulMode
             models.UniqueConstraint(fields=("tenant_id", "id"), name="inv_batch_tenant_id_uq"),
             models.UniqueConstraint(fields=("tenant_id", "item", "batch_number"), name="inv_batch_number_uq"),
             models.CheckConstraint(
-                condition=Q(expires_on__isnull=True) | Q(manufactured_on__isnull=True) | Q(expires_on__gte=F("manufactured_on")),
+                condition=Q(expires_on__isnull=True)
+                | Q(manufactured_on__isnull=True)
+                | Q(expires_on__gte=F("manufactured_on")),
                 name="inv_batch_dates_ck",
             ),
         )
@@ -327,8 +340,12 @@ class SerialNumber(UUIDIdentityModel, TenantScopedModel, TimestampedModel, State
     item = models.ForeignKey(Item, models.PROTECT, related_name="serial_numbers")
     serial_number = models.CharField(max_length=128)
     status = models.CharField(max_length=16, choices=SerialStatus.choices, default=SerialStatus.REGISTERED)
-    current_warehouse = models.ForeignKey(Warehouse, models.PROTECT, null=True, blank=True, related_name="serial_numbers")
-    current_location = models.ForeignKey(StorageLocation, models.PROTECT, null=True, blank=True, related_name="serial_numbers")
+    current_warehouse = models.ForeignKey(
+        Warehouse, models.PROTECT, null=True, blank=True, related_name="serial_numbers"
+    )
+    current_location = models.ForeignKey(
+        StorageLocation, models.PROTECT, null=True, blank=True, related_name="serial_numbers"
+    )
     manufacturer = models.CharField(max_length=255, blank=True)
     model_number = models.CharField(max_length=100, blank=True)
     warranty_starts_on = models.DateField(null=True, blank=True)
@@ -341,7 +358,9 @@ class SerialNumber(UUIDIdentityModel, TenantScopedModel, TimestampedModel, State
             models.UniqueConstraint(fields=("tenant_id", "id"), name="inv_serial_tenant_id_uq"),
             models.UniqueConstraint(fields=("tenant_id", "serial_number"), name="inv_serial_number_uq"),
             models.CheckConstraint(
-                condition=Q(warranty_ends_on__isnull=True) | Q(warranty_starts_on__isnull=True) | Q(warranty_ends_on__gte=F("warranty_starts_on")),
+                condition=Q(warranty_ends_on__isnull=True)
+                | Q(warranty_starts_on__isnull=True)
+                | Q(warranty_ends_on__gte=F("warranty_starts_on")),
                 name="inv_serial_warranty_ck",
             ),
             models.CheckConstraint(
@@ -385,8 +404,12 @@ class StockEntry(UUIDIdentityModel, TenantScopedModel, TimestampedModel, Statefu
     entry_number = models.CharField(max_length=50)
     entry_type = models.CharField(max_length=20, choices=StockEntryType.choices)
     posting_at = models.DateTimeField()
-    source_warehouse = models.ForeignKey(Warehouse, models.PROTECT, null=True, blank=True, related_name="outbound_entries")
-    destination_warehouse = models.ForeignKey(Warehouse, models.PROTECT, null=True, blank=True, related_name="inbound_entries")
+    source_warehouse = models.ForeignKey(
+        Warehouse, models.PROTECT, null=True, blank=True, related_name="outbound_entries"
+    )
+    destination_warehouse = models.ForeignKey(
+        Warehouse, models.PROTECT, null=True, blank=True, related_name="inbound_entries"
+    )
     reference_module = models.CharField(max_length=64, blank=True)
     reference_type = models.CharField(max_length=64, blank=True)
     reference_id = models.UUIDField(null=True, blank=True)
@@ -411,30 +434,42 @@ class StockEntry(UUIDIdentityModel, TenantScopedModel, TimestampedModel, Statefu
         ordering = ("-posting_at", "entry_number", "id")
         constraints = (
             models.UniqueConstraint(fields=("tenant_id", "id"), name="inv_entry_tenant_id_uq"),
-            models.UniqueConstraint(fields=("tenant_id", "entry_number"), name="inventory_unique_entry_number_per_tenant"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "entry_number"), name="inventory_unique_entry_number_per_tenant"
+            ),
             models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="inv_entry_idempotency_uq"),
             models.CheckConstraint(
                 condition=~Q(entry_type=StockEntryType.TRANSFER)
-                | (Q(source_warehouse__isnull=False) & Q(destination_warehouse__isnull=False) & ~Q(source_warehouse=F("destination_warehouse"))),
+                | (
+                    Q(source_warehouse__isnull=False)
+                    & Q(destination_warehouse__isnull=False)
+                    & ~Q(source_warehouse=F("destination_warehouse"))
+                ),
                 name="inv_entry_transfer_wh_ck",
             ),
             models.CheckConstraint(
-                condition=~Q(entry_type__in=(StockEntryType.RECEIPT, StockEntryType.RETURN)) | Q(destination_warehouse__isnull=False),
+                condition=~Q(entry_type__in=(StockEntryType.RECEIPT, StockEntryType.RETURN))
+                | Q(destination_warehouse__isnull=False),
                 name="inv_entry_destination_ck",
             ),
             models.CheckConstraint(
-                condition=~Q(entry_type__in=(StockEntryType.ISSUE, StockEntryType.SCRAP)) | Q(source_warehouse__isnull=False),
+                condition=~Q(entry_type__in=(StockEntryType.ISSUE, StockEntryType.SCRAP))
+                | Q(source_warehouse__isnull=False),
                 name="inv_entry_source_ck",
             ),
             models.CheckConstraint(
-                condition=~Q(status=StockEntryStatus.POSTED) | (Q(posted_by_id__isnull=False) & Q(posted_at__isnull=False)),
+                condition=~Q(status=StockEntryStatus.POSTED)
+                | (Q(posted_by_id__isnull=False) & Q(posted_at__isnull=False)),
                 name="inv_entry_posted_audit_ck",
             ),
         )
         indexes = (
             models.Index(fields=("tenant_id", "status", "posting_at"), name="inv_entry_status_post_ix"),
             models.Index(fields=("tenant_id", "entry_type", "posting_at"), name="inv_entry_type_post_ix"),
-            models.Index(fields=("tenant_id", "reference_module", "reference_type", "reference_id"), name="inv_entry_reference_ix"),
+            models.Index(
+                fields=("tenant_id", "reference_module", "reference_type", "reference_id"),
+                name="inv_entry_reference_ix",
+            ),
         )
 
     def __str__(self) -> str:
@@ -448,8 +483,12 @@ class StockEntryLine(UUIDIdentityModel, TenantScopedModel, TimestampedModel):
     source_location = models.ForeignKey(StorageLocation, models.PROTECT, null=True, blank=True, related_name="+")
     destination_location = models.ForeignKey(StorageLocation, models.PROTECT, null=True, blank=True, related_name="+")
     batch = models.ForeignKey(Batch, models.PROTECT, null=True, blank=True, related_name="stock_entry_lines")
-    serial_number = models.ForeignKey(SerialNumber, models.PROTECT, null=True, blank=True, related_name="stock_entry_lines")
-    quantity = models.DecimalField(max_digits=18, decimal_places=6, validators=(MinValueValidator(Decimal("0.000001")),))
+    serial_number = models.ForeignKey(
+        SerialNumber, models.PROTECT, null=True, blank=True, related_name="stock_entry_lines"
+    )
+    quantity = models.DecimalField(
+        max_digits=18, decimal_places=6, validators=(MinValueValidator(Decimal("0.000001")),)
+    )
     uom = models.CharField(max_length=32)
     unit_cost = models.DecimalField(max_digits=19, decimal_places=4, null=True, blank=True)
     line_value = models.DecimalField(max_digits=19, decimal_places=4, default=MONEY_ZERO)
@@ -503,7 +542,9 @@ class StockLedgerEntry(UUIDIdentityModel, TenantScopedModel, AppendOnlyModel):
     warehouse = models.ForeignKey(Warehouse, models.PROTECT, related_name="ledger_entries")
     location = models.ForeignKey(StorageLocation, models.PROTECT, related_name="ledger_entries")
     batch = models.ForeignKey(Batch, models.PROTECT, null=True, blank=True, related_name="ledger_entries")
-    serial_number = models.ForeignKey(SerialNumber, models.PROTECT, null=True, blank=True, related_name="ledger_entries")
+    serial_number = models.ForeignKey(
+        SerialNumber, models.PROTECT, null=True, blank=True, related_name="ledger_entries"
+    )
     quantity_delta = models.DecimalField(max_digits=18, decimal_places=6)
     quantity_after = models.DecimalField(max_digits=18, decimal_places=6)
     unit_cost = models.DecimalField(max_digits=19, decimal_places=4)
@@ -519,10 +560,14 @@ class StockLedgerEntry(UUIDIdentityModel, TenantScopedModel, AppendOnlyModel):
         constraints = (
             models.UniqueConstraint(fields=("tenant_id", "id"), name="inv_ledger_tenant_id_uq"),
             models.UniqueConstraint(fields=("tenant_id", "sequence"), name="inv_ledger_sequence_uq"),
-            models.UniqueConstraint(fields=("tenant_id", "stock_entry_line", "warehouse", "location"), name="inv_ledger_line_dimension_uq"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "stock_entry_line", "warehouse", "location"), name="inv_ledger_line_dimension_uq"
+            ),
         )
         indexes = (
-            models.Index(fields=("tenant_id", "item", "warehouse", "location", "sequence"), name="inv_ledger_dimension_ix"),
+            models.Index(
+                fields=("tenant_id", "item", "warehouse", "location", "sequence"), name="inv_ledger_dimension_ix"
+            ),
             models.Index(fields=("tenant_id", "batch", "sequence"), name="inv_ledger_batch_ix"),
             models.Index(fields=("tenant_id", "serial_number", "sequence"), name="inv_ledger_serial_ix"),
         )
@@ -549,10 +594,15 @@ class StockCostLayer(UUIDIdentityModel, TenantScopedModel, TimestampedModel):
         constraints = (
             models.UniqueConstraint(fields=("tenant_id", "id"), name="inv_layer_tenant_id_uq"),
             models.CheckConstraint(condition=Q(received_quantity__gt=0), name="inv_layer_received_ck"),
-            models.CheckConstraint(condition=Q(remaining_quantity__gte=0) & Q(remaining_quantity__lte=F("received_quantity")), name="inv_layer_remaining_ck"),
+            models.CheckConstraint(
+                condition=Q(remaining_quantity__gte=0) & Q(remaining_quantity__lte=F("received_quantity")),
+                name="inv_layer_remaining_ck",
+            ),
         )
         indexes = (
-            models.Index(fields=("tenant_id", "item", "warehouse", "location", "acquired_at"), name="inv_layer_acquired_ix"),
+            models.Index(
+                fields=("tenant_id", "item", "warehouse", "location", "acquired_at"), name="inv_layer_acquired_ix"
+            ),
             models.Index(fields=("tenant_id", "item", "remaining_quantity"), name="inv_layer_remaining_ix"),
         )
 
@@ -562,13 +612,17 @@ class StockBalance(UUIDIdentityModel, TenantScopedModel, TimestampedModel):
     warehouse = models.ForeignKey(Warehouse, models.PROTECT, related_name="stock_balances")
     location = models.ForeignKey(StorageLocation, models.PROTECT, related_name="stock_balances")
     batch = models.ForeignKey(Batch, models.PROTECT, null=True, blank=True, related_name="stock_balances")
-    serial_number = models.ForeignKey(SerialNumber, models.PROTECT, null=True, blank=True, related_name="stock_balances")
+    serial_number = models.ForeignKey(
+        SerialNumber, models.PROTECT, null=True, blank=True, related_name="stock_balances"
+    )
     quantity_on_hand = models.DecimalField(max_digits=18, decimal_places=6, default=QUANTITY_ZERO)
     quantity_allocated = models.DecimalField(max_digits=18, decimal_places=6, default=QUANTITY_ZERO)
     quantity_available = models.DecimalField(max_digits=18, decimal_places=6, default=QUANTITY_ZERO)
     stock_value = models.DecimalField(max_digits=19, decimal_places=4, default=MONEY_ZERO)
     valuation_rate = models.DecimalField(max_digits=19, decimal_places=4, default=MONEY_ZERO)
-    last_ledger_entry = models.ForeignKey(StockLedgerEntry, models.PROTECT, null=True, blank=True, related_name="resulting_balances")
+    last_ledger_entry = models.ForeignKey(
+        StockLedgerEntry, models.PROTECT, null=True, blank=True, related_name="resulting_balances"
+    )
 
     class Meta:
         db_table = "inventory_stock_balances"
@@ -581,7 +635,10 @@ class StockBalance(UUIDIdentityModel, TenantScopedModel, TimestampedModel):
                 nulls_distinct=False,
             ),
             models.CheckConstraint(condition=Q(quantity_allocated__gte=0), name="inv_balance_allocated_ck"),
-            models.CheckConstraint(condition=Q(quantity_available=F("quantity_on_hand") - F("quantity_allocated")), name="inv_balance_available_ck"),
+            models.CheckConstraint(
+                condition=Q(quantity_available=F("quantity_on_hand") - F("quantity_allocated")),
+                name="inv_balance_available_ck",
+            ),
             models.CheckConstraint(
                 condition=Q(serial_number__isnull=True) | Q(quantity_on_hand__in=(QUANTITY_ZERO, QUANTITY_ONE)),
                 name="inv_balance_serial_quantity_ck",
@@ -631,7 +688,9 @@ class StockReservation(UUIDIdentityModel, TenantScopedModel, TimestampedModel, S
         )
         indexes = (
             models.Index(fields=("tenant_id", "status", "expires_at"), name="inv_res_status_expiry_ix"),
-            models.Index(fields=("tenant_id", "reference_module", "reference_type", "reference_id"), name="inv_res_reference_ix"),
+            models.Index(
+                fields=("tenant_id", "reference_module", "reference_type", "reference_id"), name="inv_res_reference_ix"
+            ),
         )
 
     def __str__(self) -> str:
@@ -692,7 +751,9 @@ class CycleCountLine(UUIDIdentityModel, TenantScopedModel, TimestampedModel):
     item = models.ForeignKey(Item, models.PROTECT, related_name="cycle_count_lines")
     location = models.ForeignKey(StorageLocation, models.PROTECT, related_name="cycle_count_lines")
     batch = models.ForeignKey(Batch, models.PROTECT, null=True, blank=True, related_name="cycle_count_lines")
-    serial_number = models.ForeignKey(SerialNumber, models.PROTECT, null=True, blank=True, related_name="cycle_count_lines")
+    serial_number = models.ForeignKey(
+        SerialNumber, models.PROTECT, null=True, blank=True, related_name="cycle_count_lines"
+    )
     system_quantity = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     counted_quantity = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True)
     variance_quantity = models.DecimalField(max_digits=18, decimal_places=6, default=QUANTITY_ZERO)
@@ -704,14 +765,17 @@ class CycleCountLine(UUIDIdentityModel, TenantScopedModel, TimestampedModel):
         ordering = ("cycle_count_id", "line_number", "id")
         constraints = (
             models.UniqueConstraint(fields=("tenant_id", "id"), name="inv_count_line_tenant_id_uq"),
-            models.UniqueConstraint(fields=("tenant_id", "cycle_count", "line_number"), name="inv_count_line_number_uq"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "cycle_count", "line_number"), name="inv_count_line_number_uq"
+            ),
             models.UniqueConstraint(
                 fields=("tenant_id", "cycle_count", "item", "location", "batch", "serial_number"),
                 name="inv_count_line_dimension_uq",
                 nulls_distinct=False,
             ),
             models.CheckConstraint(
-                condition=Q(counted_quantity__isnull=True) | Q(variance_quantity=F("counted_quantity") - F("system_quantity")),
+                condition=Q(counted_quantity__isnull=True)
+                | Q(variance_quantity=F("counted_quantity") - F("system_quantity")),
                 name="inv_count_line_variance_ck",
             ),
         )
@@ -734,13 +798,21 @@ class InventoryConfiguration(UUIDIdentityModel, TenantScopedModel, TimestampedMo
     Status = ConfigurationStatus
     environment = models.CharField(max_length=16, choices=DeploymentEnvironment.choices)
     status = models.CharField(max_length=12, choices=ConfigurationStatus.choices, default=ConfigurationStatus.DRAFT)
-    default_valuation_method = models.CharField(max_length=20, choices=ValuationMethod.choices, default=ValuationMethod.FIFO)
+    default_valuation_method = models.CharField(
+        max_length=20, choices=ValuationMethod.choices, default=ValuationMethod.FIFO
+    )
     allow_negative_stock = models.BooleanField(default=False)
     require_stock_entry_approval = models.BooleanField(default=True)
     enforce_creator_approver_separation = models.BooleanField(default=True)
-    max_lines_per_entry = models.PositiveIntegerField(default=500, validators=(MinValueValidator(1), MaxValueValidator(5000)))
-    reservation_ttl_minutes = models.PositiveIntegerField(default=1440, validators=(MinValueValidator(5), MaxValueValidator(10080)))
-    expiry_warning_days = models.PositiveIntegerField(default=30, validators=(MinValueValidator(1), MaxValueValidator(3650)))
+    max_lines_per_entry = models.PositiveIntegerField(
+        default=500, validators=(MinValueValidator(1), MaxValueValidator(5000))
+    )
+    reservation_ttl_minutes = models.PositiveIntegerField(
+        default=1440, validators=(MinValueValidator(5), MaxValueValidator(10080))
+    )
+    expiry_warning_days = models.PositiveIntegerField(
+        default=30, validators=(MinValueValidator(1), MaxValueValidator(3650))
+    )
     auto_expire_batches = models.BooleanField(default=True)
     enabled_capabilities = models.JSONField(default=dict)
     rollout_rules = models.JSONField(default=dict)
@@ -752,9 +824,18 @@ class InventoryConfiguration(UUIDIdentityModel, TenantScopedModel, TimestampedMo
         constraints = (
             models.UniqueConstraint(fields=("tenant_id", "id"), name="inv_config_tenant_id_uq"),
             models.UniqueConstraint(fields=("tenant_id", "environment"), name="inv_config_environment_uq"),
-            models.CheckConstraint(condition=Q(max_lines_per_entry__gte=1, max_lines_per_entry__lte=5000), name="inv_config_lines_bounds_ck"),
-            models.CheckConstraint(condition=Q(reservation_ttl_minutes__gte=5, reservation_ttl_minutes__lte=10080), name="inv_config_ttl_bounds_ck"),
-            models.CheckConstraint(condition=Q(expiry_warning_days__gte=1, expiry_warning_days__lte=3650), name="inv_config_expiry_bounds_ck"),
+            models.CheckConstraint(
+                condition=Q(max_lines_per_entry__gte=1, max_lines_per_entry__lte=5000),
+                name="inv_config_lines_bounds_ck",
+            ),
+            models.CheckConstraint(
+                condition=Q(reservation_ttl_minutes__gte=5, reservation_ttl_minutes__lte=10080),
+                name="inv_config_ttl_bounds_ck",
+            ),
+            models.CheckConstraint(
+                condition=Q(expiry_warning_days__gte=1, expiry_warning_days__lte=3650),
+                name="inv_config_expiry_bounds_ck",
+            ),
         )
 
     def __str__(self) -> str:

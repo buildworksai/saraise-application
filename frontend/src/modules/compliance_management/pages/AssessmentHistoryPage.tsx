@@ -1,1 +1,1 @@
-export { AssessmentHistoryPage } from './CompliancePages';
+export { AssessmentHistoryPage } from "./CompliancePages";

@@ -12,7 +12,6 @@ from typing import Final, Mapping
 
 from django.core.exceptions import ValidationError
 
-
 CONFIGURATION_SCHEMA_VERSION: Final = 1
 
 DEFAULT_CONFIGURATION: Final[dict[str, object]] = {
@@ -235,7 +234,9 @@ def _validate_shape(value: object, template: object, dotted: str = "document") -
         missing, unknown = set(template) - set(value), set(value) - set(template)
         if missing or unknown:
             raise ValidationError(
-                {"document": f"{dotted} fields must match schema; missing={sorted(missing)}, unknown={sorted(unknown)}."}
+                {
+                    "document": f"{dotted} fields must match schema; missing={sorted(missing)}, unknown={sorted(unknown)}."  # noqa: E501
+                }
             )
         for key, child_template in template.items():
             _validate_shape(value[key], child_template, f"{dotted}.{key}")
@@ -286,12 +287,18 @@ def validate_configuration(document: object) -> dict[str, object]:
     required_secret_fields = set(DEFAULT_CONFIGURATION["security"]["secret_field_names"])
     configured_secret_fields = set(_path(document, "security.secret_field_names"))
     if not required_secret_fields.issubset(configured_secret_fields):
-        raise ValidationError({"document": "Security secret field names may be extended but cannot remove platform protections."})
+        raise ValidationError(
+            {"document": "Security secret field names may be extended but cannot remove platform protections."}
+        )
     directions = _path(document, "synchronization.directions")
     if not isinstance(directions, list) or not directions or set(directions) - {"pull", "push"}:
         raise ValidationError({"document": "Synchronization directions must be a non-empty pull/push allow-list."})
     capabilities = _path(document, "adapter.capabilities")
-    if not capabilities or len(capabilities) != len(set(capabilities)) or set(capabilities) - {"test", "pull", "push", "receive", "deliver"}:
+    if (
+        not capabilities
+        or len(capabilities) != len(set(capabilities))
+        or set(capabilities) - {"test", "pull", "push", "receive", "deliver"}
+    ):
         raise ValidationError({"document": "Adapter capabilities contain unsupported values."})
     if _path(document, "adapter.spi_version") not in {"1.0"}:
         raise ValidationError({"document": "Adapter SPI version is not supported by this runtime."})
@@ -300,7 +307,9 @@ def validate_configuration(document: object) -> dict[str, object]:
     if not operations or len(operations) != len(set(operations)) or set(operations) - allowed_transformations:
         raise ValidationError({"document": "Transformation operation allow-list is invalid."})
     route_order = _path(document, "navigation.route_order")
-    if not all(isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10000 for value in route_order.values()):
+    if not all(
+        isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 10000 for value in route_order.values()
+    ):
         raise ValidationError({"document": "Navigation route order values must be integers between 0 and 10000."})
     for quota_name, quota_cost in _path(document, "quotas").items():
         if isinstance(quota_cost, bool) or not isinstance(quota_cost, int) or not 1 <= quota_cost <= 100:

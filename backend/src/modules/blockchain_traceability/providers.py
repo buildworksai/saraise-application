@@ -373,6 +373,6 @@ def register_builtin_adapters() -> None:
     except AdapterNotRegisteredError:
         credential_issuer_registry.register(candidate.issuer_type, candidate)
         return
-    identity = lambda value: (type(value).__module__, type(value).__qualname__)
+    identity = lambda value: (type(value).__module__, type(value).__qualname__)  # noqa: E731
     if identity(existing) != identity(candidate):
         raise AdapterRegistrationError(f"credential issuer {candidate.issuer_type!r} is owned by a competing adapter")

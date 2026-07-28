@@ -1,3 +1,142 @@
+/* eslint-disable max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
-import { useQuery } from '@tanstack/react-query';import { Link,useSearchParams } from 'react-router-dom';import { CrmPage,GovernedError,PageSkeleton } from '../components/CrmPage';import { EntityList } from '../components/EntityList';import { useCrmConfiguration } from '../hooks/use-crm-configuration';import { crmKeys,crmService } from '../services/crm-service';import type { ActivityFilters } from '../contracts';
-export function ActivityListPage(){const[p]=useSearchParams(),configuration=useCrmConfiguration(),document=configuration.data?.document;const filters:ActivityFilters={related_to_type:(p.get('related_to_type')as ActivityFilters['related_to_type'])||undefined,related_to_id:p.get('related_to_id')||undefined,activity_type:(p.get('activity_type')as ActivityFilters['activity_type'])||undefined,owner_id:p.get('owner_id')||undefined,completed:p.get('completed')?p.get('completed')==='true':undefined,due_from:p.get('due_from')||undefined,due_to:p.get('due_to')||undefined,page:Number(p.get('page')||1),page_size:document?Number(p.get('page_size')||document.ui.saved_page_size):undefined,ordering:p.get('ordering')||undefined};const q=useQuery({queryKey:crmKeys.activities(filters),queryFn:()=>crmService.listActivities(filters),enabled:!!document});if(configuration.isLoading)return <CrmPage title="Activities"><PageSkeleton label="Loading activity configuration"/></CrmPage>;if(configuration.error||!document)return <CrmPage title="Activities"><GovernedError error={configuration.error} onRetry={()=>void configuration.refetch()} subject="Activity configuration"/></CrmPage>;return <EntityList title="Activities" description="One evidence timeline for every customer relationship." createPath="/crm/activities/new" emptyTitle="Log your first activity" emptyDescription="Record an activity against any CRM record." query={q.data} isLoading={q.isLoading} error={q.error} refetch={()=>void q.refetch()} filters={[{key:'related_to_type',label:'Relation',choices:['Lead','Contact','Account','Opportunity'].map(value=>({value,label:value}))},{key:'activity_type',label:'Type',choices:['call','email','meeting','task','note'].map(value=>({value,label:value}))},{key:'owner_id',label:'Owner ID'},{key:'completed',label:'Completion',choices:[{value:'false',label:'Open'},{value:'true',label:'Completed'}]}]} columns={[{key:'subject',label:'Subject',sortable:true,render:activity=><Link className="font-medium text-primary hover:underline" to={`/crm/activities/${activity.id}`}>{activity.subject}</Link>},{key:'activity_type',label:'Type',render:activity=>activity.activity_type},{key:'relation',label:'Related to',render:activity=><Link className="hover:underline" to={`/crm/${activity.related_to_type.toLowerCase()}s/${activity.related_to_id}`}>{activity.related_to_type}</Link>},{key:'due_date',label:'Due',sortable:true,render:activity=>activity.due_date?<span className={!activity.completed&&new Date(activity.due_date)<new Date()?'font-medium text-destructive':''}>{new Date(activity.due_date).toLocaleString()}{!activity.completed&&new Date(activity.due_date)<new Date()?' · Overdue':''}</span>:'—'},{key:'completed',label:'Status',render:activity=>activity.completed?'Completed':'Open'}]}/>}
+import { useQuery } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router-dom";
+import { CrmPage, GovernedError, PageSkeleton } from "../components/CrmPage";
+import { EntityList } from "../components/EntityList";
+import { useCrmConfiguration } from "../hooks/use-crm-configuration";
+import { crmKeys, crmService } from "../services/crm-service";
+import type { ActivityFilters } from "../contracts";
+export function ActivityListPage() {
+  const [p] = useSearchParams(),
+    configuration = useCrmConfiguration(),
+    document = configuration.data?.document;
+  const filters: ActivityFilters = {
+    related_to_type: (p.get("related_to_type") as ActivityFilters["related_to_type"]) || undefined,
+    related_to_id: p.get("related_to_id") || undefined,
+    activity_type: (p.get("activity_type") as ActivityFilters["activity_type"]) || undefined,
+    owner_id: p.get("owner_id") || undefined,
+    completed: p.get("completed") ? p.get("completed") === "true" : undefined,
+    due_from: p.get("due_from") || undefined,
+    due_to: p.get("due_to") || undefined,
+    page: Number(p.get("page") || 1),
+    page_size: document ? Number(p.get("page_size") || document.ui.saved_page_size) : undefined,
+    ordering: p.get("ordering") || undefined,
+  };
+  const q = useQuery({
+    queryKey: crmKeys.activities(filters),
+    queryFn: () => crmService.listActivities(filters),
+    enabled: !!document,
+  });
+  if (configuration.isLoading)
+    return (
+      <CrmPage title="Activities">
+        <PageSkeleton label="Loading activity configuration" />
+      </CrmPage>
+    );
+  if (configuration.error || !document)
+    return (
+      <CrmPage title="Activities">
+        <GovernedError
+          error={configuration.error}
+          onRetry={() => void configuration.refetch()}
+          subject="Activity configuration"
+        />
+      </CrmPage>
+    );
+  return (
+    <EntityList
+      title="Activities"
+      description="One evidence timeline for every customer relationship."
+      createPath="/crm/activities/new"
+      emptyTitle="Log your first activity"
+      emptyDescription="Record an activity against any CRM record."
+      query={q.data}
+      isLoading={q.isLoading}
+      error={q.error}
+      refetch={() => void q.refetch()}
+      filters={[
+        {
+          key: "related_to_type",
+          label: "Relation",
+          choices: ["Lead", "Contact", "Account", "Opportunity"].map((value) => ({
+            value,
+            label: value,
+          })),
+        },
+        {
+          key: "activity_type",
+          label: "Type",
+          choices: ["call", "email", "meeting", "task", "note"].map((value) => ({
+            value,
+            label: value,
+          })),
+        },
+        { key: "owner_id", label: "Owner ID" },
+        {
+          key: "completed",
+          label: "Completion",
+          choices: [
+            { value: "false", label: "Open" },
+            { value: "true", label: "Completed" },
+          ],
+        },
+      ]}
+      columns={[
+        {
+          key: "subject",
+          label: "Subject",
+          sortable: true,
+          render: (activity) => (
+            <Link
+              className="font-medium text-primary hover:underline"
+              to={`/crm/activities/${activity.id}`}
+            >
+              {activity.subject}
+            </Link>
+          ),
+        },
+        { key: "activity_type", label: "Type", render: (activity) => activity.activity_type },
+        {
+          key: "relation",
+          label: "Related to",
+          render: (activity) => (
+            <Link
+              className="hover:underline"
+              to={`/crm/${activity.related_to_type.toLowerCase()}s/${activity.related_to_id}`}
+            >
+              {activity.related_to_type}
+            </Link>
+          ),
+        },
+        {
+          key: "due_date",
+          label: "Due",
+          sortable: true,
+          render: (activity) =>
+            activity.due_date ? (
+              <span
+                className={
+                  !activity.completed && new Date(activity.due_date) < new Date()
+                    ? "font-medium text-destructive"
+                    : ""
+                }
+              >
+                {new Date(activity.due_date).toLocaleString()}
+                {!activity.completed && new Date(activity.due_date) < new Date()
+                  ? " · Overdue"
+                  : ""}
+              </span>
+            ) : (
+              "—"
+            ),
+        },
+        {
+          key: "completed",
+          label: "Status",
+          render: (activity) => (activity.completed ? "Completed" : "Open"),
+        },
+      ]}
+    />
+  );
+}

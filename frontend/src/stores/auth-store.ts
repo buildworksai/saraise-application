@@ -4,8 +4,8 @@
  * Manages authentication state and session management.
  * Sessions establish identity only - no authorization state cached.
  */
-import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 
 export interface User {
   id: string;
@@ -30,7 +30,7 @@ interface AuthState {
 }
 
 export const useAuthStore = create<AuthState>()(
-    persist(
+  persist(
     (set) => ({
       user: null,
       isAuthenticated: false,
@@ -42,7 +42,7 @@ export const useAuthStore = create<AuthState>()(
       setLoading: (isLoading) => set({ isLoading }),
     }),
     {
-      name: 'auth-storage',
+      name: "auth-storage",
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({ user: state.user, isAuthenticated: state.isAuthenticated }),
     }

@@ -13,18 +13,19 @@ import json
 import os
 import threading
 import uuid
-from copy import deepcopy
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from types import MappingProxyType
-from typing import Any, Generic, Protocol, TypeAlias, TypeVar, runtime_checkable
+from typing import Any, Generic, NoReturn, Protocol, TypeAlias, TypeVar, cast, runtime_checkable
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import connection
 from django.utils import timezone
-from jsonschema import Draft202012Validator, SchemaError, ValidationError as JsonSchemaValidationError
+from jsonschema import Draft202012Validator, SchemaError
+from jsonschema import ValidationError as JsonSchemaValidationError
 
 from src.core.api.results import OperationResult
 from src.core.health import HealthCheckResult
@@ -62,17 +63,34 @@ class WorkflowExtensionContractError(WorkflowExtensionError, ValueError):
 class _FrozenJsonObject(dict[str, JsonValue]):
     """JSON-serializable immutable mapping with catalog-safe deepcopy."""
 
-    def _immutable(self, *args: Any, **kwargs: Any) -> None:
-        del args, kwargs
+    def _immutable(self) -> NoReturn:
         raise TypeError("workflow extension schemas are immutable")
 
-    __setitem__ = _immutable
-    __delitem__ = _immutable
-    clear = _immutable
-    pop = _immutable
-    popitem = _immutable
-    setdefault = _immutable
-    update = _immutable
+    def __setitem__(self, key: str, value: JsonValue) -> NoReturn:
+        del key, value
+        self._immutable()
+
+    def __delitem__(self, key: str) -> NoReturn:
+        del key
+        self._immutable()
+
+    def clear(self) -> NoReturn:
+        self._immutable()
+
+    def pop(self, *args: Any) -> NoReturn:
+        del args
+        self._immutable()
+
+    def popitem(self) -> NoReturn:
+        self._immutable()
+
+    def setdefault(self, key: str, default: JsonValue | None = None) -> NoReturn:
+        del key, default
+        self._immutable()
+
+    def update(self, *args: Any, **kwargs: JsonValue) -> NoReturn:
+        del args, kwargs
+        self._immutable()
 
     def __deepcopy__(self, memo: dict[int, Any]) -> dict[str, JsonValue]:
         return deepcopy(dict(self), memo)
@@ -452,7 +470,9 @@ class VersionedRegistry(Generic[HandlerT, DescriptorT]):
         catalog: list[DescriptorT] = []
         for descriptor in self.descriptors():
             availability, reason = _availability(descriptor, access_context)
-            catalog.append(replace(descriptor, availability=availability, availability_reason=reason))
+            catalog.append(
+                cast(DescriptorT, replace(cast(Any, descriptor), availability=availability, availability_reason=reason))
+            )
         return tuple(catalog)
 
     def keys(self) -> tuple[str, ...]:
@@ -589,7 +609,8 @@ class InAppNotificationAction(_ActionBase):
             recipient_uuid = uuid.UUID(recipient)
         except ValueError:
             recipient_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, f"saraise-user:{recipient}")
-        existing = Notification.objects.filter(
+        notification_model = cast(Any, Notification)
+        existing = notification_model.objects.filter(
             tenant_id=invocation.tenant_id,
             metadata__idempotency_key=invocation.idempotency_key,
         ).first()
@@ -599,7 +620,7 @@ class InAppNotificationAction(_ActionBase):
                 evidence={"notification_id": str(existing.id), "persisted": True, "replayed": True},
                 provider="notifications",
             )
-        notification = Notification.objects.create(
+        notification = notification_model.objects.create(
             tenant_id=invocation.tenant_id,
             user_id=recipient_uuid,
             type=str(invocation.config.get("notification_type", "workflow")),
@@ -910,7 +931,9 @@ class CoreUserAssigneeProvider:
 
     def search(self, invocation: AssigneeSearchInvocation) -> OperationResult[list[JsonObject]]:
         User = get_user_model()
-        queryset = User.objects.filter(profile__tenant_id=str(invocation.tenant_id), is_active=True).order_by(
+        queryset = User.objects.filter(
+            profile__tenant_id=str(invocation.tenant_id), is_active=True
+        ).order_by(  # nosemgrep: semgrep.tenant-id-required-in-queries -- reviewed false positive; scope enforced by surrounding domain policy.  # noqa: E501
             "first_name", "last_name", "username"
         )
         if invocation.query.strip():

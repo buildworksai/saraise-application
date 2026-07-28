@@ -319,7 +319,9 @@ class _ServiceBase:
                 "Validated tenant resilience configuration is unavailable.",
                 status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             ) from exc
-        return self.resilience.execute(f"{tenant_id}:{key}", operation, policy)
+        return self.resilience.execute(  # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query  # noqa: E501
+            f"{tenant_id}:{key}", operation, policy
+        )
 
     def _provider_ready(self, tenant_id: UUID, adapter: object) -> None:
         try:

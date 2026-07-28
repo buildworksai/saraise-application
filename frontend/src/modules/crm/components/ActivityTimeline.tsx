@@ -1,2 +1,58 @@
-import { Link } from 'react-router-dom'; import type { Activity } from '../contracts';
-export function ActivityTimeline({activities,loading,error,onRetry}:{activities?:readonly Activity[];loading?:boolean;error?:unknown;onRetry?:()=>void}){if(loading)return <div role="status" className="space-y-3"><span className="sr-only">Loading activity timeline</span>{[1,2,3].map(i=><div key={i} className="h-16 animate-pulse rounded bg-muted"/>)}</div>;if(error)return <div role="alert" className="rounded border p-4 text-sm">Timeline is unavailable independently of this record. <button onClick={onRetry} className="font-medium text-primary underline">Retry timeline</button></div>;if(!activities?.length)return <p className="rounded border border-dashed p-6 text-center text-sm text-muted-foreground">No activity evidence has been recorded.</p>;return <ol className="space-y-3">{activities.map(a=><li key={a.id} className="border-l-2 pl-4"><div className="flex justify-between gap-4"><Link className="font-medium hover:underline" to={`/crm/activities/${a.id}`}>{a.subject}</Link><span className="text-xs text-muted-foreground">{new Date(a.created_at).toLocaleString()}</span></div><p className="text-sm text-muted-foreground">{a.activity_type} · {a.completed?'Completed':'Open'}{a.outcome?` · ${a.outcome}`:''}</p></li>)}</ol>}
+import { Link } from "react-router-dom";
+import type { Activity } from "../contracts";
+export function ActivityTimeline({
+  activities,
+  loading,
+  error,
+  onRetry,
+}: {
+  activities?: readonly Activity[];
+  loading?: boolean;
+  error?: unknown;
+  onRetry?: () => void;
+}) {
+  if (loading)
+    return (
+      <div role="status" className="space-y-3">
+        <span className="sr-only">Loading activity timeline</span>
+        {[1, 2, 3].map((i) => (
+          <div key={i} className="h-16 animate-pulse rounded bg-muted" />
+        ))}
+      </div>
+    );
+  if (error)
+    return (
+      <div role="alert" className="rounded border p-4 text-sm">
+        Timeline is unavailable independently of this record.{" "}
+        <button onClick={onRetry} className="font-medium text-primary underline">
+          Retry timeline
+        </button>
+      </div>
+    );
+  if (!activities?.length)
+    return (
+      <p className="rounded border border-dashed p-6 text-center text-sm text-muted-foreground">
+        No activity evidence has been recorded.
+      </p>
+    );
+  return (
+    <ol className="space-y-3">
+      {activities.map((a) => (
+        <li key={a.id} className="border-l-2 pl-4">
+          <div className="flex justify-between gap-4">
+            <Link className="font-medium hover:underline" to={`/crm/activities/${a.id}`}>
+              {a.subject}
+            </Link>
+            <span className="text-xs text-muted-foreground">
+              {new Date(a.created_at).toLocaleString()}
+            </span>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {a.activity_type} · {a.completed ? "Completed" : "Open"}
+            {a.outcome ? ` · ${a.outcome}` : ""}
+          </p>
+        </li>
+      ))}
+    </ol>
+  );
+}

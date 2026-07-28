@@ -12,12 +12,7 @@ from src.core.async_jobs.services import HandlerAlreadyRegistered, register_hand
 from src.core.observability import TaskContext, bind_task_context
 from src.core.tenancy import tenant_context
 
-from .services import (
-    DEDUPLICATION_SCAN_COMMAND,
-    QUALITY_SCAN_COMMAND,
-    DataQualityService,
-    MatchingService,
-)
+from .services import DEDUPLICATION_SCAN_COMMAND, QUALITY_SCAN_COMMAND, DataQualityService, MatchingService
 
 logger = logging.getLogger("saraise.master_data_management")
 REGISTERED_COMMANDS: Final = (QUALITY_SCAN_COMMAND, DEDUPLICATION_SCAN_COMMAND)

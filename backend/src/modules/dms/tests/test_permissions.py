@@ -12,17 +12,17 @@ from src.core.access.decision import AccessDecision, AccessReasonCode
 from src.core.access.permissions import RequiresAccess
 from src.modules.dms import permissions as permission_contract
 from src.modules.dms.permissions import (
-    ActionAccessMixin,
     CONFIGURATION_ACTION_PERMISSIONS,
     DOCUMENT_ACTION_PERMISSIONS,
     DOCUMENT_PERMISSION_ACTION_PERMISSIONS,
     FOLDER_ACTION_PERMISSIONS,
     HEALTH_ACTION_PERMISSIONS,
-    PERMISSIONS,
     PERMISSION_QUOTAS,
+    PERMISSIONS,
     PRINCIPAL_ACTION_PERMISSIONS,
     SHARE_ACTION_PERMISSIONS,
     VERSION_ACTION_PERMISSIONS,
+    ActionAccessMixin,
     SessionAuthentication401,
 )
 

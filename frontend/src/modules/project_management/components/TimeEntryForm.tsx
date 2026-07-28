@@ -1,1 +1,1 @@
-export {TimeEntryForm} from './ProjectForms';
+export { TimeEntryForm } from "./ProjectForms";

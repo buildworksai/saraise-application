@@ -39,12 +39,18 @@ export interface ApiV2Error {
   readonly meta?: { readonly correlation_id?: string; readonly timestamp?: ISODateTime };
 }
 
-export type BudgetStatus = 'draft' | 'pending_approval' | 'approved' | 'rejected' | 'revision' | 'closed';
-export type BudgetType = 'operating' | 'capital' | 'project' | 'departmental';
-export type PeriodType = 'annual' | 'monthly' | 'quarterly';
-export type AlertType = 'over_budget' | 'approaching_limit' | 'underspend';
-export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
-export type NotificationStatus = 'pending' | 'sent' | 'failed' | 'unavailable';
+export type BudgetStatus =
+  | "draft"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "revision"
+  | "closed";
+export type BudgetType = "operating" | "capital" | "project" | "departmental";
+export type PeriodType = "annual" | "monthly" | "quarterly";
+export type AlertType = "over_budget" | "approaching_limit" | "underspend";
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "cancelled";
+export type NotificationStatus = "pending" | "sent" | "failed" | "unavailable";
 
 export interface BudgetListItem {
   readonly id: UUID;
@@ -78,7 +84,7 @@ export interface BudgetLine {
   readonly actual_amount: DecimalString;
   readonly variance: DecimalString;
   readonly actuals_as_of: ISODateTime | null;
-  readonly source: 'manual' | 'accounting_sync';
+  readonly source: "manual" | "accounting_sync";
   readonly created_at: ISODateTime;
   readonly updated_at: ISODateTime;
 }
@@ -242,7 +248,9 @@ export interface TransitionRequest {
   readonly notes?: string;
 }
 
-export interface RejectRequest extends TransitionRequest { readonly reason: string }
+export interface RejectRequest extends TransitionRequest {
+  readonly reason: string;
+}
 
 export interface BudgetAvailabilityRequest {
   readonly account_code: string;
@@ -264,21 +272,29 @@ export interface BudgetAvailabilityResult {
   readonly unbudgeted: boolean;
 }
 
-export interface ActualsSyncRequest { readonly idempotency_key: string }
+export interface ActualsSyncRequest {
+  readonly idempotency_key: string;
+}
 export interface AcceptedJob {
   readonly id: UUID;
   readonly job_type: string;
-  readonly status: 'queued' | 'running' | 'succeeded' | 'failed' | 'timed_out' | 'cancelled';
+  readonly status: "queued" | "running" | "succeeded" | "failed" | "timed_out" | "cancelled";
   readonly created_at: ISODateTime;
 }
 
 export interface HealthResult {
-  readonly status: 'healthy' | 'degraded' | 'unhealthy';
-  readonly dependencies: Readonly<Record<string, 'healthy' | 'degraded' | 'unhealthy' | 'unavailable'>>;
+  readonly status: "healthy" | "degraded" | "unhealthy";
+  readonly dependencies: Readonly<
+    Record<string, "healthy" | "degraded" | "unhealthy" | "unavailable">
+  >;
   readonly checked_at: ISODateTime;
 }
 
-export interface PageFilters { readonly page?: number; readonly page_size?: number; readonly ordering?: string }
+export interface PageFilters {
+  readonly page?: number;
+  readonly page_size?: number;
+  readonly ordering?: string;
+}
 export interface BudgetListFilters extends PageFilters {
   readonly fiscal_year?: number;
   readonly budget_type?: BudgetType;
@@ -290,12 +306,43 @@ export interface BudgetListFilters extends PageFilters {
   readonly end_date_to?: ISODate;
   readonly search?: string;
 }
-export interface BudgetLineFilters extends PageFilters { readonly budget_id: UUID; readonly account_code?: string; readonly account_id?: UUID; readonly period_type?: PeriodType; readonly period_number?: number; readonly source?: 'manual' | 'accounting_sync' }
-export interface ApprovalFilters extends PageFilters { readonly budget_id?: UUID; readonly approver_id?: UUID; readonly status?: ApprovalStatus; readonly approval_level?: number }
-export interface VarianceAlertFilters extends PageFilters { readonly budget_id?: UUID; readonly budget_line_id?: UUID; readonly alert_type?: AlertType; readonly notification_status?: NotificationStatus; readonly acknowledged?: boolean; readonly date_from?: ISODate; readonly date_to?: ISODate }
-export interface VarianceFilters { readonly period_type?: PeriodType; readonly period_number?: number; readonly account_code?: string; readonly threshold_percentage?: number }
-export interface VarianceAlertGenerateRequest { readonly threshold_percentage: DecimalString; readonly alert_type: AlertType; readonly idempotency_key: string }
-export interface VarianceAlertAcknowledgeRequest { readonly acknowledged: true }
+export interface BudgetLineFilters extends PageFilters {
+  readonly budget_id: UUID;
+  readonly account_code?: string;
+  readonly account_id?: UUID;
+  readonly period_type?: PeriodType;
+  readonly period_number?: number;
+  readonly source?: "manual" | "accounting_sync";
+}
+export interface ApprovalFilters extends PageFilters {
+  readonly budget_id?: UUID;
+  readonly approver_id?: UUID;
+  readonly status?: ApprovalStatus;
+  readonly approval_level?: number;
+}
+export interface VarianceAlertFilters extends PageFilters {
+  readonly budget_id?: UUID;
+  readonly budget_line_id?: UUID;
+  readonly alert_type?: AlertType;
+  readonly notification_status?: NotificationStatus;
+  readonly acknowledged?: boolean;
+  readonly date_from?: ISODate;
+  readonly date_to?: ISODate;
+}
+export interface VarianceFilters {
+  readonly period_type?: PeriodType;
+  readonly period_number?: number;
+  readonly account_code?: string;
+  readonly threshold_percentage?: number;
+}
+export interface VarianceAlertGenerateRequest {
+  readonly threshold_percentage: DecimalString;
+  readonly alert_type: AlertType;
+  readonly idempotency_key: string;
+}
+export interface VarianceAlertAcknowledgeRequest {
+  readonly acknowledged: true;
+}
 
 export interface PaginatedResult<T> {
   readonly items: readonly T[];
@@ -304,10 +351,11 @@ export interface PaginatedResult<T> {
   readonly receivedAt: ISODateTime;
 }
 
-export const MODULE_API_PREFIX = '/api/v2/budget-management';
+export const MODULE_API_PREFIX = "/api/v2/budget-management";
 export const ENDPOINTS = {
   BUDGETS: {
-    LIST: `${MODULE_API_PREFIX}/budgets/`, CREATE: `${MODULE_API_PREFIX}/budgets/`,
+    LIST: `${MODULE_API_PREFIX}/budgets/`,
+    CREATE: `${MODULE_API_PREFIX}/budgets/`,
     DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/budgets/${id}/` as const,
     UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/budgets/${id}/` as const,
     DELETE: (id: UUID) => `${MODULE_API_PREFIX}/budgets/${id}/` as const,
@@ -320,44 +368,77 @@ export const ENDPOINTS = {
     VARIANCE: (id: UUID) => `${MODULE_API_PREFIX}/budgets/${id}/variance/` as const,
     SYNC_ACTUALS: (id: UUID) => `${MODULE_API_PREFIX}/budgets/${id}/sync-actuals/` as const,
   },
-  BUDGET_LINES: { LIST: `${MODULE_API_PREFIX}/budget-lines/`, CREATE: `${MODULE_API_PREFIX}/budget-lines/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/budget-lines/${id}/` as const, UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/budget-lines/${id}/` as const, DELETE: (id: UUID) => `${MODULE_API_PREFIX}/budget-lines/${id}/` as const },
-  APPROVALS: { LIST: `${MODULE_API_PREFIX}/approvals/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/approvals/${id}/` as const },
-  VARIANCE_ALERTS: { LIST: `${MODULE_API_PREFIX}/variance-alerts/`, DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/variance-alerts/${id}/` as const, GENERATE: `${MODULE_API_PREFIX}/variance-alerts/generate/`, ACKNOWLEDGE: (id: UUID) => `${MODULE_API_PREFIX}/variance-alerts/${id}/acknowledge/` as const },
+  BUDGET_LINES: {
+    LIST: `${MODULE_API_PREFIX}/budget-lines/`,
+    CREATE: `${MODULE_API_PREFIX}/budget-lines/`,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/budget-lines/${id}/` as const,
+    UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/budget-lines/${id}/` as const,
+    DELETE: (id: UUID) => `${MODULE_API_PREFIX}/budget-lines/${id}/` as const,
+  },
+  APPROVALS: {
+    LIST: `${MODULE_API_PREFIX}/approvals/`,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/approvals/${id}/` as const,
+  },
+  VARIANCE_ALERTS: {
+    LIST: `${MODULE_API_PREFIX}/variance-alerts/`,
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/variance-alerts/${id}/` as const,
+    GENERATE: `${MODULE_API_PREFIX}/variance-alerts/generate/`,
+    ACKNOWLEDGE: (id: UUID) => `${MODULE_API_PREFIX}/variance-alerts/${id}/acknowledge/` as const,
+  },
   AVAILABILITY: `${MODULE_API_PREFIX}/availability/`,
   HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
 
 export const ROUTES = {
-  BUDGETS: '/budget-management/budgets', CREATE: '/budget-management/budgets/new',
+  BUDGETS: "/budget-management/budgets",
+  CREATE: "/budget-management/budgets/new",
   DETAIL: (id: UUID) => `/budget-management/budgets/${id}` as const,
   EDIT: (id: UUID) => `/budget-management/budgets/${id}/edit` as const,
   ALLOCATIONS: (id: UUID) => `/budget-management/budgets/${id}/allocations` as const,
-  APPROVALS: '/budget-management/approvals', VARIANCE: '/budget-management/variance', REPORT: '/budget-management/report',
+  APPROVALS: "/budget-management/approvals",
+  VARIANCE: "/budget-management/variance",
+  REPORT: "/budget-management/report",
 } as const;
 
 export const QUERY_KEYS = {
-  root: ['budget-management'] as const,
-  budgets: (filters: BudgetListFilters = {}) => ['budget-management', 'budgets', stableFilters(filters)] as const,
-  budget: (id: UUID) => ['budget-management', 'budget', id] as const,
-  lines: (filters: BudgetLineFilters) => ['budget-management', 'lines', stableFilters(filters)] as const,
-  approvals: (filters: ApprovalFilters = {}) => ['budget-management', 'approvals', stableFilters(filters)] as const,
-  variance: (id: UUID, filters: VarianceFilters = {}) => ['budget-management', 'variance', id, stableFilters(filters)] as const,
-  alerts: (filters: VarianceAlertFilters = {}) => ['budget-management', 'alerts', stableFilters(filters)] as const,
+  root: ["budget-management"] as const,
+  budgets: (filters: BudgetListFilters = {}) =>
+    ["budget-management", "budgets", stableFilters(filters)] as const,
+  budget: (id: UUID) => ["budget-management", "budget", id] as const,
+  lines: (filters: BudgetLineFilters) =>
+    ["budget-management", "lines", stableFilters(filters)] as const,
+  approvals: (filters: ApprovalFilters = {}) =>
+    ["budget-management", "approvals", stableFilters(filters)] as const,
+  variance: (id: UUID, filters: VarianceFilters = {}) =>
+    ["budget-management", "variance", id, stableFilters(filters)] as const,
+  alerts: (filters: VarianceAlertFilters = {}) =>
+    ["budget-management", "alerts", stableFilters(filters)] as const,
 };
 
 type QueryValue = string | number | boolean | undefined;
 function queryEntries(filters: object): readonly (readonly [string, QueryValue])[] {
   return Object.keys(filters).flatMap((key) => {
     const value: unknown = Object.getOwnPropertyDescriptor(filters, key)?.value;
-    return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === undefined ? [[key, value] as const] : [];
+    return typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean" ||
+      value === undefined
+      ? [[key, value] as const]
+      : [];
   });
 }
 export function withQuery(path: string, filters: object): string {
   const params = new URLSearchParams();
-  queryEntries(filters).forEach(([key, value]) => { if (value !== undefined && value !== '') params.set(key, String(value)); });
+  queryEntries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  });
   const query = params.toString();
   return query ? `${path}?${query}` : path;
 }
 function stableFilters(filters: object): string {
-  return queryEntries(filters).filter(([, value]) => value !== undefined && value !== '').sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) => `${key}:${String(value)}`).join('|');
+  return queryEntries(filters)
+    .filter(([, value]) => value !== undefined && value !== "")
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => `${key}:${String(value)}`)
+    .join("|");
 }

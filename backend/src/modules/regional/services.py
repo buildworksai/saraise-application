@@ -11,8 +11,8 @@ import uuid
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from django.core.exceptions import ValidationError
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.utils import timezone
@@ -72,9 +72,7 @@ DEFAULT_CONFIGURATION_DOCUMENT: dict[str, Any] = {
 
 _SAFE_RESOURCE_CONFIG_KEYS = frozenset({"country_code", "jurisdiction_type", "compliance_tags"})
 _SAFE_FILTERS = frozenset({"is_active", "name"})
-_SAFE_ORDERING = frozenset(
-    {"name", "-name", "created_at", "-created_at", "updated_at", "-updated_at"}
-)
+_SAFE_ORDERING = frozenset({"name", "-name", "created_at", "-created_at", "updated_at", "-updated_at"})
 _SAFE_SEARCH_FIELDS = frozenset({"name", "description"})
 _SAFE_JURISDICTIONS = frozenset({"country", "state", "province", "economic_zone"})
 _SAFE_ROLES = frozenset({"tenant_admin", "tenant_user"})
@@ -187,18 +185,12 @@ def validate_configuration_document(value: Any) -> dict[str, Any]:
         if set(group_value) != set(expected_keys):
             missing = sorted(set(expected_keys) - set(group_value))
             unknown = sorted(set(group_value) - set(expected_keys))
-            raise ValidationError(
-                {f"document.{group}": f"Fields mismatch; missing={missing}, unknown={unknown}."}
-            )
+            raise ValidationError({f"document.{group}": f"Fields mismatch; missing={missing}, unknown={unknown}."})
         groups[group] = group_value
 
     resource = groups["resource"]
-    resource["name_min_length"] = _require_int(
-        resource["name_min_length"], "document.resource.name_min_length", 1, 64
-    )
-    resource["name_max_length"] = _require_int(
-        resource["name_max_length"], "document.resource.name_max_length", 1, 512
-    )
+    resource["name_min_length"] = _require_int(resource["name_min_length"], "document.resource.name_min_length", 1, 64)
+    resource["name_max_length"] = _require_int(resource["name_max_length"], "document.resource.name_max_length", 1, 512)
     if resource["name_min_length"] > resource["name_max_length"]:
         raise ValidationError({"document.resource.name_min_length": "Must not exceed name_max_length."})
     resource["name_default"] = _require_string(
@@ -207,9 +199,7 @@ def validate_configuration_document(value: Any) -> dict[str, Any]:
         resource["name_max_length"],
     )
     if len(resource["name_default"]) < resource["name_min_length"]:
-        raise ValidationError(
-            {"document.resource.name_default": "Must satisfy name_min_length."}
-        )
+        raise ValidationError({"document.resource.name_default": "Must satisfy name_min_length."})
     resource["description_default"] = _require_string(
         resource["description_default"],
         "document.resource.description_default",
@@ -220,15 +210,9 @@ def validate_configuration_document(value: Any) -> dict[str, Any]:
         resource["description_max_length"], "document.resource.description_max_length", 0, 10000
     )
     if len(resource["description_default"]) > resource["description_max_length"]:
-        raise ValidationError(
-            {"document.resource.description_default": "Must fit within description_max_length."}
-        )
-    resource["default_active"] = _require_bool(
-        resource["default_active"], "document.resource.default_active"
-    )
-    resource["default_config"] = _require_object(
-        resource["default_config"], "document.resource.default_config"
-    )
+        raise ValidationError({"document.resource.description_default": "Must fit within description_max_length."})
+    resource["default_active"] = _require_bool(resource["default_active"], "document.resource.default_active")
+    resource["default_config"] = _require_object(resource["default_config"], "document.resource.default_config")
     resource["allowed_config_keys"] = _require_string_list(
         resource["allowed_config_keys"],
         "document.resource.allowed_config_keys",
@@ -254,9 +238,7 @@ def validate_configuration_document(value: Any) -> dict[str, Any]:
         allowlist=_SAFE_SEARCH_FIELDS,
         maximum_items=len(_SAFE_SEARCH_FIELDS),
     )
-    default_config_unknown = set(resource["default_config"]) - set(
-        resource["allowed_config_keys"]
-    )
+    default_config_unknown = set(resource["default_config"]) - set(resource["allowed_config_keys"])
     if default_config_unknown:
         raise ValidationError(
             {
@@ -266,78 +248,48 @@ def validate_configuration_document(value: Any) -> dict[str, Any]:
                 )
             }
         )
-    default_config_size = len(
-        json.dumps(
-            resource["default_config"], sort_keys=True, separators=(",", ":")
-        ).encode()
-    )
+    default_config_size = len(json.dumps(resource["default_config"], sort_keys=True, separators=(",", ":")).encode())
     if default_config_size > resource["max_config_bytes"]:
-        raise ValidationError(
-            {"document.resource.default_config": "Exceeds max_config_bytes."}
-        )
+        raise ValidationError({"document.resource.default_config": "Exceeds max_config_bytes."})
     default_country = resource["default_config"].get("country_code")
     if default_country is not None and (
         not isinstance(default_country, str)
         or len(default_country.strip()) != 2
         or not default_country.strip().isalpha()
     ):
-        raise ValidationError(
-            {"document.resource.default_config.country_code": "Must be a two-letter country code."}
-        )
+        raise ValidationError({"document.resource.default_config.country_code": "Must be a two-letter country code."})
     if default_country is not None:
         resource["default_config"]["country_code"] = default_country.strip().upper()
     default_jurisdiction = resource["default_config"].get("jurisdiction_type")
-    if (
-        default_jurisdiction is not None
-        and default_jurisdiction not in resource["allowed_jurisdiction_types"]
-    ):
+    if default_jurisdiction is not None and default_jurisdiction not in resource["allowed_jurisdiction_types"]:
         raise ValidationError(
-            {
-                "document.resource.default_config.jurisdiction_type": (
-                    "Must be enabled by allowed_jurisdiction_types."
-                )
-            }
+            {"document.resource.default_config.jurisdiction_type": ("Must be enabled by allowed_jurisdiction_types.")}
         )
     default_tags = resource["default_config"].get("compliance_tags")
     if default_tags is not None and (
         not isinstance(default_tags, list)
         or len(default_tags) > resource["max_compliance_tags"]
-        or any(
-            not isinstance(tag, str) or not tag.strip() or len(tag.strip()) > 64
-            for tag in default_tags
-        )
+        or any(not isinstance(tag, str) or not tag.strip() or len(tag.strip()) > 64 for tag in default_tags)
     ):
         raise ValidationError(
-            {
-                "document.resource.default_config.compliance_tags": (
-                    "Must satisfy max_compliance_tags and text limits."
-                )
-            }
+            {"document.resource.default_config.compliance_tags": ("Must satisfy max_compliance_tags and text limits.")}
         )
 
     workflow = groups["workflow"]
-    workflow["activation_state"] = _require_bool(
-        workflow["activation_state"], "document.workflow.activation_state"
-    )
+    workflow["activation_state"] = _require_bool(workflow["activation_state"], "document.workflow.activation_state")
     workflow["deactivation_state"] = _require_bool(
         workflow["deactivation_state"], "document.workflow.deactivation_state"
     )
     if workflow["activation_state"] == workflow["deactivation_state"]:
-        raise ValidationError(
-            {"document.workflow": "Activation and deactivation states must be different."}
-        )
+        raise ValidationError({"document.workflow": "Activation and deactivation states must be different."})
     workflow["require_delete_confirmation"] = _require_bool(
         workflow["require_delete_confirmation"],
         "document.workflow.require_delete_confirmation",
     )
 
     api = groups["api"]
-    api["default_page_size"] = _require_int(
-        api["default_page_size"], "document.api.default_page_size", 1, 200
-    )
-    api["max_page_size"] = _require_int(
-        api["max_page_size"], "document.api.max_page_size", 1, 500
-    )
+    api["default_page_size"] = _require_int(api["default_page_size"], "document.api.default_page_size", 1, 200)
+    api["max_page_size"] = _require_int(api["max_page_size"], "document.api.max_page_size", 1, 500)
     if api["default_page_size"] > api["max_page_size"]:
         raise ValidationError({"document.api.default_page_size": "Must not exceed max_page_size."})
     api["allowed_filters"] = _require_string_list(
@@ -377,9 +329,7 @@ def validate_configuration_document(value: Any) -> dict[str, Any]:
         or len(cohorts) > 50
         or any(not isinstance(item, str) or not item.strip() or len(item.strip()) > 64 for item in cohorts)
     ):
-        raise ValidationError(
-            {"document.rollout.cohorts": "Must contain 1 through 50 non-empty cohort identifiers."}
-        )
+        raise ValidationError({"document.rollout.cohorts": "Must contain 1 through 50 non-empty cohort identifiers."})
     rollout["cohorts"] = list(dict.fromkeys(item.strip() for item in cohorts))
     return copy.deepcopy(groups)
 
@@ -449,9 +399,9 @@ class RegionalConfigurationService:
         actor = _actor(actor_id)
         correlation = _correlation_uuid(correlation_id or str(uuid.uuid4()))
         with transaction.atomic():
-            existing = RegionalConfiguration.objects.select_for_update().filter(
-                tenant_id=tenant, environment=env
-            ).first()
+            existing = (
+                RegionalConfiguration.objects.select_for_update().filter(tenant_id=tenant, environment=env).first()
+            )
             if existing:
                 return existing
             document = validate_configuration_document(DEFAULT_CONFIGURATION_DOCUMENT)
@@ -515,9 +465,7 @@ class RegionalConfigurationService:
         actor = _actor(actor_id)
         correlation = _correlation_uuid(correlation_id)
         with transaction.atomic():
-            current = cls.get_or_create(
-                tenant, env, actor_id=actor, correlation_id=correlation
-            )
+            current = cls.get_or_create(tenant, env, actor_id=actor, correlation_id=correlation)
             current = RegionalConfiguration.objects.select_for_update().get(pk=current.pk)
             proposed = _require_object(document, "document")
             candidate = _merge_document(current.document, proposed) if partial else proposed
@@ -582,9 +530,7 @@ class RegionalConfigurationService:
         tenant = _as_uuid(tenant_id, "tenant_id")
         env = _environment(environment)
         version = _require_int(target_version, "version", 1, 2_147_483_647)
-        target = RegionalConfigurationVersion.objects.filter(
-            tenant_id=tenant, environment=env, version=version
-        ).first()
+        target = RegionalConfigurationVersion.objects.filter(tenant_id=tenant, environment=env, version=version).first()
         if target is None:
             raise ValidationError({"version": "Configuration version was not found for this tenant."})
         return cls.update(
@@ -661,14 +607,9 @@ class RegionalService:
         if (
             not rollout["enabled"]
             or normalized_role not in rollout["roles"]
-            or (
-                "all" not in rollout["cohorts"]
-                and normalized_cohort not in rollout["cohorts"]
-            )
+            or ("all" not in rollout["cohorts"] and normalized_cohort not in rollout["cohorts"])
         ):
-            raise DjangoPermissionDenied(
-                "The Regional capability is not enabled for this role and rollout cohort."
-            )
+            raise DjangoPermissionDenied("The Regional capability is not enabled for this role and rollout cohort.")
 
     @staticmethod
     def _validate_resource(
@@ -685,9 +626,7 @@ class RegionalService:
             int(resource_policy["name_max_length"]),
         )
         if len(normalized_name) < int(resource_policy["name_min_length"]):
-            raise ValidationError(
-                {"name": f"Must contain at least {resource_policy['name_min_length']} characters."}
-            )
+            raise ValidationError({"name": f"Must contain at least {resource_policy['name_min_length']} characters."})
         normalized_description = _require_string(
             description,
             "description",
@@ -708,9 +647,7 @@ class RegionalService:
                 raise ValidationError({"config.country_code": "Must be a two-letter country code."})
             normalized_config["country_code"] = country
         if "jurisdiction_type" in normalized_config:
-            jurisdiction = _require_string(
-                normalized_config["jurisdiction_type"], "config.jurisdiction_type", 64
-            )
+            jurisdiction = _require_string(normalized_config["jurisdiction_type"], "config.jurisdiction_type", 64)
             if jurisdiction not in resource_policy["allowed_jurisdiction_types"]:
                 raise ValidationError({"config.jurisdiction_type": "Not enabled by tenant configuration."})
             normalized_config["jurisdiction_type"] = jurisdiction
@@ -722,9 +659,7 @@ class RegionalService:
                 or len(tags) > maximum
                 or any(not isinstance(tag, str) or not tag.strip() or len(tag.strip()) > 64 for tag in tags)
             ):
-                raise ValidationError(
-                    {"config.compliance_tags": f"Must contain at most {maximum} bounded text tags."}
-                )
+                raise ValidationError({"config.compliance_tags": f"Must contain at most {maximum} bounded text tags."})
             normalized_config["compliance_tags"] = list(dict.fromkeys(tag.strip() for tag in tags))
         return normalized_name, normalized_description, normalized_config
 
@@ -779,9 +714,7 @@ class RegionalService:
         normalized_name, normalized_description, normalized_config = self._validate_resource(
             policy,
             name=policy["resource"]["name_default"] if name is None else name,
-            description=(
-                policy["resource"]["description_default"] if description is None else description
-            ),
+            description=(policy["resource"]["description_default"] if description is None else description),
             config=policy["resource"]["default_config"] if config is None else config,
         )
         fingerprint = hashlib.sha256(
@@ -807,13 +740,9 @@ class RegionalService:
             )
             if not created:
                 if replay.request_fingerprint != fingerprint:
-                    raise ValidationError(
-                        {"idempotency_key": "This key was already used with a different request."}
-                    )
+                    raise ValidationError({"idempotency_key": "This key was already used with a different request."})
                 if replay.resource_id is None:
-                    raise ValidationError(
-                        {"idempotency_key": "The original request has not completed; retry later."}
-                    )
+                    raise ValidationError({"idempotency_key": "The original request has not completed; retry later."})
                 return replay.resource
             resource = RegionalResource.objects.create(
                 tenant_id=tenant,
@@ -891,11 +820,15 @@ class RegionalService:
         if unknown:
             raise ValidationError({key: "This field cannot be updated." for key in sorted(unknown)})
         with transaction.atomic():
-            resource = RegionalResource.objects.select_for_update().filter(
-                id=_as_uuid(resource_id, "resource_id"),
-                tenant_id=_as_uuid(tenant_id, "tenant_id"),
-                deleted_at__isnull=True,
-            ).first()
+            resource = (
+                RegionalResource.objects.select_for_update()
+                .filter(
+                    id=_as_uuid(resource_id, "resource_id"),
+                    tenant_id=_as_uuid(tenant_id, "tenant_id"),
+                    deleted_at__isnull=True,
+                )
+                .first()
+            )
             if resource is None:
                 return None
             before = _resource_snapshot(resource)
@@ -930,11 +863,15 @@ class RegionalService:
         actor = _actor(actor_id)
         correlation = _correlation_uuid(correlation_id)
         with transaction.atomic():
-            resource = RegionalResource.objects.select_for_update().filter(
-                id=_as_uuid(resource_id, "resource_id"),
-                tenant_id=_as_uuid(tenant_id, "tenant_id"),
-                deleted_at__isnull=True,
-            ).first()
+            resource = (
+                RegionalResource.objects.select_for_update()
+                .filter(
+                    id=_as_uuid(resource_id, "resource_id"),
+                    tenant_id=_as_uuid(tenant_id, "tenant_id"),
+                    deleted_at__isnull=True,
+                )
+                .first()
+            )
             if resource is None:
                 return False
             before = _resource_snapshot(resource)
@@ -961,11 +898,15 @@ class RegionalService:
         actor = _actor(actor_id)
         correlation = _correlation_uuid(correlation_id)
         with transaction.atomic():
-            resource = RegionalResource.objects.select_for_update().filter(
-                id=_as_uuid(resource_id, "resource_id"),
-                tenant_id=_as_uuid(tenant_id, "tenant_id"),
-                deleted_at__isnull=False,
-            ).first()
+            resource = (
+                RegionalResource.objects.select_for_update()
+                .filter(
+                    id=_as_uuid(resource_id, "resource_id"),
+                    tenant_id=_as_uuid(tenant_id, "tenant_id"),
+                    deleted_at__isnull=False,
+                )
+                .first()
+            )
             if resource is None:
                 return None
             before = _resource_snapshot(resource)
@@ -996,11 +937,15 @@ class RegionalService:
         actor = _actor(actor_id)
         correlation = _correlation_uuid(correlation_id)
         with transaction.atomic():
-            resource = RegionalResource.objects.select_for_update().filter(
-                id=_as_uuid(resource_id, "resource_id"),
-                tenant_id=_as_uuid(tenant_id, "tenant_id"),
-                deleted_at__isnull=True,
-            ).first()
+            resource = (
+                RegionalResource.objects.select_for_update()
+                .filter(
+                    id=_as_uuid(resource_id, "resource_id"),
+                    tenant_id=_as_uuid(tenant_id, "tenant_id"),
+                    deleted_at__isnull=True,
+                )
+                .first()
+            )
             if resource is None:
                 return None
             before = _resource_snapshot(resource)

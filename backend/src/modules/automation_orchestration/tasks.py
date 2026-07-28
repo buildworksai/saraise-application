@@ -14,12 +14,7 @@ from datetime import timezone as datetime_timezone
 from typing import Any
 
 from src.core.async_jobs.models import AsyncJob
-from src.core.async_jobs.services import (
-    HandlerAlreadyRegistered,
-    HandlerNotRegistered,
-    get_handler,
-    register_handler,
-)
+from src.core.async_jobs.services import HandlerAlreadyRegistered, HandlerNotRegistered, get_handler, register_handler
 from src.core.tenancy import tenant_context_worker
 
 from .services import (

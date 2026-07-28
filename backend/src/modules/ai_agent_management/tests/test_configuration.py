@@ -11,10 +11,7 @@ from django.core.exceptions import ValidationError
 from rest_framework import status
 
 from src.core.access.permissions import RequiresAccess
-from src.modules.ai_agent_management.models import (
-    AgentManagementConfiguration,
-    AgentManagementConfigurationVersion,
-)
+from src.modules.ai_agent_management.models import AgentManagementConfiguration, AgentManagementConfigurationVersion
 from src.modules.ai_agent_management.services import ConfigurationService
 from src.modules.ai_agent_management.urls import router
 
@@ -101,9 +98,7 @@ def test_configuration_api_is_typed_and_tenant_scoped(
 ):
     monkeypatch.setattr(RequiresAccess, "has_permission", lambda self, request, view: True)
     monkeypatch.setattr(RequiresAccess, "has_object_permission", lambda self, request, view, obj: True)
-    response = authenticated_tenant_a_client.get(
-        "/api/v2/ai-agent-management/configuration/?environment=production"
-    )
+    response = authenticated_tenant_a_client.get("/api/v2/ai-agent-management/configuration/?environment=production")
     assert response.status_code == status.HTTP_200_OK
     current = response.json()["data"]
     document = current["document"]

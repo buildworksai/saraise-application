@@ -7,83 +7,87 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('data_migration', '0004_production_domain'),
+        ("data_migration", "0004_production_domain"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='datamigrationconfiguration',
-            name='created_by',
+            model_name="datamigrationconfiguration",
+            name="created_by",
             field=models.UUIDField(),
         ),
         migrations.AlterField(
-            model_name='externalconnection',
-            name='credential_ref',
+            model_name="externalconnection",
+            name="credential_ref",
             field=models.CharField(max_length=255),
         ),
         migrations.AlterField(
-            model_name='externalconnection',
-            name='kind',
-            field=models.CharField(choices=[('postgresql', 'PostgreSQL'), ('mysql', 'MySQL'), ('http', 'HTTP API')], max_length=20),
+            model_name="externalconnection",
+            name="kind",
+            field=models.CharField(
+                choices=[("postgresql", "PostgreSQL"), ("mysql", "MySQL"), ("http", "HTTP API")], max_length=20
+            ),
         ),
         migrations.AlterField(
-            model_name='legacymigrationrollback',
-            name='created_by',
+            model_name="legacymigrationrollback",
+            name="created_by",
             field=models.UUIDField(),
         ),
         migrations.AlterField(
-            model_name='migrationjob',
-            name='target_adapter',
+            model_name="migrationjob",
+            name="target_adapter",
             field=models.CharField(max_length=100),
         ),
         migrations.AlterField(
-            model_name='migrationjob',
-            name='target_entity',
+            model_name="migrationjob",
+            name="target_entity",
             field=models.CharField(max_length=100),
         ),
         migrations.AlterField(
-            model_name='migrationlog',
-            name='created_by',
+            model_name="migrationlog",
+            name="created_by",
             field=models.UUIDField(),
         ),
         migrations.AlterField(
-            model_name='migrationmapping',
-            name='created_by',
+            model_name="migrationmapping",
+            name="created_by",
             field=models.UUIDField(),
         ),
         migrations.AlterField(
-            model_name='migrationmapping',
-            name='position',
+            model_name="migrationmapping",
+            name="position",
             field=models.PositiveIntegerField(),
         ),
         migrations.AlterField(
-            model_name='migrationrollback',
-            name='async_job_id',
+            model_name="migrationrollback",
+            name="async_job_id",
             field=models.UUIDField(unique=True),
         ),
         migrations.AlterField(
-            model_name='migrationrollback',
-            name='correlation_id',
+            model_name="migrationrollback",
+            name="correlation_id",
             field=models.CharField(max_length=128),
         ),
         migrations.AlterField(
-            model_name='migrationrollback',
-            name='idempotency_key',
+            model_name="migrationrollback",
+            name="idempotency_key",
             field=models.CharField(max_length=255),
         ),
         migrations.AlterField(
-            model_name='migrationrollback',
-            name='requested_by',
+            model_name="migrationrollback",
+            name="requested_by",
             field=models.UUIDField(),
         ),
         migrations.AlterField(
-            model_name='migrationrollback',
-            name='run',
-            field=models.OneToOneField(on_delete=django.db.models.deletion.PROTECT, related_name='rollback', to='data_migration.migrationrun'),
+            model_name="migrationrollback",
+            name="run",
+            field=models.OneToOneField(
+                on_delete=django.db.models.deletion.PROTECT, related_name="rollback", to="data_migration.migrationrun"
+            ),
         ),
         migrations.AlterField(
-            model_name='migrationvalidation',
-            name='created_by',
+            model_name="migrationvalidation",
+            name="created_by",
             field=models.UUIDField(),
         ),
     ]

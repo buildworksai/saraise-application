@@ -12,14 +12,15 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import NotAuthenticated, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.views import APIView, exception_handler as drf_exception_handler
+from rest_framework.views import APIView
+from rest_framework.views import exception_handler as drf_exception_handler
 
 from src.core.access.permissions import RequiresAccess
 from src.core.api import GovernedAPIViewMixin, GovernedPageNumberPagination
 from src.core.api.envelope import correlation_id_for_request
+from src.core.async_jobs.services import enqueue
 from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
-from src.core.async_jobs.services import enqueue
 
 from .models import DynamicResourceVersion, NamingSequence
 from .permissions import (
@@ -45,17 +46,21 @@ from .serializers import (
     EntityDefinitionUpdateSerializer,
     EntitySchemaVersionDetailSerializer,
     EntitySchemaVersionListSerializer,
-    NamingSequenceSerializer,
     MetadataConfigurationAuditSerializer,
     MetadataConfigurationSerializer,
     MetadataConfigurationWriteSerializer,
+    NamingSequenceSerializer,
     ResourceTransitionSerializer,
     SchemaCandidateCreateSerializer,
     SchemaPublishSerializer,
     SequenceResetSerializer,
 )
 from .services import (
-    DynamicResourceService, EntityDefinitionService, MetadataConfigurationService, NamingService, SchemaVersionService,
+    DynamicResourceService,
+    EntityDefinitionService,
+    MetadataConfigurationService,
+    NamingService,
+    SchemaVersionService,
 )
 
 
@@ -183,10 +188,15 @@ class EntityDefinitionViewSet(GovernedMetadataViewSet):
     def create(self, request):
         serializer = EntityDefinitionCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        key = request.headers.get("Idempotency-Key") or (f"legacy:{uuid.uuid4()}" if request.path.startswith("/api/v1/") else _idempotency_key(request))
+        key = request.headers.get("Idempotency-Key") or (
+            f"legacy:{uuid.uuid4()}" if request.path.startswith("/api/v1/") else _idempotency_key(request)
+        )
         entity = EntityDefinitionService.create_definition(
-            _tenant_id(request), _actor_id(request), serializer.validated_data,
-            idempotency_key=key, correlation_id=_correlation_id(request),
+            _tenant_id(request),
+            _actor_id(request),
+            serializer.validated_data,
+            idempotency_key=key,
+            correlation_id=_correlation_id(request),
         )
         return Response(EntityDefinitionDetailSerializer(entity).data, status=status.HTTP_201_CREATED)
 
@@ -196,8 +206,12 @@ class EntityDefinitionViewSet(GovernedMetadataViewSet):
         current = EntityDefinitionService.get_definition(_tenant_id(request), pk)
         expected = current.lock_version if request.path.startswith("/api/v1/") else _lock_version(request)
         entity = EntityDefinitionService.update_definition(
-            _tenant_id(request), _actor_id(request), current.id, serializer.validated_data,
-            expected_lock_version=expected, correlation_id=_correlation_id(request),
+            _tenant_id(request),
+            _actor_id(request),
+            current.id,
+            serializer.validated_data,
+            expected_lock_version=expected,
+            correlation_id=_correlation_id(request),
         )
         return Response(EntityDefinitionDetailSerializer(entity).data)
 
@@ -205,8 +219,12 @@ class EntityDefinitionViewSet(GovernedMetadataViewSet):
         serializer = EntityDefinitionUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         entity = EntityDefinitionService.update_definition(
-            _tenant_id(request), _actor_id(request), pk, serializer.validated_data,
-            expected_lock_version=_lock_version(request), correlation_id=_correlation_id(request),
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            serializer.validated_data,
+            expected_lock_version=_lock_version(request),
+            correlation_id=_correlation_id(request),
         )
         return Response(EntityDefinitionDetailSerializer(entity).data)
 
@@ -218,7 +236,9 @@ class EntityDefinitionViewSet(GovernedMetadataViewSet):
             )
             return Response({"operation": "delete", "status": "completed", "id": str(entity.id)})
         EntityDefinitionService.archive_definition(
-            _tenant_id(request), _actor_id(request), entity.id,
+            _tenant_id(request),
+            _actor_id(request),
+            entity.id,
             idempotency_key=request.headers.get("Idempotency-Key", f"archive:{entity.id}"),
             correlation_id=_correlation_id(request),
         )
@@ -227,24 +247,33 @@ class EntityDefinitionViewSet(GovernedMetadataViewSet):
     @action(detail=True, methods=("post",))
     def archive(self, request, pk=None):
         entity = EntityDefinitionService.archive_definition(
-            _tenant_id(request), _actor_id(request), pk,
-            idempotency_key=_idempotency_key(request), correlation_id=_correlation_id(request),
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            idempotency_key=_idempotency_key(request),
+            correlation_id=_correlation_id(request),
         )
         return Response(EntityDefinitionDetailSerializer(entity).data)
 
     @action(detail=True, methods=("post",))
     def restore(self, request, pk=None):
         entity = EntityDefinitionService.restore_definition(
-            _tenant_id(request), _actor_id(request), pk,
-            idempotency_key=_idempotency_key(request), correlation_id=_correlation_id(request),
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            idempotency_key=_idempotency_key(request),
+            correlation_id=_correlation_id(request),
         )
         return Response(EntityDefinitionDetailSerializer(entity).data)
 
     @action(detail=True, methods=("post",))
     def clone(self, request, pk=None):
         entity = EntityDefinitionService.clone_definition(
-            _tenant_id(request), _actor_id(request), pk,
-            str(request.data.get("code", "")), str(request.data.get("name", "")),
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            str(request.data.get("code", "")),
+            str(request.data.get("name", "")),
             correlation_id=_correlation_id(request),
         )
         return Response(EntityDefinitionDetailSerializer(entity).data, status=status.HTTP_201_CREATED)
@@ -279,8 +308,11 @@ class EntityDefinitionViewSet(GovernedMetadataViewSet):
         serializer = EntityDefinitionImportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         result = EntityDefinitionService.import_definition(
-            _tenant_id(request), _actor_id(request), serializer.validated_data["document"],
-            mode=serializer.validated_data["mode"], idempotency_key=_idempotency_key(request),
+            _tenant_id(request),
+            _actor_id(request),
+            serializer.validated_data["document"],
+            mode=serializer.validated_data["mode"],
+            idempotency_key=_idempotency_key(request),
             correlation_id=_correlation_id(request),
         )
         if isinstance(result, dict):
@@ -290,13 +322,19 @@ class EntityDefinitionViewSet(GovernedMetadataViewSet):
     @action(detail=True, methods=("get", "post"), url_path="versions")
     def versions(self, request, pk=None):
         if request.method == "GET":
-            return self._page(SchemaVersionService.list_versions(_tenant_id(request), pk), EntitySchemaVersionListSerializer)
+            return self._page(
+                SchemaVersionService.list_versions(_tenant_id(request), pk), EntitySchemaVersionListSerializer
+            )
         serializer = SchemaCandidateCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         version = SchemaVersionService.create_candidate(
-            _tenant_id(request), _actor_id(request), pk, serializer.validated_data["fields"],
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            serializer.validated_data["fields"],
             based_on_version_id=serializer.validated_data.get("based_on_version_id"),
-            change_summary=serializer.validated_data.get("change_summary", ""), correlation_id=_correlation_id(request),
+            change_summary=serializer.validated_data.get("change_summary", ""),
+            correlation_id=_correlation_id(request),
         )
         return Response(EntitySchemaVersionDetailSerializer(version).data, status=status.HTTP_201_CREATED)
 
@@ -337,15 +375,23 @@ class EntityDefinitionViewSet(GovernedMetadataViewSet):
         serializer = SchemaPublishSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         version = SchemaVersionService.publish_candidate(
-            _tenant_id(request), _actor_id(request), pk, version_id,
-            idempotency_key=_idempotency_key(request), correlation_id=_correlation_id(request),
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            version_id,
+            idempotency_key=_idempotency_key(request),
+            correlation_id=_correlation_id(request),
         )
         return Response(EntitySchemaVersionDetailSerializer(version).data)
 
     @action(detail=True, methods=("post",), url_path=r"versions/(?P<version_id>[^/.]+)/reject")
     def reject_version(self, request, pk=None, version_id=None):
         version = SchemaVersionService.reject_candidate(
-            _tenant_id(request), _actor_id(request), pk, version_id, str(request.data.get("reason", "")),
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            version_id,
+            str(request.data.get("reason", "")),
             correlation_id=_correlation_id(request),
         )
         return Response(EntitySchemaVersionDetailSerializer(version).data)
@@ -353,8 +399,12 @@ class EntityDefinitionViewSet(GovernedMetadataViewSet):
     @action(detail=True, methods=("post",), url_path=r"versions/(?P<version_id>[^/.]+)/rollback")
     def rollback_version(self, request, pk=None, version_id=None):
         version = SchemaVersionService.rollback_to_version(
-            _tenant_id(request), _actor_id(request), pk, version_id,
-            idempotency_key=_idempotency_key(request), correlation_id=_correlation_id(request),
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            version_id,
+            idempotency_key=_idempotency_key(request),
+            correlation_id=_correlation_id(request),
         )
         return Response(EntitySchemaVersionDetailSerializer(version).data, status=status.HTTP_201_CREATED)
 
@@ -372,8 +422,10 @@ class DynamicResourceViewSet(GovernedMetadataViewSet):
 
     def get_queryset(self):
         return DynamicResourceService.list_resources(
-            _tenant_id(self.request), entity_id=self.request.query_params.get("entity_id"),
-            entity_code=self.request.query_params.get("entity_code"), state=self.request.query_params.get("state"),
+            _tenant_id(self.request),
+            entity_id=self.request.query_params.get("entity_id"),
+            entity_code=self.request.query_params.get("entity_code"),
+            state=self.request.query_params.get("state"),
             search=self.request.query_params.get("search"),
             created_after=_date_param(self.request, "created_after"),
             created_before=_date_param(self.request, "created_before"),
@@ -384,21 +436,30 @@ class DynamicResourceViewSet(GovernedMetadataViewSet):
         return self._page(self.get_queryset(), DynamicResourceListSerializer)
 
     def retrieve(self, request, pk=None):
-        return Response(DynamicResourceDetailSerializer(DynamicResourceService.get_resource(_tenant_id(request), pk)).data)
+        return Response(
+            DynamicResourceDetailSerializer(DynamicResourceService.get_resource(_tenant_id(request), pk)).data
+        )
 
     def create(self, request):
         serializer = DynamicResourceCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         if request.path.startswith("/api/v1/"):
             resource = DynamicResourceService.create_legacy_resource(
-                _tenant_id(request), _actor_id(request), serializer.validated_data["entity_id"],
-                serializer.validated_data["data"], correlation_id=_correlation_id(request),
+                _tenant_id(request),
+                _actor_id(request),
+                serializer.validated_data["entity_id"],
+                serializer.validated_data["data"],
+                correlation_id=_correlation_id(request),
             )
         else:
             resource = DynamicResourceService.create_resource(
-                _tenant_id(request), _actor_id(request), serializer.validated_data["entity_id"],
-                serializer.validated_data["data"], display_name=serializer.validated_data.get("display_name"),
-                idempotency_key=_idempotency_key(request), correlation_id=_correlation_id(request),
+                _tenant_id(request),
+                _actor_id(request),
+                serializer.validated_data["entity_id"],
+                serializer.validated_data["data"],
+                display_name=serializer.validated_data.get("display_name"),
+                idempotency_key=_idempotency_key(request),
+                correlation_id=_correlation_id(request),
             )
         return Response(DynamicResourceDetailSerializer(resource).data, status=status.HTTP_201_CREATED)
 
@@ -408,8 +469,12 @@ class DynamicResourceViewSet(GovernedMetadataViewSet):
         current = DynamicResourceService.get_resource(_tenant_id(request), pk)
         expected = current.lock_version if request.path.startswith("/api/v1/") else _lock_version(request)
         resource = DynamicResourceService.replace_resource(
-            _tenant_id(request), _actor_id(request), pk, serializer.validated_data["data"],
-            expected_lock_version=expected, correlation_id=_correlation_id(request),
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            serializer.validated_data["data"],
+            expected_lock_version=expected,
+            correlation_id=_correlation_id(request),
         )
         return Response(DynamicResourceDetailSerializer(resource).data)
 
@@ -417,8 +482,12 @@ class DynamicResourceViewSet(GovernedMetadataViewSet):
         serializer = DynamicResourcePatchSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         resource = DynamicResourceService.patch_resource(
-            _tenant_id(request), _actor_id(request), pk, serializer.validated_data.get("data", {}),
-            expected_lock_version=_lock_version(request), correlation_id=_correlation_id(request),
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            serializer.validated_data.get("data", {}),
+            expected_lock_version=_lock_version(request),
+            correlation_id=_correlation_id(request),
         )
         return Response(DynamicResourceDetailSerializer(resource).data)
 
@@ -426,7 +495,10 @@ class DynamicResourceViewSet(GovernedMetadataViewSet):
         current = DynamicResourceService.get_resource(_tenant_id(request), pk)
         expected = current.lock_version if request.path.startswith("/api/v1/") else _lock_version(request)
         resource = DynamicResourceService.soft_delete_resource(
-            _tenant_id(request), _actor_id(request), pk, expected_lock_version=expected,
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            expected_lock_version=expected,
             correlation_id=_correlation_id(request),
         )
         return Response({"operation": "delete", "status": "completed", "id": str(resource.id)})
@@ -450,8 +522,12 @@ class DynamicResourceViewSet(GovernedMetadataViewSet):
         serializer = ResourceTransitionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         resource = DynamicResourceService.submit_resource(
-            _tenant_id(request), _actor_id(request), pk, expected_lock_version=_lock_version(request),
-            idempotency_key=_idempotency_key(request), correlation_id=_correlation_id(request),
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            expected_lock_version=_lock_version(request),
+            idempotency_key=_idempotency_key(request),
+            correlation_id=_correlation_id(request),
         )
         return Response(DynamicResourceDetailSerializer(resource).data)
 
@@ -460,15 +536,21 @@ class DynamicResourceViewSet(GovernedMetadataViewSet):
         serializer = ResourceTransitionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         resource = DynamicResourceService.cancel_resource(
-            _tenant_id(request), _actor_id(request), pk, serializer.validated_data.get("reason", ""),
-            expected_lock_version=_lock_version(request), idempotency_key=_idempotency_key(request),
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            serializer.validated_data.get("reason", ""),
+            expected_lock_version=_lock_version(request),
+            idempotency_key=_idempotency_key(request),
             correlation_id=_correlation_id(request),
         )
         return Response(DynamicResourceDetailSerializer(resource).data)
 
     @action(detail=True, methods=("get",), url_path="versions")
     def versions(self, request, pk=None):
-        return self._page(DynamicResourceService.list_resource_versions(_tenant_id(request), pk), DynamicResourceVersionSerializer)
+        return self._page(
+            DynamicResourceService.list_resource_versions(_tenant_id(request), pk), DynamicResourceVersionSerializer
+        )
 
     @action(detail=True, methods=("get",), url_path=r"versions/(?P<version>[^/.]+)")
     def version_detail(self, request, pk=None, version=None):
@@ -476,13 +558,12 @@ class DynamicResourceViewSet(GovernedMetadataViewSet):
             item = DynamicResourceVersion.objects.for_tenant(_tenant_id(request)).get(resource_id=pk, version=version)
         except DynamicResourceVersion.DoesNotExist:
             from rest_framework.exceptions import NotFound
+
             raise NotFound("Resource version not found.")
         return Response(DynamicResourceVersionSerializer(item).data)
 
 
-class NamingSequenceViewSet(
-    GovernedMetadataViewSet, mixins.ListModelMixin, mixins.RetrieveModelMixin
-):
+class NamingSequenceViewSet(GovernedMetadataViewSet, mixins.ListModelMixin, mixins.RetrieveModelMixin):
     access_map = SEQUENCE_ACTION_ACCESS
 
     def get_queryset(self):
@@ -501,6 +582,7 @@ class NamingSequenceViewSet(
             sequence = self.get_queryset().get(pk=pk)
         except NamingSequence.DoesNotExist:
             from rest_framework.exceptions import NotFound
+
             raise NotFound("Naming sequence not found.")
         return Response(NamingSequenceSerializer(sequence).data)
 
@@ -509,7 +591,10 @@ class NamingSequenceViewSet(
         serializer = SequenceResetSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         sequence = NamingService.reset_sequence(
-            _tenant_id(request), _actor_id(request), pk, serializer.validated_data["next_value"],
+            _tenant_id(request),
+            _actor_id(request),
+            pk,
+            serializer.validated_data["next_value"],
             correlation_id=_correlation_id(request),
         )
         return Response(NamingSequenceSerializer(sequence).data)
@@ -544,8 +629,12 @@ class MetadataConfigurationViewSet(GovernedMetadataViewSet):
         serializer = MetadataConfigurationWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         config = MetadataConfigurationService.update_configuration(
-            _tenant_id(request), _actor_id(request), self._environment(request), serializer.validated_data,
-            expected_version=_lock_version(request), correlation_id=_correlation_id(request),
+            _tenant_id(request),
+            _actor_id(request),
+            self._environment(request),
+            serializer.validated_data,
+            expected_version=_lock_version(request),
+            correlation_id=_correlation_id(request),
         )
         return Response(MetadataConfigurationSerializer(config).data)
 
@@ -567,7 +656,10 @@ class MetadataConfigurationViewSet(GovernedMetadataViewSet):
 
     def rollback(self, request, version=None):
         config = MetadataConfigurationService.rollback_configuration(
-            _tenant_id(request), _actor_id(request), self._environment(request), int(version),
+            _tenant_id(request),
+            _actor_id(request),
+            self._environment(request),
+            int(version),
             correlation_id=_correlation_id(request),
         )
         return Response(MetadataConfigurationSerializer(config).data)
@@ -582,6 +674,7 @@ class MetadataConfigurationViewSet(GovernedMetadataViewSet):
             checksum = document.get("checksum")
             body = {key: value for key, value in document.items() if key != "checksum"}
             from .services import _schema_hash
+
             if checksum != _schema_hash(body):
                 raise ValidationError({"checksum": [{"code": "CHECKSUM_MISMATCH", "message": "Checksum is invalid."}]})
             values = document.get("values")
@@ -598,7 +691,10 @@ class MetadataConfigurationViewSet(GovernedMetadataViewSet):
         return Response(MetadataConfigurationSerializer(config).data)
 
     def export_config(self, request):
-        return Response(MetadataConfigurationService.export_configuration(_tenant_id(request), self._environment(request)))
+        return Response(
+            MetadataConfigurationService.export_configuration(_tenant_id(request), self._environment(request))
+        )
+
 
 class MetadataHealthView(GovernedAPIViewMixin, APIView):
     authentication_classes = (RelaxedCsrfSessionAuthentication,)
@@ -636,6 +732,8 @@ class MetadataHealthView(GovernedAPIViewMixin, APIView):
             checks["outbox"] = "unavailable"
             overall = "unhealthy"
         response_status = status.HTTP_200_OK if overall == "healthy" else status.HTTP_503_SERVICE_UNAVAILABLE
-        response = Response({"status": overall, "module": "metadata-modeling", "checks": checks}, status=response_status)
+        response = Response(
+            {"status": overall, "module": "metadata-modeling", "checks": checks}, status=response_status
+        )
         response["X-Correlation-ID"] = _correlation_id(request)
         return response

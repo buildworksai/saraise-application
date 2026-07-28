@@ -1,1 +1,1 @@
-export { CreateLeaveBalancePage } from './form-pages';
+export { CreateLeaveBalancePage } from "./form-pages";

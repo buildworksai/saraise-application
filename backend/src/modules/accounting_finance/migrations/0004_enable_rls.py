@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 TABLES = (
     "accounting_accounts",
     "accounting_posting_periods",

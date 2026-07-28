@@ -60,9 +60,9 @@ READ_PERMISSIONS: Final[frozenset[str]] = frozenset(
     if permission.endswith(":read") or permission.endswith(":validate") or permission.endswith(":export")
 )
 PERMISSION_QUOTAS: Final[dict[str, str]] = {
-    permission: "compliance_management.api_reads"
-    if permission in READ_PERMISSIONS
-    else "compliance_management.api_writes"
+    permission: (
+        "compliance_management.api_reads" if permission in READ_PERMISSIONS else "compliance_management.api_writes"
+    )
     for permission in PERMISSIONS
 }
 
@@ -156,6 +156,7 @@ def requirement_for(viewset: str, action: str, method: str | None = None) -> Acc
         if qualified is not None:
             return qualified
     return ACTION_ACCESS.get(f"{viewset}.{action}")
+
 
 FRAMEWORK_ACTION_PERMISSIONS: Final[dict[str, str]] = {
     "list": "compliance.framework:read",

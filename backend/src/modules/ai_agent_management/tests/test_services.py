@@ -220,12 +220,15 @@ def test_schedule_is_durable_idempotent_and_recovers_stale(agent, actor_id):
     )
     assert schedule.async_job_id
     assert AsyncJob.objects.filter(id=schedule.async_job_id, tenant_id=agent.tenant_id).exists()
-    assert ScheduleService.create_schedule(
-        agent.tenant_id,
-        actor_id,
-        agent.id,
-        {"scheduled_at": due, "task_data": {}, "idempotency_key": "schedule:one"},
-    ).id == schedule.id
+    assert (
+        ScheduleService.create_schedule(
+            agent.tenant_id,
+            actor_id,
+            agent.id,
+            {"scheduled_at": due, "task_data": {}, "idempotency_key": "schedule:one"},
+        ).id
+        == schedule.id
+    )
     assert ScheduleService.dispatch_due(agent.tenant_id, timezone.now(), 10) == 1
     schedule.refresh_from_db()
     assert schedule.status == "queued"

@@ -12,6 +12,7 @@ WORKDIR /app
 # Note: Additional packages for WeasyPrint (PDF generation)
 RUN apt-get update && apt-get install -y \
     postgresql-client \
+    tesseract-ocr \
     gcc \
     python3-dev \
     libpq-dev \
@@ -38,7 +39,10 @@ COPY start.sh /app/start.sh
 RUN chmod +x /app/start.sh && ls -la /app/start.sh
 
 # Create necessary directories
-RUN mkdir -p /app/static /app/media /app/logs
+RUN mkdir -p /app/static /app/media /app/logs \
+    /app/runtime/document-intelligence/artifacts \
+    /app/runtime/bdr/storage \
+    /app/runtime/bdr/restore
 
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && \

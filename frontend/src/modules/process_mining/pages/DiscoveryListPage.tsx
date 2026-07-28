@@ -1,3 +1,104 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'; import { Plus, Trash2 } from 'lucide-react'; import { useNavigate, useSearchParams } from 'react-router-dom'; import { Button } from '@/components/ui/Button'; import { Card } from '@/components/ui/Card';
-import { ApiProblem, DataTable, EmptyPanel, PageHeader, PageSkeleton, Pagination, StatusPill } from '../components/ModuleShell'; import { PROCESS_MINING_ROUTES, type DiscoveryJob } from '../contracts'; import { processMiningService } from '../services/process_mining-service';
-export function DiscoveryListPage() { const navigate = useNavigate(); const client = useQueryClient(); const [params, setParams] = useSearchParams(); const page = Number(params.get('page') ?? 1); const configuration = useQuery({ queryKey: ['process-mining', 'configuration'], queryFn: processMiningService.getConfiguration }); const query = useQuery({ queryKey: ['process-mining', 'discoveries', page, configuration.data?.version], queryFn: () => processMiningService.listDiscoveries({ page, page_size: configuration.data!.document.list_page_size, ordering: '-created_at' }), enabled: Boolean(configuration.data), refetchInterval: (state) => state.state.data?.items.some((item) => ['queued', 'running'].includes(item.status)) ? configuration.data?.document.polling_interval_ms : false }); const remove = useMutation({ mutationFn: (item: DiscoveryJob) => processMiningService.deleteDiscovery(item.id), onSuccess: () => client.invalidateQueries({ queryKey: ['process-mining', 'discoveries'] }) }); if (!configuration.data || query.isLoading) return <PageSkeleton/>; if (query.error || !query.data) return <main className="p-8"><ApiProblem error={query.error} onRetry={() => void query.refetch()}/></main>; return <main className="space-y-6 p-4 sm:p-8"><PageHeader title="Process discovery" description="Durable discovery jobs using tenant-configured polling and pagination." actions={<Button onClick={() => navigate(PROCESS_MINING_ROUTES.DISCOVERY_CREATE)}><Plus className="mr-2 h-4 w-4"/>New discovery</Button>}/>{query.data.items.length === 0 ? <EmptyPanel title="No discovery jobs" description="Publish the first deterministic process model."/> : <Card className="overflow-hidden"><DataTable headers={['Process', 'Algorithm', 'Status', 'Events', 'Actions']} rows={query.data.items.map((item) => [<button className="text-primary" onClick={() => navigate(PROCESS_MINING_ROUTES.DISCOVERY(item.id))}>{item.process_name}</button>, item.algorithm, <StatusPill status={item.status}/>, item.event_count, <Button size="sm" variant="ghost" disabled={!['completed', 'failed', 'timed_out', 'cancelled'].includes(item.status) || remove.isPending} onClick={() => remove.mutate(item)}><Trash2 className="mr-1 h-4 w-4"/>Delete</Button>])}/><Pagination value={query.data.pagination} onPage={(next) => setParams({ page: String(next) })}/></Card>}</main>; }
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, Trash2 } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import {
+  ApiProblem,
+  DataTable,
+  EmptyPanel,
+  PageHeader,
+  PageSkeleton,
+  Pagination,
+  StatusPill,
+} from "../components/ModuleShell";
+import { PROCESS_MINING_ROUTES, type DiscoveryJob } from "../contracts";
+import { processMiningService } from "../services/process_mining-service";
+export function DiscoveryListPage() {
+  const navigate = useNavigate();
+  const client = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const page = Number(params.get("page") ?? 1);
+  const configuration = useQuery({
+    queryKey: ["process-mining", "configuration"],
+    queryFn: processMiningService.getConfiguration,
+  });
+  const query = useQuery({
+    queryKey: ["process-mining", "discoveries", page, configuration.data?.version],
+    queryFn: () =>
+      processMiningService.listDiscoveries({
+        page,
+        page_size: configuration.data!.document.list_page_size,
+        ordering: "-created_at",
+      }),
+    enabled: Boolean(configuration.data),
+    refetchInterval: (state) =>
+      state.state.data?.items.some((item) => ["queued", "running"].includes(item.status))
+        ? configuration.data?.document.polling_interval_ms
+        : false,
+  });
+  const remove = useMutation({
+    mutationFn: (item: DiscoveryJob) => processMiningService.deleteDiscovery(item.id),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["process-mining", "discoveries"] }),
+  });
+  if (!configuration.data || query.isLoading) return <PageSkeleton />;
+  if (query.error || !query.data)
+    return (
+      <main className="p-8">
+        <ApiProblem error={query.error} onRetry={() => void query.refetch()} />
+      </main>
+    );
+  return (
+    <main className="space-y-6 p-4 sm:p-8">
+      <PageHeader
+        title="Process discovery"
+        description="Durable discovery jobs using tenant-configured polling and pagination."
+        actions={
+          <Button onClick={() => navigate(PROCESS_MINING_ROUTES.DISCOVERY_CREATE)}>
+            <Plus className="mr-2 h-4 w-4" />
+            New discovery
+          </Button>
+        }
+      />
+      {query.data.items.length === 0 ? (
+        <EmptyPanel
+          title="No discovery jobs"
+          description="Publish the first deterministic process model."
+        />
+      ) : (
+        <Card className="overflow-hidden">
+          <DataTable
+            headers={["Process", "Algorithm", "Status", "Events", "Actions"]}
+            rows={query.data.items.map((item) => [
+              <button
+                className="text-primary"
+                onClick={() => navigate(PROCESS_MINING_ROUTES.DISCOVERY(item.id))}
+              >
+                {item.process_name}
+              </button>,
+              item.algorithm,
+              <StatusPill status={item.status} />,
+              item.event_count,
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={
+                  !["completed", "failed", "timed_out", "cancelled"].includes(item.status) ||
+                  remove.isPending
+                }
+                onClick={() => remove.mutate(item)}
+              >
+                <Trash2 className="mr-1 h-4 w-4" />
+                Delete
+              </Button>,
+            ])}
+          />
+          <Pagination
+            value={query.data.pagination}
+            onPage={(next) => setParams({ page: String(next) })}
+          />
+        </Card>
+      )}
+    </main>
+  );
+}

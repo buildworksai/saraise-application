@@ -4,7 +4,14 @@ import { tenantRoutes } from "../../routes";
 describe("workflow automation route registry", () => {
   it("discovers every required page with three sidebar parents", () => {
     expect(tenantRoutes).toHaveLength(8);
-    expect(tenantRoutes.filter((route) => route.navigation.type === "sidebar").map((route) => [route.path, route.navigation.type === "sidebar" ? route.navigation.order : -1])).toEqual([
+    expect(
+      tenantRoutes
+        .filter((route) => route.navigation.type === "sidebar")
+        .map((route) => [
+          route.path,
+          route.navigation.type === "sidebar" ? route.navigation.order : -1,
+        ])
+    ).toEqual([
       ["/workflow-automation/workflows", 80],
       ["/workflow-automation/instances", 81],
       ["/workflow-automation/tasks", 82],
@@ -18,7 +25,9 @@ describe("workflow automation route registry", () => {
       expect(route.modes).toEqual(["development", "self-hosted", "saas"]);
       if (route.navigation.type === "sidebar") expect(route.path).not.toContain(":");
       if (route.navigation.type === "contextual") {
-        const parent = tenantRoutes.find((candidate) => candidate.id === route.navigation.parentRouteId);
+        const parent = tenantRoutes.find(
+          (candidate) => candidate.id === route.navigation.parentRouteId
+        );
         expect(parent?.module).toBe(route.module);
         expect(parent?.navigation.type).toBe("sidebar");
       }

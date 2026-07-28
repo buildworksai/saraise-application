@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildTenantSidebarTree, getTenantRouteValidationIssues, getTenantRoutesForMode } from "@/navigation/tenant-route-registry";
+import {
+  buildTenantSidebarTree,
+  getTenantRouteValidationIssues,
+  getTenantRoutesForMode,
+} from "@/navigation/tenant-route-registry";
 import { tenantRoutes } from "./routes";
 
 describe("metadata modeling route contract", () => {
@@ -11,8 +15,14 @@ describe("metadata modeling route contract", () => {
   });
 
   it("resolves the required sidebar leaves", () => {
-    const branch = buildTenantSidebarTree(tenantRoutes).find((item) => item.module === "metadata_modeling");
-    expect(branch?.children.map((item) => item.label)).toEqual(["Metadata Models", "Dynamic Records", "Metadata Settings"]);
+    const branch = buildTenantSidebarTree(tenantRoutes).find(
+      (item) => item.module === "metadata_modeling"
+    );
+    expect(branch?.children.map((item) => item.label)).toEqual([
+      "Metadata Models",
+      "Dynamic Records",
+      "Metadata Settings",
+    ]);
   });
 
   it.each(["development", "self-hosted", "saas"] as const)("is available in %s mode", (mode) => {

@@ -37,7 +37,7 @@ def tenant_user(db):
             profile.tenant_role = "tenant_admin"
             profile.save()
     user = User.objects.get(pk=user.pk)
-    user.has_perm = lambda permission: str(permission).startswith("ai_provider_configuration.")  # type: ignore[method-assign]
+    user.has_perm = lambda permission: str(permission).startswith("ai_provider_configuration.")  # type: ignore[method-assign]  # noqa: E501
     return user
 
 

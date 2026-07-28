@@ -110,11 +110,7 @@ def test_configuration_api_preview_update_replay_export_versions_and_rollback(
     current = _data(authenticated_tenant_a_client.get(f"{BASE}/"))
     document = current["document"]
     document["ui"]["loading_skeleton_rows"] = 8
-    preview = _data(
-        authenticated_tenant_a_client.post(
-            f"{BASE}/preview/", {"document": document}, format="json"
-        )
-    )
+    preview = _data(authenticated_tenant_a_client.post(f"{BASE}/preview/", {"document": document}, format="json"))
     assert preview["valid"] is True and any(item["path"] == "ui.loading_skeleton_rows" for item in preview["diff"])
     body = {
         "environment": "development",
@@ -122,12 +118,8 @@ def test_configuration_api_preview_update_replay_export_versions_and_rollback(
         "rollout": current["rollout"],
         "reason": "Tune loading feedback",
     }
-    first = authenticated_tenant_a_client.put(
-        f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="config-update-1"
-    )
-    second = authenticated_tenant_a_client.put(
-        f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="config-update-1"
-    )
+    first = authenticated_tenant_a_client.put(f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="config-update-1")
+    second = authenticated_tenant_a_client.put(f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="config-update-1")
     assert _data(first)["version"] == 2
     assert _data(second)["version"] == 2
     assert MutationReplay.objects.count() == 1
@@ -156,11 +148,10 @@ def test_idempotency_key_cannot_be_reused_for_different_configuration_request(
         "rollout": current["rollout"],
         "reason": "First request",
     }
-    assert authenticated_tenant_a_client.put(
-        f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="same-key"
-    ).status_code == 200
-    body["reason"] = "Different request"
-    conflict = authenticated_tenant_a_client.put(
-        f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="same-key"
+    assert (
+        authenticated_tenant_a_client.put(f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="same-key").status_code
+        == 200
     )
+    body["reason"] = "Different request"
+    conflict = authenticated_tenant_a_client.put(f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="same-key")
     assert conflict.status_code == 409

@@ -1,1 +1,1 @@
-export { CreateCompliancePolicyPage } from './CompliancePages';
+export { CreateCompliancePolicyPage } from "./CompliancePages";

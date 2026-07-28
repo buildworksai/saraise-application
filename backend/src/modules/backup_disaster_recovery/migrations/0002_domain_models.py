@@ -31,7 +31,12 @@ class Migration(migrations.Migration):
                 (
                     "scope_type",
                     models.CharField(
-                        choices=[("tenant", "Tenant"), ("module", "Module"), ("database", "Database"), ("files", "Files")],
+                        choices=[
+                            ("tenant", "Tenant"),
+                            ("module", "Module"),
+                            ("database", "Database"),
+                            ("files", "Files"),
+                        ],
                         max_length=16,
                     ),
                 ),
@@ -86,7 +91,9 @@ class Migration(migrations.Migration):
                         name="bdr_rp_cutoff_lte_capture",
                     ),
                     models.CheckConstraint(
-                        condition=models.Q(("expires_at__isnull", True), ("expires_at__gt", models.F("captured_at")), _connector="OR"),
+                        condition=models.Q(
+                            ("expires_at__isnull", True), ("expires_at__gt", models.F("captured_at")), _connector="OR"
+                        ),
                         name="bdr_rp_expiry_after_capture",
                     ),
                     models.CheckConstraint(
@@ -118,7 +125,12 @@ class Migration(migrations.Migration):
                 (
                     "scope_type",
                     models.CharField(
-                        choices=[("tenant", "Tenant"), ("module", "Module"), ("database", "Database"), ("files", "Files")],
+                        choices=[
+                            ("tenant", "Tenant"),
+                            ("module", "Module"),
+                            ("database", "Database"),
+                            ("files", "Files"),
+                        ],
                         max_length=16,
                     ),
                 ),
@@ -153,15 +165,21 @@ class Migration(migrations.Migration):
                     models.Index(fields=["tenant_id", "owner_id", "status"], name="bdr_rb_tenant_owner_st_idx"),
                 ],
                 "constraints": [
-                    models.UniqueConstraint(fields=("tenant_id", "slug", "version"), name="bdr_rb_tenant_slug_ver_uniq"),
+                    models.UniqueConstraint(
+                        fields=("tenant_id", "slug", "version"), name="bdr_rb_tenant_slug_ver_uniq"
+                    ),
                     models.UniqueConstraint(
                         condition=models.Q(("deleted_at__isnull", True), ("status", "published")),
                         fields=("tenant_id", "slug"),
                         name="bdr_rb_one_published_uniq",
                     ),
                     models.CheckConstraint(condition=models.Q(("version__gt", 0)), name="bdr_rb_version_positive"),
-                    models.CheckConstraint(condition=models.Q(("rpo_target_seconds__gt", 0)), name="bdr_rb_rpo_positive"),
-                    models.CheckConstraint(condition=models.Q(("rto_target_seconds__gt", 0)), name="bdr_rb_rto_positive"),
+                    models.CheckConstraint(
+                        condition=models.Q(("rpo_target_seconds__gt", 0)), name="bdr_rb_rpo_positive"
+                    ),
+                    models.CheckConstraint(
+                        condition=models.Q(("rto_target_seconds__gt", 0)), name="bdr_rb_rto_positive"
+                    ),
                 ],
             },
         ),
@@ -220,7 +238,9 @@ class Migration(migrations.Migration):
             ],
             options={
                 "db_table": "bdr_runbook_steps",
-                "indexes": [models.Index(fields=["tenant_id", "runbook", "position"], name="bdr_step_tenant_rb_pos_idx")],
+                "indexes": [
+                    models.Index(fields=["tenant_id", "runbook", "position"], name="bdr_step_tenant_rb_pos_idx")
+                ],
                 "constraints": [
                     models.UniqueConstraint(
                         condition=models.Q(("deleted_at__isnull", True)),
@@ -248,7 +268,10 @@ class Migration(migrations.Migration):
                                 ("extension_action_key__isnull", False),
                                 models.Q(("extension_action_key", ""), _negated=True),
                             ),
-                            models.Q(models.Q(("action_type", "extension"), _negated=True), ("extension_action_key__isnull", True)),
+                            models.Q(
+                                models.Q(("action_type", "extension"), _negated=True),
+                                ("extension_action_key__isnull", True),
+                            ),
                             _connector="OR",
                         ),
                         name="bdr_step_extension_key_shape",
@@ -267,7 +290,12 @@ class Migration(migrations.Migration):
                 (
                     "exercise_type",
                     models.CharField(
-                        choices=[("tabletop", "Tabletop"), ("restore", "Restore"), ("failover", "Failover"), ("full", "Full")],
+                        choices=[
+                            ("tabletop", "Tabletop"),
+                            ("restore", "Restore"),
+                            ("failover", "Failover"),
+                            ("full", "Full"),
+                        ],
                         max_length=16,
                     ),
                 ),
@@ -326,14 +354,18 @@ class Migration(migrations.Migration):
             options={
                 "db_table": "bdr_exercises",
                 "indexes": [
-                    models.Index(fields=["tenant_id", "status", "scheduled_for"], name="bdr_ex_tenant_status_sched_idx"),
+                    models.Index(
+                        fields=["tenant_id", "status", "scheduled_for"], name="bdr_ex_tenant_status_sched_idx"
+                    ),
                     models.Index(fields=["tenant_id", "runbook", "-created_at"], name="bdr_ex_tenant_rb_created_idx"),
                 ],
                 "constraints": [
                     models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="bdr_ex_tenant_idem_uniq"),
                     models.CheckConstraint(
                         condition=models.Q(
-                            models.Q(("completed_at__isnull", False), ("status__in", ["passed", "failed", "cancelled"])),
+                            models.Q(
+                                ("completed_at__isnull", False), ("status__in", ["passed", "failed", "cancelled"])
+                            ),
                             models.Q(("status__in", ["passed", "failed", "cancelled"]), _negated=True),
                             _connector="OR",
                         ),
@@ -426,12 +458,16 @@ class Migration(migrations.Migration):
                 "db_table": "bdr_restore_runs",
                 "indexes": [
                     models.Index(fields=["tenant_id", "status", "-requested_at"], name="bdr_rr_tenant_status_req_idx"),
-                    models.Index(fields=["tenant_id", "recovery_point", "-requested_at"], name="bdr_rr_tenant_rp_req_idx"),
+                    models.Index(
+                        fields=["tenant_id", "recovery_point", "-requested_at"], name="bdr_rr_tenant_rp_req_idx"
+                    ),
                 ],
                 "constraints": [
                     models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="bdr_rr_tenant_idem_uniq"),
                     models.CheckConstraint(
-                        condition=models.Q(("approved_by__isnull", True), ("target_environment", "production"), _negated=True),
+                        condition=models.Q(
+                            ("approved_by__isnull", True), ("target_environment", "production"), _negated=True
+                        ),
                         name="bdr_rr_prod_approved",
                     ),
                     models.UniqueConstraint(

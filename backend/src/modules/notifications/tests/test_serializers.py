@@ -108,9 +108,7 @@ def test_dispatch_rejects_priority_outside_safe_bounds():
 
 
 def test_bulk_dispatch_accepts_compatibility_alias_and_normalizes_it():
-    serializer = BulkDispatchSerializer(
-        data={"deliveries": [_dispatch_payload()], "idempotency_key": "bulk-1"}
-    )
+    serializer = BulkDispatchSerializer(data={"deliveries": [_dispatch_payload()], "idempotency_key": "bulk-1"})
     assert serializer.is_valid(), serializer.errors
     assert len(serializer.validated_data["requests"]) == 1
     assert "deliveries" not in serializer.validated_data
@@ -159,9 +157,7 @@ def test_configuration_write_normalizes_change_summary_alias():
 
 
 def test_configuration_write_requires_auditable_reason():
-    serializer = ConfigurationWriteSerializer(
-        data={"document": {}}, context={"tenant_id": uuid4()}
-    )
+    serializer = ConfigurationWriteSerializer(data={"document": {}}, context={"tenant_id": uuid4()})
     assert not serializer.is_valid()
     assert "change_summary" in serializer.errors
 

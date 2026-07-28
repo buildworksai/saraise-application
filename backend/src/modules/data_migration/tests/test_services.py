@@ -11,21 +11,13 @@ from rest_framework.exceptions import NotFound
 from src.core.async_jobs.models import AsyncJob, OutboxEvent
 from src.modules.data_migration.adapters import SOURCE_ADAPTERS, TARGET_ADAPTERS
 from src.modules.data_migration.models import (
-    DataMigrationConfiguration,
     DataMigrationConfigurationAudit,
-    ExternalConnection,
     MigrationChange,
     MigrationJob,
     MigrationJobVersion,
-    MigrationMapping,
     MigrationRun,
-    ValidationRule,
 )
-from src.modules.data_migration.schemas import (
-    validate_rule_config,
-    validate_source_config,
-    validate_transform_config,
-)
+from src.modules.data_migration.schemas import validate_rule_config, validate_source_config, validate_transform_config
 from src.modules.data_migration.services import (
     ConfigurationConflict,
     DataMigrationConfigurationService,
@@ -93,7 +85,9 @@ class FakeTargetAdapter:
 
 @pytest.fixture(autouse=True)
 def adapter_registry(monkeypatch) -> tuple[FakeSourceAdapter, FakeTargetAdapter]:
-    monkeypatch.setattr("src.modules.dms.services.VersionService.get_version", lambda self, tenant, actor, version: object())
+    monkeypatch.setattr(
+        "src.modules.dms.services.VersionService.get_version", lambda self, tenant, actor, version: object()
+    )
     monkeypatch.setattr("src.modules.data_migration.services._validate_connection_destination", lambda values: None)
     SOURCE_ADAPTERS.clear()
     TARGET_ADAPTERS.clear()
@@ -166,7 +160,10 @@ def test_job_update_is_optimistic_versioned_and_revises_ready(identities) -> Non
     updated = MigrationJobService.update(tenant, job.id, actor, {"description": "Changed"}, expected_version=1)
     assert updated.configuration_version == 2
     assert updated.status == MigrationJob.Status.DRAFT
-    assert list(MigrationJobVersion.objects.filter(job=job).values_list("version", flat=True).order_by("version")) == [1, 2]
+    assert list(MigrationJobVersion.objects.filter(job=job).values_list("version", flat=True).order_by("version")) == [
+        1,
+        2,
+    ]
     with pytest.raises(ConfigurationConflict):
         MigrationJobService.update(tenant, job.id, actor, {"description": "Stale"}, expected_version=1)
     updated.refresh_from_db()
@@ -178,21 +175,40 @@ def test_mapping_and_rule_mutations_validate_and_bump_definition_version(identit
     tenant, _, actor = identities
     job = MigrationJobService.create(tenant, actor, job_command())
     mapping = MigrationMappingService.create(
-        tenant, job.id, actor,
-        {"source_field": "name", "target_field": "full_name", "position": 0, "transform_type": "identity", "transform_config": {}},
+        tenant,
+        job.id,
+        actor,
+        {
+            "source_field": "name",
+            "target_field": "full_name",
+            "position": 0,
+            "transform_type": "identity",
+            "transform_config": {},
+        },
     )
     job.refresh_from_db()
     assert mapping.tenant_id == tenant and job.configuration_version == 2
     rule = ValidationRuleService.create(
-        tenant, job.id, actor,
-        {"field_name": "full_name", "rule_type": "required", "rule_config": {}, "error_message": "Name required", "severity": "error", "position": 0},
+        tenant,
+        job.id,
+        actor,
+        {
+            "field_name": "full_name",
+            "rule_type": "required",
+            "rule_config": {},
+            "error_message": "Name required",
+            "severity": "error",
+            "position": 0,
+        },
     )
     job.refresh_from_db()
     assert rule.tenant_id == tenant and job.configuration_version == 3
     with pytest.raises((ValueError, MigrationServiceError)):
         MigrationMappingService.update(tenant, mapping.id, actor, {"transform_type": "unknown"})
     with pytest.raises((ValueError, MigrationServiceError)):
-        ValidationRuleService.update(tenant, rule.id, actor, {"rule_type": "regex", "rule_config": {"pattern": "(a+)+"}})
+        ValidationRuleService.update(
+            tenant, rule.id, actor, {"rule_type": "regex", "rule_config": {"pattern": "(a+)+"}}
+        )
 
 
 @pytest.mark.django_db
@@ -201,12 +217,28 @@ def test_cross_tenant_parent_and_entity_access_is_not_found(identities) -> None:
     job_b = MigrationJobService.create(tenant_b, actor, job_command("Tenant B"))
     with pytest.raises(NotFound):
         MigrationMappingService.create(
-            tenant_a, job_b.id, actor,
-            {"source_field": "name", "target_field": "full_name", "position": 0, "transform_type": "identity", "transform_config": {}},
+            tenant_a,
+            job_b.id,
+            actor,
+            {
+                "source_field": "name",
+                "target_field": "full_name",
+                "position": 0,
+                "transform_type": "identity",
+                "transform_config": {},
+            },
         )
     mapping_b = MigrationMappingService.create(
-        tenant_b, job_b.id, actor,
-        {"source_field": "name", "target_field": "full_name", "position": 0, "transform_type": "identity", "transform_config": {}},
+        tenant_b,
+        job_b.id,
+        actor,
+        {
+            "source_field": "name",
+            "target_field": "full_name",
+            "position": 0,
+            "transform_type": "identity",
+            "transform_config": {},
+        },
     )
     with pytest.raises(NotFound):
         MigrationMappingService.update(tenant_a, mapping_b.id, actor, {"source_field": "stolen"})
@@ -219,8 +251,16 @@ def test_definition_export_import_checksum_and_identity_safety(identities) -> No
     tenant_a, tenant_b, actor = identities
     job = MigrationJobService.create(tenant_a, actor, job_command())
     MigrationMappingService.create(
-        tenant_a, job.id, actor,
-        {"source_field": "name", "target_field": "full_name", "position": 0, "transform_type": "identity", "transform_config": {}},
+        tenant_a,
+        job.id,
+        actor,
+        {
+            "source_field": "name",
+            "target_field": "full_name",
+            "position": 0,
+            "transform_type": "identity",
+            "transform_config": {},
+        },
     )
     document = MigrationJobService.export_definition(tenant_a, job.id)
     assert "tenant_id" not in document and "job_id" not in document
@@ -272,8 +312,16 @@ def test_run_request_is_durable_idempotent_and_conflict_safe(identities, adapter
     tenant, _, actor = identities
     job = MigrationJobService.create(tenant, actor, job_command())
     MigrationMappingService.create(
-        tenant, job.id, actor,
-        {"source_field": "name", "target_field": "full_name", "position": 0, "transform_type": "identity", "transform_config": {}},
+        tenant,
+        job.id,
+        actor,
+        {
+            "source_field": "name",
+            "target_field": "full_name",
+            "position": 0,
+            "transform_type": "identity",
+            "transform_config": {},
+        },
     )
     result = MigrationJobService.validate_definition(tenant, job.id, actor)
     assert result.valid
@@ -306,9 +354,15 @@ def test_run_request_rejects_non_ready_job_without_async_evidence(identities) ->
 def test_external_connection_rejects_secret_material_and_cross_tenant_access(identities) -> None:
     tenant_a, tenant_b, actor = identities
     payload = {
-        "name": "Warehouse", "kind": "postgresql", "host": "db.example.test", "port": 5432,
-        "database": "warehouse", "username": "readonly", "credential_ref": "vault://migration/warehouse",
-        "tls_mode": "verify-full", "public_options": {},
+        "name": "Warehouse",
+        "kind": "postgresql",
+        "host": "db.example.test",
+        "port": 5432,
+        "database": "warehouse",
+        "username": "readonly",
+        "credential_ref": "vault://migration/warehouse",
+        "tls_mode": "verify-full",
+        "public_options": {},
     }
     connection = ExternalConnectionService.register(tenant_b, actor, payload)
     assert connection.credential_ref == "vault://migration/warehouse"

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone as datetime_timezone
+from datetime import datetime
+from datetime import timezone as datetime_timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 

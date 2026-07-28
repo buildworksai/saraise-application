@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import uuid
 from decimal import ROUND_HALF_UP, Decimal
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -36,7 +36,7 @@ def _normalise_currency(instance: models.Model, field: str = "currency") -> None
         raise ValidationError({field: "Currency must be an uppercase ISO-4217 three-letter code."})
 
 
-def _require_same_tenant(instance: models.Model, relation: str) -> None:
+def _require_same_tenant(instance: TenantScopedModel, relation: str) -> None:
     relation_id = getattr(instance, f"{relation}_id", None)
     if relation_id is None:
         return
@@ -50,10 +50,10 @@ def _require_json_object(instance: models.Model, field: str) -> None:
         raise ValidationError({field: "This value must be a JSON object."})
 
 
-class AuditedAggregateQuerySet(TenantQuerySet):
+class AuditedAggregateQuerySet(TenantQuerySet["AuditedAggregate"]):
     """Keep legacy ORM creation explicit without weakening audit columns."""
 
-    def create(self, **kwargs: Any) -> models.Model:
+    def create(self, **kwargs: Any) -> "AuditedAggregate":
         field_names = {field.name for field in self.model._meta.concrete_fields}
         if "created_by" in field_names:
             kwargs.setdefault("created_by", LEGACY_UNATTRIBUTED_ACTOR)
@@ -71,7 +71,7 @@ class AuditedAggregate(TenantScopedModel, TimestampedModel):
     creation_idempotency_key = models.CharField(max_length=255, null=True, blank=True)
     creation_request_fingerprint = models.CharField(max_length=64, null=True, blank=True)
 
-    objects = AuditedAggregateQuerySet.as_manager()
+    objects: ClassVar[Any] = AuditedAggregateQuerySet.as_manager()
 
     class Meta:
         abstract = True
@@ -115,20 +115,18 @@ class StatefulAggregate(AuditedAggregate):
             if self.transition_history:
                 raise ValidationError({"transition_history": "New aggregates cannot supply transition history."})
             return
-        prior = (
-            type(self)._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id)
-            .values("status", "transition_history")
-            .first()
-        )
+        prior = type(self)._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id).first()
         if not prior:
             return
-        old_history = prior["transition_history"]
+        old_history = prior.transition_history
         new_history = self.transition_history
         if not isinstance(new_history, list) or not isinstance(old_history, list):
             raise ValidationError({"transition_history": "Transition history must be a JSON array."})
         if new_history[: len(old_history)] != old_history:
             raise ValidationError({"transition_history": "Transition history is append-only."})
-        state_changed = prior["status"] != self.status
+        prior_status = str(getattr(prior, "status"))
+        current_status = str(getattr(self, "status"))
+        state_changed = prior_status != current_status
         if not state_changed and new_history != old_history:
             raise ValidationError({"transition_history": "History may change only with aggregate state."})
         if not state_changed:
@@ -140,9 +138,9 @@ class StatefulAggregate(AuditedAggregate):
             raise ValidationError({"transition_history": "Transition entries must be JSON objects."})
         command = str(record.get("command") or "")
         if (
-            record.get("from_state") != prior["status"]
-            or record.get("to_state") != self.status
-            or self._state_edges.get((prior["status"], command)) != self.status
+            record.get("from_state") != prior_status
+            or record.get("to_state") != current_status
+            or self._state_edges.get((prior_status, command)) != current_status
             or not str(record.get("transition_key") or "").strip()
             or not str(record.get("occurred_at") or "").strip()
         ):
@@ -213,12 +211,21 @@ class Account(SoftDeletableAggregate):
             models.UniqueConstraint(
                 fields=("tenant_id", "code"), condition=Q(is_deleted=False), name="acct_account_code_uq"
             ),
-            models.CheckConstraint(condition=Q(parent__isnull=True) | ~Q(parent=F("id")), name="acct_account_parent_ck"),
+            models.CheckConstraint(
+                condition=Q(parent__isnull=True) | ~Q(parent=F("id")), name="acct_account_parent_ck"
+            ),
             models.CheckConstraint(
                 condition=Q(normal_balance__in=NormalBalance.values), name="acct_account_balance_ck"
             ),
-            models.UniqueConstraint(fields=("tenant_id", "creation_idempotency_key"), condition=Q(creation_idempotency_key__isnull=False), name="acct_account_idem_uq"),
-            models.CheckConstraint(condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)), name="acct_account_softdel_ck"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "creation_idempotency_key"),
+                condition=Q(creation_idempotency_key__isnull=False),
+                name="acct_account_idem_uq",
+            ),
+            models.CheckConstraint(
+                condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)),
+                name="acct_account_softdel_ck",
+            ),
         ]
 
     @property
@@ -239,9 +246,10 @@ class Account(SoftDeletableAggregate):
             if self.parent_id == self.id:
                 raise ValidationError({"parent": "An account cannot be its own parent."})
             _require_same_tenant(self, "parent")
-            if not self.parent.is_group:
+            parent = self.parent
+            if parent is None or not parent.is_group:
                 raise ValidationError({"parent": "A parent account must be a group account."})
-            ancestor = self.parent
+            ancestor: Account | None = parent
             seen = {self.id}
             while ancestor is not None:
                 if ancestor.id in seen:
@@ -249,10 +257,13 @@ class Account(SoftDeletableAggregate):
                 seen.add(ancestor.id)
                 ancestor = ancestor.parent
         if not self._state.adding and self.pk:
-            prior = type(self)._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id).values(
-                "account_type", "normal_balance", "currency"
-            ).first()
-            if prior and any(prior[field] != getattr(self, field) for field in prior):
+            prior = (
+                type(self)
+                ._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id)
+                .values("account_type", "normal_balance", "currency")
+                .first()
+            )
+            if prior and any(prior.get(field) != getattr(self, field) for field in prior):
                 if JournalLine.objects.filter(
                     tenant_id=self.tenant_id, account_id=self.pk, journal_entry__status=JournalEntryStatus.POSTED
                 ).exists():
@@ -300,11 +311,13 @@ class PostingPeriod(StatefulAggregate):
             models.Index(fields=("tenant_id", "start_date", "end_date"), name="acct_period_dates_idx"),
         ]
         constraints = [
-            models.UniqueConstraint(
-                fields=("tenant_id", "period_name", "fiscal_year"), name="acct_period_name_uq"
-            ),
+            models.UniqueConstraint(fields=("tenant_id", "period_name", "fiscal_year"), name="acct_period_name_uq"),
             models.CheckConstraint(condition=Q(start_date__lte=F("end_date")), name="acct_period_dates_ck"),
-            models.UniqueConstraint(fields=("tenant_id", "creation_idempotency_key"), condition=Q(creation_idempotency_key__isnull=False), name="acct_period_idem_uq"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "creation_idempotency_key"),
+                condition=Q(creation_idempotency_key__isnull=False),
+                name="acct_period_idem_uq",
+            ),
         ]
 
     def clean(self) -> None:
@@ -379,8 +392,15 @@ class JournalEntry(SoftDeletableStatefulAggregate):
             models.CheckConstraint(
                 condition=Q(reversed_entry__isnull=True) | ~Q(reversed_entry=F("id")), name="acct_je_reversal_self_ck"
             ),
-            models.UniqueConstraint(fields=("tenant_id", "creation_idempotency_key"), condition=Q(creation_idempotency_key__isnull=False), name="acct_je_create_idem_uq"),
-            models.CheckConstraint(condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)), name="acct_je_softdel_ck"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "creation_idempotency_key"),
+                condition=Q(creation_idempotency_key__isnull=False),
+                name="acct_je_create_idem_uq",
+            ),
+            models.CheckConstraint(
+                condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)),
+                name="acct_je_softdel_ck",
+            ),
         ]
 
     def clean(self) -> None:
@@ -402,8 +422,17 @@ class JournalEntry(SoftDeletableStatefulAggregate):
                 # business content (accounts, lines, posting_date, entry_number, per-line amounts)
                 # remain outside this set and stay immutable after posting.
                 mutable = {
-                    "status", "transition_history", "reversed_at", "reversed_by", "updated_by",
-                    "version", "updated_at", "posted_at", "posted_by", "debit_total", "credit_total",
+                    "status",
+                    "transition_history",
+                    "reversed_at",
+                    "reversed_by",
+                    "updated_by",
+                    "version",
+                    "updated_at",
+                    "posted_at",
+                    "posted_by",
+                    "debit_total",
+                    "credit_total",
                 }
                 for field in self._meta.concrete_fields:
                     if field.name not in mutable and getattr(prior, field.attname) != getattr(self, field.attname):
@@ -442,9 +471,7 @@ class JournalLine(TenantScopedModel, TimestampedModel):
             models.Index(fields=("tenant_id", "cost_center"), name="acct_jl_cost_center_idx"),
         ]
         constraints = [
-            models.UniqueConstraint(
-                fields=("tenant_id", "journal_entry", "line_number"), name="acct_jl_line_uq"
-            ),
+            models.UniqueConstraint(fields=("tenant_id", "journal_entry", "line_number"), name="acct_jl_line_uq"),
             models.CheckConstraint(
                 condition=(Q(debit_amount__gt=0, credit_amount=0) | Q(credit_amount__gt=0, debit_amount=0)),
                 name="acct_jl_debit_credit_ck",
@@ -478,10 +505,12 @@ class JournalLine(TenantScopedModel, TimestampedModel):
         if self._state.adding:
             if self.line_number is None and self.journal_entry_id:
                 current = (
-                    type(self).objects.filter(
+                    type(self)
+                    .objects.filter(
                         tenant_id=self.tenant_id,
                         journal_entry_id=self.journal_entry_id,
-                    ).aggregate(maximum=Max("line_number"))["maximum"]
+                    )
+                    .aggregate(maximum=Max("line_number"))["maximum"]
                     or 0
                 )
                 self.line_number = current + 1
@@ -593,9 +622,18 @@ class APInvoice(InvoiceAggregate):
             models.CheckConstraint(condition=Q(amount__gte=0), name="acct_ap_amount_ck"),
             models.CheckConstraint(condition=Q(tax_amount__gte=0), name="acct_ap_tax_ck"),
             models.CheckConstraint(condition=Q(total_amount=F("amount") + F("tax_amount")), name="acct_ap_total_ck"),
-            models.CheckConstraint(condition=Q(paid_amount__gte=0, paid_amount__lte=F("total_amount")), name="acct_ap_paid_ck"),
-            models.UniqueConstraint(fields=("tenant_id", "creation_idempotency_key"), condition=Q(creation_idempotency_key__isnull=False), name="acct_ap_create_idem_uq"),
-            models.CheckConstraint(condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)), name="acct_ap_softdel_ck"),
+            models.CheckConstraint(
+                condition=Q(paid_amount__gte=0, paid_amount__lte=F("total_amount")), name="acct_ap_paid_ck"
+            ),
+            models.UniqueConstraint(
+                fields=("tenant_id", "creation_idempotency_key"),
+                condition=Q(creation_idempotency_key__isnull=False),
+                name="acct_ap_create_idem_uq",
+            ),
+            models.CheckConstraint(
+                condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)),
+                name="acct_ap_softdel_ck",
+            ),
         ]
 
     def clean(self) -> None:
@@ -604,12 +642,25 @@ class APInvoice(InvoiceAggregate):
             prior = type(self)._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id).first()
             if prior and prior.status != APInvoiceStatus.DRAFT:
                 mutable = {
-                    "status", "transition_history", "approved_at", "approved_by", "posted_at", "posted_by",
-                    "cancelled_at", "cancelled_by", "journal_entry", "paid_amount", "updated_by", "version", "updated_at",
+                    "status",
+                    "transition_history",
+                    "approved_at",
+                    "approved_by",
+                    "posted_at",
+                    "posted_by",
+                    "cancelled_at",
+                    "cancelled_by",
+                    "journal_entry",
+                    "paid_amount",
+                    "updated_by",
+                    "version",
+                    "updated_at",
                 }
                 for field in self._meta.concrete_fields:
                     if field.name not in mutable and getattr(prior, field.attname) != getattr(self, field.attname):
-                        raise ValidationError("An AP invoice is immutable after leaving draft.", code="invoice_immutable")
+                        raise ValidationError(
+                            "An AP invoice is immutable after leaving draft.", code="invoice_immutable"
+                        )
 
     def __str__(self) -> str:
         return f"AP-{self.invoice_number} - {self.total_amount}"
@@ -650,9 +701,18 @@ class ARInvoice(InvoiceAggregate):
             models.CheckConstraint(condition=Q(amount__gte=0), name="acct_ar_amount_ck"),
             models.CheckConstraint(condition=Q(tax_amount__gte=0), name="acct_ar_tax_ck"),
             models.CheckConstraint(condition=Q(total_amount=F("amount") + F("tax_amount")), name="acct_ar_total_ck"),
-            models.CheckConstraint(condition=Q(paid_amount__gte=0, paid_amount__lte=F("total_amount")), name="acct_ar_paid_ck"),
-            models.UniqueConstraint(fields=("tenant_id", "creation_idempotency_key"), condition=Q(creation_idempotency_key__isnull=False), name="acct_ar_create_idem_uq"),
-            models.CheckConstraint(condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)), name="acct_ar_softdel_ck"),
+            models.CheckConstraint(
+                condition=Q(paid_amount__gte=0, paid_amount__lte=F("total_amount")), name="acct_ar_paid_ck"
+            ),
+            models.UniqueConstraint(
+                fields=("tenant_id", "creation_idempotency_key"),
+                condition=Q(creation_idempotency_key__isnull=False),
+                name="acct_ar_create_idem_uq",
+            ),
+            models.CheckConstraint(
+                condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)),
+                name="acct_ar_softdel_ck",
+            ),
         ]
 
     def clean(self) -> None:
@@ -661,8 +721,17 @@ class ARInvoice(InvoiceAggregate):
             prior = type(self)._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id).first()
             if prior and prior.status != ARInvoiceStatus.DRAFT:
                 mutable = {
-                    "status", "transition_history", "posted_at", "posted_by", "cancelled_at", "cancelled_by",
-                    "journal_entry", "paid_amount", "updated_by", "version", "updated_at",
+                    "status",
+                    "transition_history",
+                    "posted_at",
+                    "posted_by",
+                    "cancelled_at",
+                    "cancelled_by",
+                    "journal_entry",
+                    "paid_amount",
+                    "updated_by",
+                    "version",
+                    "updated_at",
                 }
                 for field in self._meta.concrete_fields:
                     if field.name not in mutable and getattr(prior, field.attname) != getattr(self, field.attname):
@@ -673,6 +742,10 @@ class ARInvoice(InvoiceAggregate):
 
 
 class InvoiceLine(TenantScopedModel, TimestampedModel):
+    if TYPE_CHECKING:
+        invoice: APInvoice | ARInvoice
+        invoice_id: uuid.UUID | None
+
     line_number = models.PositiveIntegerField()
     description = models.CharField(max_length=500)
     account = models.ForeignKey(Account, on_delete=models.PROTECT)
@@ -767,9 +840,7 @@ class PaymentStatus(models.TextChoices):
 
 @tenancy_scope(TENANT_SCOPED)
 class Payment(TenantScopedModel, TimestampedModel):
-    _state_edges: ClassVar[dict[tuple[str, str], str]] = {
-        (PaymentStatus.RECORDED, "void"): PaymentStatus.VOIDED
-    }
+    _state_edges: ClassVar[dict[tuple[str, str], str]] = {(PaymentStatus.RECORDED, "void"): PaymentStatus.VOIDED}
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     created_by = models.CharField(max_length=255)
@@ -801,7 +872,10 @@ class Payment(TenantScopedModel, TimestampedModel):
             models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="acct_payment_idem_uq"),
             models.CheckConstraint(condition=Q(amount__gt=0), name="acct_payment_amount_ck"),
             models.CheckConstraint(
-                condition=(Q(ap_invoice__isnull=False, ar_invoice__isnull=True) | Q(ap_invoice__isnull=True, ar_invoice__isnull=False)),
+                condition=(
+                    Q(ap_invoice__isnull=False, ar_invoice__isnull=True)
+                    | Q(ap_invoice__isnull=True, ar_invoice__isnull=False)
+                ),
                 name="acct_payment_invoice_ck",
             ),
         ]
@@ -814,7 +888,16 @@ class Payment(TenantScopedModel, TimestampedModel):
         prior = type(self)._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id).first()
         if not prior:
             return
-        allowed_mutable = {"reference_number", "description", "status", "voided_at", "voided_by", "void_reason", "transition_history", "updated_at"}
+        allowed_mutable = {
+            "reference_number",
+            "description",
+            "status",
+            "voided_at",
+            "voided_by",
+            "void_reason",
+            "transition_history",
+            "updated_at",
+        }
         for field in self._meta.concrete_fields:
             if field.name not in allowed_mutable and getattr(prior, field.attname) != getattr(self, field.attname):
                 raise ValidationError("Payment financial evidence is append-only.", code="payment_immutable")
@@ -823,7 +906,10 @@ class Payment(TenantScopedModel, TimestampedModel):
             if self.transition_history != old_history:
                 raise ValidationError({"transition_history": "History may change only when voiding."})
             return
-        if len(self.transition_history) != len(old_history) + 1 or self.transition_history[: len(old_history)] != old_history:
+        if (
+            len(self.transition_history) != len(old_history) + 1
+            or self.transition_history[: len(old_history)] != old_history
+        ):
             raise ValidationError("Payment state changes must use the accounting state machine.", code="state_machine")
         record = self.transition_history[-1]
         if not isinstance(record, dict) or (
@@ -863,8 +949,24 @@ class Payment(TenantScopedModel, TimestampedModel):
 
 
 __all__ = [
-    "APInvoice", "APInvoiceLine", "APInvoiceStatus", "ARInvoice", "ARInvoiceLine", "ARInvoiceStatus",
-    "Account", "AccountType", "CashFlowCategory", "JournalEntry", "JournalEntryStatus", "JournalLine",
-    "MONEY_QUANTUM", "NormalBalance", "Payment", "PaymentMethod", "PaymentStatus", "PostingPeriod",
-    "PostingPeriodStatus", "money",
+    "APInvoice",
+    "APInvoiceLine",
+    "APInvoiceStatus",
+    "ARInvoice",
+    "ARInvoiceLine",
+    "ARInvoiceStatus",
+    "Account",
+    "AccountType",
+    "CashFlowCategory",
+    "JournalEntry",
+    "JournalEntryStatus",
+    "JournalLine",
+    "MONEY_QUANTUM",
+    "NormalBalance",
+    "Payment",
+    "PaymentMethod",
+    "PaymentStatus",
+    "PostingPeriod",
+    "PostingPeriodStatus",
+    "money",
 ]

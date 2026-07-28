@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
 
 from django.db import migrations, models
 from django.db.models import F, Q
-
 
 INDEXES = {
     "Account": (
@@ -62,42 +62,86 @@ INDEXES = {
 
 CONSTRAINTS = {
     "account": (
-        models.UniqueConstraint(fields=("tenant_id", "code"), condition=Q(is_deleted=False), name="acct_account_code_uq"),
+        models.UniqueConstraint(
+            fields=("tenant_id", "code"), condition=Q(is_deleted=False), name="acct_account_code_uq"
+        ),
         models.CheckConstraint(condition=Q(parent__isnull=True) | ~Q(parent=F("id")), name="acct_account_parent_ck"),
         models.CheckConstraint(condition=Q(normal_balance__in=("debit", "credit")), name="acct_account_balance_ck"),
-        models.UniqueConstraint(fields=("tenant_id", "creation_idempotency_key"), condition=Q(creation_idempotency_key__isnull=False), name="acct_account_idem_uq"),
-        models.CheckConstraint(condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)), name="acct_account_softdel_ck"),
+        models.UniqueConstraint(
+            fields=("tenant_id", "creation_idempotency_key"),
+            condition=Q(creation_idempotency_key__isnull=False),
+            name="acct_account_idem_uq",
+        ),
+        models.CheckConstraint(
+            condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)),
+            name="acct_account_softdel_ck",
+        ),
     ),
     "postingperiod": (
         models.UniqueConstraint(fields=("tenant_id", "period_name", "fiscal_year"), name="acct_period_name_uq"),
         models.CheckConstraint(condition=Q(start_date__lte=F("end_date")), name="acct_period_dates_ck"),
-        models.UniqueConstraint(fields=("tenant_id", "creation_idempotency_key"), condition=Q(creation_idempotency_key__isnull=False), name="acct_period_idem_uq"),
+        models.UniqueConstraint(
+            fields=("tenant_id", "creation_idempotency_key"),
+            condition=Q(creation_idempotency_key__isnull=False),
+            name="acct_period_idem_uq",
+        ),
     ),
     "journalentry": (
-        models.UniqueConstraint(fields=("tenant_id", "entry_number"), condition=Q(is_deleted=False), name="acct_je_number_uq"),
-        models.UniqueConstraint(fields=("tenant_id", "source_module", "source_idempotency_key"), condition=Q(source_idempotency_key__isnull=False), name="acct_je_source_idem_uq"),
+        models.UniqueConstraint(
+            fields=("tenant_id", "entry_number"), condition=Q(is_deleted=False), name="acct_je_number_uq"
+        ),
+        models.UniqueConstraint(
+            fields=("tenant_id", "source_module", "source_idempotency_key"),
+            condition=Q(source_idempotency_key__isnull=False),
+            name="acct_je_source_idem_uq",
+        ),
         models.CheckConstraint(condition=Q(debit_total__gte=0), name="acct_je_debit_nonneg_ck"),
         models.CheckConstraint(condition=Q(credit_total__gte=0), name="acct_je_credit_nonneg_ck"),
-        models.CheckConstraint(condition=Q(reversed_entry__isnull=True) | ~Q(reversed_entry=F("id")), name="acct_je_reversal_self_ck"),
-        models.UniqueConstraint(fields=("tenant_id", "creation_idempotency_key"), condition=Q(creation_idempotency_key__isnull=False), name="acct_je_create_idem_uq"),
-        models.CheckConstraint(condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)), name="acct_je_softdel_ck"),
+        models.CheckConstraint(
+            condition=Q(reversed_entry__isnull=True) | ~Q(reversed_entry=F("id")), name="acct_je_reversal_self_ck"
+        ),
+        models.UniqueConstraint(
+            fields=("tenant_id", "creation_idempotency_key"),
+            condition=Q(creation_idempotency_key__isnull=False),
+            name="acct_je_create_idem_uq",
+        ),
+        models.CheckConstraint(
+            condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)),
+            name="acct_je_softdel_ck",
+        ),
     ),
     "journalline": (
         models.UniqueConstraint(fields=("tenant_id", "journal_entry", "line_number"), name="acct_jl_line_uq"),
-        models.CheckConstraint(condition=(Q(debit_amount__gt=0, credit_amount=0) | Q(credit_amount__gt=0, debit_amount=0)), name="acct_jl_debit_credit_ck"),
+        models.CheckConstraint(
+            condition=(Q(debit_amount__gt=0, credit_amount=0) | Q(credit_amount__gt=0, debit_amount=0)),
+            name="acct_jl_debit_credit_ck",
+        ),
         models.CheckConstraint(condition=Q(base_debit_amount__gte=0), name="acct_jl_base_debit_ck"),
         models.CheckConstraint(condition=Q(base_credit_amount__gte=0), name="acct_jl_base_credit_ck"),
         models.CheckConstraint(condition=Q(exchange_rate__gt=0), name="acct_jl_rate_ck"),
     ),
     "apinvoice": (
-        models.UniqueConstraint(fields=("tenant_id", "supplier_id", "invoice_number"), condition=Q(is_deleted=False), name="acct_ap_invoice_uq"),
+        models.UniqueConstraint(
+            fields=("tenant_id", "supplier_id", "invoice_number"),
+            condition=Q(is_deleted=False),
+            name="acct_ap_invoice_uq",
+        ),
         models.CheckConstraint(condition=Q(invoice_date__lte=F("due_date")), name="acct_ap_dates_ck"),
         models.CheckConstraint(condition=Q(amount__gte=0), name="acct_ap_amount_ck"),
         models.CheckConstraint(condition=Q(tax_amount__gte=0), name="acct_ap_tax_ck"),
         models.CheckConstraint(condition=Q(total_amount=F("amount") + F("tax_amount")), name="acct_ap_total_ck"),
-        models.CheckConstraint(condition=Q(paid_amount__gte=0, paid_amount__lte=F("total_amount")), name="acct_ap_paid_ck"),
-        models.UniqueConstraint(fields=("tenant_id", "creation_idempotency_key"), condition=Q(creation_idempotency_key__isnull=False), name="acct_ap_create_idem_uq"),
-        models.CheckConstraint(condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)), name="acct_ap_softdel_ck"),
+        models.CheckConstraint(
+            condition=Q(paid_amount__gte=0, paid_amount__lte=F("total_amount")), name="acct_ap_paid_ck"
+        ),
+        models.UniqueConstraint(
+            fields=("tenant_id", "creation_idempotency_key"),
+            condition=Q(creation_idempotency_key__isnull=False),
+            name="acct_ap_create_idem_uq",
+        ),
+        models.CheckConstraint(
+            condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)),
+            name="acct_ap_softdel_ck",
+        ),
     ),
     "apinvoiceline": (
         models.UniqueConstraint(fields=("tenant_id", "invoice", "line_number"), name="acct_apl_line_uq"),
@@ -107,14 +151,27 @@ CONSTRAINTS = {
         models.CheckConstraint(condition=Q(line_total__gte=0), name="acct_apl_total_ck"),
     ),
     "arinvoice": (
-        models.UniqueConstraint(fields=("tenant_id", "customer_id", "invoice_number"), condition=Q(is_deleted=False), name="acct_ar_invoice_uq"),
+        models.UniqueConstraint(
+            fields=("tenant_id", "customer_id", "invoice_number"),
+            condition=Q(is_deleted=False),
+            name="acct_ar_invoice_uq",
+        ),
         models.CheckConstraint(condition=Q(invoice_date__lte=F("due_date")), name="acct_ar_dates_ck"),
         models.CheckConstraint(condition=Q(amount__gte=0), name="acct_ar_amount_ck"),
         models.CheckConstraint(condition=Q(tax_amount__gte=0), name="acct_ar_tax_ck"),
         models.CheckConstraint(condition=Q(total_amount=F("amount") + F("tax_amount")), name="acct_ar_total_ck"),
-        models.CheckConstraint(condition=Q(paid_amount__gte=0, paid_amount__lte=F("total_amount")), name="acct_ar_paid_ck"),
-        models.UniqueConstraint(fields=("tenant_id", "creation_idempotency_key"), condition=Q(creation_idempotency_key__isnull=False), name="acct_ar_create_idem_uq"),
-        models.CheckConstraint(condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)), name="acct_ar_softdel_ck"),
+        models.CheckConstraint(
+            condition=Q(paid_amount__gte=0, paid_amount__lte=F("total_amount")), name="acct_ar_paid_ck"
+        ),
+        models.UniqueConstraint(
+            fields=("tenant_id", "creation_idempotency_key"),
+            condition=Q(creation_idempotency_key__isnull=False),
+            name="acct_ar_create_idem_uq",
+        ),
+        models.CheckConstraint(
+            condition=(Q(is_deleted=False, deleted_at__isnull=True) | Q(is_deleted=True, deleted_at__isnull=False)),
+            name="acct_ar_softdel_ck",
+        ),
     ),
     "arinvoiceline": (
         models.UniqueConstraint(fields=("tenant_id", "invoice", "line_number"), name="acct_arl_line_uq"),
@@ -126,7 +183,13 @@ CONSTRAINTS = {
     "payment": (
         models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="acct_payment_idem_uq"),
         models.CheckConstraint(condition=Q(amount__gt=0), name="acct_payment_amount_ck"),
-        models.CheckConstraint(condition=(Q(ap_invoice__isnull=False, ar_invoice__isnull=True) | Q(ap_invoice__isnull=True, ar_invoice__isnull=False)), name="acct_payment_invoice_ck"),
+        models.CheckConstraint(
+            condition=(
+                Q(ap_invoice__isnull=False, ar_invoice__isnull=True)
+                | Q(ap_invoice__isnull=True, ar_invoice__isnull=False)
+            ),
+            name="acct_payment_invoice_ck",
+        ),
     ),
 }
 
@@ -145,7 +208,7 @@ def validate_rows(apps, schema_editor) -> None:
     for account in Account.objects.all().iterator():
         if account.parent_id == account.id or account.normal_balance not in {"debit", "credit"}:
             failures.append(f"account:{account.id}")
-    periods_by_tenant: dict[object, list[object]] = {}
+    periods_by_tenant: dict[object, list[Any]] = {}
     for period in PostingPeriod.objects.order_by("tenant_id", "start_date", "end_date").iterator():
         if period.start_date > period.end_date:
             failures.append(f"period:{period.id}:dates")
@@ -166,13 +229,24 @@ def validate_rows(apps, schema_editor) -> None:
             failures.append(f"journal-line:{line.id}:base")
     for label, model in (("ap", APInvoice), ("ar", ARInvoice)):
         for invoice in model.objects.all().iterator():
-            if invoice.invoice_date > invoice.due_date or min(invoice.amount, invoice.tax_amount, invoice.total_amount, invoice.paid_amount) < 0:
+            if (
+                invoice.invoice_date > invoice.due_date
+                or min(invoice.amount, invoice.tax_amount, invoice.total_amount, invoice.paid_amount) < 0
+            ):
                 failures.append(f"{label}:{invoice.id}:amount-or-date")
-            if invoice.total_amount != invoice.amount + invoice.tax_amount or invoice.paid_amount > invoice.total_amount:
+            if (
+                invoice.total_amount != invoice.amount + invoice.tax_amount
+                or invoice.paid_amount > invoice.total_amount
+            ):
                 failures.append(f"{label}:{invoice.id}:total")
     for payment in Payment.objects.select_related("ap_invoice", "ar_invoice").all().iterator():
         invoice = payment.ap_invoice or payment.ar_invoice
-        if payment.amount <= 0 or invoice is None or payment.currency != invoice.currency or payment.payment_date < invoice.invoice_date:
+        if (
+            payment.amount <= 0
+            or invoice is None
+            or payment.currency != invoice.currency
+            or payment.payment_date < invoice.invoice_date
+        ):
             failures.append(f"payment:{payment.id}")
     if failures:
         raise RuntimeError("Accounting v2 constraints rejected records: " + ", ".join(failures[:50]))
@@ -183,7 +257,9 @@ def add_indexes(apps, schema_editor) -> None:
         model = apps.get_model("accounting_finance", model_name)
         for index in indexes:
             if schema_editor.connection.vendor == "postgresql":
-                sql = str(index.create_sql(model, schema_editor)).replace("CREATE INDEX", "CREATE INDEX CONCURRENTLY", 1)
+                sql = str(index.create_sql(model, schema_editor)).replace(
+                    "CREATE INDEX", "CREATE INDEX CONCURRENTLY", 1
+                )
                 schema_editor.execute(sql)
             else:
                 schema_editor.add_index(model, index)
@@ -219,13 +295,24 @@ def remove_period_exclusion(apps, schema_editor) -> None:
 
 
 LEGACY_INDEXES = (
-    ("account", "accounting__tenant__6dd755_idx"), ("account", "accounting__tenant__edc503_idx"),
-    ("postingperiod", "accounting__tenant__4a985d_idx"), ("postingperiod", "accounting__tenant__bc39fe_idx"),
-    ("journalentry", "accounting__tenant__97db4c_idx"), ("journalentry", "accounting__tenant__634dd6_idx"), ("journalentry", "accounting__tenant__ac9110_idx"),
-    ("journalline", "accounting__tenant__76a163_idx"), ("journalline", "accounting__tenant__a1a834_idx"),
-    ("apinvoice", "accounting__tenant__600de2_idx"), ("apinvoice", "accounting__tenant__d5d212_idx"), ("apinvoice", "accounting__tenant__6dfb4e_idx"),
-    ("arinvoice", "accounting__tenant__fdb465_idx"), ("arinvoice", "accounting__tenant__c79f51_idx"), ("arinvoice", "accounting__tenant__47a03f_idx"),
-    ("payment", "accounting__tenant__ba3dec_idx"), ("payment", "accounting__tenant__717f13_idx"), ("payment", "accounting__tenant__f30497_idx"),
+    ("account", "accounting__tenant__6dd755_idx"),
+    ("account", "accounting__tenant__edc503_idx"),
+    ("postingperiod", "accounting__tenant__4a985d_idx"),
+    ("postingperiod", "accounting__tenant__bc39fe_idx"),
+    ("journalentry", "accounting__tenant__97db4c_idx"),
+    ("journalentry", "accounting__tenant__634dd6_idx"),
+    ("journalentry", "accounting__tenant__ac9110_idx"),
+    ("journalline", "accounting__tenant__76a163_idx"),
+    ("journalline", "accounting__tenant__a1a834_idx"),
+    ("apinvoice", "accounting__tenant__600de2_idx"),
+    ("apinvoice", "accounting__tenant__d5d212_idx"),
+    ("apinvoice", "accounting__tenant__6dfb4e_idx"),
+    ("arinvoice", "accounting__tenant__fdb465_idx"),
+    ("arinvoice", "accounting__tenant__c79f51_idx"),
+    ("arinvoice", "accounting__tenant__47a03f_idx"),
+    ("payment", "accounting__tenant__ba3dec_idx"),
+    ("payment", "accounting__tenant__717f13_idx"),
+    ("payment", "accounting__tenant__f30497_idx"),
 )
 
 
@@ -244,7 +331,20 @@ class Migration(migrations.Migration):
         migrations.AlterField("account", "created_at", models.DateTimeField(auto_now_add=True)),
         migrations.AlterField("account", "code", models.CharField(max_length=50)),
         migrations.AlterField("account", "name", models.CharField(max_length=255)),
-        migrations.AlterField("account", "account_type", models.CharField(choices=(("asset", "Asset"), ("liability", "Liability"), ("equity", "Equity"), ("revenue", "Revenue"), ("expense", "Expense")), max_length=20)),
+        migrations.AlterField(
+            "account",
+            "account_type",
+            models.CharField(
+                choices=(
+                    ("asset", "Asset"),
+                    ("liability", "Liability"),
+                    ("equity", "Equity"),
+                    ("revenue", "Revenue"),
+                    ("expense", "Expense"),
+                ),
+                max_length=20,
+            ),
+        ),
         migrations.AlterField("account", "is_active", models.BooleanField(default=True)),
         migrations.AlterField("postingperiod", "created_at", models.DateTimeField(auto_now_add=True)),
         migrations.AlterField("postingperiod", "period_name", models.CharField(max_length=50)),
@@ -254,8 +354,14 @@ class Migration(migrations.Migration):
         migrations.AlterField("journalentry", "entry_number", models.CharField(max_length=50)),
         migrations.AlterField("journalentry", "posting_date", models.DateField()),
         migrations.AlterField("journalline", "created_at", models.DateTimeField(auto_now_add=True)),
-        migrations.AlterField("journalline", "debit_amount", models.DecimalField(decimal_places=2, default=Decimal("0.00"), max_digits=15)),
-        migrations.AlterField("journalline", "credit_amount", models.DecimalField(decimal_places=2, default=Decimal("0.00"), max_digits=15)),
+        migrations.AlterField(
+            "journalline", "debit_amount", models.DecimalField(decimal_places=2, default=Decimal("0.00"), max_digits=15)
+        ),
+        migrations.AlterField(
+            "journalline",
+            "credit_amount",
+            models.DecimalField(decimal_places=2, default=Decimal("0.00"), max_digits=15),
+        ),
         migrations.AlterField("apinvoice", "created_at", models.DateTimeField(auto_now_add=True)),
         migrations.AlterField("apinvoice", "invoice_number", models.CharField(max_length=100)),
         migrations.AlterField("apinvoice", "supplier_id", models.UUIDField()),

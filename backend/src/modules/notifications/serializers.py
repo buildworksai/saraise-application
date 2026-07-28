@@ -31,15 +31,36 @@ class StrictSerializer(serializers.Serializer):
 
 class TemplateListSerializer(serializers.ModelSerializer):
     active_version_number = serializers.IntegerField(source="active_version.version", read_only=True, allow_null=True)
+
     class Meta:
         model = NotificationTemplate
-        fields = ("id", "code", "name", "category", "channel", "locale", "status", "active_version_number", "updated_at")
+        fields = (
+            "id",
+            "code",
+            "name",
+            "category",
+            "channel",
+            "locale",
+            "status",
+            "active_version_number",
+            "updated_at",
+        )
 
 
 class TemplateVersionSerializer(serializers.ModelSerializer):
     class Meta:
         model = NotificationTemplateVersion
-        fields = ("id", "version", "subject_template", "body_template", "variables_schema", "content_type", "created_by", "correlation_id", "created_at")
+        fields = (
+            "id",
+            "version",
+            "subject_template",
+            "body_template",
+            "variables_schema",
+            "content_type",
+            "created_by",
+            "correlation_id",
+            "created_at",
+        )
         read_only_fields = fields
 
 
@@ -47,8 +68,17 @@ class TemplateDetailSerializer(TemplateListSerializer):
     active_version = TemplateVersionSerializer(read_only=True)
     latest_version = serializers.SerializerMethodField()
     transition_history = serializers.JSONField(read_only=True)
+
     class Meta(TemplateListSerializer.Meta):
-        fields = TemplateListSerializer.Meta.fields + ("active_version", "latest_version", "transition_history", "created_by", "updated_by", "created_at")
+        fields = TemplateListSerializer.Meta.fields + (
+            "active_version",
+            "latest_version",
+            "transition_history",
+            "created_by",
+            "updated_by",
+            "created_at",
+        )
+
     def get_latest_version(self, obj):
         latest = obj.versions.order_by("-version").first()
         return TemplateVersionSerializer(latest).data if latest else None
@@ -63,7 +93,9 @@ class TemplateCreateSerializer(StrictSerializer):
     subject_template = serializers.CharField(max_length=500, allow_blank=True, default="")
     body_template = serializers.CharField()
     variables_schema = serializers.DictField(default=dict)
-    content_type = serializers.ChoiceField(choices=("text/plain", "text/html", "application/json"), default="text/plain")
+    content_type = serializers.ChoiceField(
+        choices=("text/plain", "text/html", "application/json"), default="text/plain"
+    )
     idempotency_key = serializers.CharField(max_length=255, required=False, write_only=True)
 
 
@@ -113,27 +145,65 @@ class TemplateRollbackSerializer(TransitionSerializer):
 class DeliveryAttemptSerializer(serializers.ModelSerializer):
     class Meta:
         model = NotificationDeliveryAttempt
-        fields = ("id", "attempt_number", "adapter_key", "outcome", "provider_message_id", "error_code", "latency_ms", "started_at", "completed_at", "correlation_id")
+        fields = (
+            "id",
+            "attempt_number",
+            "adapter_key",
+            "outcome",
+            "provider_message_id",
+            "error_code",
+            "latency_ms",
+            "started_at",
+            "completed_at",
+            "correlation_id",
+        )
         read_only_fields = fields
 
 
 class DeliveryListSerializer(serializers.ModelSerializer):
     class Meta:
         model = NotificationDelivery
-        fields = ("id", "recipient_type", "recipient_display", "channel", "category", "priority", "status", "attempt_count", "max_attempts", "failure_code", "scheduled_at", "next_attempt_at", "sent_at", "delivered_at", "correlation_id", "created_at", "updated_at")
+        fields = (
+            "id",
+            "recipient_type",
+            "recipient_display",
+            "channel",
+            "category",
+            "priority",
+            "status",
+            "attempt_count",
+            "max_attempts",
+            "failure_code",
+            "scheduled_at",
+            "next_attempt_at",
+            "sent_at",
+            "delivered_at",
+            "correlation_id",
+            "created_at",
+            "updated_at",
+        )
         read_only_fields = fields
 
 
 class DeliveryDetailSerializer(DeliveryListSerializer):
     attempts = DeliveryAttemptSerializer(many=True, read_only=True)
     template_version_id = serializers.UUIDField(read_only=True)
+
     class Meta(DeliveryListSerializer.Meta):
-        fields = DeliveryListSerializer.Meta.fields + ("template_version_id", "provider_message_id", "failure_message", "transition_history", "attempts")
+        fields = DeliveryListSerializer.Meta.fields + (
+            "template_version_id",
+            "provider_message_id",
+            "failure_message",
+            "transition_history",
+            "attempts",
+        )
 
 
 class DispatchCreateSerializer(StrictSerializer):
     template_id = serializers.UUIDField()
-    recipient_type = serializers.ChoiceField(choices=("user", "email", "phone", "push_endpoint", "webhook_endpoint"), required=False)
+    recipient_type = serializers.ChoiceField(
+        choices=("user", "email", "phone", "push_endpoint", "webhook_endpoint"), required=False
+    )
     recipient_user_id = serializers.CharField(required=False)
     recipient = serializers.JSONField(required=False, write_only=True)
     context = serializers.DictField(default=dict, write_only=True)
@@ -160,7 +230,9 @@ class DispatchCreateSerializer(StrictSerializer):
 
 class DispatchPreviewSerializer(StrictSerializer):
     template_id = serializers.UUIDField()
-    recipient_type = serializers.ChoiceField(choices=("user", "email", "phone", "push_endpoint", "webhook_endpoint"), required=False)
+    recipient_type = serializers.ChoiceField(
+        choices=("user", "email", "phone", "push_endpoint", "webhook_endpoint"), required=False
+    )
     recipient_user_id = serializers.CharField(required=False)
     recipient = serializers.JSONField(required=False, write_only=True)
     context = serializers.DictField(default=dict, write_only=True)
@@ -191,8 +263,10 @@ class BulkDispatchSerializer(StrictSerializer):
 
     def validate(self, attrs):
         items = attrs.get("requests") or attrs.get("deliveries")
-        if not items: raise serializers.ValidationError({"deliveries": "At least one delivery is required."})
-        attrs["requests"] = items; attrs.pop("deliveries", None)
+        if not items:
+            raise serializers.ValidationError({"deliveries": "At least one delivery is required."})
+        attrs["requests"] = items
+        attrs.pop("deliveries", None)
         return attrs
 
 
@@ -214,7 +288,19 @@ class DeliveryConfirmationSerializer(StrictSerializer):
 class InboxListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notification
-        fields = ("id", "notification_type", "category", "title", "message", "status", "read_at", "action_url", "expires_at", "created_at", "updated_at")
+        fields = (
+            "id",
+            "notification_type",
+            "category",
+            "title",
+            "message",
+            "status",
+            "read_at",
+            "action_url",
+            "expires_at",
+            "created_at",
+            "updated_at",
+        )
         read_only_fields = fields
 
 
@@ -238,12 +324,30 @@ class UnreadCountResultSerializer(StrictSerializer):
 class PreferenceReadSerializer(serializers.ModelSerializer):
     mandatory = serializers.SerializerMethodField()
     source = serializers.SerializerMethodField()
+
     class Meta:
         model = NotificationPreference
-        fields = ("id", "channel", "category", "enabled", "digest_mode", "quiet_hours_start", "quiet_hours_end", "timezone", "mandatory", "source", "created_at", "updated_at")
+        fields = (
+            "id",
+            "channel",
+            "category",
+            "enabled",
+            "digest_mode",
+            "quiet_hours_start",
+            "quiet_hours_end",
+            "timezone",
+            "mandatory",
+            "source",
+            "created_at",
+            "updated_at",
+        )
         read_only_fields = fields
-    def get_mandatory(self, obj): return obj.category in {"security_alerts", "password_reset"}
-    def get_source(self, obj): return "mandatory_policy" if self.get_mandatory(obj) else "override"
+
+    def get_mandatory(self, obj):
+        return obj.category in {"security_alerts", "password_reset"}
+
+    def get_source(self, obj):
+        return "mandatory_policy" if self.get_mandatory(obj) else "override"
 
 
 class PreferenceUpsertSerializer(StrictSerializer):
@@ -258,8 +362,10 @@ class PreferenceUpsertSerializer(StrictSerializer):
     def validate(self, attrs):
         if (attrs.get("quiet_hours_start") is None) != (attrs.get("quiet_hours_end") is None):
             raise serializers.ValidationError({"quiet_hours": "Start and end must both be set or null."})
-        try: ZoneInfo(attrs.get("timezone", "UTC"))
-        except ZoneInfoNotFoundError as exc: raise serializers.ValidationError({"timezone": "Must be a valid IANA timezone."}) from exc
+        try:
+            ZoneInfo(attrs.get("timezone", "UTC"))
+        except ZoneInfoNotFoundError as exc:
+            raise serializers.ValidationError({"timezone": "Must be a valid IANA timezone."}) from exc
         return attrs
 
 
@@ -270,17 +376,36 @@ class PreferenceBulkReplacementSerializer(StrictSerializer):
 class EndpointListSerializer(serializers.ModelSerializer):
     health = serializers.SerializerMethodField()
     address_display = serializers.SerializerMethodField()
+
     class Meta:
         model = NotificationEndpoint
-        fields = ("id", "user_id", "kind", "device_type", "address_display", "display_name", "is_active", "last_verified_at", "last_used_at", "health", "created_by", "created_at", "updated_at")
+        fields = (
+            "id",
+            "user_id",
+            "kind",
+            "device_type",
+            "address_display",
+            "display_name",
+            "is_active",
+            "last_verified_at",
+            "last_used_at",
+            "health",
+            "created_by",
+            "created_at",
+            "updated_at",
+        )
         read_only_fields = fields
+
     def get_health(self, obj):
         return "healthy" if obj.last_verified_at else ("revoked" if not obj.is_active else "unverified")
-    def get_address_display(self, obj): return f"Protected {obj.kind} endpoint"
+
+    def get_address_display(self, obj):
+        return f"Protected {obj.kind} endpoint"
 
 
 class EndpointDetailSerializer(EndpointListSerializer):
     secret_ref = serializers.CharField(read_only=True)
+
     class Meta(EndpointListSerializer.Meta):
         fields = EndpointListSerializer.Meta.fields + ("secret_ref",)
 
@@ -308,15 +433,29 @@ class EndpointRevokeSerializer(StrictSerializer):
 
 
 class EndpointSecretRotationSerializer(StrictSerializer):
-    secret_ref = serializers.RegexField(r"^(?:vault|aws-secrets|gcp-secrets|azure-keyvault)://[A-Za-z0-9_./-]+$", max_length=255, write_only=True)
+    secret_ref = serializers.RegexField(
+        r"^(?:vault|aws-secrets|gcp-secrets|azure-keyvault)://[A-Za-z0-9_./-]+$", max_length=255, write_only=True
+    )
 
 
 class ConfigurationReadSerializer(serializers.ModelSerializer):
     checksum = serializers.SerializerMethodField()
+
     class Meta:
         model = NotificationConfiguration
-        fields = ("id", "environment", "active_version", "document", "checksum", "created_by", "updated_by", "created_at", "updated_at")
+        fields = (
+            "id",
+            "environment",
+            "active_version",
+            "document",
+            "checksum",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
+        )
         read_only_fields = fields
+
     def get_checksum(self, obj):
         version = obj.versions.order_by("-version").first()
         return version.checksum if version else ""
@@ -330,7 +469,8 @@ class ConfigurationWriteSerializer(StrictSerializer):
 
     def validate(self, attrs):
         attrs["reason"] = attrs.get("reason") or attrs.get("change_summary")
-        if not attrs["reason"]: raise serializers.ValidationError({"change_summary": "A change reason is required."})
+        if not attrs["reason"]:
+            raise serializers.ValidationError({"change_summary": "A change reason is required."})
         attrs.pop("change_summary", None)
         return attrs
 
@@ -342,9 +482,20 @@ class ConfigurationSimulationSerializer(StrictSerializer):
 
 class ConfigurationVersionSerializer(serializers.ModelSerializer):
     change_summary = serializers.CharField(source="change_reason", read_only=True)
+
     class Meta:
         model = NotificationConfigurationVersion
-        fields = ("id", "version", "document", "checksum", "previous_version_id", "created_by", "correlation_id", "change_summary", "created_at")
+        fields = (
+            "id",
+            "version",
+            "document",
+            "checksum",
+            "previous_version_id",
+            "created_by",
+            "correlation_id",
+            "change_summary",
+            "created_at",
+        )
         read_only_fields = fields
 
 
@@ -379,8 +530,10 @@ class ConfigurationRollbackSerializer(StrictSerializer):
     def validate(self, attrs):
         attrs["version"] = attrs.get("version") or attrs.get("target_version")
         attrs["reason"] = attrs.get("reason") or attrs.get("change_summary")
-        if not attrs["version"] or not attrs["reason"]: raise serializers.ValidationError("target_version and change_summary are required.")
-        attrs.pop("target_version", None); attrs.pop("change_summary", None)
+        if not attrs["version"] or not attrs["reason"]:
+            raise serializers.ValidationError("target_version and change_summary are required.")
+        attrs.pop("target_version", None)
+        attrs.pop("change_summary", None)
         return attrs
 
 

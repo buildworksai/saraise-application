@@ -292,6 +292,22 @@ if SARAISE_MODE == "saas" and not _in_test:
 
 # Redis configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+    }
+}
+
+# Local development integration provider roots. Adapters read these through
+# django.conf.settings so env values must be promoted explicitly.
+BDR_LOCAL_STORAGE_ROOT = os.getenv("BDR_LOCAL_STORAGE_ROOT")
+BDR_LOCAL_RESTORE_ROOT = os.getenv("BDR_LOCAL_RESTORE_ROOT")
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+EMAIL_MARKETING_DEFAULT_GATEWAY = os.getenv("EMAIL_MARKETING_DEFAULT_GATEWAY", "")
 # Domain events (Stream A3) — disable in unit tests via env if needed
 SARAISE_EVENTS_ENABLED = os.getenv("SARAISE_EVENTS_ENABLED", "true").lower() in ("1", "true", "yes")
 

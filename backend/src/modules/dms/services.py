@@ -48,11 +48,7 @@ from .models import (
     DocumentVersion,
     Folder,
 )
-from .storage import (
-    DocumentStoragePort,
-    generate_storage_key,
-    get_document_storage,
-)
+from .storage import DocumentStoragePort, generate_storage_key, get_document_storage
 
 logger = logging.getLogger("saraise.dms")
 
@@ -546,7 +542,7 @@ class DmsConfigurationService:
         normalized = cls.validate_values(values)
         environment = cls.validate_environment(environment)
         with transaction.atomic():
-            current = cls.current(tenant_id, actor_id, environment)
+            cls.current(tenant_id, actor_id, environment)
             configuration = DmsConfiguration.objects.select_for_update().get(
                 tenant_id=tenant_id,
                 environment=environment,

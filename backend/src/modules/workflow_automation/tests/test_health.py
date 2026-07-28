@@ -9,7 +9,14 @@ import pytest
 from .. import health
 
 
-def _set_checks(monkeypatch: pytest.MonkeyPatch, *, database: bool = True, jobs: bool = True, outbox: bool = True, extensions: bool = True) -> None:
+def _set_checks(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    database: bool = True,
+    jobs: bool = True,
+    outbox: bool = True,
+    extensions: bool = True,
+) -> None:
     monkeypatch.setattr(health, "_database_ready", lambda tenant_id: database)
     monkeypatch.setattr(health, "_handlers_registered", lambda: jobs)
     monkeypatch.setattr(health, "_outbox_fresh", lambda tenant_id: outbox)

@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 TABLES = ("crm_leads", "crm_accounts", "crm_contacts", "crm_opportunities", "crm_activities")
 
 

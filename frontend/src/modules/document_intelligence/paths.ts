@@ -1,6 +1,6 @@
-import type { UUID } from './contracts';
+import type { UUID } from "./contracts";
 
-const ROOT = '/document-intelligence' as const;
+const ROOT = "/document-intelligence" as const;
 
 export const DOCUMENT_INTELLIGENCE_PATHS = {
   EXTRACTIONS: {

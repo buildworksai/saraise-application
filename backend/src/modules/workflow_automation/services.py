@@ -14,7 +14,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from time import monotonic
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, cast
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -37,12 +37,7 @@ from src.core.state_machine import (
     TerminalStateError,
 )
 
-from .extensions import (
-    WorkflowActionInvocation,
-    action_registry,
-    condition_registry,
-    execute_registered_action,
-)
+from .extensions import WorkflowActionInvocation, action_registry, condition_registry, execute_registered_action
 from .models import (
     Workflow,
     WorkflowAutomationConfiguration,
@@ -270,6 +265,12 @@ class WorkflowConfigurationService:
         flags = candidate.get("feature_flags")
         if not all(isinstance(value, Mapping) for value in (defaults, limits, allowed, operational, ui, flags)):
             raise ValidationError({"document": ["Configuration sections must be JSON objects."]})
+        defaults = cast(Mapping[str, Any], defaults)
+        limits = cast(Mapping[str, Any], limits)
+        allowed = cast(Mapping[str, Any], allowed)
+        operational = cast(Mapping[str, Any], operational)
+        ui = cast(Mapping[str, Any], ui)
+        flags = cast(Mapping[str, Any], flags)
 
         baseline = default_configuration_document()
         errors: dict[str, list[str]] = {}
@@ -342,20 +343,18 @@ class WorkflowConfigurationService:
         }
         for default_name, allowlist_name in default_dependencies.items():
             if defaults.get(default_name) not in allowed.get(allowlist_name, []):  # type: ignore[union-attr]
-                errors[f"defaults.{default_name}"] = [
-                    f"Must be enabled by allowed_values.{allowlist_name}."
-                ]
+                errors[f"defaults.{default_name}"] = [f"Must be enabled by allowed_values.{allowlist_name}."]
         for default_name, limit_name in {
             "approval_due_seconds": "duration_max_seconds",
         }.items():
             value = defaults.get(default_name)  # type: ignore[union-attr]
-            maximum = limits.get(limit_name)  # type: ignore[union-attr]
+            configured_maximum = limits.get(limit_name)
             if (
                 isinstance(value, bool)
                 or not isinstance(value, int)
                 or value < 1
-                or not isinstance(maximum, int)
-                or value > maximum
+                or not isinstance(configured_maximum, int)
+                or value > configured_maximum
             ):
                 errors[f"defaults.{default_name}"] = [f"Must be within limits.{limit_name}."]
         priority = defaults.get("execution_priority")  # type: ignore[union-attr]
@@ -398,9 +397,7 @@ class WorkflowConfigurationService:
             "decision": "registered_condition",
         }
         if not isinstance(step_handlers, Mapping) or dict(step_handlers) != supported_step_handlers:
-            errors["step_handlers"] = [
-                "Must map each supported step type to its fixed, safe execution primitive."
-            ]
+            errors["step_handlers"] = ["Must map each supported step type to its fixed, safe execution primitive."]
         lifecycle = candidate.get("lifecycle")
         safe_lifecycle = default_configuration_document()["lifecycle"]
         if not isinstance(lifecycle, Mapping):
@@ -412,10 +409,7 @@ class WorkflowConfigurationService:
                     errors[f"lifecycle.{domain}"] = ["Must declare every lifecycle state."]
                     continue
                 for source, targets in configured_graph.items():
-                    if (
-                        not isinstance(targets, list)
-                        or not set(targets).issubset(set(safe_graph[source]))
-                    ):
+                    if not isinstance(targets, list) or not set(targets).issubset(set(safe_graph[source])):
                         errors[f"lifecycle.{domain}.{source}"] = [
                             "May only enable transitions supported by the fixed state-machine engine."
                         ]
@@ -425,9 +419,7 @@ class WorkflowConfigurationService:
             not isinstance(action_quota_costs, Mapping)
             or set(action_quota_costs) != safe_quota_keys
             or any(
-                isinstance(value, bool)
-                or not isinstance(value, int)
-                or not 0 <= value <= 100
+                isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100
                 for value in action_quota_costs.values()
             )
         ):
@@ -450,7 +442,8 @@ class WorkflowConfigurationService:
             value = operational.get(name)  # type: ignore[union-attr]
             if isinstance(value, bool) or not isinstance(value, int) or not bounds[0] <= value <= bounds[1]:
                 errors[f"operational.{name}"] = [f"Must be an integer from {bounds[0]} through {bounds[1]}."]
-        if not isinstance(operational.get("v1_sunset"), str) or not operational["v1_sunset"]:  # type: ignore[index,union-attr]
+        v1_sunset = operational.get("v1_sunset")  # type: ignore[union-attr]
+        if not isinstance(v1_sunset, str) or not v1_sunset:
             errors["operational.v1_sunset"] = ["Must be a non-empty HTTP-date."]
 
         if not isinstance(ui.get("sidebar_orders"), Mapping):  # type: ignore[union-attr]
@@ -461,12 +454,12 @@ class WorkflowConfigurationService:
             values = list(sidebar_orders.values())
             if (
                 set(sidebar_orders) != expected_sidebar_keys
-                or any(isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 1000 for value in values)
+                or any(
+                    isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 1000 for value in values
+                )
                 or len(values) != len(set(values))
             ):
-                errors["ui.sidebar_orders"] = [
-                    "Must assign each navigation item a unique integer from 0 through 1000."
-                ]
+                errors["ui.sidebar_orders"] = ["Must assign each navigation item a unique integer from 0 through 1000."]
         for name, bounds in {
             "duration_display_threshold_ms": (1, 86400000),
             "due_time_unit_seconds": (60, 86400),
@@ -481,9 +474,7 @@ class WorkflowConfigurationService:
             and isinstance(limits.get("reject_reason_max_length"), int)  # type: ignore[union-attr]
             and ui["reject_reason_max_length"] > limits["reject_reason_max_length"]  # type: ignore[index]
         ):
-            errors["ui.reject_reason_max_length"] = [
-                "Must not exceed limits.reject_reason_max_length."
-            ]
+            errors["ui.reject_reason_max_length"] = ["Must not exceed limits.reject_reason_max_length."]
         for flag_name, rollout in flags.items():  # type: ignore[union-attr]
             if (
                 not isinstance(rollout, Mapping)
@@ -497,10 +488,9 @@ class WorkflowConfigurationService:
                 continue
             for field in ("roles", "cohorts"):
                 values = rollout[field]
-                if (
-                    any(not isinstance(value, str) or not value.strip() or len(value) > 128 for value in values)
-                    or len(values) != len(set(values))
-                ):
+                if any(not isinstance(value, str) or not value.strip() or len(value) > 128 for value in values) or len(
+                    values
+                ) != len(set(values)):
                     errors[f"feature_flags.{flag_name}.{field}"] = [
                         "Must contain unique, nonblank identifiers no longer than 128 characters."
                     ]
@@ -617,8 +607,10 @@ class WorkflowConfigurationService:
         correlation_id = _correlation_id()
         with transaction.atomic():
             configuration = WorkflowConfigurationService.get_configuration(tenant_uuid, environment)
-            configuration = WorkflowAutomationConfiguration.objects.for_tenant(tenant_uuid).select_for_update().get(
-                id=configuration.id
+            configuration = (
+                WorkflowAutomationConfiguration.objects.for_tenant(tenant_uuid)
+                .select_for_update()
+                .get(id=configuration.id)
             )
             if configuration.version != expected_version:
                 raise _conflict("CONFIGURATION_VERSION_CONFLICT", "The configuration changed; reload before saving.")
@@ -936,7 +928,7 @@ def _handler_key_for_step(
     raise ValueError("Only action and notification steps use action handlers")
 
 
-def _descriptor_health(handler: object) -> tuple[bool, str]:
+def _descriptor_health(handler: Any) -> tuple[bool, str]:
     try:
         result = handler.health()
     except Exception:
@@ -1089,7 +1081,7 @@ class WorkflowDefinitionService:
                 tenant_id=tenant_uuid,
                 version=int(configuration["defaults"]["workflow_version"]),
                 status=str(configuration["defaults"]["definition_status"]),
-                created_by=actor,
+                created_by=cast(Any, actor),
                 **clean,
             )
             workflow.full_clean()
@@ -1386,7 +1378,10 @@ class WorkflowDefinitionService:
             keys.append(step_key)
             by_key[step_key] = raw_step
             try:
-                order = int(raw_step.get("order"))
+                raw_order = raw_step.get("order")
+                if raw_order is None:
+                    raise ValueError
+                order = int(raw_order)
                 if order < 1:
                     raise ValueError
                 orders.append(order)
@@ -1734,7 +1729,7 @@ class WorkflowDefinitionService:
                     )
                 ),
                 required_context_schema=source.required_context_schema,
-                created_by=actor,
+                created_by=cast(Any, actor),
             )
             WorkflowDefinitionService._create_steps(
                 tenant_uuid,
@@ -1798,11 +1793,7 @@ class WorkflowExecutionService:
         public_context = {
             str(key): instance.context_data[key]
             for key, definition in properties.items()
-            if (
-                key in instance.context_data
-                and isinstance(definition, Mapping)
-                and definition.get("x-public") is True
-            )
+            if (key in instance.context_data and isinstance(definition, Mapping) and definition.get("x-public") is True)
         }
         raw_steps = instance.result_data.get("steps", {})
         public_steps: dict[str, Any] = {}
@@ -1929,7 +1920,7 @@ class WorkflowExecutionService:
                 priority=int(priority),
                 idempotency_key=idem,
                 correlation_id=_correlation_id(),
-                started_by=actor,
+                started_by=cast(Any, actor),
             )
             job = enqueue(
                 tenant_uuid,
@@ -1958,9 +1949,12 @@ class WorkflowExecutionService:
                 WorkflowInstance.objects.for_tenant(tenant_uuid)
                 .select_related("workflow", "current_step", "started_by")
                 .prefetch_related(
-                    Prefetch("tasks", queryset=WorkflowTask.objects.for_tenant(tenant_uuid).select_related("step")),
                     Prefetch(
-                        "workflow__steps", queryset=WorkflowStep.objects.for_tenant(tenant_uuid).order_by("order")
+                        "tasks", queryset=cast(Any, WorkflowTask.objects.for_tenant(tenant_uuid).select_related("step"))
+                    ),
+                    Prefetch(
+                        "workflow__steps",
+                        queryset=cast(Any, WorkflowStep.objects.for_tenant(tenant_uuid).order_by("order")),
                     ),
                 )
                 .get(id=instance_uuid)
@@ -2027,9 +2021,7 @@ class WorkflowExecutionService:
             )
         )
         if not configured_reason or len(configured_reason) > maximum:
-            raise ValidationError(
-                {"reason": [f"Must contain between 1 and {maximum} characters."]}
-            )
+            raise ValidationError({"reason": [f"Must contain between 1 and {maximum} characters."]})
         with transaction.atomic():
             instance = _apply_machine(
                 WORKFLOW_INSTANCE_MACHINE,
@@ -2257,9 +2249,12 @@ class WorkflowExecutionService:
             if execution is not None and execution.state == "succeeded":
                 return
             if execution is not None and execution.state == "running":
-                WorkflowStepExecution.objects.for_tenant(tenant_id).filter(
-                    id=execution.id,
-                    state="running",
+                cast(
+                    Any,
+                    WorkflowStepExecution.objects.for_tenant(tenant_id).filter(
+                        id=execution.id,
+                        state="running",
+                    ),
                 ).lifecycle_update(
                     state="failed",
                     completed_at=now,
@@ -2284,11 +2279,7 @@ class WorkflowExecutionService:
                     tenant_id=tenant_id,
                     instance=instance,
                     step=step,
-                    attempt=int(
-                        WorkflowConfigurationService.value(
-                            tenant_id, "defaults.step_execution_attempt"
-                        )
-                    ),
+                    attempt=int(WorkflowConfigurationService.value(tenant_id, "defaults.step_execution_attempt")),
                     operation_key=operation_key,
                     state="running",
                     handler_key=key,
@@ -2323,9 +2314,12 @@ class WorkflowExecutionService:
         elapsed_ms = max(0, int((monotonic() - started) * 1_000))
         completed_at = timezone.now()
         if result.status != "succeeded":
-            WorkflowStepExecution.objects.for_tenant(tenant_id).filter(
-                id=execution.id,
-                state="running",
+            cast(
+                Any,
+                WorkflowStepExecution.objects.for_tenant(tenant_id).filter(
+                    id=execution.id,
+                    state="running",
+                ),
             ).lifecycle_update(
                 state="failed",
                 completed_at=completed_at,
@@ -2350,13 +2344,19 @@ class WorkflowExecutionService:
             step_results = dict(result_data.get("steps", {}))
             step_results[str(step.key)] = {"status": "succeeded", "evidence": evidence, "output": value}
             result_data["steps"] = step_results
-            WorkflowInstance.objects.for_tenant(tenant_id).filter(
-                id=locked_instance.id,
-                state="running",
+            cast(
+                Any,
+                WorkflowInstance.objects.for_tenant(tenant_id).filter(
+                    id=locked_instance.id,
+                    state="running",
+                ),
             ).lifecycle_update(result_data=result_data)
-            WorkflowStepExecution.objects.for_tenant(tenant_id).filter(
-                id=execution.id,
-                state="running",
+            cast(
+                Any,
+                WorkflowStepExecution.objects.for_tenant(tenant_id).filter(
+                    id=execution.id,
+                    state="running",
+                ),
             ).lifecycle_update(
                 state="succeeded",
                 completed_at=completed_at,
@@ -2372,7 +2372,7 @@ class WorkflowExecutionService:
         assignment_kind = str(config["assignment_kind"])
         assignee_key = str(config["assignee_id"]).strip()
         due_date = (
-            timezone.now() + timedelta(seconds=int(config.get("due_in_seconds") or step.timeout_seconds))
+            timezone.now() + timedelta(seconds=int(cast(int, config.get("due_in_seconds") or step.timeout_seconds)))
             if (config.get("due_in_seconds") or step.timeout_seconds)
             else None
         )
@@ -2432,9 +2432,9 @@ class WorkflowExecutionService:
             f"condition_input_mappings.{condition_key}",
         )
         if not isinstance(mapping, Mapping):
-            evaluation_context = dict(instance.context_data)
+            evaluation_context: dict[str, Any] = dict(instance.context_data)
         else:
-            evaluation_context: dict[str, Any] = {}
+            evaluation_context = {}
             for target, rule in mapping.items():
                 if not isinstance(rule, Mapping):
                     raise OperationFailed(
@@ -2538,9 +2538,7 @@ class WorkflowExecutionService:
             pending = WorkflowTask.objects.for_tenant(tenant_uuid).filter(
                 instance=instance, step=task.step, status="pending"
             )
-            completion_default = WorkflowConfigurationService.value(
-                tenant_uuid, "defaults.approval_completion_rule"
-            )
+            completion_default = WorkflowConfigurationService.value(tenant_uuid, "defaults.approval_completion_rule")
             if task.step.config.get("completion_rule", completion_default) == "all" and pending.exists():
                 return instance
             next_step = WorkflowExecutionService._next_step(tenant_uuid, instance, task.step)
@@ -2557,9 +2555,7 @@ class WorkflowExecutionService:
         elif task.status == "rejected":
             behavior = task.step.config.get(
                 "rejection_behavior",
-                WorkflowConfigurationService.value(
-                    tenant_uuid, "defaults.approval_rejection_behavior"
-                ),
+                WorkflowConfigurationService.value(tenant_uuid, "defaults.approval_rejection_behavior"),
             )
             if behavior == "cancel":
                 return WorkflowExecutionService.cancel_instance(
@@ -2688,9 +2684,10 @@ class WorkflowTaskService:
         if getattr(actor, "is_superuser", False):
             permissions.update({"workflow_automation.task:manage", "workflow_automation.task:self_approve"})
         try:
-            from src.modules.security_access_control.services import SecurityAccessControlService
+            from src.modules.security_access_control import services as security_services
 
-            effective = SecurityAccessControlService.get_user_effective_permissions(getattr(actor, "pk"), tenant_id)
+            access_service = cast(Any, getattr(security_services, "SecurityAccessControlService"))
+            effective = access_service.get_user_effective_permissions(getattr(actor, "pk"), tenant_id)
             permissions.update(effective)
             permissions.update(
                 permission.replace("workflow_automation:task:", "workflow_automation.task:")
@@ -2711,7 +2708,11 @@ class WorkflowTaskService:
             now = timezone.now()
             return (
                 UserRole.objects.filter(
-                    user=actor, role_id=role_id, role__tenant_id=tenant_id, role__is_active=True, valid_from__lte=now
+                    user=cast(Any, actor),
+                    role_id=role_id,
+                    role__tenant_id=tenant_id,
+                    role__is_active=True,
+                    valid_from__lte=now,
                 )
                 .filter(Q(valid_until__isnull=True) | Q(valid_until__gt=now))
                 .exists()
@@ -2773,7 +2774,7 @@ class WorkflowTaskService:
             now = timezone.now()
             role_ids = (
                 UserRole.objects.filter(
-                    user=actor, role__tenant_id=tenant_uuid, role__is_active=True, valid_from__lte=now
+                    user=cast(Any, actor), role__tenant_id=tenant_uuid, role__is_active=True, valid_from__lte=now
                 )
                 .filter(Q(valid_until__isnull=True) | Q(valid_until__gt=now))
                 .values_list("role_id", flat=True)

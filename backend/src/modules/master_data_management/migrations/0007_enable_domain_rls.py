@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 TENANT_TABLES = (
     "mdm_entity_types",
     "mdm_entities",

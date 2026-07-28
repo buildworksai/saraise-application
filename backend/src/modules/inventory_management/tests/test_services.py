@@ -8,11 +8,7 @@ from uuid import uuid4
 import pytest
 from django.utils import timezone
 
-from src.modules.inventory_management.models import (
-    ImmutableRecordError,
-    StockBalance,
-    StockLedgerEntry,
-)
+from src.modules.inventory_management.models import ImmutableRecordError, StockBalance, StockLedgerEntry
 from src.modules.inventory_management.services import (
     InventoryConfigurationService,
     InventoryError,
@@ -74,13 +70,15 @@ def test_receipt_reservation_issue_and_immutable_ledger() -> None:
             "entry_type": "receipt",
             "posting_at": timezone.now(),
             "destination_warehouse_id": warehouse.id,
-            "lines": [{
-                "item_id": item.id,
-                "destination_location_id": location.id,
-                "quantity": "10.000000",
-                "uom": "EA",
-                "unit_cost": "5.0000",
-            }],
+            "lines": [
+                {
+                    "item_id": item.id,
+                    "destination_location_id": location.id,
+                    "quantity": "10.000000",
+                    "uom": "EA",
+                    "unit_cost": "5.0000",
+                }
+            ],
         },
         "receipt-001",
     )
@@ -118,12 +116,14 @@ def test_receipt_reservation_issue_and_immutable_ledger() -> None:
             "entry_type": "issue",
             "posting_at": timezone.now(),
             "source_warehouse_id": warehouse.id,
-            "lines": [{
-                "item_id": item.id,
-                "source_location_id": location.id,
-                "quantity": "3.000000",
-                "uom": "EA",
-            }],
+            "lines": [
+                {
+                    "item_id": item.id,
+                    "source_location_id": location.id,
+                    "quantity": "3.000000",
+                    "uom": "EA",
+                }
+            ],
         },
         "issue-001",
     )
@@ -144,7 +144,7 @@ def test_receipt_reservation_issue_and_immutable_ledger() -> None:
 
 def test_configuration_bounds_preview_export_import_and_rollback() -> None:
     tenant_id, actor_id = uuid4(), uuid4()
-    current = InventoryConfigurationService.get_effective(tenant_id, "development")
+    InventoryConfigurationService.get_effective(tenant_id, "development")
     proposed = {
         "default_valuation_method": "fifo",
         "allow_negative_stock": True,

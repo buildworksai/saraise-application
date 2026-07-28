@@ -1,3 +1,107 @@
-import { useQuery } from '@tanstack/react-query'; import { useParams } from 'react-router-dom'; import { Card } from '@/components/ui/Card';
-import { ApiProblem, DataTable, MetricCard, PageHeader, PageSkeleton, StatusPill } from '../components/ModuleShell'; import { formatDuration } from '../components/utils'; import { processMiningService } from '../services/process_mining-service';
-export function BottleneckDetailPage() { const { id = '' } = useParams(); const configuration = useQuery({ queryKey: ['process-mining', 'configuration'], queryFn: processMiningService.getConfiguration }); const analysis = useQuery({ queryKey: ['process-mining', 'bottleneck', id], queryFn: () => processMiningService.getBottleneck(id), enabled: Boolean(id), refetchInterval: (state) => state.state.data && ['queued', 'running'].includes(state.state.data.status) ? configuration.data?.document.polling_interval_ms : false }); const findings = useQuery({ queryKey: ['process-mining', 'findings', id, configuration.data?.version], queryFn: () => processMiningService.listFindings(id, { page_size: configuration.data!.document.detail_page_size }), enabled: analysis.data?.status === 'completed' && Boolean(configuration.data) }); const variants = useQuery({ queryKey: ['process-mining', 'variants', id, configuration.data?.version], queryFn: () => processMiningService.listVariants(id, { page_size: configuration.data!.document.detail_page_size, ordering: '-case_count' }), enabled: analysis.data?.status === 'completed' && Boolean(configuration.data) }); if (!configuration.data || analysis.isLoading) return <PageSkeleton/>; const error = analysis.error ?? findings.error ?? variants.error; if (error || !analysis.data) return <main className="p-8"><ApiProblem error={error} onRetry={() => { void analysis.refetch(); void findings.refetch(); void variants.refetch(); }}/></main>; const item = analysis.data; return <main className="space-y-6 p-4 sm:p-8"><PageHeader title={`${item.process_name} bottlenecks`} description="Configured tail latency and resource-concentration evidence." actions={<StatusPill status={item.status}/>}/><section className="grid gap-4 sm:grid-cols-3"><MetricCard label="Cases" value={item.total_cases} detail="Analyzed traces"/><MetricCard label="Variants" value={item.total_variants} detail="Configured grouping"/><MetricCard label="Cycle" value={formatDuration(item.avg_case_duration_seconds)} detail="Average duration"/></section>{findings.data && <Card className="overflow-hidden"><DataTable headers={['Rank', 'Transition', 'Severity', 'P95', 'Cases']} rows={findings.data.items.map((row) => [row.rank, `${row.from_activity} → ${row.to_activity}`, <StatusPill status={row.severity}/>, formatDuration(row.p95_duration_seconds), row.case_count])}/></Card>}{variants.data && <Card className="overflow-hidden"><DataTable headers={['Path', 'Cases', 'Share', 'Classification']} rows={variants.data.items.map((row) => [row.activities.join(' → '), row.case_count, `${row.percentage}%`, row.is_happy_path ? 'Happy path' : row.is_grouped_other ? 'Grouped other' : 'Variant'])}/></Card>}</main>; }
+import { useQuery } from "@tanstack/react-query";
+import { useParams } from "react-router-dom";
+import { Card } from "@/components/ui/Card";
+import {
+  ApiProblem,
+  DataTable,
+  MetricCard,
+  PageHeader,
+  PageSkeleton,
+  StatusPill,
+} from "../components/ModuleShell";
+import { formatDuration } from "../components/utils";
+import { processMiningService } from "../services/process_mining-service";
+export function BottleneckDetailPage() {
+  const { id = "" } = useParams();
+  const configuration = useQuery({
+    queryKey: ["process-mining", "configuration"],
+    queryFn: processMiningService.getConfiguration,
+  });
+  const analysis = useQuery({
+    queryKey: ["process-mining", "bottleneck", id],
+    queryFn: () => processMiningService.getBottleneck(id),
+    enabled: Boolean(id),
+    refetchInterval: (state) =>
+      state.state.data && ["queued", "running"].includes(state.state.data.status)
+        ? configuration.data?.document.polling_interval_ms
+        : false,
+  });
+  const findings = useQuery({
+    queryKey: ["process-mining", "findings", id, configuration.data?.version],
+    queryFn: () =>
+      processMiningService.listFindings(id, {
+        page_size: configuration.data!.document.detail_page_size,
+      }),
+    enabled: analysis.data?.status === "completed" && Boolean(configuration.data),
+  });
+  const variants = useQuery({
+    queryKey: ["process-mining", "variants", id, configuration.data?.version],
+    queryFn: () =>
+      processMiningService.listVariants(id, {
+        page_size: configuration.data!.document.detail_page_size,
+        ordering: "-case_count",
+      }),
+    enabled: analysis.data?.status === "completed" && Boolean(configuration.data),
+  });
+  if (!configuration.data || analysis.isLoading) return <PageSkeleton />;
+  const error = analysis.error ?? findings.error ?? variants.error;
+  if (error || !analysis.data)
+    return (
+      <main className="p-8">
+        <ApiProblem
+          error={error}
+          onRetry={() => {
+            void analysis.refetch();
+            void findings.refetch();
+            void variants.refetch();
+          }}
+        />
+      </main>
+    );
+  const item = analysis.data;
+  return (
+    <main className="space-y-6 p-4 sm:p-8">
+      <PageHeader
+        title={`${item.process_name} bottlenecks`}
+        description="Configured tail latency and resource-concentration evidence."
+        actions={<StatusPill status={item.status} />}
+      />
+      <section className="grid gap-4 sm:grid-cols-3">
+        <MetricCard label="Cases" value={item.total_cases} detail="Analyzed traces" />
+        <MetricCard label="Variants" value={item.total_variants} detail="Configured grouping" />
+        <MetricCard
+          label="Cycle"
+          value={formatDuration(item.avg_case_duration_seconds)}
+          detail="Average duration"
+        />
+      </section>
+      {findings.data && (
+        <Card className="overflow-hidden">
+          <DataTable
+            headers={["Rank", "Transition", "Severity", "P95", "Cases"]}
+            rows={findings.data.items.map((row) => [
+              row.rank,
+              `${row.from_activity} → ${row.to_activity}`,
+              <StatusPill status={row.severity} />,
+              formatDuration(row.p95_duration_seconds),
+              row.case_count,
+            ])}
+          />
+        </Card>
+      )}
+      {variants.data && (
+        <Card className="overflow-hidden">
+          <DataTable
+            headers={["Path", "Cases", "Share", "Classification"]}
+            rows={variants.data.items.map((row) => [
+              row.activities.join(" → "),
+              row.case_count,
+              `${row.percentage}%`,
+              row.is_happy_path ? "Happy path" : row.is_grouped_other ? "Grouped other" : "Variant",
+            ])}
+          />
+        </Card>
+      )}
+    </main>
+  );
+}

@@ -12,11 +12,7 @@ from django.utils import timezone as django_timezone
 from src.core.async_jobs.models import OutboxEvent
 from src.modules.blockchain_traceability import health
 from src.modules.blockchain_traceability.models import LedgerNetwork
-from src.modules.blockchain_traceability.providers import (
-    CapabilityMetadata,
-    ProviderHealth,
-    ledger_provider_registry,
-)
+from src.modules.blockchain_traceability.providers import CapabilityMetadata, ProviderHealth, ledger_provider_registry
 
 pytest_plugins = ["src.core.testing"]
 pytestmark = pytest.mark.django_db

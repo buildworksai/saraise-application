@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Mapping, Protocol, runtime_checkable
+from typing import Mapping, Protocol, runtime_checkable
 from uuid import UUID
 
 INVENTORY_EXTENSION_CONTRACT_VERSION = "1.0"
@@ -153,9 +153,7 @@ class ValuationStrategyExtension(Protocol):
 
 @runtime_checkable
 class TraceEnricherExtension(Protocol):
-    def enrich(
-        self, tenant_id: UUID, aggregate_id: UUID, points: tuple[TracePointDTO, ...]
-    ) -> TraceEnrichmentDTO: ...
+    def enrich(self, tenant_id: UUID, aggregate_id: UUID, points: tuple[TracePointDTO, ...]) -> TraceEnrichmentDTO: ...
 
 
 @runtime_checkable
@@ -254,9 +252,7 @@ class InventoryExtensionRegistry:
             try:
                 return self._entries[(kind, name)]
             except KeyError as exc:
-                raise CapabilityUnavailableError(
-                    f"inventory capability {kind.value}/{name} is unavailable"
-                ) from exc
+                raise CapabilityUnavailableError(f"inventory capability {kind.value}/{name} is unavailable") from exc
 
     def capability(self, capability: str) -> CapabilityResolution:
         matches = tuple(entry for entry in self.list() if entry.descriptor.capability == capability)
@@ -274,8 +270,7 @@ def register_extension(descriptor: ExtensionDescriptor, implementation: object) 
 
 def health_contributors() -> tuple[HealthContributorExtension, ...]:
     return tuple(
-        entry.implementation  # type: ignore[misc]
-        for entry in registry.list(ExtensionKind.HEALTH_CONTRIBUTOR)
+        entry.implementation for entry in registry.list(ExtensionKind.HEALTH_CONTRIBUTOR)  # type: ignore[misc]
     )
 
 

@@ -1,28 +1,29 @@
+/* eslint-disable @typescript-eslint/unbound-method -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /**
  * Tenant Service Tests
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { tenantService } from './tenant-service';
-import { apiClient } from '@/services/api-client';
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { tenantService } from "./tenant-service";
+import { apiClient } from "@/services/api-client";
 
 // Mock apiClient
-vi.mock('@/services/api-client', () => ({
+vi.mock("@/services/api-client", () => ({
   apiClient: {
     get: vi.fn(),
   },
 }));
 
-describe('tenantService', () => {
+describe("tenantService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  describe('tenants.list', () => {
-    it('should fetch list of tenants', async () => {
+  describe("tenants.list", () => {
+    it("should fetch list of tenants", async () => {
       const mockTenants = [
-        { id: '1', name: 'Tenant 1', domain: 'tenant1.com', is_active: true },
-        { id: '2', name: 'Tenant 2', domain: 'tenant2.com', is_active: false },
+        { id: "1", name: "Tenant 1", domain: "tenant1.com", is_active: true },
+        { id: "2", name: "Tenant 2", domain: "tenant2.com", is_active: false },
       ];
 
       vi.mocked(apiClient.get).mockResolvedValueOnce(mockTenants);
@@ -34,13 +35,13 @@ describe('tenantService', () => {
     });
   });
 
-  describe('tenants.get', () => {
-    it('should fetch single tenant', async () => {
-      const mockTenant = { id: '1', name: 'Tenant 1', domain: 'tenant1.com', is_active: true };
+  describe("tenants.get", () => {
+    it("should fetch single tenant", async () => {
+      const mockTenant = { id: "1", name: "Tenant 1", domain: "tenant1.com", is_active: true };
 
       vi.mocked(apiClient.get).mockResolvedValueOnce(mockTenant);
 
-      const result = await tenantService.tenants.get('1');
+      const result = await tenantService.tenants.get("1");
 
       expect(result).toEqual(mockTenant);
       expect(apiClient.get).toHaveBeenCalled();

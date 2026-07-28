@@ -1,7 +1,7 @@
 """Prevent drift between the process-mining manifest and runtime inventory."""
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 import pytest
 import yaml

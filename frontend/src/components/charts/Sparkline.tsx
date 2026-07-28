@@ -5,11 +5,7 @@
  *
  * Mini inline chart for metric cards.
  */
-import {
-  LineChart,
-  Line,
-  ResponsiveContainer,
-} from 'recharts';
+import { LineChart, Line, ResponsiveContainer } from "recharts";
 
 interface SparklineProps {
   data: number[];
@@ -17,7 +13,7 @@ interface SparklineProps {
   height?: number;
 }
 
-export const Sparkline = ({ data, color = 'hsl(var(--primary))', height = 40 }: SparklineProps) => {
+export const Sparkline = ({ data, color = "hsl(var(--primary))", height = 40 }: SparklineProps) => {
   const chartData = data.map((value, index) => ({ value, index }));
 
   return (

@@ -175,8 +175,12 @@ class Migration(migrations.Migration):
                 "db_table": "ai_provider_configuration_runtime_configs",
                 "indexes": [models.Index(fields=["tenant_id", "environment"], name="aiprov_runtime_config_env_idx")],
                 "constraints": [
-                    models.UniqueConstraint(fields=("tenant_id", "environment"), name="aiprov_runtime_config_tenant_env_uq"),
-                    models.CheckConstraint(condition=models.Q(("version__gte", 1)), name="aiprov_runtime_config_version_gte1"),
+                    models.UniqueConstraint(
+                        fields=("tenant_id", "environment"), name="aiprov_runtime_config_tenant_env_uq"
+                    ),
+                    models.CheckConstraint(
+                        condition=models.Q(("version__gte", 1)), name="aiprov_runtime_config_version_gte1"
+                    ),
                 ],
             },
         ),
@@ -196,7 +200,9 @@ class Migration(migrations.Migration):
             options={
                 "db_table": "ai_provider_configuration_idempotency_keys",
                 "indexes": [models.Index(fields=["tenant_id", "key_digest"], name="aiprov_idem_lookup_idx")],
-                "constraints": [models.UniqueConstraint(fields=("tenant_id", "key_digest"), name="aiprov_idem_tenant_key_uq")],
+                "constraints": [
+                    models.UniqueConstraint(fields=("tenant_id", "key_digest"), name="aiprov_idem_tenant_key_uq")
+                ],
             },
         ),
         migrations.CreateModel(
@@ -213,13 +219,23 @@ class Migration(migrations.Migration):
                 ("rollback_of", models.PositiveIntegerField(blank=True, null=True)),
                 (
                     "configuration",
-                    models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="versions", to="ai_provider_configuration.aiproviderruntimeconfiguration"),
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="versions",
+                        to="ai_provider_configuration.aiproviderruntimeconfiguration",
+                    ),
                 ),
             ],
             options={
                 "db_table": "ai_provider_configuration_runtime_config_versions",
-                "indexes": [models.Index(fields=["tenant_id", "configuration", "-version"], name="aiprov_runtime_cfg_ver_idx")],
-                "constraints": [models.UniqueConstraint(fields=("tenant_id", "configuration", "version"), name="aiprov_runtime_config_version_uq")],
+                "indexes": [
+                    models.Index(fields=["tenant_id", "configuration", "-version"], name="aiprov_runtime_cfg_ver_idx")
+                ],
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=("tenant_id", "configuration", "version"), name="aiprov_runtime_config_version_uq"
+                    )
+                ],
             },
         ),
         migrations.CreateModel(
@@ -238,12 +254,20 @@ class Migration(migrations.Migration):
                 ("rollback_of", models.PositiveIntegerField(blank=True, null=True)),
                 (
                     "configuration",
-                    models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="audit_records", to="ai_provider_configuration.aiproviderruntimeconfiguration"),
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="audit_records",
+                        to="ai_provider_configuration.aiproviderruntimeconfiguration",
+                    ),
                 ),
             ],
             options={
                 "db_table": "ai_provider_configuration_runtime_config_audit",
-                "indexes": [models.Index(fields=["tenant_id", "configuration", "-created_at"], name="aiprov_runtime_cfg_audit_idx")],
+                "indexes": [
+                    models.Index(
+                        fields=["tenant_id", "configuration", "-created_at"], name="aiprov_runtime_cfg_audit_idx"
+                    )
+                ],
             },
         ),
         migrations.RunPython(refresh_resource_rls, restore_resource_rls),

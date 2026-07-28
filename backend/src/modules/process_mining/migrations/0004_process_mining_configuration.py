@@ -18,9 +18,7 @@ def normalize_legacy_tenant_id(apps, schema_editor):
         _pattern_indexes = [row[0] for row in cursor.fetchall()]
     for _index_name in _pattern_indexes:
         schema_editor.execute(f'DROP INDEX IF EXISTS "{_index_name}"')
-    schema_editor.execute(
-        "ALTER TABLE process_mining_resources ALTER COLUMN tenant_id TYPE uuid USING tenant_id::uuid"
-    )
+    schema_editor.execute("ALTER TABLE process_mining_resources ALTER COLUMN tenant_id TYPE uuid USING tenant_id::uuid")
 
 
 def restore_legacy_tenant_id(apps, schema_editor):
@@ -73,7 +71,9 @@ class Migration(migrations.Migration):
             ],
             options={
                 "db_table": "process_mining_event_retention_tombstones",
-                "constraints": [models.UniqueConstraint(fields=("tenant_id", "cutoff"), name="pm_retention_cutoff_uniq")],
+                "constraints": [
+                    models.UniqueConstraint(fields=("tenant_id", "cutoff"), name="pm_retention_cutoff_uniq")
+                ],
             },
         ),
         migrations.CreateModel(
@@ -83,12 +83,30 @@ class Migration(migrations.Migration):
                 ("transition_key", models.CharField(max_length=255)),
                 ("reason", models.TextField(blank=True)),
                 ("correlation_id", models.CharField(db_index=True, max_length=128)),
-                ("process_model", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="reference_assignments", to="process_mining.processmodel")),
-                ("process_model_version", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="reference_assignments", to="process_mining.processmodelversion")),
+                (
+                    "process_model",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="reference_assignments",
+                        to="process_mining.processmodel",
+                    ),
+                ),
+                (
+                    "process_model_version",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="reference_assignments",
+                        to="process_mining.processmodelversion",
+                    ),
+                ),
             ],
             options={
                 "db_table": "process_mining_model_reference_assignments",
-                "constraints": [models.UniqueConstraint(fields=("tenant_id", "process_model", "transition_key"), name="pm_ref_assignment_key_uniq")],
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=("tenant_id", "process_model", "transition_key"), name="pm_ref_assignment_key_uniq"
+                    )
+                ],
                 "indexes": [models.Index(fields=["tenant_id", "process_model", "created_at"], name="pm_ref_current")],
             },
         ),
@@ -100,11 +118,22 @@ class Migration(migrations.Migration):
                 ("document", models.JSONField()),
                 ("correlation_id", models.CharField(db_index=True, max_length=128)),
                 ("source", models.CharField(max_length=32)),
-                ("configuration", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="versions", to="process_mining.processminingconfiguration")),
+                (
+                    "configuration",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="versions",
+                        to="process_mining.processminingconfiguration",
+                    ),
+                ),
             ],
             options={
                 "db_table": "process_mining_configuration_versions",
-                "constraints": [models.UniqueConstraint(fields=("tenant_id", "configuration", "version"), name="pm_config_version_uniq")],
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=("tenant_id", "configuration", "version"), name="pm_config_version_uniq"
+                    )
+                ],
                 "indexes": [models.Index(fields=["tenant_id", "configuration", "version"], name="pm_config_history")],
             },
         ),
@@ -117,11 +146,20 @@ class Migration(migrations.Migration):
                 ("previous_document", models.JSONField(blank=True)),
                 ("current_document", models.JSONField()),
                 ("correlation_id", models.CharField(db_index=True, max_length=128)),
-                ("configuration", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="audits", to="process_mining.processminingconfiguration")),
+                (
+                    "configuration",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="audits",
+                        to="process_mining.processminingconfiguration",
+                    ),
+                ),
             ],
             options={
                 "db_table": "process_mining_configuration_audits",
-                "indexes": [models.Index(fields=["tenant_id", "configuration", "created_at"], name="pm_config_audit_time")],
+                "indexes": [
+                    models.Index(fields=["tenant_id", "configuration", "created_at"], name="pm_config_audit_time")
+                ],
             },
         ),
         migrations.CreateModel(
@@ -130,11 +168,20 @@ class Migration(migrations.Migration):
                 *append_fields(),
                 ("artifact_key", models.CharField(max_length=1024)),
                 ("correlation_id", models.CharField(db_index=True, max_length=128)),
-                ("export_job", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="artifact_deletions", to="process_mining.eventexportjob")),
+                (
+                    "export_job",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="artifact_deletions",
+                        to="process_mining.eventexportjob",
+                    ),
+                ),
             ],
             options={
                 "db_table": "process_mining_export_artifact_deletions",
-                "constraints": [models.UniqueConstraint(fields=("tenant_id", "export_job"), name="pm_export_delete_once")],
+                "constraints": [
+                    models.UniqueConstraint(fields=("tenant_id", "export_job"), name="pm_export_delete_once")
+                ],
             },
         ),
     ]

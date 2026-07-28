@@ -1,11 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
-import { useAuthStore } from '@/stores/auth-store';
-import { ROUTES, type AssetCreate } from '../contracts';
-import { AssetForm } from '../components/AssetForm';
-import { PageHeader, PageSkeleton, ProblemState } from '../components/AssetManagementUI';
-import { assetQueryKeys, assetService } from '../services/asset-service';
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { useAuthStore } from "@/stores/auth-store";
+import { ROUTES, type AssetCreate } from "../contracts";
+import { AssetForm } from "../components/AssetForm";
+import { PageHeader, PageSkeleton, ProblemState } from "../components/AssetManagementUI";
+import { assetQueryKeys, assetService } from "../services/asset-service";
 
 export const CreateAssetPage = () => {
   const navigate = useNavigate();
@@ -19,14 +19,21 @@ export const CreateAssetPage = () => {
     mutationFn: (data: AssetCreate) => assetService.createAsset(data),
     onSuccess: (asset) => {
       void queryClient.invalidateQueries({ queryKey: assetQueryKeys.root(tenantId) });
-      toast.success('Asset created');
+      toast.success("Asset created");
       navigate(ROUTES.ASSETS.DETAIL(asset.id));
     },
   });
 
   if (configurationQuery.isLoading) return <PageSkeleton />;
   if (configurationQuery.error || !configurationQuery.data) {
-    return <main className="p-4 sm:p-8"><ProblemState error={configurationQuery.error ?? new Error('Configuration unavailable')} onRetry={() => void configurationQuery.refetch()} /></main>;
+    return (
+      <main className="p-4 sm:p-8">
+        <ProblemState
+          error={configurationQuery.error ?? new Error("Configuration unavailable")}
+          onRetry={() => void configurationQuery.refetch()}
+        />
+      </main>
+    );
   }
 
   return (

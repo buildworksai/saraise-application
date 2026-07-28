@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import uuid
+from copy import deepcopy
 
 import pytest
 from django.core.exceptions import ValidationError
@@ -88,10 +88,7 @@ def test_configuration_preview_and_rollback_create_real_versions() -> None:
     changed["dashboard"]["trend_window_days"] = 45  # type: ignore[index]
     preview = ConfigurationService.preview(tenant, changed)
     assert preview["valid"] is True
-    assert any(
-        item["path"] == "dashboard.trend_window_days"
-        for item in preview["changes"]  # type: ignore[union-attr]
-    )
+    assert any(item["path"] == "dashboard.trend_window_days" for item in preview["changes"])  # type: ignore[union-attr]
 
     second = ConfigurationService.write(
         tenant,

@@ -15,16 +15,8 @@ from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
 
 from ..api import HumanResourcesConfigurationViewSet
-from ..models import (
-    HumanResourcesConfiguration,
-    HumanResourcesConfigurationAudit,
-    HumanResourcesConfigurationVersion,
-)
-from ..services import (
-    HRConflictError,
-    HRValidationError,
-    HumanResourcesConfigurationService,
-)
+from ..models import HumanResourcesConfiguration, HumanResourcesConfigurationAudit, HumanResourcesConfigurationVersion
+from ..services import HRConflictError, HRValidationError, HumanResourcesConfigurationService
 
 pytestmark = pytest.mark.django_db
 

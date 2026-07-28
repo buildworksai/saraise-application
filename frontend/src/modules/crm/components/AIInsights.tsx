@@ -1,2 +1,47 @@
-import type { Prediction } from '../contracts';
-export function AIInsights({prediction}:{prediction:Prediction|null}){if(!prediction)return <section className="rounded-lg border border-dashed p-6"><h2 className="font-semibold">Provider prediction unavailable</h2><p className="mt-2 text-sm text-muted-foreground">No verified provider result is available. Pipeline values remain visible separately and are never presented as AI output.</p></section>;const factors=Object.entries(prediction.factors);return <section className="rounded-lg border p-6"><h2 className="font-semibold">Provider prediction</h2><p className="mt-1 text-sm text-muted-foreground">Evidence: {prediction.provider} · {prediction.model} · as of {new Date(prediction.as_of).toLocaleString()}</p><p className="mt-4 rounded bg-muted px-3 py-2 font-medium">{new Intl.NumberFormat(undefined,{style:'currency',currency:prediction.currency}).format(Number(prediction.amount))}</p><p className="mt-3 text-sm">Confidence: {prediction.confidence===null?'Not supplied':`${Math.round(Number(prediction.confidence)*100)}%`}</p>{factors.length?<ul className="mt-2 list-disc pl-5 text-sm">{factors.map(([name,value])=><li key={name}>{name}: {typeof value==='string'||typeof value==='number'?value:'Structured provider evidence'}</li>)}</ul>:null}</section>}
+import type { Prediction } from "../contracts";
+export function AIInsights({ prediction }: { prediction: Prediction | null }) {
+  if (!prediction)
+    return (
+      <section className="rounded-lg border border-dashed p-6">
+        <h2 className="font-semibold">Provider prediction unavailable</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          No verified provider result is available. Pipeline values remain visible separately and
+          are never presented as AI output.
+        </p>
+      </section>
+    );
+  const factors = Object.entries(prediction.factors);
+  return (
+    <section className="rounded-lg border p-6">
+      <h2 className="font-semibold">Provider prediction</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Evidence: {prediction.provider} · {prediction.model} · as of{" "}
+        {new Date(prediction.as_of).toLocaleString()}
+      </p>
+      <p className="mt-4 rounded bg-muted px-3 py-2 font-medium">
+        {new Intl.NumberFormat(undefined, {
+          style: "currency",
+          currency: prediction.currency,
+        }).format(Number(prediction.amount))}
+      </p>
+      <p className="mt-3 text-sm">
+        Confidence:{" "}
+        {prediction.confidence === null
+          ? "Not supplied"
+          : `${Math.round(Number(prediction.confidence) * 100)}%`}
+      </p>
+      {factors.length ? (
+        <ul className="mt-2 list-disc pl-5 text-sm">
+          {factors.map(([name, value]) => (
+            <li key={name}>
+              {name}:{" "}
+              {typeof value === "string" || typeof value === "number"
+                ? value
+                : "Structured provider evidence"}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}

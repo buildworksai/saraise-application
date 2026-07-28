@@ -47,8 +47,10 @@ function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter><DefinitionsListPage /></MemoryRouter>
-    </QueryClientProvider>,
+      <MemoryRouter>
+        <DefinitionsListPage />
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
@@ -69,7 +71,10 @@ describe("DefinitionsListPage states", () => {
   it("renders an accessible skeleton while loading", () => {
     vi.spyOn(service, "listDefinitions").mockReturnValue(new Promise(() => undefined));
     renderPage();
-    expect(screen.getByLabelText("Loading orchestration data")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByLabelText("Loading orchestration data")).toHaveAttribute(
+      "aria-busy",
+      "true"
+    );
   });
 
   it("renders the true empty state with a creation action", async () => {

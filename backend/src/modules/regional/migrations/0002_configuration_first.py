@@ -8,8 +8,9 @@ tenant data, which is a data leak.
 import uuid
 
 import django.db.models.deletion
-import src.modules.regional.models
 from django.db import migrations, models
+
+import src.modules.regional.models
 
 
 def validate_uuid_data(apps, schema_editor):

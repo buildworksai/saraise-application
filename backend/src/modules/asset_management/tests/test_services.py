@@ -2,6 +2,7 @@
 
 from datetime import date
 from decimal import Decimal
+
 import pytest
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import IntegrityError
@@ -15,10 +16,10 @@ from src.modules.asset_management.models import (
     DepreciationMethod,
 )
 from src.modules.asset_management.services import (
+    DEFAULT_CONFIGURATION,
     AssetConfigurationService,
     AssetManagementError,
     AssetService,
-    DEFAULT_CONFIGURATION,
     DepreciationService,
 )
 
@@ -313,7 +314,9 @@ def test_configuration_versions_audits_and_rolls_back_per_tenant(tenant_a, tenan
     assert AssetManagementConfiguration.objects.for_tenant(tenant_a).count() == 1
     assert AssetManagementConfiguration.objects.for_tenant(tenant_b).get().id == other.id
     assert AssetManagementConfigurationVersion.objects.for_tenant(tenant_a).count() == 3
-    assert AssetManagementConfigurationAudit.objects.for_tenant(tenant_a).filter(correlation_id="corr-config-3").exists()
+    assert (
+        AssetManagementConfigurationAudit.objects.for_tenant(tenant_a).filter(correlation_id="corr-config-3").exists()
+    )
 
 
 def test_configuration_rejects_unsafe_policy_document(tenant_a):

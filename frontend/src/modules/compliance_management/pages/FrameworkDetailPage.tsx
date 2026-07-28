@@ -1,1 +1,1 @@
-export { FrameworkDetailPage } from './CompliancePages';
+export { FrameworkDetailPage } from "./CompliancePages";

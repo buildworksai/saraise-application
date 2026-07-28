@@ -106,18 +106,12 @@ def test_definition_create_update_publish_clone_archive_delete(tenant_a, tenant_
     )
     assert updated.name == "Updated approval"
 
-    published = WorkflowDefinitionService.publish_workflow(
-        tenant_a.id, workflow.id, tenant_a_user, "publish-once"
-    )
-    replay = WorkflowDefinitionService.publish_workflow(
-        tenant_a.id, workflow.id, tenant_a_user, "publish-once"
-    )
+    published = WorkflowDefinitionService.publish_workflow(tenant_a.id, workflow.id, tenant_a_user, "publish-once")
+    replay = WorkflowDefinitionService.publish_workflow(tenant_a.id, workflow.id, tenant_a_user, "publish-once")
     assert replay.status == published.status == "published"
     clone = WorkflowDefinitionService.clone_version(tenant_a.id, workflow.id, tenant_a_user)
     assert (clone.status, clone.version, clone.key) == ("draft", 2, workflow.key)
-    archived = WorkflowDefinitionService.archive_workflow(
-        tenant_a.id, workflow.id, tenant_a_user, "archive-v1"
-    )
+    archived = WorkflowDefinitionService.archive_workflow(tenant_a.id, workflow.id, tenant_a_user, "archive-v1")
     assert archived.status == "archived"
     WorkflowDefinitionService.delete_draft(tenant_a.id, clone.id, tenant_a_user)
     assert WorkflowDefinitionService.list_workflows(tenant_a.id).filter(id=clone.id).count() == 0
@@ -172,9 +166,7 @@ def test_start_rejects_draft_bad_context_and_cross_tenant(tenant_a, tenant_b, te
     with pytest.raises(NotFound):
         WorkflowExecutionService.start_workflow(tenant_b.id, draft.id, tenant_a_user, {}, "foreign")
 
-    published = WorkflowDefinitionService.publish_workflow(
-        tenant_a.id, draft.id, tenant_a_user, "publish-context"
-    )
+    published = WorkflowDefinitionService.publish_workflow(tenant_a.id, draft.id, tenant_a_user, "publish-context")
     # The published definition above allows an optional value; direct schema validation
     # is covered here without mutating its immutable definition.
     with pytest.raises(ValidationError):
@@ -187,9 +179,7 @@ def test_approval_completion_rejection_and_timeout(tenant_a, tenant_a_user) -> N
     approver = TenantUserFactory(organization=tenant_a, username="workflow-approver")
     workflow = publish(tenant_a.id, tenant_a_user, approval_payload(approver.pk))
 
-    approved = WorkflowExecutionService.start_workflow(
-        tenant_a.id, workflow.id, tenant_a_user, {}, "approval-complete"
-    )
+    approved = WorkflowExecutionService.start_workflow(tenant_a.id, workflow.id, tenant_a_user, {}, "approval-complete")
     run_job(approved)
     approved.refresh_from_db()
     task = WorkflowTask.objects.for_tenant(tenant_a.id).get(instance=approved)
@@ -200,25 +190,22 @@ def test_approval_completion_rejection_and_timeout(tenant_a, tenant_a_user) -> N
     assert decided.status == "completed"
     approved.refresh_from_db()
     assert approved.state == "completed"
-    assert WorkflowTaskService.complete_task(
-        tenant_a.id, task.id, approver, {"comment": "Approved"}, "decision-complete"
-    ).status == "completed"
-
-    rejected = WorkflowExecutionService.start_workflow(
-        tenant_a.id, workflow.id, tenant_a_user, {}, "approval-reject"
+    assert (
+        WorkflowTaskService.complete_task(
+            tenant_a.id, task.id, approver, {"comment": "Approved"}, "decision-complete"
+        ).status
+        == "completed"
     )
+
+    rejected = WorkflowExecutionService.start_workflow(tenant_a.id, workflow.id, tenant_a_user, {}, "approval-reject")
     run_job(rejected)
     rejected_task = WorkflowTask.objects.for_tenant(tenant_a.id).get(instance=rejected)
-    WorkflowTaskService.reject_task(
-        tenant_a.id, rejected_task.id, approver, "Outside policy", {}, "decision-reject"
-    )
+    WorkflowTaskService.reject_task(tenant_a.id, rejected_task.id, approver, "Outside policy", {}, "decision-reject")
     rejected.refresh_from_db()
     assert rejected.state == "failed"
     assert rejected.failure_code == "TASK_REJECTED"
 
-    timed = WorkflowExecutionService.start_workflow(
-        tenant_a.id, workflow.id, tenant_a_user, {}, "approval-timeout"
-    )
+    timed = WorkflowExecutionService.start_workflow(tenant_a.id, workflow.id, tenant_a_user, {}, "approval-timeout")
     run_job(timed)
     timed_task = WorkflowTask.objects.for_tenant(tenant_a.id).get(instance=timed)
     WorkflowTask.objects.for_tenant(tenant_a.id).filter(id=timed_task.id).update(
@@ -232,21 +219,24 @@ def test_approval_completion_rejection_and_timeout(tenant_a, tenant_a_user) -> N
 def test_decision_executes_true_and_false_branches(tenant_a, tenant_a_user) -> None:
     payload = action_payload(key="decision-path")
     payload["workflow_type"] = "conditional"
-    terminal = lambda key, order: {
-        "key": key,
-        "name": key.title(),
-        "step_type": "action",
-        "order": order,
-        "config": {
-            "handler": "core.terminal_completion.v1",
-            "schema_version": "1",
-            "input_mapping": {},
-            "configuration": {},
-        },
-        "is_terminal": True,
-        "next_step_keys": [],
-        "join_key": "",
-    }
+
+    def terminal(key, order):
+        return {
+            "key": key,
+            "name": key.title(),
+            "step_type": "action",
+            "order": order,
+            "config": {
+                "handler": "core.terminal_completion.v1",
+                "schema_version": "1",
+                "input_mapping": {},
+                "configuration": {},
+            },
+            "is_terminal": True,
+            "next_step_keys": [],
+            "join_key": "",
+        }
+
     payload["steps"] = [
         {
             "key": "choose",

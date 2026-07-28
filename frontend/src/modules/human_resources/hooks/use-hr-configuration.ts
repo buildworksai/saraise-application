@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
-import { hrKeys } from '../contracts';
-import { hrService } from '../services/hr-service';
+import { useQuery } from "@tanstack/react-query";
+import { hrKeys } from "../contracts";
+import { hrService } from "../services/hr-service";
 
 /** Configuration is required business data. Consumers fail closed while it is unavailable. */
 export function useHumanResourcesConfiguration() {

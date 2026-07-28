@@ -8,7 +8,9 @@ describe("automation orchestration route registry", () => {
     expect(tenantRoutes.filter((route) => route.navigation.type === "contextual")).toHaveLength(6);
     expect(tenantRoutes.every((route) => typeof route.Page === "object")).toBe(true);
     expect(tenantRoutes.every((route) => route.title.length > 0)).toBe(true);
-    expect(tenantRoutes.some((route) => route.path === "/automation-orchestration/configuration")).toBe(true);
+    expect(
+      tenantRoutes.some((route) => route.path === "/automation-orchestration/configuration")
+    ).toBe(true);
   });
 
   it("uses unique ids and paths with valid same-module parents", () => {
@@ -19,7 +21,9 @@ describe("automation orchestration route registry", () => {
     for (const route of tenantRoutes) {
       expect(route.modes).toEqual(["development", "self-hosted", "saas"]);
       if (route.navigation.type === "contextual") {
-        const parent = tenantRoutes.find((candidate) => candidate.id === route.navigation.parentRouteId);
+        const parent = tenantRoutes.find(
+          (candidate) => candidate.id === route.navigation.parentRouteId
+        );
         expect(parent?.module).toBe(route.module);
         expect(parent?.navigation.type).toBe("sidebar");
       }

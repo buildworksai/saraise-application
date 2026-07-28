@@ -143,9 +143,7 @@ def test_policy_entitlement_quota_and_default_denials_are_403(
 def test_connector_catalog_schema_filters_and_pagination(tenant_a_client) -> None:
     shown = ConnectorFactory(name="Open CRM", connector_type="api", module_id="crm")
     ConnectorFactory(name="Warehouse", connector_type="database", module_id="warehouse")
-    response = tenant_a_client.get(
-        f"{BASE}/connectors/?connector_type=api&module_id=crm&search=open&page_size=1"
-    )
+    response = tenant_a_client.get(f"{BASE}/connectors/?connector_type=api&module_id=crm&search=open&page_size=1")
     assert response.status_code == status.HTTP_200_OK
     assert [item["id"] for item in _data(response)] == [str(shown.id)]
     assert response.json()["meta"]["pagination"] == {
@@ -187,9 +185,7 @@ def test_integration_list_filter_search_order_and_secret_safe_detail(tenant_a_cl
     )
     IntegrationFactory(tenant_id=tenant_a.id, connector=connector, name="Zulu API")
     IntegrationFactory(tenant_id=tenant_b.id, connector=connector, name="Other tenant")
-    response = tenant_a_client.get(
-        f"{BASE}/integrations/?search=find&connector_id={connector.id}&ordering=name"
-    )
+    response = tenant_a_client.get(f"{BASE}/integrations/?search=find&connector_id={connector.id}&ordering=name")
     assert response.status_code == status.HTTP_200_OK
     assert [item["id"] for item in _data(response)] == [str(alpha.id)]
     assert "connector_key" not in _data(response)[0]
@@ -314,7 +310,9 @@ def test_test_action_returns_202_only_for_persisted_job_and_outbox(monkeypatch, 
         (status.HTTP_503_SERVICE_UNAVAILABLE, "CAPABILITY_UNAVAILABLE"),
     ],
 )
-def test_governed_operation_failures_keep_exact_status(monkeypatch, tenant_a_client, tenant_a, error_status, error_code):
+def test_governed_operation_failures_keep_exact_status(
+    monkeypatch, tenant_a_client, tenant_a, error_status, error_code
+):
     integration = IntegrationFactory(tenant_id=tenant_a.id)
 
     def fail(*args):

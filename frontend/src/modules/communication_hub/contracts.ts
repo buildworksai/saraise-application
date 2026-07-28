@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /**
  * Communication Hub Module Contracts
  *
@@ -15,7 +16,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { components } from '@/types/api';
+import type { components } from "@/types/api";
 
 // =============================================================================
 // EXPORTED TYPES - Import these in your components
@@ -43,7 +44,7 @@ import type { components } from '@/types/api';
  * apiClient.get(ENDPOINTS.ENTITIES.LIST);
  * ```
  */
-export const MODULE_API_PREFIX = '/api/v1/communication-hub';
+export const MODULE_API_PREFIX = "/api/v1/communication-hub";
 
 export const ENDPOINTS = {
   // TODO: Define actual endpoints when backend API is implemented

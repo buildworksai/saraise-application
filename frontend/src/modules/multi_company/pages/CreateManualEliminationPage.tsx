@@ -1,1 +1,1 @@
-export { CreateManualEliminationPage } from './workspaces';
+export { CreateManualEliminationPage } from "./workspaces";

@@ -27,28 +27,66 @@ from .models import (
 
 SERVER_OWNED_FIELDS = frozenset(
     {
-        "id", "tenant_id", "created_by", "updated_by", "created_at", "updated_at",
-        "correlation_id", "version", "is_deleted", "deleted_at", "status",
-        "transition_history", "job_id", "source_journal_id", "target_journal_id",
-        "posted_date", "failure_code", "failure_detail", "report_snapshot",
-        "started_at", "completed_at", "approved_at", "published_at", "approved_by",
-        "published_by", "activated_by", "activated_at", "transfer_pricing_snapshot",
+        "id",
+        "tenant_id",
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at",
+        "correlation_id",
+        "version",
+        "is_deleted",
+        "deleted_at",
+        "status",
+        "transition_history",
+        "job_id",
+        "source_journal_id",
+        "target_journal_id",
+        "posted_date",
+        "failure_code",
+        "failure_detail",
+        "report_snapshot",
+        "started_at",
+        "completed_at",
+        "approved_at",
+        "published_at",
+        "approved_by",
+        "published_by",
+        "activated_by",
+        "activated_at",
+        "transfer_pricing_snapshot",
     }
 )
 
 TRANSACTION_TYPES = (
-    "sale", "purchase", "service", "loan", "transfer", "dividend", "cost_allocation",
+    "sale",
+    "purchase",
+    "service",
+    "loan",
+    "transfer",
+    "dividend",
+    "cost_allocation",
 )
 PRICING_METHODS = (
-    "cost_plus", "resale_minus", "comparable_uncontrolled",
-    "transactional_net_margin", "profit_split", "extension",
+    "cost_plus",
+    "resale_minus",
+    "comparable_uncontrolled",
+    "transactional_net_margin",
+    "profit_split",
+    "extension",
 )
 TRANSLATION_METHODS = ("current_rate", "temporal", "monetary_non_monetary")
 ACCESS_ROLES = ("viewer", "operator", "approver", "controller", "tax_admin")
 ELIMINATION_TYPES = (
-    "intercompany_balance", "intercompany_revenue", "intercompany_expense",
-    "intercompany_receivable", "intercompany_payable", "unrealized_profit",
-    "intercompany_dividend", "equity_investment", "minority_interest",
+    "intercompany_balance",
+    "intercompany_revenue",
+    "intercompany_expense",
+    "intercompany_receivable",
+    "intercompany_payable",
+    "unrealized_profit",
+    "intercompany_dividend",
+    "equity_investment",
+    "minority_interest",
 )
 ENVIRONMENTS = ("development", "staging", "production")
 
@@ -59,9 +97,7 @@ class RejectServerOwnedFieldsMixin:
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         supplied = set(getattr(self, "initial_data", {})) & SERVER_OWNED_FIELDS
         if supplied:
-            raise serializers.ValidationError(
-                {field: "This field is server-owned." for field in sorted(supplied)}
-            )
+            raise serializers.ValidationError({field: "This field is server-owned." for field in sorted(supplied)})
         return super().validate(attrs)  # type: ignore[misc]
 
 
@@ -107,9 +143,20 @@ class _ReadSerializer(serializers.ModelSerializer):
 
 
 COMPANY_LIST_FIELDS = (
-    "id", "company_code", "company_name", "legal_name", "currency",
-    "parent_company", "consolidation_group", "ownership_percentage", "is_active",
-    "is_holding", "version", "created_at", "updated_at", "allowed_commands",
+    "id",
+    "company_code",
+    "company_name",
+    "legal_name",
+    "currency",
+    "parent_company",
+    "consolidation_group",
+    "ownership_percentage",
+    "is_active",
+    "is_holding",
+    "version",
+    "created_at",
+    "updated_at",
+    "allowed_commands",
     "denial_reasons",
 )
 
@@ -137,8 +184,15 @@ class CompanyDetailSerializer(_ReadSerializer):
     class Meta:
         model = Company
         fields = (
-            *COMPANY_LIST_FIELDS, "tax_id", "address", "fiscal_year_start_month",
-            "created_by", "updated_by", "correlation_id", "is_deleted", "deleted_at",
+            *COMPANY_LIST_FIELDS,
+            "tax_id",
+            "address",
+            "fiscal_year_start_month",
+            "created_by",
+            "updated_by",
+            "correlation_id",
+            "is_deleted",
+            "deleted_at",
         )
         read_only_fields = fields
 
@@ -210,9 +264,20 @@ class CompanyAccessGrantSerializer(_ReadSerializer):
     class Meta:
         model = CompanyAccessGrant
         fields = (
-            "id", "company", "subject_id", "role", "valid_from", "valid_until",
-            "granted_by", "revoked_by", "revoked_at", "is_deleted", "created_at",
-            "version", "allowed_commands", "denial_reasons",
+            "id",
+            "company",
+            "subject_id",
+            "role",
+            "valid_from",
+            "valid_until",
+            "granted_by",
+            "revoked_by",
+            "revoked_at",
+            "is_deleted",
+            "created_at",
+            "version",
+            "allowed_commands",
+            "denial_reasons",
         )
         read_only_fields = fields
 
@@ -236,9 +301,22 @@ class CompanyAccessRevokeSerializer(RejectServerOwnedFieldsMixin, serializers.Se
 
 
 TRANSACTION_LIST_FIELDS = (
-    "id", "reference", "source_company", "target_company", "transaction_type",
-    "product_category", "amount", "currency", "target_amount", "transaction_date",
-    "status", "job_id", "version", "created_at", "updated_at", "allowed_commands",
+    "id",
+    "reference",
+    "source_company",
+    "target_company",
+    "transaction_type",
+    "product_category",
+    "amount",
+    "currency",
+    "target_amount",
+    "transaction_date",
+    "status",
+    "job_id",
+    "version",
+    "created_at",
+    "updated_at",
+    "allowed_commands",
     "denial_reasons",
 )
 
@@ -260,13 +338,20 @@ class TransactionListSerializer(_ReadSerializer):
     def candidate_commands(self, instance: IntercompanyTransaction) -> set[str]:
         status = instance.status
         result: set[str] = set()
-        if status == "draft": result.update({"update", "submit", "apply_transfer_pricing", "cancel"})
-        if status == "pending_approval": result.update({"approve", "dispute", "cancel"})
-        if status == "approved": result.update({"dispute", "post", "cancel"})
-        if status == "disputed": result.update({"resolve_dispute", "cancel"})
-        if status == "posting_failed": result.update({"retry_posting", "cancel"})
-        if status == "posted": result.add("reverse")
+        if status == "draft":
+            result.update({"update", "submit", "apply_transfer_pricing", "cancel"})
+        if status == "pending_approval":
+            result.update({"approve", "dispute", "cancel"})
+        if status == "approved":
+            result.update({"dispute", "post", "cancel"})
+        if status == "disputed":
+            result.update({"resolve_dispute", "cancel"})
+        if status == "posting_failed":
+            result.update({"retry_posting", "cancel"})
+        if status == "posted":
+            result.add("reverse")
         return result
+
     class Meta:
         model = IntercompanyTransaction
         fields = TRANSACTION_LIST_FIELDS
@@ -277,8 +362,17 @@ class IntercompanyApprovalSerializer(serializers.ModelSerializer):
     class Meta:
         model = IntercompanyApproval
         fields = (
-            "id", "transaction", "side", "attempt", "approver_id", "decision",
-            "reason", "workflow_reference", "decided_at", "correlation_id", "created_at",
+            "id",
+            "transaction",
+            "side",
+            "attempt",
+            "approver_id",
+            "decision",
+            "reason",
+            "workflow_reference",
+            "decided_at",
+            "correlation_id",
+            "created_at",
         )
         read_only_fields = fields
 
@@ -289,11 +383,24 @@ class TransactionDetailSerializer(_ReadSerializer):
     class Meta:
         model = IntercompanyTransaction
         fields = (
-            *TRANSACTION_LIST_FIELDS, "original_amount", "exchange_rate", "description",
-            "transfer_pricing_rule", "transfer_pricing_snapshot", "source_journal_id",
-            "target_journal_id", "posted_date", "cancellation_reason", "dispute_reason",
-            "failure_code", "failure_detail", "transition_history", "created_by",
-            "updated_by", "correlation_id", "approvals",
+            *TRANSACTION_LIST_FIELDS,
+            "original_amount",
+            "exchange_rate",
+            "description",
+            "transfer_pricing_rule",
+            "transfer_pricing_snapshot",
+            "source_journal_id",
+            "target_journal_id",
+            "posted_date",
+            "cancellation_reason",
+            "dispute_reason",
+            "failure_code",
+            "failure_detail",
+            "transition_history",
+            "created_by",
+            "updated_by",
+            "correlation_id",
+            "approvals",
         )
         read_only_fields = fields
 
@@ -306,7 +413,9 @@ class TransactionCreateSerializer(RejectServerOwnedFieldsMixin, serializers.Seri
     product_category = serializers.CharField(max_length=100, required=False, allow_blank=True)
     amount = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=Decimal("0.0001"))
     currency = serializers.CharField(min_length=3, max_length=3)
-    exchange_rate = serializers.DecimalField(max_digits=18, decimal_places=8, min_value=Decimal("0.00000001"), required=False, allow_null=True)
+    exchange_rate = serializers.DecimalField(
+        max_digits=18, decimal_places=8, min_value=Decimal("0.00000001"), required=False, allow_null=True
+    )
     description = serializers.CharField(required=False, allow_blank=True)
     transaction_date = serializers.DateField()
     transfer_pricing_rule_id = serializers.UUIDField(required=False, allow_null=True)
@@ -326,7 +435,9 @@ class TransactionUpdateSerializer(RejectServerOwnedFieldsMixin, serializers.Seri
     product_category = serializers.CharField(max_length=100, required=False, allow_blank=True)
     amount = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=Decimal("0.0001"), required=False)
     currency = serializers.CharField(min_length=3, max_length=3, required=False)
-    exchange_rate = serializers.DecimalField(max_digits=18, decimal_places=8, min_value=Decimal("0.00000001"), required=False, allow_null=True)
+    exchange_rate = serializers.DecimalField(
+        max_digits=18, decimal_places=8, min_value=Decimal("0.00000001"), required=False, allow_null=True
+    )
     description = serializers.CharField(required=False, allow_blank=True)
     transaction_date = serializers.DateField(required=False)
     transfer_pricing_rule_id = serializers.UUIDField(required=False, allow_null=True)
@@ -370,10 +481,24 @@ class ApplyTransferPricingSerializer(RejectServerOwnedFieldsMixin, serializers.S
 
 
 CONSOLIDATION_LIST_FIELDS = (
-    "id", "name", "consolidation_group", "period_start", "period_end",
-    "reporting_currency", "translation_method", "status", "total_companies",
-    "total_eliminations", "elimination_total", "minority_interest_total", "job_id",
-    "version", "created_at", "updated_at", "allowed_commands", "denial_reasons",
+    "id",
+    "name",
+    "consolidation_group",
+    "period_start",
+    "period_end",
+    "reporting_currency",
+    "translation_method",
+    "status",
+    "total_companies",
+    "total_eliminations",
+    "elimination_total",
+    "minority_interest_total",
+    "job_id",
+    "version",
+    "created_at",
+    "updated_at",
+    "allowed_commands",
+    "denial_reasons",
 )
 
 
@@ -396,6 +521,7 @@ class ConsolidationRunListSerializer(_ReadSerializer):
             "approved": {"publish"},
         }
         return mapping.get(instance.status, set())
+
     class Meta:
         model = ConsolidationRun
         fields = CONSOLIDATION_LIST_FIELDS
@@ -406,10 +532,21 @@ class ConsolidationRunDetailSerializer(_ReadSerializer):
     class Meta:
         model = ConsolidationRun
         fields = (
-            *CONSOLIDATION_LIST_FIELDS, "started_at", "completed_at", "approved_at",
-            "published_at", "approved_by", "published_by", "failure_code", "failure_step",
-            "failure_detail", "report_snapshot", "transition_history", "created_by",
-            "updated_by", "correlation_id",
+            *CONSOLIDATION_LIST_FIELDS,
+            "started_at",
+            "completed_at",
+            "approved_at",
+            "published_at",
+            "approved_by",
+            "published_by",
+            "failure_code",
+            "failure_step",
+            "failure_detail",
+            "report_snapshot",
+            "transition_history",
+            "created_by",
+            "updated_by",
+            "correlation_id",
         )
         read_only_fields = fields
 
@@ -467,10 +604,23 @@ class EliminationEntrySerializer(serializers.ModelSerializer):
     class Meta:
         model = EliminationEntry
         fields = (
-            "id", "consolidation_run", "elimination_type", "source_company",
-            "target_company", "debit_account", "credit_account", "amount", "currency",
-            "description", "source_transaction", "is_auto_generated", "rule_key",
-            "sequence", "created_by", "correlation_id", "created_at",
+            "id",
+            "consolidation_run",
+            "elimination_type",
+            "source_company",
+            "target_company",
+            "debit_account",
+            "credit_account",
+            "amount",
+            "currency",
+            "description",
+            "source_transaction",
+            "is_auto_generated",
+            "rule_key",
+            "sequence",
+            "created_by",
+            "correlation_id",
+            "created_at",
         )
         read_only_fields = fields
 
@@ -483,10 +633,23 @@ class ConsolidatedReportSerializer(serializers.Serializer):
 
 
 RULE_LIST_FIELDS = (
-    "id", "rule_key", "rule_version", "name", "source_company", "target_company",
-    "product_category", "transaction_type", "pricing_method", "effective_from",
-    "effective_to", "is_active", "version", "created_at", "updated_at",
-    "allowed_commands", "denial_reasons",
+    "id",
+    "rule_key",
+    "rule_version",
+    "name",
+    "source_company",
+    "target_company",
+    "product_category",
+    "transaction_type",
+    "pricing_method",
+    "effective_from",
+    "effective_to",
+    "is_active",
+    "version",
+    "created_at",
+    "updated_at",
+    "allowed_commands",
+    "denial_reasons",
 )
 
 
@@ -502,6 +665,7 @@ class TransferPricingRuleListSerializer(_ReadSerializer):
         if not instance.is_active:
             result.add("delete")
         return result
+
     class Meta:
         model = TransferPricingRule
         fields = RULE_LIST_FIELDS
@@ -512,9 +676,17 @@ class TransferPricingRuleDetailSerializer(_ReadSerializer):
     class Meta:
         model = TransferPricingRule
         fields = (
-            *RULE_LIST_FIELDS, "extension_key", "markup_percentage", "margin_range_min",
-            "margin_range_max", "parameters", "documentation", "supersedes", "created_by",
-            "updated_by", "correlation_id",
+            *RULE_LIST_FIELDS,
+            "extension_key",
+            "markup_percentage",
+            "margin_range_min",
+            "margin_range_max",
+            "parameters",
+            "documentation",
+            "supersedes",
+            "created_by",
+            "updated_by",
+            "correlation_id",
         )
         read_only_fields = fields
 
@@ -542,7 +714,11 @@ class _TransferRuleFields(RejectServerOwnedFieldsMixin, serializers.Serializer):
             errors["target_company_id"] = "Must differ from source company."
         if attrs.get("effective_to") and attrs["effective_to"] < attrs["effective_from"]:
             errors["effective_to"] = "Must not precede effective_from."
-        if attrs.get("margin_range_min") is not None and attrs.get("margin_range_max") is not None and attrs["margin_range_min"] > attrs["margin_range_max"]:
+        if (
+            attrs.get("margin_range_min") is not None
+            and attrs.get("margin_range_max") is not None
+            and attrs["margin_range_min"] > attrs["margin_range_max"]
+        ):
             errors["margin_range_max"] = "Must not be less than margin_range_min."
         if attrs["pricing_method"] == "extension" and not attrs.get("extension_key", "").strip():
             errors["extension_key"] = "Required for extension pricing."
@@ -606,9 +782,21 @@ class ConfigurationVersionSerializer(serializers.ModelSerializer):
     class Meta:
         model = MultiCompanyConfigurationVersion
         fields = (
-            "id", "environment", "version", "status", "schema_version", "settings",
-            "change_summary", "supersedes", "activated_by", "activated_at", "created_by",
-            "correlation_id", "created_at", "allowed_commands", "denial_reasons",
+            "id",
+            "environment",
+            "version",
+            "status",
+            "schema_version",
+            "settings",
+            "change_summary",
+            "supersedes",
+            "activated_by",
+            "activated_at",
+            "created_by",
+            "correlation_id",
+            "created_at",
+            "allowed_commands",
+            "denial_reasons",
         )
         read_only_fields = fields
 
@@ -626,10 +814,18 @@ class ConfigurationVersionSerializer(serializers.ModelSerializer):
                 "activate": "multi_company.configuration:activate",
             },
             "active": {"export": "multi_company.configuration:export"},
-            "superseded": {"rollback": "multi_company.configuration:rollback", "export": "multi_company.configuration:export"},
-            "rolled_back": {"rollback": "multi_company.configuration:rollback", "export": "multi_company.configuration:export"},
+            "superseded": {
+                "rollback": "multi_company.configuration:rollback",
+                "export": "multi_company.configuration:export",
+            },
+            "rolled_back": {
+                "rollback": "multi_company.configuration:rollback",
+                "export": "multi_company.configuration:export",
+            },
         }.get(instance.status, {})
-        return sorted(command for command, permission in candidates.items() if user is not None and user.has_perm(permission))
+        return sorted(
+            command for command, permission in candidates.items() if user is not None and user.has_perm(permission)
+        )
 
     def get_denial_reasons(self, instance: Any) -> dict[str, str]:
         explicit = getattr(instance, "denial_reasons", None)
@@ -643,7 +839,10 @@ class ConfigurationVersionSerializer(serializers.ModelSerializer):
             "superseded": {"rollback", "export"},
             "rolled_back": {"rollback", "export"},
         }.get(instance.status, set())
-        return {command: "permission_denied" if command in state_candidates else "state_not_allowed" for command in sorted(all_commands - allowed)}
+        return {
+            command: "permission_denied" if command in state_candidates else "state_not_allowed"
+            for command in sorted(all_commands - allowed)
+        }
 
 
 class ConfigurationDraftSerializer(RejectServerOwnedFieldsMixin, serializers.Serializer):
@@ -677,8 +876,17 @@ class AsyncJobSerializer(serializers.ModelSerializer):
     class Meta:
         model = AsyncJob
         fields = (
-            "id", "command", "status", "attempts", "result", "error_message",
-            "correlation_id", "started_at", "completed_at", "created_at", "updated_at",
+            "id",
+            "command",
+            "status",
+            "attempts",
+            "result",
+            "error_message",
+            "correlation_id",
+            "started_at",
+            "completed_at",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 
@@ -710,8 +918,16 @@ class CompanyV1CompatibilitySerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
         fields = (
-            "id", "tenant_id", "company_code", "company_name", "legal_name",
-            "tax_id", "address", "is_active", "created_at", "updated_at",
+            "id",
+            "tenant_id",
+            "company_code",
+            "company_name",
+            "legal_name",
+            "tax_id",
+            "address",
+            "is_active",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = ("id", "tenant_id", "is_active", "created_at", "updated_at")
         extra_kwargs = {

@@ -12,12 +12,7 @@ from rest_framework import status
 from src.core.access.decision import AccessDecision, AccessDecisionPipeline, AccessReasonCode
 
 from ..models import BDRConfiguration, BDRConfigurationVersion
-from ..services import (
-    BDRDomainError,
-    ConfigurationService,
-    ResourceNotFound,
-    get_configuration,
-)
+from ..services import BDRDomainError, ConfigurationService, ResourceNotFound, get_configuration
 
 pytest_plugins = ["src.core.testing"]
 

@@ -168,10 +168,11 @@ def create_tenant_identity(label: str) -> TenantIdentity:
     )
 
 
+# nosemgrep: python.lang.security.audit.hardcoded-password-default-argument.hardcoded-password-default-argument
 def authenticated_api_client(
     user: Any,
     *,
-    password: str = TEST_PASSWORD,
+    password: str = TEST_PASSWORD,  # nosemgrep: python.lang.security.audit.hardcoded-password-default-argument.hardcoded-password-default-argument -- deterministic test credential only.  # noqa: E501
     enforce_csrf_checks: bool = True,
 ) -> APIClient:
     """Return a DRF client authenticated through Django's real session backend.

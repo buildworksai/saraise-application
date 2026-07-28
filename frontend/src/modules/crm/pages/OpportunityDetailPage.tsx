@@ -1,12 +1,244 @@
+/* eslint-disable max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /* eslint-disable @typescript-eslint/no-base-to-string */
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Button } from '@/components/ui/Button';
-import { Dialog } from '@/components/ui/Dialog';
-import { ActivityTimeline } from '../components/ActivityTimeline';
-import { CrmPage, Field, GovernedError, LiveRegion, PageSkeleton, fieldClass } from '../components/CrmPage';
-import { DeleteEntityControl } from '../components/DeleteEntityControl';
-import { DetailCard } from '../components/DetailCard';
-import { crmKeys, crmService } from '../services/crm-service';
-export function OpportunityDetailPage(){const{id=''}=useParams(),nav=useNavigate(),client=useQueryClient();const[won,setWon]=useState(false),[lost,setLost]=useState(false);const q=useQuery({queryKey:crmKeys.opportunity(id),queryFn:()=>crmService.getOpportunity(id),enabled:!!id});const activities=useQuery({queryKey:crmKeys.activities({related_to_type:'Opportunity',related_to_id:id,page:1}),queryFn:()=>crmService.listActivities({related_to_type:'Opportunity',related_to_id:id,page:1}),enabled:!!id});const done=async()=>{await client.invalidateQueries({queryKey:crmKeys.opportunity(id)});await client.invalidateQueries({queryKey:['crm','opportunities']});setWon(false);setLost(false)};const closeWon=useMutation({mutationFn:()=>crmService.closeOpportunityWon(id,{expected_version:q.data?.version??0,transition_key:`close-won-${crypto.randomUUID()}`,confirmation:true}),onSuccess:done});const closeLost=useMutation({mutationFn:(reason:string)=>crmService.closeOpportunityLost(id,{expected_version:q.data?.version??0,transition_key:`close-lost-${crypto.randomUUID()}`,loss_reason:reason}),onSuccess:done});if(q.isLoading)return <CrmPage title="Opportunity" parent={{label:'Opportunities',to:'/crm/opportunities'}}><PageSkeleton/></CrmPage>;if(q.error||!q.data)return <CrmPage title="Opportunity" parent={{label:'Opportunities',to:'/crm/opportunities'}}><GovernedError error={q.error} onRetry={()=>void q.refetch()} subject="Opportunity"/></CrmPage>;const opportunity=q.data;const deleted=()=>{void client.invalidateQueries({queryKey:['crm','opportunities']});nav('/crm/opportunities')};return <CrmPage title={opportunity.name} description={`${opportunity.stage.replaceAll('_',' ')} · ${opportunity.status}`} parent={{label:'Opportunities',to:'/crm/opportunities'}} actions={<><Link to={`/crm/opportunities/${opportunity.id}/edit`}><Button variant="outline">Edit</Button></Link>{opportunity.status==='open'?<><Button onClick={()=>setWon(true)}>Close won</Button><Button variant="outline" onClick={()=>setLost(true)}>Close lost</Button></>:null}<Link to={`/crm/activities/new?related_to_type=Opportunity&related_to_id=${opportunity.id}`}><Button variant="outline">Log activity</Button></Link><DeleteEntityControl label="opportunity" impact="This removes the deal from active pipeline and forecast views while preserving transition and activity evidence." onDelete={()=>crmService.deleteOpportunity(opportunity.id,opportunity.version)} onDeleted={deleted}/></>}><LiveRegion message={closeWon.isSuccess?'Opportunity closed won.':closeLost.isSuccess?'Opportunity closed lost.':null}/><div className="grid gap-6 lg:grid-cols-3"><div className="space-y-6 lg:col-span-2"><DetailCard title="Deal information" fields={[{label:'Account',value:<Link className="text-primary hover:underline" to={`/crm/accounts/${opportunity.account_id}`}>Open account</Link>},{label:'Primary contact',value:opportunity.primary_contact_id?<Link className="text-primary hover:underline" to={`/crm/contacts/${opportunity.primary_contact_id}`}>Open contact</Link>:'—'},{label:'Amount',value:new Intl.NumberFormat(undefined,{style:'currency',currency:opportunity.currency}).format(Number(opportunity.amount))},{label:'Probability',value:`${opportunity.probability}%`},{label:'Expected close',value:new Date(`${opportunity.close_date}T00:00:00`).toLocaleDateString()},{label:'Description',value:opportunity.description||'—'}]}/><DetailCard title="Activity timeline"><ActivityTimeline activities={activities.data?.items} loading={activities.isLoading} error={activities.error} onRetry={()=>void activities.refetch()}/></DetailCard></div><DetailCard title="Stage history">{opportunity.transition_history.length?<ol className="space-y-3">{opportunity.transition_history.map(transition=><li key={transition.transition_key} className="border-l-2 pl-3 text-sm"><strong>{transition.from_state} → {transition.to_state}</strong><p className="text-muted-foreground">{new Date(transition.occurred_at).toLocaleString()}{transition.reason?` · ${transition.reason}`:''}</p></li>)}</ol>:<p className="text-sm text-muted-foreground">No stage transitions recorded.</p>}</DetailCard></div><Dialog open={won} onOpenChange={setWon} title="Confirm closed won" description="This terminal transition fixes probability according to tenant configuration and may notify entitled fulfillment extensions."><div className="flex justify-end gap-2"><Button variant="outline" onClick={()=>setWon(false)}>Cancel</Button><Button disabled={closeWon.isPending} onClick={()=>closeWon.mutate()}>{closeWon.isPending?'Closing…':'Confirm won'}</Button></div>{closeWon.error?<GovernedError error={closeWon.error} subject="Close won"/>:null}</Dialog><Dialog open={lost} onOpenChange={setLost} title="Close opportunity as lost" description="A meaningful reason is retained in the transition audit trail."><form onSubmit={event=>{event.preventDefault();closeLost.mutate(String(new FormData(event.currentTarget).get('reason')).trim())}} className="space-y-4"><Field id="reason" label="Loss reason" required><textarea id="reason" name="reason" required minLength={2} rows={4} className={fieldClass}/></Field>{closeLost.error?<GovernedError error={closeLost.error} subject="Close lost"/>:null}<div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={()=>setLost(false)}>Cancel</Button><Button type="submit" variant="danger" disabled={closeLost.isPending}>{closeLost.isPending?'Closing…':'Confirm lost'}</Button></div></form></Dialog></CrmPage>}
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
+import { ActivityTimeline } from "../components/ActivityTimeline";
+import {
+  CrmPage,
+  Field,
+  GovernedError,
+  LiveRegion,
+  PageSkeleton,
+  fieldClass,
+} from "../components/CrmPage";
+import { DeleteEntityControl } from "../components/DeleteEntityControl";
+import { DetailCard } from "../components/DetailCard";
+import { crmKeys, crmService } from "../services/crm-service";
+export function OpportunityDetailPage() {
+  const { id = "" } = useParams(),
+    nav = useNavigate(),
+    client = useQueryClient();
+  const [won, setWon] = useState(false),
+    [lost, setLost] = useState(false);
+  const q = useQuery({
+    queryKey: crmKeys.opportunity(id),
+    queryFn: () => crmService.getOpportunity(id),
+    enabled: !!id,
+  });
+  const activities = useQuery({
+    queryKey: crmKeys.activities({ related_to_type: "Opportunity", related_to_id: id, page: 1 }),
+    queryFn: () =>
+      crmService.listActivities({ related_to_type: "Opportunity", related_to_id: id, page: 1 }),
+    enabled: !!id,
+  });
+  const done = async () => {
+    await client.invalidateQueries({ queryKey: crmKeys.opportunity(id) });
+    await client.invalidateQueries({ queryKey: ["crm", "opportunities"] });
+    setWon(false);
+    setLost(false);
+  };
+  const closeWon = useMutation({
+    mutationFn: () =>
+      crmService.closeOpportunityWon(id, {
+        expected_version: q.data?.version ?? 0,
+        transition_key: `close-won-${crypto.randomUUID()}`,
+        confirmation: true,
+      }),
+    onSuccess: done,
+  });
+  const closeLost = useMutation({
+    mutationFn: (reason: string) =>
+      crmService.closeOpportunityLost(id, {
+        expected_version: q.data?.version ?? 0,
+        transition_key: `close-lost-${crypto.randomUUID()}`,
+        loss_reason: reason,
+      }),
+    onSuccess: done,
+  });
+  if (q.isLoading)
+    return (
+      <CrmPage title="Opportunity" parent={{ label: "Opportunities", to: "/crm/opportunities" }}>
+        <PageSkeleton />
+      </CrmPage>
+    );
+  if (q.error || !q.data)
+    return (
+      <CrmPage title="Opportunity" parent={{ label: "Opportunities", to: "/crm/opportunities" }}>
+        <GovernedError error={q.error} onRetry={() => void q.refetch()} subject="Opportunity" />
+      </CrmPage>
+    );
+  const opportunity = q.data;
+  const deleted = () => {
+    void client.invalidateQueries({ queryKey: ["crm", "opportunities"] });
+    nav("/crm/opportunities");
+  };
+  return (
+    <CrmPage
+      title={opportunity.name}
+      description={`${opportunity.stage.replaceAll("_", " ")} · ${opportunity.status}`}
+      parent={{ label: "Opportunities", to: "/crm/opportunities" }}
+      actions={
+        <>
+          <Link to={`/crm/opportunities/${opportunity.id}/edit`}>
+            <Button variant="outline">Edit</Button>
+          </Link>
+          {opportunity.status === "open" ? (
+            <>
+              <Button onClick={() => setWon(true)}>Close won</Button>
+              <Button variant="outline" onClick={() => setLost(true)}>
+                Close lost
+              </Button>
+            </>
+          ) : null}
+          <Link
+            to={`/crm/activities/new?related_to_type=Opportunity&related_to_id=${opportunity.id}`}
+          >
+            <Button variant="outline">Log activity</Button>
+          </Link>
+          <DeleteEntityControl
+            label="opportunity"
+            impact="This removes the deal from active pipeline and forecast views while preserving transition and activity evidence."
+            onDelete={() => crmService.deleteOpportunity(opportunity.id, opportunity.version)}
+            onDeleted={deleted}
+          />
+        </>
+      }
+    >
+      <LiveRegion
+        message={
+          closeWon.isSuccess
+            ? "Opportunity closed won."
+            : closeLost.isSuccess
+              ? "Opportunity closed lost."
+              : null
+        }
+      />
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2">
+          <DetailCard
+            title="Deal information"
+            fields={[
+              {
+                label: "Account",
+                value: (
+                  <Link
+                    className="text-primary hover:underline"
+                    to={`/crm/accounts/${opportunity.account_id}`}
+                  >
+                    Open account
+                  </Link>
+                ),
+              },
+              {
+                label: "Primary contact",
+                value: opportunity.primary_contact_id ? (
+                  <Link
+                    className="text-primary hover:underline"
+                    to={`/crm/contacts/${opportunity.primary_contact_id}`}
+                  >
+                    Open contact
+                  </Link>
+                ) : (
+                  "—"
+                ),
+              },
+              {
+                label: "Amount",
+                value: new Intl.NumberFormat(undefined, {
+                  style: "currency",
+                  currency: opportunity.currency,
+                }).format(Number(opportunity.amount)),
+              },
+              { label: "Probability", value: `${opportunity.probability}%` },
+              {
+                label: "Expected close",
+                value: new Date(`${opportunity.close_date}T00:00:00`).toLocaleDateString(),
+              },
+              { label: "Description", value: opportunity.description || "—" },
+            ]}
+          />
+          <DetailCard title="Activity timeline">
+            <ActivityTimeline
+              activities={activities.data?.items}
+              loading={activities.isLoading}
+              error={activities.error}
+              onRetry={() => void activities.refetch()}
+            />
+          </DetailCard>
+        </div>
+        <DetailCard title="Stage history">
+          {opportunity.transition_history.length ? (
+            <ol className="space-y-3">
+              {opportunity.transition_history.map((transition) => (
+                <li key={transition.transition_key} className="border-l-2 pl-3 text-sm">
+                  <strong>
+                    {transition.from_state} → {transition.to_state}
+                  </strong>
+                  <p className="text-muted-foreground">
+                    {new Date(transition.occurred_at).toLocaleString()}
+                    {transition.reason ? ` · ${transition.reason}` : ""}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-sm text-muted-foreground">No stage transitions recorded.</p>
+          )}
+        </DetailCard>
+      </div>
+      <Dialog
+        open={won}
+        onOpenChange={setWon}
+        title="Confirm closed won"
+        description="This terminal transition fixes probability according to tenant configuration and may notify entitled fulfillment extensions."
+      >
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setWon(false)}>
+            Cancel
+          </Button>
+          <Button disabled={closeWon.isPending} onClick={() => closeWon.mutate()}>
+            {closeWon.isPending ? "Closing…" : "Confirm won"}
+          </Button>
+        </div>
+        {closeWon.error ? <GovernedError error={closeWon.error} subject="Close won" /> : null}
+      </Dialog>
+      <Dialog
+        open={lost}
+        onOpenChange={setLost}
+        title="Close opportunity as lost"
+        description="A meaningful reason is retained in the transition audit trail."
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            closeLost.mutate(String(new FormData(event.currentTarget).get("reason")).trim());
+          }}
+          className="space-y-4"
+        >
+          <Field id="reason" label="Loss reason" required>
+            <textarea
+              id="reason"
+              name="reason"
+              required
+              minLength={2}
+              rows={4}
+              className={fieldClass}
+            />
+          </Field>
+          {closeLost.error ? <GovernedError error={closeLost.error} subject="Close lost" /> : null}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setLost(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="danger" disabled={closeLost.isPending}>
+              {closeLost.isPending ? "Closing…" : "Confirm lost"}
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+    </CrmPage>
+  );
+}

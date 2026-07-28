@@ -7,7 +7,7 @@ import time
 import uuid
 from collections.abc import Mapping
 from datetime import timedelta
-from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP
+from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
 from typing import Any
 
 from django.conf import settings
@@ -21,6 +21,7 @@ from src.core.async_jobs.models import AsyncJob
 from src.core.async_jobs.services import enqueue
 from src.core.state_machine import StateMachine
 
+from .integrations import Capability, IntegrationUnavailable, InventoryAvailabilityRequest, get_integration_registry
 from .models import (
     Customer,
     DeliveryNote,
@@ -32,12 +33,6 @@ from .models import (
     SalesDocumentSequence,
     SalesOrder,
     SalesOrderLine,
-)
-from .integrations import (
-    Capability,
-    IntegrationUnavailable,
-    InventoryAvailabilityRequest,
-    get_integration_registry,
 )
 
 logger = logging.getLogger("saraise.sales_management")

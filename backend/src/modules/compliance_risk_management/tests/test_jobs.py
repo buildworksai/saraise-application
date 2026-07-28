@@ -24,11 +24,7 @@ from ..jobs import (
     mark_remediation_overdue_handler,
 )
 from ..models import ControlTest
-from .factories import (
-    ComplianceCalendarEntryFactory,
-    ControlFactory,
-    RemediationActionFactory,
-)
+from .factories import ComplianceCalendarEntryFactory, ControlFactory, RemediationActionFactory
 
 pytestmark = pytest.mark.django_db
 

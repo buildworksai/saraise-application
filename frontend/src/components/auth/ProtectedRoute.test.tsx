@@ -1,24 +1,25 @@
+/* eslint-disable @typescript-eslint/require-await -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /**
  * ProtectedRoute Component Tests
  *
  * Tests for authentication-protected route component.
  */
 
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import { ProtectedRoute } from './ProtectedRoute';
-import { useAuthStore } from '../../stores/auth-store';
-import { authService } from '../../services/auth-service';
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import { render, screen, waitFor, act } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { ProtectedRoute } from "./ProtectedRoute";
+import { useAuthStore } from "../../stores/auth-store";
+import { authService } from "../../services/auth-service";
 
 // Mock auth service
-vi.mock('../../services/auth-service', () => ({
+vi.mock("../../services/auth-service", () => ({
   authService: {
     getCurrentUser: vi.fn(),
   },
 }));
 
-describe('ProtectedRoute', () => {
+describe("ProtectedRoute", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Reset store state
@@ -28,11 +29,11 @@ describe('ProtectedRoute', () => {
     });
   });
 
-  it('should render children when authenticated', () => {
+  it("should render children when authenticated", () => {
     const mockUser = {
-      id: '1',
-      email: 'test@example.com',
-      username: 'test',
+      id: "1",
+      email: "test@example.com",
+      username: "test",
       is_staff: false,
       is_superuser: false,
       tenant_id: null,
@@ -49,30 +50,30 @@ describe('ProtectedRoute', () => {
         <ProtectedRoute>
           <div>Protected Content</div>
         </ProtectedRoute>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
-    expect(screen.getByText('Protected Content')).toBeInTheDocument();
+    expect(screen.getByText("Protected Content")).toBeInTheDocument();
   });
 
-  it('should redirect to login when not authenticated', () => {
+  it("should redirect to login when not authenticated", () => {
     act(() => {
       useAuthStore.getState().logout();
     });
 
     render(
-      <MemoryRouter initialEntries={['/protected']}>
+      <MemoryRouter initialEntries={["/protected"]}>
         <ProtectedRoute>
           <div>Protected Content</div>
         </ProtectedRoute>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     // Should redirect (Navigate component behavior)
-    expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
+    expect(screen.queryByText("Protected Content")).not.toBeInTheDocument();
   });
 
-  it('should show loading when verifying session', () => {
+  it("should show loading when verifying session", () => {
     act(() => {
       useAuthStore.getState().setLoading(true);
     });
@@ -82,21 +83,21 @@ describe('ProtectedRoute', () => {
         <ProtectedRoute>
           <div>Protected Content</div>
         </ProtectedRoute>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
   });
 
-  it('should verify session on mount when no user', async () => {
+  it("should verify session on mount when no user", async () => {
     act(() => {
       useAuthStore.getState().logout();
     });
 
     const mockUser = {
-      id: '1',
-      email: 'test@example.com',
-      username: 'test',
+      id: "1",
+      email: "test@example.com",
+      username: "test",
       is_staff: false,
       is_superuser: false,
       tenant_id: null,
@@ -112,7 +113,7 @@ describe('ProtectedRoute', () => {
           <ProtectedRoute>
             <div>Protected Content</div>
           </ProtectedRoute>
-        </MemoryRouter>,
+        </MemoryRouter>
       );
     });
 

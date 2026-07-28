@@ -96,7 +96,13 @@ class NotificationTemplate(TenantScopedModel, TimestampedModel):
     channel = models.CharField(max_length=20, choices=Channel.choices)
     locale = models.CharField(max_length=16, default="en")
     status = models.CharField(max_length=16, choices=TemplateStatus.choices, default=TemplateStatus.DRAFT)
-    active_version = models.ForeignKey("NotificationTemplateVersion", null=True, blank=True, on_delete=models.PROTECT, related_name="active_for_templates")
+    active_version = models.ForeignKey(
+        "NotificationTemplateVersion",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="active_for_templates",
+    )
     transition_history = models.JSONField(default=list, blank=True)
     created_by = models.UUIDField()
     updated_by = models.UUIDField()
@@ -104,7 +110,14 @@ class NotificationTemplate(TenantScopedModel, TimestampedModel):
     class Meta:
         db_table = "notifications_templates"
         constraints = [
-            models.UniqueConstraint(Lower("code"), "channel", "locale", "tenant_id", condition=~models.Q(status="archived"), name="notif_tpl_identity_uniq"),
+            models.UniqueConstraint(
+                Lower("code"),
+                "channel",
+                "locale",
+                "tenant_id",
+                condition=~models.Q(status="archived"),
+                name="notif_tpl_identity_uniq",
+            ),
             models.CheckConstraint(condition=~models.Q(code=""), name="notif_tpl_code_nonempty"),
             models.CheckConstraint(condition=~models.Q(category=""), name="notif_tpl_category_nonempty"),
             models.CheckConstraint(condition=~models.Q(name=""), name="notif_tpl_name_nonempty"),
@@ -115,7 +128,9 @@ class NotificationTemplate(TenantScopedModel, TimestampedModel):
         ]
 
     def clean(self) -> None:
-        self.code = self.code.strip().lower(); self.category = self.category.strip().lower(); self.name = self.name.strip()
+        self.code = self.code.strip().lower()
+        self.category = self.category.strip().lower()
+        self.name = self.name.strip()
         _same_tenant(self, self.active_version, "active_version")
         if self.active_version and self.active_version.template_id != self.id:
             raise ValidationError({"active_version": "Active version must belong to this template."})
@@ -123,7 +138,8 @@ class NotificationTemplate(TenantScopedModel, TimestampedModel):
     def save(self, *args: Any, **kwargs: Any) -> None:
         if self.active_version_id:
             _same_tenant(self, self.active_version, "active_version")
-            if self.active_version.template_id != self.id: raise ValidationError({"active_version": "Active version must belong to this template."})
+            if self.active_version.template_id != self.id:
+                raise ValidationError({"active_version": "Active version must belong to this template."})
         super().save(*args, **kwargs)
 
 
@@ -134,14 +150,20 @@ class NotificationTemplateVersion(AppendOnlyModel):
     subject_template = models.CharField(max_length=500, blank=True)
     body_template = models.TextField()
     variables_schema = models.JSONField(default=dict)
-    content_type = models.CharField(max_length=32, choices=(("text/plain", "Plain text"), ("text/html", "HTML"), ("application/json", "JSON")), default="text/plain")
+    content_type = models.CharField(
+        max_length=32,
+        choices=(("text/plain", "Plain text"), ("text/html", "HTML"), ("application/json", "JSON")),
+        default="text/plain",
+    )
     created_by = models.UUIDField()
     correlation_id = models.UUIDField(db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "notifications_template_versions"
-        constraints = [models.UniqueConstraint(fields=("tenant_id", "template", "version"), name="notif_tpl_version_uniq")]
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "template", "version"), name="notif_tpl_version_uniq")
+        ]
         indexes = [models.Index(fields=("tenant_id", "template", "-version"), name="notif_tpl_version_idx")]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
@@ -151,10 +173,21 @@ class NotificationTemplateVersion(AppendOnlyModel):
 
 class NotificationDelivery(TenantScopedModel, TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    template_version = models.ForeignKey(NotificationTemplateVersion, on_delete=models.PROTECT, related_name="deliveries")
+    template_version = models.ForeignKey(
+        NotificationTemplateVersion, on_delete=models.PROTECT, related_name="deliveries"
+    )
     job_id = models.UUIDField(null=True, blank=True, db_index=True)
     idempotency_key = models.CharField(max_length=255)
-    recipient_type = models.CharField(max_length=20, choices=(("user", "User"), ("email", "Email"), ("phone", "Phone"), ("push_endpoint", "Push endpoint"), ("webhook_endpoint", "Webhook endpoint")))
+    recipient_type = models.CharField(
+        max_length=20,
+        choices=(
+            ("user", "User"),
+            ("email", "Email"),
+            ("phone", "Phone"),
+            ("push_endpoint", "Push endpoint"),
+            ("webhook_endpoint", "Webhook endpoint"),
+        ),
+    )
     recipient_user_id = models.UUIDField(null=True, blank=True, db_index=True)
     recipient_ciphertext = models.TextField(blank=True)
     recipient_fingerprint = models.CharField(max_length=64)
@@ -183,16 +216,37 @@ class NotificationDelivery(TenantScopedModel, TimestampedModel):
         db_table = "notifications_deliveries"
         constraints = [
             models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="notif_delivery_idem_uniq"),
-            models.CheckConstraint(condition=models.Q(priority__gte=1, priority__lte=10), name="notif_delivery_priority_ck"),
-            models.CheckConstraint(condition=models.Q(max_attempts__gte=1, max_attempts__lte=10), name="notif_delivery_max_attempts_ck"),
-            models.CheckConstraint(condition=models.Q(attempt_count__lte=models.F("max_attempts")), name="notif_delivery_attempt_bound_ck"),
-            models.CheckConstraint(condition=~models.Q(status="sent") | (models.Q(sent_at__isnull=False) & ~models.Q(provider_message_id="")), name="notif_delivery_sent_evidence_ck"),
-            models.CheckConstraint(condition=~models.Q(status="delivered") | models.Q(delivered_at__isnull=False), name="notif_delivery_delivered_ck"),
-            models.CheckConstraint(condition=~models.Q(status="failed") | ~models.Q(failure_code=""), name="notif_delivery_failed_ck"),
-            models.CheckConstraint(condition=~models.Q(status="retry_wait") | models.Q(next_attempt_at__isnull=False), name="notif_delivery_retry_ck"),
+            models.CheckConstraint(
+                condition=models.Q(priority__gte=1, priority__lte=10), name="notif_delivery_priority_ck"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(max_attempts__gte=1, max_attempts__lte=10), name="notif_delivery_max_attempts_ck"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(attempt_count__lte=models.F("max_attempts")), name="notif_delivery_attempt_bound_ck"
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(status="sent")
+                | (models.Q(sent_at__isnull=False) & ~models.Q(provider_message_id="")),
+                name="notif_delivery_sent_evidence_ck",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(status="delivered") | models.Q(delivered_at__isnull=False),
+                name="notif_delivery_delivered_ck",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(status="failed") | ~models.Q(failure_code=""), name="notif_delivery_failed_ck"
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(status="retry_wait") | models.Q(next_attempt_at__isnull=False),
+                name="notif_delivery_retry_ck",
+            ),
         ]
         indexes = [
-            models.Index(fields=("tenant_id", "status", "scheduled_at", "priority", "created_at"), name="notif_delivery_queue_idx"),
+            models.Index(
+                fields=("tenant_id", "status", "scheduled_at", "priority", "created_at"),
+                name="notif_delivery_queue_idx",
+            ),
             models.Index(fields=("tenant_id", "recipient_user_id", "-created_at"), name="notif_delivery_user_idx"),
             models.Index(fields=("tenant_id", "channel", "status", "-created_at"), name="notif_delivery_channel_idx"),
         ]
@@ -205,7 +259,9 @@ class NotificationDelivery(TenantScopedModel, TimestampedModel):
 class Notification(TenantScopedModel, TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user_id = models.UUIDField(db_index=True)
-    delivery = models.OneToOneField(NotificationDelivery, null=True, blank=True, on_delete=models.SET_NULL, related_name="inbox_notification")
+    delivery = models.OneToOneField(
+        NotificationDelivery, null=True, blank=True, on_delete=models.SET_NULL, related_name="inbox_notification"
+    )
     notification_type = models.CharField(max_length=20, choices=NotificationType.choices, default=NotificationType.INFO)
     category = models.CharField(max_length=100, default="general")
     title = models.CharField(max_length=255)
@@ -220,7 +276,13 @@ class Notification(TenantScopedModel, TimestampedModel):
     class Meta:
         db_table = "notifications_notifications"
         constraints = [
-            models.CheckConstraint(condition=(models.Q(status="read", read_at__isnull=False) | (~models.Q(status="read") & models.Q(read_at__isnull=True))), name="notif_inbox_read_at_ck"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status="read", read_at__isnull=False)
+                    | (~models.Q(status="read") & models.Q(read_at__isnull=True))
+                ),
+                name="notif_inbox_read_at_ck",
+            ),
             models.CheckConstraint(condition=~models.Q(category=""), name="notif_inbox_category_ck"),
         ]
         indexes = [
@@ -234,7 +296,8 @@ class Notification(TenantScopedModel, TimestampedModel):
             raise ValidationError({"metadata": "Metadata exceeds the safe maximum."})
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        if self.delivery_id: _same_tenant(self, self.delivery, "delivery")
+        if self.delivery_id:
+            _same_tenant(self, self.delivery, "delivery")
         super().save(*args, **kwargs)
 
 
@@ -243,7 +306,16 @@ class NotificationDeliveryAttempt(AppendOnlyModel):
     delivery = models.ForeignKey(NotificationDelivery, on_delete=models.PROTECT, related_name="attempts")
     attempt_number = models.PositiveIntegerField()
     adapter_key = models.CharField(max_length=100)
-    outcome = models.CharField(max_length=20, choices=(("accepted", "Accepted"), ("retryable_failure", "Retryable failure"), ("permanent_failure", "Permanent failure"), ("circuit_open", "Circuit open"), ("timeout", "Timeout")))
+    outcome = models.CharField(
+        max_length=20,
+        choices=(
+            ("accepted", "Accepted"),
+            ("retryable_failure", "Retryable failure"),
+            ("permanent_failure", "Permanent failure"),
+            ("circuit_open", "Circuit open"),
+            ("timeout", "Timeout"),
+        ),
+    )
     provider_message_id = models.CharField(max_length=255, blank=True)
     error_code = models.CharField(max_length=100, blank=True)
     latency_ms = models.PositiveIntegerField()
@@ -253,11 +325,16 @@ class NotificationDeliveryAttempt(AppendOnlyModel):
 
     class Meta:
         db_table = "notifications_delivery_attempts"
-        constraints = [models.UniqueConstraint(fields=("tenant_id", "delivery", "attempt_number"), name="notif_attempt_number_uniq")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("tenant_id", "delivery", "attempt_number"), name="notif_attempt_number_uniq"
+            )
+        ]
         indexes = [models.Index(fields=("tenant_id", "delivery", "attempt_number"), name="notif_attempt_delivery_idx")]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        _same_tenant(self, self.delivery, "delivery"); super().save(*args, **kwargs)
+        _same_tenant(self, self.delivery, "delivery")
+        super().save(*args, **kwargs)
 
 
 class NotificationPreference(TenantScopedModel, TimestampedModel):
@@ -266,7 +343,11 @@ class NotificationPreference(TenantScopedModel, TimestampedModel):
     channel = models.CharField(max_length=20, choices=Channel.choices)
     category = models.CharField(max_length=100)
     enabled = models.BooleanField(default=True)
-    digest_mode = models.CharField(max_length=16, choices=(("immediate", "Immediate"), ("hourly", "Hourly"), ("daily", "Daily"), ("weekly", "Weekly")), default="immediate")
+    digest_mode = models.CharField(
+        max_length=16,
+        choices=(("immediate", "Immediate"), ("hourly", "Hourly"), ("daily", "Daily"), ("weekly", "Weekly")),
+        default="immediate",
+    )
     quiet_hours_start = models.TimeField(null=True, blank=True)
     quiet_hours_end = models.TimeField(null=True, blank=True)
     timezone = models.CharField(max_length=64, default="UTC")
@@ -275,9 +356,20 @@ class NotificationPreference(TenantScopedModel, TimestampedModel):
     class Meta:
         db_table = "notifications_preferences"
         constraints = [
-            models.UniqueConstraint(fields=("tenant_id", "user_id", "channel", "category"), name="notif_preference_uniq"),
-            models.CheckConstraint(condition=(models.Q(quiet_hours_start__isnull=True, quiet_hours_end__isnull=True) | models.Q(quiet_hours_start__isnull=False, quiet_hours_end__isnull=False)), name="notif_preference_quiet_ck"),
-            models.CheckConstraint(condition=~models.Q(category__in=("security_alerts", "password_reset"), enabled=False), name="notif_preference_mandatory_ck"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "user_id", "channel", "category"), name="notif_preference_uniq"
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(quiet_hours_start__isnull=True, quiet_hours_end__isnull=True)
+                    | models.Q(quiet_hours_start__isnull=False, quiet_hours_end__isnull=False)
+                ),
+                name="notif_preference_quiet_ck",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(category__in=("security_alerts", "password_reset"), enabled=False),
+                name="notif_preference_mandatory_ck",
+            ),
         ]
         indexes = [models.Index(fields=("tenant_id", "user_id", "channel"), name="notif_preference_user_idx")]
 
@@ -286,7 +378,9 @@ class NotificationEndpoint(TenantScopedModel, TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user_id = models.UUIDField(null=True, blank=True, db_index=True)
     kind = models.CharField(max_length=20, choices=(("push", "Push"), ("webhook", "Webhook")))
-    device_type = models.CharField(max_length=20, choices=(("", "None"), ("web", "Web"), ("android", "Android"), ("ios", "iOS")), blank=True)
+    device_type = models.CharField(
+        max_length=20, choices=(("", "None"), ("web", "Web"), ("android", "Android"), ("ios", "iOS")), blank=True
+    )
     address_ciphertext = models.TextField()
     fingerprint = models.CharField(max_length=64)
     display_name = models.CharField(max_length=255)
@@ -300,15 +394,25 @@ class NotificationEndpoint(TenantScopedModel, TimestampedModel):
     class Meta:
         db_table = "notifications_endpoints"
         constraints = [
-            models.UniqueConstraint(fields=("tenant_id", "kind", "fingerprint"), name="notif_endpoint_fingerprint_uniq"),
-            models.CheckConstraint(condition=(models.Q(kind="push", user_id__isnull=False, device_type__in=("web", "android", "ios")) | models.Q(kind="webhook", device_type="")), name="notif_endpoint_kind_ck"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "kind", "fingerprint"), name="notif_endpoint_fingerprint_uniq"
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(kind="push", user_id__isnull=False, device_type__in=("web", "android", "ios"))
+                    | models.Q(kind="webhook", device_type="")
+                ),
+                name="notif_endpoint_kind_ck",
+            ),
         ]
         indexes = [models.Index(fields=("tenant_id", "user_id", "kind", "is_active"), name="notif_endpoint_user_idx")]
 
 
 class NotificationConfiguration(TenantScopedModel, TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    environment = models.CharField(max_length=20, choices=(("development", "Development"), ("staging", "Staging"), ("production", "Production")))
+    environment = models.CharField(
+        max_length=20, choices=(("development", "Development"), ("staging", "Staging"), ("production", "Production"))
+    )
     active_version = models.PositiveIntegerField(default=1)
     document = models.JSONField(default=dict)
     created_by = models.UUIDField()
@@ -316,7 +420,9 @@ class NotificationConfiguration(TenantScopedModel, TimestampedModel):
 
     class Meta:
         db_table = "notifications_configurations"
-        constraints = [models.UniqueConstraint(fields=("tenant_id", "environment"), name="notif_configuration_env_uniq")]
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "environment"), name="notif_configuration_env_uniq")
+        ]
 
 
 class NotificationConfigurationVersion(AppendOnlyModel):
@@ -333,18 +439,30 @@ class NotificationConfigurationVersion(AppendOnlyModel):
 
     class Meta:
         db_table = "notifications_configuration_versions"
-        constraints = [models.UniqueConstraint(fields=("tenant_id", "configuration", "version"), name="notif_config_version_uniq")]
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "configuration", "version"), name="notif_config_version_uniq")
+        ]
         indexes = [models.Index(fields=("tenant_id", "configuration", "-version"), name="notif_config_version_idx")]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        _same_tenant(self, self.configuration, "configuration"); super().save(*args, **kwargs)
+        _same_tenant(self, self.configuration, "configuration")
+        super().save(*args, **kwargs)
 
 
 class NotificationConfigurationAudit(AppendOnlyModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     configuration = models.ForeignKey(NotificationConfiguration, on_delete=models.PROTECT, related_name="audits")
     version = models.ForeignKey(NotificationConfigurationVersion, on_delete=models.PROTECT, related_name="audits")
-    action = models.CharField(max_length=20, choices=(("created", "Created"), ("updated", "Updated"), ("imported", "Imported"), ("rolled_back", "Rolled back"), ("activated", "Activated")))
+    action = models.CharField(
+        max_length=20,
+        choices=(
+            ("created", "Created"),
+            ("updated", "Updated"),
+            ("imported", "Imported"),
+            ("rolled_back", "Rolled back"),
+            ("activated", "Activated"),
+        ),
+    )
     diff = models.JSONField(default=list)
     actor_id = models.UUIDField()
     correlation_id = models.UUIDField(db_index=True)
@@ -355,16 +473,28 @@ class NotificationConfigurationAudit(AppendOnlyModel):
         indexes = [models.Index(fields=("tenant_id", "configuration", "-created_at"), name="notif_config_audit_idx")]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        _same_tenant(self, self.configuration, "configuration"); _same_tenant(self, self.version, "version")
-        if self.version.configuration_id != self.configuration_id: raise ValidationError({"version": "Version must belong to the configuration."})
+        _same_tenant(self, self.configuration, "configuration")
+        _same_tenant(self, self.version, "version")
+        if self.version.configuration_id != self.configuration_id:
+            raise ValidationError({"version": "Version must belong to the configuration."})
         super().save(*args, **kwargs)
 
 
 __all__ = [
-    "Channel", "DeliveryStatus", "ImmutableRecordError", "Notification",
-    "NotificationConfiguration", "NotificationConfigurationAudit",
-    "NotificationConfigurationVersion", "NotificationDelivery",
-    "NotificationDeliveryAttempt", "NotificationEndpoint", "NotificationPreference",
-    "NotificationStatus", "NotificationTemplate", "NotificationTemplateVersion",
-    "NotificationType", "TemplateStatus",
+    "Channel",
+    "DeliveryStatus",
+    "ImmutableRecordError",
+    "Notification",
+    "NotificationConfiguration",
+    "NotificationConfigurationAudit",
+    "NotificationConfigurationVersion",
+    "NotificationDelivery",
+    "NotificationDeliveryAttempt",
+    "NotificationEndpoint",
+    "NotificationPreference",
+    "NotificationStatus",
+    "NotificationTemplate",
+    "NotificationTemplateVersion",
+    "NotificationType",
+    "TemplateStatus",
 ]

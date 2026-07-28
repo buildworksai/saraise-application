@@ -6,7 +6,6 @@ import uuid
 
 from django.db import migrations, models
 
-
 TENANT_TABLES = (
     "security_configurations",
     "security_configuration_versions",
@@ -22,21 +21,21 @@ def install_postgresql_guards(apps, schema_editor) -> None:
         schema_editor.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
         schema_editor.execute(f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY')
         schema_editor.execute(
-            f'''CREATE POLICY "{table}_tenant_isolation" ON "{table}"
+            f"""CREATE POLICY "{table}_tenant_isolation" ON "{table}"
                 USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
-                WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)'''
+                WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)"""
         )
     for table in ("security_configuration_versions", "security_mutation_replays"):
         function = f"{table}_reject_mutation"
         trigger = f"{table}_immutable"
         schema_editor.execute(
-            f'''CREATE FUNCTION "{function}"() RETURNS trigger LANGUAGE plpgsql AS $$
+            f"""CREATE FUNCTION "{function}"() RETURNS trigger LANGUAGE plpgsql AS $$
                 BEGIN RAISE EXCEPTION 'immutable security configuration evidence' USING ERRCODE = '55000'; END;
-                $$'''
+                $$"""
         )
         schema_editor.execute(
-            f'''CREATE TRIGGER "{trigger}" BEFORE UPDATE OR DELETE ON "{table}"
-                FOR EACH ROW EXECUTE FUNCTION "{function}"()'''
+            f"""CREATE TRIGGER "{trigger}" BEFORE UPDATE OR DELETE ON "{table}"
+                FOR EACH ROW EXECUTE FUNCTION "{function}"()"""
         )
 
 
@@ -123,9 +122,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 "db_table": "security_mutation_replays",
-                "indexes": [
-                    models.Index(fields=["tenant_id", "operation"], name="sec_replay_tenant_op_idx")
-                ],
+                "indexes": [models.Index(fields=["tenant_id", "operation"], name="sec_replay_tenant_op_idx")],
                 "constraints": [
                     models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="sec_replay_tenant_key_uniq")
                 ],

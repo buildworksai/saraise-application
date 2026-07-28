@@ -1,4 +1,5 @@
 """Deterministic service and algorithm behavior."""
+
 import io
 import uuid
 from datetime import timedelta
@@ -28,7 +29,9 @@ def test_ingestion_validates_deduplicates_and_publishes():
 
 @pytest.mark.parametrize("occurred", [timezone.now() + timedelta(minutes=1), timezone.now() - timedelta(days=731)])
 def test_ingestion_rejects_timestamp_bounds(occurred):
-    result = EventLogService().ingest_events(uuid.uuid4(), uuid.uuid4(), "canonical", "orders", [{"case_id": "c", "activity": "a", "occurred_at": occurred}])
+    result = EventLogService().ingest_events(
+        uuid.uuid4(), uuid.uuid4(), "canonical", "orders", [{"case_id": "c", "activity": "a", "occurred_at": occurred}]
+    )
     assert result.rejected == 1 and result.accepted == 0
 
 

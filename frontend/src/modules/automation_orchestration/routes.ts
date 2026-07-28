@@ -11,7 +11,11 @@ export const tenantRoutes = [
     path: "/automation-orchestration",
     title: "Orchestration definitions",
     sourceFile: "modules/automation_orchestration/pages/DefinitionsListPage.tsx",
-    Page: lazy(() => import("./pages/DefinitionsListPage").then(({ DefinitionsListPage }) => ({ default: DefinitionsListPage }))),
+    Page: lazy(() =>
+      import("./pages/DefinitionsListPage").then(({ DefinitionsListPage }) => ({
+        default: DefinitionsListPage,
+      }))
+    ),
     modes,
     navigation: { type: "sidebar", label: "Definitions", icon: Workflow, order: 60 },
   },
@@ -21,7 +25,11 @@ export const tenantRoutes = [
     path: "/automation-orchestration/configuration",
     title: "Orchestration configuration",
     sourceFile: "modules/automation_orchestration/pages/ConfigurationPage.tsx",
-    Page: lazy(() => import("./pages/ConfigurationPage").then(({ ConfigurationPage }) => ({ default: ConfigurationPage }))),
+    Page: lazy(() =>
+      import("./pages/ConfigurationPage").then(({ ConfigurationPage }) => ({
+        default: ConfigurationPage,
+      }))
+    ),
     modes,
     navigation: { type: "sidebar", label: "Configuration", icon: Settings2, order: 63 },
   },
@@ -31,7 +39,11 @@ export const tenantRoutes = [
     path: "/automation-orchestration/definitions/new",
     title: "Create orchestration definition",
     sourceFile: "modules/automation_orchestration/pages/DefinitionCreatePage.tsx",
-    Page: lazy(() => import("./pages/DefinitionCreatePage").then(({ DefinitionCreatePage }) => ({ default: DefinitionCreatePage }))),
+    Page: lazy(() =>
+      import("./pages/DefinitionCreatePage").then(({ DefinitionCreatePage }) => ({
+        default: DefinitionCreatePage,
+      }))
+    ),
     modes,
     navigation: { type: "contextual", parentRouteId: "automation-orchestration.definitions.list" },
   },
@@ -41,7 +53,11 @@ export const tenantRoutes = [
     path: "/automation-orchestration/definitions/:id",
     title: "Orchestration definition",
     sourceFile: "modules/automation_orchestration/pages/DefinitionDetailPage.tsx",
-    Page: lazy(() => import("./pages/DefinitionDetailPage").then(({ DefinitionDetailPage }) => ({ default: DefinitionDetailPage }))),
+    Page: lazy(() =>
+      import("./pages/DefinitionDetailPage").then(({ DefinitionDetailPage }) => ({
+        default: DefinitionDetailPage,
+      }))
+    ),
     modes,
     navigation: { type: "contextual", parentRouteId: "automation-orchestration.definitions.list" },
   },
@@ -51,7 +67,11 @@ export const tenantRoutes = [
     path: "/automation-orchestration/definitions/:id/edit",
     title: "Edit orchestration graph",
     sourceFile: "modules/automation_orchestration/pages/DefinitionEditPage.tsx",
-    Page: lazy(() => import("./pages/DefinitionEditPage").then(({ DefinitionEditPage }) => ({ default: DefinitionEditPage }))),
+    Page: lazy(() =>
+      import("./pages/DefinitionEditPage").then(({ DefinitionEditPage }) => ({
+        default: DefinitionEditPage,
+      }))
+    ),
     modes,
     navigation: { type: "contextual", parentRouteId: "automation-orchestration.definitions.list" },
   },
@@ -61,7 +81,11 @@ export const tenantRoutes = [
     path: "/automation-orchestration/schedules",
     title: "Orchestration schedules",
     sourceFile: "modules/automation_orchestration/pages/SchedulesListPage.tsx",
-    Page: lazy(() => import("./pages/SchedulesListPage").then(({ SchedulesListPage }) => ({ default: SchedulesListPage }))),
+    Page: lazy(() =>
+      import("./pages/SchedulesListPage").then(({ SchedulesListPage }) => ({
+        default: SchedulesListPage,
+      }))
+    ),
     modes,
     navigation: { type: "sidebar", label: "Schedules", icon: CalendarClock, order: 61 },
   },
@@ -71,7 +95,11 @@ export const tenantRoutes = [
     path: "/automation-orchestration/schedules/new",
     title: "Create orchestration schedule",
     sourceFile: "modules/automation_orchestration/pages/ScheduleCreatePage.tsx",
-    Page: lazy(() => import("./pages/ScheduleCreatePage").then(({ ScheduleCreatePage }) => ({ default: ScheduleCreatePage }))),
+    Page: lazy(() =>
+      import("./pages/ScheduleCreatePage").then(({ ScheduleCreatePage }) => ({
+        default: ScheduleCreatePage,
+      }))
+    ),
     modes,
     navigation: { type: "contextual", parentRouteId: "automation-orchestration.schedules.list" },
   },
@@ -81,7 +109,11 @@ export const tenantRoutes = [
     path: "/automation-orchestration/schedules/:id/edit",
     title: "Edit orchestration schedule",
     sourceFile: "modules/automation_orchestration/pages/ScheduleEditPage.tsx",
-    Page: lazy(() => import("./pages/ScheduleEditPage").then(({ ScheduleEditPage }) => ({ default: ScheduleEditPage }))),
+    Page: lazy(() =>
+      import("./pages/ScheduleEditPage").then(({ ScheduleEditPage }) => ({
+        default: ScheduleEditPage,
+      }))
+    ),
     modes,
     navigation: { type: "contextual", parentRouteId: "automation-orchestration.schedules.list" },
   },
@@ -91,7 +123,9 @@ export const tenantRoutes = [
     path: "/automation-orchestration/runs",
     title: "Orchestration runs",
     sourceFile: "modules/automation_orchestration/pages/RunsListPage.tsx",
-    Page: lazy(() => import("./pages/RunsListPage").then(({ RunsListPage }) => ({ default: RunsListPage }))),
+    Page: lazy(() =>
+      import("./pages/RunsListPage").then(({ RunsListPage }) => ({ default: RunsListPage }))
+    ),
     modes,
     navigation: { type: "sidebar", label: "Runs", icon: Activity, order: 62 },
   },
@@ -101,7 +135,9 @@ export const tenantRoutes = [
     path: "/automation-orchestration/runs/:runId",
     title: "Orchestration run detail",
     sourceFile: "modules/automation_orchestration/pages/RunDetailPage.tsx",
-    Page: lazy(() => import("./pages/RunDetailPage").then(({ RunDetailPage }) => ({ default: RunDetailPage }))),
+    Page: lazy(() =>
+      import("./pages/RunDetailPage").then(({ RunDetailPage }) => ({ default: RunDetailPage }))
+    ),
     modes,
     navigation: { type: "contextual", parentRouteId: "automation-orchestration.runs.list" },
   },

@@ -28,9 +28,7 @@ REGISTERED_COMMANDS: Final = (
     AR_MARK_OVERDUE_COMMAND,
 )
 
-_REPORT_TYPES: Final = frozenset(
-    {"trial_balance", "general_ledger", "balance_sheet", "income_statement", "cash_flow"}
-)
+_REPORT_TYPES: Final = frozenset({"trial_balance", "general_ledger", "balance_sheet", "income_statement", "cash_flow"})
 _REPORT_PARAMETER_KEYS: Final = {
     "trial_balance": frozenset({"as_of_date"}),
     "general_ledger": frozenset({"account_id", "start_date", "end_date"}),

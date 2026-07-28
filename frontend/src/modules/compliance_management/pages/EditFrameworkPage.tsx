@@ -1,1 +1,1 @@
-export { EditFrameworkPage } from './CompliancePages';
+export { EditFrameworkPage } from "./CompliancePages";

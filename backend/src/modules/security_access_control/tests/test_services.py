@@ -21,16 +21,12 @@ from src.modules.security_access_control.extensions import (
     unregister_security_extension,
 )
 from src.modules.security_access_control.models import (
-    FieldSecurity,
     Permission,
     PermissionSetPermission,
     Role,
     RolePermission,
-    RowSecurityRule,
     SecurityAuditLog,
     SecurityProfileAssignment,
-    UserPermissionSet,
-    UserRole,
 )
 from src.modules.security_access_control.services import (
     AccessEvaluationService,
@@ -256,9 +252,7 @@ def test_permission_catalog_filters_resolves_registers_idempotently_and_rejects_
     manifest = {
         "name": "inventory",
         "permission_namespace": "inventory",
-        "permissions": [
-            {"code": "inventory.items:read", "name": "Read items", "risk_level": "low"}
-        ],
+        "permissions": [{"code": "inventory.items:read", "name": "Read items", "risk_level": "low"}],
     }
     first = PermissionCatalogService.register_manifest_permissions(
         tenant_a.id,
@@ -453,9 +447,7 @@ def test_field_and_row_rules_use_registered_metadata_resolve_and_version(
     )
 
 
-def test_profile_assignment_merge_update_revoke_and_delete(
-    tenant_a, tenant_a_user, actor_id, correlation_id
-) -> None:
+def test_profile_assignment_merge_update_revoke_and_delete(tenant_a, tenant_a_user, actor_id, correlation_id) -> None:
     profile = SecurityProfileService.create_profile(
         tenant_a.id,
         name="Restricted",
@@ -589,12 +581,8 @@ def test_effective_permissions_expand_parent_explicit_deny_and_permission_set(
     effective = AccessEvaluationService.get_effective_permissions(tenant_a.id, tenant_a_user.id)
     assert catalog[0].code in effective.denied and catalog[0].code not in effective.allowed
     assert catalog[1].code in effective.allowed
-    assert not AccessEvaluationService.evaluate_local(
-        tenant_a.id, tenant_a_user, catalog[0].code
-    ).allowed
-    assert AccessEvaluationService.evaluate_local(
-        tenant_a.id, tenant_a_user, catalog[1].code
-    ).allowed
+    assert not AccessEvaluationService.evaluate_local(tenant_a.id, tenant_a_user, catalog[0].code).allowed
+    assert AccessEvaluationService.evaluate_local(tenant_a.id, tenant_a_user, catalog[1].code).allowed
 
 
 @pytest.mark.parametrize(
@@ -620,9 +608,7 @@ def test_remote_evaluation_fail_closed_for_dependency_and_invalid_payload(
     client.post.assert_called_once()
 
 
-def test_remote_evaluation_never_reuses_previous_allow_after_timeout(
-    tenant_a, tenant_a_user, monkeypatch
-) -> None:
+def test_remote_evaluation_never_reuses_previous_allow_after_timeout(tenant_a, tenant_a_user, monkeypatch) -> None:
     client = Mock()
     client.post.side_effect = [
         SimpleNamespace(

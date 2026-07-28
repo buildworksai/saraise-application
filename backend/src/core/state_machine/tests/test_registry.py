@@ -66,7 +66,8 @@ def test_yaml_mapping_loads_named_machines_and_resolves_guards() -> None:
         return document is not None
 
     loaded = local.load_yaml(
-        StringIO("""
+        StringIO(
+            """
             machines:
               document:
                 states: [draft, published]
@@ -85,7 +86,8 @@ def test_yaml_mapping_loads_named_machines_and_resolves_guards() -> None:
                   settle:
                     from: open
                     to: paid
-            """),
+            """
+        ),
         guards={"ready": ready},
     )
 

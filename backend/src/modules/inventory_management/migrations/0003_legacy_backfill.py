@@ -31,10 +31,11 @@ def backfill_legacy(apps, schema_editor):
     transfer_entries = Entry.objects.filter(entry_type="transfer", warehouse_id__isnull=False)
     if transfer_entries.exists():
         raise RuntimeError(
-            "inventory 0003 cannot infer the missing transfer endpoint for legacy entries: "
-            + _ids(transfer_entries)
+            "inventory 0003 cannot infer the missing transfer endpoint for legacy entries: " + _ids(transfer_entries)
         )
-    invalid_entries = Entry.objects.exclude(status__in=("draft", "submitted", "approved", "posted", "rejected", "cancelled", "reversed"))
+    invalid_entries = Entry.objects.exclude(
+        status__in=("draft", "submitted", "approved", "posted", "rejected", "cancelled", "reversed")
+    )
     if invalid_entries.exists():
         raise RuntimeError("inventory 0003 found unsupported legacy stock-entry statuses: " + _ids(invalid_entries))
     invalid_lines = Line.objects.filter(quantity__lte=0)
@@ -91,9 +92,13 @@ def backfill_legacy(apps, schema_editor):
                 raise RuntimeError(f"inventory 0003 found cross-tenant legacy line {line.id}")
             item = line.item
             if line.batch_no and item.tracking_mode != "batch":
-                raise RuntimeError(f"inventory 0003 cannot attach batch {line.batch_no!r} to non-batch item on line {line.id}")
+                raise RuntimeError(
+                    f"inventory 0003 cannot attach batch {line.batch_no!r} to non-batch item on line {line.id}"
+                )
             if line.serial_no and item.tracking_mode != "serial":
-                raise RuntimeError(f"inventory 0003 cannot attach serial {line.serial_no!r} to non-serial item on line {line.id}")
+                raise RuntimeError(
+                    f"inventory 0003 cannot attach serial {line.serial_no!r} to non-serial item on line {line.id}"
+                )
             line.line_number = number
             line.uom = item.base_uom
             line.unit_cost = line.cost
@@ -168,8 +173,7 @@ def reverse_backfill(apps, schema_editor):
     unsupported_locations = Location.objects.exclude(location_code=LEGACY_LOCATION_CODE)
     if unsupported_locations.exists():
         raise RuntimeError(
-            "inventory 0003 reversal cannot represent non-legacy storage locations: "
-            + _ids(unsupported_locations)
+            "inventory 0003 reversal cannot represent non-legacy storage locations: " + _ids(unsupported_locations)
         )
     for batch in Batch.objects.all():
         if not Line.objects.filter(batch_id=batch.id, batch_no=batch.batch_number).exists():
@@ -247,7 +251,9 @@ def reverse_backfill(apps, schema_editor):
         line.serial_number_id = None
         line.source_location_id = None
         line.destination_location_id = None
-        line.save(update_fields=("batch_no", "serial_no", "batch", "serial_number", "source_location", "destination_location"))
+        line.save(
+            update_fields=("batch_no", "serial_no", "batch", "serial_number", "source_location", "destination_location")
+        )
     Balance.objects.update(location_id=None, batch_id=None, serial_number_id=None, last_ledger_entry_id=None)
     Batch.objects.all().delete()
     Serial.objects.all().delete()

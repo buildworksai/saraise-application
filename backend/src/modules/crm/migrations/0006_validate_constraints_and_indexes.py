@@ -3,7 +3,6 @@
 from django.db import migrations, models
 from django.db.models.functions import Lower
 
-
 INDEXES = {
     "Lead": (
         models.Index(fields=["tenant_id", "is_deleted", "-created_at"], name="crm_lead_tenant_del_ct"),
@@ -11,9 +10,7 @@ INDEXES = {
         models.Index(fields=["tenant_id", "owner_id", "status"], name="crm_lead_owner_status"),
         models.Index(fields=["tenant_id", "-score"], name="crm_lead_score_desc"),
         models.Index(fields=["tenant_id", "source", "-created_at"], name="crm_lead_source_ct"),
-        models.Index(
-            fields=["tenant_id", "converted_to_opportunity_id"], name="crm_lead_converted_opp"
-        ),
+        models.Index(fields=["tenant_id", "converted_to_opportunity_id"], name="crm_lead_converted_opp"),
     ),
     "Account": (
         models.Index(fields=["tenant_id", "is_deleted", "-created_at"], name="crm_account_tenant_del_ct"),
@@ -29,13 +26,9 @@ INDEXES = {
         models.Index(fields=["tenant_id", "-engagement_score"], name="crm_contact_engagement"),
     ),
     "Opportunity": (
-        models.Index(
-            fields=["tenant_id", "is_deleted", "-created_at"], name="crm_opportunity_tenant_del_ct"
-        ),
+        models.Index(fields=["tenant_id", "is_deleted", "-created_at"], name="crm_opportunity_tenant_del_ct"),
         models.Index(fields=["tenant_id", "status", "close_date"], name="crm_opp_status_close"),
-        models.Index(
-            fields=["tenant_id", "owner_id", "stage", "close_date"], name="crm_opp_owner_stage_close"
-        ),
+        models.Index(fields=["tenant_id", "owner_id", "stage", "close_date"], name="crm_opp_owner_stage_close"),
         models.Index(fields=["tenant_id", "account_id", "status"], name="crm_opp_account_status"),
         models.Index(fields=["tenant_id", "stage", "amount"], name="crm_opp_stage_amount"),
         models.Index(fields=["tenant_id", "last_activity_at"], name="crm_opp_last_activity"),
@@ -46,9 +39,7 @@ INDEXES = {
             fields=["tenant_id", "related_to_type", "related_to_id", "-created_at"],
             name="crm_activity_relation_ct",
         ),
-        models.Index(
-            fields=["tenant_id", "owner_id", "completed", "due_date"], name="crm_activity_owner_due"
-        ),
+        models.Index(fields=["tenant_id", "owner_id", "completed", "due_date"], name="crm_activity_owner_due"),
         models.Index(fields=["tenant_id", "activity_type", "-created_at"], name="crm_activity_type_ct"),
         models.Index(fields=["tenant_id", "external_id"], name="crm_activity_external"),
     ),
@@ -80,10 +71,7 @@ def validate_rows(apps, schema_editor):
         raise RuntimeError("crm_leads contains an inconsistent score grade")
     conversion_valid = models.Q(
         status="converted", converted_at__isnull=False, converted_to_opportunity_id__isnull=False
-    ) | (
-        ~models.Q(status="converted")
-        & models.Q(converted_at__isnull=True, converted_to_opportunity_id__isnull=True)
-    )
+    ) | (~models.Q(status="converted") & models.Q(converted_at__isnull=True, converted_to_opportunity_id__isnull=True))
     if Lead.objects.exclude(conversion_valid).exists():
         raise RuntimeError("crm_leads contains inconsistent conversion evidence")
     if Account.objects.filter(employees__lt=0).exists() or Account.objects.filter(annual_revenue__lt=0).exists():
@@ -92,9 +80,10 @@ def validate_rows(apps, schema_editor):
         raise RuntimeError("crm_accounts contains a self-parent")
     if Contact.objects.exclude(engagement_score__range=(0, 100)).exists():
         raise RuntimeError("crm_contacts contains an out-of-range engagement score")
-    if Opportunity.objects.filter(amount__lte=0).exists() or Opportunity.objects.exclude(
-        probability__range=(0, 100)
-    ).exists():
+    if (
+        Opportunity.objects.filter(amount__lte=0).exists()
+        or Opportunity.objects.exclude(probability__range=(0, 100)).exists()
+    ):
         raise RuntimeError("crm_opportunities contains invalid financial evidence")
     open_stages = ["prospecting", "qualification", "needs_analysis", "proposal", "negotiation"]
     opportunity_valid = (

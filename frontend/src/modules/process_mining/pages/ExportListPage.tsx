@@ -1,3 +1,116 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'; import { Download, Plus, Trash2 } from 'lucide-react'; import { useNavigate, useSearchParams } from 'react-router-dom'; import { Button } from '@/components/ui/Button'; import { Card } from '@/components/ui/Card';
-import { ApiProblem, DataTable, EmptyPanel, PageHeader, PageSkeleton, Pagination, StatusPill } from '../components/ModuleShell'; import { PROCESS_MINING_ROUTES, type EventExport } from '../contracts'; import { processMiningService } from '../services/process_mining-service';
-export function ExportListPage() { const navigate = useNavigate(); const client = useQueryClient(); const [params, setParams] = useSearchParams(); const page = Number(params.get('page') ?? 1); const configuration = useQuery({ queryKey: ['process-mining', 'configuration'], queryFn: processMiningService.getConfiguration }); const query = useQuery({ queryKey: ['process-mining', 'exports', page, configuration.data?.version], queryFn: () => processMiningService.listExports({ page, page_size: configuration.data!.document.list_page_size, ordering: '-created_at' }), enabled: Boolean(configuration.data), refetchInterval: (state) => state.state.data?.items.some((item) => ['queued', 'running'].includes(item.status)) ? configuration.data?.document.polling_interval_ms : false }); const remove = useMutation({ mutationFn: (item: EventExport) => processMiningService.deleteExport(item.id), onSuccess: () => client.invalidateQueries({ queryKey: ['process-mining', 'exports'] }) }); const download = useMutation({ mutationFn: (item: EventExport) => processMiningService.downloadExport(item.id), onSuccess: (blob, item) => { const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${item.process_name}.${item.format}`; anchor.click(); URL.revokeObjectURL(url); } }); if (!configuration.data || query.isLoading) return <PageSkeleton/>; if (query.error || !query.data) return <main className="p-8"><ApiProblem error={query.error} onRetry={() => void query.refetch()}/></main>; return <main className="space-y-6 p-4 sm:p-8"><PageHeader title="Evidence exports" description="Verified artifacts with tenant-configured resilience." actions={<Button onClick={() => navigate(PROCESS_MINING_ROUTES.EXPORT_CREATE)}><Plus className="mr-2 h-4 w-4"/>New export</Button>}/>{query.data.items.length === 0 ? <EmptyPanel title="No exports" description="Create a bounded evidence export."/> : <Card className="overflow-hidden"><DataTable headers={['Process', 'Format', 'Status', 'Rows', 'Actions']} rows={query.data.items.map((item) => [item.process_name, item.format, <StatusPill status={item.status}/>, item.row_count ?? '—', <div className="flex gap-1">{item.status === 'completed' && <Button size="sm" variant="ghost" onClick={() => download.mutate(item)}><Download className="mr-1 h-4 w-4"/>Download</Button>}<Button size="sm" variant="ghost" disabled={!['completed', 'failed', 'timed_out', 'cancelled', 'expired'].includes(item.status) || remove.isPending} onClick={() => remove.mutate(item)}><Trash2 className="mr-1 h-4 w-4"/>Delete</Button></div>])}/><Pagination value={query.data.pagination} onPage={(next) => setParams({ page: String(next) })}/></Card>}</main>; }
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download, Plus, Trash2 } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import {
+  ApiProblem,
+  DataTable,
+  EmptyPanel,
+  PageHeader,
+  PageSkeleton,
+  Pagination,
+  StatusPill,
+} from "../components/ModuleShell";
+import { PROCESS_MINING_ROUTES, type EventExport } from "../contracts";
+import { processMiningService } from "../services/process_mining-service";
+export function ExportListPage() {
+  const navigate = useNavigate();
+  const client = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const page = Number(params.get("page") ?? 1);
+  const configuration = useQuery({
+    queryKey: ["process-mining", "configuration"],
+    queryFn: processMiningService.getConfiguration,
+  });
+  const query = useQuery({
+    queryKey: ["process-mining", "exports", page, configuration.data?.version],
+    queryFn: () =>
+      processMiningService.listExports({
+        page,
+        page_size: configuration.data!.document.list_page_size,
+        ordering: "-created_at",
+      }),
+    enabled: Boolean(configuration.data),
+    refetchInterval: (state) =>
+      state.state.data?.items.some((item) => ["queued", "running"].includes(item.status))
+        ? configuration.data?.document.polling_interval_ms
+        : false,
+  });
+  const remove = useMutation({
+    mutationFn: (item: EventExport) => processMiningService.deleteExport(item.id),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["process-mining", "exports"] }),
+  });
+  const download = useMutation({
+    mutationFn: (item: EventExport) => processMiningService.downloadExport(item.id),
+    onSuccess: (blob, item) => {
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${item.process_name}.${item.format}`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    },
+  });
+  if (!configuration.data || query.isLoading) return <PageSkeleton />;
+  if (query.error || !query.data)
+    return (
+      <main className="p-8">
+        <ApiProblem error={query.error} onRetry={() => void query.refetch()} />
+      </main>
+    );
+  return (
+    <main className="space-y-6 p-4 sm:p-8">
+      <PageHeader
+        title="Evidence exports"
+        description="Verified artifacts with tenant-configured resilience."
+        actions={
+          <Button onClick={() => navigate(PROCESS_MINING_ROUTES.EXPORT_CREATE)}>
+            <Plus className="mr-2 h-4 w-4" />
+            New export
+          </Button>
+        }
+      />
+      {query.data.items.length === 0 ? (
+        <EmptyPanel title="No exports" description="Create a bounded evidence export." />
+      ) : (
+        <Card className="overflow-hidden">
+          <DataTable
+            headers={["Process", "Format", "Status", "Rows", "Actions"]}
+            rows={query.data.items.map((item) => [
+              item.process_name,
+              item.format,
+              <StatusPill status={item.status} />,
+              item.row_count ?? "—",
+              <div className="flex gap-1">
+                {item.status === "completed" && (
+                  <Button size="sm" variant="ghost" onClick={() => download.mutate(item)}>
+                    <Download className="mr-1 h-4 w-4" />
+                    Download
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={
+                    !["completed", "failed", "timed_out", "cancelled", "expired"].includes(
+                      item.status
+                    ) || remove.isPending
+                  }
+                  onClick={() => remove.mutate(item)}
+                >
+                  <Trash2 className="mr-1 h-4 w-4" />
+                  Delete
+                </Button>
+              </div>,
+            ])}
+          />
+          <Pagination
+            value={query.data.pagination}
+            onPage={(next) => setParams({ page: String(next) })}
+          />
+        </Card>
+      )}
+    </main>
+  );
+}

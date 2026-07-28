@@ -30,7 +30,6 @@ from src.modules.compliance_management.tasks import (
     import_requirements_handler,
 )
 
-
 pytestmark = pytest.mark.django_db(transaction=True)
 
 

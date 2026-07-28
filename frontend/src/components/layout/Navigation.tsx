@@ -6,8 +6,8 @@
  *
  * This application frontend serves tenant-scoped users only.
  */
-import { useAuthStore } from '../../stores/auth-store';
-import { TenantSidebar } from './TenantSidebar';
+import { useAuthStore } from "../../stores/auth-store";
+import { TenantSidebar } from "./TenantSidebar";
 
 export const Navigation = () => {
   const { user } = useAuthStore();

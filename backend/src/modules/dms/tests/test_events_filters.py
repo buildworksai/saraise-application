@@ -10,7 +10,6 @@ import pytest
 from django.http import QueryDict
 from django.utils import timezone
 
-from src.core.async_jobs.models import OutboxEvent
 from src.modules.dms import events
 from src.modules.dms.events import (
     DmsOperation,

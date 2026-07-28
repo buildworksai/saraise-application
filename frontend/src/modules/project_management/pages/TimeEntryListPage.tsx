@@ -1,1 +1,1 @@
-export {TimeEntryListPage} from './ModulePages';
+export { TimeEntryListPage } from "./ModulePages";

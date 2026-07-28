@@ -4,7 +4,9 @@ import { tenantRoutes } from "./routes";
 
 describe("ai agent module routes", () => {
   it("publishes exactly the required discoverable areas", () => {
-    const labels = tenantRoutes.flatMap((route) => route.navigation.type === "sidebar" ? [route.navigation.label] : []);
+    const labels = tenantRoutes.flatMap((route) =>
+      route.navigation.type === "sidebar" ? [route.navigation.label] : []
+    );
     expect(labels).toEqual(["Agents", "Executions", "Approvals", "Governance", "Usage", "Audit"]);
     expect(tenantRoutes.every((route) => route.module === "ai_agent_management")).toBe(true);
   });
@@ -16,10 +18,23 @@ describe("ai agent module routes", () => {
 
   it("registers all required contextual workflows", () => {
     const paths = tenantRoutes.map((route) => route.path);
-    expect(paths).toEqual(expect.arrayContaining([
-      "/ai-agents/create", "/ai-agents/:id", "/ai-agents/:id/edit", "/ai-agents/:id/evaluation",
-      "/ai-agents/executions/:id", "/ai-agents/schedules", "/ai-agents/schedules/create", "/ai-agents/schedules/:id",
-      "/ai-agents/approvals/:id", "/ai-agents/tools", "/ai-agents/tools/create", "/ai-agents/tools/:id", "/ai-agents/tools/:id/edit", "/ai-agents/audit/:id",
-    ]));
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "/ai-agents/create",
+        "/ai-agents/:id",
+        "/ai-agents/:id/edit",
+        "/ai-agents/:id/evaluation",
+        "/ai-agents/executions/:id",
+        "/ai-agents/schedules",
+        "/ai-agents/schedules/create",
+        "/ai-agents/schedules/:id",
+        "/ai-agents/approvals/:id",
+        "/ai-agents/tools",
+        "/ai-agents/tools/create",
+        "/ai-agents/tools/:id",
+        "/ai-agents/tools/:id/edit",
+        "/ai-agents/audit/:id",
+      ])
+    );
   });
 });

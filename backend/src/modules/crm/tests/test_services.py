@@ -18,11 +18,7 @@ from django.utils import timezone
 
 from src.core.async_jobs.models import OutboxEvent
 from src.modules.crm import services
-from src.modules.crm.integrations import (
-    IntegrationUnavailable,
-    LeadScoreResult,
-    RevenuePredictionResult,
-)
+from src.modules.crm.integrations import IntegrationUnavailable, LeadScoreResult, RevenuePredictionResult
 from src.modules.crm.models import (
     Account,
     AccountType,

@@ -1,1 +1,1 @@
-export {MilestoneListPage} from './ModulePages';
+export { MilestoneListPage } from "./ModulePages";

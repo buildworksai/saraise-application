@@ -6,14 +6,15 @@ import logging
 import random
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from typing import Any, Callable, TypeVar
 from uuid import UUID
 
 from src.core.resilience import CircuitBreaker
 
-from .base import LLMProvider
 from ..services import AgentServiceError, ConfigurationService
+from .base import LLMProvider
 
 logger = logging.getLogger("saraise.ai_agent_management.provider")
 T = TypeVar("T")

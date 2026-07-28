@@ -1,1 +1,1 @@
-export { VerificationAttemptListPage } from './domain-pages';
+export { VerificationAttemptListPage } from "./domain-pages";

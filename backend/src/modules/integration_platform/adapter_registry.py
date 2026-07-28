@@ -6,7 +6,6 @@ import threading
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any
 
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 
@@ -127,7 +126,13 @@ def _date_format(value: object, options: Mapping[str, object]) -> object:
     if not isinstance(output, str) or not output:
         raise ValidationError({"transform": "date_format requires output_format."})
     try:
-        parsed = value if isinstance(value, datetime) else datetime.strptime(str(value), str(options.get("input_format") or _TRANSFORM_POLICY["default_input_date_format"]))
+        parsed = (
+            value
+            if isinstance(value, datetime)
+            else datetime.strptime(
+                str(value), str(options.get("input_format") or _TRANSFORM_POLICY["default_input_date_format"])
+            )
+        )
     except (TypeError, ValueError) as exc:
         raise ValidationError({"transform": "Value does not match input_format."}) from exc
     return parsed.strftime(output)
@@ -210,7 +215,9 @@ class TransformationRegistry:
                 raise ValidationError({"transform": "string_case requires a supported case."})
             if name == "date_format" and not isinstance(options.get("output_format"), str):
                 raise ValidationError({"transform": "date_format requires output_format."})
-            if name == "number" and options.get("type", _TRANSFORM_POLICY["default_number_mode"]) not in set(_TRANSFORM_POLICY["number_modes"]):
+            if name == "number" and options.get("type", _TRANSFORM_POLICY["default_number_mode"]) not in set(
+                _TRANSFORM_POLICY["number_modes"]
+            ):
                 raise ValidationError({"transform": "number type is unsupported."})
             if name == "enum_map" and not isinstance(options.get("mapping"), Mapping):
                 raise ValidationError({"transform": "enum_map requires a mapping object."})
@@ -231,20 +238,26 @@ class TransformationRegistry:
 
 connector_adapter_registry = ConnectorAdapterRegistry()
 transformation_registry = TransformationRegistry()
-_AVAILABLE_OPERATIONS = dict((
-    ("rename", _identity),
-    ("string_case", _string_case),
-    ("trim", _trim),
-    ("number", _number),
-    ("date_format", _date_format),
-    ("default", _default),
-    ("enum_map", _enum_map),
-))
+_AVAILABLE_OPERATIONS = dict(
+    (
+        ("rename", _identity),
+        ("string_case", _string_case),
+        ("trim", _trim),
+        ("number", _number),
+        ("date_format", _date_format),
+        ("default", _default),
+        ("enum_map", _enum_map),
+    )
+)
 for _name in _TRANSFORM_POLICY["operations"]:
     transformation_registry.register(str(_name), _AVAILABLE_OPERATIONS[str(_name)])
 
 
 __all__ = [
-    "AdapterUnavailableError", "ConnectorAdapterRegistry", "DuplicateAdapterError",
-    "TransformationRegistry", "connector_adapter_registry", "transformation_registry",
+    "AdapterUnavailableError",
+    "ConnectorAdapterRegistry",
+    "DuplicateAdapterError",
+    "TransformationRegistry",
+    "connector_adapter_registry",
+    "transformation_registry",
 ]

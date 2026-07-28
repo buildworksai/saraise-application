@@ -1,1 +1,1 @@
-export { CreateTraceabilityAssetPage } from './domain-pages';
+export { CreateTraceabilityAssetPage } from "./domain-pages";

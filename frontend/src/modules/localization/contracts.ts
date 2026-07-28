@@ -15,7 +15,7 @@
 // =============================================================================
 
 /** Language entity */
-export type Language = {
+export interface Language {
   id: string;
   code: string;
   name: string;
@@ -24,10 +24,10 @@ export type Language = {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-};
+}
 
 /** Translation entity */
-export type Translation = {
+export interface Translation {
   id: string;
   tenant_id: string;
   language: string;
@@ -37,21 +37,21 @@ export type Translation = {
   context?: string;
   created_at: string;
   updated_at: string;
-};
+}
 
 /** Translation create request */
-export type TranslationCreate = {
+export interface TranslationCreate {
   language: string;
   key: string;
   value: string;
   context?: string;
-};
+}
 
 /** Translation update request (partial) */
 export type TranslationUpdate = Partial<TranslationCreate>;
 
 /** LocaleConfig entity */
-export type LocaleConfig = {
+export interface LocaleConfig {
   id: string;
   tenant_id: string;
   default_language: string;
@@ -62,41 +62,41 @@ export type LocaleConfig = {
   number_format: string;
   created_at: string;
   updated_at: string;
-};
+}
 
 /** LocaleConfig create request */
-export type LocaleConfigCreate = {
+export interface LocaleConfigCreate {
   default_language: string;
   timezone?: string;
   date_format?: string;
   time_format?: string;
   number_format?: string;
-};
+}
 
 /** LocaleConfig update request (partial) */
 export type LocaleConfigUpdate = Partial<LocaleConfigCreate>;
 
 /** CurrencyConfig entity */
-export type CurrencyConfig = {
+export interface CurrencyConfig {
   id: string;
   tenant_id: string;
   default_currency: string;
   exchange_rates: Record<string, unknown>;
   created_at: string;
   updated_at: string;
-};
+}
 
 /** CurrencyConfig create request */
-export type CurrencyConfigCreate = {
+export interface CurrencyConfigCreate {
   default_currency: string;
   exchange_rates?: Record<string, unknown>;
-};
+}
 
 /** CurrencyConfig update request (partial) */
 export type CurrencyConfigUpdate = Partial<CurrencyConfigCreate>;
 
 /** RegionalSettings entity */
-export type RegionalSettings = {
+export interface RegionalSettings {
   id: string;
   tenant_id: string;
   country_code: string;
@@ -105,15 +105,15 @@ export type RegionalSettings = {
   business_days: number[];
   created_at: string;
   updated_at: string;
-};
+}
 
 /** RegionalSettings create request */
-export type RegionalSettingsCreate = {
+export interface RegionalSettingsCreate {
   country_code: string;
   tax_settings?: Record<string, unknown>;
   fiscal_year_start?: string;
   business_days?: number[];
-};
+}
 
 /** RegionalSettings update request (partial) */
 export type RegionalSettingsUpdate = Partial<RegionalSettingsCreate>;
@@ -134,7 +134,7 @@ export type RegionalSettingsUpdate = Partial<RegionalSettingsCreate>;
  * apiClient.get(ENDPOINTS.TRANSLATIONS.DETAIL(id));
  * ```
  */
-export const MODULE_API_PREFIX = '/api/v1/localization';
+export const MODULE_API_PREFIX = "/api/v1/localization";
 
 export const ENDPOINTS = {
   LANGUAGES: {

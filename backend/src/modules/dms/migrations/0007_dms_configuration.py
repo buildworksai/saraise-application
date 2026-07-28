@@ -1,7 +1,7 @@
 """Add tenant-owned, versioned DMS configuration and upload idempotency."""
 
-import uuid
 import importlib
+import uuid
 
 import django.db.models.deletion
 from django.db import migrations, models
@@ -30,15 +30,21 @@ def enable_configuration_isolation(apps, schema_editor) -> None:
             schema_editor.execute(f"SELECT saraise_enable_rls('{table_name}'::REGCLASS);")
         return
     for table_name in TENANT_TABLES:
-        schema_editor.execute(f"""
+        schema_editor.execute(
+            f"""
             CREATE TRIGGER {table_name}_tenant_id_immutable
             BEFORE UPDATE OF tenant_id ON {table_name}
             FOR EACH ROW WHEN NEW.tenant_id <> OLD.tenant_id
             BEGIN SELECT RAISE(ABORT, 'DMS tenant ownership is immutable'); END
-        """)
+        """
+        )
     for table_name, column_name, related_table in RELATIONSHIPS:
-        for operation, timing in (("insert", "BEFORE INSERT"), ("update", f"BEFORE UPDATE OF {column_name}, tenant_id")):
-            schema_editor.execute(f"""
+        for operation, timing in (
+            ("insert", "BEFORE INSERT"),
+            ("update", f"BEFORE UPDATE OF {column_name}, tenant_id"),
+        ):
+            schema_editor.execute(
+                f"""
                 CREATE TRIGGER {table_name}_{column_name}_same_tenant_{operation}
                 {timing} ON {table_name}
                 FOR EACH ROW WHEN NEW.{column_name} IS NOT NULL AND NOT EXISTS (
@@ -46,7 +52,8 @@ def enable_configuration_isolation(apps, schema_editor) -> None:
                     WHERE related.id = NEW.{column_name} AND related.tenant_id = NEW.tenant_id
                 )
                 BEGIN SELECT RAISE(ABORT, 'DMS relationship crosses tenant boundary'); END
-            """)
+            """
+            )
 
 
 def disable_configuration_isolation(apps, schema_editor) -> None:
@@ -63,9 +70,7 @@ def disable_configuration_isolation(apps, schema_editor) -> None:
         return
     for table_name, column_name, _related_table in reversed(RELATIONSHIPS):
         for operation in ("update", "insert"):
-            schema_editor.execute(
-                f"DROP TRIGGER IF EXISTS {table_name}_{column_name}_same_tenant_{operation};"
-            )
+            schema_editor.execute(f"DROP TRIGGER IF EXISTS {table_name}_{column_name}_same_tenant_{operation};")
     for table_name in reversed(TENANT_TABLES):
         schema_editor.execute(f"DROP TRIGGER IF EXISTS {table_name}_tenant_id_immutable;")
 

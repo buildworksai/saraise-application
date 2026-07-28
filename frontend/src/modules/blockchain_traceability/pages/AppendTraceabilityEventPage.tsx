@@ -1,1 +1,1 @@
-export { AppendTraceabilityEventPage } from './domain-pages';
+export { AppendTraceabilityEventPage } from "./domain-pages";

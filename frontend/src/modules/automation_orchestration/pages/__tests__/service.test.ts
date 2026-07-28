@@ -58,7 +58,7 @@ describe("automation orchestration service", () => {
     expect(result.pagination.count).toBe(1);
     expect(result.correlationId).toBe("corr-1");
     expect(apiClient.get).toHaveBeenCalledWith(
-      `${ENDPOINTS.DEFINITIONS.LIST}?status=published&page=1`,
+      `${ENDPOINTS.DEFINITIONS.LIST}?status=published&page=1`
     );
   });
 
@@ -82,10 +82,7 @@ describe("automation orchestration service", () => {
       name: "Close",
       expected_revision: 2,
     });
-    expect(apiClient.post).toHaveBeenCalledWith(
-      ENDPOINTS.DEFINITIONS.VALIDATE(definition.id),
-      {},
-    );
+    expect(apiClient.post).toHaveBeenCalledWith(ENDPOINTS.DEFINITIONS.VALIDATE(definition.id), {});
   });
 
   it("delegates deletion without fabricating a response", async () => {

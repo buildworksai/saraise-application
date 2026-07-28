@@ -1,1 +1,2 @@
-import { ResourceFormPage } from './ResourceWorkspace'; export const CreatePurchaseOrderPage = () => <ResourceFormPage kind="orders" />;
+import { ResourceFormPage } from "./ResourceWorkspace";
+export const CreatePurchaseOrderPage = () => <ResourceFormPage kind="orders" />;

@@ -1,7 +1,8 @@
 import uuid
 
-import src.modules.api_management.models
 from django.db import migrations, models
+
+import src.modules.api_management.models
 
 
 def validate_and_prepare_resource_uuids(apps, schema_editor):

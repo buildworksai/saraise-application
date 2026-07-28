@@ -2,7 +2,6 @@
 
 from django.db import migrations, models
 
-
 INDEXES = (
     models.Index(fields=("tenant_id", "entity_type", "status", "entity_code"), name="mdm_entity_type_stat_code_idx"),
     models.Index(fields=("tenant_id", "entity_type", "quality_score"), name="mdm_entity_type_quality_idx"),
@@ -52,9 +51,6 @@ class Migration(migrations.Migration):
     operations = [
         migrations.SeparateDatabaseAndState(
             database_operations=[migrations.RunPython(create_indexes, drop_indexes, atomic=False)],
-            state_operations=[
-                migrations.AddIndex(model_name="masterdataentity", index=index)
-                for index in INDEXES
-            ],
+            state_operations=[migrations.AddIndex(model_name="masterdataentity", index=index) for index in INDEXES],
         )
     ]

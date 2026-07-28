@@ -26,7 +26,7 @@ fi
 # Install Semgrep if not found
 if [ -z "$SEMGREP_CMD" ]; then
     echo "📦 Installing Semgrep..."
-    
+
     # Try pipx first (recommended for applications)
     if command -v pipx &> /dev/null; then
         echo "   Using pipx to install Semgrep..."
@@ -78,12 +78,12 @@ $SEMGREP_CMD --config=auto \
 if [ -f semgrep-baseline.json ]; then
     echo "✅ Baseline scan complete"
     echo "   Results saved to: semgrep-baseline.json"
-    
+
     # Count findings by severity (if jq is available)
     if command -v jq &> /dev/null; then
         CRITICAL=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' semgrep-baseline.json 2>/dev/null || echo "0")
         HIGH=$(jq '[.results[] | select(.extra.severity == "WARNING")] | length' semgrep-baseline.json 2>/dev/null || echo "0")
-        
+
         echo ""
         echo "📊 Baseline Summary:"
         echo "   Critical/High findings: $CRITICAL"
@@ -92,7 +92,7 @@ if [ -f semgrep-baseline.json ]; then
         echo ""
         echo "📊 Baseline file created (install jq for detailed summary)"
     fi
-    
+
     echo ""
     echo "⚠️  Review semgrep-baseline.json and address critical findings"
     echo "   Then update .semgrep/custom-rules.yaml to ignore false positives"
