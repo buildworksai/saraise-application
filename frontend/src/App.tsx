@@ -236,13 +236,13 @@ const SalesDashboardPage = lazy(() =>
 
 // Accounting & Finance
 const AccountingAccountListPage = lazy(() =>
-  import("./modules/accounting_finance/pages/AccountListPage").then((m) => ({
-    default: m.AccountListPage,
+  import("./modules/accounting_finance/pages/ResourceListPages").then((m) => ({
+    default: m.AccountListView,
   }))
 );
 const AccountingAccountDetailPage = lazy(() =>
-  import("./modules/accounting_finance/pages/AccountDetailPage").then((m) => ({
-    default: m.AccountDetailPage,
+  import("./modules/accounting_finance/pages/ResourceDetailPages").then((m) => ({
+    default: m.AccountDetailView,
   }))
 );
 const CreateAccountingAccountPage = lazy(() =>
@@ -1104,6 +1104,14 @@ function AnimatedRoutes() {
           <Route
             path="/api-management/resources"
             element={<Navigate to="/api-management" replace />}
+          />
+          <Route
+            path="/accounting-finance"
+            element={<Navigate to="/accounting-finance/accounts" replace />}
+          />
+          <Route
+            path="/purchase-management"
+            element={<Navigate to="/purchase-management/suppliers" replace />}
           />
           <Route
             path="/email-marketing/recipients/:id"

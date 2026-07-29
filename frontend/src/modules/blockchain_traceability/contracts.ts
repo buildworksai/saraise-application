@@ -570,6 +570,8 @@ export interface TraceabilityCapabilities {
   can_import: boolean;
   can_export: boolean;
   can_mutate_resources: boolean;
+  can_finalize_compliance_evidence: boolean;
+  can_supersede_compliance_evidence: boolean;
   document: TraceabilityConfigurationDocument;
 }
 

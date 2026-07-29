@@ -11,10 +11,10 @@ class AccessRule:
     permission: str
     required_entitlement: str = "backup-recovery"
     quota_resource: str = "backup-recovery.read"
-    quota_cost: int = 0
+    quota_cost: int = 1
 
 
-def _rule(resource: str, action: str, *, quota: str | None = None, cost: int = 0) -> AccessRule:
+def _rule(resource: str, action: str, *, quota: str | None = None, cost: int = 1) -> AccessRule:
     return AccessRule(
         permission=f"backup_recovery.{resource}:{action}",
         quota_resource=quota or f"backup-recovery.{resource}",

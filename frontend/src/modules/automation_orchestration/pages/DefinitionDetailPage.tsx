@@ -22,26 +22,34 @@ import {
   StatusPill,
   formatDate,
 } from "../components/OrchestrationUI";
+import { isRouteUuid, routeRecordNotFoundError } from "../route-state";
 import { Topology } from "../components/Topology";
 
 // Lifecycle, validation, execution, and related-query branches are deliberately visible here.
 // eslint-disable-next-line complexity
 export function DefinitionDetailPage() {
   const { id = "" } = useParams();
+  const routeIdValid = isRouteUuid(id);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const configurationQuery = useRuntimeConfiguration();
   const configuration = configurationQuery.data?.document;
-  const definitionQuery = useDefinition(id);
-  const schedulesQuery = useSchedules({
-    definition_id: id,
-    page_size: configuration?.ui.definition_detail_page_size,
-  });
-  const runsQuery = useRuns({
-    definition_id: id,
-    page_size: configuration?.ui.definition_detail_page_size,
-    ordering: "-created_at",
-  });
+  const definitionQuery = useDefinition(routeIdValid ? id : "");
+  const schedulesQuery = useSchedules(
+    {
+      definition_id: id,
+      page_size: configuration?.ui.definition_detail_page_size,
+    },
+    routeIdValid
+  );
+  const runsQuery = useRuns(
+    {
+      definition_id: id,
+      page_size: configuration?.ui.definition_detail_page_size,
+      ordering: "-created_at",
+    },
+    routeIdValid
+  );
   const [showRunDialog, setShowRunDialog] = useState(false);
   const [idempotencyKey, setIdempotencyKey] = useState<string>(() => crypto.randomUUID());
 
@@ -74,6 +82,7 @@ export function DefinitionDetailPage() {
     onSuccess: (created) => navigate(ROUTE_PATHS.RUN_DETAIL(created.id)),
   });
 
+  if (!routeIdValid) return <LoadError error={routeRecordNotFoundError("Definition")} />;
   if (configurationQuery.isLoading || definitionQuery.isLoading)
     return <PageSkeleton rows={configuration?.ui.skeleton_rows} />;
   if (configurationQuery.error || definitionQuery.error || !configuration)

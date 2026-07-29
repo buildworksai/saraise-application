@@ -12,6 +12,7 @@ describe("performance monitoring route surface", () => {
         ROUTES.METRICS,
         ROUTES.LOGS,
         ROUTES.TRACES,
+        ROUTES.SERVICES,
         ROUTES.ALERTS,
         ROUTES.ALERT_RULES,
         ROUTES.SLOS,

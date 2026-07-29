@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from django.conf import settings
-from django.http import FileResponse, HttpResponse, StreamingHttpResponse
+from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
 from rest_framework import status
 from rest_framework.exceptions import NotFound, Throttled, ValidationError
 from rest_framework.request import Request
@@ -135,6 +135,7 @@ def test_exception_handler_has_stable_validation_and_not_found_codes() -> None:
         {"request": request},
     )
     not_found = stable_exception_handler(NotFound(), {"request": request})
+    django_not_found = stable_exception_handler(Http404(), {"request": request})
 
     assert validation.status_code == status.HTTP_400_BAD_REQUEST
     assert validation.data == {
@@ -148,6 +149,8 @@ def test_exception_handler_has_stable_validation_and_not_found_codes() -> None:
     assert not_found.status_code == status.HTTP_404_NOT_FOUND
     assert not_found.data["error"]["code"] == "RESOURCE_NOT_FOUND"
     assert set(not_found.data["error"]) == {"code", "message", "detail", "correlation_id"}
+    assert django_not_found.status_code == status.HTTP_404_NOT_FOUND
+    assert django_not_found.data["error"]["code"] == "RESOURCE_NOT_FOUND"
 
 
 def test_exception_handler_maps_unavailable_to_503_without_exposing_evidence() -> None:

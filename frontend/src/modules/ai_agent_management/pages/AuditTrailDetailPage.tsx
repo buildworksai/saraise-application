@@ -11,14 +11,18 @@ import {
   PageSkeleton,
   StatusPill,
   formatDate,
+  isRouteUuid,
+  routeRecordNotFoundError,
 } from "../components/AgentUI";
 export const AuditTrailDetailPage = () => {
   const { id = "" } = useParams();
+  const routeIdValid = isRouteUuid(id);
   const query = useQuery({
     queryKey: ["ai-audit-trail", id],
     queryFn: () => aiAgentService.getAuditTrail(id),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
+  if (!routeIdValid) return <GovernedError error={routeRecordNotFoundError("Audit trail")} />;
   if (query.isLoading) return <PageSkeleton />;
   if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()} />;
   if (!query.data) return <GovernedError error={new Error("Audit trail not found.")} />;

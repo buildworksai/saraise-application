@@ -22,21 +22,23 @@ import {
   formatDate,
   formatDuration,
 } from "../components/OrchestrationUI";
+import { isRouteUuid, routeRecordNotFoundError } from "../route-state";
 import { Topology } from "../components/Topology";
 
 // Run control and evidence branches remain explicit for operational review.
 // eslint-disable-next-line complexity
 export function RunDetailPage() {
   const { runId = "" } = useParams();
+  const routeIdValid = isRouteUuid(runId);
   const queryClient = useQueryClient();
-  const runQuery = useRun(runId);
+  const runQuery = useRun(routeIdValid ? runId : "");
   const configurationQuery = useRuntimeConfiguration();
   const taskFilters = {
     page_size: configurationQuery.data?.document.ui.task_run_page_size,
     ordering: "created_at" as const,
   };
-  const tasksQuery = useTaskRuns(runId, taskFilters);
-  const eventsQuery = useRunEvents(runId);
+  const tasksQuery = useTaskRuns(runId, taskFilters, routeIdValid);
+  const eventsQuery = useRunEvents(runId, routeIdValid);
   const definitionQuery = useDefinition(runQuery.data?.definition_id ?? "");
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const selectedTaskQuery = useQuery({
@@ -74,6 +76,7 @@ export function RunDetailPage() {
     onSuccess: refresh,
   });
 
+  if (!routeIdValid) return <LoadError error={routeRecordNotFoundError("Run")} />;
   if (runQuery.isLoading || configurationQuery.isLoading || definitionQuery.isLoading)
     return <PageSkeleton />;
   if (runQuery.error)

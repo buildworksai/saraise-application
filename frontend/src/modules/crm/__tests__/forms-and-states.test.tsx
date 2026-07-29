@@ -28,6 +28,18 @@ describe("CRM forms and governed states", () => {
     expect(screen.getByText(/req-denied/u)).toBeInTheDocument();
   });
 
+  it("renders invalid CRM detail identifiers as not found instead of access denial", () => {
+    render(
+      <GovernedError
+        subject="Lead"
+        error={new CrmApiError("Lead was not found", "not_found", 404, "not_found", "req-missing")}
+      />
+    );
+    expect(screen.getByText("Lead not found")).toBeInTheDocument();
+    expect(screen.queryByText("Access denied")).not.toBeInTheDocument();
+    expect(screen.getByText(/req-missing/u)).toBeInTheDocument();
+  });
+
   it("shows prediction unavailable instead of fabricated insights", () => {
     render(<AIInsights prediction={null} />);
     expect(screen.getByText("Provider prediction unavailable")).toBeInTheDocument();

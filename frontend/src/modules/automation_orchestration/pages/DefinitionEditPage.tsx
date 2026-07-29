@@ -22,6 +22,7 @@ import {
   PermissionDenied,
   StatusPill,
 } from "../components/OrchestrationUI";
+import { isRouteUuid, routeRecordNotFoundError } from "../route-state";
 import { Topology } from "../components/Topology";
 import { EdgeEditor } from "../components/EdgeEditor";
 
@@ -29,10 +30,11 @@ import { EdgeEditor } from "../components/EdgeEditor";
 // eslint-disable-next-line complexity
 export function DefinitionEditPage() {
   const { id = "" } = useParams();
+  const routeIdValid = isRouteUuid(id);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const definitionQuery = useDefinition(id);
-  const catalogQuery = useNodeTypes();
+  const definitionQuery = useDefinition(routeIdValid ? id : "");
+  const catalogQuery = useNodeTypes(routeIdValid);
   const configurationQuery = useRuntimeConfiguration();
   const [selectedNode, setSelectedNode] = useState("");
   const [zoom, setZoom] = useState(0);
@@ -116,6 +118,7 @@ export function DefinitionEditPage() {
     return Array.from(groups.entries());
   }, [catalogQuery.data]);
 
+  if (!routeIdValid) return <LoadError error={routeRecordNotFoundError("Definition")} />;
   if (definitionQuery.isLoading || configurationQuery.isLoading) return <PageSkeleton />;
   if (definitionQuery.error)
     return <LoadError error={definitionQuery.error} retry={() => void definitionQuery.refetch()} />;

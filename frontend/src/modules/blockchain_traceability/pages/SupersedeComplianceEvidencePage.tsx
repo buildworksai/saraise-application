@@ -66,7 +66,7 @@ export function SupersedeComplianceEvidencePage() {
         />
       </main>
     );
-  if (!capabilities.data.can_mutate_resources)
+  if (!capabilities.data.can_supersede_compliance_evidence)
     return (
       <main className="p-4 sm:p-8">
         <ApiProblem

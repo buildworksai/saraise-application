@@ -55,17 +55,22 @@ export function PermissionDenied() {
   );
 }
 
-export function LoadError({ error, retry }: { error: Error; retry: () => void }) {
+export function LoadError({ error, retry }: { error: Error; retry?: () => void }) {
   if (error instanceof ApiError && error.status === 403) return <PermissionDenied />;
+  const notFound = error instanceof ApiError && error.status === 404;
   return (
     <Card role="alert" className="border-destructive/40">
       <CardContent className="flex min-h-72 flex-col items-center justify-center text-center">
         <AlertTriangle className="mb-4 h-10 w-10 text-destructive" aria-hidden="true" />
-        <h2 className="text-xl font-semibold">Orchestration data is unavailable</h2>
+        <h2 className="text-xl font-semibold">
+          {notFound ? "Record not found" : "Orchestration data is unavailable"}
+        </h2>
         <p className="mt-2 max-w-lg text-sm text-muted-foreground">{error.message}</p>
-        <Button className="mt-5" variant="outline" onClick={retry}>
-          Try again
-        </Button>
+        {!notFound && retry ? (
+          <Button className="mt-5" variant="outline" onClick={retry}>
+            Try again
+          </Button>
+        ) : null}
       </CardContent>
     </Card>
   );

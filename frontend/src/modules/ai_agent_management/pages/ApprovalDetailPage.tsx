@@ -10,14 +10,18 @@ import {
   PageSkeleton,
   StatusPill,
   formatDate,
+  isRouteUuid,
+  routeRecordNotFoundError,
 } from "../components/AgentUI";
 export const ApprovalDetailPage = () => {
   const { id = "" } = useParams();
+  const routeIdValid = isRouteUuid(id);
   const query = useQuery({
     queryKey: ["ai-approval", id],
     queryFn: () => aiAgentService.getApproval(id),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
+  if (!routeIdValid) return <GovernedError error={routeRecordNotFoundError("Approval request")} />;
   if (query.isLoading) return <PageSkeleton />;
   if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()} />;
   if (!query.data) return <GovernedError error={new Error("Approval request not found.")} />;

@@ -13,15 +13,18 @@ import {
   PageSkeleton,
   StatusPill,
   formatDate,
+  isRouteUuid,
   newTransitionKey,
+  routeRecordNotFoundError,
 } from "../components/AgentUI";
 export const ScheduleDetailPage = () => {
   const { id = "" } = useParams();
+  const routeIdValid = isRouteUuid(id);
   const client = useQueryClient();
   const query = useQuery({
     queryKey: ["ai-schedule", id],
     queryFn: () => aiAgentService.getSchedule(id),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const cancel = useMutation({
     mutationFn: () =>
@@ -34,6 +37,7 @@ export const ScheduleDetailPage = () => {
       void client.invalidateQueries({ queryKey: ["ai-schedules"] });
     },
   });
+  if (!routeIdValid) return <GovernedError error={routeRecordNotFoundError("Schedule")} />;
   if (query.isLoading) return <PageSkeleton />;
   if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()} />;
   if (!query.data) return <GovernedError error={new Error("Schedule not found.")} />;

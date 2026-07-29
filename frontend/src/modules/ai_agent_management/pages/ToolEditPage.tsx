@@ -3,16 +3,23 @@ import { useNavigate, useParams } from "react-router-dom";
 import type { ToolUpdateRequest } from "../contracts";
 import { ROUTES } from "../contracts";
 import { ToolForm } from "../components/ToolForm";
-import { GovernedError, PageHeader, PageSkeleton } from "../components/AgentUI";
+import {
+  GovernedError,
+  PageHeader,
+  PageSkeleton,
+  isRouteUuid,
+  routeRecordNotFoundError,
+} from "../components/AgentUI";
 import { aiAgentService } from "../services/ai-agent-service";
 export const ToolEditPage = () => {
   const { id = "" } = useParams();
+  const routeIdValid = isRouteUuid(id);
   const navigate = useNavigate();
   const client = useQueryClient();
   const query = useQuery({
     queryKey: ["ai-tool", id],
     queryFn: () => aiAgentService.getTool(id),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const mutation = useMutation({
     mutationFn: (request: ToolUpdateRequest) => aiAgentService.updateTool(id, request),
@@ -21,6 +28,7 @@ export const ToolEditPage = () => {
       navigate(ROUTES.TOOL_DETAIL(id));
     },
   });
+  if (!routeIdValid) return <GovernedError error={routeRecordNotFoundError("Tool")} />;
   if (query.isLoading) return <PageSkeleton />;
   if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()} />;
   if (!query.data) return <GovernedError error={new Error("Tool not found.")} />;

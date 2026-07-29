@@ -11,6 +11,7 @@ import { ROUTES } from "../contracts";
 import { AssetForm } from "../components/AssetForm";
 import { assetService } from "../services/asset-service";
 import { AssetDetailPage } from "./AssetDetailPage";
+import { EditAssetPage } from "./EditAssetPage";
 import { AssetListPage } from "./AssetListPage";
 
 const asset: Asset = {
@@ -206,4 +207,30 @@ describe("asset management workflows", () => {
       expect(calculate).toHaveBeenCalledWith(asset.id, { entry_date: entry.entry_date })
     );
   });
+
+  it.each([
+    [
+      "detail",
+      <AssetDetailPage />,
+      ROUTES.ASSETS.DETAIL_PATTERN,
+      "/asset-management/assets/not-a-uuid",
+    ],
+    [
+      "edit",
+      <EditAssetPage />,
+      ROUTES.ASSETS.EDIT_PATTERN,
+      "/asset-management/assets/not-a-uuid/edit",
+    ],
+  ] as const)(
+    "renders asset not found for invalid %s route IDs",
+    async (_name, page, pattern, path) => {
+      const getAsset = vi.spyOn(assetService, "getAsset");
+      vi.spyOn(assetService, "getConfiguration").mockResolvedValue(configuration);
+
+      renderRoute(page, path, pattern);
+
+      expect(await screen.findByText("Asset not found")).toBeInTheDocument();
+      expect(getAsset).not.toHaveBeenCalled();
+    }
+  );
 });

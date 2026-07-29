@@ -1,4 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import {
   ApiProblem,
@@ -12,7 +14,8 @@ import {
   blockchainTraceabilityService,
 } from "../services/blockchain_traceability-service";
 import { IssueAuthenticityCredentialPage } from "./IssueAuthenticityCredentialPage";
-import type { AuthenticityCredential } from "../contracts";
+import { SupersedeComplianceEvidencePage } from "./SupersedeComplianceEvidencePage";
+import type { AuthenticityCredential, TraceabilityCapabilities } from "../contracts";
 
 const credential: AuthenticityCredential = {
   id: "credential-1",
@@ -34,6 +37,35 @@ const credential: AuthenticityCredential = {
   created_at: "2026-07-22T10:00:00Z",
   updated_at: "2026-07-22T10:00:00Z",
 };
+
+const traceabilityCapabilities = {
+  can_read: true,
+  can_update: false,
+  can_preview: false,
+  can_rollback: false,
+  can_import: false,
+  can_export: false,
+  can_mutate_resources: false,
+  can_finalize_compliance_evidence: true,
+  can_supersede_compliance_evidence: true,
+  document: {
+    features: {
+      enabled: true,
+      enable_supersede: true,
+    },
+  },
+} as TraceabilityCapabilities;
+
+function renderWithQueries(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>{ui}</MemoryRouter>
+    </QueryClientProvider>
+  );
+}
 
 describe("blockchain traceability UX safeguards", () => {
   afterEach(() => {
@@ -105,5 +137,21 @@ describe("blockchain traceability UX safeguards", () => {
       expires_at: null,
       claims: {},
     });
+  });
+
+  it("allows compliance supersession from the specific finalize capability", async () => {
+    vi.spyOn(blockchainTraceabilityService, "getCapabilities").mockResolvedValue(
+      traceabilityCapabilities
+    );
+
+    renderWithQueries(<SupersedeComplianceEvidencePage />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Supersede compliance evidence" })
+      ).toBeInTheDocument()
+    );
+    expect(screen.getByLabelText("Finalized evidence ID to supersede")).toBeInTheDocument();
+    expect(screen.queryByText("Permission required")).not.toBeInTheDocument();
   });
 });

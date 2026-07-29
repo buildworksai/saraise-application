@@ -15,9 +15,12 @@ import {
   PageHeader,
   PageSkeleton,
   StatusPill,
+  isRouteUuid,
+  routeRecordNotFoundError,
 } from "../components/AgentUI";
 export const ToolDetailPage = () => {
   const { id = "" } = useParams();
+  const routeIdValid = isRouteUuid(id);
   const navigate = useNavigate();
   const client = useQueryClient();
   const [sample, setSample] = useState("{}");
@@ -25,7 +28,7 @@ export const ToolDetailPage = () => {
   const query = useQuery({
     queryKey: ["ai-tool", id],
     queryFn: () => aiAgentService.getTool(id),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const validate = useMutation({
     mutationFn: (value: JSONValue) =>
@@ -38,6 +41,7 @@ export const ToolDetailPage = () => {
       navigate(ROUTES.TOOLS);
     },
   });
+  if (!routeIdValid) return <GovernedError error={routeRecordNotFoundError("Tool")} />;
   if (query.isLoading) return <PageSkeleton />;
   if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()} />;
   if (!query.data) return <GovernedError error={new Error("Tool not found.")} />;

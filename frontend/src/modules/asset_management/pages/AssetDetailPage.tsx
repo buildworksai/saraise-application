@@ -20,6 +20,8 @@ import {
   ProblemState,
   StatusPill,
   titleCase,
+  isRouteUuid,
+  routeAssetNotFoundError,
 } from "../components/AssetManagementUI";
 import { assetQueryKeys, assetService } from "../services/asset-service";
 
@@ -34,6 +36,7 @@ function Field({ label, value }: { label: string; value: string }) {
 
 export const AssetDetailPage = () => {
   const { id = "" } = useParams();
+  const routeIdValid = isRouteUuid(id);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const tenantId = useAuthStore((state) => state.user?.tenant_id ?? null);
@@ -51,7 +54,7 @@ export const AssetDetailPage = () => {
   const assetQuery = useQuery({
     queryKey: assetQueryKeys.asset(tenantId, id),
     queryFn: () => assetService.getAsset(id),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const historyFilters = {
     asset_id: id,
@@ -62,7 +65,7 @@ export const AssetDetailPage = () => {
   const historyQuery = useQuery({
     queryKey: assetQueryKeys.depreciation(tenantId, historyFilters),
     queryFn: () => assetService.listDepreciationEntries(historyFilters),
-    enabled: Boolean(id && configuration),
+    enabled: routeIdValid && Boolean(configuration),
   });
   const deleteMutation = useMutation({
     mutationFn: () => assetService.deleteAsset(id),
@@ -82,6 +85,12 @@ export const AssetDetailPage = () => {
     },
   });
 
+  if (!routeIdValid)
+    return (
+      <main className="p-4 sm:p-8">
+        <ProblemState error={routeAssetNotFoundError()} />
+      </main>
+    );
   if (assetQuery.isLoading || configurationQuery.isLoading) return <PageSkeleton />;
   if (configurationQuery.error || !configuration) {
     return (

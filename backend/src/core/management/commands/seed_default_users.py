@@ -21,7 +21,34 @@ PASSWORD_ENV = "SARAISE_SEED_DEFAULT_PASSWORD"  # pragma: allowlist secret
 PERMISSION_CODE_RE = re.compile(
     r"^(?P<module>[a-z][a-z0-9_-]{0,99})\.(?P<resource>[a-z][a-z0-9_-]{0,99}):(?P<action>[a-z][a-z0-9_-]{0,49})$"
 )
-ACCESS_RESOURCE_RE = re.compile(r"['\"]([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_-]*)+(?::[a-z][a-z0-9_-]*)?)['\"]")
+ACCESS_RESOURCE_RE = re.compile(r"['\"]([a-z][a-z0-9_-]*(?:[.:][a-z][a-z0-9_-]*)*)['\"]")
+STANDARD_VIEWSET_ACTIONS = (
+    "list",
+    "retrieve",
+    "create",
+    "update",
+    "partial_update",
+    "destroy",
+    "preview",
+    "versions",
+    "rollback",
+    "import_configuration",
+    "export_configuration",
+    "health",
+)
+LOCAL_DEVELOPMENT_QUOTA_RESOURCES = (
+    "active-schedules",
+    "backup-jobs-per-period",
+    "backup-recovery.archive",
+    "backup-recovery.health",
+    "backup-recovery.job",
+    "backup-recovery.read",
+    "backup-recovery.retention",
+    "backup-recovery.schedule",
+    "backup-recovery.storage_target",
+    "integrity-verifications",
+    "provider-probes",
+)
 
 
 class Command(BaseCommand):
@@ -229,10 +256,13 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.WARNING(f"ℹ️  {user_description} already exists: {user_email}"))
 
             if getattr(settings, "SARAISE_MODE", "development") in {"development", "self-hosted"}:
-                admin_user = User.objects.get(
-                    email="admin@buildworks.ai"
-                )  # nosemgrep: semgrep.tenant-id-required-in-queries
-                self._bootstrap_local_access(tenant_id, admin_user)
+                local_users = list(
+                    User.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
+                        email__in=[str(user_config["email"]) for user_config in tenant_users]
+                    )
+                )
+                self._bootstrap_local_access(tenant_id, local_users)
+                self._bootstrap_local_procurement_configuration(tenant_id, local_users)
 
         # Summary
         self.stdout.write(self.style.SUCCESS("\n✅ Default users seeded successfully!"))
@@ -252,8 +282,8 @@ class Command(BaseCommand):
             self.stdout.write("\n   Note: Functional roles (developer, operator, billing, auditor, viewer)")
             self.stdout.write("         are managed via Role model in security_access_control module.")
 
-    def _bootstrap_local_access(self, tenant_id: str, admin_user) -> None:
-        """Create explicit local access state for seeded tenant administration."""
+    def _bootstrap_local_access(self, tenant_id: str, tenant_users) -> None:
+        """Create explicit local access state for every seeded tenant UAT identity."""
 
         try:
             from src.core.access.entitlements import Entitlement, Quota
@@ -269,7 +299,9 @@ class Command(BaseCommand):
             return
 
         tenant_uuid = uuid.UUID(str(tenant_id))
-        actor_id = uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:seed:{admin_user.email}")
+        users = tuple(tenant_users)
+        actor_email = users[0].email if users else "local-access"
+        actor_id = uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:seed:{actor_email}")
         correlation_id = "seed-default-users-local-access"
         ConfigurationService.current(tenant_uuid, actor_id=actor_id, correlation_id=correlation_id)
 
@@ -322,24 +354,25 @@ class Command(BaseCommand):
                 )
 
         expiry = timezone.now() + timedelta(days=365)
-        grant = (
-            UserPermissionSet.objects.for_tenant(tenant_uuid)
-            .filter(user=admin_user, permission_set=permission_set, revoked_at__isnull=True)
-            .first()
-        )
-        if grant is None:
-            UserPermissionSet.objects.create(
-                tenant_id=tenant_uuid,
-                user=admin_user,
-                permission_set=permission_set,
-                expires_at=expiry,
-                granted_by=actor_id,
-                reason="Seeded local development administrator access",
+        for user in users:
+            grant = (
+                UserPermissionSet.objects.for_tenant(tenant_uuid)
+                .filter(user=user, permission_set=permission_set, revoked_at__isnull=True)
+                .first()
             )
-        elif grant.expires_at <= expiry:
-            grant.expires_at = expiry
-            grant.reason = "Seeded local development administrator access"
-            grant.save(update_fields=("expires_at", "reason", "updated_at"))
+            if grant is None:
+                UserPermissionSet.objects.create(
+                    tenant_id=tenant_uuid,
+                    user=user,
+                    permission_set=permission_set,
+                    expires_at=expiry,
+                    granted_by=actor_id,
+                    reason="Seeded local development UAT access",
+                )
+            elif grant.expires_at <= expiry:
+                grant.expires_at = expiry
+                grant.reason = "Seeded local development UAT access"
+                grant.save(update_fields=("expires_at", "reason", "updated_at"))
 
         for capability in sorted(capabilities | permissions):
             Entitlement.objects.update_or_create(
@@ -361,6 +394,78 @@ class Command(BaseCommand):
                 f"{len(resources | permissions)} quotas"
             )
         )
+
+    def _bootstrap_local_procurement_configuration(self, tenant_id: str, tenant_users) -> None:
+        """Ensure local purchase-management settings have an active tenant policy."""
+
+        try:
+            from src.modules.purchase_management.models import (
+                ConfigurationEnvironment,
+                ConfigurationStatus,
+                ProcurementConfiguration,
+            )
+        except Exception as exc:
+            self.stdout.write(self.style.WARNING(f"⚠️  Could not bootstrap procurement configuration: {exc}"))
+            return
+
+        tenant_uuid = uuid.UUID(str(tenant_id))
+        users = tuple(tenant_users)
+        actor_email = users[0].email if users else "local-procurement-configuration"
+        actor_id = uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:seed:{actor_email}")
+        now = timezone.now()
+        defaults = {
+            "default_currency": "USD",
+            "default_payment_terms": "Net 30",
+            "supplier_code_prefix": "SUP",
+            "requisition_prefix": "PR",
+            "rfq_prefix": "RFQ",
+            "po_prefix": "PO",
+            "receipt_prefix": "GRN",
+            "approval_rules": [],
+            "receipt_tolerance_percent": "5.00",
+            "minimum_rfq_suppliers": 3,
+            "quote_scoring_weights": {"price": 55, "delivery": 20, "quality": 15, "service": 10},
+            "inventory_integration_enabled": False,
+            "accounting_integration_enabled": False,
+            "supplier_delivery_enabled": False,
+            "rollout": {"roles": [], "cohorts": [], "percentage": 100},
+            "created_by": actor_id,
+            "updated_by": actor_id,
+            "activated_at": now,
+            "activated_by": actor_id,
+        }
+        created = 0
+        for environment in ConfigurationEnvironment.values:
+            active_exists = (
+                ProcurementConfiguration.objects.for_tenant(tenant_uuid)
+                .filter(
+                    environment=environment,
+                    status=ConfigurationStatus.ACTIVE,
+                )
+                .exists()
+            )
+            if active_exists:
+                continue
+            next_version = (
+                ProcurementConfiguration.objects.for_tenant(tenant_uuid)
+                .filter(environment=environment)
+                .order_by("-version")
+                .values_list("version", flat=True)
+                .first()
+                or 0
+            ) + 1
+            ProcurementConfiguration.objects.create(
+                tenant_id=tenant_uuid,
+                environment=environment,
+                version=next_version,
+                status=ConfigurationStatus.ACTIVE,
+                **defaults,
+            )
+            created += 1
+        if created:
+            self.stdout.write(
+                self.style.SUCCESS(f"✅ Bootstrapped local procurement configuration: {created} active environments")
+            )
 
     def _collect_local_access_contracts(self) -> tuple[set[str], set[str], set[str]]:
         permissions: set[str] = set()
@@ -394,10 +499,20 @@ class Command(BaseCommand):
                 elif "." in token:
                     resources.add(token)
                     capabilities.add(token.split(".", maxsplit=1)[0])
+                elif "-" in token:
+                    resources.add(token)
+                    if token.endswith("-recovery") or "_" in token:
+                        capabilities.add(token)
 
+        module_capabilities = {capability for capability in capabilities if "." not in capability}
+        resources.update(LOCAL_DEVELOPMENT_QUOTA_RESOURCES)
         for capability in tuple(capabilities):
             for action in ("get", "post", "put", "patch", "delete", "list", "retrieve", "create", "update"):
                 resources.add(f"{capability}.{action}")
+                resources.add(f"{capability}.api.{action}")
+        for module_name in module_capabilities:
+            for action in STANDARD_VIEWSET_ACTIONS:
+                resources.add(f"{module_name}.api.{action}")
         for permission in tuple(permissions):
             resources.add(f"{permission}:read")
 

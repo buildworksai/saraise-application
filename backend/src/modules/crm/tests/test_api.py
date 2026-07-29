@@ -133,6 +133,22 @@ class TestLeadAPI:
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data) >= 1
 
+    def test_invalid_v2_lead_id_is_controlled_resource_error_not_permission_denial(
+        self, api_client, authenticated_user
+    ):
+        """Authorized malformed detail routes must reach validation/resource handling."""
+
+        api_client.force_authenticate(user=authenticated_user)
+
+        response = api_client.get("/api/v2/crm/leads/__uat_invalid_id__/")
+
+        assert response.status_code in {
+            status.HTTP_400_BAD_REQUEST,
+            status.HTTP_404_NOT_FOUND,
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+        }
+        assert response.status_code != status.HTTP_403_FORBIDDEN
+
     def test_convert_lead_to_opportunity(self, api_client, authenticated_user):
         """Test converting lead to opportunity."""
         tenant_id = uuid.UUID(authenticated_user.profile.tenant_id)

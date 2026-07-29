@@ -14,6 +14,8 @@ import {
   PageSkeleton,
   StatusPill,
   Unavailable,
+  isRouteUuid,
+  routeRecordNotFoundError,
 } from "../components/AgentUI";
 
 const ACTIVE_JOB_STATES = new Set(["queued", "running", "retrying"]);
@@ -38,11 +40,12 @@ function jobEvidence(value: unknown): {
 
 export const EvaluationPage = () => {
   const { id = "" } = useParams();
+  const routeIdValid = isRouteUuid(id);
   const [suite, setSuite] = useState("");
   const agent = useQuery({
     queryKey: ["ai-agent", id],
     queryFn: () => aiAgentService.getAgent(id),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const start = useMutation({
     mutationFn: () =>
@@ -60,6 +63,7 @@ export const EvaluationPage = () => {
       ACTIVE_JOB_STATES.has(query.state.data?.status ?? "") ? 2_000 : false,
   });
 
+  if (!routeIdValid) return <GovernedError error={routeRecordNotFoundError("Agent")} />;
   if (agent.isLoading) return <PageSkeleton />;
   if (agent.error) return <GovernedError error={agent.error} retry={() => void agent.refetch()} />;
   if (!agent.data) return <GovernedError error={new Error("Agent not found.")} />;

@@ -81,6 +81,19 @@ export const tenantRoutes = [
     navigation: { type: "sidebar", label: "APM & traces", icon: Network, order: 630 },
   },
   {
+    id: "performance-monitoring.services",
+    module: moduleName,
+    path: ROUTES.SERVICES,
+    title: "Monitored services",
+    sourceFile: "modules/performance_monitoring/pages/TraceExplorerPage.tsx",
+    Page: lazy(() =>
+      import("./pages/TraceExplorerPage").then(({ TraceExplorerPage }) => ({
+        default: TraceExplorerPage,
+      }))
+    ),
+    navigation: { type: "sidebar", label: "Services", icon: Network, order: 631 },
+  },
+  {
     id: "performance-monitoring.alerts",
     module: moduleName,
     path: ROUTES.ALERTS,

@@ -12,6 +12,7 @@ import { automationOrchestrationService as service } from "../services/automatio
 import { ROUTE_PATHS } from "../contracts";
 import { CronPreview, nextCronRuns } from "./CronPreview";
 import { LoadError, PageHeader, PageSkeleton } from "./OrchestrationUI";
+import { isRouteUuid, routeRecordNotFoundError } from "../route-state";
 
 // Form state branches represent explicit loading, denial, validation, and mutation outcomes.
 // eslint-disable-next-line complexity
@@ -19,7 +20,8 @@ export function ScheduleEditor({ scheduleId }: { scheduleId?: string }) {
   const navigate = useNavigate();
   const configurationQuery = useRuntimeConfiguration();
   const configuration = configurationQuery.data?.document;
-  const existingQuery = useSchedule(scheduleId ?? "");
+  const routeIdValid = scheduleId === undefined || isRouteUuid(scheduleId);
+  const existingQuery = useSchedule(routeIdValid ? scheduleId ?? "" : "");
   const definitionsQuery = useDefinitions({
     status: "published",
     is_current: true,
@@ -85,6 +87,7 @@ export function ScheduleEditor({ scheduleId }: { scheduleId?: string }) {
     (editing && existingQuery.isLoading);
   const error =
     configurationQuery.error ?? definitionsQuery.error ?? (editing ? existingQuery.error : null);
+  if (!routeIdValid) return <LoadError error={routeRecordNotFoundError("Schedule")} />;
   if (loading) return <PageSkeleton rows={configuration?.ui.skeleton_rows} />;
   if (error || !configuration)
     return (

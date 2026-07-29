@@ -25,6 +25,11 @@ from src.core.access.entitlements import Entitlement, Quota
 from src.core.licensing.models import License, LicenseStatus, Organization
 from src.core.tenancy.rls import tenant_context
 from src.core.user_models import UserProfile
+from src.modules.purchase_management.models import (
+    ConfigurationEnvironment,
+    ConfigurationStatus,
+    ProcurementConfiguration,
+)
 from src.modules.security_access_control.models import PermissionSet, PermissionSetPermission, UserPermissionSet
 from src.modules.tenant_management.models import Tenant
 
@@ -56,19 +61,68 @@ def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
     assert tenant_admin.check_password(password)
 
     tenant_uuid = uuid.UUID(profile.tenant_id)
+    seeded_tenant_emails = {
+        "admin@buildworks.ai",
+        "user@buildworks.ai",
+        "developer@buildworks.ai",
+        "operator@buildworks.ai",
+        "billing@buildworks.ai",
+        "auditor@buildworks.ai",
+        "viewer@buildworks.ai",
+    }
     with tenant_context(tenant_uuid):
         permission_set = PermissionSet.objects.for_tenant(tenant_uuid).get(
             name="Local development administrator",
             is_active=True,
             is_deleted=False,
         )
-        grant = UserPermissionSet.objects.for_tenant(tenant_uuid).get(
-            user=tenant_admin,
+        seeded_tenant_users = User.objects.filter(email__in=seeded_tenant_emails)
+        grants = UserPermissionSet.objects.for_tenant(tenant_uuid).filter(
+            user__in=seeded_tenant_users,
             permission_set=permission_set,
             revoked_at__isnull=True,
         )
 
-        assert grant.expires_at is not None
+        assert set(seeded_tenant_users.values_list("email", flat=True)) == seeded_tenant_emails
+        assert grants.count() == len(seeded_tenant_emails)
+        assert all(grant.expires_at is not None for grant in grants)
+        assert (
+            PermissionSetPermission.objects.for_tenant(tenant_uuid)
+            .filter(
+                permission_set=permission_set,
+                removed_at__isnull=True,
+                permission__module="crm",
+                permission__resource="configuration",
+                permission__action="read",
+            )
+            .exists()
+        )
+        assert (
+            Entitlement.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                capability="crm.configuration:read",
+                enabled=True,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="crm.api.list",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="crm.api.retrieve",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
         assert (
             PermissionSetPermission.objects.for_tenant(tenant_uuid)
             .filter(
@@ -99,6 +153,24 @@ def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
         assert (
             Quota.objects.filter(tenant_id=tenant_uuid)
             .filter(
+                resource="crm.api.list",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="crm.api.versions",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
                 resource="budget_management.api_reads",
                 limit__gte=1,
                 remaining__gte=1,
@@ -121,5 +193,10 @@ def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
                 limit__gte=1,
                 remaining__gte=1,
             )
+            .exists()
+        )
+        assert (
+            ProcurementConfiguration.objects.for_tenant(tenant_uuid)
+            .filter(environment=ConfigurationEnvironment.DEVELOPMENT, status=ConfigurationStatus.ACTIVE)
             .exists()
         )

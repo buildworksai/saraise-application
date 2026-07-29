@@ -21,11 +21,14 @@ import {
   StatusPill,
   Unavailable,
   formatDate,
+  isRouteUuid,
   newTransitionKey,
+  routeRecordNotFoundError,
 } from "../components/AgentUI";
 
 export const AgentDetailPage = () => {
   const { id = "" } = useParams();
+  const routeIdValid = isRouteUuid(id);
   const navigate = useNavigate();
   const client = useQueryClient();
   const [task, setTask] = useState('{\n  "goal": ""\n}');
@@ -33,13 +36,13 @@ export const AgentDetailPage = () => {
   const agent = useQuery({
     queryKey: ["ai-agent", id],
     queryFn: () => aiAgentService.getAgent(id),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const executions = useQuery({
     queryKey: ["ai-agent-executions", id],
     queryFn: () =>
       aiAgentService.listExecutions({ agent_id: id, ordering: "-created_at", page_size: 5 }),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const approvals = useQuery({
     queryKey: ["ai-agent-approvals", id],
@@ -98,6 +101,7 @@ export const AgentDetailPage = () => {
       navigate(ROUTES.EXECUTION_DETAIL(value.id));
     },
   });
+  if (!routeIdValid) return <GovernedError error={routeRecordNotFoundError("Agent")} />;
   if (agent.isLoading) return <PageSkeleton />;
   if (agent.error) return <GovernedError error={agent.error} retry={() => void agent.refetch()} />;
   if (!agent.data) return <GovernedError error={new Error("Agent not found.")} />;

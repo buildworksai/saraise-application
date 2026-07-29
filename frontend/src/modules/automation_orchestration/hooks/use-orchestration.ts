@@ -60,10 +60,11 @@ export function useNodeTypes(enabled = true) {
   });
 }
 
-export function useSchedules(filters: ScheduleFilters) {
+export function useSchedules(filters: ScheduleFilters, enabled = true) {
   return useQuery({
     queryKey: orchestrationKeys.schedules(filters),
     queryFn: () => service.listSchedules(filters),
+    enabled,
   });
 }
 
@@ -75,11 +76,12 @@ export function useSchedule(id: string) {
   });
 }
 
-export function useRuns(filters: RunFilters) {
+export function useRuns(filters: RunFilters, enabled = true) {
   const configuration = useRuntimeConfiguration();
   return useQuery({
     queryKey: orchestrationKeys.runs(filters),
     queryFn: () => service.listRuns(filters),
+    enabled,
     refetchInterval: (query) => {
       const hasLiveRun = query.state.data?.items.some((run) =>
         NONTERMINAL_RUNS.includes(run.status)
@@ -104,21 +106,21 @@ export function useRun(id: string) {
   });
 }
 
-export function useTaskRuns(runId: string, filters: TaskRunFilters = {}) {
+export function useTaskRuns(runId: string, filters: TaskRunFilters = {}, enabled = true) {
   return useQuery({
     queryKey: orchestrationKeys.taskRuns(runId, filters),
     queryFn: () => service.listTaskRuns(runId, filters),
-    enabled: Boolean(runId),
+    enabled: enabled && Boolean(runId),
   });
 }
 
-export function useRunEvents(runId: string) {
+export function useRunEvents(runId: string, enabled = true) {
   const configuration = useRuntimeConfiguration();
   return useQuery({
     queryKey: orchestrationKeys.events(runId),
     queryFn: () => service.listEvents(runId),
     select: (result) => result.items,
-    enabled: Boolean(runId),
+    enabled: enabled && Boolean(runId),
     refetchInterval: configuration.data?.document.ui.event_poll_interval_ms ?? false,
   });
 }

@@ -16,41 +16,44 @@ import {
   PageSkeleton,
   StatusPill,
   formatDate,
+  isRouteUuid,
   newTransitionKey,
+  routeRecordNotFoundError,
 } from "../components/AgentUI";
 
 export const ExecutionDetailPage = () => {
   const { id = "" } = useParams();
+  const routeIdValid = isRouteUuid(id);
   const client = useQueryClient();
   const execution = useQuery({
     queryKey: ["ai-execution", id],
     queryFn: () => aiAgentService.getExecution(id),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const tools = useQuery({
     queryKey: ["ai-execution-tools", id],
     queryFn: () => aiAgentService.listToolInvocations({ execution_id: id, page_size: 100 }),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const approvals = useQuery({
     queryKey: ["ai-execution-approvals", id],
     queryFn: () => aiAgentService.listApprovals({ execution_id: id, page_size: 100 }),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const egress = useQuery({
     queryKey: ["ai-execution-egress", id],
     queryFn: () => aiAgentService.listEgressRequests({ execution_id: id, page_size: 100 }),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const costs = useQuery({
     queryKey: ["ai-execution-cost", id],
     queryFn: () => aiAgentService.listCostRecords({ execution_id: id, page_size: 100 }),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const audit = useQuery({
     queryKey: ["ai-execution-audit", id],
     queryFn: () => aiAgentService.listAuditEvents({ execution_id: id, page_size: 100 }),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const control = useMutation({
     mutationFn: ({
@@ -72,6 +75,7 @@ export const ExecutionDetailPage = () => {
       void client.invalidateQueries({ queryKey: ["ai-executions"] });
     },
   });
+  if (!routeIdValid) return <GovernedError error={routeRecordNotFoundError("Execution")} />;
   if (execution.isLoading) return <PageSkeleton />;
   if (execution.error)
     return <GovernedError error={execution.error} retry={() => void execution.refetch()} />;
