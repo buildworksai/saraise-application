@@ -3,11 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ScheduleEditor } from "../../components/ScheduleEditor";
-import type {
-  DefinitionListDTO,
-  OrchestrationConfigurationDTO,
-  PageResult,
-} from "../../contracts";
+import type { DefinitionListDTO, OrchestrationConfigurationDTO, PageResult } from "../../contracts";
 import { automationOrchestrationService as service } from "../../services/automation-orchestration-service";
 import { DefinitionDetailPage } from "../DefinitionDetailPage";
 import { DefinitionEditPage } from "../DefinitionEditPage";
@@ -114,11 +110,14 @@ describe("automation orchestration terminal route states", () => {
       "/automation-orchestration/runs/not-a-uuid",
       "getRun",
     ],
-  ] as const)("renders record not found for invalid %s route IDs", async (_name, page, pattern, path, method) => {
-    const blockedRequest = service[method];
-    renderRoute(page, pattern, path);
+  ] as const)(
+    "renders record not found for invalid %s route IDs",
+    async (_name, page, pattern, path, method) => {
+      const blockedRequest = service[method];
+      renderRoute(page, pattern, path);
 
-    expect(await screen.findByText("Record not found")).toBeInTheDocument();
-    expect(blockedRequest).not.toHaveBeenCalled();
-  });
+      expect(await screen.findByText("Record not found")).toBeInTheDocument();
+      expect(blockedRequest).not.toHaveBeenCalled();
+    }
+  );
 });

@@ -51,7 +51,13 @@ describe("AI agent route terminal states", () => {
 
   it.each([
     ["agent detail", <AgentDetailPage />, "/ai-agents/:id", "/ai-agents/not-a-uuid", "getAgent"],
-    ["agent edit", <EditAgentPage />, "/ai-agents/:id/edit", "/ai-agents/not-a-uuid/edit", "getAgent"],
+    [
+      "agent edit",
+      <EditAgentPage />,
+      "/ai-agents/:id/edit",
+      "/ai-agents/not-a-uuid/edit",
+      "getAgent",
+    ],
     [
       "agent evaluation",
       <EvaluationPage />,
@@ -101,10 +107,13 @@ describe("AI agent route terminal states", () => {
       "/ai-agents/audit/not-a-uuid",
       "getAuditTrail",
     ],
-  ] as const)("renders record not found for invalid %s route IDs", async (_name, page, pattern, path, method) => {
-    renderRoute(page, pattern, path);
+  ] as const)(
+    "renders record not found for invalid %s route IDs",
+    async (_name, page, pattern, path, method) => {
+      renderRoute(page, pattern, path);
 
-    expect(await screen.findByText("Record not found")).toBeInTheDocument();
-    expect(aiAgentService[method]).not.toHaveBeenCalled();
-  });
+      expect(await screen.findByText("Record not found")).toBeInTheDocument();
+      expect(aiAgentService[method]).not.toHaveBeenCalled();
+    }
+  );
 });
