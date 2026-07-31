@@ -602,30 +602,30 @@ class InAppNotificationAction(_ActionBase):
             return OperationResult.failed(code="EXECUTION_CANCELLED", message="Execution was cancelled")
         self.validate_config(invocation.config)
         _validate(invocation.input, self.descriptor.input_schema, "input")
-        from src.core.notifications.models import Notification
+        from src.core.notifications.services import NotificationService
 
         recipient = str(invocation.input["recipient_id"])
-        try:
-            recipient_uuid = uuid.UUID(recipient)
-        except ValueError:
-            recipient_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, f"saraise-user:{recipient}")
-        notification_model = cast(Any, Notification)
-        existing = notification_model.objects.filter(
-            tenant_id=invocation.tenant_id,
-            metadata__idempotency_key=invocation.idempotency_key,
-        ).first()
-        if existing is not None:
+        existing = NotificationService.get_user_notifications(str(invocation.tenant_id), recipient, limit=500)
+        replay = next(
+            (
+                notification
+                for notification in existing
+                if notification.metadata.get("idempotency_key") == invocation.idempotency_key
+            ),
+            None,
+        )
+        if replay is not None:
             return OperationResult.succeeded(
-                {"notification_id": str(existing.id)},
-                evidence={"notification_id": str(existing.id), "persisted": True, "replayed": True},
+                {"notification_id": str(replay.id)},
+                evidence={"notification_id": str(replay.id), "persisted": True, "replayed": True},
                 provider="notifications",
             )
-        notification = notification_model.objects.create(
-            tenant_id=invocation.tenant_id,
-            user_id=recipient_uuid,
-            type=str(invocation.config.get("notification_type", "workflow")),
+        notification = NotificationService.create_notification(
+            tenant_id=str(invocation.tenant_id),
+            user_id=recipient,
             title=str(invocation.input["title"]),
             message=str(invocation.input["message"]),
+            notification_type=str(invocation.config.get("notification_type", "workflow")),
             metadata={
                 "workflow_instance_id": str(invocation.instance_id),
                 "workflow_step_id": str(invocation.step_id),

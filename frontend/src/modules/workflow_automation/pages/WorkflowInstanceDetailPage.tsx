@@ -41,6 +41,11 @@ export function WorkflowInstanceDetailPage() {
       }),
     onSuccess: () => void cache.invalidateQueries({ queryKey: ["workflow-instance", id] }),
   });
+  if (configuration.isLoading) return <PageSkeleton label="Loading workflow configuration" />;
+  if (configuration.error)
+    return (
+      <WorkflowProblem error={configuration.error} retry={() => void configuration.refetch()} />
+    );
   if (query.isLoading) return <PageSkeleton label="Loading workflow execution" />;
   if (query.error)
     return <WorkflowProblem error={query.error} retry={() => void query.refetch()} />;

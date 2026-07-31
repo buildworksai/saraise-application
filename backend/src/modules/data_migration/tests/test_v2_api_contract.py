@@ -53,10 +53,10 @@ def test_access_boundary_uses_governed_profile_and_fail_closed_pipeline() -> Non
 @pytest.mark.parametrize(
     ("path", "view_name"),
     (
-        ("/api/v2/data-migration/jobs/", "data_migration:job-list"),
-        ("/api/v2/data-migration/health/live/", "data_migration:health-live"),
-        ("/api/v2/data-migration/health/ready/", "data_migration:health-ready"),
-        ("/api/v2/data-migration/configuration/", "data_migration:configuration"),
+        ("/api/v2/data-migration/jobs/", "data_migration_v2:job-list"),
+        ("/api/v2/data-migration/health/live/", "data_migration_v2:health-live"),
+        ("/api/v2/data-migration/health/ready/", "data_migration_v2:health-ready"),
+        ("/api/v2/data-migration/configuration/", "data_migration_v2:configuration"),
     ),
 )
 def test_required_v2_routes_resolve(path: str, view_name: str) -> None:

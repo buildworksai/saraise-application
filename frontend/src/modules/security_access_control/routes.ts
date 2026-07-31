@@ -529,18 +529,18 @@ const securityRouteDefinitions = [
   },
 ] satisfies readonly TenantRoute[];
 
-const routeTitleByKind: Readonly<Record<string, string>> = {
+const routeTitleByKind = {
   list: "Security administration",
   create: "Create security policy",
   detail: "Security policy detail",
   edit: "Edit security policy",
   simulator: "Access simulator",
   configuration: "Security configuration",
-};
+} as const;
 
 export const tenantRoutes = securityRouteDefinitions.map((route) => {
-  const kind = route.id.split(".").at(-1) ?? "detail";
-  return { ...route, title: routeTitleByKind[kind] ?? "Security & Access Control" };
+  const kind = route.id.split(".").at(-1) as keyof typeof routeTitleByKind;
+  return { ...route, title: routeTitleByKind[kind] };
 }) satisfies readonly TenantRoute[];
 
 export default tenantRoutes;

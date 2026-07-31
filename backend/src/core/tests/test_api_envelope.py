@@ -29,6 +29,7 @@ from src.core.api import (
     stable_exception_handler,
 )
 from src.core.api.envelope import bypasses_json_envelope, correlation_id_for_request, is_json_media_type
+from src.core.middleware.correlation import correlation_id_var
 
 
 def _renderer_context(response: object, correlation_id: str = "req_contract_test_000001") -> dict[str, object]:
@@ -177,10 +178,14 @@ def test_exception_handler_maps_unavailable_to_503_without_exposing_evidence() -
 
 
 def test_exception_handler_safely_maps_unexpected_errors() -> None:
-    response = stable_exception_handler(
-        RuntimeError("database password must not leak"),
-        {"request": SimpleNamespace()},
-    )
+    token = correlation_id_var.set("")
+    try:
+        response = stable_exception_handler(
+            RuntimeError("database password must not leak"),
+            {"request": SimpleNamespace()},
+        )
+    finally:
+        correlation_id_var.reset(token)
 
     assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
     assert response.data["error"]["code"] == "INTERNAL_ERROR"
@@ -289,7 +294,12 @@ def test_error_rendering_is_not_wrapped_as_success() -> None:
 
 
 def test_correlation_fallback_handles_immutable_request_objects() -> None:
-    correlation_id = correlation_id_for_request(object())
+    token = correlation_id_var.set("")
+    try:
+        correlation_id = correlation_id_for_request(object())
+    finally:
+        correlation_id_var.reset(token)
+
     assert correlation_id.startswith("req_")
     assert len(correlation_id) == 28
 

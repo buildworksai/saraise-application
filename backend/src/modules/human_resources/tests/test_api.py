@@ -9,6 +9,7 @@ from rest_framework import status
 
 from src.core.access.decision import HttpPolicyEvaluator, PolicyEvaluation
 from src.core.testing.factories import authenticated_api_client
+from src.modules.security_access_control.services import SecurityPolicyEvaluator
 
 from ..models import Department
 from ..services import DepartmentService
@@ -34,11 +35,12 @@ def test_unauthenticated_is_401_and_put_is_unsupported(api_client: Any) -> None:
 
 
 def test_policy_entitlement_or_quota_denial_is_403(tenant_a: Any, tenant_a_client: Any, monkeypatch: Any) -> None:
-    monkeypatch.setattr(
-        HttpPolicyEvaluator,
-        "evaluate",
-        lambda self, tenant_id, identity, required_permission, request=None: PolicyEvaluation(True),
-    )
+    def allow_policy(self: Any, tenant_id: Any, identity: Any, required_permission: str, request: Any = None) -> Any:
+        del self, tenant_id, identity, required_permission, request
+        return PolicyEvaluation(True)
+
+    monkeypatch.setattr(HttpPolicyEvaluator, "evaluate", allow_policy)
+    monkeypatch.setattr(SecurityPolicyEvaluator, "evaluate", allow_policy)
     # No entitlement or quota projections exist: the unified pipeline fails closed.
     response = tenant_a_client.get("/api/v2/human-resources/employees/")
     assert response.status_code == status.HTTP_403_FORBIDDEN

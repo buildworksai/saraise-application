@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { tenantRoutes } from "../../routes";
 
 describe("workflow automation route registry", () => {
-  it("discovers every required page with three sidebar parents", () => {
-    expect(tenantRoutes).toHaveLength(8);
+  it("discovers every required page with four sidebar parents", () => {
+    expect(tenantRoutes).toHaveLength(9);
     expect(
       tenantRoutes
         .filter((route) => route.navigation.type === "sidebar")
@@ -12,9 +12,10 @@ describe("workflow automation route registry", () => {
           route.navigation.type === "sidebar" ? route.navigation.order : -1,
         ])
     ).toEqual([
-      ["/workflow-automation/workflows", 80],
-      ["/workflow-automation/instances", 81],
-      ["/workflow-automation/tasks", 82],
+      ["/workflow-automation/workflows", 0],
+      ["/workflow-automation/instances", 1],
+      ["/workflow-automation/tasks", 2],
+      ["/workflow-automation/configuration", 3],
     ]);
   });
 

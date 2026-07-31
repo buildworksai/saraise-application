@@ -267,12 +267,12 @@ const routeDefinitions = [
   },
 ] satisfies readonly TenantRoute[];
 
-function routeTitle(route: TenantRoute): string {
-  const file =
-    route.sourceFile
-      .split("/")
-      .at(-1)
-      ?.replace(/Page\.tsx$/u, "") ?? "AI agent management";
+export function routeTitle(route: Pick<TenantRoute, "sourceFile">): string {
+  const file = route.sourceFile
+    .split("/")
+    .at(-1)
+    ?.replace(/Page\.tsx$/u, "");
+  if (!file) throw new Error(`AI agent route has invalid source file: ${route.sourceFile}`);
   return file.replace(/([a-z])([A-Z])/gu, "$1 $2");
 }
 

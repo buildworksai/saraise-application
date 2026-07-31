@@ -24,7 +24,8 @@ function isExportDocument(value: unknown): value is WorkflowConfigurationExportD
     typeof candidate.environment === "string" &&
     typeof candidate.version === "number" &&
     Boolean(candidate.document) &&
-    typeof candidate.document === "object"
+    typeof candidate.document === "object" &&
+    !Array.isArray(candidate.document)
   );
 }
 
@@ -80,9 +81,9 @@ export function WorkflowConfigurationPage() {
     onSuccess: invalidate,
   });
 
-  if (query.isLoading || !draft) return <PageSkeleton label="Loading workflow configuration" />;
   if (query.error)
     return <WorkflowProblem error={query.error} retry={() => void query.refetch()} />;
+  if (query.isLoading || !draft) return <PageSkeleton label="Loading workflow configuration" />;
   const current = query.data;
   if (!current)
     return (

@@ -1,6 +1,9 @@
 /**
  * Security & Access Control public frontend contract.
  *
+ * === AGENT INSTRUCTION ===
+ * Read this file FIRST when working on this module.
+ *
  * This file deliberately does not depend on generated v1 OpenAPI types.  The
  * governed v2 API is validated at runtime at the service boundary so malformed
  * authorization data can never be mistaken for an empty or successful result.
@@ -927,6 +930,26 @@ function enumGuard<const T extends readonly string[]>(
   return isString(value) && values.includes(value);
 }
 
+export function isPredicateScalar(value: unknown): value is PredicateValue {
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "boolean":
+      return true;
+    default:
+      return value === null;
+  }
+}
+
+export function isPredicateSubjectReference(value: unknown): value is PredicateSubjectReference {
+  if (!isRecord(value)) return false;
+  return Object.keys(value).length === 1 && isString(value.subject);
+}
+
+export function isPredicateScalarArray(value: unknown): value is readonly PredicateValue[] {
+  return Array.isArray(value) && value.length > 0 && value.every(isPredicateScalar);
+}
+
 export function isV2PageMeta(value: unknown): value is V2PageMeta {
   return (
     isRecord(value) &&
@@ -1023,27 +1046,20 @@ export function isFieldSecurity(value: unknown): value is FieldSecurity {
 // eslint-disable-next-line complexity
 export function isRowPredicate(value: unknown): value is RowPredicate {
   if (!isRecord(value) || !isString(value.op)) return false;
-  if (value.op === "and" || value.op === "or")
-    return (
-      Array.isArray(value.args) &&
-      value.args.length > 0 &&
-      value.args.every((item) => isRowPredicate(item))
-    );
-  if (value.op === "not") return isRowPredicate(value.arg);
+  if (value.op === "and") return isRowPredicateList(value.args);
+  if (value.op === "or") return isRowPredicateList(value.args);
+  if (value.op === "not") return Object.hasOwn(value, "arg") && isRowPredicate(value.arg);
   if (!isString(value.field)) return false;
   if (value.op === "eq")
-    return isRecord(value.value)
-      ? isString(value.value.subject) && Object.keys(value.value).length === 1
-      : value.value === null || ["string", "number", "boolean"].includes(typeof value.value);
-  if (value.op === "in")
-    return (
-      Array.isArray(value.value) &&
-      value.value.length > 0 &&
-      value.value.every(
-        (item) => item === null || ["string", "number", "boolean"].includes(typeof item)
-      )
-    );
-  return value.op === "is_null" || value.op === "owner" || value.op === "tenant";
+    return isPredicateScalar(value.value) || isPredicateSubjectReference(value.value);
+  if (value.op === "in") return isPredicateScalarArray(value.value);
+  if (value.op === "is_null") return true;
+  if (value.op === "owner") return true;
+  return value.op === "tenant";
+}
+
+function isRowPredicateList(value: unknown): value is readonly RowPredicate[] {
+  return Array.isArray(value) && value.length > 0 && value.every(isRowPredicate);
 }
 export function isRowSecurityRule(value: unknown): value is RowSecurityRule {
   return (

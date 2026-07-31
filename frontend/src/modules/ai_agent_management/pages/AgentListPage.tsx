@@ -32,16 +32,20 @@ export const AgentListPage = () => {
   const [page, setPage] = useState(1);
   const query = useQuery({
     queryKey: ["ai-agents", { search, status, identity, runner, ordering, page }],
-    queryFn: () =>
-      aiAgentService.listAgents({
+    queryFn: async () => {
+      if (!configuration.data) throw new Error("AI agent configuration is unavailable.");
+      const response = await aiAgentService.listAgents({
         search: search || undefined,
         status: status || undefined,
         identity_type: identity || undefined,
         runner_key: runner || undefined,
         ordering,
         page,
-        page_size: configuration.data?.document.ui.agent_page_size,
-      }),
+        page_size: configuration.data.document.ui.agent_page_size,
+      });
+      if (!response) throw new Error("No governed agent response was received.");
+      return response;
+    },
     enabled: Boolean(configuration.data),
     placeholderData: (previous) => previous,
   });

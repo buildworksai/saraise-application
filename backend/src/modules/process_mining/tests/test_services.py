@@ -27,8 +27,9 @@ def test_ingestion_validates_deduplicates_and_publishes():
     assert second.duplicates == 1 and ProcessEvent.objects.for_tenant(tenant).count() == 1
 
 
-@pytest.mark.parametrize("occurred", [timezone.now() + timedelta(minutes=1), timezone.now() - timedelta(days=731)])
-def test_ingestion_rejects_timestamp_bounds(occurred):
+@pytest.mark.parametrize("offset", [timedelta(minutes=1), -timedelta(days=731)])
+def test_ingestion_rejects_timestamp_bounds(offset):
+    occurred = timezone.now() + offset
     result = EventLogService().ingest_events(
         uuid.uuid4(), uuid.uuid4(), "canonical", "orders", [{"case_id": "c", "activity": "a", "occurred_at": occurred}]
     )

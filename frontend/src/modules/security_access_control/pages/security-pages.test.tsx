@@ -7,9 +7,15 @@ import { ApiError } from "@/services/api-client";
 import { AccessSimulatorPage } from "./AccessSimulatorPage";
 import { RoleCreatePage, RolesPage } from "./RolesPage";
 
-const mocks = vi.hoisted(() => ({ listRoles: vi.fn(), createRole: vi.fn(), simulate: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  getConfiguration: vi.fn(),
+  listRoles: vi.fn(),
+  createRole: vi.fn(),
+  simulate: vi.fn(),
+}));
 vi.mock("../services/security-service", () => ({
   securityService: {
+    configuration: { get: mocks.getConfiguration },
     roles: { list: mocks.listRoles, create: mocks.createRole },
     accessDecisions: { simulate: mocks.simulate },
   },
@@ -29,6 +35,29 @@ const empty = {
   correlationId: "corr-list",
   timestamp: "2026-07-22T00:00:00Z",
 };
+const configuration = {
+  data: {
+    id: "security-config-1",
+    environment: "development",
+    version: 1,
+    document: {
+      ui: { loading_skeleton_rows: 3, audit_timeline_page_size: 25 },
+      semantic_tokens: {
+        success: "status-success",
+        danger: "status-danger",
+        warning: "status-warning",
+        neutral: "status-neutral",
+      },
+    },
+    rollout: { enabled: true, percentage: 100, role_ids: [], cohorts: [] },
+    updated_by: "00000000-0000-0000-0000-000000000000",
+    correlation_id: "corr-config",
+    created_at: "2026-07-22T00:00:00Z",
+    updated_at: "2026-07-22T00:00:00Z",
+  },
+  correlationId: "corr-config",
+  timestamp: "2026-07-22T00:00:00Z",
+};
 function renderPage(page: React.ReactNode, initial = "/security-access-control/roles") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -41,7 +70,10 @@ function renderPage(page: React.ReactNode, initial = "/security-access-control/r
 }
 
 describe("security administration page states", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getConfiguration.mockResolvedValue(configuration);
+  });
   it("renders an initial list skeleton", () => {
     mocks.listRoles.mockReturnValue(new Promise(() => undefined));
     renderPage(<RolesPage />);
@@ -125,7 +157,7 @@ describe("security administration page states", () => {
     });
     renderPage(<AccessSimulatorPage />, "/security-access-control/access-simulator");
     await userEvent.type(
-      screen.getByLabelText("Subject UUID"),
+      await screen.findByLabelText("Subject UUID"),
       "00000000-0000-0000-0000-000000000001"
     );
     await userEvent.type(screen.getByLabelText("Permission code"), "security.roles:read");

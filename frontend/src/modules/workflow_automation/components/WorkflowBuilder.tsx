@@ -12,20 +12,31 @@ import type {
   ConditionDescriptorDTO,
   DefinitionValidationResultDTO,
   HandlerDescriptorDTO,
-  JsonValue,
   NotificationStepConfig,
   StepType,
-  UISchemaField,
   WorkflowCreateDTO,
   WorkflowDetailDTO,
   WorkflowStepWriteDTO,
   WorkflowType,
-  WorkflowConfigurationDocument,
 } from "../contracts";
 import { ROUTES } from "../contracts";
 import { workflowService } from "../services/workflow-service";
 import { StatusPill } from "./WorkflowUI";
 import { useWorkflowConfiguration } from "../hooks/use-workflow-configuration";
+import {
+  moveStepByOffset,
+  newStep,
+  recipientPath,
+  removeStepAt,
+  slug,
+  WORKFLOW_CATALOG_ACTIONS_QUERY_KEY,
+  WORKFLOW_CATALOG_ASSIGNEES_QUERY_KEY,
+  WORKFLOW_CATALOG_CONDITIONS_QUERY_KEY,
+  workflowBuilderIssues,
+  workflowBuilderPayload,
+} from "./workflow-builder-utils";
+import { WorkflowSchemaField } from "./WorkflowSchemaField";
+import { inputClass } from "./workflow-schema-field-utils";
 
 interface WorkflowBuilderProps {
   initial?: WorkflowDetailDTO;
@@ -34,206 +45,6 @@ interface WorkflowBuilderProps {
   serverError?: Error | null;
   onSubmit: (payload: WorkflowCreateDTO) => Promise<void>;
   onCancel: (path: string) => void;
-}
-
-const inputClass =
-  "block w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
-const slug = (value: string, maximum: number): string =>
-  value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, "_")
-    .replace(/^_+|_+$/gu, "")
-    .slice(0, maximum);
-function recipientPath(config: NotificationStepConfig): string {
-  const value =
-    config.recipient_mapping[config.channel === "email" ? "recipient_email" : "recipient_id"];
-  return typeof value === "string" ? value : "";
-}
-
-function newStep(
-  type: StepType,
-  order: number,
-  policy: WorkflowConfigurationDocument
-): WorkflowStepWriteDTO {
-  const key = `step_${order}`;
-  if (type === "approval")
-    return {
-      key,
-      name: `Approval ${order}`,
-      step_type: type,
-      order,
-      config: {
-        assignment_kind: policy.defaults.approval_assignment_kind,
-        assignee_id: "",
-        due_in_seconds: policy.defaults.approval_due_seconds,
-        rejection_behavior: policy.defaults.approval_rejection_behavior,
-        reject_step_key: null,
-      },
-      is_terminal: false,
-    };
-  if (type === "notification")
-    return {
-      key,
-      name: `Notification ${order}`,
-      step_type: type,
-      order,
-      config: {
-        channel: "in_app",
-        recipient_mapping: { recipient_id: "actor.id" },
-        template_key: "workflow.task.created",
-      },
-      is_terminal: false,
-    };
-  if (type === "decision")
-    return {
-      key,
-      name: `Decision ${order}`,
-      step_type: type,
-      order,
-      config: { condition: {}, true_step_key: "", false_step_key: "" },
-      is_terminal: false,
-    };
-  return {
-    key,
-    name: `Action ${order}`,
-    step_type: type,
-    order,
-    config: { handler: "", schema_version: "", input_mapping: {}, configuration: {} },
-    is_terminal: false,
-  };
-}
-
-// Validation deliberately keeps every graph/config branch visible for step-linked feedback.
-// eslint-disable-next-line complexity
-function localIssues(payload: WorkflowCreateDTO): readonly string[] {
-  const issues: string[] = [];
-  if (!payload.key.trim()) issues.push("Workflow key is required.");
-  if (!payload.name.trim()) issues.push("Workflow name is required.");
-  if (payload.steps.length === 0) issues.push("Add at least one step.");
-  const keys = new Set<string>();
-  for (const step of payload.steps) {
-    if (!step.key.trim() || keys.has(step.key))
-      issues.push(`Step ${step.order} needs a unique key.`);
-    keys.add(step.key);
-    if (!step.name.trim()) issues.push(`Step ${step.order} needs a name.`);
-    if (step.step_type === "action" && !(step.config as ActionStepConfig).handler)
-      issues.push(`${step.name}: choose an available action.`);
-    if (step.step_type === "approval" && !(step.config as ApprovalStepConfig).assignee_id)
-      issues.push(`${step.name}: choose an assignee.`);
-    if (step.step_type === "decision") {
-      const config = step.config;
-      if (
-        !("condition" in config) ||
-        typeof config.condition.handler !== "string" ||
-        !config.condition.handler
-      )
-        issues.push(`${step.name}: choose a condition.`);
-      if (
-        !("true_step_key" in config) ||
-        (!keys.has(config.true_step_key) &&
-          !payload.steps.some((candidate) => candidate.key === config.true_step_key))
-      )
-        issues.push(`${step.name}: select a valid true branch.`);
-      if (
-        !("false_step_key" in config) ||
-        (!keys.has(config.false_step_key) &&
-          !payload.steps.some((candidate) => candidate.key === config.false_step_key))
-      )
-        issues.push(`${step.name}: select a valid false branch.`);
-    }
-  }
-  if (payload.steps.length > 0 && !payload.steps.some((step) => step.is_terminal))
-    issues.push("Mark at least one step as terminal.");
-  return issues;
-}
-
-function SchemaField({
-  field,
-  value,
-  onChange,
-}: {
-  field: UISchemaField;
-  value: JsonValue | undefined;
-  onChange: (value: JsonValue) => void;
-}) {
-  const lookup = useQuery({
-    queryKey: ["workflow-catalog-lookup", field.kind === "lookup" ? field.lookup_key : "none"],
-    queryFn: () =>
-      field.kind === "lookup"
-        ? workflowService.catalog.lookup(field.lookup_key)
-        : Promise.resolve([]),
-    enabled: field.kind === "lookup",
-  });
-  const id = `descriptor-${field.key}`;
-  if (field.kind === "boolean")
-    return (
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          id={id}
-          type="checkbox"
-          checked={value === true}
-          onChange={(event) => onChange(event.target.checked)}
-        />
-        {field.label}
-      </label>
-    );
-  if (field.kind === "select")
-    return (
-      <label htmlFor={id} className="block text-sm font-medium">
-        {field.label}
-        <select
-          id={id}
-          required={field.required}
-          className={`${inputClass} mt-1`}
-          value={typeof value === "string" ? value : ""}
-          onChange={(event) => onChange(event.target.value)}
-        >
-          <option value="">Select…</option>
-          {field.options.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
-    );
-  if (field.kind === "lookup")
-    return (
-      <label htmlFor={id} className="block text-sm font-medium">
-        {field.label}
-        <select
-          id={id}
-          required={field.required}
-          disabled={lookup.isLoading || lookup.isError}
-          className={`${inputClass} mt-1`}
-          value={typeof value === "string" ? value : ""}
-          onChange={(event) => onChange(event.target.value)}
-        >
-          <option value="">{lookup.isError ? "Lookup unavailable" : "Select…"}</option>
-          {lookup.data?.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
-    );
-  return (
-    <Input
-      id={id}
-      label={field.label}
-      type={field.kind === "number" ? "number" : "text"}
-      required={field.required}
-      min={field.kind === "number" ? field.minimum : undefined}
-      max={field.kind === "number" ? field.maximum : undefined}
-      placeholder={field.kind === "text" ? field.placeholder : undefined}
-      value={typeof value === "string" || typeof value === "number" ? value : ""}
-      onChange={(event) =>
-        onChange(field.kind === "number" ? Number(event.target.value) : event.target.value)
-      }
-    />
-  );
 }
 
 function DescriptorBadge({
@@ -300,47 +111,40 @@ export function WorkflowBuilder({
   const [dirty, setDirty] = useState(false);
   const [validation, setValidation] = useState<DefinitionValidationResultDTO | null>(null);
   const actions = useQuery({
-    queryKey: ["workflow-catalog-actions"],
+    queryKey: WORKFLOW_CATALOG_ACTIONS_QUERY_KEY,
     queryFn: workflowService.catalog.actions,
   });
   const conditions = useQuery({
-    queryKey: ["workflow-catalog-conditions"],
+    queryKey: WORKFLOW_CATALOG_CONDITIONS_QUERY_KEY,
     queryFn: workflowService.catalog.conditions,
   });
   const assignees = useQuery({
-    queryKey: ["workflow-catalog-assignees"],
+    queryKey: WORKFLOW_CATALOG_ASSIGNEES_QUERY_KEY,
     queryFn: () => workflowService.catalog.assignees(),
   });
   const resolvedWorkflowType = workflowType ?? policy?.defaults.workflow_type;
   const resolvedTriggerType = triggerType ?? policy?.defaults.trigger_type;
   const payload = useMemo<WorkflowCreateDTO | null>(
     () =>
-      resolvedWorkflowType && resolvedTriggerType
-        ? {
-            key,
-            name,
-            description,
-            workflow_type: resolvedWorkflowType,
-            trigger_type: resolvedTriggerType,
-            trigger_config: initial?.trigger_config ?? {},
-            required_context_schema: initial?.required_context_schema ?? {},
-            steps,
-          }
-        : null,
-    [
-      description,
-      initial?.required_context_schema,
-      initial?.trigger_config,
-      key,
-      name,
-      resolvedTriggerType,
-      resolvedWorkflowType,
-      steps,
-    ]
+      workflowBuilderPayload({
+        key,
+        name,
+        description,
+        workflowType: resolvedWorkflowType,
+        triggerType: resolvedTriggerType,
+        initial,
+        steps,
+      }),
+    [description, initial, key, name, resolvedTriggerType, resolvedWorkflowType, steps]
   );
   const issues = useMemo(
-    () => (payload ? localIssues(payload) : ["Workflow configuration is unavailable."]),
-    [payload]
+    () =>
+      workflowBuilderIssues({
+        payload,
+        actionCatalogFailed: Boolean(actions.error),
+        conditionCatalogFailed: Boolean(conditions.error),
+      }),
+    [actions.error, conditions.error, payload]
   );
   const validateMutation = useMutation({
     mutationFn: () => {
@@ -371,23 +175,13 @@ export function WorkflowBuilder({
     changed();
   };
   const remove = (index: number): void => {
-    setSteps((current) =>
-      current
-        .filter((_, position) => position !== index)
-        .map((step, position) => ({ ...step, order: position + 1 }))
-    );
+    setSteps((current) => removeStepAt(current, index));
     changed();
   };
   const move = (index: number, offset: -1 | 1): void => {
-    const target = index + offset;
-    if (target < 0 || target >= steps.length) return;
-    const reordered = [...steps];
-    const sourceStep = reordered[index];
-    const targetStep = reordered[target];
-    if (!sourceStep || !targetStep) return;
-    reordered[index] = targetStep;
-    reordered[target] = sourceStep;
-    setSteps(reordered.map((step, position) => ({ ...step, order: position + 1 })));
+    const next = moveStepByOffset(steps, index, offset);
+    if (next === steps) return;
+    setSteps(next);
     changed();
   };
   const navigateAway = (): void => {
@@ -419,7 +213,11 @@ export function WorkflowBuilder({
           </Button>
           <Button
             disabled={submitting || issues.length > 0}
-            onClick={() => void onSubmit(payload).then(() => setDirty(false))}
+            onClick={() =>
+              void onSubmit(payload)
+                .then(() => setDirty(false))
+                .catch(() => undefined)
+            }
           >
             <Save className="mr-2 h-4 w-4" />
             {submitting ? "Saving…" : submitLabel}
@@ -634,7 +432,7 @@ export function WorkflowBuilder({
                               <DescriptorBadge descriptor={action} />
                               <div className="grid gap-3 sm:grid-cols-2">
                                 {action.ui_schema.map((field) => (
-                                  <SchemaField
+                                  <WorkflowSchemaField
                                     key={field.key}
                                     field={field}
                                     value={configuration[field.key]}
@@ -887,7 +685,7 @@ export function WorkflowBuilder({
                               <DescriptorBadge descriptor={conditionDescriptor} />
                               <div className="grid gap-3 sm:grid-cols-2">
                                 {conditionDescriptor.ui_schema.map((field) => (
-                                  <SchemaField
+                                  <WorkflowSchemaField
                                     key={field.key}
                                     field={field}
                                     value={decisionConfig.condition[field.key]}
@@ -912,6 +710,7 @@ export function WorkflowBuilder({
                       ) : null}
                       <div className="grid gap-3 sm:grid-cols-3">
                         <Input
+                          id={`step-${step.key}-timeout`}
                           label="Timeout seconds"
                           type="number"
                           min={1}

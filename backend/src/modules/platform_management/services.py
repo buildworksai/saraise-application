@@ -125,6 +125,7 @@ class AnalyticsService:
         # Mapped to frontend interface: ApiMetrics
         return {
             "total_api_calls_30d": total,
+            "total_requests": total,
             "error_rate_percent": round(error_rate, 2),
             "average_response_time_ms": round(avg, 2),
         }

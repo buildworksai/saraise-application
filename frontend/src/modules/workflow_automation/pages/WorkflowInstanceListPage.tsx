@@ -48,6 +48,11 @@ export function WorkflowInstanceListPage() {
         ? policy?.operational.execution_poll_interval_ms
         : false,
   });
+  if (configuration.isLoading) return <PageSkeleton label="Loading workflow configuration" />;
+  if (configuration.error)
+    return (
+      <WorkflowProblem error={configuration.error} retry={() => void configuration.refetch()} />
+    );
   if (query.isLoading) return <PageSkeleton label="Loading workflow executions" />;
   if (query.error)
     return <WorkflowProblem error={query.error} retry={() => void query.refetch()} />;

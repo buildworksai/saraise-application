@@ -11,8 +11,8 @@ describe("ErrorState", () => {
   it("should render default title and message", () => {
     render(<ErrorState message="Something went wrong" />);
 
-    expect(screen.getByText("Something went wrong")).toBeInTheDocument();
-    expect(screen.getByText("Something went wrong")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Something went wrong" })).toBeInTheDocument();
+    expect(screen.getByText("Something went wrong", { selector: "p" })).toBeInTheDocument();
   });
 
   it("should render custom title", () => {

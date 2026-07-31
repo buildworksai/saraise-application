@@ -4,7 +4,7 @@
  * Root-cause fix: semantic tokens for dark/light/system theme consistency.
  */
 import type { TextareaHTMLAttributes } from "react";
-import { forwardRef } from "react";
+import { forwardRef, useId } from "react";
 import { clsx } from "clsx";
 
 export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
@@ -13,15 +13,18 @@ export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElemen
 }
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ className, error, label, ...props }, ref) => {
+  ({ className, error, id, label, ...props }, ref) => {
+    const generatedId = useId();
+    const textareaId = id ?? (label ? generatedId : undefined);
     return (
       <div className="w-full">
         {label && (
-          <label htmlFor={props.id} className="block text-sm font-medium text-foreground mb-1">
+          <label htmlFor={textareaId} className="block text-sm font-medium text-foreground mb-1">
             {label}
           </label>
         )}
         <textarea
+          id={textareaId}
           ref={ref}
           className={clsx(
             "block w-full px-3 py-2 rounded-md border bg-background text-foreground shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background",

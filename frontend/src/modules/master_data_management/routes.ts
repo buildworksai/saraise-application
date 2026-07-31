@@ -155,7 +155,7 @@ function registered(
       type: "sidebar",
       label,
       icon: DatabaseZap,
-      order: Number.MAX_SAFE_INTEGER,
+      order: path === "/master-data" ? 0 : Number.MAX_SAFE_INTEGER,
       ...(navigationPath ? { path: navigationPath } : {}),
     },
   };

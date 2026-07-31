@@ -7,10 +7,12 @@ SPDX-License-Identifier: Apache-2.0
 import uuid
 from unittest.mock import MagicMock, patch
 
+from cryptography.fernet import Fernet
 from django.test import TestCase
 
-from src.core.notifications.models import Notification, PushNotificationToken
+from src.core.encryption import EncryptionService
 from src.core.notifications.services import PHONE_NUMBER_REGEX, NotificationService
+from src.modules.notifications.models import Notification, NotificationEndpoint
 
 
 class NotificationServiceTestCase(TestCase):
@@ -34,6 +36,8 @@ class NotificationServiceTestCase(TestCase):
         self.assertIsNotNone(notification.id)
         self.assertEqual(notification.title, "Test Notification")
         self.assertEqual(notification.tenant_id, uuid.UUID(self.tenant_id))
+        self.assertEqual(notification.notification_type, "info")
+        self.assertEqual(notification.status, "unread")
 
     def test_send_sms_invalid_phone_number(self):
         """Test SMS sending with invalid phone number."""
@@ -93,40 +97,56 @@ class NotificationServiceTestCase(TestCase):
             message="Test message",
         )
 
-        # Create push token
-        PushNotificationToken.objects.create(
-            tenant_id=uuid.UUID(self.tenant_id),
-            user_id=uuid.UUID(self.user_id),
-            token="test-fcm-token",
-            device_type="web",
-        )
-
-        # Inject the lazily imported Firebase modules without replacing Python's
-        # process-wide import primitive.
-        mock_firebase = MagicMock()
-        mock_messaging = MagicMock()
-        mock_credentials = MagicMock()
-        mock_firebase.messaging = mock_messaging
-        mock_firebase.credentials = mock_credentials
-
-        with patch.dict(
-            "sys.modules",
-            {
-                "firebase_admin": mock_firebase,
-                "firebase_admin.messaging": mock_messaging,
-                "firebase_admin.credentials": mock_credentials,
-            },
+        encryption_key = Fernet.generate_key().decode("ascii")
+        with (
+            self.settings(SARAISE_ENCRYPTION_KEY=encryption_key),
+            patch.dict(
+                "os.environ",
+                {"SARAISE_ENCRYPTION_KEYS": "", "SARAISE_ENCRYPTION_KEY": encryption_key},
+            ),
         ):
-            mock_firebase.get_app.side_effect = ValueError("Not initialized")
-            mock_firebase.initialize_app.return_value = MagicMock()
+            EncryptionService._fernet = None
+            EncryptionService._cached_keys = None
+            NotificationEndpoint.objects.create(
+                tenant_id=uuid.UUID(self.tenant_id),
+                user_id=uuid.UUID(self.user_id),
+                kind="push",
+                address_ciphertext=EncryptionService.encrypt("test-fcm-token"),
+                fingerprint="test-fingerprint",
+                device_type="web",
+                display_name="Test browser",
+                created_by=uuid.UUID(self.user_id),
+            )
 
-            mock_response = MagicMock()
-            mock_response.success_count = 1
-            mock_response.failure_count = 0
-            mock_response.responses = [MagicMock(success=True)]
-            mock_messaging.send_multicast.return_value = mock_response
+            # Inject the lazily imported Firebase modules without replacing Python's
+            # process-wide import primitive.
+            mock_firebase = MagicMock()
+            mock_messaging = MagicMock()
+            mock_credentials = MagicMock()
+            mock_firebase.messaging = mock_messaging
+            mock_firebase.credentials = mock_credentials
 
-            NotificationService._send_push(notification)
+            with patch.dict(
+                "sys.modules",
+                {
+                    "firebase_admin": mock_firebase,
+                    "firebase_admin.messaging": mock_messaging,
+                    "firebase_admin.credentials": mock_credentials,
+                },
+            ):
+                mock_firebase.get_app.side_effect = ValueError("Not initialized")
+                mock_firebase.initialize_app.return_value = MagicMock()
+
+                mock_response = MagicMock()
+                mock_response.success_count = 1
+                mock_response.failure_count = 0
+                mock_response.responses = [MagicMock(success=True)]
+                mock_messaging.send_multicast.return_value = mock_response
+
+                NotificationService._send_push(notification)
+
+            EncryptionService._fernet = None
+            EncryptionService._cached_keys = None
 
         mock_messaging.Notification.assert_called_once_with(
             title="Test",

@@ -3,8 +3,6 @@
 import pytest
 from cryptography.fernet import Fernet
 
-pytest_plugins = ["src.core.testing"]
-
 
 @pytest.fixture(autouse=True)
 def notification_encryption(settings, monkeypatch):

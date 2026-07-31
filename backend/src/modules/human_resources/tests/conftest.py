@@ -14,10 +14,9 @@ from rest_framework.test import APIClient
 
 from src.core.access.decision import HttpPolicyEvaluator, PolicyEvaluation
 from src.core.access.entitlements import Entitlement, Quota
+from src.modules.security_access_control.services import SecurityPolicyEvaluator
 
 from ..permissions import ACTION_ACCESS
-
-pytest_plugins = ["src.core.testing.factories"]
 
 
 @pytest.fixture(autouse=True)
@@ -49,6 +48,15 @@ def allow_hr_access(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     monkeypatch.setattr(
         HttpPolicyEvaluator,
+        "evaluate",
+        lambda self, tenant_id, identity, required_permission, request=None: PolicyEvaluation(
+            allowed=True,
+            reason_codes=("TEST_POLICY_ALLOW",),
+            applied_policies=("human_resources_test_policy",),
+        ),
+    )
+    monkeypatch.setattr(
+        SecurityPolicyEvaluator,
         "evaluate",
         lambda self, tenant_id, identity, required_permission, request=None: PolicyEvaluation(
             allowed=True,

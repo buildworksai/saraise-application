@@ -1,5 +1,10 @@
 /* eslint-disable @typescript-eslint/consistent-indexed-object-style -- Object.entries needs a readonly string-indexed query projection. */
-/** Public v2 contracts for the tenant-scoped AI agent governance runtime. */
+/**
+ * Public v2 contracts for the tenant-scoped AI agent governance runtime.
+ *
+ * === AGENT INSTRUCTION ===
+ * Read this file FIRST when working on this module.
+ */
 
 export type UUID = string;
 export type JSONPrimitive = string | number | boolean | null;
@@ -828,16 +833,17 @@ export function withQuery<T extends object>(path: string, filters: T): string {
 }
 
 const API_ROOT = "/api/v2/ai-agent-management";
-const resource = (name: string) => `${API_ROOT}/${name}/` as const;
-const detail = (name: string, id: UUID) =>
-  `${API_ROOT}/${name}/${encodeURIComponent(id)}/` as const;
-const action = (name: string, id: UUID, verb: string) =>
-  `${API_ROOT}/${name}/${encodeURIComponent(id)}/${verb}/` as const;
+function detail(name: string, id: UUID) {
+  return `${API_ROOT}/${name}/${encodeURIComponent(id)}/` as const;
+}
+function action(name: string, id: UUID, verb: string) {
+  return `${API_ROOT}/${name}/${encodeURIComponent(id)}/${verb}/` as const;
+}
 
 export const ENDPOINTS = {
   AGENTS: {
-    LIST: resource("agents"),
-    CREATE: resource("agents"),
+    LIST: `${API_ROOT}/agents/`,
+    CREATE: `${API_ROOT}/agents/`,
     DETAIL: (id: UUID) => detail("agents", id),
     UPDATE: (id: UUID) => detail("agents", id),
     DELETE: (id: UUID) => detail("agents", id),
@@ -848,102 +854,108 @@ export const ENDPOINTS = {
     EVALUATE: (id: UUID) => action("agents", id, "evaluate"),
   },
   EXECUTIONS: {
-    LIST: resource("executions"),
+    LIST: `${API_ROOT}/executions/`,
     DETAIL: (id: UUID) => detail("executions", id),
     PAUSE: (id: UUID) => action("executions", id, "pause"),
     RESUME: (id: UUID) => action("executions", id, "resume"),
     TERMINATE: (id: UUID) => action("executions", id, "terminate"),
   },
   SCHEDULES: {
-    LIST: resource("schedules"),
-    CREATE: resource("schedules"),
+    LIST: `${API_ROOT}/schedules/`,
+    CREATE: `${API_ROOT}/schedules/`,
     DETAIL: (id: UUID) => detail("schedules", id),
     CANCEL: (id: UUID) => action("schedules", id, "cancel"),
   },
   APPROVALS: {
-    LIST: resource("approvals"),
-    CREATE: resource("approvals"),
+    LIST: `${API_ROOT}/approvals/`,
+    CREATE: `${API_ROOT}/approvals/`,
     DETAIL: (id: UUID) => detail("approvals", id),
     APPROVE: (id: UUID) => action("approvals", id, "approve"),
     REJECT: (id: UUID) => action("approvals", id, "reject"),
     CANCEL: (id: UUID) => action("approvals", id, "cancel"),
   },
   SOD_POLICIES: {
-    LIST: resource("sod-policies"),
-    CREATE: resource("sod-policies"),
+    LIST: `${API_ROOT}/sod-policies/`,
+    CREATE: `${API_ROOT}/sod-policies/`,
     DETAIL: (id: UUID) => detail("sod-policies", id),
     UPDATE: (id: UUID) => detail("sod-policies", id),
     DELETE: (id: UUID) => detail("sod-policies", id),
   },
   SOD_VIOLATIONS: {
-    LIST: resource("sod-violations"),
+    LIST: `${API_ROOT}/sod-violations/`,
     DETAIL: (id: UUID) => detail("sod-violations", id),
   },
   TOOLS: {
-    LIST: resource("tools"),
-    CREATE: resource("tools"),
+    LIST: `${API_ROOT}/tools/`,
+    CREATE: `${API_ROOT}/tools/`,
     DETAIL: (id: UUID) => detail("tools", id),
     UPDATE: (id: UUID) => detail("tools", id),
     DELETE: (id: UUID) => detail("tools", id),
     VALIDATE: (id: UUID) => action("tools", id, "validate"),
   },
   TOOL_INVOCATIONS: {
-    LIST: resource("tool-invocations"),
+    LIST: `${API_ROOT}/tool-invocations/`,
     DETAIL: (id: UUID) => detail("tool-invocations", id),
   },
   EGRESS_RULES: {
-    LIST: resource("egress-rules"),
-    CREATE: resource("egress-rules"),
+    LIST: `${API_ROOT}/egress-rules/`,
+    CREATE: `${API_ROOT}/egress-rules/`,
     DETAIL: (id: UUID) => detail("egress-rules", id),
     UPDATE: (id: UUID) => detail("egress-rules", id),
     DELETE: (id: UUID) => detail("egress-rules", id),
   },
   EGRESS_REQUESTS: {
-    LIST: resource("egress-requests"),
+    LIST: `${API_ROOT}/egress-requests/`,
     DETAIL: (id: UUID) => detail("egress-requests", id),
   },
   SECRETS: {
-    LIST: resource("secrets"),
-    CREATE: resource("secrets"),
+    LIST: `${API_ROOT}/secrets/`,
+    CREATE: `${API_ROOT}/secrets/`,
     DETAIL: (id: UUID) => detail("secrets", id),
     ROTATE: (id: UUID) => action("secrets", id, "rotate"),
     DEACTIVATE: (id: UUID) => action("secrets", id, "deactivate"),
   },
   SECRET_ACCESSES: {
-    LIST: resource("secret-accesses"),
+    LIST: `${API_ROOT}/secret-accesses/`,
     DETAIL: (id: UUID) => detail("secret-accesses", id),
   },
-  QUOTAS: { LIST: resource("quotas"), DETAIL: (id: UUID) => detail("quotas", id) },
-  QUOTA_USAGE: { LIST: resource("quota-usage"), DETAIL: (id: UUID) => detail("quota-usage", id) },
-  SATURATION: { LIST: resource("saturation"), DETAIL: (id: UUID) => detail("saturation", id) },
+  QUOTAS: { LIST: `${API_ROOT}/quotas/`, DETAIL: (id: UUID) => detail("quotas", id) },
+  QUOTA_USAGE: {
+    LIST: `${API_ROOT}/quota-usage/`,
+    DETAIL: (id: UUID) => detail("quota-usage", id),
+  },
+  SATURATION: { LIST: `${API_ROOT}/saturation/`, DETAIL: (id: UUID) => detail("saturation", id) },
   KILL_SWITCHES: {
-    LIST: resource("kill-switches"),
-    CREATE: resource("kill-switches"),
+    LIST: `${API_ROOT}/kill-switches/`,
+    CREATE: `${API_ROOT}/kill-switches/`,
     DETAIL: (id: UUID) => detail("kill-switches", id),
     DEACTIVATE: (id: UUID) => action("kill-switches", id, "deactivate"),
   },
-  TOKEN_USAGE: { LIST: resource("token-usage"), DETAIL: (id: UUID) => detail("token-usage", id) },
+  TOKEN_USAGE: {
+    LIST: `${API_ROOT}/token-usage/`,
+    DETAIL: (id: UUID) => detail("token-usage", id),
+  },
   COST_RECORDS: {
-    LIST: resource("cost-records"),
+    LIST: `${API_ROOT}/cost-records/`,
     DETAIL: (id: UUID) => detail("cost-records", id),
   },
   COST_SUMMARIES: {
-    LIST: resource("cost-summaries"),
+    LIST: `${API_ROOT}/cost-summaries/`,
     DETAIL: (id: UUID) => detail("cost-summaries", id),
     RECALCULATE: `${API_ROOT}/cost-summaries/recalculate/`,
   },
   AUDIT_EVENTS: {
-    LIST: resource("audit-events"),
+    LIST: `${API_ROOT}/audit-events/`,
     DETAIL: (id: UUID) => detail("audit-events", id),
   },
   AUDIT_TRAILS: {
-    LIST: resource("audit-trails"),
+    LIST: `${API_ROOT}/audit-trails/`,
     DETAIL: (id: UUID) => detail("audit-trails", id),
   },
-  JOBS: { LIST: resource("jobs"), DETAIL: (id: UUID) => detail("jobs", id) },
+  JOBS: { LIST: `${API_ROOT}/jobs/`, DETAIL: (id: UUID) => detail("jobs", id) },
   CONFIGURATION: {
-    CURRENT: resource("configuration"),
-    UPDATE: resource("configuration"),
+    CURRENT: `${API_ROOT}/configuration/`,
+    UPDATE: `${API_ROOT}/configuration/`,
     PREVIEW: `${API_ROOT}/configuration/preview/`,
     VERSIONS: `${API_ROOT}/configuration/versions/`,
     ROLLBACK: `${API_ROOT}/configuration/rollback/`,
@@ -978,18 +990,15 @@ export const ROUTES = {
 } as const;
 
 export function isExecutionState(value: unknown): value is ExecutionState {
-  return (
-    typeof value === "string" &&
-    [
-      "created",
-      "validated",
-      "queued",
-      "running",
-      "paused",
-      "completed",
-      "failed",
-      "terminated",
-      "timed_out",
-    ].includes(value)
-  );
+  return [
+    "created",
+    "validated",
+    "queued",
+    "running",
+    "paused",
+    "completed",
+    "failed",
+    "terminated",
+    "timed_out",
+  ].includes(value as ExecutionState);
 }

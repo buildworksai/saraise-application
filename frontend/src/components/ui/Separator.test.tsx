@@ -9,7 +9,7 @@ import { Separator } from "./Separator";
 describe("Separator", () => {
   it("should render separator element", () => {
     const { container } = render(<Separator />);
-    const separator = container.querySelector('[role="separator"]');
+    const separator = container.querySelector('[data-orientation="horizontal"]');
     expect(separator).toBeInTheDocument();
   });
 
@@ -23,7 +23,7 @@ describe("Separator", () => {
     const { container: horizontal } = render(<Separator orientation="horizontal" />);
     const { container: vertical } = render(<Separator orientation="vertical" />);
 
-    expect(horizontal.querySelector('[role="separator"]')).toBeInTheDocument();
-    expect(vertical.querySelector('[role="separator"]')).toBeInTheDocument();
+    expect(horizontal.querySelector('[data-orientation="horizontal"]')).toBeInTheDocument();
+    expect(vertical.querySelector('[data-orientation="vertical"]')).toBeInTheDocument();
   });
 });

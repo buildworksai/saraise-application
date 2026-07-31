@@ -4,7 +4,7 @@
  * Reusable input component with error handling.
  */
 import type { InputHTMLAttributes } from "react";
-import { forwardRef } from "react";
+import { forwardRef, useId } from "react";
 import { clsx } from "clsx";
 
 export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -13,15 +13,18 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className, error, label, ...props }, ref) => {
+  ({ className, error, id, label, ...props }, ref) => {
+    const generatedId = useId();
+    const inputId = id ?? (label ? generatedId : undefined);
     return (
       <div className="w-full">
         {label && (
-          <label htmlFor={props.id} className="block text-sm font-medium text-foreground mb-1">
+          <label htmlFor={inputId} className="block text-sm font-medium text-foreground mb-1">
             {label}
           </label>
         )}
         <input
+          id={inputId}
           ref={ref}
           className={clsx(
             // Root-cause fix: semantic tokens (no hardcoded grays/blues).

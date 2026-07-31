@@ -5,6 +5,8 @@ Root conftest - runs before any tests. Sets SQLite for tests when Postgres unava
 import os
 import sys
 
+pytest_plugins = ["src.core.testing"]
+
 # Must run before Django settings load - set env for SQLite in tests
 if "pytest" in sys.argv or "test" in sys.argv:
     os.environ["DJANGO_USE_SQLITE_FOR_TESTS"] = "1"

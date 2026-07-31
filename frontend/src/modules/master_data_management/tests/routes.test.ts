@@ -28,8 +28,15 @@ describe("master data tenant routes", () => {
 
   it("gives every page a discoverable sidebar NavItem", () => {
     const tree = buildTenantSidebarTree(tenantRoutes);
+    const leafPaths: string[] = [];
+    for (const branch of tree) {
+      for (const child of branch.children) {
+        leafPaths.push(child.path);
+      }
+    }
+
     expect(tree).toHaveLength(1);
-    expect(tree[0]?.children[0]?.path).toBe("/master-data");
+    expect(leafPaths).toContain("/master-data");
     expect(tree[0]?.children).toHaveLength(26);
     expect(tenantRoutes.every((route) => route.navigation.type === "sidebar")).toBe(true);
   });

@@ -19,8 +19,6 @@ from .factories import (
     RuleExecutionFactory,
 )
 
-pytest_plugins = ["src.core.testing.factories"]
-
 
 @pytest.fixture(autouse=True)
 def registered_resource_contract():

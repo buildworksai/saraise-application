@@ -16,8 +16,6 @@ from src.modules.ai_agent_management.models import Agent, AgentExecution
 from src.modules.ai_agent_management.registries import evaluation_registry, runner_registry
 from src.modules.ai_agent_management.tool_models import Tool
 
-pytest_plugins = ["src.core.testing.factories"]
-
 
 @pytest.fixture(autouse=True)
 def configured_runtime(settings, monkeypatch):

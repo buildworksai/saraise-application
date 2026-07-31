@@ -1,8 +1,17 @@
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/services/api-client";
 import { EmptyState, GovernedError, PageSkeleton } from "../components/MdmUI";
 import { SchemaFields } from "../components/SchemaFields";
+
+function renderWithQueryClient(element: ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(<QueryClientProvider client={client}>{element}</QueryClientProvider>);
+}
 
 describe("master data governed UX", () => {
   it.each([
@@ -18,7 +27,7 @@ describe("master data governed UX", () => {
   });
 
   it("announces geometry-matched loading and an actionable empty state", () => {
-    const { rerender } = render(<PageSkeleton label="Loading MDM queue" />);
+    const { rerender } = renderWithQueryClient(<PageSkeleton label="Loading MDM queue" />);
     expect(screen.getByLabelText("Loading MDM queue")).toHaveAttribute("aria-busy", "true");
     rerender(
       <EmptyState

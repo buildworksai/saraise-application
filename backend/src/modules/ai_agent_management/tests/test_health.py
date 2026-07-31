@@ -137,8 +137,8 @@ def test_database_failure_is_503_and_redacted(authenticated_tenant_a_client, exe
 @pytest.mark.django_db
 def test_cache_failure_is_503_and_redacted(authenticated_tenant_a_client, execution_handler, monkeypatch):
     monkeypatch.setattr(
-        health.cache,
-        "set",
+        health,
+        "_cache_set",
         lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError("redis://secret-host:6379")),
     )
     response = authenticated_tenant_a_client.get(HEALTH_URL)

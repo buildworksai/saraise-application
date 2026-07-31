@@ -73,6 +73,11 @@ export function TaskInboxPage() {
     setDecision(next);
     mutation.reset();
   };
+  if (configuration.isLoading) return <PageSkeleton label="Loading workflow configuration" />;
+  if (configuration.error)
+    return (
+      <WorkflowProblem error={configuration.error} retry={() => void configuration.refetch()} />
+    );
   if (query.isLoading) return <PageSkeleton label="Loading workflow task inbox" />;
   if (query.error)
     return <WorkflowProblem error={query.error} retry={() => void query.refetch()} />;

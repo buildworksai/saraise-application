@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from src.core.async_jobs.models import OutboxEvent
 from src.core.async_jobs.services import get_handler
-from src.core.notifications.services import NotificationService
+from src.modules.notifications import health as notifications_health
 from src.modules.performance_monitoring import health, tasks
 from src.modules.performance_monitoring import urls as v1_urls
 from src.modules.performance_monitoring import v2_urls
@@ -24,20 +24,28 @@ from src.modules.performance_monitoring.models import Metric, MetricDataPoint, M
 from src.modules.performance_monitoring.services import ConfigurationService
 
 
-def test_notification_readiness_fails_closed_without_contract(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delattr(NotificationService, "readiness_probe", raising=False)
+def test_notification_readiness_fails_closed_when_dependency_contract_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        health.connection.introspection,
+        "table_names",
+        lambda: (_ for _ in ()).throw(RuntimeError("metadata unavailable")),
+    )
     result = health.notifications_probe()
     assert result.healthy is False
-    assert result.details == {"code": "readiness_contract_unavailable"}
+    assert result.details == {"code": "dependency_unavailable"}
 
 
 def test_notification_readiness_accepts_only_conclusive_healthy_contract(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        NotificationService,
-        "readiness_probe",
-        staticmethod(lambda: SimpleNamespace(healthy=True)),
-        raising=False,
-    )
+    required_tables = {
+        "notifications_templates",
+        "notifications_deliveries",
+        "notifications_notifications",
+        "notifications_preferences",
+        "notifications_endpoints",
+        "notifications_configurations",
+    }
+    monkeypatch.setattr(health.connection.introspection, "table_names", lambda: required_tables)
+    monkeypatch.setattr(notifications_health, "_handlers_status", lambda: SimpleNamespace(healthy=True))
     result = health.notifications_probe()
     assert result.healthy is True
     assert result.details == {"code": "ready"}

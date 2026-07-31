@@ -104,6 +104,11 @@ const object = <T>(value: unknown, correlationId?: string) =>
   requireObject<T>(value, correlationId);
 const configuration = (value: unknown, correlationId?: string): SalesConfiguration =>
   object<SalesConfiguration>(value, correlationId);
+const configurationPreview = (value: unknown, correlationId?: string): ConfigurationPreview => {
+  if (!isRecord(value) || typeof value.valid !== "boolean" || !Array.isArray(value.diff))
+    throw new SalesGatewayError(correlationId);
+  return value as unknown as ConfigurationPreview;
+};
 
 export const salesQueryKeys = {
   all: ["sales-management"] as const,
@@ -349,11 +354,7 @@ export const salesService = {
   ): Promise<ConfigurationPreview> =>
     unwrap(
       await apiClient.post<unknown>(ENDPOINTS.CONFIGURATION.PREVIEW, values),
-      (data, correlationId) => {
-        if (!isRecord(data) || typeof data.valid !== "boolean" || !Array.isArray(data.diff))
-          throw new SalesGatewayError(correlationId);
-        return data as unknown as ConfigurationPreview;
-      }
+      configurationPreview
     ),
   applyConfiguration: async (change: ConfigurationChange): Promise<SalesConfiguration> =>
     unwrap(
@@ -391,7 +392,7 @@ export const salesService = {
       await apiClient.post<unknown>(ENDPOINTS.CONFIGURATION.IMPORT, payload),
       (data, correlationId) => {
         if (!isRecord(data)) throw new SalesGatewayError(correlationId);
-        if ("valid" in data) return data as unknown as ConfigurationPreview;
+        if ("valid" in data) return configurationPreview(data, correlationId);
         return configuration(data, correlationId);
       }
     ),

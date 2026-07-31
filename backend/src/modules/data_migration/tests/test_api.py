@@ -16,28 +16,28 @@ from src.modules.data_migration import api
 @pytest.mark.parametrize(
     ("path", "view_name"),
     (
-        ("/api/v2/data-migration/jobs/", "data_migration:job-list"),
-        ("/api/v2/data-migration/jobs/import/", "data_migration:job-import-definition"),
+        ("/api/v2/data-migration/jobs/", "data_migration_v2:job-list"),
+        ("/api/v2/data-migration/jobs/import/", "data_migration_v2:job-import-definition"),
         (
             "/api/v2/data-migration/jobs/00000000-0000-0000-0000-000000000001/validate/",
-            "data_migration:job-validate-definition",
+            "data_migration_v2:job-validate-definition",
         ),
         (
             "/api/v2/data-migration/jobs/00000000-0000-0000-0000-000000000001/dry-runs/",
-            "data_migration:job-request-dry-run",
+            "data_migration_v2:job-request-dry-run",
         ),
         (
             "/api/v2/data-migration/runs/00000000-0000-0000-0000-000000000001/issues/export/",
-            "data_migration:run-export-issues",
+            "data_migration_v2:run-export-issues",
         ),
         (
             "/api/v2/data-migration/connections/00000000-0000-0000-0000-000000000001/test/",
-            "data_migration:connection-test-connection",
+            "data_migration_v2:connection-test-connection",
         ),
-        ("/api/v2/data-migration/configuration/", "data_migration:configuration"),
-        ("/api/v2/data-migration/configuration/versions/1/restore/", "data_migration:configuration-restore"),
-        ("/api/v2/data-migration/health/live/", "data_migration:health-live"),
-        ("/api/v2/data-migration/health/ready/", "data_migration:health-ready"),
+        ("/api/v2/data-migration/configuration/", "data_migration_v2:configuration"),
+        ("/api/v2/data-migration/configuration/versions/1/restore/", "data_migration_v2:configuration-restore"),
+        ("/api/v2/data-migration/health/live/", "data_migration_v2:health-live"),
+        ("/api/v2/data-migration/health/ready/", "data_migration_v2:health-ready"),
     ),
 )
 def test_required_routes_resolve(path: str, view_name: str) -> None:

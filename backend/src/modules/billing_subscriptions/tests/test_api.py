@@ -10,11 +10,12 @@ Tests all DRF ViewSet endpoints:
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient
 
 from src.core.auth_utils import get_user_tenant_id
-from src.modules.billing_subscriptions.models import TenantBaseModel
+from src.modules.billing_subscriptions.models import Subscription, SubscriptionPlan, UsageRecord
 
 User = get_user_model()
 
@@ -63,99 +64,78 @@ def override_saraise_mode(settings):
 
 
 @pytest.mark.django_db
-class TestTenantBaseModelViewSet:
-    """Test TenantBaseModelViewSet CRUD operations."""
+class TestBillingSubscriptionsAPI:
+    """Test registered BillingSubscriptions API endpoints."""
 
-    def test_list_resources_requires_authentication(self, api_client):
-        """Test that listing resources requires authentication."""
-        response = api_client.get("/api/v1/billing-subscriptions/resources/")
-        assert response.status_code == status.HTTP_200_OK
+    def test_list_plans_requires_authentication(self, api_client):
+        """Test that billing endpoints require authentication."""
+        response = api_client.get("/api/v1/billing-subscriptions/plans/")
+        assert response.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}
 
-    def test_list_resources(self, authenticated_client, tenant_user):
-        """Test listing resources for authenticated user."""
-        tenant_id = get_user_tenant_id(tenant_user)
-
-        # Create test resources
-        TenantBaseModel.objects.create(
-            tenant_id=tenant_id,
-            name="Test Resource 1",
-            description="Test description 1",
-            created_by=str(tenant_user.id),
+    def test_list_plans_returns_only_active_platform_plans(self, authenticated_client):
+        """Test listing active platform-level subscription plans."""
+        active = SubscriptionPlan.objects.create(
+            name="Growth",
+            description="Growth tier",
+            price="99.00",
+            billing_cycle="monthly",
+            features=["crm"],
+            limits={"users": 25},
+            is_active=True,
         )
-        TenantBaseModel.objects.create(
-            tenant_id=tenant_id,
-            name="Test Resource 2",
-            description="Test description 2",
-            created_by=str(tenant_user.id),
+        SubscriptionPlan.objects.create(
+            name="Retired",
+            description="Retired tier",
+            price="19.00",
+            billing_cycle="monthly",
+            is_active=False,
         )
 
-        response = authenticated_client.get("/api/v1/billing-subscriptions/resources/")
+        response = authenticated_client.get("/api/v1/billing-subscriptions/plans/")
+
         assert response.status_code == status.HTTP_200_OK
         data = response.data if isinstance(response.data, list) else response.data.get("results", [])
-        assert len(data) == 2
+        assert [item["id"] for item in data] == [active.id]
 
-    def test_create_resource(self, authenticated_client, tenant_user):
-        """Test creating a resource."""
+    def test_list_subscriptions_filters_to_authenticated_tenant(self, authenticated_client, tenant_user):
+        """Test subscription listing does not expose another tenant's records."""
+        tenant_id = get_user_tenant_id(tenant_user)
+        other_tenant_id = "11111111-1111-4111-8111-111111111111"
+        plan = SubscriptionPlan.objects.create(
+            name="Tenant Plan",
+            description="Tenant tier",
+            price="49.00",
+            billing_cycle="monthly",
+            is_active=True,
+        )
+        own = Subscription.objects.create(
+            tenant_id=tenant_id,
+            plan=plan,
+            status="active",
+            start_date=timezone.now().date(),
+        )
+        Subscription.objects.create(
+            tenant_id=other_tenant_id,
+            plan=plan,
+            status="active",
+            start_date=timezone.now().date(),
+        )
+
+        response = authenticated_client.get("/api/v1/billing-subscriptions/subscriptions/")
+        assert response.status_code == status.HTTP_200_OK
+        data = response.data if isinstance(response.data, list) else response.data.get("results", [])
+        assert [item["id"] for item in data] == [own.id]
+
+    def test_create_usage_record_sets_authenticated_tenant(self, authenticated_client, tenant_user):
+        """Test usage-record create derives tenant from the session identity."""
         tenant_id = get_user_tenant_id(tenant_user)
 
         data = {
-            "name": "New Resource",
-            "description": "New resource description",
-            "config": {"key": "value"},
+            "resource_type": "api_calls",
+            "quantity": "42.0000",
         }
 
-        response = authenticated_client.post("/api/v1/billing-subscriptions/resources/", data, format="json")
+        response = authenticated_client.post("/api/v1/billing-subscriptions/usage-records/", data, format="json")
         assert response.status_code == status.HTTP_201_CREATED
-        assert response.data["name"] == "New Resource"
         assert response.data["tenant_id"] == tenant_id
-
-    def test_get_resource_detail(self, authenticated_client, tenant_user):
-        """Test getting resource detail."""
-        tenant_id = get_user_tenant_id(tenant_user)
-
-        resource = TenantBaseModel.objects.create(
-            tenant_id=tenant_id,
-            name="Test Resource",
-            description="Test description",
-            created_by=str(tenant_user.id),
-        )
-
-        response = authenticated_client.get(f"/api/v1/billing-subscriptions/resources/{resource.id}/")
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["id"] == resource.id
-        assert response.data["name"] == "Test Resource"
-
-    def test_update_resource(self, authenticated_client, tenant_user):
-        """Test updating a resource."""
-        tenant_id = get_user_tenant_id(tenant_user)
-
-        resource = TenantBaseModel.objects.create(
-            tenant_id=tenant_id,
-            name="Original Name",
-            description="Original description",
-            created_by=str(tenant_user.id),
-        )
-
-        data = {"name": "Updated Name", "description": "Updated description"}
-        response = authenticated_client.put(
-            f"/api/v1/billing-subscriptions/resources/{resource.id}/", data, format="json"
-        )
-        assert response.status_code == status.HTTP_200_OK
-        assert response.data["name"] == "Updated Name"
-
-    def test_delete_resource(self, authenticated_client, tenant_user):
-        """Test deleting a resource."""
-        tenant_id = get_user_tenant_id(tenant_user)
-
-        resource = TenantBaseModel.objects.create(
-            tenant_id=tenant_id,
-            name="To Delete",
-            description="Will be deleted",
-            created_by=str(tenant_user.id),
-        )
-
-        response = authenticated_client.delete(f"/api/v1/billing-subscriptions/resources/{resource.id}/")
-        assert response.status_code == status.HTTP_204_NO_CONTENT
-
-        # Verify resource is deleted
-        assert not TenantBaseModel.objects.filter(id=resource.id).exists()
+        assert str(UsageRecord.objects.get(id=response.data["id"]).tenant_id) == tenant_id

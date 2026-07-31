@@ -80,6 +80,11 @@ export function WorkflowListPage() {
     setOrdering("-updated_at");
     setPage(1);
   };
+  if (configuration.isLoading) return <PageSkeleton label="Loading workflow configuration" />;
+  if (configuration.error)
+    return (
+      <WorkflowProblem error={configuration.error} retry={() => void configuration.refetch()} />
+    );
   if (query.isLoading) return <PageSkeleton label="Loading workflow definitions" />;
   if (query.error)
     return <WorkflowProblem error={query.error} retry={() => void query.refetch()} />;

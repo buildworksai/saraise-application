@@ -84,8 +84,22 @@ function item<T>(response: ApiSuccess<T>): ItemResult<T> {
   return { data: response.data, meta: response.meta };
 }
 
-function list<T>(response: ApiListSuccess<T>): ListResult<T> {
-  return { items: response.data, pagination: response.meta.pagination, meta: response.meta };
+type ApiListResponse<T> = Omit<ApiListSuccess<T>, "meta"> & {
+  readonly meta: ApiSuccess<T>["meta"] & {
+    readonly pagination?: ApiListSuccess<T>["meta"]["pagination"];
+  };
+  readonly pagination?: ApiListSuccess<T>["meta"]["pagination"];
+};
+
+function list<T>(response: ApiListResponse<T>): ListResult<T> {
+  const pagination = response.meta.pagination ?? response.pagination;
+  if (!pagination)
+    throw new Error("Master Data list response is missing governed pagination metadata.");
+  return {
+    items: response.data,
+    pagination,
+    meta: response.meta,
+  };
 }
 
 async function getItem<T>(path: string): Promise<ItemResult<T>> {

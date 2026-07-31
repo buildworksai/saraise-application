@@ -7,6 +7,7 @@ import pytest
 from django.urls import resolve
 from rest_framework import status
 
+from src.core.access.decision import PolicyEvaluation
 from src.core.access.entitlements import Entitlement, Quota
 from src.modules.notifications.api import (
     ConfigurationAPIView,
@@ -23,13 +24,34 @@ from src.modules.notifications.api import (
     ReadinessAPIView,
     TemplateViewSet,
 )
+from src.modules.security_access_control.services import SecurityPolicyEvaluator
 
 
 def _allow_policy_engine(monkeypatch, settings):
-    """Allow policy over the real HTTP evaluator without bypassing the pipeline."""
+    """Allow policy without bypassing entitlement and quota checks."""
 
     settings.SARAISE_POLICY_ENGINE_URL = "https://policy.example.test"
     calls = []
+
+    def evaluate(self, tenant_id, identity, required_permission, request=None):
+        del self
+        calls.append(
+            (
+                "local",
+                {
+                    "tenant_id": str(tenant_id),
+                    "actor_id": str(getattr(identity, "id", "")),
+                    "action": required_permission,
+                    "path": getattr(request, "path", ""),
+                },
+                None,
+            )
+        )
+        return PolicyEvaluation(
+            allowed=True,
+            reason_codes=("TEST_POLICY_ALLOW",),
+            applied_policies=("notifications-test-policy",),
+        )
 
     def post(url, *, json, timeout):
         calls.append((url, json, timeout))
@@ -42,6 +64,7 @@ def _allow_policy_engine(monkeypatch, settings):
             },
         )
 
+    monkeypatch.setattr(SecurityPolicyEvaluator, "evaluate", evaluate)
     monkeypatch.setattr("src.core.access.decision.requests.post", post)
     return calls
 
@@ -108,8 +131,8 @@ def test_governed_collection_envelope_and_bounded_pagination(
     }
     assert response.json()["meta"]["correlation_id"]
     assert response.json()["meta"]["timestamp"].endswith("Z")
-    assert calls[0][0] == "https://policy.example.test/api/v1/evaluate"
-    assert calls[0][2] == 2.0
+    assert calls[0][0] == "local"
+    assert calls[0][1]["action"] == "notifications.inbox:read"
     assert Quota.objects.get(tenant_id=tenant_a.id, resource="notifications.api_reads").remaining == 9
 
 

@@ -16,7 +16,9 @@ from django.conf import settings
 from django.core.mail import send_mail
 from django.utils import timezone
 
-from .models import Notification, NotificationPreference
+from src.core.encryption import EncryptionService
+from src.modules.notifications.models import Notification, NotificationEndpoint, NotificationPreference
+from src.modules.notifications.services import NotificationInboxService
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,11 @@ def _convert_user_id_to_uuid(user_id_str: str) -> uuid.UUID:
     except ValueError:
         # If not a UUID, generate one from the user ID using uuid5
         return uuid.uuid5(NAMESPACE_USER_ID, user_id_str)
+
+
+def _convert_tenant_id_to_uuid(tenant_id: str | uuid.UUID) -> uuid.UUID:
+    """Accept both legacy string tenant IDs and canonical UUID objects."""
+    return tenant_id if isinstance(tenant_id, uuid.UUID) else uuid.UUID(str(tenant_id))
 
 
 class NotificationService:
@@ -74,7 +81,7 @@ class NotificationService:
             Created Notification instance.
         """
         try:
-            tenant_id_uuid = uuid.UUID(tenant_id)
+            tenant_id_uuid = _convert_tenant_id_to_uuid(tenant_id)
             user_id_uuid = _convert_user_id_to_uuid(user_id)
         except (ValueError, TypeError) as e:
             logger.error(f"Invalid tenant_id or user_id format: {e}")
@@ -85,7 +92,8 @@ class NotificationService:
             user_id=user_id_uuid,
             title=title,
             message=message,
-            type=notification_type,
+            notification_type=notification_type,
+            category=str((metadata or {}).get("category", "general")),
             action_url=action_url or "",
             metadata=metadata or {},
         )
@@ -105,40 +113,43 @@ class NotificationService:
             notification: Notification instance.
         """
         try:
-            # notification.tenant_id and notification.user_id are already UUIDs
-            preference, _ = NotificationPreference.objects.get_or_create(
-                tenant_id=notification.tenant_id,
-                user_id=notification.user_id,
-                defaults={
-                    "email_enabled": True,
-                    "sms_enabled": False,
-                    "push_enabled": True,
-                    "in_app_enabled": True,
-                },
-            )
-
-            # Check if this notification type is enabled
-            if notification.type == "workflow" and not preference.workflow_notifications:
-                return
-            if notification.type == "approval" and not preference.approval_notifications:
-                return
-            if notification.type == "system" and not preference.system_notifications:
+            category = notification.category or notification.notification_type
+            if not NotificationService._category_enabled(notification, category):
                 return
 
             # Send email if enabled
-            if preference.email_enabled:
+            if NotificationService._channel_enabled(notification, "email", category, default=True):
                 NotificationService._send_email(notification)
 
             # Send SMS if enabled (TODO: Implement SMS provider integration)
-            if preference.sms_enabled:
+            if NotificationService._channel_enabled(notification, "sms", category, default=False):
                 NotificationService._send_sms(notification)
 
             # Send push notification if enabled (TODO: Implement web push)
-            if preference.push_enabled:
+            if NotificationService._channel_enabled(notification, "push", category, default=True):
                 NotificationService._send_push(notification)
 
         except Exception as e:
             logger.error(f"Failed to send external notifications: {e}")
+
+    @staticmethod
+    def _channel_enabled(notification: Notification, channel: str, category: str, *, default: bool) -> bool:
+        """Read canonical v2 preferences for the legacy core service contract."""
+        preference = (
+            NotificationPreference.objects.for_tenant(notification.tenant_id)
+            .filter(user_id=notification.user_id, channel=channel, category=category)
+            .first()
+        )
+        return default if preference is None else bool(preference.enabled)
+
+    @staticmethod
+    def _category_enabled(notification: Notification, category: str) -> bool:
+        """Preserve legacy category opt-outs without restoring deleted tables."""
+        preferences = NotificationPreference.objects.for_tenant(notification.tenant_id).filter(
+            user_id=notification.user_id,
+            category=category,
+        )
+        return not preferences.exists() or preferences.filter(enabled=True).exists()
 
     @staticmethod
     def _send_email(notification: Notification) -> None:
@@ -290,16 +301,13 @@ class NotificationService:
 
                 firebase_admin.initialize_app(cred)
 
-            # Get all active FCM tokens for the user
-            from .models import PushNotificationToken
-
-            tokens = PushNotificationToken.objects.filter(
-                tenant_id=notification.tenant_id,
+            endpoints = NotificationEndpoint.objects.for_tenant(notification.tenant_id).filter(
+                kind="push",
                 user_id=notification.user_id,
                 is_active=True,
             )
 
-            if not tokens.exists():
+            if not endpoints.exists():
                 logger.debug(f"No active FCM tokens found for user {notification.user_id}")
                 return
 
@@ -312,13 +320,16 @@ class NotificationService:
             # Prepare data payload (for deep linking)
             data_payload = {
                 "notification_id": str(notification.id),
-                "type": notification.type,
+                "type": notification.notification_type,
             }
             if notification.action_url:
                 data_payload["action_url"] = notification.action_url
 
             # Prepare message for batch sending
-            token_list = [token.token for token in tokens]
+            token_by_endpoint = [
+                (endpoint, EncryptionService.decrypt(endpoint.address_ciphertext)) for endpoint in endpoints
+            ]
+            token_list = [token for _, token in token_by_endpoint]
             if not token_list:
                 return
 
@@ -346,10 +357,15 @@ class NotificationService:
                     if response.success_count > 0:
                         success_count += response.success_count
                         # Update last_used_at for successful tokens
-                        PushNotificationToken.objects.filter(
-                            tenant_id=notification.tenant_id,
+                        successful_tokens = set(batch_tokens[: response.success_count])
+                        NotificationEndpoint.objects.for_tenant(notification.tenant_id).filter(
+                            kind="push",
                             user_id=notification.user_id,
-                            token__in=batch_tokens[: response.success_count],
+                            address_ciphertext__in=[
+                                endpoint.address_ciphertext
+                                for endpoint, token in token_by_endpoint
+                                if token in successful_tokens
+                            ],
                         ).update(last_used_at=timezone.now())
 
                     # Handle failed tokens (mark as inactive if invalid)
@@ -365,15 +381,15 @@ class NotificationService:
                                     "NOT_FOUND",
                                 ]:
                                     try:
-                                        token_obj = PushNotificationToken.objects.get(
-                                            tenant_id=notification.tenant_id,
-                                            user_id=notification.user_id,
-                                            token=batch_tokens[idx],
+                                        endpoint = next(
+                                            candidate
+                                            for candidate, token in token_by_endpoint
+                                            if token == batch_tokens[idx]
                                         )
-                                        token_obj.is_active = False
-                                        token_obj.save(update_fields=["is_active"])
+                                        endpoint.is_active = False
+                                        endpoint.save(update_fields=["is_active", "updated_at"])
                                         logger.info(f"Deactivated invalid FCM token for user {notification.user_id}")
-                                    except PushNotificationToken.DoesNotExist:
+                                    except StopIteration:
                                         pass
 
                 except Exception as e:
@@ -412,16 +428,16 @@ class NotificationService:
             List of Notification instances.
         """
         try:
-            tenant_id_uuid = uuid.UUID(tenant_id)
+            tenant_id_uuid = _convert_tenant_id_to_uuid(tenant_id)
             user_id_uuid = _convert_user_id_to_uuid(user_id)
         except (ValueError, TypeError) as e:
             logger.warning(f"Invalid tenant_id or user_id format: {e}")
             return []
 
-        queryset = Notification.objects.filter(tenant_id=tenant_id_uuid, user_id=user_id_uuid)
+        queryset = Notification.objects.for_tenant(tenant_id_uuid).filter(user_id=user_id_uuid)
 
         if unread_only:
-            queryset = queryset.filter(read=False)
+            queryset = queryset.filter(status="unread")
 
         return list(queryset[:limit])
 
@@ -438,7 +454,7 @@ class NotificationService:
             True if marked as read, False if not found or unauthorized.
         """
         try:
-            tenant_id_uuid = uuid.UUID(tenant_id)
+            tenant_id_uuid = _convert_tenant_id_to_uuid(tenant_id)
             user_id_uuid = _convert_user_id_to_uuid(user_id)
             notification_id_uuid = uuid.UUID(notification_id)
         except (ValueError, TypeError) as e:
@@ -446,10 +462,12 @@ class NotificationService:
             return False
 
         try:
-            notification = Notification.objects.get(
-                id=notification_id_uuid, tenant_id=tenant_id_uuid, user_id=user_id_uuid
+            NotificationInboxService.mark_read(
+                tenant_id_uuid,
+                user_id_uuid,
+                notification_id_uuid,
+                f"legacy-mark-read:{notification_id_uuid}",
             )
-            notification.mark_as_read()
             return True
         except Notification.DoesNotExist:
             return False
@@ -466,14 +484,16 @@ class NotificationService:
             Number of notifications marked as read.
         """
         try:
-            tenant_id_uuid = uuid.UUID(tenant_id)
+            tenant_id_uuid = _convert_tenant_id_to_uuid(tenant_id)
             user_id_uuid = _convert_user_id_to_uuid(user_id)
         except (ValueError, TypeError) as e:
             logger.warning(f"Invalid tenant_id or user_id format: {e}")
             return 0
 
-        count = Notification.objects.filter(tenant_id=tenant_id_uuid, user_id=user_id_uuid, read=False).update(
-            read=True, read_at=timezone.now()
+        count = NotificationInboxService.mark_all_read(
+            tenant_id_uuid,
+            user_id_uuid,
+            f"legacy-mark-all-read:{uuid.uuid4()}",
         )
 
         logger.info(f"Marked {count} notifications as read for user {user_id}")

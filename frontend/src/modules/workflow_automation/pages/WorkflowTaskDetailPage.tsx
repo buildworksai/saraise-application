@@ -124,7 +124,9 @@ export function WorkflowTaskDetailPage() {
               <div key={key} className="flex justify-between gap-4 py-3">
                 <dt className="text-sm text-muted-foreground">{key}</dt>
                 <dd className="max-w-sm break-words text-right text-sm">
-                  {typeof value === "object" ? "Structured value hidden" : safeValue(value)}
+                  {value === null || typeof value !== "object"
+                    ? safeValue(value)
+                    : "Structured value hidden"}
                 </dd>
               </div>
             ))}

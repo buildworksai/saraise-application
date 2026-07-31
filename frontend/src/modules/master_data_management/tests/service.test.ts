@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/unbound-method -- mocked API methods are assertion targets, never detached invocations. */
+/* eslint-disable max-lines-per-function, @typescript-eslint/unbound-method -- mocked API methods are assertion targets, never detached invocations. */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { apiClient } from "@/services/api-client";
 import { ENDPOINTS } from "../contracts";
@@ -29,6 +29,79 @@ describe("master data v2 service", () => {
       pagination,
     });
     expect(api.get).toHaveBeenCalledWith(`${ENDPOINTS.ENTITIES.LIST}?search=Acme&page=2`);
+  });
+
+  it("prefers governed meta pagination, falls back to legacy pagination, and fails closed when absent", async () => {
+    const governedPagination = { ...pagination, count: 2, total_pages: 1 };
+    const legacyPagination = { ...pagination, count: 1, page_size: 10 };
+    const governedMeta = { ...meta, pagination: governedPagination };
+    api.get
+      .mockResolvedValueOnce({ data: [], meta: governedMeta, pagination: legacyPagination })
+      .mockResolvedValueOnce({ data: [], meta, pagination: legacyPagination })
+      .mockResolvedValueOnce({ data: [], meta });
+
+    await expect(masterDataService.entities.list()).resolves.toMatchObject({
+      pagination: governedPagination,
+      meta: governedMeta,
+    });
+    await expect(masterDataService.entities.list()).resolves.toMatchObject({
+      pagination: legacyPagination,
+      meta,
+    });
+    await expect(masterDataService.entities.list()).rejects.toThrow(
+      "Master Data list response is missing governed pagination metadata."
+    );
+    expect(api.get).toHaveBeenNthCalledWith(1, ENDPOINTS.ENTITIES.LIST);
+    expect(api.get).toHaveBeenNthCalledWith(2, ENDPOINTS.ENTITIES.LIST);
+    expect(api.get).toHaveBeenNthCalledWith(3, ENDPOINTS.ENTITIES.LIST);
+  });
+
+  it("serializes governed query primitives and omits empty or unsupported filter values", async () => {
+    api.get.mockResolvedValue({ data: [], meta, pagination });
+
+    await masterDataService.entityTypes.list({
+      search: "",
+      page: 0,
+      page_size: undefined,
+      is_active: false,
+    });
+    await masterDataService.entities.list({
+      search: "",
+      quality_min: 0,
+      deleted: false,
+      source_system: undefined,
+    });
+
+    expect(api.get).toHaveBeenNthCalledWith(
+      1,
+      `${ENDPOINTS.ENTITY_TYPES.LIST}?page=0&is_active=false`
+    );
+    expect(api.get).toHaveBeenNthCalledWith(
+      2,
+      `${ENDPOINTS.ENTITIES.LIST}?quality_min=0&deleted=false`
+    );
+  });
+
+  it("wraps governed item envelopes without dropping response evidence", async () => {
+    const summary = {
+      total_entities: 2,
+      active_entities: 1,
+      pending_review_entities: 1,
+      merged_entities: 0,
+      archived_entities: 0,
+      quality_evaluated_entities: 1,
+      average_quality_score: 98,
+      score_distribution: [],
+      quality_trend: [],
+      open_issues: 0,
+      critical_issues: 0,
+      pending_matches: 0,
+      recent_activity: [],
+    };
+    api.get.mockResolvedValueOnce({ data: summary, meta });
+
+    await expect(masterDataService.dashboard.get()).resolves.toEqual({ data: summary, meta });
+    expect(api.get).toHaveBeenCalledWith(ENDPOINTS.DASHBOARD);
   });
 
   it("uses contract-owned endpoints for actions", async () => {

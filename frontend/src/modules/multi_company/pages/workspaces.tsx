@@ -518,7 +518,7 @@ function CompanyFormPage({ edit }: { edit: boolean }) {
       !form.company_code.trim() ||
       !form.company_name.trim() ||
       !form.legal_name.trim() ||
-      !/^[A-Za-z]{3}$/.test(form.currency) ||
+      !/^[A-Za-z]{3}$/.test(form.currency.trim()) ||
       month < 1 ||
       month > 12
     ) {

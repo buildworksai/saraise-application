@@ -281,7 +281,10 @@ describe("email marketing page families", () => {
   });
   it("renders an accessible skeleton then the campaign first-use empty state", async () => {
     renderPage(<EmailCampaignListPage />);
-    expect(screen.getByLabelText("Loading campaigns")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByLabelText("Loading campaign configuration")).toHaveAttribute(
+      "aria-busy",
+      "true"
+    );
     expect(await screen.findByText("No campaigns yet")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /create campaign/iu })).toHaveLength(2);
   });
@@ -307,7 +310,7 @@ describe("email marketing page families", () => {
   it("retains campaign form values after validation and prevents invalid submit", async () => {
     const submit = vi.fn();
     renderPage(<CampaignForm pending={false} serverError={null} onSubmit={submit} />);
-    await userEvent.type(screen.getByLabelText("Campaign code"), "WELCOME");
+    await userEvent.type(await screen.findByLabelText("Campaign code"), "WELCOME");
     await userEvent.type(screen.getByLabelText("Campaign name"), "Welcome");
     await userEvent.type(screen.getByLabelText("Subject"), "Hello");
     await userEvent.type(screen.getByLabelText("From name"), "SARAISE");

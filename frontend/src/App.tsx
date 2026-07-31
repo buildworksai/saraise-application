@@ -1097,6 +1097,7 @@ function AnimatedRoutes() {
             path="/performance-monitoring/slos"
             element={<Navigate to="/performance-monitoring/sla" replace />}
           />
+          <Route path="/dms" element={<Navigate to="/dms/documents" replace />} />
           <Route
             path="/inventory-management/dashboard"
             element={<Navigate to="/inventory-management" replace />}

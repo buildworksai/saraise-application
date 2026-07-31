@@ -12,11 +12,12 @@ export function formatDuration(
   minuteThresholdMs: number
 ): string {
   if (!start) return "—";
-  const milliseconds = Math.max(
-    0,
-    new Date(end ?? Date.now()).getTime() - new Date(start).getTime()
-  );
-  if (milliseconds < minuteThresholdMs) return `${Math.round(milliseconds / 1000)}s`;
+  if (!Number.isFinite(minuteThresholdMs) || minuteThresholdMs <= 0) return "—";
+  const startTime = new Date(start).getTime();
+  const endTime = end ? new Date(end).getTime() : Date.now();
+  if (Number.isNaN(startTime) || Number.isNaN(endTime)) return "—";
+  const milliseconds = Math.max(0, endTime - startTime);
+  if (milliseconds < minuteThresholdMs) return `${Math.floor(milliseconds / 1000)}s`;
   return `${Math.floor(milliseconds / minuteThresholdMs)}m ${Math.round((milliseconds % minuteThresholdMs) / 1000)}s`;
 }
 

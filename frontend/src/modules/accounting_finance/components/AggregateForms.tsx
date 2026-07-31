@@ -944,6 +944,11 @@ export function PaymentForm({
           Choose exactly one invoice. The server locks it, verifies its outstanding balance, and
           rejects overpayment.
         </p>
+        {error("") ? (
+          <p className="text-sm text-destructive" role="alert">
+            {error("")}
+          </p>
+        ) : null}
         <TextAreaField
           id="payment-description"
           label="Description"

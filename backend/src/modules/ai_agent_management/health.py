@@ -37,6 +37,14 @@ def _probe(operation) -> dict[str, object]:
     return {"status": state, "latency_ms": round((monotonic() - started) * 1000, 2)}
 
 
+def _cache_set(key: str, value: object, *, timeout: int) -> None:
+    cache.set(key, value, timeout=timeout)
+
+
+def _cache_get(key: str) -> object:
+    return cache.get(key)
+
+
 class ModuleHealthView(GovernedAPIViewMixin, APIView):
     authentication_classes = (GovernedSessionAuthentication,)
     permission_classes = (IsAuthenticated, RequiresAccess)
@@ -63,8 +71,8 @@ class ModuleHealthView(GovernedAPIViewMixin, APIView):
 
         def cache_probe() -> None:
             key = f"ai-agent-management:health:{tenant}"
-            cache.set(key, "ok", timeout=int(configuration["cache_probe_timeout_seconds"]))
-            if cache.get(key) != "ok":
+            _cache_set(key, "ok", timeout=int(configuration["cache_probe_timeout_seconds"]))
+            if _cache_get(key) != "ok":
                 raise RuntimeError
 
         def rls() -> None:

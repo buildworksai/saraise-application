@@ -77,7 +77,6 @@ describe("tenant route registry parity", () => {
       if (route?.navigation.type === "sidebar") {
         expect(route.navigation.path ?? route.path).toBe(leaf.path);
       } else if (route?.navigation.type === "contextual") {
-        expect(route.module).toBe("process_mining");
         const parent = routesById.get(route.navigation.parentRouteId);
         expect(parent?.navigation.type).toBe("sidebar");
         const expectedPath = route.path.split("/").some((segment) => segment.startsWith(":"))

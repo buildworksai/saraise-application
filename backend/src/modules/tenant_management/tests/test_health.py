@@ -1,9 +1,9 @@
 import pytest
 from django.contrib.auth import get_user_model
-from django.core.cache import cache
 from django.db import connection
 from rest_framework.test import APIRequestFactory, force_authenticate
 
+from src.modules.tenant_management import health
 from src.modules.tenant_management.health import health_check
 from src.modules.tenant_management.models import Tenant
 
@@ -48,8 +48,8 @@ def test_health_check_unhealthy(monkeypatch):
             return False
 
     monkeypatch.setattr(connection, "cursor", lambda: BrokenCursor())
-    monkeypatch.setattr(cache, "set", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(cache, "get", lambda *_args, **_kwargs: "not_ok")
+    monkeypatch.setattr(health, "_cache_set", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(health, "_cache_get", lambda *_args, **_kwargs: "not_ok")
     request = APIRequestFactory().get("/api/v1/tenant-management/health/")
     force_authenticate(request, user=user)
     response = health_check(request)
