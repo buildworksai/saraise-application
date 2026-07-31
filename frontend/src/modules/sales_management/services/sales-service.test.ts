@@ -110,53 +110,69 @@ describe("sales service", () => {
     vi.mocked(mockedClient.delete).mockResolvedValue(envelope(entity));
 
     await expect(salesService.getCustomer("customer/1")).resolves.toBe(entity);
-    await expect(salesService.createCustomer(
-      { customer_code: "ACME", customer_name: "ACME", currency: "USD" },
-      "idem-customer"
-    )).resolves.toBe(entity);
-    await expect(salesService.updateCustomer("customer/1", {
-      customer_name: "ACME Inc",
-      expected_version: 7,
-    })).resolves.toBe(entity);
+    await expect(
+      salesService.createCustomer(
+        { customer_code: "ACME", customer_name: "ACME", currency: "USD" },
+        "idem-customer"
+      )
+    ).resolves.toBe(entity);
+    await expect(
+      salesService.updateCustomer("customer/1", {
+        customer_name: "ACME Inc",
+        expected_version: 7,
+      })
+    ).resolves.toBe(entity);
     await expect(salesService.deleteCustomer("customer/1", 7)).resolves.toBeUndefined();
 
     await expect(salesService.getQuotation("quote/1")).resolves.toBe(entity);
-    await expect(salesService.createQuotation(
-      {
-        quotation_date: "2026-07-31",
-        valid_until: "2026-08-31",
-        customer: "customer-1",
-        currency: "USD",
-        lines: [],
-      },
-      "idem-quote"
-    )).resolves.toBe(entity);
-    await expect(salesService.updateQuotation("quote/1", { expected_version: 7 })).resolves.toBe(entity);
+    await expect(
+      salesService.createQuotation(
+        {
+          quotation_date: "2026-07-31",
+          valid_until: "2026-08-31",
+          customer: "customer-1",
+          currency: "USD",
+          lines: [],
+        },
+        "idem-quote"
+      )
+    ).resolves.toBe(entity);
+    await expect(salesService.updateQuotation("quote/1", { expected_version: 7 })).resolves.toBe(
+      entity
+    );
     await expect(salesService.deleteQuotation("quote/1", 7)).resolves.toBeUndefined();
 
     await expect(salesService.getOrder("order/1")).resolves.toBe(entity);
-    await expect(salesService.createOrder(
-      {
-        order_date: "2026-07-31",
-        customer: "customer-1",
-        currency: "USD",
-        lines: [],
-      },
-      "idem-order"
-    )).resolves.toBe(entity);
-    await expect(salesService.updateOrder("order/1", { expected_version: 7 })).resolves.toBe(entity);
+    await expect(
+      salesService.createOrder(
+        {
+          order_date: "2026-07-31",
+          customer: "customer-1",
+          currency: "USD",
+          lines: [],
+        },
+        "idem-order"
+      )
+    ).resolves.toBe(entity);
+    await expect(salesService.updateOrder("order/1", { expected_version: 7 })).resolves.toBe(
+      entity
+    );
     await expect(salesService.deleteOrder("order/1", 7)).resolves.toBeUndefined();
 
     await expect(salesService.getDeliveryNote("delivery/1")).resolves.toBe(entity);
-    await expect(salesService.createDeliveryNote(
-      {
-        delivery_date: "2026-07-31",
-        sales_order: "order-1",
-        lines: [],
-      },
-      "idem-delivery"
-    )).resolves.toBe(entity);
-    await expect(salesService.updateDeliveryNote("delivery/1", { expected_version: 7 })).resolves.toBe(entity);
+    await expect(
+      salesService.createDeliveryNote(
+        {
+          delivery_date: "2026-07-31",
+          sales_order: "order-1",
+          lines: [],
+        },
+        "idem-delivery"
+      )
+    ).resolves.toBe(entity);
+    await expect(
+      salesService.updateDeliveryNote("delivery/1", { expected_version: 7 })
+    ).resolves.toBe(entity);
     await expect(salesService.deleteDeliveryNote("delivery/1", 7)).resolves.toBeUndefined();
 
     expect(mockedClient.get).toHaveBeenCalledWith(ENDPOINTS.CUSTOMERS.DETAIL("customer/1"));
@@ -201,24 +217,60 @@ describe("sales service", () => {
     ).rejects.toBeInstanceOf(SalesGatewayError);
 
     vi.mocked(mockedClient.post).mockResolvedValue(envelope(entity));
-    await expect(salesService.quotationCommand("quote-1", "send", { idempotency_key: "idem-generic" })).resolves.toBe(entity);
-    await expect(salesService.sendQuotation("quote-1", { idempotency_key: "idem-send" })).resolves.toBe(entity);
-    await expect(salesService.acceptQuotation("quote-1", { idempotency_key: "idem-accept" })).resolves.toBe(entity);
-    await expect(salesService.rejectQuotation("quote-1", { idempotency_key: "idem-reject" })).resolves.toBe(entity);
-    await expect(salesService.expireQuotation("quote-1", { idempotency_key: "idem-expire" })).resolves.toBe(entity);
-    await expect(salesService.reviseQuotation("quote-1", { idempotency_key: "idem-revise" })).resolves.toBe(entity);
-    await expect(salesService.convertQuotation("quote-1", { idempotency_key: "idem-convert" })).resolves.toBe(entity);
+    await expect(
+      salesService.quotationCommand("quote-1", "send", { idempotency_key: "idem-generic" })
+    ).resolves.toBe(entity);
+    await expect(
+      salesService.sendQuotation("quote-1", { idempotency_key: "idem-send" })
+    ).resolves.toBe(entity);
+    await expect(
+      salesService.acceptQuotation("quote-1", { idempotency_key: "idem-accept" })
+    ).resolves.toBe(entity);
+    await expect(
+      salesService.rejectQuotation("quote-1", { idempotency_key: "idem-reject" })
+    ).resolves.toBe(entity);
+    await expect(
+      salesService.expireQuotation("quote-1", { idempotency_key: "idem-expire" })
+    ).resolves.toBe(entity);
+    await expect(
+      salesService.reviseQuotation("quote-1", { idempotency_key: "idem-revise" })
+    ).resolves.toBe(entity);
+    await expect(
+      salesService.convertQuotation("quote-1", { idempotency_key: "idem-convert" })
+    ).resolves.toBe(entity);
     vi.mocked(mockedClient.post).mockResolvedValue(envelope(command));
-    await expect(salesService.orderCommand("order-1", "confirm", { idempotency_key: "idem-order-command" })).resolves.toMatchObject(command);
-    await expect(salesService.startOrderPicking("order-1", { idempotency_key: "idem-picking" })).resolves.toMatchObject(command);
-    await expect(salesService.startOrderPacking("order-1", { idempotency_key: "idem-packing" })).resolves.toMatchObject(command);
-    await expect(salesService.markOrderReady("order-1", { idempotency_key: "idem-ready" })).resolves.toMatchObject(command);
-    await expect(salesService.shipOrder("order-1", { idempotency_key: "idem-ship" })).resolves.toMatchObject(command);
-    await expect(salesService.deliverOrder("order-1", { idempotency_key: "idem-deliver" })).resolves.toMatchObject(command);
-    await expect(salesService.markOrderInvoiced("order-1", { idempotency_key: "idem-invoiced" })).resolves.toMatchObject(command);
-    await expect(salesService.cancelOrder("order-1", { idempotency_key: "idem-cancel-order" })).resolves.toMatchObject(command);
-    await expect(salesService.deliveryCommand("delivery-1", "complete", { idempotency_key: "idem-delivery-command" })).resolves.toMatchObject(command);
-    await expect(salesService.completeDeliveryNote("delivery-1", { idempotency_key: "idem-complete-delivery" })).resolves.toMatchObject(command);
+    await expect(
+      salesService.orderCommand("order-1", "confirm", { idempotency_key: "idem-order-command" })
+    ).resolves.toMatchObject(command);
+    await expect(
+      salesService.startOrderPicking("order-1", { idempotency_key: "idem-picking" })
+    ).resolves.toMatchObject(command);
+    await expect(
+      salesService.startOrderPacking("order-1", { idempotency_key: "idem-packing" })
+    ).resolves.toMatchObject(command);
+    await expect(
+      salesService.markOrderReady("order-1", { idempotency_key: "idem-ready" })
+    ).resolves.toMatchObject(command);
+    await expect(
+      salesService.shipOrder("order-1", { idempotency_key: "idem-ship" })
+    ).resolves.toMatchObject(command);
+    await expect(
+      salesService.deliverOrder("order-1", { idempotency_key: "idem-deliver" })
+    ).resolves.toMatchObject(command);
+    await expect(
+      salesService.markOrderInvoiced("order-1", { idempotency_key: "idem-invoiced" })
+    ).resolves.toMatchObject(command);
+    await expect(
+      salesService.cancelOrder("order-1", { idempotency_key: "idem-cancel-order" })
+    ).resolves.toMatchObject(command);
+    await expect(
+      salesService.deliveryCommand("delivery-1", "complete", {
+        idempotency_key: "idem-delivery-command",
+      })
+    ).resolves.toMatchObject(command);
+    await expect(
+      salesService.completeDeliveryNote("delivery-1", { idempotency_key: "idem-complete-delivery" })
+    ).resolves.toMatchObject(command);
     expect(mockedClient.post).toHaveBeenCalledWith(
       ENDPOINTS.QUOTATIONS.COMMAND("quote-1", "convert"),
       {},
@@ -320,9 +372,7 @@ describe("sales service", () => {
       { headers: { "Idempotency-Key": "idem-rollback" } }
     );
 
-    vi.mocked(mockedClient.get).mockResolvedValueOnce(
-      envelope(configurationExport)
-    );
+    vi.mocked(mockedClient.get).mockResolvedValueOnce(envelope(configurationExport));
     await expect(salesService.exportConfiguration()).resolves.toMatchObject({ schema_version: 1 });
 
     vi.mocked(mockedClient.post).mockResolvedValueOnce(envelope({ valid: false, diff: [] }));
@@ -369,7 +419,11 @@ describe("sales service", () => {
       "quotations",
       { status: "sent" },
     ]);
-    expect(salesQueryKeys.quotation("quote-1")).toEqual(["sales-management", "quotation", "quote-1"]);
+    expect(salesQueryKeys.quotation("quote-1")).toEqual([
+      "sales-management",
+      "quotation",
+      "quote-1",
+    ]);
     expect(salesQueryKeys.orders({ status: "draft" })).toEqual([
       "sales-management",
       "orders",
@@ -421,7 +475,9 @@ describe("sales service", () => {
       currency: null,
       page: undefined,
     } as never);
-    expect(mockedClient.get).toHaveBeenLastCalledWith(`${ENDPOINTS.CUSTOMERS.LIST}?is_active=false`);
+    expect(mockedClient.get).toHaveBeenLastCalledWith(
+      `${ENDPOINTS.CUSTOMERS.LIST}?is_active=false`
+    );
 
     vi.mocked(mockedClient.post).mockResolvedValueOnce(envelope({ command: 42, resource: entity }));
     await expect(
@@ -467,17 +523,23 @@ describe("sales service", () => {
     await expect(salesService.deleteDeliveryNote("delivery-1", 10)).resolves.toBeUndefined();
 
     expect(mockedClient.delete).toHaveBeenCalledTimes(4);
-    expect(mockedClient.delete).toHaveBeenNthCalledWith(1, ENDPOINTS.CUSTOMERS.DELETE("customer-1"), {
-      headers: { "If-Match": "7" },
+    expect(mockedClient.delete).toHaveBeenNthCalledWith(
+      1,
+      ENDPOINTS.CUSTOMERS.DELETE("customer-1"),
+      {
+        headers: { "If-Match": "7" },
+      }
+    );
+    expect(mockedClient.delete).toHaveBeenNthCalledWith(2, ENDPOINTS.QUOTATIONS.DELETE("quote-1"), {
+      headers: { "If-Match": "8" },
     });
     expect(mockedClient.delete).toHaveBeenNthCalledWith(
-      2,
-      ENDPOINTS.QUOTATIONS.DELETE("quote-1"),
-      { headers: { "If-Match": "8" } }
+      3,
+      ENDPOINTS.SALES_ORDERS.DELETE("order-1"),
+      {
+        headers: { "If-Match": "9" },
+      }
     );
-    expect(mockedClient.delete).toHaveBeenNthCalledWith(3, ENDPOINTS.SALES_ORDERS.DELETE("order-1"), {
-      headers: { "If-Match": "9" },
-    });
     expect(mockedClient.delete).toHaveBeenNthCalledWith(
       4,
       ENDPOINTS.DELIVERY_NOTES.DELETE("delivery-1"),
@@ -662,7 +724,9 @@ describe("sales service", () => {
     });
 
     vi.mocked(mockedClient.post).mockResolvedValueOnce(envelope({ valid: true }));
-    await expect(salesService.previewConfiguration({ default_currency: "USD" })).rejects.toMatchObject({
+    await expect(
+      salesService.previewConfiguration({ default_currency: "USD" })
+    ).rejects.toMatchObject({
       correlationId: "corr-sales",
     });
 

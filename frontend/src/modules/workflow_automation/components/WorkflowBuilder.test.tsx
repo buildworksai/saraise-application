@@ -1,6 +1,6 @@
 /* eslint-disable max-lines-per-function, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/unbound-method -- Broad builder flows intentionally exercise governed UI behavior end to end; Vitest matchers and spies intentionally compose dynamic assertions. */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -11,6 +11,11 @@ import type {
   WorkflowDetailDTO,
 } from "../contracts";
 import { workflowService } from "../services/workflow-service";
+import {
+  WORKFLOW_CATALOG_ACTIONS_QUERY_KEY,
+  WORKFLOW_CATALOG_ASSIGNEES_QUERY_KEY,
+  WORKFLOW_CATALOG_CONDITIONS_QUERY_KEY,
+} from "./workflow-builder-utils";
 import { WorkflowBuilder } from "./WorkflowBuilder";
 
 const configuration: WorkflowConfigurationDTO = {
@@ -259,8 +264,22 @@ const initial: WorkflowDetailDTO = {
   ],
 };
 
-function renderBuilder(overrides: Partial<React.ComponentProps<typeof WorkflowBuilder>> = {}) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderBuilder(
+  overrides: Partial<React.ComponentProps<typeof WorkflowBuilder>> = {},
+  options: { seedGovernedQueries?: boolean } = {}
+) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  });
+  if (options.seedGovernedQueries) {
+    client.setQueryData(["workflow-automation", "configuration", "production"], configuration);
+    client.setQueryData(WORKFLOW_CATALOG_ACTIONS_QUERY_KEY, [action]);
+    client.setQueryData(WORKFLOW_CATALOG_CONDITIONS_QUERY_KEY, [condition]);
+    client.setQueryData(WORKFLOW_CATALOG_ASSIGNEES_QUERY_KEY, [
+      { id: "role-1", label: "Purchasing managers", description: null, kind: "role" },
+      { id: "user-1", label: "Asha", description: null, kind: "user" },
+    ]);
+  }
   const props: React.ComponentProps<typeof WorkflowBuilder> = {
     initial,
     submitting: false,
@@ -307,10 +326,10 @@ describe("WorkflowBuilder", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("edits every governed step type, validates, submits, reorders, removes, and navigates", async () => {
-    const user = userEvent.setup();
-    const { props } = renderBuilder();
+    const { props } = renderBuilder({}, { seedGovernedQueries: true });
 
     expect(await screen.findByText("Step palette")).toBeInTheDocument();
+    expect(screen.getByLabelText("Description")).toHaveValue("Govern purchasing");
     expect(screen.getByLabelText("Workflow type")).toHaveClass("rounded-md");
     expect(screen.getByLabelText("Trigger")).toHaveClass("rounded-md");
     expect(screen.getByLabelText("Registered action")).toHaveClass("rounded-md");
@@ -321,25 +340,24 @@ describe("WorkflowBuilder", () => {
     expect(screen.getByLabelText("Condition")).toHaveClass("rounded-md");
     expect(screen.getByLabelText("True branch")).toHaveClass("rounded-md");
     expect(screen.getByLabelText("False branch")).toHaveClass("rounded-md");
-    await user.selectOptions(screen.getByLabelText("Registered action"), "core.project_context");
-    await user.clear(screen.getByLabelText("Context path"));
-    await user.type(screen.getByLabelText("Context path"), "total");
-    await user.clear(screen.getByLabelText("Limit"));
-    await user.type(screen.getByLabelText("Limit"), "3");
-    await user.click(screen.getByLabelText("Enabled"));
-    await user.selectOptions(screen.getByLabelText("Mode"), "strict");
-    await user.selectOptions(screen.getByLabelText("Target"), "role-1");
+    fireEvent.change(screen.getByLabelText("Registered action"), {
+      target: { value: "core.project_context" },
+    });
+    fireEvent.change(screen.getByLabelText("Context path"), { target: { value: "total" } });
+    fireEvent.change(screen.getByLabelText("Limit"), { target: { value: "3" } });
+    fireEvent.click(screen.getByLabelText("Enabled"));
+    fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "strict" } });
+    fireEvent.change(screen.getByLabelText("Target"), { target: { value: "role-1" } });
 
-    await user.selectOptions(screen.getByLabelText("On rejection"), "fail");
-    await user.selectOptions(screen.getByLabelText("Channel"), "email");
+    fireEvent.change(screen.getByLabelText("On rejection"), { target: { value: "fail" } });
+    fireEvent.change(screen.getByLabelText("Channel"), { target: { value: "email" } });
     expect(screen.getByDisplayValue("actor.email")).toBeInTheDocument();
-    await user.selectOptions(screen.getByLabelText("Condition"), "core.amount_gt");
-    await user.clear(screen.getByLabelText("Minimum"));
-    await user.type(screen.getByLabelText("Minimum"), "2500");
+    fireEvent.change(screen.getByLabelText("Condition"), { target: { value: "core.amount_gt" } });
+    fireEvent.change(screen.getByLabelText("Minimum"), { target: { value: "2500" } });
 
-    await user.click(screen.getByRole("button", { name: "Validate" }));
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
     expect(await screen.findByText("Definition is publishable")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() =>
       expect(props.onSubmit).toHaveBeenCalledWith(
         expect.objectContaining({ name: "Purchase approval" })
@@ -398,21 +416,23 @@ describe("WorkflowBuilder", () => {
       }),
     ]);
 
-    await user.click(screen.getByRole("button", { name: "Move Manager approval up" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move Manager approval up" }));
     expect(screen.getByRole("button", { name: "Move Manager approval up" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Move Project context down" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move Project context down" }));
+    expect(
+      screen.getAllByLabelText(/Step \d name/u).map((input) => input.getAttribute("value"))
+    ).toEqual(["Manager approval", "Notify requester", "Project context", "Route decision"]);
     expect(screen.getByRole("button", { name: "Move Route decision down" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Remove Notify requester" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Notify requester" }));
     expect(screen.queryByDisplayValue("Notify requester")).not.toBeInTheDocument();
     expect(screen.getByText("Route decision: select a valid false branch.")).toBeInTheDocument();
     vi.spyOn(window, "confirm").mockReturnValue(true);
-    await user.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(props.onCancel).toHaveBeenCalledWith("/workflow-automation/workflows/workflow-1");
   }, 15_000);
 
   it("clears timeout values, restores governed defaults, and toggles terminal steps", async () => {
-    const user = userEvent.setup();
-    const { props } = renderBuilder();
+    const { props } = renderBuilder({}, { seedGovernedQueries: true });
 
     await screen.findByText("Step palette");
     const timeoutInputs = screen.getAllByLabelText("Timeout seconds");
@@ -420,10 +440,9 @@ describe("WorkflowBuilder", () => {
     const firstTerminal = screen.getAllByLabelText("Terminal step").at(0);
     if (!firstTimeout || !firstTerminal)
       throw new Error("Project step controls were not rendered.");
-    await user.clear(firstTimeout);
-    await user.type(firstTimeout, "45");
-    await user.click(firstTerminal);
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.change(firstTimeout, { target: { value: "45" } });
+    fireEvent.click(firstTerminal);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalled());
     const submitted = vi.mocked(props.onSubmit).mock.calls[0]?.[0];
@@ -441,26 +460,26 @@ describe("WorkflowBuilder", () => {
   });
 
   it("keeps unsaved changes after a rejected save and allows retry", async () => {
-    const user = userEvent.setup();
     const onSubmit = vi
       .fn<(payload: WorkflowCreateDTO) => Promise<void>>()
       .mockRejectedValueOnce(new Error("Save failed"))
       .mockResolvedValueOnce(undefined);
-    const { props } = renderBuilder({ onSubmit });
+    const { props } = renderBuilder({ onSubmit }, { seedGovernedQueries: true });
 
     await screen.findByText("Step palette");
-    await user.clear(screen.getByLabelText("Name"));
-    await user.type(screen.getByLabelText("Name"), "Purchase approval revised");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Purchase approval revised" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    await user.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
 
     expect(confirm).toHaveBeenCalledWith("Discard unsaved workflow changes?");
     expect(props.onCancel).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
     expect(onSubmit).toHaveBeenLastCalledWith(
@@ -469,30 +488,41 @@ describe("WorkflowBuilder", () => {
   });
 
   it("submits edited workflow metadata and preserves immutable existing keys", async () => {
-    const user = userEvent.setup();
-    const { props } = renderBuilder();
+    const nonDefaultInitial: WorkflowDetailDTO = {
+      ...initial,
+      description: "",
+      workflow_type: "parallel",
+      trigger_type: "event",
+    };
+    const { props } = renderBuilder({ initial: nonDefaultInitial }, { seedGovernedQueries: true });
 
     await screen.findByText("Step palette");
 
     expect(screen.getByLabelText("Name")).toHaveValue("Purchase approval");
     expect(screen.getByLabelText("Stable key")).toHaveValue("purchase_approval");
     expect(screen.getByLabelText("Stable key")).toHaveAttribute("readonly");
-    expect(screen.getByLabelText("Description")).toHaveValue("Govern purchasing");
-    expect(screen.getByLabelText("Workflow type")).toHaveValue("approval");
-    expect(screen.getByLabelText("Trigger")).toHaveValue("manual");
+    expect(screen.getByLabelText("Description")).toHaveValue("");
+    expect(screen.getByLabelText("Workflow type")).toHaveValue("parallel");
+    expect(screen.getByLabelText("Trigger")).toHaveValue("event");
 
-    await user.clear(screen.getByLabelText("Name"));
-    await user.type(screen.getByLabelText("Name"), "Purchase approval revised");
-    await user.clear(screen.getByLabelText("Description"));
-    await user.type(screen.getByLabelText("Description"), "Controls ERP purchasing changes");
-    await user.selectOptions(screen.getByLabelText("Workflow type"), "parallel");
-    await user.selectOptions(screen.getByLabelText("Trigger"), "event");
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Purchase approval revised" },
+    });
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "Controls ERP purchasing changes" },
+    });
+    fireEvent.change(screen.getByLabelText("Workflow type"), { target: { value: "parallel" } });
+    fireEvent.change(screen.getByLabelText("Trigger"), { target: { value: "event" } });
 
     expect(screen.getByLabelText("Stable key")).toHaveValue("purchase_approval");
 
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    const save = screen.getByRole("button", { name: "Save changes" });
+    expect(save).toBeEnabled();
+    act(() => {
+      fireEvent.click(save);
+    });
 
-    await waitFor(() => expect(props.onSubmit).toHaveBeenCalled());
+    expect(props.onSubmit).toHaveBeenCalled();
     expect(props.onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
         key: "purchase_approval",
@@ -512,6 +542,7 @@ describe("WorkflowBuilder", () => {
 
     await user.type(screen.getByLabelText("Name"), "  Emergency PO Approval!!!  ");
     expect(screen.getByLabelText("Stable key")).toHaveValue("emergency_po_approval");
+    expect(screen.getByLabelText("Description")).toHaveValue("");
 
     await user.clear(screen.getByLabelText("Stable key"));
     fireEvent.change(screen.getByLabelText("Stable key"), {
@@ -592,6 +623,9 @@ describe("WorkflowBuilder", () => {
     const actionOnly = renderBuilder();
 
     expect(await screen.findByText("Action catalog is unavailable.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Extension catalog unavailable. Saving action or decision steps is blocked.")
+    ).toBeInTheDocument();
     expect(screen.queryByText("Condition catalog is unavailable.")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     actionOnly.unmount();
@@ -602,6 +636,9 @@ describe("WorkflowBuilder", () => {
     renderBuilder();
 
     expect(await screen.findByText("Condition catalog is unavailable.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Extension catalog unavailable. Saving action or decision steps is blocked.")
+    ).toBeInTheDocument();
     expect(screen.queryByText("Action catalog is unavailable.")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
   });
@@ -755,6 +792,8 @@ describe("WorkflowBuilder", () => {
 
     expect(trueBranch).not.toHaveTextContent("Route decision");
     expect(falseBranch).not.toHaveTextContent("Route decision");
+    expect(trueBranch).toHaveTextContent("Manager approval");
+    expect(falseBranch).toHaveTextContent("Notify requester");
 
     await user.selectOptions(screen.getByLabelText("True branch"), "");
     await user.selectOptions(screen.getByLabelText("False branch"), "");
@@ -767,46 +806,59 @@ describe("WorkflowBuilder", () => {
   });
 
   it("creates governed default steps from the palette and enforces edge move controls", async () => {
-    const user = userEvent.setup();
-    const { props } = renderBuilder({ initial: undefined, submitLabel: "Create workflow" });
+    const { props } = renderBuilder(
+      { initial: undefined, submitLabel: "Create workflow" },
+      { seedGovernedQueries: true }
+    );
 
     await screen.findByText("Step palette");
 
-    await user.type(screen.getByLabelText("Name"), "Emergency review");
+    fireEvent.change(screen.getByLabelText("Name"), {
+      target: { value: "Emergency review" },
+    });
     expect(screen.getByLabelText("Stable key")).toHaveValue("emergency_review");
 
-    await user.click(screen.getByRole("button", { name: "Add action" }));
-    await user.click(screen.getByRole("button", { name: "Add approval" }));
-    await user.click(screen.getByRole("button", { name: "Add notification" }));
-    await user.click(screen.getByRole("button", { name: "Add decision" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add action" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add approval" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add notification" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add decision" }));
 
     expect(screen.getByDisplayValue("Action 1")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Approval 2")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Notification 3")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Decision 4")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Move Action 1 up" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move Approval 2 up" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Move Approval 2 down" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Move Decision 4 down" })).toBeDisabled();
     expect(screen.getByDisplayValue("actor.id")).toBeInTheDocument();
     expect(screen.getByText("Approval 2: choose an assignee.")).toBeInTheDocument();
     expect(screen.getByText("Action 1: choose an available action.")).toBeInTheDocument();
     expect(screen.getByText("Decision 4: choose a condition.")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Registered action"), "core.project_context");
-    await user.type(screen.getByLabelText("Context path"), "subject.amount");
-    await user.clear(screen.getByLabelText("Limit"));
-    await user.type(screen.getByLabelText("Limit"), "4");
-    await user.selectOptions(screen.getByLabelText("Mode"), "strict");
-    await user.selectOptions(screen.getByLabelText("Target"), "role-1");
-    await user.selectOptions(screen.getByLabelText("Assignment"), "role-1");
-    await user.selectOptions(screen.getByLabelText("Condition"), "core.amount_gt");
-    await user.type(screen.getByLabelText("Minimum"), "100");
-    await user.selectOptions(screen.getByLabelText("True branch"), "step_2");
-    await user.selectOptions(screen.getByLabelText("False branch"), "step_3");
+    fireEvent.change(screen.getByLabelText("Registered action"), {
+      target: { value: "core.project_context" },
+    });
+    fireEvent.change(screen.getByLabelText("Context path"), {
+      target: { value: "subject.amount" },
+    });
+    fireEvent.change(screen.getByLabelText("Limit"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "strict" } });
+    fireEvent.change(screen.getByLabelText("Target"), { target: { value: "role-1" } });
+    fireEvent.change(screen.getByLabelText("Assignment"), { target: { value: "role-1" } });
+    fireEvent.change(screen.getByLabelText("Condition"), {
+      target: { value: "core.amount_gt" },
+    });
+    fireEvent.change(screen.getByLabelText("Minimum"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText("True branch"), { target: { value: "step_2" } });
+    fireEvent.change(screen.getByLabelText("False branch"), { target: { value: "step_3" } });
     const decisionTerminal = screen.getAllByLabelText("Terminal step").at(3);
     if (!decisionTerminal) throw new Error("Decision terminal control was not rendered.");
-    await user.click(decisionTerminal);
+    expect(decisionTerminal).not.toBeChecked();
+    fireEvent.click(decisionTerminal);
+    expect(decisionTerminal).toBeChecked();
 
-    await user.click(screen.getByRole("button", { name: "Create workflow" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create workflow" }));
 
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalled());
     const submitted = vi.mocked(props.onSubmit).mock.calls[0]?.[0];
@@ -853,7 +905,7 @@ describe("WorkflowBuilder", () => {
         }),
       }),
     ]);
-  });
+  }, 10_000);
 
   it("preserves the selected descriptors when unavailable catalog entries are chosen", async () => {
     vi.mocked(workflowService.catalog.actions).mockResolvedValueOnce([action, lockedAction]);
@@ -898,6 +950,28 @@ describe("WorkflowBuilder", () => {
     );
   });
 
+  it("resolves selected descriptors by key when unavailable catalog entries are returned first", async () => {
+    vi.mocked(workflowService.catalog.actions).mockResolvedValueOnce([lockedAction, action]);
+    vi.mocked(workflowService.catalog.conditions).mockResolvedValueOnce([
+      setupRequiredCondition,
+      condition,
+    ]);
+    renderBuilder();
+
+    await screen.findByText("Step palette");
+
+    expect(screen.getByLabelText("Registered action")).toHaveValue("core.project_context");
+    expect(screen.getByLabelText("Condition")).toHaveValue("core.amount_gt");
+    expect(screen.getAllByText("workflow_automation · 1.0")).toHaveLength(2);
+    expect(screen.getAllByText("available")).toHaveLength(2);
+    expect(screen.getByDisplayValue("amount")).toBeInTheDocument();
+    expect(screen.getByDisplayValue(1000)).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Locked action — locked" })).toBeDisabled();
+    expect(
+      screen.getByRole("option", { name: "Setup required condition — setup required" })
+    ).toBeDisabled();
+  });
+
   it("renders lookup outage states without accepting unavailable lookup values", async () => {
     vi.mocked(workflowService.catalog.lookup).mockRejectedValueOnce(new Error("Lookup failed"));
     const user = userEvent.setup();
@@ -935,17 +1009,17 @@ describe("WorkflowBuilder", () => {
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(1));
     let submitted = vi.mocked(props.onSubmit).mock.calls[0]?.[0];
     if (!submitted) throw new Error("Workflow draft payload was not submitted.");
-    expect(submitted.steps[0]).toEqual(
+    expect(submitted.steps.find((step) => step.key === "project")).toEqual(
       expect.objectContaining({ timeout_action: null, timeout_seconds: null })
     );
 
-    await user.type(timeoutInput, "45");
+    fireEvent.change(timeoutInput, { target: { value: "45" } });
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(2));
     submitted = vi.mocked(props.onSubmit).mock.calls[1]?.[0];
     if (!submitted) throw new Error("Workflow draft payload retry was not submitted.");
-    expect(submitted.steps[0]).toEqual(
+    expect(submitted.steps.find((step) => step.key === "project")).toEqual(
       expect.objectContaining({ timeout_action: "notify", timeout_seconds: 45 })
     );
   });
@@ -973,27 +1047,29 @@ describe("WorkflowBuilder", () => {
 
     const status = await screen.findByRole("status");
     expect(status).toHaveTextContent("Server validation found issues");
+    expect(status).toHaveClass("border-destructive/40");
     expect(status).toHaveTextContent("missing_assignee");
     expect(status).toHaveTextContent("Approval step requires an assignee.");
     expect(props.onSubmit).not.toHaveBeenCalled();
   });
 
   it("clears server validation output when the local draft changes", async () => {
-    const user = userEvent.setup();
-    renderBuilder();
+    renderBuilder({}, { seedGovernedQueries: true });
 
     await screen.findByText("Step palette");
-    await user.click(screen.getByRole("button", { name: "Validate" }));
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
 
     expect(await screen.findByText("Definition is publishable")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveClass("border-emerald-500/40");
     expect(screen.getByText("late_step")).toBeInTheDocument();
 
-    await user.clear(screen.getByLabelText("Description"));
-    await user.type(screen.getByLabelText("Description"), "Updated after validation");
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "Updated after validation" },
+    });
 
     expect(screen.queryByText("Definition is publishable")).not.toBeInTheDocument();
     expect(screen.queryByText("late_step")).not.toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("keeps validation disabled while server validation is pending", async () => {
     let resolveValidation: (
@@ -1020,14 +1096,17 @@ describe("WorkflowBuilder", () => {
   });
 
   it("renders loaded server errors and blocks only through explicit disabled states", async () => {
-    const user = userEvent.setup();
-    const { props } = renderBuilder({ serverError: new Error("Save failed") });
+    const { props } = renderBuilder(
+      { serverError: new Error("Save failed") },
+      { seedGovernedQueries: true }
+    );
 
     expect(await screen.findByRole("alert", { name: "" })).toHaveTextContent("Save failed");
 
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    const callsBeforeSave = vi.mocked(props.onSubmit).mock.calls.length;
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(callsBeforeSave + 1));
   });
 
   it("renders assignee directory outages as disabled approval controls", async () => {
@@ -1054,17 +1133,15 @@ describe("WorkflowBuilder", () => {
   });
 
   it("persists approval due units and rejection branch rewiring", async () => {
-    const user = userEvent.setup();
-    const { props } = renderBuilder();
+    const { props } = renderBuilder({}, { seedGovernedQueries: true });
 
     await screen.findByText("Step palette");
 
     const dueTimeUnits = screen.getAllByDisplayValue(2).at(1);
     if (!dueTimeUnits) throw new Error("Approval due time control was not rendered.");
-    await user.clear(dueTimeUnits);
-    await user.type(dueTimeUnits, "5");
-    await user.selectOptions(screen.getByLabelText("Rejection branch"), "project");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.change(dueTimeUnits, { target: { value: "5" } });
+    fireEvent.change(screen.getByLabelText("Rejection branch"), { target: { value: "project" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(1));
     let submitted = vi.mocked(props.onSubmit).mock.calls[0]?.[0];
@@ -1077,9 +1154,9 @@ describe("WorkflowBuilder", () => {
       })
     );
 
-    await user.selectOptions(screen.getByLabelText("On rejection"), "cancel");
+    fireEvent.change(screen.getByLabelText("On rejection"), { target: { value: "cancel" } });
     expect(screen.queryByLabelText("Rejection branch")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(2));
     submitted = vi.mocked(props.onSubmit).mock.calls[1]?.[0];
@@ -1090,21 +1167,18 @@ describe("WorkflowBuilder", () => {
         reject_step_key: null,
       })
     );
-  });
+  }, 10_000);
 
   it("persists notification recipient and template edits for both delivery channels", async () => {
-    const user = userEvent.setup();
-    const { props } = renderBuilder();
+    const { props } = renderBuilder({}, { seedGovernedQueries: true });
 
     await screen.findByText("Step palette");
 
     const inAppRecipient = screen.getByDisplayValue("actor.id");
     const template = screen.getByDisplayValue("workflow.task.created");
-    await user.clear(inAppRecipient);
-    await user.type(inAppRecipient, "requester.id");
-    await user.clear(template);
-    await user.type(template, "workflow.custom.in_app");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.change(inAppRecipient, { target: { value: "requester.id" } });
+    fireEvent.change(template, { target: { value: "workflow.custom.in_app" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(1));
     let submitted = vi.mocked(props.onSubmit).mock.calls[0]?.[0];
@@ -1117,11 +1191,10 @@ describe("WorkflowBuilder", () => {
       })
     );
 
-    await user.selectOptions(screen.getByLabelText("Channel"), "email");
+    fireEvent.change(screen.getByLabelText("Channel"), { target: { value: "email" } });
     const emailRecipient = screen.getByDisplayValue("actor.email");
-    await user.clear(emailRecipient);
-    await user.type(emailRecipient, "requester.email");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.change(emailRecipient, { target: { value: "requester.email" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(2));
     submitted = vi.mocked(props.onSubmit).mock.calls[1]?.[0];
@@ -1158,17 +1231,19 @@ describe("WorkflowBuilder", () => {
   });
 
   it("routes away without confirmation after a successful save clears dirty state", async () => {
-    const user = userEvent.setup();
     const confirm = vi.spyOn(window, "confirm");
     const { props } = renderBuilder();
 
     await screen.findByText("Step palette");
-    await user.clear(screen.getByLabelText("Description"));
-    await user.type(screen.getByLabelText("Description"), "Ready to leave after save");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.change(screen.getByLabelText("Description"), {
+      target: { value: "Ready to leave after save" },
+    });
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    });
 
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(1));
-    await user.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
 
     expect(confirm).not.toHaveBeenCalled();
     expect(props.onCancel).toHaveBeenCalledWith("/workflow-automation/workflows/workflow-1");

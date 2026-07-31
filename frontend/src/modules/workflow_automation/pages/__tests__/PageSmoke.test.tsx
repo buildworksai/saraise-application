@@ -1,6 +1,6 @@
 /* eslint-disable max-lines-per-function, @typescript-eslint/unbound-method -- This smoke file intentionally covers end-to-end page flows; Vitest spies intentionally reference service methods. */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -248,10 +248,20 @@ function page<T>(items: readonly T[]): PaginatedResult<T> {
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-function renderRoute(path: string, route: string, pageElement: React.ReactElement) {
+function renderRoute(
+  path: string,
+  route: string,
+  pageElement: React.ReactElement,
+  options: { configuration?: WorkflowConfigurationDTO } = {}
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  if (options.configuration)
+    client.setQueryData(
+      ["workflow-automation", "configuration", "production"],
+      options.configuration
+    );
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
@@ -612,7 +622,9 @@ describe("workflow contextual pages", () => {
       ])
     );
 
-    renderRoute("/workflow-automation/tasks", "/workflow-automation/tasks", <TaskInboxPage />);
+    renderRoute("/workflow-automation/tasks", "/workflow-automation/tasks", <TaskInboxPage />, {
+      configuration,
+    });
 
     expect(await screen.findByText("Workflow decision")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Manager approval" })).toBeInTheDocument();
@@ -770,32 +782,36 @@ describe("workflow contextual pages", () => {
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
     expect(screen.getByText(/Published and archived versions are read-only/u)).toBeInTheDocument();
   });
-  it("records task approvals, rejects with evidence, and refreshes stale conflicts", async () => {
+  it("records task approvals with immutable success evidence", async () => {
     const complete = vi
       .spyOn(workflowService.tasks, "complete")
       .mockResolvedValue({ ...task, status: "completed", completed_at: "2026-07-22T01:00:00Z" });
+    renderRoute("/workflow-automation/tasks", "/workflow-automation/tasks", <TaskInboxPage />, {
+      configuration,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /Approve \/ complete/u }));
+    fireEvent.click(screen.getByRole("button", { name: "Complete task" }));
+    await waitFor(() => expect(complete).toHaveBeenCalledWith("task-1", expect.any(Object)));
+    expect(await screen.findByRole("status")).toHaveTextContent("completed");
+  });
+  it("rejects tasks with evidence and refreshes stale conflicts", async () => {
     const reject = vi
       .spyOn(workflowService.tasks, "reject")
       .mockRejectedValueOnce(
         new WorkflowApiError("Version conflict", 409, "stale_task", "corr-stale", [], true)
       )
       .mockResolvedValue({ ...task, status: "rejected", completed_at: "2026-07-22T01:05:00Z" });
-    const user = userEvent.setup();
     renderRoute("/workflow-automation/tasks", "/workflow-automation/tasks", <TaskInboxPage />);
-    await user.click(await screen.findByRole("button", { name: /Approve \/ complete/u }));
-    await user.click(screen.getByRole("button", { name: "Complete task" }));
-    await waitFor(() => expect(complete).toHaveBeenCalledWith("task-1", expect.any(Object)));
-    expect(await screen.findByRole("status")).toHaveTextContent("completed");
-    await user.click(screen.getByRole("button", { name: /Reject/u }));
+    fireEvent.click(await screen.findByRole("button", { name: /Reject/u }));
     expect(screen.getByRole("button", { name: "Reject task" })).toBeDisabled();
-    await user.type(screen.getByRole("textbox"), "Insufficient evidence");
-    await user.click(screen.getByRole("button", { name: "Reject task" }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Insufficient evidence" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reject task" }));
     expect(await screen.findByText(/No duplicate decision/u)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    await user.click(screen.getByRole("button", { name: "Refresh task state" }));
-    await user.click(screen.getByRole("button", { name: /Reject/u }));
-    await user.type(screen.getByRole("textbox"), "Still blocked");
-    await user.click(screen.getByRole("button", { name: "Reject task" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh task state" }));
+    fireEvent.click(screen.getByRole("button", { name: /Reject/u }));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Still blocked" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reject task" }));
     await waitFor(() => expect(reject).toHaveBeenCalledTimes(2));
   });
   it("applies task filters and clears filtered empty state", async () => {

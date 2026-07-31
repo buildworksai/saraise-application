@@ -240,7 +240,9 @@ describe("compliance management pages", () => {
     await user.type(screen.getByLabelText("Framework UUID"), "framework-1");
     await user.tab();
     await waitFor(() =>
-      expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ framework_id: "framework-1" }))
+      expect(list).toHaveBeenLastCalledWith(
+        expect.objectContaining({ framework_id: "framework-1" })
+      )
     );
     expect(await screen.findByText("No requirements")).toBeVisible();
     expect(screen.getByRole("button", { name: "Create requirement" })).toBeEnabled();

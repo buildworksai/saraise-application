@@ -57,7 +57,10 @@ describe("accounting aggregate forms", () => {
 
     expect(screen.getByLabelText("Code")).toHaveClass("border-destructive");
     expect(screen.getByText("Code is required")).toBeInTheDocument();
-    expect(screen.getByLabelText("Type")).toHaveAttribute("aria-describedby", "primitive-select-error");
+    expect(screen.getByLabelText("Type")).toHaveAttribute(
+      "aria-describedby",
+      "primitive-select-error"
+    );
     await user.selectOptions(screen.getByLabelText("Type"), "liability");
     expect(selectChange).toHaveBeenCalledWith("liability");
     expect(screen.getByText("Too long")).toBeInTheDocument();
@@ -83,7 +86,9 @@ describe("accounting aggregate forms", () => {
     await user.type(screen.getByLabelText("Account code"), " ");
     await user.type(screen.getByLabelText("Account name"), " ");
     submitForm("Create account");
-    expect(await screen.findAllByText("String must contain at least 1 character(s)")).toHaveLength(2);
+    expect(await screen.findAllByText("String must contain at least 1 character(s)")).toHaveLength(
+      2
+    );
     expect(submit).not.toHaveBeenCalled();
 
     await user.clear(screen.getByLabelText("Account code"));
@@ -162,7 +167,9 @@ describe("accounting aggregate forms", () => {
     expect(screen.getByText("Difference 2.34")).toBeInTheDocument();
 
     submitForm("Create draft");
-    expect(await screen.findByRole("alert")).toHaveTextContent("Debits and credits must balance exactly.");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Debits and credits must balance exactly."
+    );
     expect(submit).not.toHaveBeenCalled();
 
     await user.clear(screen.getByLabelText("Line 2 credit"));
@@ -198,7 +205,9 @@ describe("accounting aggregate forms", () => {
     await user.type(screen.getByLabelText("Line 1 tax"), "1.50");
     expect(screen.getByText("USD 11.50")).toBeInTheDocument();
     submitForm("Create invoice");
-    expect(await screen.findByText("Due date must be on or after invoice date.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Due date must be on or after invoice date.")
+    ).toBeInTheDocument();
 
     await user.clear(screen.getByLabelText("Due date"));
     await user.type(screen.getByLabelText("Due date"), "2026-08-31");

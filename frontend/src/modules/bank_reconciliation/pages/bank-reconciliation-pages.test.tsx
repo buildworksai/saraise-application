@@ -370,7 +370,10 @@ function renderPage(path: string, element: React.ReactElement) {
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={[path]}>
           <Routes>
-            <Route path={path.includes(":") ? path : path.replace(/\/[^/]+$/u, "/:id")} element={element} />
+            <Route
+              path={path.includes(":") ? path : path.replace(/\/[^/]+$/u, "/:id")}
+              element={element}
+            />
             <Route path="*" element={element} />
           </Routes>
         </MemoryRouter>
@@ -397,7 +400,10 @@ function renderAt(routePattern: string, entry: string, element: React.ReactEleme
 describe("bank reconciliation governed pages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubGlobal("confirm", vi.fn(() => true));
+    vi.stubGlobal(
+      "confirm",
+      vi.fn(() => true)
+    );
     vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "idem-test") });
     service.health.mockResolvedValue({
       status: "degraded",
@@ -498,7 +504,9 @@ describe("bank reconciliation governed pages", () => {
   });
 
   it("renders statement filters, balance proof, import diagnostics, and void guard", async () => {
-    service.listStatements.mockResolvedValue(collection([{ ...statement, balance_variance: "5.0000" }]));
+    service.listStatements.mockResolvedValue(
+      collection([{ ...statement, balance_variance: "5.0000" }])
+    );
     service.getStatement.mockResolvedValue({ ...statement, balance_variance: "5.0000" });
     service.listStatementTransactions.mockResolvedValue(collection([transaction]));
     service.voidStatement.mockResolvedValue({ ...statement, status: "void" });
@@ -633,12 +641,22 @@ describe("bank reconciliation governed pages", () => {
     service.listStatementTransactions.mockResolvedValue(
       collection([
         transaction,
-        { ...transaction, id: "tx-2", description: "Fee", amount: "-5.0000", match_status: "unmatched" },
+        {
+          ...transaction,
+          id: "tx-2",
+          description: "Fee",
+          amount: "-5.0000",
+          match_status: "unmatched",
+        },
       ])
     );
     service.createManualMatch.mockResolvedValue(reconciliationMatch);
 
-    renderAt("/reconciliations/:id/workspace", "/reconciliations/recon-1/workspace", <ReconciliationWorkspacePage />);
+    renderAt(
+      "/reconciliations/:id/workspace",
+      "/reconciliations/recon-1/workspace",
+      <ReconciliationWorkspacePage />
+    );
 
     expect(await screen.findByText("Certification blocked")).toBeInTheDocument();
     expect(screen.getByText("Unmatched transactions remain")).toBeInTheDocument();
@@ -663,7 +681,9 @@ describe("bank reconciliation governed pages", () => {
     const createObjectURL = vi.fn(() => "blob:reconciliation");
     const revokeObjectURL = vi.fn();
     vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
-    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
     service.getReconciliation.mockResolvedValue({ ...reconciliation, status: "finalized" });
     service.downloadReport.mockResolvedValue(new Blob(["csv"]));
     renderAt("/reconciliations/:id", "/reconciliations/recon-1", <ReconciliationDetailPage />);
@@ -695,9 +715,7 @@ describe("bank reconciliation governed pages", () => {
     renderPage("/bank-reconciliation/rules", <MatchingRuleListPage />);
     expect(await screen.findByText("Exact reference")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Deactivate" }));
-    await waitFor(() =>
-      expect(service.deactivateRule).toHaveBeenCalledWith("rule-1")
-    );
+    await waitFor(() => expect(service.deactivateRule).toHaveBeenCalledWith("rule-1"));
 
     renderPage("/bank-reconciliation/imports", <ImportJobListPage />);
     expect(await screen.findByText("july.csv")).toBeInTheDocument();

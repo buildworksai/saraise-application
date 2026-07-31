@@ -34,7 +34,11 @@ describe("AccountingUI", () => {
     const { container } = render(
       <>
         <AccountingPageSkeleton rows={3} />
-        <PageHeader title="Accounting" description="Governed ledger" actions={<button>Act</button>} />
+        <PageHeader
+          title="Accounting"
+          description="Governed ledger"
+          actions={<button>Act</button>}
+        />
       </>
     );
 
@@ -58,7 +62,9 @@ describe("AccountingUI", () => {
     );
 
     expect(screen.getByRole("heading", { name: "No accounts" })).toBeInTheDocument();
-    expect(screen.getByText("Create the first account before posting journals.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Create the first account before posting journals.")
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create account" })).toBeInTheDocument();
   });
 
@@ -87,11 +93,21 @@ describe("AccountingUI", () => {
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(retry).toHaveBeenCalledOnce();
 
-    rerender(<AccountingFailure error={new AccountingApiError("Missing", 404, "NOT_FOUND", null, null)} onRetry={retry} />);
+    rerender(
+      <AccountingFailure
+        error={new AccountingApiError("Missing", 404, "NOT_FOUND", null, null)}
+        onRetry={retry}
+      />
+    );
     expect(screen.getByRole("alert")).toHaveTextContent("Record not found");
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
 
-    rerender(<AccountingFailure error={new AccountingApiError("Denied", 403, "DENIED", null, null)} onRetry={retry} />);
+    rerender(
+      <AccountingFailure
+        error={new AccountingApiError("Denied", 403, "DENIED", null, null)}
+        onRetry={retry}
+      />
+    );
     expect(screen.getByRole("alert")).toHaveTextContent("Access denied");
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
 

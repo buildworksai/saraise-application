@@ -128,7 +128,10 @@ describe("sales shared UI primitives", () => {
     rerender(
       <QueryClientProvider client={new QueryClient()}>
         <MemoryRouter initialEntries={["/sales-management/customers"]}>
-          {list({ isLoading: false, error: new ApiError("Denied", 403, undefined, "FORBIDDEN", "corr-denied") })}
+          {list({
+            isLoading: false,
+            error: new ApiError("Denied", 403, undefined, "FORBIDDEN", "corr-denied"),
+          })}
         </MemoryRouter>
       </QueryClientProvider>
     );
@@ -182,7 +185,12 @@ describe("sales shared UI primitives", () => {
     const { rerender } = renderWithRouter(
       <>
         <StatusPill status="ready_to_ship" />
-        <DetailGrid entries={[["Tracking", ""], ["Currency", "USD"]]} />
+        <DetailGrid
+          entries={[
+            ["Tracking", ""],
+            ["Currency", "USD"],
+          ]}
+        />
         <Timeline records={[transition]} />
         <SalesFiltersProbe />
         <UnsavedProbe dirty={false} />
@@ -197,10 +205,7 @@ describe("sales shared UI primitives", () => {
     expect(screen.getByText(/"is_active":true/u)).toBeInTheDocument();
 
     const prevented = vi.fn();
-    fireEvent(
-      window,
-      new Event("beforeunload", { cancelable: true, bubbles: true })
-    );
+    fireEvent(window, new Event("beforeunload", { cancelable: true, bubbles: true }));
     expect(prevented).not.toHaveBeenCalled();
 
     rerender(

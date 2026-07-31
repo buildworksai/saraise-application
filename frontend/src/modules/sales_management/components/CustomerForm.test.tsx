@@ -110,7 +110,10 @@ describe("CustomerForm", () => {
   });
 
   it("updates existing customers with expected version and guards dirty cancel navigation", async () => {
-    vi.mocked(salesService.updateCustomer).mockResolvedValue({ ...customer, customer_name: "ACME Renewed" });
+    vi.mocked(salesService.updateCustomer).mockResolvedValue({
+      ...customer,
+      customer_name: "ACME Renewed",
+    });
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     renderForm(<CustomerForm customer={customer} />);
 

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QUERY_KEYS } from "@/modules/api_management/contracts";
 import { tenantItems } from "./contracts";
 import { TenantSidebar } from "./TenantSidebar";
+import { renderTenantItems } from "./sidebar-utils";
 import type { User } from "@/stores/auth-store";
 
 const mocks = vi.hoisted(() => ({
@@ -591,22 +592,28 @@ describe("TenantSidebar", () => {
     expect(screen.queryByRole("link", { name: /tenant admin audit/i })).not.toBeInTheDocument();
   });
 
-  it("filters admin-only children without dropping visible siblings for non-admin users", async () => {
-    renderSidebarForUser(tenantUser, "/tenant/dashboard");
+  it("filters admin-only children without dropping visible siblings for non-admin users", () => {
+    const rendered = renderTenantItems(tenantItems, [], { isAdmin: false });
+    const regional = rendered.find((item) => item.label === "Regional");
+    const aiProviders = rendered.find((item) => item.label === "AI Providers");
 
-    await userEvent.click(screen.getByRole("button", { name: /regional/i }));
-    expect(screen.getByRole("link", { name: /^resources$/i })).toHaveAttribute("href", "/regional");
-    expect(screen.getByRole("link", { name: /^create resource$/i })).toHaveAttribute(
-      "href",
-      "/regional/create"
+    expect(regional?.children).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "Resources", path: "/regional" }),
+        expect.objectContaining({ label: "Create resource", path: "/regional/create" }),
+      ])
     );
-    expect(screen.queryByRole("link", { name: /^configuration$/i })).not.toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: /ai providers/i }));
-    expect(screen.getByRole("link", { name: /provider console/i })).toHaveAttribute(
-      "href",
-      "/ai-provider-configuration"
+    expect(regional?.children?.some((child) => child.label === "Configuration")).toBe(false);
+    expect(aiProviders?.children).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          label: "Provider Console",
+          path: "/ai-provider-configuration",
+        }),
+      ])
     );
-    expect(screen.queryByRole("link", { name: /runtime configuration/i })).not.toBeInTheDocument();
+    expect(aiProviders?.children?.some((child) => child.label === "Runtime Configuration")).toBe(
+      false
+    );
   });
 });

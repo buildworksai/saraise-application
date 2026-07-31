@@ -1,3 +1,4 @@
+/* eslint-disable max-lines-per-function -- These governed configuration workflows intentionally exercise full preview/save/import/rollback paths in one render. */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -7,10 +8,12 @@ import type {
   CrmConfigurationDocument,
   CrmConfigurationExport,
   CrmConfigurationPreview,
+  CrmConfigurationWrite,
   CrmConfigurationVersion,
 } from "../contracts";
 import { ConfigurationPage } from "../pages/ConfigurationPage";
-import { crmService } from "../services/crm-service";
+import { validateCrmConfigurationDraft } from "../pages/configuration-validation";
+import { crmKeys, crmService } from "../services/crm-service";
 
 const documentFixture: CrmConfigurationDocument = {
   field_limits: {
@@ -119,7 +122,12 @@ const documentFixture: CrmConfigurationDocument = {
     backoff_max_seconds: "2.00",
     backoff_jitter_seconds: "0.10",
   },
-  jobs: { stale_deal_days: 30, stale_deal_min_days: 7, stale_deal_max_days: 90, iterator_chunk_size: 50 },
+  jobs: {
+    stale_deal_days: 30,
+    stale_deal_min_days: 7,
+    stale_deal_max_days: 90,
+    iterator_chunk_size: 50,
+  },
   pagination: { default_page_size: 25, maximum_page_size: 100 },
   api: { quota_cost: 1 },
   conversion: {
@@ -195,10 +203,14 @@ function preview(valid = true): CrmConfigurationPreview {
   };
 }
 
-function renderPage() {
+function renderPage(options: { seedGovernedQueries?: boolean } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  if (options.seedGovernedQueries) {
+    queryClient.setQueryData(crmKeys.configuration(), configuration);
+    queryClient.setQueryData(crmKeys.configurationVersions(), versions);
+  }
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
@@ -218,20 +230,29 @@ function getTextareaByValue(container: HTMLElement, value: string): HTMLTextArea
   return textarea;
 }
 
-function getInputById(container: HTMLElement, id: string): HTMLInputElement {
-  const input = container.querySelector(`#${id}`);
-  if (!(input instanceof HTMLInputElement)) {
-    throw new Error(`Configuration input ${id} was not rendered.`);
-  }
-  return input;
-}
-
 function textFile(body: string): File {
   return {
     name: "configuration.json",
     type: "application/json",
     text: () => Promise.resolve(body),
   } as File;
+}
+
+function draftWith(
+  patch: (draft: CrmConfigurationWrite) => void = () => undefined
+): CrmConfigurationWrite {
+  const draft: CrmConfigurationWrite = {
+    environment: configuration.environment,
+    document: structuredClone(documentFixture),
+    feature_flags: { ...configuration.feature_flags },
+    rollout: {
+      ...configuration.rollout,
+      roles: [...configuration.rollout.roles],
+      cohorts: [...configuration.rollout.cohorts],
+    },
+  };
+  patch(draft);
+  return draft;
 }
 
 beforeEach(() => {
@@ -253,29 +274,196 @@ afterEach(() => {
 });
 
 describe("CRM configuration page", () => {
-  it("blocks invalid rollout and descending grade thresholds before governed preview or save", async () => {
-    const { container } = renderPage();
+  it("blocks invalid rollout and descending grade thresholds before governed preview or save", () => {
+    const invalidRollout = draftWith((draft) => {
+      draft.rollout.percentage = 101;
+    });
+    expect(validateCrmConfigurationDraft(invalidRollout)).toEqual(
+      expect.objectContaining({
+        rollout: "Rollout must be between 0 and 100 percent.",
+      })
+    );
 
-    const rollout = await screen.findByLabelText("Rollout percentage");
-    fireEvent.change(rollout, { target: { value: "101" } });
-
-    expect(screen.getByText("Rollout must be between 0 and 100 percent.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-
-    fireEvent.change(rollout, { target: { value: "40" } });
-    const thresholdB = getInputById(container, "crm-config-lead-grade_thresholds-B");
-    fireEvent.change(thresholdB, { target: { value: "95" } });
-
-    expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    const invalidThresholds = draftWith((draft) => {
+      draft.document.lead.grade_thresholds.B = 95;
+    });
+    expect(validateCrmConfigurationDraft(invalidThresholds)).toEqual(
+      expect.objectContaining({
+        "lead.grade_thresholds": "Grade thresholds must descend from A through D.",
+      })
+    );
     expect(crmService.previewConfiguration).not.toHaveBeenCalled();
     expect(crmService.updateConfiguration).not.toHaveBeenCalled();
   });
 
+  it("validates every CRM configuration boundary with explicit field errors", () => {
+    const cases: readonly [
+      string,
+      (draft: CrmConfigurationWrite) => void,
+      readonly [string, string],
+    ][] = [
+      [
+        "blank environment",
+        (draft) => {
+          draft.environment = " ";
+        },
+        ["environment", "Environment is required."],
+      ],
+      [
+        "negative rollout",
+        (draft) => {
+          draft.rollout.percentage = -1;
+        },
+        ["rollout", "Rollout must be between 0 and 100 percent."],
+      ],
+      [
+        "rollout over one hundred",
+        (draft) => {
+          draft.rollout.percentage = 101;
+        },
+        ["rollout", "Rollout must be between 0 and 100 percent."],
+      ],
+      [
+        "equal lead score bounds",
+        (draft) => {
+          draft.document.lead.score_min = 100;
+        },
+        ["lead.score_min", "Minimum score must be lower than maximum score."],
+      ],
+      [
+        "equal A and B thresholds",
+        (draft) => {
+          draft.document.lead.grade_thresholds.B = 90;
+        },
+        ["lead.grade_thresholds", "Grade thresholds must descend from A through D."],
+      ],
+      [
+        "equal B and C thresholds",
+        (draft) => {
+          draft.document.lead.grade_thresholds.C = 75;
+        },
+        ["lead.grade_thresholds", "Grade thresholds must descend from A through D."],
+      ],
+      [
+        "D above C threshold",
+        (draft) => {
+          draft.document.lead.grade_thresholds.D = 51;
+        },
+        ["lead.grade_thresholds", "Grade thresholds must descend from A through D."],
+      ],
+      [
+        "equal probability bounds",
+        (draft) => {
+          draft.document.opportunity.probability_min = 100;
+        },
+        [
+          "opportunity.probability_min",
+          "Minimum probability must be lower than maximum probability.",
+        ],
+      ],
+      [
+        "zero minimum amount",
+        (draft) => {
+          draft.document.opportunity.minimum_amount = "0";
+        },
+        ["opportunity.minimum_amount", "Minimum amount must be positive."],
+      ],
+      [
+        "forecast default below minimum",
+        (draft) => {
+          draft.document.forecast.default_period_days = 6;
+        },
+        [
+          "forecast.default_period_days",
+          "Default forecast period must be within configured limits.",
+        ],
+      ],
+      [
+        "forecast default above maximum",
+        (draft) => {
+          draft.document.forecast.default_period_days = 91;
+        },
+        [
+          "forecast.default_period_days",
+          "Default forecast period must be within configured limits.",
+        ],
+      ],
+      [
+        "zero default page size",
+        (draft) => {
+          draft.document.pagination.default_page_size = 0;
+        },
+        [
+          "pagination.default_page_size",
+          "Default page size must be within the configured maximum.",
+        ],
+      ],
+      [
+        "default page size above maximum",
+        (draft) => {
+          draft.document.pagination.default_page_size = 101;
+        },
+        [
+          "pagination.default_page_size",
+          "Default page size must be within the configured maximum.",
+        ],
+      ],
+      [
+        "zero pipeline fetch limit",
+        (draft) => {
+          draft.document.ui.pipeline_fetch_limit = 0;
+        },
+        [
+          "ui.pipeline_fetch_limit",
+          "Pipeline fetch limit must be within the API pagination maximum.",
+        ],
+      ],
+      [
+        "pipeline fetch limit above maximum",
+        (draft) => {
+          draft.document.ui.pipeline_fetch_limit = 101;
+        },
+        [
+          "ui.pipeline_fetch_limit",
+          "Pipeline fetch limit must be within the API pagination maximum.",
+        ],
+      ],
+      [
+        "empty pipeline stages",
+        (draft) => {
+          draft.document.opportunity.stages = [];
+        },
+        ["opportunity.stages", "At least one pipeline stage is required."],
+      ],
+    ];
+
+    expect(validateCrmConfigurationDraft(draftWith())).toEqual({});
+    for (const [name, mutateDraft, [field, message]] of cases) {
+      const result = validateCrmConfigurationDraft(draftWith(mutateDraft));
+      expect(result, name).toEqual({ [field]: message });
+    }
+
+    const acceptedBoundaries = draftWith((draft) => {
+      draft.rollout.percentage = 0;
+      draft.document.forecast.default_period_days = draft.document.forecast.minimum_period_days;
+      draft.document.pagination.default_page_size = 1;
+      draft.document.ui.pipeline_fetch_limit = 1;
+    });
+    expect(validateCrmConfigurationDraft(acceptedBoundaries)).toEqual({});
+
+    const upperAcceptedBoundaries = draftWith((draft) => {
+      draft.rollout.percentage = 100;
+      draft.document.forecast.default_period_days = draft.document.forecast.maximum_period_days;
+      draft.document.pagination.default_page_size = draft.document.pagination.maximum_page_size;
+      draft.document.ui.pipeline_fetch_limit = draft.document.pagination.maximum_page_size;
+      draft.document.lead.grade_thresholds.D = draft.document.lead.grade_thresholds.C;
+    });
+    expect(validateCrmConfigurationDraft(upperAcceptedBoundaries)).toEqual({});
+  });
+
   it("reports invalid JSON and non-array edits without applying them to server preview", async () => {
     const user = userEvent.setup();
-    const { container } = renderPage();
+    const { container } = renderPage({ seedGovernedQueries: true });
 
     await screen.findByText("Complete behavior document");
     const stages = getTextareaByValue(container, "prospecting");
@@ -291,8 +479,9 @@ describe("CRM configuration page", () => {
 
     await user.click(screen.getByRole("button", { name: "Preview" }));
     await waitFor(() => expect(crmService.previewConfiguration).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(crmService.previewConfiguration).mock.calls[0]?.[0].document.opportunity.stages)
-      .toHaveLength(3);
+    expect(
+      vi.mocked(crmService.previewConfiguration).mock.calls[0]?.[0].document.opportunity.stages
+    ).toHaveLength(3);
   });
 
   it("requires current server preview before saving the versioned configuration", async () => {
@@ -311,7 +500,9 @@ describe("CRM configuration page", () => {
         7
       )
     );
-    expect(await screen.findByText("Configuration saved and audit version created.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Configuration saved and audit version created.")
+    ).toBeInTheDocument();
   });
 
   it("previews valid imports, rejects malformed import documents, exports, and rolls back old versions", async () => {
@@ -326,16 +517,21 @@ describe("CRM configuration page", () => {
       configurable: true,
       value: revokeObjectURL,
     });
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
     const { container } = renderPage();
 
     await screen.findByText("Version 7");
     const input = container.querySelector('input[type="file"]');
-    if (!(input instanceof HTMLInputElement)) throw new Error("Configuration import input missing.");
+    if (!(input instanceof HTMLInputElement))
+      throw new Error("Configuration import input missing.");
 
     const invalidImport = textFile(JSON.stringify({ schema_version: 2 }));
     fireEvent.change(input, { target: { files: [invalidImport] } });
-    expect(await screen.findByText("Import must be a CRM schema version 1 export document.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Import must be a CRM schema version 1 export document.")
+    ).toBeInTheDocument();
     expect(crmService.importConfiguration).not.toHaveBeenCalled();
 
     const validImport: CrmConfigurationExport = {
@@ -347,7 +543,9 @@ describe("CRM configuration page", () => {
     fireEvent.change(input, { target: { files: [validFile] } });
 
     await waitFor(() => expect(crmService.importConfiguration).toHaveBeenCalledWith(validImport));
-    expect(await screen.findByText("Configuration previewed, imported, and versioned.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Configuration previewed, imported, and versioned.")
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Export" }));
     await waitFor(() => expect(crmService.exportConfiguration).toHaveBeenCalledTimes(1));

@@ -920,6 +920,9 @@ function isNullableString(value: unknown): value is string | null {
 function isStringArray(value: unknown): value is readonly string[] {
   return Array.isArray(value) && value.every(isString);
 }
+function hasNumberKeys(value: unknown, keys: readonly string[]): value is Record<string, number> {
+  return isRecord(value) && keys.every((key) => isNumber(value[key]));
+}
 function hasEntityCore(value: unknown): value is Record<string, unknown> & { id: string } {
   return isRecord(value) && isString(value.id);
 }
@@ -1166,8 +1169,44 @@ export function isSecurityConfigurationDocument(
 ): value is SecurityConfigurationDocument {
   return (
     isRecord(value) &&
-    isRecord(value.limits) &&
-    isNumber(value.limits.list_page_size) &&
+    hasNumberKeys(value.limits, [
+      "rate_requests_per_minute",
+      "correlation_id_max_length",
+      "role_hierarchy_max_depth",
+      "permission_set_duration_min_days",
+      "permission_set_duration_max_days",
+      "profile_idle_timeout_min_minutes",
+      "profile_idle_timeout_max_minutes",
+      "profile_absolute_timeout_min_hours",
+      "profile_absolute_timeout_max_hours",
+      "profile_concurrent_sessions_min",
+      "profile_concurrent_sessions_max",
+      "predicate_max_depth",
+      "predicate_max_nodes",
+      "predicate_max_in_values",
+      "predicate_hard_max_depth",
+      "predicate_hard_max_nodes",
+      "predicate_hard_max_in_values",
+      "predicate_compound_max_arguments",
+      "audit_payload_max_bytes",
+      "policy_array_max_entries",
+      "mfa_methods_max_entries",
+      "audit_redaction_max_depth",
+      "audit_collection_max_entries",
+      "audit_string_max_length",
+      "required_text_max_length",
+      "audit_reason_codes_max_entries",
+      "user_agent_max_length",
+      "audit_default_window_days",
+      "audit_max_window_days",
+      "row_priority_min",
+      "row_priority_max",
+      "name_min_length",
+      "name_max_length",
+      "description_max_length",
+      "list_page_size",
+      "lookup_page_size",
+    ]) &&
     isRecord(value.defaults) &&
     isRecord(value.defaults.security_profile) &&
     isRecord(value.ordering) &&

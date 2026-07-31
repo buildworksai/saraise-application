@@ -315,7 +315,9 @@ describe("compliance risk page coverage", () => {
     await waitFor(() =>
       expect(service.getDashboard).toHaveBeenLastCalledWith({ category: "compliance" })
     );
-    expect(screen.getByRole("gridcell", { name: /Likelihood 4, impact 5, 2 risks/i })).toBeEnabled();
+    expect(
+      screen.getByRole("gridcell", { name: /Likelihood 4, impact 5, 2 risks/i })
+    ).toBeEnabled();
     expect(screen.getByText("No overdue work in this view.")).toBeVisible();
     expect(screen.getByText("No upcoming events in this view.")).toBeVisible();
   });
@@ -339,7 +341,10 @@ describe("compliance risk page coverage", () => {
     await user.type(reviewDays, "120");
     await user.click(screen.getByRole("button", { name: "Preview impact" }));
     expect(await screen.findByRole("status")).toHaveTextContent("Candidate is valid");
-    await user.type(controlAfterLabel<HTMLTextAreaElement>("Version summary"), "Align review cadence");
+    await user.type(
+      controlAfterLabel<HTMLTextAreaElement>("Version summary"),
+      "Align review cadence"
+    );
     await user.click(screen.getByRole("button", { name: "Publish configuration" }));
     await user.click(await screen.findByRole("button", { name: "Publish version" }));
 
@@ -362,14 +367,19 @@ describe("compliance risk page coverage", () => {
 
     renderPage(
       <Routes>
-        <Route path="/configuration/history/:version" element={<RiskConfigurationVersionDetailPage />} />
+        <Route
+          path="/configuration/history/:version"
+          element={<RiskConfigurationVersionDetailPage />}
+        />
       </Routes>,
       "/configuration/history/3?environment=development"
     );
 
     expect(await screen.findByText("Configuration version 3")).toBeVisible();
     expect(screen.getByText("Current active version")).toBeVisible();
-    expect(screen.queryByRole("button", { name: /Rollback to this version/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Rollback to this version/i })
+    ).not.toBeInTheDocument();
   });
 
   it("renders risk detail trace branches and opens acceptance transition preview", async () => {
@@ -407,7 +417,9 @@ describe("compliance risk page coverage", () => {
     expect(await screen.findByText("CTRL-001 · Vendor attestation")).toBeVisible();
     await user.selectOptions(screen.getByLabelText("Frequency filter"), "custom");
     await waitFor(() =>
-      expect(service.listControls).toHaveBeenLastCalledWith(expect.objectContaining({ frequency: "custom" }))
+      expect(service.listControls).toHaveBeenLastCalledWith(
+        expect.objectContaining({ frequency: "custom" })
+      )
     );
 
     cleanup();
@@ -437,7 +449,9 @@ describe("compliance risk page coverage", () => {
       JSON.stringify({
         result: "failed",
         findings: "Old finding",
-        evidence: [{ document_id: "doc-1", version_id: "ver-1", label: "Attestation", checksum: "sha" }],
+        evidence: [
+          { document_id: "doc-1", version_id: "ver-1", label: "Attestation", checksum: "sha" },
+        ],
       })
     );
 

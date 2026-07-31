@@ -256,8 +256,14 @@ function renderAt(element: React.ReactNode, path: string, route = path) {
           <Route path={ROUTES.ATTENDANCE} element={<p>Attendance index</p>} />
           <Route path={`${ROUTES.ATTENDANCE}/:id`} element={<p>Attendance detail reached</p>} />
           <Route path={ROUTES.LEAVE} element={<p>Leave index</p>} />
-          <Route path={`${ROUTES.LEAVE}/balances/:id`} element={<p>Leave balance detail reached</p>} />
-          <Route path={`${ROUTES.LEAVE}/requests/:id`} element={<p>Leave request detail reached</p>} />
+          <Route
+            path={`${ROUTES.LEAVE}/balances/:id`}
+            element={<p>Leave balance detail reached</p>}
+          />
+          <Route
+            path={`${ROUTES.LEAVE}/requests/:id`}
+            element={<p>Leave request detail reached</p>}
+          />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -294,18 +300,28 @@ describe("Human Resources form pages", () => {
     const listEmployees = vi
       .spyOn(hrService, "listEmployees")
       .mockRejectedValueOnce(
-        new HrApiError("Lookup service unavailable", "unavailable", 503, "hr_lookup_down", "corr-choice")
+        new HrApiError(
+          "Lookup service unavailable",
+          "unavailable",
+          503,
+          "hr_lookup_down",
+          "corr-choice"
+        )
       )
       .mockResolvedValueOnce(page([employee]));
 
     renderAt(<CreateEmployeePage />, ROUTES.EMPLOYEE_CREATE);
 
-    expect(await screen.findByRole("heading", { name: "Form choices unavailable" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Form choices unavailable" })
+    ).toBeInTheDocument();
     expect(screen.getByText(/corr-choice/u)).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: /try again/i }));
 
-    await waitFor(() => expect(screen.getByRole("heading", { name: "Create employee" })).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Create employee" })).toBeInTheDocument()
+    );
     expect(listEmployees).toHaveBeenCalledTimes(2);
   });
 
@@ -314,8 +330,12 @@ describe("Human Resources form pages", () => {
 
     renderAt(<CreateLeaveRequestPage />, ROUTES.LEAVE_REQUEST_CREATE);
 
-    expect(await screen.findByRole("heading", { name: "Required choices unavailable" })).toBeInTheDocument();
-    expect(screen.getByText("Create or activate the required tenant resource, then retry this form.")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Required choices unavailable" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Create or activate the required tenant resource, then retry this form.")
+    ).toBeInTheDocument();
   });
 
   it("validates employee fields locally before creating and navigating to the new detail page", async () => {
@@ -331,7 +351,9 @@ describe("Human Resources form pages", () => {
     await user.click(await screen.findByRole("button", { name: "Create employee" }));
 
     expect(createEmployee).not.toHaveBeenCalled();
-    expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toContain("This field is required.");
+    expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toContain(
+      "This field is required."
+    );
 
     await user.type(screen.getByLabelText("Employee number"), "EMP-002");
     await user.type(screen.getByLabelText("First name"), "Grace");

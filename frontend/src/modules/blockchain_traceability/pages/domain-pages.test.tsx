@@ -58,7 +58,12 @@ const capabilities = {
     },
     network_policy: { default_confirmation_depth: 2, max_confirmation_depth: 12 },
     schema_policy: { default_version: 1, allowed_versions: [1] },
-    list_policy: { default_page_size: 25, max_page_size: 100, history_chunk_size: 50, verification_chunk_size: 20 },
+    list_policy: {
+      default_page_size: 25,
+      max_page_size: 100,
+      history_chunk_size: 50,
+      verification_chunk_size: 20,
+    },
     health_policy: {
       provider_probe_cache_ttl_seconds: 60,
       outbox_freshness_seconds: 120,
@@ -369,16 +374,18 @@ describe("blockchain traceability domain pages", () => {
   });
 
   it("queues an anchor with numeric ranges and renders the durable queued state", async () => {
-    const requestAnchor = vi.spyOn(blockchainTraceabilityService, "requestAnchor").mockResolvedValue({
-      anchor: anchor(),
-      job: {
-        id: "job-1",
-        command: "blockchain_traceability.submit_anchor",
-        status: "queued",
-        correlation_id: "corr-job",
-      },
-      queued: true,
-    });
+    const requestAnchor = vi
+      .spyOn(blockchainTraceabilityService, "requestAnchor")
+      .mockResolvedValue({
+        anchor: anchor(),
+        job: {
+          id: "job-1",
+          command: "blockchain_traceability.submit_anchor",
+          status: "queued",
+          correlation_id: "corr-job",
+        },
+        queued: true,
+      });
 
     renderWithProviders(<CreateLedgerAnchorPage />);
 
@@ -386,7 +393,9 @@ describe("blockchain traceability domain pages", () => {
     fireEvent.change(screen.getByLabelText("Network ID"), { target: { value: " network-1 " } });
     fireEvent.change(screen.getByLabelText("Start sequence"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("End sequence"), { target: { value: "2" } });
-    fireEvent.change(screen.getByLabelText("Idempotency key"), { target: { value: " anchor-key " } });
+    fireEvent.change(screen.getByLabelText("Idempotency key"), {
+      target: { value: " anchor-key " },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Queue anchor request" }));
 
     await waitFor(() =>
@@ -436,13 +445,17 @@ describe("blockchain traceability domain pages", () => {
     renderWithProviders(<CreateComplianceEvidencePage />);
 
     fireEvent.change(screen.getByLabelText("Asset ID"), { target: { value: " asset-1 " } });
-    fireEvent.change(screen.getByLabelText("Evidence key"), { target: { value: " evidence-key-1 " } });
+    fireEvent.change(screen.getByLabelText("Evidence key"), {
+      target: { value: " evidence-key-1 " },
+    });
     fireEvent.change(screen.getByLabelText("Evidence type"), { target: { value: " inspection " } });
     fireEvent.change(screen.getByLabelText("Standard"), { target: { value: " ISO-9001 " } });
     fireEvent.change(screen.getByLabelText("Result (pass, fail, warning, not_applicable)"), {
       target: { value: " warning " },
     });
-    fireEvent.change(screen.getByLabelText("Observed at"), { target: { value: "2026-07-30T10:00" } });
+    fireEvent.change(screen.getByLabelText("Observed at"), {
+      target: { value: "2026-07-30T10:00" },
+    });
     fireEvent.change(screen.getByLabelText("Details (JSON)"), {
       target: { value: '{"inspector":"qa-1","score":97}' },
     });

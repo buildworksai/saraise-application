@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const renderMock = vi.fn();
@@ -11,6 +12,11 @@ vi.mock("react-dom/client", () => {
     createRoot: createRootMock,
   };
 });
+vi.mock("./App", () => ({ default: () => <div data-testid="app" /> }));
+vi.mock("./lib/theme-provider", () => ({
+  ThemeProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+}));
+vi.mock("sonner", () => ({ Toaster: () => null }));
 
 describe("main bootstrap", () => {
   beforeEach(() => {
