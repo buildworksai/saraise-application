@@ -7,6 +7,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.accounts.list",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/accounts",
+    title: "Bank accounts",
     sourceFile: "modules/bank_reconciliation/pages/BankAccountListPage.tsx",
     Page: lazy(() =>
       import("./pages/BankAccountListPage").then(({ BankAccountListPage }) => ({
@@ -19,6 +20,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.accounts.create",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/accounts/new",
+    title: "Create bank account",
     sourceFile: "modules/bank_reconciliation/pages/CreateBankAccountPage.tsx",
     Page: lazy(() =>
       import("./pages/CreateBankAccountPage").then(({ CreateBankAccountPage }) => ({
@@ -31,6 +33,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.accounts.detail",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/accounts/:id",
+    title: "Bank account details",
     sourceFile: "modules/bank_reconciliation/pages/BankAccountDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/BankAccountDetailPage").then(({ BankAccountDetailPage }) => ({
@@ -43,6 +46,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.accounts.edit",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/accounts/:id/edit",
+    title: "Edit bank account",
     sourceFile: "modules/bank_reconciliation/pages/EditBankAccountPage.tsx",
     Page: lazy(() =>
       import("./pages/EditBankAccountPage").then(({ EditBankAccountPage }) => ({
@@ -55,6 +59,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.statements.list",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/statements",
+    title: "Bank statements",
     sourceFile: "modules/bank_reconciliation/pages/StatementListPage.tsx",
     Page: lazy(() =>
       import("./pages/StatementListPage").then(({ StatementListPage }) => ({
@@ -67,6 +72,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.statements.import",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/statements/import",
+    title: "Import statement",
     sourceFile: "modules/bank_reconciliation/pages/ImportStatementPage.tsx",
     Page: lazy(() =>
       import("./pages/ImportStatementPage").then(({ ImportStatementPage }) => ({
@@ -79,6 +85,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.statements.create",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/statements/new",
+    title: "Create statement",
     sourceFile: "modules/bank_reconciliation/pages/CreateManualStatementPage.tsx",
     Page: lazy(() =>
       import("./pages/CreateManualStatementPage").then(({ CreateManualStatementPage }) => ({
@@ -91,6 +98,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.statements.detail",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/statements/:id",
+    title: "Statement details",
     sourceFile: "modules/bank_reconciliation/pages/StatementDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/StatementDetailPage").then(({ StatementDetailPage }) => ({
@@ -103,6 +111,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.transactions.detail",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/transactions/:id",
+    title: "Transaction details",
     sourceFile: "modules/bank_reconciliation/pages/TransactionDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/TransactionDetailPage").then(({ TransactionDetailPage }) => ({
@@ -115,6 +124,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.transactions.edit",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/transactions/:id/edit",
+    title: "Edit transaction",
     sourceFile: "modules/bank_reconciliation/pages/EditTransactionPage.tsx",
     Page: lazy(() =>
       import("./pages/EditTransactionPage").then(({ EditTransactionPage }) => ({
@@ -127,6 +137,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.reconciliations.list",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/reconciliations",
+    title: "Reconciliations",
     sourceFile: "modules/bank_reconciliation/pages/ReconciliationListPage.tsx",
     Page: lazy(() =>
       import("./pages/ReconciliationListPage").then(({ ReconciliationListPage }) => ({
@@ -139,6 +150,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.reconciliations.create",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/reconciliations/new",
+    title: "Create reconciliation",
     sourceFile: "modules/bank_reconciliation/pages/CreateReconciliationPage.tsx",
     Page: lazy(() =>
       import("./pages/CreateReconciliationPage").then(({ CreateReconciliationPage }) => ({
@@ -151,6 +163,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.reconciliations.detail",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/reconciliations/:id",
+    title: "Reconciliation details",
     sourceFile: "modules/bank_reconciliation/pages/ReconciliationDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/ReconciliationDetailPage").then(({ ReconciliationDetailPage }) => ({
@@ -163,6 +176,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.reconciliations.workspace",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/reconciliations/:id/workspace",
+    title: "Reconciliation workspace",
     sourceFile: "modules/bank_reconciliation/pages/ReconciliationWorkspacePage.tsx",
     Page: lazy(() =>
       import("./pages/ReconciliationWorkspacePage").then(({ ReconciliationWorkspacePage }) => ({
@@ -175,6 +189,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.rules.list",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/rules",
+    title: "Matching rules",
     sourceFile: "modules/bank_reconciliation/pages/MatchingRuleListPage.tsx",
     Page: lazy(() =>
       import("./pages/MatchingRuleListPage").then(({ MatchingRuleListPage }) => ({
@@ -187,6 +202,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.rules.create",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/rules/new",
+    title: "Create matching rule",
     sourceFile: "modules/bank_reconciliation/pages/CreateMatchingRulePage.tsx",
     Page: lazy(() =>
       import("./pages/CreateMatchingRulePage").then(({ CreateMatchingRulePage }) => ({
@@ -199,6 +215,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.rules.detail",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/rules/:id",
+    title: "Matching rule details",
     sourceFile: "modules/bank_reconciliation/pages/MatchingRuleDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/MatchingRuleDetailPage").then(({ MatchingRuleDetailPage }) => ({
@@ -211,6 +228,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.rules.edit",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/rules/:id/edit",
+    title: "Edit matching rule",
     sourceFile: "modules/bank_reconciliation/pages/EditMatchingRulePage.tsx",
     Page: lazy(() =>
       import("./pages/EditMatchingRulePage").then(({ EditMatchingRulePage }) => ({
@@ -223,6 +241,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.imports.list",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/imports",
+    title: "Import jobs",
     sourceFile: "modules/bank_reconciliation/pages/ImportJobListPage.tsx",
     Page: lazy(() =>
       import("./pages/ImportJobListPage").then(({ ImportJobListPage }) => ({
@@ -235,6 +254,7 @@ export const tenantRoutes = [
     id: "bank-reconciliation.imports.detail",
     module: "bank_reconciliation",
     path: "/bank-reconciliation/imports/:id",
+    title: "Import job details",
     sourceFile: "modules/bank_reconciliation/pages/ImportJobDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/ImportJobDetailPage").then(({ ImportJobDetailPage }) => ({

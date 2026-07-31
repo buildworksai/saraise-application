@@ -6,12 +6,22 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import os
+import shlex
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 THRESHOLD = 90.0
+DEFAULT_TEST_TARGETS = ("src",)
+SOURCE_TEST_TARGETS = {
+    "src/core/auth_api.py": ("src/core/auth/tests/test_mode_aware.py",),
+    "src/core/management/commands/seed_default_users.py": (
+        "src/core/tests/test_seed_default_users_collector.py",
+        "src/core/tests/test_seed_default_users.py",
+    ),
+}
 APPLICABLE_STATUSES = ("killed", "survived", "timeout", "suspicious")
 ALL_STATUSES = (*APPLICABLE_STATUSES, "untested", "skipped")
 EXCLUDED_DIRECTORIES = {"generated", "migrations", "test", "tests"}
@@ -96,6 +106,53 @@ def _mutation_environment() -> dict[str, str]:
     return environment
 
 
+def _diff_arguments(files: list[Path]) -> list[str]:
+    file_arguments = [path.as_posix() for path in files]
+    if os.environ.get("GITHUB_BASE_REF"):
+        return ["diff", "--relative", f"origin/{os.environ['GITHUB_BASE_REF']}...HEAD", "--", *file_arguments]
+    if os.environ.get("GITHUB_EVENT_NAME") == "push":
+        return ["diff", "--relative", "HEAD^", "HEAD", "--", *file_arguments]
+    return ["diff", "--relative", "HEAD", "--", *file_arguments]
+
+
+def _write_patch_file(files: list[Path], package_root: Path) -> Path | None:
+    diff = subprocess.run(
+        ["git", *_diff_arguments(files)],
+        cwd=package_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    if not diff.strip():
+        return None
+
+    patch = tempfile.NamedTemporaryFile(
+        "w",
+        delete=False,
+        encoding="utf-8",
+        prefix="mutation-gate-",
+        suffix=".patch",
+    )
+    with patch:
+        patch.write(diff)
+    return Path(patch.name)
+
+
+def _runner_for_files(files: list[Path]) -> str:
+    test_targets: set[str] = set()
+    for source_file in files:
+        test_targets.update(SOURCE_TEST_TARGETS.get(source_file.as_posix(), ()))
+
+    if not test_targets:
+        test_targets.update(DEFAULT_TEST_TARGETS)
+
+    quoted_targets = " ".join(shlex.quote(target) for target in sorted(test_targets))
+    return (
+        "sh -c 'SARAISE_MODE=development DJANGO_USE_SQLITE_FOR_TESTS=1 "
+        f"python -m pytest --nomigrations -x -q {quoted_targets}'"
+    )
+
+
 def run_gate(arguments: list[str], package_root: Path) -> int:
     files = _source_files(arguments, package_root)
     if not files:
@@ -106,16 +163,25 @@ def run_gate(arguments: list[str], package_root: Path) -> int:
     cache.unlink(missing_ok=True)
 
     mutation_paths = ",".join(path.as_posix() for path in files)
+    runner = _runner_for_files(files)
+    patch_file = _write_patch_file(files, package_root)
     print(f"Mutation gate: mutating {mutation_paths}", flush=True)
+    print(f"Mutation gate: runner {runner}", flush=True)
+    command = [
+        "mutmut",
+        "run",
+        "--paths-to-mutate",
+        mutation_paths,
+        "--runner",
+        runner,
+        "--simple-output",
+        "--no-progress",
+    ]
+    if patch_file is not None:
+        command.extend(["--use-patch-file", patch_file.as_posix()])
+        print(f"Mutation gate: patch {patch_file}", flush=True)
     run = subprocess.run(
-        [
-            "mutmut",
-            "run",
-            "--paths-to-mutate",
-            mutation_paths,
-            "--simple-output",
-            "--no-progress",
-        ],
+        command,
         cwd=package_root,
         check=False,
         env=_mutation_environment(),

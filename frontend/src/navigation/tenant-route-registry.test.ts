@@ -7,6 +7,7 @@ import {
   validateTenantSidebarTree,
   validateTenantRoutes,
 } from "./tenant-route-registry";
+import appSource from "../App.tsx?raw";
 
 describe("tenant route registry parity", () => {
   // Extensible by design: each migrated module appends its own descriptors, so this asserts
@@ -130,6 +131,24 @@ describe("tenant route registry parity", () => {
   it("supports an empty registry as a migration no-op", () => {
     expect(buildTenantSidebarTree([])).toEqual([]);
     expect(getTenantRouteValidationIssues([])).toEqual([]);
+  });
+
+  it("keeps completed module migrations out of the legacy route block", () => {
+    const migratedPaths = [
+      "/asset-management/assets",
+      "/asset-management/assets/new",
+      "/asset-management/assets/:id",
+      "/bank-reconciliation/accounts",
+      "/bank-reconciliation/accounts/new",
+      "/bank-reconciliation/accounts/:id",
+      "/inventory-management/warehouses",
+      "/inventory-management/warehouses/new",
+      "/inventory-management/warehouses/:id",
+    ];
+
+    for (const path of migratedPaths) {
+      expect(appSource).not.toContain(`path="${path}"`);
+    }
   });
 
   it("reports duplicate paths and broken contextual parents together", () => {

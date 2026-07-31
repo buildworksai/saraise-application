@@ -137,5 +137,10 @@ jobs:
         working-directory: frontend
         shell: bash
         run: |
-          mutate=$(sed 's#^frontend/##' /tmp/frontend-changed.txt | paste -sd, -)
+          sed 's#^frontend/##' /tmp/frontend-changed.txt > /tmp/frontend-changed-relative.txt
+          mutate=$(node scripts/changed-mutation-ranges.mjs /tmp/frontend-changed-relative.txt)
+          if [[ -z "$mutate" ]]; then
+            echo "Mutation gate: no added or changed frontend lines; skipping."
+            exit 0
+          fi
           npx stryker run --mutate "$mutate"

@@ -251,39 +251,6 @@ const CreateAccountingAccountPage = lazy(() =>
   }))
 );
 
-// Inventory Management
-const InventoryWarehouseListPage = lazy(() =>
-  import("./modules/inventory_management/pages/WarehouseListPage").then((m) => ({
-    default: m.WarehouseListPage,
-  }))
-);
-const InventoryWarehouseDetailPage = lazy(() =>
-  import("./modules/inventory_management/pages/WarehouseDetailPage").then((m) => ({
-    default: m.WarehouseDetailPage,
-  }))
-);
-const CreateInventoryWarehousePage = lazy(() =>
-  import("./modules/inventory_management/pages/CreateWarehousePage").then((m) => ({
-    default: m.CreateWarehousePage,
-  }))
-);
-// Bank Reconciliation
-const BankAccountListPage = lazy(() =>
-  import("./modules/bank_reconciliation/pages/BankAccountListPage").then((m) => ({
-    default: m.BankAccountListPage,
-  }))
-);
-const BankAccountDetailPage = lazy(() =>
-  import("./modules/bank_reconciliation/pages/BankAccountDetailPage").then((m) => ({
-    default: m.BankAccountDetailPage,
-  }))
-);
-const CreateBankAccountPage = lazy(() =>
-  import("./modules/bank_reconciliation/pages/CreateBankAccountPage").then((m) => ({
-    default: m.CreateBankAccountPage,
-  }))
-);
-
 // Budget Management
 const BudgetListPage = lazy(() =>
   import("./modules/budget_management/pages/BudgetListPage").then((m) => ({
@@ -298,23 +265,6 @@ const BudgetDetailPage = lazy(() =>
 const CreateBudgetPage = lazy(() =>
   import("./modules/budget_management/pages/CreateBudgetPage").then((m) => ({
     default: m.CreateBudgetPage,
-  }))
-);
-
-// Asset Management
-const AssetListPage = lazy(() =>
-  import("./modules/asset_management/pages/AssetListPage").then((m) => ({
-    default: m.AssetListPage,
-  }))
-);
-const AssetDetailPage = lazy(() =>
-  import("./modules/asset_management/pages/AssetDetailPage").then((m) => ({
-    default: m.AssetDetailPage,
-  }))
-);
-const CreateAssetPage = lazy(() =>
-  import("./modules/asset_management/pages/CreateAssetPage").then((m) => ({
-    default: m.CreateAssetPage,
   }))
 );
 
@@ -637,69 +587,6 @@ function AnimatedRoutes() {
             }
           />
 
-          {/* Inventory Management */}
-          <Route
-            path="/inventory-management/warehouses"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <InventoryWarehouseListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/inventory-management/warehouses/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateInventoryWarehousePage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/inventory-management/warehouses/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <InventoryWarehouseDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          {/* Bank Reconciliation */}
-          <Route
-            path="/bank-reconciliation/accounts"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <BankAccountListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/bank-reconciliation/accounts/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateBankAccountPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/bank-reconciliation/accounts/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <BankAccountDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
           {/* Budget Management */}
           <Route
             path="/budget-management/budgets"
@@ -727,38 +614,6 @@ function AnimatedRoutes() {
               <ProtectedRoute>
                 <ModuleLayout>
                   <BudgetDetailPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Asset Management */}
-          <Route
-            path="/asset-management/assets"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <AssetListPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/asset-management/assets/new"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <CreateAssetPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/asset-management/assets/:id"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <AssetDetailPage />
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -1068,8 +923,7 @@ function AnimatedRoutes() {
             }
           />
 
-          {/* Migration shim: module-owned routes coexist with the legacy inventory.
-              Remove matching legacy declarations as each module completes migration. */}
+          {/* Migration shim: module-owned routes are rendered from the typed registry. */}
           {registryTenantRoutes.map(({ id, path, title, Page }) => (
             <Route
               key={`registry:${id}`}

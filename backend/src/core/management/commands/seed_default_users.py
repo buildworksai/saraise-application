@@ -12,6 +12,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from src.core.user_models import UserProfile
@@ -256,10 +257,9 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.WARNING(f"ℹ️  {user_description} already exists: {user_email}"))
 
             if getattr(settings, "SARAISE_MODE", "development") in {"development", "self-hosted"}:
-                local_users = list(
-                    User.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
-                        email__in=[str(user_config["email"]) for user_config in tenant_users]
-                    )
+                local_users = self._local_access_users(
+                    tenant_id,
+                    self._seeded_tenant_emails(tenant_users),
                 )
                 self._bootstrap_local_access(tenant_id, local_users)
                 self._bootstrap_local_procurement_configuration(tenant_id, local_users)
@@ -281,6 +281,25 @@ class Command(BaseCommand):
             self.stdout.write("     - viewer@buildworks.ai (Tenant User)")
             self.stdout.write("\n   Note: Functional roles (developer, operator, billing, auditor, viewer)")
             self.stdout.write("         are managed via Role model in security_access_control module.")
+
+    @staticmethod
+    def _seeded_tenant_emails(tenant_users) -> tuple[str, ...]:
+        """Return configured tenant emails used to bind explicit local access grants."""
+
+        return tuple(str(user_config["email"]) for user_config in tenant_users)
+
+    def _local_access_users(self, tenant_id: str, seeded_emails: tuple[str, ...]):
+        """Return users that should receive explicit local UAT access grants."""
+
+        return tuple(
+            User.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
+                Q(email__in=seeded_emails)
+                | Q(profile__tenant_id=str(tenant_id), profile__tenant_role="tenant_admin", is_active=True)
+            )
+            .select_related("profile")
+            .distinct()
+            .order_by("id")
+        )
 
     def _bootstrap_local_access(self, tenant_id: str, tenant_users) -> None:
         """Create explicit local access state for every seeded tenant UAT identity."""

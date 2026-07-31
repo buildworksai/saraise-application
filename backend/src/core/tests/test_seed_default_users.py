@@ -61,6 +61,22 @@ def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
     assert tenant_admin.check_password(password)
 
     tenant_uuid = uuid.UUID(profile.tenant_id)
+    ad_hoc_admin = User.objects.create_user(
+        username="uat-local@example.com",
+        email="uat-local@example.com",
+        password=password,
+    )
+    UserProfile.objects.update_or_create(
+        user=ad_hoc_admin,
+        defaults={
+            "tenant_id": str(tenant_uuid),
+            "tenant_role": "tenant_admin",
+            "platform_role": None,
+        },
+    )
+
+    call_command("seed_default_users", password=password, stdout=StringIO())
+
     seeded_tenant_emails = {
         "admin@buildworks.ai",
         "user@buildworks.ai",
@@ -86,6 +102,15 @@ def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
         assert set(seeded_tenant_users.values_list("email", flat=True)) == seeded_tenant_emails
         assert grants.count() == len(seeded_tenant_emails)
         assert all(grant.expires_at is not None for grant in grants)
+        assert (
+            UserPermissionSet.objects.for_tenant(tenant_uuid)
+            .filter(
+                user=ad_hoc_admin,
+                permission_set=permission_set,
+                revoked_at__isnull=True,
+            )
+            .exists()
+        )
         assert (
             PermissionSetPermission.objects.for_tenant(tenant_uuid)
             .filter(

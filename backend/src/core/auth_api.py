@@ -14,6 +14,7 @@ Phase 7.6: Mode-aware authentication routing:
 - Development: Django built-in authentication (same as self-hosted)
 """
 
+import logging
 import uuid
 
 from django.contrib.auth import get_user_model, login, logout
@@ -32,6 +33,7 @@ from src.core.authentication import CsrfExemptSessionAuthentication, RelaxedCsrf
 from src.core.user_models import UserProfile
 
 User = get_user_model()
+logger = logging.getLogger("saraise.auth")
 
 
 @api_view(["POST"])
@@ -84,6 +86,9 @@ def login_view(request):
             email=email
         )  # nosemgrep: semgrep.tenant-id-required-in-queries -- reviewed false positive; scope enforced by surrounding domain policy.  # noqa: E501
     except User.DoesNotExist:
+        return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+    except User.MultipleObjectsReturned:
+        logger.error("auth.login.duplicate_email_identity")
         return Response({"error": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
     # Check password
