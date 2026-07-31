@@ -1,14 +1,17 @@
 """Readiness/liveness contract tests."""
 
 import json
+from dataclasses import FrozenInstanceError
 from datetime import timedelta
 
 import pytest
 from django.test import RequestFactory
 from django.urls import resolve
 from django.utils import timezone
+from prometheus_client import CONTENT_TYPE_LATEST
 
 from src.core.health import HealthCheckResult, HealthRegistry, health, health_live, health_ready, health_registry
+from src.core.metrics import metrics
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +51,27 @@ def test_root_health_routes_resolve_to_the_named_views() -> None:
     assert resolve("/health/").func is health
     assert resolve("/health/live/").func is health_live
     assert resolve("/health/ready/").func is health_ready
+
+
+def test_metrics_route_serves_prometheus_scrape_contract() -> None:
+    request = RequestFactory().get("/metrics/")
+
+    response = metrics(request)
+
+    assert resolve("/metrics/").func is metrics
+    assert response.status_code == 200
+    assert response["Content-Type"] == CONTENT_TYPE_LATEST
+    assert response.content
+
+
+def test_registered_probe_contract_is_immutable_after_registration() -> None:
+    registry = HealthRegistry()
+    registry.register("database", lambda: True, staleness_limit=5)
+
+    registration = registry._probes["database"]  # noqa: SLF001 - immutability is the contract under test.
+
+    with pytest.raises(FrozenInstanceError):
+        registration.critical = False
 
 
 def test_stale_critical_probe_returns_503() -> None:

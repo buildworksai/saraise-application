@@ -48,7 +48,13 @@ export class TenantRouteRegistryError extends Error {
   }
 }
 
-const routeModules = import.meta.glob<TenantRouteModule>("../modules/*/routes.ts", { eager: true });
+const moduleRouteModules = import.meta.glob<TenantRouteModule>("../modules/*/routes.ts", {
+  eager: true,
+});
+const featureRouteModules = import.meta.glob<TenantRouteModule>("../features/*/routes.ts", {
+  eager: true,
+});
+const routeModules = { ...moduleRouteModules, ...featureRouteModules };
 
 const KNOWN_ACRONYMS = new Map<string, string>([["crm", "CRM"]]);
 

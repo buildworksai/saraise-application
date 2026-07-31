@@ -20,8 +20,25 @@ describe("tenant route registry parity", () => {
         "document_intelligence",
         "automation_orchestration",
         "fixed_assets",
+        "marketplace",
       ])
     );
+  });
+
+  it("discovers marketplace feature routes for industry capability discovery", () => {
+    const marketplaceRoutes = tenantRoutes.filter((route) => route.module === "marketplace");
+
+    expect(marketplaceRoutes.map((route) => route.path)).toEqual(
+      expect.arrayContaining(["/marketplace", "/marketplace/compare", "/marketplace/:capabilityId"])
+    );
+    expect(marketplaceRoutes.map((route) => route.title)).toEqual(
+      expect.arrayContaining([
+        "Capability marketplace",
+        "Capability comparison",
+        "Capability detail",
+      ])
+    );
+    expect(tenantSidebarTree.some((branch) => branch.module === "marketplace")).toBe(true);
   });
 
   it("resolves the orchestration sidebar and contextual routes", () => {
