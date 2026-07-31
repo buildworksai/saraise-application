@@ -116,8 +116,9 @@ def _diff_arguments(files: list[Path]) -> list[str]:
 
 
 def _write_patch_file(files: list[Path], package_root: Path) -> Path | None:
+    patch_files = _patch_files(files)
     diff = subprocess.run(
-        ["git", *_diff_arguments(files)],
+        ["git", *_diff_arguments(patch_files)],
         cwd=package_root,
         check=True,
         capture_output=True,
@@ -136,6 +137,13 @@ def _write_patch_file(files: list[Path], package_root: Path) -> Path | None:
     with patch:
         patch.write(diff)
     return Path(patch.name)
+
+
+def _patch_files(files: list[Path]) -> list[Path]:
+    patch_files = set(files)
+    for source_file in files:
+        patch_files.update(Path(target) for target in SOURCE_TEST_TARGETS.get(source_file.as_posix(), ()))
+    return sorted(patch_files)
 
 
 def _runner_for_files(files: list[Path]) -> str:

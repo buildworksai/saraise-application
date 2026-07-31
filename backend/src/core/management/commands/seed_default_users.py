@@ -1,5 +1,6 @@
 """Django management command to seed default development users."""
 
+import ast
 import os
 import re
 import uuid
@@ -15,6 +16,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from src.core.tenancy.rls import tenant_context
 from src.core.user_models import UserProfile
 
 User = get_user_model()
@@ -340,58 +342,59 @@ class Command(BaseCommand):
             )
             created_permissions.append(item)
 
-        permission_set, _ = PermissionSet.objects.get_or_create(
-            tenant_id=tenant_uuid,
-            name="Local development administrator",
-            defaults={
-                "description": "Explicit seeded grant for local end-to-end UAT.",
-                "default_duration_days": 365,
-                "is_active": True,
-                "created_by": actor_id,
-                "updated_by": actor_id,
-            },
-        )
-        if not permission_set.is_active or permission_set.is_deleted:
-            permission_set.is_active = True
-            permission_set.is_deleted = False
-            permission_set.deleted_at = None
-            permission_set.updated_by = actor_id
-            permission_set.save(update_fields=("is_active", "is_deleted", "deleted_at", "updated_by", "updated_at"))
-
-        existing_members = set(
-            PermissionSetPermission.objects.for_tenant(tenant_uuid)
-            .filter(permission_set=permission_set, removed_at__isnull=True)
-            .values_list("permission_id", flat=True)
-        )
-        for permission in created_permissions:
-            if permission.id not in existing_members:
-                PermissionSetPermission.objects.create(
-                    tenant_id=tenant_uuid,
-                    permission_set=permission_set,
-                    permission=permission,
-                    added_by=actor_id,
-                )
-
-        expiry = timezone.now() + timedelta(days=365)
-        for user in users:
-            grant = (
-                UserPermissionSet.objects.for_tenant(tenant_uuid)
-                .filter(user=user, permission_set=permission_set, revoked_at__isnull=True)
-                .first()
+        with tenant_context(tenant_uuid):
+            permission_set, created = PermissionSet.objects.for_tenant(tenant_uuid).get_or_create(
+                tenant_id=tenant_uuid,
+                name="Local development administrator",
+                defaults={
+                    "description": "Explicit seeded grant for local end-to-end UAT.",
+                    "default_duration_days": 365,
+                    "is_active": True,
+                    "created_by": actor_id,
+                    "updated_by": actor_id,
+                },
             )
-            if grant is None:
-                UserPermissionSet.objects.create(
-                    tenant_id=tenant_uuid,
-                    user=user,
-                    permission_set=permission_set,
-                    expires_at=expiry,
-                    granted_by=actor_id,
-                    reason="Seeded local development UAT access",
+            if not created and (not permission_set.is_active or permission_set.is_deleted):
+                permission_set.is_active = True
+                permission_set.is_deleted = False
+                permission_set.deleted_at = None
+                permission_set.updated_by = actor_id
+                permission_set.save(update_fields=("is_active", "is_deleted", "deleted_at", "updated_by", "updated_at"))
+
+            existing_members = set(
+                PermissionSetPermission.objects.for_tenant(tenant_uuid)
+                .filter(permission_set=permission_set, removed_at__isnull=True)
+                .values_list("permission_id", flat=True)
+            )
+            for permission in created_permissions:
+                if permission.id not in existing_members:
+                    PermissionSetPermission.objects.create(
+                        tenant_id=tenant_uuid,
+                        permission_set=permission_set,
+                        permission=permission,
+                        added_by=actor_id,
+                    )
+
+            expiry = timezone.now() + timedelta(days=365)
+            for user in users:
+                grant = (
+                    UserPermissionSet.objects.for_tenant(tenant_uuid)
+                    .filter(user=user, permission_set=permission_set, revoked_at__isnull=True)
+                    .first()
                 )
-            elif grant.expires_at <= expiry:
-                grant.expires_at = expiry
-                grant.reason = "Seeded local development UAT access"
-                grant.save(update_fields=("expires_at", "reason", "updated_at"))
+                if grant is None:
+                    UserPermissionSet.objects.create(
+                        tenant_id=tenant_uuid,
+                        user=user,
+                        permission_set=permission_set,
+                        expires_at=expiry,
+                        granted_by=actor_id,
+                        reason="Seeded local development UAT access",
+                    )
+                elif grant.expires_at <= expiry:
+                    grant.expires_at = expiry
+                    grant.reason = "Seeded local development UAT access"
+                    grant.save(update_fields=("expires_at", "reason", "updated_at"))
 
         for capability in sorted(capabilities | permissions):
             Entitlement.objects.update_or_create(
@@ -505,6 +508,7 @@ class Command(BaseCommand):
         for permissions_file in backend_root.glob("*/*.py"):
             if permissions_file.parent.name in {"migrations", "tests"} or permissions_file.name.startswith("test_"):
                 continue
+            module_name = permissions_file.parent.name
             try:
                 text = permissions_file.read_text(encoding="utf-8")
             except OSError:
@@ -522,6 +526,7 @@ class Command(BaseCommand):
                     resources.add(token)
                     if token.endswith("-recovery") or "_" in token:
                         capabilities.add(token)
+            self._collect_declared_action_quotas(module_name, permissions_file, resources)
 
         module_capabilities = {capability for capability in capabilities if "." not in capability}
         resources.update(LOCAL_DEVELOPMENT_QUOTA_RESOURCES)
@@ -536,6 +541,62 @@ class Command(BaseCommand):
             resources.add(f"{permission}:read")
 
         return permissions, resources, capabilities
+
+    def _collect_declared_action_quotas(self, module_name: str, permissions_file: Path, resources: set[str]) -> None:
+        """Seed local quotas for custom DRF action keys declared in permission maps."""
+
+        try:
+            tree = ast.parse(permissions_file.read_text(encoding="utf-8"), filename=str(permissions_file))
+        except (OSError, SyntaxError):
+            return
+
+        for node in ast.walk(tree):
+            dictionary = self._permission_action_dictionary(node)
+            if dictionary is None:
+                continue
+            for key in dictionary.keys:
+                if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+                    continue
+                action = key.value.strip()
+                if not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", action):
+                    continue
+                resources.add(f"{module_name}.api.{action}")
+
+    @staticmethod
+    def _permission_action_dictionary(node: ast.AST) -> ast.Dict | None:
+        """Return dictionaries that explicitly declare governed API actions."""
+
+        value: ast.AST
+        targets: list[ast.AST]
+        if isinstance(node, ast.Assign):
+            value = node.value
+            targets = list(node.targets)
+        elif isinstance(node, ast.AnnAssign):
+            value = node.value if node.value is not None else ast.Constant(None)
+            targets = [node.target]
+        else:
+            return None
+
+        target_names = {
+            target.id
+            for target in targets
+            if isinstance(target, ast.Name)
+            and (target.id.endswith("_ACTION_PERMISSIONS") or target.id == "permission_map")
+        }
+        target_names.update(
+            target.attr
+            for target in targets
+            if isinstance(target, ast.Attribute)
+            and (target.attr.endswith("_ACTION_PERMISSIONS") or target.attr == "permission_map")
+        )
+        if not target_names:
+            return None
+
+        if isinstance(value, ast.Dict):
+            return value
+        if isinstance(value, ast.Call) and value.args and isinstance(value.args[0], ast.Dict):
+            return value.args[0]
+        return None
 
     def _collect_manifest_access_values(
         self,
@@ -591,8 +652,8 @@ class Command(BaseCommand):
             user.refresh_from_db()
             created = False
 
-            if force:
-                # Update existing user
+            if force or not user.check_password(password):
+                # Reconcile existing seeded identities so idempotent local UAT remains usable.
                 user.username = username
                 user.is_staff = is_staff
                 user.is_superuser = is_superuser

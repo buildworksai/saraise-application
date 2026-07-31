@@ -1,7 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { Component, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import { formatRouteTitle } from "./route-title";
 
 vi.mock("./components/auth/ProtectedRoute", () => ({
   ProtectedRoute: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -23,6 +24,22 @@ vi.mock("./modules/inventory_management/pages/InventoryPages", () => ({
   WarehouseListPage: () => <h1>Registry warehouses page</h1>,
 }));
 
+vi.mock("./modules/security_access_control/pages/RolesPage", () => ({
+  RolesPage: () => <h1>Registry security roles page</h1>,
+}));
+
+vi.mock("./modules/security_access_control/pages/PermissionsPage", () => ({
+  PermissionsPage: () => <h1>Registry security permissions page</h1>,
+}));
+
+vi.mock("./modules/security_access_control/pages/PermissionSetsPage", () => ({
+  PermissionSetsPage: () => <h1>Registry permission sets page</h1>,
+}));
+
+vi.mock("./modules/security_access_control/pages/AuditLogPage", () => ({
+  AuditLogPage: () => <h1>Registry security audit log page</h1>,
+}));
+
 class TestErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false };
 
@@ -38,6 +55,7 @@ class TestErrorBoundary extends Component<{ children: ReactNode }, { hasError: b
 
 describe("App", () => {
   afterEach(() => {
+    cleanup();
     document.title = "";
     window.history.pushState(null, "", "/");
   });
@@ -57,9 +75,36 @@ describe("App", () => {
   });
 
   it.each([
+    ["Inventory", "Inventory · SARAISE"],
+    ["Already branded · SARAISE", "Already branded · SARAISE"],
+  ])("formats route title %s", (title, expected) => {
+    expect(formatRouteTitle(title)).toBe(expected);
+  });
+
+  it.each([
     ["/asset-management/assets", "Asset register · SARAISE", "Registry asset register page"],
     ["/bank-reconciliation/accounts", "Bank accounts · SARAISE", "Registry bank accounts page"],
     ["/inventory-management/warehouses", "Warehouses · SARAISE", "Registry warehouses page"],
+    [
+      "/security-access-control/roles",
+      "Security administration · SARAISE",
+      "Registry security roles page",
+    ],
+    [
+      "/security-access-control/permissions",
+      "Permissions · SARAISE",
+      "Registry security permissions page",
+    ],
+    [
+      "/security-access-control/permission-sets",
+      "Permission sets · SARAISE",
+      "Registry permission sets page",
+    ],
+    [
+      "/security-access-control/audit-logs",
+      "Security audit trail · SARAISE",
+      "Registry security audit log page",
+    ],
   ])(
     "renders %s through the migrated route registry title wrapper",
     async (path, title, heading) => {

@@ -16,7 +16,7 @@ import type { TenantRoute } from "@/navigation/tenant-route-types";
 const localModes = ["development", "self-hosted"] as const;
 const allModes = ["development", "self-hosted", "saas"] as const;
 
-const securityRouteDefinitions = [
+const securityRouteDefinitions: TenantRoute[] = [
   {
     id: "security-access-control.roles.list",
     module: "security_access_control",
@@ -527,7 +527,7 @@ const securityRouteDefinitions = [
     requiredPermission: "security.configuration:read",
     navigation: { type: "sidebar", label: "Configuration", icon: Settings2, order: 129 },
   },
-] satisfies readonly TenantRoute[];
+];
 
 const routeTitleByKind = {
   list: "Security administration",
@@ -538,9 +538,23 @@ const routeTitleByKind = {
   configuration: "Security configuration",
 } as const;
 
+const routeTitleById = {
+  "security-access-control.roles.list": "Security administration",
+  "security-access-control.permissions.list": "Permissions",
+  "security-access-control.permission-sets.list": "Permission sets",
+  "security-access-control.assignments.list": "Assignments",
+  "security-access-control.permission-set-grants.list": "Permission-set grants",
+  "security-access-control.field-security.list": "Field security",
+  "security-access-control.row-security.list": "Row security",
+  "security-access-control.profiles.list": "Security profiles",
+  "security-access-control.profile-assignments.list": "Profile assignments",
+  "security-access-control.audit.list": "Security audit trail",
+} as const;
+
 export const tenantRoutes = securityRouteDefinitions.map((route) => {
   const kind = route.id.split(".").at(-1) as keyof typeof routeTitleByKind;
-  return { ...route, title: routeTitleByKind[kind] };
+  route.title = routeTitleById[route.id as keyof typeof routeTitleById] ?? routeTitleByKind[kind];
+  return route;
 }) satisfies readonly TenantRoute[];
 
 export default tenantRoutes;

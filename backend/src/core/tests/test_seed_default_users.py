@@ -60,6 +60,11 @@ def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
     profile.full_clean()
     assert tenant_admin.check_password(password)
 
+    reconciled_password = "UatSeedReconciled123!"  # pragma: allowlist secret
+    call_command("seed_default_users", password=reconciled_password, stdout=StringIO())
+    tenant_admin.refresh_from_db()
+    assert tenant_admin.check_password(reconciled_password)
+
     tenant_uuid = uuid.UUID(profile.tenant_id)
     ad_hoc_admin = User.objects.create_user(
         username="uat-local@example.com",
@@ -188,6 +193,24 @@ def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
             Quota.objects.filter(tenant_id=tenant_uuid)
             .filter(
                 resource="crm.api.versions",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="crm.api.win_rate",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="crm.api.predict",
                 limit__gte=1,
                 remaining__gte=1,
             )

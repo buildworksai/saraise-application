@@ -148,9 +148,9 @@ def login_view(request):
     # we need to ensure the cookie is set explicitly
     from django.conf import settings
 
-    session_cookie_name = getattr(settings, "SESSION_COOKIE_NAME", "sessionid")
+    session_cookie_name = settings.SESSION_COOKIE_NAME
     if request.session.session_key:
-        cookie_path = getattr(settings, "SESSION_COOKIE_PATH", "/")
+        cookie_path = settings.SESSION_COOKIE_PATH
         # CRITICAL: Set cookie with exact same settings as Django's session middleware
         # This ensures consistency and that the cookie is properly set
         response.set_cookie(
@@ -453,10 +453,9 @@ def register_view(request):
     # Django's login() sets the cookie, but we need to ensure it's in the response
     from django.conf import settings
 
-    session_cookie_name = getattr(settings, "SESSION_COOKIE_NAME", "sessionid")
+    session_cookie_name = settings.SESSION_COOKIE_NAME
     if request.session.session_key:
-        # Use getattr with default '/' for SESSION_COOKIE_PATH (may not be defined)
-        cookie_path = getattr(settings, "SESSION_COOKIE_PATH", "/")
+        cookie_path = settings.SESSION_COOKIE_PATH
         response.set_cookie(
             session_cookie_name,
             request.session.session_key,

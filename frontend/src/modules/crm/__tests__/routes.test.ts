@@ -1,42 +1,275 @@
+/* eslint-disable max-lines-per-function -- exact CRM route matrix intentionally keeps labels, paths, and permissions together. */
+import {
+  Briefcase,
+  Building2,
+  CalendarCheck,
+  LayoutDashboard,
+  Pencil,
+  Plus,
+  Settings,
+  TrendingUp,
+  Users,
+} from "lucide-react";
+import { getTenantRouteValidationIssues } from "@/navigation/tenant-route-registry";
 import tenantRoutes from "../routes";
 
 describe("CRM tenant route registry", () => {
-  it("publishes every CRM page as a sidebar-resolvable route with unique ids and paths", () => {
-    expect(
-      tenantRoutes.filter((route) => route.navigation.type === "sidebar").map((route) => route.path)
-    ).toEqual([
+  const expectedRoutes = [
+    [
+      "crm.dashboard",
       "/crm/dashboard",
+      "Dashboard",
+      100,
+      "/crm/dashboard",
+      undefined,
+      LayoutDashboard,
+      "modules/crm/pages/SalesDashboardPage.tsx",
+    ],
+    [
+      "crm.leads.list",
       "/crm/leads",
+      "Leads",
+      110,
+      "/crm/leads",
+      undefined,
+      TrendingUp,
+      "modules/crm/pages/LeadListPage.tsx",
+    ],
+    [
+      "crm.leads.create",
       "/crm/leads/new",
+      "Create lead",
+      111,
+      "/crm/leads/new",
+      undefined,
+      Plus,
+      "modules/crm/pages/LeadCreatePage.tsx",
+    ],
+    [
+      "crm.leads.detail",
       "/crm/leads/:id",
+      "Lead details",
+      112,
+      "/crm/leads",
+      undefined,
+      TrendingUp,
+      "modules/crm/pages/LeadDetailPage.tsx",
+    ],
+    [
+      "crm.leads.edit",
       "/crm/leads/:id/edit",
+      "Edit lead",
+      113,
+      "/crm/leads",
+      undefined,
+      Pencil,
+      "modules/crm/pages/LeadEditPage.tsx",
+    ],
+    [
+      "crm.accounts.list",
       "/crm/accounts",
+      "Accounts",
+      120,
+      "/crm/accounts",
+      undefined,
+      Building2,
+      "modules/crm/pages/AccountListPage.tsx",
+    ],
+    [
+      "crm.accounts.create",
       "/crm/accounts/new",
+      "Create account",
+      121,
+      "/crm/accounts/new",
+      undefined,
+      Plus,
+      "modules/crm/pages/AccountCreatePage.tsx",
+    ],
+    [
+      "crm.accounts.detail",
       "/crm/accounts/:id",
+      "Account details",
+      122,
+      "/crm/accounts",
+      undefined,
+      Building2,
+      "modules/crm/pages/AccountDetailPage.tsx",
+    ],
+    [
+      "crm.accounts.edit",
       "/crm/accounts/:id/edit",
+      "Edit account",
+      123,
+      "/crm/accounts",
+      undefined,
+      Pencil,
+      "modules/crm/pages/AccountEditPage.tsx",
+    ],
+    [
+      "crm.contacts.list",
       "/crm/contacts",
+      "Contacts",
+      130,
+      "/crm/contacts",
+      undefined,
+      Users,
+      "modules/crm/pages/ContactListPage.tsx",
+    ],
+    [
+      "crm.contacts.create",
       "/crm/contacts/new",
+      "Create contact",
+      131,
+      "/crm/contacts/new",
+      undefined,
+      Plus,
+      "modules/crm/pages/ContactCreatePage.tsx",
+    ],
+    [
+      "crm.contacts.detail",
       "/crm/contacts/:id",
+      "Contact details",
+      132,
+      "/crm/contacts",
+      undefined,
+      Users,
+      "modules/crm/pages/ContactDetailPage.tsx",
+    ],
+    [
+      "crm.contacts.edit",
       "/crm/contacts/:id/edit",
+      "Edit contact",
+      133,
+      "/crm/contacts",
+      undefined,
+      Pencil,
+      "modules/crm/pages/ContactEditPage.tsx",
+    ],
+    [
+      "crm.opportunities.list",
       "/crm/opportunities",
+      "Opportunities",
+      140,
+      "/crm/opportunities",
+      undefined,
+      Briefcase,
+      "modules/crm/pages/OpportunityListPage.tsx",
+    ],
+    [
+      "crm.opportunities.pipeline",
       "/crm/opportunities/pipeline",
+      "Pipeline",
+      141,
+      "/crm/opportunities/pipeline",
+      undefined,
+      TrendingUp,
+      "modules/crm/pages/OpportunityKanbanPage.tsx",
+    ],
+    [
+      "crm.opportunities.create",
       "/crm/opportunities/new",
+      "Create opportunity",
+      142,
+      "/crm/opportunities/new",
+      undefined,
+      Plus,
+      "modules/crm/pages/OpportunityCreatePage.tsx",
+    ],
+    [
+      "crm.opportunities.detail",
       "/crm/opportunities/:id",
+      "Opportunity details",
+      143,
+      "/crm/opportunities",
+      undefined,
+      Briefcase,
+      "modules/crm/pages/OpportunityDetailPage.tsx",
+    ],
+    [
+      "crm.opportunities.edit",
       "/crm/opportunities/:id/edit",
+      "Edit opportunity",
+      144,
+      "/crm/opportunities",
+      undefined,
+      Pencil,
+      "modules/crm/pages/OpportunityEditPage.tsx",
+    ],
+    [
+      "crm.activities.list",
       "/crm/activities",
+      "Activities",
+      150,
+      "/crm/activities",
+      undefined,
+      CalendarCheck,
+      "modules/crm/pages/ActivityListPage.tsx",
+    ],
+    [
+      "crm.activities.create",
       "/crm/activities/new",
+      "Create activity",
+      151,
+      "/crm/activities/new",
+      undefined,
+      Plus,
+      "modules/crm/pages/ActivityCreatePage.tsx",
+    ],
+    [
+      "crm.activities.detail",
       "/crm/activities/:id",
+      "Activity details",
+      152,
+      "/crm/activities",
+      undefined,
+      CalendarCheck,
+      "modules/crm/pages/ActivityDetailPage.tsx",
+    ],
+    [
+      "crm.activities.edit",
       "/crm/activities/:id/edit",
+      "Edit activity",
+      153,
+      "/crm/activities",
+      undefined,
+      Pencil,
+      "modules/crm/pages/ActivityEditPage.tsx",
+    ],
+    [
+      "crm.configuration",
       "/crm/configuration",
-    ]);
+      "Configuration",
+      160,
+      "/crm/configuration",
+      "crm.configuration:read",
+      Settings,
+      "modules/crm/pages/ConfigurationPage.tsx",
+    ],
+  ] as const;
+
+  it("publishes every CRM page as a sidebar-resolvable route with exact metadata", () => {
+    expect(getTenantRouteValidationIssues(tenantRoutes)).toEqual([]);
+    expect(
+      tenantRoutes.map((route) => [
+        route.id,
+        route.path,
+        route.navigation.type === "sidebar" ? route.navigation.label : undefined,
+        route.navigation.type === "sidebar" ? route.navigation.order : undefined,
+        route.navigation.type === "sidebar" ? route.navigation.path ?? route.path : undefined,
+        route.requiredPermission,
+        route.navigation.type === "sidebar" ? route.navigation.icon : undefined,
+        route.sourceFile,
+      ])
+    ).toEqual(expectedRoutes);
     expect(new Set(tenantRoutes.map((route) => route.id)).size).toBe(tenantRoutes.length);
     expect(new Set(tenantRoutes.map((route) => route.path)).size).toBe(tenantRoutes.length);
-    expect(tenantRoutes).toHaveLength(23);
   });
 
   it("gives every page a stable parameter-free sidebar destination", () => {
     for (const route of tenantRoutes) {
       expect(route.Page).toBeDefined();
+      expect(route.module).toBe("crm");
+      expect(route.title).toBe(`${route.navigation.label} | SARAISE CRM`);
       expect(route.navigation.type).toBe("sidebar");
       if (route.navigation.type === "sidebar")
         expect(route.navigation.path ?? route.path).not.toContain(":");

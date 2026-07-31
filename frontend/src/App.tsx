@@ -11,6 +11,7 @@ import { ForgotPasswordForm } from "./components/auth/ForgotPasswordForm";
 import { ResetPasswordForm } from "./components/auth/ResetPasswordForm";
 import { getTenantRoutesForMode, tenantRoutes } from "./navigation/tenant-route-registry";
 import { ROUTES as REGIONAL_ROUTES } from "./modules/regional/contracts";
+import { formatRouteTitle } from "./route-title";
 
 const registryTenantRoutes = getTenantRoutesForMode(
   tenantRoutes,
@@ -319,31 +320,6 @@ const TenantDetailPage = lazy(() =>
   }))
 );
 
-// Security & Access Control Pages
-const RolesPage = lazy(() =>
-  import("./modules/security_access_control/pages/RolesPage").then((m) => ({
-    default: m.RolesPage,
-  }))
-);
-
-const PermissionsPage = lazy(() =>
-  import("./modules/security_access_control/pages/PermissionsPage").then((m) => ({
-    default: m.PermissionsPage,
-  }))
-);
-
-const PermissionSetsPage = lazy(() =>
-  import("./modules/security_access_control/pages/PermissionSetsPage").then((m) => ({
-    default: m.PermissionSetsPage,
-  }))
-);
-
-const SecurityAuditLogPage = lazy(() =>
-  import("./modules/security_access_control/pages/AuditLogPage").then((m) => ({
-    default: m.AuditLogPage,
-  }))
-);
-
 // Tenant Dashboard (Home)
 const TenantDashboard = lazy(() =>
   import("./pages/tenant/TenantDashboard").then((m) => ({
@@ -378,14 +354,10 @@ function LoadingFallback() {
   );
 }
 
-function RouteTitle({ title, children }: { title?: string; children: ReactNode }) {
+function RouteTitle({ title, children }: { title: string; children: ReactNode }) {
   useEffect(() => {
-    if (!title) return undefined;
-    const previousTitle = document.title;
-    document.title = title.endsWith("· SARAISE") ? title : `${title} · SARAISE`;
-    return () => {
-      document.title = previousTitle;
-    };
+    document.title = formatRouteTitle(title);
+    return undefined;
   }, [title]);
 
   return children;
@@ -512,48 +484,6 @@ function AnimatedRoutes() {
               }
             />
           )}
-
-          {/* Security & Access Control routes */}
-          <Route
-            path="/security-access-control/roles"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <RolesPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/security-access-control/permissions"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <PermissionsPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/security-access-control/permission-sets"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <PermissionSetsPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/security-access-control/audit-logs"
-            element={
-              <ProtectedRoute>
-                <ModuleLayout>
-                  <SecurityAuditLogPage />
-                </ModuleLayout>
-              </ProtectedRoute>
-            }
-          />
 
           {/* Accounting & Finance */}
           <Route
@@ -931,7 +861,7 @@ function AnimatedRoutes() {
               element={
                 <ProtectedRoute>
                   <ModuleLayout>
-                    <RouteTitle title={title}>
+                    <RouteTitle title={title!}>
                       <Page />
                     </RouteTitle>
                   </ModuleLayout>

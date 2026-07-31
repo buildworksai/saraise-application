@@ -12,6 +12,9 @@ export default defineConfig({
   server: {
     host: '0.0.0.0', // Allow external connections (Docker)
     port: 5173,
+    watch: {
+      ignored: ['**/.stryker-tmp/**', '**/coverage/**', '**/dist/**'],
+    },
     proxy: {
       '^/api(?:/|$)': {
         // In Docker, use service name 'backend' on internal port 8000
