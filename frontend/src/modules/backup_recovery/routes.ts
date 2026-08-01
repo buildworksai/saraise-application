@@ -18,6 +18,7 @@ export const tenantRoutes = [
     id: "backup_recovery.overview",
     module: "backup_recovery",
     path: "/backup-recovery",
+    title: "Backup protection posture",
     sourceFile: "modules/backup_recovery/pages/BackupRecoveryOverviewPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupRecoveryOverviewPage").then(({ BackupRecoveryOverviewPage }) => ({
@@ -31,6 +32,7 @@ export const tenantRoutes = [
     id: "backup_recovery.jobs.list",
     module: "backup_recovery",
     path: "/backup-recovery/jobs",
+    title: "Backup jobs",
     sourceFile: "modules/backup_recovery/pages/BackupJobListPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupJobListPage").then(({ BackupJobListPage }) => ({
@@ -44,6 +46,7 @@ export const tenantRoutes = [
     id: "backup_recovery.jobs.create",
     module: "backup_recovery",
     path: "/backup-recovery/jobs/new",
+    title: "Request backup",
     sourceFile: "modules/backup_recovery/pages/BackupJobCreatePage.tsx",
     Page: lazy(() =>
       import("./pages/BackupJobCreatePage").then(({ BackupJobCreatePage }) => ({
@@ -57,6 +60,7 @@ export const tenantRoutes = [
     id: "backup_recovery.jobs.detail",
     module: "backup_recovery",
     path: "/backup-recovery/jobs/:id",
+    title: "Backup job detail",
     sourceFile: "modules/backup_recovery/pages/BackupJobDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupJobDetailPage").then(({ BackupJobDetailPage }) => ({
@@ -70,6 +74,7 @@ export const tenantRoutes = [
     id: "backup_recovery.jobs.edit",
     module: "backup_recovery",
     path: "/backup-recovery/jobs/:id/edit",
+    title: "Edit backup request",
     sourceFile: "modules/backup_recovery/pages/BackupJobEditPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupJobEditPage").then(({ BackupJobEditPage }) => ({
@@ -83,6 +88,7 @@ export const tenantRoutes = [
     id: "backup_recovery.schedules.list",
     module: "backup_recovery",
     path: "/backup-recovery/schedules",
+    title: "Backup schedules",
     sourceFile: "modules/backup_recovery/pages/BackupScheduleListPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupScheduleListPage").then(({ BackupScheduleListPage }) => ({
@@ -96,6 +102,7 @@ export const tenantRoutes = [
     id: "backup_recovery.schedules.create",
     module: "backup_recovery",
     path: "/backup-recovery/schedules/new",
+    title: "Create backup schedule",
     sourceFile: "modules/backup_recovery/pages/BackupScheduleCreatePage.tsx",
     Page: lazy(() =>
       import("./pages/BackupScheduleCreatePage").then(({ BackupScheduleCreatePage }) => ({
@@ -109,6 +116,7 @@ export const tenantRoutes = [
     id: "backup_recovery.schedules.detail",
     module: "backup_recovery",
     path: "/backup-recovery/schedules/:id",
+    title: "Backup schedule detail",
     sourceFile: "modules/backup_recovery/pages/BackupScheduleDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupScheduleDetailPage").then(({ BackupScheduleDetailPage }) => ({
@@ -122,6 +130,7 @@ export const tenantRoutes = [
     id: "backup_recovery.schedules.edit",
     module: "backup_recovery",
     path: "/backup-recovery/schedules/:id/edit",
+    title: "Edit backup schedule",
     sourceFile: "modules/backup_recovery/pages/BackupScheduleEditPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupScheduleEditPage").then(({ BackupScheduleEditPage }) => ({
@@ -135,6 +144,7 @@ export const tenantRoutes = [
     id: "backup_recovery.retention.list",
     module: "backup_recovery",
     path: "/backup-recovery/retention-policies",
+    title: "Retention policies",
     sourceFile: "modules/backup_recovery/pages/BackupRetentionPolicyListPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupRetentionPolicyListPage").then(({ BackupRetentionPolicyListPage }) => ({
@@ -148,6 +158,7 @@ export const tenantRoutes = [
     id: "backup_recovery.retention.create",
     module: "backup_recovery",
     path: "/backup-recovery/retention-policies/new",
+    title: "Create retention policy",
     sourceFile: "modules/backup_recovery/pages/BackupRetentionPolicyCreatePage.tsx",
     Page: lazy(() =>
       import("./pages/BackupRetentionPolicyCreatePage").then(
@@ -161,6 +172,7 @@ export const tenantRoutes = [
     id: "backup_recovery.retention.detail",
     module: "backup_recovery",
     path: "/backup-recovery/retention-policies/:id",
+    title: "Retention policy detail",
     sourceFile: "modules/backup_recovery/pages/BackupRetentionPolicyDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupRetentionPolicyDetailPage").then(
@@ -174,6 +186,7 @@ export const tenantRoutes = [
     id: "backup_recovery.retention.edit",
     module: "backup_recovery",
     path: "/backup-recovery/retention-policies/:id/edit",
+    title: "Edit retention policy",
     sourceFile: "modules/backup_recovery/pages/BackupRetentionPolicyEditPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupRetentionPolicyEditPage").then(({ BackupRetentionPolicyEditPage }) => ({
@@ -187,6 +200,7 @@ export const tenantRoutes = [
     id: "backup_recovery.targets.list",
     module: "backup_recovery",
     path: "/backup-recovery/storage-targets",
+    title: "Storage targets",
     sourceFile: "modules/backup_recovery/pages/BackupStorageTargetListPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupStorageTargetListPage").then(({ BackupStorageTargetListPage }) => ({
@@ -200,6 +214,7 @@ export const tenantRoutes = [
     id: "backup_recovery.targets.create",
     module: "backup_recovery",
     path: "/backup-recovery/storage-targets/new",
+    title: "Add storage target",
     sourceFile: "modules/backup_recovery/pages/BackupStorageTargetCreatePage.tsx",
     Page: lazy(() =>
       import("./pages/BackupStorageTargetCreatePage").then(({ BackupStorageTargetCreatePage }) => ({
@@ -213,6 +228,7 @@ export const tenantRoutes = [
     id: "backup_recovery.targets.detail",
     module: "backup_recovery",
     path: "/backup-recovery/storage-targets/:id",
+    title: "Storage target detail",
     sourceFile: "modules/backup_recovery/pages/BackupStorageTargetDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupStorageTargetDetailPage").then(({ BackupStorageTargetDetailPage }) => ({
@@ -226,6 +242,7 @@ export const tenantRoutes = [
     id: "backup_recovery.targets.edit",
     module: "backup_recovery",
     path: "/backup-recovery/storage-targets/:id/edit",
+    title: "Edit storage target",
     sourceFile: "modules/backup_recovery/pages/BackupStorageTargetEditPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupStorageTargetEditPage").then(({ BackupStorageTargetEditPage }) => ({
@@ -239,6 +256,7 @@ export const tenantRoutes = [
     id: "backup_recovery.archives.list",
     module: "backup_recovery",
     path: "/backup-recovery/archives",
+    title: "Backup artifacts",
     sourceFile: "modules/backup_recovery/pages/BackupArchiveListPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupArchiveListPage").then(({ BackupArchiveListPage }) => ({
@@ -252,6 +270,7 @@ export const tenantRoutes = [
     id: "backup_recovery.archives.detail",
     module: "backup_recovery",
     path: "/backup-recovery/archives/:id",
+    title: "Backup artifact detail",
     sourceFile: "modules/backup_recovery/pages/BackupArchiveDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupArchiveDetailPage").then(({ BackupArchiveDetailPage }) => ({
@@ -265,6 +284,7 @@ export const tenantRoutes = [
     id: "backup_recovery.verifications.list",
     module: "backup_recovery",
     path: "/backup-recovery/verifications",
+    title: "Integrity verifications",
     sourceFile: "modules/backup_recovery/pages/BackupVerificationListPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupVerificationListPage").then(({ BackupVerificationListPage }) => ({
@@ -278,6 +298,7 @@ export const tenantRoutes = [
     id: "backup_recovery.verifications.detail",
     module: "backup_recovery",
     path: "/backup-recovery/verifications/:id",
+    title: "Integrity verification detail",
     sourceFile: "modules/backup_recovery/pages/BackupVerificationDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/BackupVerificationDetailPage").then(({ BackupVerificationDetailPage }) => ({

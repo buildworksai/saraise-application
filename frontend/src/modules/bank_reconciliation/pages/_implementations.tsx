@@ -983,6 +983,7 @@ export function ImportStatementPage() {
           </p>
           <Input
             id="statement-file"
+            aria-label="Bank statement file"
             className="mx-auto max-w-sm"
             type="file"
             accept=".csv,.ofx,.qif,.bai,.bai2,.sta,.xml"
@@ -2253,6 +2254,8 @@ function RuleForm({
       )}
       <label className="flex items-center gap-2">
         <input
+          id="rule-auto-confirm"
+          aria-label="Automatically confirm perfect deterministic matches"
           type="checkbox"
           checked={form.auto_confirm}
           onChange={(e) =>

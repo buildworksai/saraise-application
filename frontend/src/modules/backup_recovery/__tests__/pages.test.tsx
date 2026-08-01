@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BackupJobCreatePage } from "../pages/BackupJobCreatePage";
 import { BackupJobListPage } from "../pages/BackupJobListPage";
-import { formatBytes } from "../components/BackupRecoveryUI";
+import { formatBytes, PageHeader } from "../components/BackupRecoveryUI";
 import { BackupRecoveryApiError, backupRecoveryService } from "../services/backup-recovery-service";
 
 const pagination = {
@@ -86,7 +86,18 @@ describe("backup recovery governed page states", () => {
     );
     renderPage(<BackupJobCreatePage />, "/backup-recovery/jobs/new");
     const submit = await screen.findByRole("button", { name: "Request backup" });
+    expect(document.title).toBe("Request backup · SARAISE");
     await userEvent.click(submit);
     expect(await screen.findByRole("button", { name: "Durably queueing…" })).toBeDisabled();
+  });
+
+  it("updates the browser title when the shared page header title changes", () => {
+    const rendered = render(<PageHeader title="Request backup" />);
+
+    expect(document.title).toBe("Request backup · SARAISE");
+
+    rendered.rerender(<PageHeader title="Add storage target" />);
+
+    expect(document.title).toBe("Add storage target · SARAISE");
   });
 });

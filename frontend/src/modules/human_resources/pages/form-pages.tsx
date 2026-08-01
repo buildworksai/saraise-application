@@ -13,6 +13,7 @@ import type {
   DepartmentUpdate,
   EmployeeCreate,
   EmployeeUpdate,
+  HumanResourcesConfigurationDocument,
   LeaveBalanceCreate,
   LeaveBalanceUpdate,
   LeaveRequestCreate,
@@ -199,7 +200,7 @@ export function CreateEmployeePage() {
     setLocal(errors);
     if (!Object.keys(errors).length) mutation.mutate();
   };
-  const guard = choiceGuard(choices, ["employees", "departments"]);
+  const guard = choiceGuard(choices, []);
   if (guard) return guard;
   const configuration = choices.configuration.data!.data.document;
   return (
@@ -337,7 +338,7 @@ export function CreateDepartmentPage() {
     setLocal(errors);
     if (!Object.keys(errors).length) mutation.mutate();
   };
-  const guard = choiceGuard(choices, ["employees"]);
+  const guard = choiceGuard(choices, []);
   if (guard) return guard;
   return (
     <FormFrame
@@ -573,20 +574,24 @@ export function EditAttendancePage() {
   );
 }
 
-export function CreateLeaveBalancePage() {
+function CreateLeaveBalanceFormPage({
+  choices,
+  document,
+}: {
+  choices: ReturnType<typeof useChoices>;
+  document: HumanResourcesConfigurationDocument;
+}) {
   const navigate = useNavigate();
   const client = useQueryClient();
-  const choices = useChoices();
-  const document = choices.configuration.data?.data.document;
   const year = new Date().getFullYear();
   const initial = useMemo<LeaveBalanceCreate>(
     () => ({
       employee_id: "",
-      leave_type: document?.defaults.leave_type ?? ("" as LeaveBalanceCreate["leave_type"]),
+      leave_type: document.defaults.leave_type,
       period_start: `${year}-01-01`,
       period_end: `${year}-12-31`,
-      entitled_days: document?.defaults.leave_entitled_days ?? "",
-      carried_days: document?.defaults.leave_carried_days ?? "",
+      entitled_days: document.defaults.leave_entitled_days,
+      carried_days: document.defaults.leave_carried_days,
     }),
     [document, year]
   );
@@ -597,11 +602,11 @@ export function CreateLeaveBalancePage() {
       const data = form as LeaveBalanceCreate;
       return hrService.createLeaveBalance({
         ...data,
-        leave_type: data.leave_type ? data.leave_type : document!.defaults.leave_type,
+        leave_type: data.leave_type ? data.leave_type : document.defaults.leave_type,
         entitled_days: data.entitled_days
           ? data.entitled_days
-          : document!.defaults.leave_entitled_days,
-        carried_days: data.carried_days ? data.carried_days : document!.defaults.leave_carried_days,
+          : document.defaults.leave_entitled_days,
+        carried_days: data.carried_days ? data.carried_days : document.defaults.leave_carried_days,
       });
     },
     onSuccess: (result) => {
@@ -623,7 +628,7 @@ export function CreateLeaveBalancePage() {
         value={form}
         setValue={setForm}
         employees={choices.employeeChoices}
-        configuration={choices.configuration.data!.data.document}
+        configuration={document}
         errors={fieldErrors(mutation.error)}
         pending={mutation.isPending}
         submitLabel="Create allocation"
@@ -635,6 +640,18 @@ export function CreateLeaveBalancePage() {
       />
       {unsaved.dialog}
     </FormFrame>
+  );
+}
+
+export function CreateLeaveBalancePage() {
+  const choices = useChoices();
+  const guard = choiceGuard(choices, []);
+  if (guard) return guard;
+  return (
+    <CreateLeaveBalanceFormPage
+      choices={choices}
+      document={choices.configuration.data!.data.document}
+    />
   );
 }
 function LeaveBalanceEditForm({ initial, id }: { initial: LeaveBalanceUpdate; id: string }) {

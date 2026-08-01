@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
+from typing import Any, ClassVar
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
@@ -17,7 +18,6 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from src.core.access import RequiresAccess
 from src.core.api import GovernedAPIViewMixin, OperationFailed
 from src.core.auth_utils import get_user_tenant_id
 
@@ -63,8 +63,8 @@ def _date(value, field):
 
 class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.GenericViewSet):
     http_method_names = ("get", "post", "patch", "delete", "head", "options")
-    list_serializer_class = None
-    detail_serializer_class = None
+    list_serializer_class: ClassVar[Any] = None
+    detail_serializer_class: ClassVar[Any] = None
 
     def tenant_id(self):
         value = getattr(self.request, "tenant_id", None)
@@ -756,8 +756,8 @@ class ConfigurationViewSet(TenantGovernedViewSet):
         return Response(ConfigurationVersionSerializer(o).data, status=201)
 
 
-class PortfolioDashboardView(GovernedAPIViewMixin, APIView):
-    permission_classes = (IsAuthenticated, RequiresAccess("project_management.project:read"))
+class PortfolioDashboardView(GovernedAPIViewMixin, ActionAccessMixin, APIView):
+    action_permissions = {"get": "project_management.project:read"}
     required_entitlement = "project_management.core"
 
     def get(self, request):
@@ -767,8 +767,8 @@ class PortfolioDashboardView(GovernedAPIViewMixin, APIView):
         return Response(PortfolioSummarySerializer(ProjectService.get_portfolio_summary(tenant)).data)
 
 
-class MyWorkView(GovernedAPIViewMixin, APIView):
-    permission_classes = (IsAuthenticated, RequiresAccess("project_management.task:read"))
+class MyWorkView(GovernedAPIViewMixin, ActionAccessMixin, APIView):
+    action_permissions = {"get": "project_management.task:read"}
     required_entitlement = "project_management.core"
 
     def get(self, request):

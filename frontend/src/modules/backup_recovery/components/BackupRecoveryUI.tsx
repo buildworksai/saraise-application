@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -61,6 +61,10 @@ export function PageHeader({
   onBack?: () => void;
   actions?: ReactNode;
 }) {
+  useEffect(() => {
+    document.title = `${title} · SARAISE`;
+  }, [title]);
+
   return (
     <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div>

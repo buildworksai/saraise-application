@@ -19,14 +19,35 @@ describe("Input", () => {
   });
 
   it("should display error message", () => {
-    render(<Input error="This field is required" />);
-    expect(screen.getByText("This field is required")).toBeInTheDocument();
+    render(
+      <Input
+        id="email"
+        label="Email"
+        error="This field is required"
+        aria-describedby="email-error"
+      />
+    );
+    const input = screen.getByLabelText("Email");
+
+    expect(input).toHaveAccessibleDescription("This field is required");
+    expect(screen.getByText("This field is required")).toHaveAttribute("id", "email-error");
   });
 
   it("should apply error styling when error is present", () => {
     const { container } = render(<Input error="Error" />);
     const input = container.querySelector("input");
+    expect(input?.className).toContain("block w-full");
     expect(input?.className).toContain("border-destructive");
+    expect(input?.className).not.toContain("border-input");
+  });
+
+  it("should apply normal styling when error is absent", () => {
+    const { container } = render(<Input />);
+    const input = container.querySelector("input");
+
+    expect(input?.className).toContain("block w-full");
+    expect(input?.className).toContain("border-input");
+    expect(input?.className).not.toContain("border-destructive");
   });
 
   it("should forward ref", () => {

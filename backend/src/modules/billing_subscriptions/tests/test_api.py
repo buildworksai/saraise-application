@@ -139,3 +139,13 @@ class TestBillingSubscriptionsAPI:
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["tenant_id"] == tenant_id
         assert str(UsageRecord.objects.get(id=response.data["id"]).tenant_id) == tenant_id
+
+    def test_quota_list_does_not_require_platform_tenant_row(self, authenticated_client):
+        """Quota UI can render for authenticated tenants before tenant-management sync exists."""
+
+        response = authenticated_client.get("/api/v1/billing-subscriptions/quotas/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert set(response.data) == {"users", "storage", "api_calls"}
+        assert response.data["users"] == {"used": 0, "limit": 0}
+        assert response.data["storage"] == {"used": 0.0, "limit": 0}

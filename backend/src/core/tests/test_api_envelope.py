@@ -22,8 +22,10 @@ from src.core.api import (
     GovernedAPIViewMixin,
     GovernedMultipartAPIViewMixin,
     GovernedPageNumberPagination,
+    GovernedPagination,
     OperationFailed,
     OperationResult,
+    SaraiseV2Pagination,
     SuccessEnvelopeRenderer,
     operation_result_to_response,
     stable_exception_handler,
@@ -229,18 +231,82 @@ def test_pagination_caps_page_size_and_renders_governed_metadata() -> None:
     }
 
 
-def test_paginated_response_schema_matches_wire_contract() -> None:
-    schema = GovernedPageNumberPagination().get_paginated_response_schema(
-        {"type": "object", "properties": {"id": {"type": "string"}}}
+def test_pagination_renders_empty_collection_metadata() -> None:
+    request = Request(APIRequestFactory().get("/api/v2/items/?page_size=25&page=1"))
+    paginator = GovernedPageNumberPagination()
+    page = paginator.paginate_queryset([], request)
+
+    assert page == []
+    response = paginator.get_paginated_response(page)
+    rendered = SuccessEnvelopeRenderer().render(
+        response.data,
+        "application/json",
+        _renderer_context(response, "req_empty_page_000001"),
     )
+    payload = json.loads(rendered)
 
-    assert schema["required"] == ["data", "meta"]
-    assert schema["properties"]["data"]["type"] == "array"
-    page_size = schema["properties"]["meta"]["properties"]["pagination"]["properties"]["page_size"]
-    assert page_size == {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}
+    assert payload["data"] == []
+    assert payload["meta"]["pagination"] == {
+        "count": 0,
+        "page": 1,
+        "page_size": 25,
+        "total_pages": 0,
+        "has_next": False,
+        "has_previous": False,
+    }
 
-    with pytest.raises(RuntimeError, match="paginate_queryset"):
+
+def test_paginated_response_schema_matches_wire_contract() -> None:
+    item_schema = {"type": "object", "properties": {"id": {"type": "string"}}}
+    schema = GovernedPageNumberPagination().get_paginated_response_schema(item_schema)
+
+    assert schema == {
+        "type": "object",
+        "required": ["data", "meta"],
+        "properties": {
+            "data": {"type": "array", "items": item_schema},
+            "meta": {
+                "type": "object",
+                "required": ["correlation_id", "timestamp", "pagination"],
+                "properties": {
+                    "correlation_id": {"type": "string"},
+                    "timestamp": {"type": "string", "format": "date-time"},
+                    "pagination": {
+                        "type": "object",
+                        "required": [
+                            "count",
+                            "page",
+                            "page_size",
+                            "total_pages",
+                            "has_next",
+                            "has_previous",
+                        ],
+                        "properties": {
+                            "count": {"type": "integer", "minimum": 0},
+                            "page": {"type": "integer", "minimum": 1},
+                            "page_size": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 100,
+                                "default": 25,
+                            },
+                            "total_pages": {"type": "integer", "minimum": 0},
+                            "has_next": {"type": "boolean"},
+                            "has_previous": {"type": "boolean"},
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+    with pytest.raises(RuntimeError, match=r"^paginate_queryset\(\) must be called before get_paginated_response\(\)$"):
         GovernedPageNumberPagination().get_paginated_response([])
+
+
+def test_governed_pagination_aliases_remain_stable() -> None:
+    assert GovernedPagination is GovernedPageNumberPagination
+    assert SaraiseV2Pagination is GovernedPageNumberPagination
 
 
 def test_binary_and_streaming_responses_bypass_json_envelope() -> None:

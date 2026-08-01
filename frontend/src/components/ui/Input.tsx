@@ -16,6 +16,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
   ({ className, error, id, label, ...props }, ref) => {
     const generatedId = useId();
     const inputId = id ?? (label ? generatedId : undefined);
+    const errorId = inputId ? `${inputId}-error` : undefined;
     return (
       <div className="w-full">
         {label && (
@@ -34,7 +35,11 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           )}
           {...props}
         />
-        {error && <p className="mt-1 text-sm text-destructive">{error}</p>}
+        {error && (
+          <p id={errorId} className="mt-1 text-sm text-destructive">
+            {error}
+          </p>
+        )}
       </div>
     );
   }

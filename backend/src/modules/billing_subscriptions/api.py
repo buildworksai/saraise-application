@@ -366,35 +366,33 @@ class QuotaViewSet(viewsets.ViewSet):
         if not tenant_id:
             return Response({"error": "User must belong to a tenant"}, status=status.HTTP_403_FORBIDDEN)
 
-        try:
-            tenant = Tenant.objects.get(id=tenant_id)  # nosemgrep: semgrep.tenant-id-required-in-queries
-        except Tenant.DoesNotExist:
-            return Response({"error": "Tenant not found"}, status=status.HTTP_404_NOT_FOUND)
-
         # Get current usage from TenantResourceUsage (today's record)
         today = timezone.now().date()
-        usage_record, _ = TenantResourceUsage.objects.get_or_create(
-            tenant=tenant,
-            date=today,
-            defaults={
-                "active_users": 0,
-                "api_calls": 0,
-                "storage_used_gb": 0,
-                "bandwidth_used_gb": 0,
-            },
-        )
+        tenant = Tenant.objects.filter(id=tenant_id).first()  # nosemgrep: semgrep.tenant-id-required-in-queries
+        if tenant is not None:
+            usage_record, _ = TenantResourceUsage.objects.get_or_create(
+                tenant=tenant,
+                date=today,
+                defaults={
+                    "active_users": 0,
+                    "api_calls": 0,
+                    "storage_used_gb": 0,
+                    "bandwidth_used_gb": 0,
+                },
+            )
+            active_users_used = usage_record.active_users
+            active_users_limit = tenant.max_users
+            storage_used = float(usage_record.storage_used_gb)
+            storage_limit = tenant.max_storage_gb
+        else:
+            active_users_used = 0
+            active_users_limit = 0
+            storage_used = 0.0
+            storage_limit = 0
 
         # Get API calls from rate limiting service
         api_calls_used = RateLimitService.get_usage(tenant_id, "api_calls")
         api_calls_limit = RateLimitService.get_limit(tenant_id, "api_calls")
-
-        # Get active users count (simplified - in production, count from UserProfile)
-        active_users_used = usage_record.active_users
-        active_users_limit = tenant.max_users
-
-        # Get storage usage
-        storage_used = float(usage_record.storage_used_gb)
-        storage_limit = tenant.max_storage_gb
 
         return Response(
             {

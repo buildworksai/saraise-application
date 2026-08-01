@@ -424,6 +424,7 @@ export function DmsConfigurationPage() {
                   ref={fileInput}
                   className="sr-only"
                   type="file"
+                  aria-label="Import DMS configuration JSON"
                   accept="application/json"
                   onChange={(event) => readImport(event.target.files?.[0])}
                 />
@@ -469,9 +470,10 @@ export function DmsConfigurationPage() {
       ) : null}
       <Card className="space-y-5 p-5">
         <div className="grid gap-4 md:grid-cols-3">
-          <label className="text-sm font-medium">
+          <label className="text-sm font-medium" htmlFor="dms-configuration-environment">
             Environment
             <select
+              id="dms-configuration-environment"
               className="mt-1 block w-full rounded-md border bg-background px-3 py-2"
               value={environment}
               disabled={!canManage}
@@ -524,9 +526,10 @@ export function DmsConfigurationPage() {
               setPreviewFingerprint(null);
             }}
           />
-          <label className="text-sm font-medium">
+          <label className="text-sm font-medium" htmlFor="dms-folder-deletion-policy">
             Folder deletion policy
             <select
+              id="dms-folder-deletion-policy"
               className="mt-1 block w-full rounded-md border bg-background px-3 py-2"
               value={draft.folder_deletion_policy}
               disabled={!canManage}
@@ -543,9 +546,10 @@ export function DmsConfigurationPage() {
               <option value="recursive_soft_delete">Recursively soft-delete contents</option>
             </select>
           </label>
-          <label className="text-sm font-medium">
+          <label className="text-sm font-medium" htmlFor="dms-default-document-ordering">
             Default document ordering
             <select
+              id="dms-default-document-ordering"
               className="mt-1 block w-full rounded-md border bg-background px-3 py-2"
               value={draft.default_document_ordering}
               disabled={!canManage}
@@ -643,9 +647,10 @@ export function DmsConfigurationPage() {
           }}
         />
         <div className="grid gap-4 md:grid-cols-3">
-          <label className="text-sm font-medium">
+          <label className="text-sm font-medium" htmlFor="dms-rollout-state">
             Rollout state
             <select
+              id="dms-rollout-state"
               className="mt-1 block w-full rounded-md border bg-background px-3 py-2"
               value={draft.rollout.enabled ? "enabled" : "disabled"}
               disabled={!canManage}

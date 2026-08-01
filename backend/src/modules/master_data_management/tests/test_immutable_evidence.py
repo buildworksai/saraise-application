@@ -33,6 +33,24 @@ from .factories import (
 pytestmark = pytest.mark.django_db
 
 
+def _skip_without_mdm_evidence_triggers() -> None:
+    if connection.vendor != "sqlite":
+        return
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'trigger'
+              AND name IN ('mdm_quality_issue_evidence_immutable', 'mdm_match_candidate_evidence_immutable')
+            """
+        )
+        triggers = {row[0] for row in cursor.fetchall()}
+    if triggers != {"mdm_quality_issue_evidence_immutable", "mdm_match_candidate_evidence_immutable"}:
+        pytest.skip("SQLite test database was created with --nomigrations and lacks MDM evidence triggers.")
+
+
 def test_issue_and_candidate_evidence_reject_model_queryset_and_database_updates() -> None:
     tenant = uuid.uuid4()
     entity_type = make_entity_type(tenant)
@@ -57,6 +75,8 @@ def test_issue_and_candidate_evidence_reject_model_queryset_and_database_updates
         candidate.save()
     with pytest.raises(ValidationError, match="evidence is immutable"):
         MatchCandidate.objects.filter(pk=candidate.pk).update(evidence={"tampered": True})
+
+    _skip_without_mdm_evidence_triggers()
 
     with pytest.raises(DatabaseError), transaction.atomic():
         with connection.cursor() as cursor:

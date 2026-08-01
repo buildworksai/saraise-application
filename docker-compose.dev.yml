@@ -105,6 +105,8 @@ services:
       - DJANGO_SETTINGS_MODULE=saraise_backend.settings
       - PYTHONPATH=/app
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - SARAISE_ENCRYPTION_KEYS=${SARAISE_ENCRYPTION_KEYS:-}
+      - SARAISE_ACTIVE_ENCRYPTION_KEY_ID=${SARAISE_ACTIVE_ENCRYPTION_KEY_ID:-}
       - DEBUG=True
       - ALLOWED_HOSTS=localhost,127.0.0.1,backend,backend:8000,0.0.0.0
       - SARAISE_MODE=${SARAISE_MODE:-development}
@@ -161,6 +163,8 @@ services:
       - DJANGO_SETTINGS_MODULE=saraise_backend.settings
       - PYTHONPATH=/app
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - SARAISE_ENCRYPTION_KEYS=${SARAISE_ENCRYPTION_KEYS:-}
+      - SARAISE_ACTIVE_ENCRYPTION_KEY_ID=${SARAISE_ACTIVE_ENCRYPTION_KEY_ID:-}
       - DEBUG=True
       - ALLOWED_HOSTS=localhost,127.0.0.1,backend,backend:8000,0.0.0.0
       - SARAISE_MODE=${SARAISE_MODE:-development}
@@ -205,6 +209,8 @@ services:
       - DJANGO_SETTINGS_MODULE=saraise_backend.settings
       - PYTHONPATH=/app
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - SARAISE_ENCRYPTION_KEYS=${SARAISE_ENCRYPTION_KEYS:-}
+      - SARAISE_ACTIVE_ENCRYPTION_KEY_ID=${SARAISE_ACTIVE_ENCRYPTION_KEY_ID:-}
       - DEBUG=True
       - ALLOWED_HOSTS=localhost,127.0.0.1,backend,backend:8000,0.0.0.0
       - SARAISE_MODE=${SARAISE_MODE:-development}

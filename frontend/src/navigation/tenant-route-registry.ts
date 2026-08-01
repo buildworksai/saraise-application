@@ -48,12 +48,14 @@ export class TenantRouteRegistryError extends Error {
   }
 }
 
+// Stryker disable all: Vite requires static glob literals; mutating them creates invalid source before tests run.
 const moduleRouteModules = import.meta.glob<TenantRouteModule>("../modules/*/routes.ts", {
   eager: true,
 });
 const featureRouteModules = import.meta.glob<TenantRouteModule>("../features/*/routes.ts", {
   eager: true,
 });
+// Stryker restore all
 const routeModules = { ...moduleRouteModules, ...featureRouteModules };
 
 const KNOWN_ACRONYMS = new Map<string, string>([["crm", "CRM"]]);

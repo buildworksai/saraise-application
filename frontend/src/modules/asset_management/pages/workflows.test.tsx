@@ -50,6 +50,12 @@ const inconsistentStraightLineAsset: Asset = {
   declining_balance_rate: "12.5",
 };
 
+const outOfRangeStraightLineAsset: Asset = {
+  ...inconsistentStraightLineAsset,
+  id: "00000000-0000-4000-8000-000000000009",
+  declining_balance_rate: "150",
+};
+
 const inconsistentNoneAsset: Asset = {
   ...asset,
   id: "00000000-0000-4000-8000-000000000006",
@@ -550,6 +556,30 @@ describe("asset form validation governance", () => {
     );
   });
 
+  it("checks asset code length after trimming before applying the character policy", () => {
+    const submit = vi.fn();
+    render(
+      <AssetForm
+        configuration={{ ...configurationDocument, asset_code_max_length: 5 }}
+        pending={false}
+        error={null}
+        onCancel={vi.fn()}
+        onSubmit={submit}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Asset code"), { target: { value: " lap-2 " } });
+    fireEvent.change(screen.getByLabelText("Asset name"), { target: { value: "Trimmed code" } });
+    fireEvent.change(screen.getByLabelText("Purchase cost"), { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create asset" }));
+
+    expect(screen.queryByText("Asset code cannot exceed 5 characters.")).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Use letters, numbers, periods, underscores, or hyphens.")
+    ).toBeInTheDocument();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it("accepts names that are exactly the configured trimmed length", () => {
     const submit = vi.fn();
     render(
@@ -749,7 +779,9 @@ describe("asset form depreciation validation", () => {
     expect(screen.getByText("Enter an annual rate from 0.0001 to 100.0000.")).toBeInTheDocument();
     expect(submit).not.toHaveBeenCalled();
   });
+});
 
+describe("asset form legacy straight-line depreciation validation", () => {
   it("allows straight-line assets even when legacy data carries a stray declining rate", () => {
     const submit = vi.fn();
     render(
@@ -773,6 +805,33 @@ describe("asset form depreciation validation", () => {
     expect(
       screen.queryByText("Enter an annual rate from 0.0001 to 100.0000.")
     ).not.toBeInTheDocument();
+  });
+
+  it("does not validate legacy declining rates while the asset remains straight-line", () => {
+    const submit = vi.fn();
+    render(
+      <AssetForm
+        asset={outOfRangeStraightLineAsset}
+        configuration={configurationDocument}
+        pending={false}
+        error={null}
+        onCancel={vi.fn()}
+        onSubmit={submit}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Asset name"), {
+      target: { value: "Straight asset cleaned" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(
+      screen.queryByText("Enter an annual rate from 0.0001 to 100.0000.")
+    ).not.toBeInTheDocument();
+    expect(submit).toHaveBeenCalledWith({
+      asset_name: "Straight asset cleaned",
+      declining_balance_rate: null,
+    });
   });
 });
 
@@ -989,6 +1048,28 @@ describe("asset form depreciation transitions", () => {
       configurationDocument.default_useful_life_years
     );
     expect(screen.getByLabelText("Annual declining balance rate (%)")).toHaveValue("");
+  });
+
+  it("treats a blank declining-balance rate and zero rate as materially different edits", () => {
+    const submit = vi.fn();
+    render(
+      <AssetForm
+        asset={incompleteDecliningAsset}
+        configuration={configurationDocument}
+        pending={false}
+        error={null}
+        onCancel={vi.fn()}
+        onSubmit={submit}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Annual declining balance rate (%)"), {
+      target: { value: "0" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(screen.getByText("Enter an annual rate from 0.0001 to 100.0000.")).toBeInTheDocument();
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it("retains legacy declining rates when explicitly switching to declining balance", () => {

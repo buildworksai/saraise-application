@@ -143,4 +143,4 @@ jobs:
             echo "Mutation gate: no added or changed frontend lines; skipping."
             exit 0
           fi
-          npx stryker run --mutate "$mutate"
+          npx stryker run stryker.conf.json --coverageAnalysis off --mutate "$mutate"

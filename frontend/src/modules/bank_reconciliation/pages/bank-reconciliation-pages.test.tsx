@@ -755,6 +755,9 @@ describe("bank reconciliation governed pages", () => {
     expect(screen.getByLabelText("Priority")).toBeRequired();
     expect(screen.getByLabelText("Priority")).toHaveAttribute("min", "1");
     expect(screen.getByLabelText("Minimum score")).toBeRequired();
+    expect(
+      screen.getByLabelText("Automatically confirm perfect deterministic matches")
+    ).toHaveAttribute("type", "checkbox");
   });
 
   it("renders matching rule details and import retry/cancel/success diagnostics", async () => {

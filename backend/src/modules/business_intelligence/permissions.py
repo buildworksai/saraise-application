@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, cast
+from uuid import UUID
 
 from rest_framework.authentication import SessionAuthentication
+from rest_framework.request import Request
 
 from src.core.access import RequiresAccess
+from src.core.auth_utils import get_user_tenant_id
 
 CORE_ENTITLEMENT = "business_intelligence.core"
 EXECUTION_QUOTA = "business_intelligence.executions"
@@ -36,7 +40,12 @@ class StrictSessionAuthentication(SessionAuthentication):
 class BIActionPermission(RequiresAccess):
     """Resolve permission metadata from the concrete action and deny omissions."""
 
-    def has_permission(self, request: object, view: object) -> bool:
+    def has_permission(self, request: Request, view: object) -> bool:
+        tenant = get_user_tenant_id(getattr(request, "user", None))
+        try:
+            setattr(request, "tenant_id", UUID(str(tenant)) if tenant else None)
+        except (TypeError, ValueError, AttributeError):
+            setattr(request, "tenant_id", None)
         mapping = getattr(view, "permission_map", {})
         action = getattr(view, "action", None) or getattr(view, "permission_action", None)
         required = mapping.get(action) if isinstance(mapping, dict) else None
@@ -52,7 +61,7 @@ class BIActionPermission(RequiresAccess):
         # explicitly non-consuming adapter so reads and definition mutations
         # still receive policy + entitlement decisions without charging usage.
         original_quota_service = self.pipeline.quota_service
-        self.pipeline.quota_service = _NonConsumingQuota()
+        self.pipeline.quota_service = cast(Any, _NonConsumingQuota())
         setattr(view, "quota_resource", required or "business_intelligence.non_consuming")
         try:
             return super().has_permission(request, view)

@@ -375,6 +375,8 @@ export function ConfigurationPage() {
           <h2 className="font-semibold">Feature rollout</h2>
           <label className="flex items-center gap-3 text-sm">
             <input
+              id="configuration-auto-classification"
+              aria-label="Automatically classify completed uploads"
               type="checkbox"
               checked={draft.feature_flags.auto_classification_enabled}
               onChange={(event) =>

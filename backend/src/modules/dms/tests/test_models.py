@@ -6,6 +6,7 @@ import uuid
 from datetime import timedelta
 
 import pytest
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
@@ -284,13 +285,17 @@ def test_required_indexes_and_constraints_are_declared() -> None:
         "dms_folder_depth_range",
         "dms_folder_not_self_parent",
     }
-    assert {index.name for index in Document._meta.indexes} >= {
+    document_indexes = {index.name for index in Document._meta.indexes}
+    assert document_indexes >= {
         "dms_doc_folder_updated_idx",
         "dms_doc_owner_alive_idx",
         "dms_doc_name_idx",
-        "dms_doc_tags_gin",
-        "dms_doc_search_gin",
     }
+    if settings.DATABASES["default"]["ENGINE"] != "django.db.backends.sqlite3":
+        assert document_indexes >= {
+            "dms_doc_tags_gin",
+            "dms_doc_search_gin",
+        }
     assert {constraint.name for constraint in DocumentVersion._meta.constraints} >= {
         "dms_version_tenant_doc_no_uq",
         "dms_version_number_gte1",

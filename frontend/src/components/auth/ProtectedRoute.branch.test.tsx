@@ -2,7 +2,7 @@
  * ProtectedRoute branch tests with router/store boundaries mocked directly.
  */
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { authService } from "../../services/auth-service";
@@ -58,7 +58,8 @@ function authState({
 }
 
 describe("ProtectedRoute branch rendering", () => {
-  it("should render a replace redirect with the current location when unauthenticated", () => {
+  it("should render a replace redirect after backend session verification fails", async () => {
+    vi.mocked(authService.getCurrentUser).mockRejectedValueOnce(new Error("Forbidden"));
     protectedRouteAuthState = authState({
       isAuthenticated: false,
       isLoading: false,
@@ -70,7 +71,8 @@ describe("ProtectedRoute branch rendering", () => {
       </ProtectedRoute>
     );
 
-    const redirect = screen.getByTestId("navigate");
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
+    const redirect = await screen.findByTestId("navigate");
     expect(redirect).toHaveTextContent("/login");
     expect(redirect).toHaveAttribute("data-replace", "true");
     expect(redirect).toHaveAttribute(
@@ -80,6 +82,7 @@ describe("ProtectedRoute branch rendering", () => {
       })
     );
     expect(screen.queryByText("Protected Content")).not.toBeInTheDocument();
+    await waitFor(() => expect(authService.getCurrentUser).toHaveBeenCalledOnce());
   });
 
   it("should hold protected content while authenticated state is loading", () => {

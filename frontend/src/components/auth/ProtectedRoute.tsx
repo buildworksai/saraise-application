@@ -24,11 +24,6 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     let cancelled = false;
 
     const verifySession = async () => {
-      if (!isAuthenticated) {
-        setIsSessionVerified(false);
-        return;
-      }
-
       setIsSessionVerified(false);
       setLoading(true);
       try {
@@ -48,7 +43,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
     return () => {
       cancelled = true;
     };
-  }, [setUser, setLoading, isAuthenticated, location.pathname]);
+  }, [setUser, setLoading, location.pathname]);
 
   if (isProtectedContentBlocked(isAuthenticated, isLoading, isSessionVerified)) {
     return (

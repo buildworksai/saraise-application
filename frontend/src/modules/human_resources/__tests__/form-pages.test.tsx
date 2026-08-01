@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   Attendance,
@@ -21,11 +22,14 @@ import {
   CreateLeaveBalancePage,
   CreateLeaveRequestPage,
   EditAttendancePage,
+  EditDepartmentPage,
   EditEmployeePage,
   EditLeaveBalancePage,
   EditLeaveRequestPage,
 } from "../pages/form-pages";
 import { HrApiError, hrService } from "../services/hr-service";
+
+vi.mock("sonner", () => ({ toast: { success: vi.fn() } }));
 
 const pagination = {
   count: 1,
@@ -283,7 +287,9 @@ function mockChoiceSuccess() {
 
 describe("Human Resources form pages", () => {
   beforeEach(() => {
+    sessionStorage.clear();
     mockChoiceSuccess();
+    vi.mocked(toast.success).mockClear();
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -310,7 +316,7 @@ describe("Human Resources form pages", () => {
       )
       .mockResolvedValueOnce(page([employee]));
 
-    renderAt(<CreateEmployeePage />, ROUTES.EMPLOYEE_CREATE);
+    renderAt(<CreateAttendancePage />, ROUTES.ATTENDANCE_CREATE);
 
     expect(
       await screen.findByRole("heading", { name: "Form choices unavailable" })
@@ -320,7 +326,7 @@ describe("Human Resources form pages", () => {
     await userEvent.click(screen.getByRole("button", { name: /try again/i }));
 
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Create employee" })).toBeInTheDocument()
+      expect(screen.getByRole("heading", { name: "Record attendance" })).toBeInTheDocument()
     );
     expect(listEmployees).toHaveBeenCalledTimes(2);
   });
@@ -336,6 +342,72 @@ describe("Human Resources form pages", () => {
     expect(
       screen.getByText("Create or activate the required tenant resource, then retry this form.")
     ).toBeInTheDocument();
+  });
+
+  it("allows employee creation when optional department and manager lookups are empty", async () => {
+    vi.spyOn(hrService, "listEmployees").mockResolvedValue(page([]));
+    vi.spyOn(hrService, "listDepartments").mockResolvedValue(page([]));
+    const createEmployee = vi.spyOn(hrService, "createEmployee").mockResolvedValue({
+      data: { ...employee, id: "employee-without-lookups" },
+      correlationId: "corr-create-no-lookups",
+      capabilities: [],
+    });
+    const user = userEvent.setup();
+
+    renderAt(<CreateEmployeePage />, ROUTES.EMPLOYEE_CREATE);
+
+    expect(await screen.findByRole("heading", { name: "Create employee" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Department")).toHaveTextContent("Unassigned");
+    expect(screen.getByLabelText("Manager")).toHaveTextContent("No manager");
+
+    await user.type(screen.getByLabelText("Employee number"), "EMP-003");
+    await user.type(screen.getByLabelText("First name"), "Linus");
+    await user.type(screen.getByLabelText("Last name"), "Torvalds");
+    await user.type(screen.getByLabelText("Email"), "linus@example.test");
+    await user.click(screen.getByRole("button", { name: "Create employee" }));
+
+    await waitFor(() =>
+      expect(createEmployee).toHaveBeenCalledWith(
+        expect.objectContaining({
+          employee_number: "EMP-003",
+          department_id: null,
+          manager_id: null,
+          employment_type: "full_time",
+        })
+      )
+    );
+    expect(toast.success).toHaveBeenCalledWith("Employee created");
+  });
+
+  it("uses employee first and last name when a lookup item has no full name", async () => {
+    vi.spyOn(hrService, "listEmployees").mockResolvedValue(page([{ ...employee, full_name: "" }]));
+
+    renderAt(<CreateAttendancePage />, ROUTES.ATTENDANCE_CREATE);
+
+    expect(await screen.findByLabelText("Employee")).toHaveTextContent("Ada Lovelace · EMP-001");
+  });
+
+  it("stops attendance and leave allocation entry when employee choices are empty", async () => {
+    vi.spyOn(hrService, "listEmployees").mockResolvedValue(page([]));
+    const createAttendance = vi.spyOn(hrService, "createAttendance");
+    const createLeaveBalance = vi.spyOn(hrService, "createLeaveBalance");
+
+    const attendanceView = renderAt(<CreateAttendancePage />, ROUTES.ATTENDANCE_CREATE);
+
+    expect(
+      await screen.findByRole("heading", { name: "Required choices unavailable" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("No employees are available for this operation.")).toBeInTheDocument();
+    expect(createAttendance).not.toHaveBeenCalled();
+    attendanceView.unmount();
+
+    renderAt(<CreateLeaveBalancePage />, ROUTES.LEAVE_BALANCE_CREATE);
+
+    expect(
+      await screen.findByRole("heading", { name: "Required choices unavailable" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("No employees are available for this operation.")).toBeInTheDocument();
+    expect(createLeaveBalance).not.toHaveBeenCalled();
   });
 
   it("validates employee fields locally before creating and navigating to the new detail page", async () => {
@@ -378,7 +450,26 @@ describe("Human Resources form pages", () => {
         })
       )
     );
+    expect(toast.success).toHaveBeenCalledWith("Employee created");
     expect(await screen.findByText("Employee detail reached")).toBeInTheDocument();
+  });
+
+  it("protects dirty employee forms through cancel and back navigation", async () => {
+    const user = userEvent.setup();
+
+    renderAt(<CreateEmployeePage />, ROUTES.EMPLOYEE_CREATE);
+
+    await user.type(await screen.findByLabelText("Employee number"), "EMP-004");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("dialog")).toHaveTextContent("Discard unsaved changes?");
+    await user.click(screen.getByRole("button", { name: "Keep" }));
+    expect(screen.getByRole("heading", { name: "Create employee" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Go back" }));
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+
+    expect(await screen.findByText("Employee index")).toBeInTheDocument();
   });
 
   it("protects dirty department forms through cancel and back navigation", async () => {
@@ -397,6 +488,45 @@ describe("Human Resources form pages", () => {
     await user.click(screen.getByRole("button", { name: "Discard changes" }));
 
     expect(await screen.findByText("Department index")).toBeInTheDocument();
+  });
+
+  it("validates and creates departments with optional parent and manager lookups", async () => {
+    const createDepartment = vi.spyOn(hrService, "createDepartment").mockResolvedValue({
+      data: { ...department, id: "department-new", department_code: "OPS" },
+      correlationId: "corr-department-create",
+      capabilities: [],
+    });
+    const user = userEvent.setup();
+
+    renderAt(<CreateDepartmentPage />, ROUTES.DEPARTMENT_CREATE);
+
+    await user.click(await screen.findByRole("button", { name: "Create department" }));
+
+    expect(createDepartment).not.toHaveBeenCalled();
+    expect(screen.getAllByRole("alert").map((alert) => alert.textContent)).toContain(
+      "This field is required."
+    );
+
+    await user.type(screen.getByLabelText("Department code"), "OPS");
+    await user.type(screen.getByLabelText("Department name"), "Operations");
+    await user.selectOptions(screen.getByLabelText("Parent department"), "department-1");
+    await user.selectOptions(screen.getByLabelText("Manager"), "employee-1");
+    await user.type(screen.getByLabelText("Description"), "Production operations");
+    await user.click(screen.getByRole("button", { name: "Create department" }));
+
+    await waitFor(() =>
+      expect(createDepartment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          department_code: "OPS",
+          department_name: "Operations",
+          parent_department_id: "department-1",
+          manager_id: "employee-1",
+          description: "Production operations",
+        })
+      )
+    );
+    expect(toast.success).toHaveBeenCalledWith("Department created");
+    expect(await screen.findByText("Department detail reached")).toBeInTheDocument();
   });
 
   it("creates attendance only after an employee is selected and carries configured defaults", async () => {
@@ -423,6 +553,7 @@ describe("Human Resources form pages", () => {
         })
       )
     );
+    expect(toast.success).toHaveBeenCalledWith("Attendance recorded");
     expect(await screen.findByText("Attendance detail reached")).toBeInTheDocument();
   });
 
@@ -454,7 +585,144 @@ describe("Human Resources form pages", () => {
         })
       )
     );
+    expect(toast.success).toHaveBeenCalledWith("Leave allocated");
     expect(await screen.findByText("Leave balance detail reached")).toBeInTheDocument();
+  });
+
+  it("renders leave allocation default period and submits explicit configured defaults", async () => {
+    const createLeaveBalance = vi.spyOn(hrService, "createLeaveBalance").mockResolvedValue({
+      data: { ...leaveBalance, id: "balance-defaults" },
+      correlationId: "corr-balance-defaults",
+      capabilities: [],
+    });
+    const currentYear = String(new Date().getFullYear());
+    const user = userEvent.setup();
+
+    renderAt(<CreateLeaveBalancePage />, ROUTES.LEAVE_BALANCE_CREATE);
+
+    expect(await screen.findByRole("heading", { name: "Allocate leave" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Leave type")).toHaveValue("annual");
+    expect(screen.getByLabelText("Period start")).toHaveValue(`${currentYear}-01-01`);
+    expect(screen.getByLabelText("Period end")).toHaveValue(`${currentYear}-12-31`);
+
+    await user.selectOptions(screen.getByLabelText("Employee"), "employee-1");
+    await user.click(screen.getByRole("button", { name: "Create allocation" }));
+
+    await waitFor(() =>
+      expect(createLeaveBalance).toHaveBeenCalledWith({
+        employee_id: "employee-1",
+        leave_type: "annual",
+        period_start: `${currentYear}-01-01`,
+        period_end: `${currentYear}-12-31`,
+        entitled_days: "0.00",
+        carried_days: "0.00",
+      })
+    );
+  });
+
+  it("protects dirty leave allocation and leave request forms through cancel and back navigation", async () => {
+    const user = userEvent.setup();
+
+    const allocationView = renderAt(<CreateLeaveBalancePage />, ROUTES.LEAVE_BALANCE_CREATE);
+
+    await user.clear(await screen.findByLabelText("Entitled days"));
+    await user.type(screen.getByLabelText("Entitled days"), "21.00");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("dialog")).toHaveTextContent("Discard unsaved changes?");
+    await user.click(screen.getByRole("button", { name: "Keep" }));
+    expect(screen.getByRole("heading", { name: "Allocate leave" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Go back" }));
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+
+    expect(await screen.findByText("Leave index")).toBeInTheDocument();
+    allocationView.unmount();
+
+    renderAt(<CreateLeaveRequestPage />, ROUTES.LEAVE_REQUEST_CREATE);
+
+    await user.type(await screen.findByLabelText("Reason"), "Conference travel");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("dialog")).toHaveTextContent("Discard unsaved changes?");
+    await user.click(screen.getByRole("button", { name: "Keep" }));
+    expect(screen.getByRole("heading", { name: "Request leave" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Go back" }));
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+
+    expect(await screen.findByText("Leave index")).toBeInTheDocument();
+  });
+
+  it("submits leave requests only after employee and allocation are selected", async () => {
+    const createLeaveRequest = vi.spyOn(hrService, "createLeaveRequest").mockResolvedValue({
+      data: { ...leaveRequest, id: "request-new" },
+      correlationId: "corr-request-create",
+      capabilities: [],
+    });
+    const user = userEvent.setup();
+
+    renderAt(<CreateLeaveRequestPage />, ROUTES.LEAVE_REQUEST_CREATE);
+
+    await user.click(await screen.findByRole("button", { name: "Submit request" }));
+    expect(createLeaveRequest).not.toHaveBeenCalled();
+
+    await user.selectOptions(screen.getByLabelText("Employee"), "employee-1");
+    await user.click(screen.getByRole("button", { name: "Submit request" }));
+    expect(createLeaveRequest).not.toHaveBeenCalled();
+
+    await user.selectOptions(screen.getByLabelText("Leave allocation"), "balance-1");
+    await user.type(screen.getByLabelText("Reason"), "Planned holiday");
+    await user.click(screen.getByRole("button", { name: "Submit request" }));
+
+    await waitFor(() =>
+      expect(createLeaveRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          employee_id: "employee-1",
+          leave_balance_id: "balance-1",
+          leave_type: "annual",
+          reason: "Planned holiday",
+        })
+      )
+    );
+    expect(toast.success).toHaveBeenCalledWith("Leave request submitted");
+    expect(await screen.findByText("Leave request detail reached")).toBeInTheDocument();
+  });
+
+  it("renders leave request default dates and submits the persistent intent key", async () => {
+    sessionStorage.setItem("saraise:hr:intent:leave-request-create", "known-intent-key");
+    const createLeaveRequest = vi.spyOn(hrService, "createLeaveRequest").mockResolvedValue({
+      data: { ...leaveRequest, id: "request-defaults" },
+      correlationId: "corr-request-defaults",
+      capabilities: [],
+    });
+    const currentDate = new Date().toISOString().slice(0, 10);
+    const user = userEvent.setup();
+
+    renderAt(<CreateLeaveRequestPage />, ROUTES.LEAVE_REQUEST_CREATE);
+
+    expect(await screen.findByRole("heading", { name: "Request leave" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Leave type")).toHaveValue("annual");
+    expect(screen.getByLabelText("Start date")).toHaveValue(currentDate);
+    expect(screen.getByLabelText("End date")).toHaveValue(currentDate);
+
+    await user.selectOptions(screen.getByLabelText("Employee"), "employee-1");
+    await user.selectOptions(screen.getByLabelText("Leave allocation"), "balance-1");
+    await user.click(screen.getByRole("button", { name: "Submit request" }));
+
+    await waitFor(() =>
+      expect(createLeaveRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          employee_id: "employee-1",
+          leave_balance_id: "balance-1",
+          leave_type: "annual",
+          start_date: currentDate,
+          end_date: currentDate,
+          idempotency_key: "known-intent-key",
+        })
+      )
+    );
+    expect(sessionStorage.getItem("saraise:hr:intent:leave-request-create")).toBeNull();
   });
 
   it("updates employee edit pages with the current employee removed from manager choices", async () => {
@@ -485,7 +753,182 @@ describe("Human Resources form pages", () => {
         expect.objectContaining({ first_name: "Ada-Updated" })
       )
     );
+    expect(toast.success).toHaveBeenCalledWith("Employee updated");
     expect(await screen.findByText("Employee detail reached")).toBeInTheDocument();
+  });
+
+  it("updates department edit pages with the current department removed from parent choices", async () => {
+    const updateDepartment = vi.spyOn(hrService, "updateDepartment").mockResolvedValue({
+      data: { ...department, department_name: "Engineering Updated" },
+      correlationId: "corr-department-update",
+      capabilities: [],
+    });
+    vi.spyOn(hrService, "getDepartment").mockResolvedValue({
+      data: department,
+      correlationId: "corr-department-detail",
+      capabilities: [],
+    });
+    const user = userEvent.setup();
+
+    renderAt(
+      <EditDepartmentPage />,
+      ROUTES.DEPARTMENT_EDIT("department-1"),
+      ROUTES.DEPARTMENT_EDIT(":id")
+    );
+
+    expect(await screen.findByRole("heading", { name: "Edit department" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Parent department")).not.toHaveTextContent("Engineering · ENG");
+
+    await user.clear(screen.getByLabelText("Department name"));
+    await user.type(screen.getByLabelText("Department name"), "Engineering Updated");
+    await user.click(screen.getByRole("button", { name: "Save department" }));
+
+    await waitFor(() =>
+      expect(updateDepartment).toHaveBeenCalledWith(
+        "department-1",
+        expect.objectContaining({ department_name: "Engineering Updated" })
+      )
+    );
+    expect(toast.success).toHaveBeenCalledWith("Department updated");
+    expect(await screen.findByText("Department detail reached")).toBeInTheDocument();
+  });
+
+  it("renders governed detail fetch errors for edit entry pages", async () => {
+    vi.spyOn(hrService, "getEmployee").mockRejectedValue(
+      new HrApiError("Employee missing", "not_found", 404, "employee_missing", "corr-employee")
+    );
+
+    const firstView = renderAt(
+      <EditEmployeePage />,
+      ROUTES.EMPLOYEE_EDIT("employee-404"),
+      ROUTES.EMPLOYEE_EDIT(":id")
+    );
+
+    expect(await screen.findByRole("heading", { name: "Employee not found" })).toBeInTheDocument();
+    expect(screen.getByText(/corr-employee/u)).toBeInTheDocument();
+    firstView.unmount();
+
+    vi.spyOn(hrService, "getDepartment").mockRejectedValue(
+      new HrApiError(
+        "Department missing",
+        "not_found",
+        404,
+        "department_missing",
+        "corr-department"
+      )
+    );
+
+    renderAt(
+      <EditDepartmentPage />,
+      ROUTES.DEPARTMENT_EDIT("department-404"),
+      ROUTES.DEPARTMENT_EDIT(":id")
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Department not found" })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/corr-department/u)).toBeInTheDocument();
+  });
+
+  it("renders governed configuration errors for correction-only edit forms", async () => {
+    vi.spyOn(hrService, "getConfiguration").mockRejectedValue(
+      new HrApiError("Configuration unavailable", "unavailable", 503, "config_down", "corr-config")
+    );
+    vi.spyOn(hrService, "getAttendance").mockResolvedValue({
+      data: attendance,
+      correlationId: "corr-attendance-detail",
+      capabilities: [],
+    });
+
+    renderAt(
+      <EditAttendancePage />,
+      ROUTES.ATTENDANCE_EDIT("attendance-1"),
+      ROUTES.ATTENDANCE_EDIT(":id")
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Human Resources is unavailable" })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/corr-config/u)).toBeInTheDocument();
+  });
+
+  it("renders loading and governed detail errors for leave allocation edits", async () => {
+    vi.spyOn(hrService, "getLeaveBalance").mockReturnValueOnce(new Promise(() => undefined));
+
+    const loadingView = renderAt(
+      <EditLeaveBalancePage />,
+      ROUTES.LEAVE_BALANCE_EDIT("balance-1"),
+      ROUTES.LEAVE_BALANCE_EDIT(":id")
+    );
+
+    expect(screen.getByRole("status", { name: "Loading Human Resources" })).toBeInTheDocument();
+    loadingView.unmount();
+
+    vi.spyOn(hrService, "getLeaveBalance").mockRejectedValue(
+      new HrApiError("Allocation missing", "not_found", 404, "balance_missing", "corr-balance")
+    );
+
+    renderAt(
+      <EditLeaveBalancePage />,
+      ROUTES.LEAVE_BALANCE_EDIT("balance-404"),
+      ROUTES.LEAVE_BALANCE_EDIT(":id")
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Leave balance not found" })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/corr-balance/u)).toBeInTheDocument();
+  });
+
+  it("renders governed missing-data errors for leave allocation and request edit details", async () => {
+    vi.spyOn(hrService, "getLeaveBalance").mockResolvedValue(undefined as never);
+
+    const balanceView = renderAt(
+      <EditLeaveBalancePage />,
+      ROUTES.LEAVE_BALANCE_EDIT("balance-empty"),
+      ROUTES.LEAVE_BALANCE_EDIT(":id")
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Human Resources is unavailable" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("The request could not be completed safely.")).toBeInTheDocument();
+    balanceView.unmount();
+
+    vi.spyOn(hrService, "getLeaveRequest").mockResolvedValue(undefined as never);
+
+    renderAt(
+      <EditLeaveRequestPage />,
+      ROUTES.LEAVE_REQUEST_EDIT("request-empty"),
+      ROUTES.LEAVE_REQUEST_EDIT(":id")
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Human Resources is unavailable" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("The request could not be completed safely.")).toBeInTheDocument();
+  });
+
+  it("renders governed configuration errors for leave allocation edit forms", async () => {
+    vi.spyOn(hrService, "getLeaveBalance").mockResolvedValue({
+      data: leaveBalance,
+      correlationId: "corr-balance-detail",
+      capabilities: [],
+    });
+    vi.spyOn(hrService, "getConfiguration").mockRejectedValue(
+      new HrApiError("Configuration unavailable", "unavailable", 503, "config_down", "corr-config")
+    );
+
+    renderAt(
+      <EditLeaveBalancePage />,
+      ROUTES.LEAVE_BALANCE_EDIT("balance-1"),
+      ROUTES.LEAVE_BALANCE_EDIT(":id")
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Human Resources is unavailable" })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/corr-config/u)).toBeInTheDocument();
   });
 
   it("requires an adjustment note before updating a leave allocation", async () => {
@@ -510,6 +953,11 @@ describe("Human Resources form pages", () => {
     await user.click(await screen.findByRole("button", { name: "Apply adjustment" }));
     expect(updateLeaveBalance).not.toHaveBeenCalled();
 
+    await user.type(screen.getByLabelText("Adjustment note"), "   ");
+    await user.click(screen.getByRole("button", { name: "Apply adjustment" }));
+    expect(updateLeaveBalance).not.toHaveBeenCalled();
+
+    await user.clear(screen.getByLabelText("Adjustment note"));
     await user.clear(screen.getByLabelText("Entitled days"));
     await user.type(screen.getByLabelText("Entitled days"), "24.00");
     await user.type(screen.getByLabelText("Adjustment note"), "Annual entitlement correction");
@@ -525,6 +973,38 @@ describe("Human Resources form pages", () => {
         })
       )
     );
+    expect(toast.success).toHaveBeenCalledWith("Allocation adjusted");
+    expect(await screen.findByText("Leave balance detail reached")).toBeInTheDocument();
+  });
+
+  it("keeps leave allocation edit scoped to adjustment fields and protects dirty navigation", async () => {
+    vi.spyOn(hrService, "getLeaveBalance").mockResolvedValue({
+      data: leaveBalance,
+      correlationId: "corr-balance-detail",
+      capabilities: [],
+    });
+    const user = userEvent.setup();
+
+    renderAt(
+      <EditLeaveBalancePage />,
+      ROUTES.LEAVE_BALANCE_EDIT("balance-1"),
+      ROUTES.LEAVE_BALANCE_EDIT(":id")
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Adjust leave allocation" })
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Employee")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Leave type")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Period start")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Period end")).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Adjustment note"), "Audit correction");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("dialog")).toHaveTextContent("Discard unsaved changes?");
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+
     expect(await screen.findByText("Leave balance detail reached")).toBeInTheDocument();
   });
 
@@ -550,6 +1030,11 @@ describe("Human Resources form pages", () => {
     await user.click(await screen.findByRole("button", { name: "Save correction" }));
     expect(updateAttendance).not.toHaveBeenCalled();
 
+    await user.type(screen.getByLabelText("Correction note (required)"), "   ");
+    await user.click(screen.getByRole("button", { name: "Save correction" }));
+    expect(updateAttendance).not.toHaveBeenCalled();
+
+    await user.clear(screen.getByLabelText("Correction note (required)"));
     await user.type(screen.getByLabelText("Correction note (required)"), "Corrected source entry");
     await user.click(screen.getByRole("button", { name: "Save correction" }));
 
@@ -559,7 +1044,58 @@ describe("Human Resources form pages", () => {
         expect.objectContaining({ notes: "Corrected source entry" })
       )
     );
+    expect(toast.success).toHaveBeenCalledWith("Attendance corrected");
     expect(await screen.findByText("Attendance detail reached")).toBeInTheDocument();
+  });
+
+  it("renders governed configuration errors for leave request edit forms", async () => {
+    vi.spyOn(hrService, "getLeaveRequest").mockResolvedValue({
+      data: leaveRequest,
+      correlationId: "corr-request-detail",
+      capabilities: [],
+    });
+    vi.spyOn(hrService, "getConfiguration").mockRejectedValue(
+      new HrApiError("Configuration unavailable", "unavailable", 503, "config_down", "corr-config")
+    );
+
+    renderAt(
+      <EditLeaveRequestPage />,
+      ROUTES.LEAVE_REQUEST_EDIT("request-1"),
+      ROUTES.LEAVE_REQUEST_EDIT(":id")
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Human Resources is unavailable" })
+    ).toBeInTheDocument();
+    expect(screen.getByText(/corr-config/u)).toBeInTheDocument();
+  });
+
+  it("keeps leave request edits scoped to pending date fields and protects dirty navigation", async () => {
+    vi.spyOn(hrService, "getLeaveRequest").mockResolvedValue({
+      data: leaveRequest,
+      correlationId: "corr-request-detail",
+      capabilities: [],
+    });
+    const user = userEvent.setup();
+
+    renderAt(
+      <EditLeaveRequestPage />,
+      ROUTES.LEAVE_REQUEST_EDIT("request-1"),
+      ROUTES.LEAVE_REQUEST_EDIT(":id")
+    );
+
+    expect(await screen.findByRole("heading", { name: "Edit leave request" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Employee")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Leave allocation")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Leave type")).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Reason"), " needs updated dates");
+    await user.click(screen.getByRole("button", { name: "Go back" }));
+
+    expect(screen.getByRole("dialog")).toHaveTextContent("Discard unsaved changes?");
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+
+    expect(await screen.findByText("Leave request detail reached")).toBeInTheDocument();
   });
 
   it("blocks non-pending leave request edits and updates pending request dates", async () => {
@@ -616,6 +1152,7 @@ describe("Human Resources form pages", () => {
         })
       )
     );
+    expect(toast.success).toHaveBeenCalledWith("Leave request updated");
     expect(getLeaveRequest).toHaveBeenCalled();
     expect(await screen.findByText("Leave request detail reached")).toBeInTheDocument();
   });

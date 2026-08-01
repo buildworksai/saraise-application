@@ -205,6 +205,7 @@ export const AssetConfigurationPage = () => {
               id="asset-configuration-import-file"
               type="file"
               accept="application/json"
+              aria-label="Import asset configuration JSON"
               onChange={importFile}
             />
             <textarea

@@ -93,16 +93,37 @@ describe("ProtectedRoute", () => {
     expect(authService.getCurrentUser).toHaveBeenCalledOnce();
   });
 
-  it("should redirect to login when not authenticated", () => {
+  it("should redirect to login when the backend session is not authenticated", async () => {
+    vi.mocked(authService.getCurrentUser).mockRejectedValueOnce(new Error("Forbidden"));
+
     act(() => {
       useAuthStore.getState().logout();
     });
 
     renderProtectedRoute();
 
-    expect(screen.queryByText("Protected Content")).not.toBeInTheDocument();
-    expect(screen.getByText("Login Page")).toBeInTheDocument();
-    expect(screen.getByText("Return to /protected")).toBeInTheDocument();
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("Protected Content")).not.toBeInTheDocument();
+      expect(screen.getByText("Login Page")).toBeInTheDocument();
+      expect(screen.getByText("Return to /protected")).toBeInTheDocument();
+    });
+    expect(authService.getCurrentUser).toHaveBeenCalledOnce();
+  });
+
+  it("should restore authenticated state from a valid backend session on direct entry", async () => {
+    vi.mocked(authService.getCurrentUser).mockResolvedValueOnce(mockUser);
+
+    act(() => {
+      useAuthStore.getState().logout();
+    });
+
+    renderProtectedRoute();
+
+    expect(screen.getByText("Loading...")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Protected Content")).toBeInTheDocument());
+    expect(useAuthStore.getState().isAuthenticated).toBe(true);
+    expect(useAuthStore.getState().user).toEqual(mockUser);
   });
 
   it("should show loading when verifying session without relying on pre-set loading state", () => {
@@ -210,15 +231,18 @@ describe("ProtectedRoute", () => {
     expect(useAuthStore.getState().isLoading).toBe(true);
   });
 
-  it("should not call the identity endpoint when no auth state exists", () => {
+  it("should verify the identity endpoint before redirecting when no auth state exists", async () => {
+    vi.mocked(authService.getCurrentUser).mockRejectedValueOnce(new Error("Forbidden"));
+
     act(() => {
       useAuthStore.getState().logout();
     });
 
     renderProtectedRoute();
 
+    await waitFor(() => expect(screen.getByText("Login Page")).toBeInTheDocument());
     expect(screen.queryByText("Protected Content")).not.toBeInTheDocument();
-    expect(authService.getCurrentUser).not.toHaveBeenCalled();
+    expect(authService.getCurrentUser).toHaveBeenCalledOnce();
   });
 
   it("should clear stale persisted auth before rendering protected content", async () => {
@@ -308,6 +332,18 @@ describe("isProtectedContentBlocked", () => {
       isAuthenticated: false,
       isLoading: true,
       isSessionVerified: false,
+      expected: true,
+    },
+    {
+      isAuthenticated: false,
+      isLoading: false,
+      isSessionVerified: false,
+      expected: true,
+    },
+    {
+      isAuthenticated: false,
+      isLoading: false,
+      isSessionVerified: true,
       expected: false,
     },
   ])(

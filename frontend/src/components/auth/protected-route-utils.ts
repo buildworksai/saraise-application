@@ -1,7 +1,7 @@
 export function isProtectedContentBlocked(
-  isAuthenticated: boolean,
+  _isAuthenticated: boolean,
   isLoading: boolean,
   isSessionVerified: boolean
 ) {
-  return isAuthenticated && (isLoading || !isSessionVerified);
+  return isLoading || !isSessionVerified;
 }

@@ -95,7 +95,11 @@ export const ModuleLayout = ({ children }: ModuleLayoutProps) => {
               {/* User Menu */}
               <div className="flex items-center gap-4">
                 <ThemeToggle />
-                <button className="relative p-2 rounded-md hover:bg-white/10 transition-colors">
+                <button
+                  type="button"
+                  className="relative p-2 rounded-md hover:bg-white/10 transition-colors"
+                  aria-label="Open notifications"
+                >
                   <Bell className="w-5 h-5" />
                   <span className="absolute top-1 right-1 w-2 h-2 bg-deepBlue rounded-full animate-pulse" />
                 </button>

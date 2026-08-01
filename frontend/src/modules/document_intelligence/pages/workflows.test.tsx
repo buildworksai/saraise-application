@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { ClassificationDetailPage } from "./ClassificationDetailPage";
 import { ClassificationOverviewPage } from "./ClassificationOverviewPage";
+import { ConfigurationPage } from "./ConfigurationPage";
 import { CreateExtractionPage } from "./CreateExtractionPage";
 import { CreateTemplatePage } from "./CreateTemplatePage";
 import { CreateTrainingJobPage } from "./CreateTrainingJobPage";
@@ -13,13 +14,17 @@ import { TrainingJobDetailPage } from "./TrainingJobDetailPage";
 import { TrainingModelPage } from "./TrainingModelPage";
 import { TemplateDetailPage } from "./TemplateDetailPage";
 import { TemplateListPage } from "./TemplateListPage";
-import { documentIntelligenceService } from "../services/document-intelligence-service";
+import {
+  DocumentIntelligenceApiError,
+  documentIntelligenceService,
+} from "../services/document-intelligence-service";
 import { documentIntelligenceConfigurationKey } from "../hooks/use-document-intelligence-configuration";
 import {
   candidateModel,
   classificationDetail,
   documentIntelligenceConfiguration,
   extractionDetail,
+  jobSummary,
   modelDetail,
   page,
   retiredModel,
@@ -98,6 +103,160 @@ describe("document intelligence page workflows", () => {
       })
     );
     expect(screen.getByRole("button", { name: "Validating and queuing…" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Validating and queuing…" }).querySelector(".animate-spin")
+    ).toBeInTheDocument();
+  });
+
+  it("keeps pristine and whitespace-only extraction forms non-submittable", () => {
+    renderRoute(<CreateExtractionPage />);
+
+    expect(screen.getByLabelText("DMS document UUID")).toHaveValue("");
+    expect(screen.getByLabelText("Immutable version UUID")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Queue extraction" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Queue extraction" }).querySelector(".animate-spin")
+    ).not.toBeInTheDocument();
+    const pristineBeforeUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(pristineBeforeUnload);
+    expect(pristineBeforeUnload.defaultPrevented).toBe(false);
+
+    fireEvent.change(screen.getByLabelText("DMS document UUID"), {
+      target: { value: "   " },
+    });
+    fireEvent.change(screen.getByLabelText("Immutable version UUID"), {
+      target: { value: "   " },
+    });
+    expect(screen.getByRole("button", { name: "Queue extraction" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("DMS document UUID"), {
+      target: { value: "document-1" },
+    });
+    fireEvent.change(screen.getByLabelText("Immutable version UUID"), {
+      target: { value: "version-1" },
+    });
+    fireEvent.change(screen.getByLabelText("Extraction type"), { target: { value: "structured" } });
+    fireEvent.change(screen.getByLabelText("Extraction template UUID"), {
+      target: { value: "   " },
+    });
+    expect(screen.getByRole("button", { name: "Queue extraction" })).toBeDisabled();
+  });
+
+  it("trims structured extraction payloads, protects dirty forms, and navigates after success", async () => {
+    const create = vi.spyOn(documentIntelligenceService, "createExtraction").mockResolvedValue({
+      extraction: { ...extractionDetail, id: "extract-success" },
+      job: jobSummary,
+    });
+    renderRoute(<CreateExtractionPage />);
+
+    fireEvent.change(screen.getByLabelText("DMS document UUID"), {
+      target: { value: "  DOCUMENT-1  " },
+    });
+    const beforeUnload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(beforeUnload);
+    expect(beforeUnload.defaultPrevented).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("Immutable version UUID"), {
+      target: { value: "  VERSION-1  " },
+    });
+    expect(screen.getByLabelText("Extraction type")).toHaveValue("text");
+    expect(
+      [...screen.getByLabelText("Extraction type").querySelectorAll("option")].map(
+        (option) => option.value
+      )
+    ).toEqual(["text", "structured", "table", "zone"]);
+    fireEvent.change(screen.getByLabelText("Extraction type"), { target: { value: "structured" } });
+    expect(screen.getByLabelText("Extraction template UUID")).toBeRequired();
+    expect(screen.getByRole("button", { name: "Queue extraction" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Engine"), { target: { value: "google_vision" } });
+    expect(
+      [...screen.getByLabelText("Engine").querySelectorAll("option")].map((option) => option.value)
+    ).toEqual(["tesseract", "aws_textract", "azure_form_recognizer", "google_vision"]);
+    fireEvent.change(screen.getByLabelText("Extraction template UUID"), {
+      target: { value: "  TEMPLATE-1  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Queue extraction" }));
+
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith({
+        document_id: "DOCUMENT-1",
+        document_version_id: "VERSION-1",
+        engine: "google_vision",
+        extraction_type: "structured",
+        template_id: "TEMPLATE-1",
+        idempotency_key: "document-intelligence:extract:document-1:version-1:structured:template-1",
+      })
+    );
+    expect(await screen.findByText("Navigated")).toBeInTheDocument();
+  });
+
+  it("surfaces field errors, resets failed extraction mutations, and supports back navigation", async () => {
+    vi.spyOn(documentIntelligenceService, "createExtraction").mockRejectedValue(
+      new DocumentIntelligenceApiError("Validation failed", 400, "validation_error", "corr-400", {
+        field_errors: [
+          { field: "document_id", code: "invalid", message: "Document ID is invalid" },
+          { field: "document_version_id", code: "invalid", message: "Version ID is invalid" },
+          { field: "template_id", code: "required", message: "Template is required" },
+        ],
+      })
+    );
+    renderRoute(<CreateExtractionPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(await screen.findByText("Navigated")).toBeInTheDocument();
+    cleanup();
+    renderRoute(<CreateExtractionPage />);
+
+    fireEvent.change(screen.getByLabelText("DMS document UUID"), {
+      target: { value: "document-1" },
+    });
+    fireEvent.change(screen.getByLabelText("Immutable version UUID"), {
+      target: { value: "version-1" },
+    });
+    fireEvent.change(screen.getByLabelText("Extraction type"), { target: { value: "zone" } });
+    fireEvent.change(screen.getByLabelText("Extraction template UUID"), {
+      target: { value: "template-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Queue extraction" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Validation failed");
+    expect(screen.getByText("Document ID is invalid")).toBeInTheDocument();
+    expect(screen.getByText("Version ID is invalid")).toBeInTheDocument();
+    expect(screen.getByText("Template is required")).toBeInTheDocument();
+    expect(screen.getByLabelText("DMS document UUID")).toHaveAccessibleDescription(
+      "Document ID is invalid"
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+  });
+
+  it("keeps extraction and configuration controls accessible to native validation", async () => {
+    vi.spyOn(documentIntelligenceService, "listConfigurationVersions").mockResolvedValue([]);
+    vi.spyOn(documentIntelligenceService, "listConfigurationAudit").mockResolvedValue([]);
+
+    const extraction = renderRoute(<CreateExtractionPage />);
+    const documentInput = await screen.findByLabelText("DMS document UUID");
+    const extractionForm = documentInput.closest("form");
+    expect(extractionForm).not.toHaveAttribute("novalidate");
+    expect(screen.getByRole("combobox", { name: "Extraction type" })).toBe(
+      screen.getByLabelText("Extraction type")
+    );
+    expect(screen.getByRole("combobox", { name: "Engine" })).toBe(screen.getByLabelText("Engine"));
+    extraction.unmount();
+
+    setAdmin();
+    renderRoute(
+      <ConfigurationPage />,
+      "/document-intelligence/configuration",
+      "/document-intelligence/configuration"
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Document intelligence configuration" })
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Automatically classify completed uploads")).toHaveAttribute(
+      "type",
+      "checkbox"
+    );
   });
 
   it("renders immutable extraction evidence and the explicit page-empty state", async () => {

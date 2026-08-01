@@ -9,6 +9,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from src.core.access.decision import AccessDecision, AccessReasonCode
 from src.core.auth_utils import get_user_tenant_id
 from src.modules.ai_provider_configuration.models import TenantBaseModel
 
@@ -18,6 +19,24 @@ User = get_user_model()
 @pytest.fixture
 def api_client() -> APIClient:
     return APIClient()
+
+
+@pytest.fixture(autouse=True)
+def allow_declared_ai_provider_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provision the explicit policy projection used by these API tests."""
+
+    def allow(self, tenant_id, identity, required_permission, **kwargs):
+        del self, identity, kwargs
+        assert str(required_permission).startswith("ai_provider_configuration.")
+        return AccessDecision(
+            allowed=True,
+            reason_code=AccessReasonCode.ALLOW,
+            reason="ai provider test projection",
+            tenant_id=uuid.UUID(str(tenant_id)),
+            remaining_quota=100,
+        )
+
+    monkeypatch.setattr("src.core.access.decision.AccessDecisionPipeline.decide", allow)
 
 
 @pytest.fixture
@@ -37,7 +56,6 @@ def tenant_user(db):
             profile.tenant_role = "tenant_admin"
             profile.save()
     user = User.objects.get(pk=user.pk)
-    user.has_perm = lambda permission: str(permission).startswith("ai_provider_configuration.")  # type: ignore[method-assign]  # noqa: E501
     return user
 
 

@@ -2,6 +2,7 @@
 API tests for Accounting & Finance module.
 """
 
+import json
 import uuid
 
 import pytest
@@ -70,7 +71,64 @@ class TestAccountAPI:
         response = api_client.get("/api/v1/accounting-finance/accounts/")
 
         assert response.status_code == status.HTTP_200_OK
+        assert isinstance(response.data, list)
         assert len(response.data) > 0
+
+    def test_v2_list_accounts_uses_governed_paginated_envelope(self, api_client, authenticated_user):
+        """V2 list responses must match the frontend governed pagination contract."""
+        tenant_id = uuid.UUID(authenticated_user.profile.tenant_id)
+        Account.objects.create(
+            tenant_id=tenant_id,
+            code="1000",
+            name="Cash",
+            account_type="asset",
+        )
+
+        api_client.force_authenticate(user=authenticated_user)
+        response = api_client.get("/api/v2/accounting-finance/accounts/?page=1&page_size=25")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data[0]["id"] == str(Account.objects.get(code="1000").id)
+        assert response.data[0]["tenant_id"] == str(tenant_id)
+        assert response.data[0]["code"] == "1000"
+        assert response.data[0]["name"] == "Cash"
+
+        rendered = response.render()
+
+        payload = json.loads(rendered.content)
+        assert payload["data"] == response.data
+        assert payload["meta"]["pagination"] == {
+            "count": 1,
+            "page": 1,
+            "page_size": 25,
+            "total_pages": 1,
+            "has_next": False,
+            "has_previous": False,
+        }
+        assert payload["meta"]["correlation_id"]
+
+    def test_v2_detail_accounts_uses_governed_envelope(self, api_client, authenticated_user):
+        """V2 detail responses must carry data/meta while v1 remains raw."""
+        tenant_id = uuid.UUID(authenticated_user.profile.tenant_id)
+        account = Account.objects.create(
+            tenant_id=tenant_id,
+            code="1100",
+            name="Bank",
+            account_type="asset",
+        )
+
+        api_client.force_authenticate(user=authenticated_user)
+        response = api_client.get(f"/api/v2/accounting-finance/accounts/{account.id}/")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["code"] == "1100"
+
+        rendered = response.render()
+
+        payload = json.loads(rendered.content)
+        assert payload["data"]["id"] == str(account.id)
+        assert payload["meta"]["correlation_id"]
+        assert "pagination" not in payload["meta"]
 
     def test_create_account(self, api_client, authenticated_user):
         """Test creating an account."""

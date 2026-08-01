@@ -6,13 +6,6 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/Select";
 import { ApiProblem, PageHeader } from "../components/ModuleShell";
 import { deterministicKey, useUnsavedChanges } from "../components/module-utils";
 import {
@@ -86,7 +79,7 @@ export function CreateExtractionPage() {
         <ApiProblem error={mutation.error} onRetry={() => mutation.reset()} inline />
       )}
       <Card className="mx-auto max-w-3xl p-6">
-        <form className="space-y-5" onSubmit={submit} noValidate>
+        <form className="space-y-5" onSubmit={submit}>
           <div className="grid gap-4 sm:grid-cols-2">
             <Input
               id="document-id"
@@ -111,37 +104,37 @@ export function CreateExtractionPage() {
               <label className="mb-1 block text-sm font-medium" htmlFor="extraction-type">
                 Extraction type
               </label>
-              <Select value={type} onValueChange={(value: ExtractionType) => setType(value)}>
-                <SelectTrigger id="extraction-type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {["text", "structured", "table", "zone"].map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <select
+                id="extraction-type"
+                className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={type}
+                onChange={(event) => setType(event.target.value as ExtractionType)}
+              >
+                {["text", "structured", "table", "zone"].map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium" htmlFor="engine">
                 Engine
               </label>
-              <Select value={engine} onValueChange={setEngine}>
-                <SelectTrigger id="engine">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {["tesseract", "aws_textract", "azure_form_recognizer", "google_vision"].map(
-                    (value) => (
-                      <SelectItem key={value} value={value}>
-                        {value}
-                      </SelectItem>
-                    )
-                  )}
-                </SelectContent>
-              </Select>
+              <select
+                id="engine"
+                className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={engine}
+                onChange={(event) => setEngine(event.target.value as ExtractionEngine)}
+              >
+                {["tesseract", "aws_textract", "azure_form_recognizer", "google_vision"].map(
+                  (value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  )
+                )}
+              </select>
             </div>
           </div>
           {requiresTemplate && (

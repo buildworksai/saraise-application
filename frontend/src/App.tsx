@@ -370,6 +370,16 @@ function LegacyEmailMarketingRedirect({ target }: { target: "recipients" | "atte
   );
 }
 
+function LegacyHumanResourcesLeaveRequestRedirect({ edit = false }: { edit?: boolean }) {
+  const { id } = useParams();
+  return (
+    <Navigate
+      to={`/human-resources/leave/requests/${encodeURIComponent(id!)}${edit ? "/edit" : ""}`}
+      replace
+    />
+  );
+}
+
 // Legacy route inventory is being migrated module-by-module into the typed registry.
 // eslint-disable-next-line max-lines-per-function
 function AnimatedRoutes() {
@@ -419,7 +429,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <TenantDashboard />
+                  <RouteTitle title="Dashboard">
+                    <TenantDashboard />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -435,7 +447,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <TenantListPage />
+                  <RouteTitle title="Tenant management">
+                    <TenantListPage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -445,7 +459,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <TenantDetailPage />
+                  <RouteTitle title="Tenant detail">
+                    <TenantDetailPage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -457,7 +473,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <ProfilePage />
+                  <RouteTitle title="User profile">
+                    <ProfilePage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -467,7 +485,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <SettingsPage />
+                  <RouteTitle title="User settings">
+                    <SettingsPage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -478,7 +498,9 @@ function AnimatedRoutes() {
               element={
                 <ProtectedRoute>
                   <ModuleLayout>
-                    <LicenseSettingsPage />
+                    <RouteTitle title="License settings">
+                      <LicenseSettingsPage />
+                    </RouteTitle>
                   </ModuleLayout>
                 </ProtectedRoute>
               }
@@ -491,7 +513,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <AccountingAccountListPage />
+                  <RouteTitle title="Accounting accounts">
+                    <AccountingAccountListPage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -501,7 +525,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <CreateAccountingAccountPage />
+                  <RouteTitle title="Create accounting account">
+                    <CreateAccountingAccountPage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -511,7 +537,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <AccountingAccountDetailPage />
+                  <RouteTitle title="Accounting account detail">
+                    <AccountingAccountDetailPage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -669,7 +697,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <NotificationCenterPage />
+                  <RouteTitle title="Notification inbox">
+                    <NotificationCenterPage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -727,13 +757,20 @@ function AnimatedRoutes() {
             }
           />
 
+          <Route
+            path="/document-intelligence"
+            element={<Navigate to="/document-intelligence/extractions" replace />}
+          />
+
           {/* BillingSubscriptions routes */}
           <Route
             path="/billing-subscriptions"
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <BillingSubscriptionsListPage />
+                  <RouteTitle title="Billing subscriptions">
+                    <BillingSubscriptionsListPage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -743,7 +780,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <CreateBillingSubscriptionsResourcePage />
+                  <RouteTitle title="Create billing subscription">
+                    <CreateBillingSubscriptionsResourcePage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -753,7 +792,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <BillingSubscriptionsDetailPage />
+                  <RouteTitle title="Billing subscription detail">
+                    <BillingSubscriptionsDetailPage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -763,7 +804,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <QuotaManagementPage />
+                  <RouteTitle title="Billing quotas">
+                    <QuotaManagementPage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -775,7 +818,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <LocalizationListPage />
+                  <RouteTitle title="Localization">
+                    <LocalizationListPage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -785,7 +830,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <CreateLocalizationResourcePage />
+                  <RouteTitle title="Create localization resource">
+                    <CreateLocalizationResourcePage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -795,7 +842,9 @@ function AnimatedRoutes() {
             element={
               <ProtectedRoute>
                 <ModuleLayout>
-                  <LocalizationDetailPage />
+                  <RouteTitle title="Localization detail">
+                    <LocalizationDetailPage />
+                  </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
             }
@@ -899,6 +948,18 @@ function AnimatedRoutes() {
             element={<Navigate to="/purchase-management/suppliers" replace />}
           />
           <Route
+            path="/human-resources/leave-requests/new"
+            element={<Navigate to="/human-resources/leave/requests/new" replace />}
+          />
+          <Route
+            path="/human-resources/leave-requests/:id"
+            element={<LegacyHumanResourcesLeaveRequestRedirect />}
+          />
+          <Route
+            path="/human-resources/leave-requests/:id/edit"
+            element={<LegacyHumanResourcesLeaveRequestRedirect edit />}
+          />
+          <Route
             path="/email-marketing/recipients/:id"
             element={<LegacyEmailMarketingRedirect target="recipients" />}
           />
@@ -906,7 +967,14 @@ function AnimatedRoutes() {
             path="/email-marketing/deliveries/:id"
             element={<LegacyEmailMarketingRedirect target="attempts" />}
           />
-          <Route path="*" element={<div className="p-8">Page not found</div>} />
+          <Route
+            path="*"
+            element={
+              <RouteTitle title="Page not found">
+                <div className="p-8">Page not found</div>
+              </RouteTitle>
+            }
+          />
         </Routes>
       </AnimatePresence>
     </>

@@ -40,6 +40,22 @@ vi.mock("./modules/security_access_control/pages/AuditLogPage", () => ({
   AuditLogPage: () => <h1>Registry security audit log page</h1>,
 }));
 
+vi.mock("./modules/human_resources/pages/CreateLeaveRequestPage", () => ({
+  CreateLeaveRequestPage: () => <h1>Registry leave request create page</h1>,
+}));
+
+vi.mock("./modules/human_resources/pages/LeaveRequestDetailPage", () => ({
+  LeaveRequestDetailPage: () => <h1>Registry leave request detail page</h1>,
+}));
+
+vi.mock("./modules/human_resources/pages/EditLeaveRequestPage", () => ({
+  EditLeaveRequestPage: () => <h1>Registry leave request edit page</h1>,
+}));
+
+vi.mock("./modules/document_intelligence/pages/ExtractionDashboardPage", () => ({
+  ExtractionDashboardPage: () => <h1>Registry document intelligence extractions page</h1>,
+}));
+
 class TestErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
   state = { hasError: false };
 
@@ -108,6 +124,11 @@ describe("App", () => {
       "Security audit trail · SARAISE",
       "Registry security audit log page",
     ],
+    [
+      "/human-resources/leave-requests/new",
+      "Request leave · SARAISE",
+      "Registry leave request create page",
+    ],
   ])(
     "renders %s through the migrated route registry title wrapper",
     async (path, title, heading) => {
@@ -123,4 +144,61 @@ describe("App", () => {
       await waitFor(() => expect(document.title).toBe(title));
     }
   );
+});
+
+describe("App legacy redirects and fallback routes", () => {
+  afterEach(() => {
+    cleanup();
+    document.title = "";
+    window.history.pushState(null, "", "/");
+  });
+
+  it.each([
+    [
+      "/human-resources/leave-requests/request%2042",
+      "/human-resources/leave/requests/request%2042",
+      "Leave request detail · SARAISE",
+      "Registry leave request detail page",
+    ],
+    [
+      "/human-resources/leave-requests/request%2042/edit",
+      "/human-resources/leave/requests/request%2042/edit",
+      "Edit leave request · SARAISE",
+      "Registry leave request edit page",
+    ],
+    [
+      "/document-intelligence",
+      "/document-intelligence/extractions",
+      "Extraction evidence · SARAISE",
+      "Registry document intelligence extractions page",
+    ],
+  ])(
+    "redirects legacy or module root route %s into the migrated registry route",
+    async (legacyPath, expectedPath, title, heading) => {
+      window.history.pushState(null, "", legacyPath);
+
+      render(
+        <TestErrorBoundary>
+          <App />
+        </TestErrorBoundary>
+      );
+
+      expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
+      await waitFor(() => expect(window.location.pathname).toBe(expectedPath));
+      await waitFor(() => expect(document.title).toBe(title));
+    }
+  );
+
+  it("sets a human-readable title for unmatched routes", async () => {
+    window.history.pushState(null, "", "/missing-route");
+
+    render(
+      <TestErrorBoundary>
+        <App />
+      </TestErrorBoundary>
+    );
+
+    expect(screen.getByText("Page not found")).toBeInTheDocument();
+    await waitFor(() => expect(document.title).toBe("Page not found · SARAISE"));
+  });
 });

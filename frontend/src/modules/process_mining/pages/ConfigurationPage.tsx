@@ -410,6 +410,7 @@ export function ConfigurationPage() {
       <Card className="p-6">
         <h2 className="font-semibold">Import configuration document</h2>
         <textarea
+          aria-label="Import process mining configuration JSON"
           className="mt-4 min-h-36 w-full rounded-md border bg-background p-3 font-mono text-xs"
           value={importText}
           onChange={(event) => setImportText(event.target.value)}

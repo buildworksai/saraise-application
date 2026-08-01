@@ -9,6 +9,7 @@ export const tenantRoutes = [
     id: "business_intelligence.datasets",
     module: MODULE,
     path: "/business-intelligence/datasets",
+    title: "Dataset catalog",
     sourceFile: "modules/business_intelligence/pages/DatasetCatalogPage.tsx",
     Page: lazy(() =>
       import("./pages/DatasetCatalogPage").then((m) => ({ default: m.DatasetCatalogPage }))
@@ -20,6 +21,7 @@ export const tenantRoutes = [
     id: "business_intelligence.dashboards.list",
     module: MODULE,
     path: "/business-intelligence/dashboards",
+    title: "Dashboards",
     sourceFile: "modules/business_intelligence/pages/DashboardListPage.tsx",
     Page: lazy(() =>
       import("./pages/DashboardListPage").then((m) => ({ default: m.DashboardListPage }))
@@ -31,6 +33,7 @@ export const tenantRoutes = [
     id: "business_intelligence.dashboards.create",
     module: MODULE,
     path: "/business-intelligence/dashboards/new",
+    title: "Create dashboard",
     sourceFile: "modules/business_intelligence/pages/CreateDashboardPage.tsx",
     Page: lazy(() =>
       import("./pages/CreateDashboardPage").then((m) => ({ default: m.CreateDashboardPage }))
@@ -42,6 +45,7 @@ export const tenantRoutes = [
     id: "business_intelligence.dashboards.detail",
     module: MODULE,
     path: "/business-intelligence/dashboards/:id",
+    title: "Dashboard",
     sourceFile: "modules/business_intelligence/pages/DashboardDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/DashboardDetailPage").then((m) => ({ default: m.DashboardDetailPage }))
@@ -53,6 +57,7 @@ export const tenantRoutes = [
     id: "business_intelligence.dashboards.edit",
     module: MODULE,
     path: "/business-intelligence/dashboards/:id/edit",
+    title: "Dashboard builder",
     sourceFile: "modules/business_intelligence/pages/EditDashboardPage.tsx",
     Page: lazy(() =>
       import("./pages/EditDashboardPage").then((m) => ({ default: m.EditDashboardPage }))
@@ -64,6 +69,7 @@ export const tenantRoutes = [
     id: "business_intelligence.reports.list",
     module: MODULE,
     path: "/business-intelligence/reports",
+    title: "Reports",
     sourceFile: "modules/business_intelligence/pages/ReportListPage.tsx",
     Page: lazy(() => import("./pages/ReportListPage").then((m) => ({ default: m.ReportListPage }))),
     modes,
@@ -73,6 +79,7 @@ export const tenantRoutes = [
     id: "business_intelligence.reports.create",
     module: MODULE,
     path: "/business-intelligence/reports/new",
+    title: "Create report",
     sourceFile: "modules/business_intelligence/pages/CreateReportPage.tsx",
     Page: lazy(() =>
       import("./pages/CreateReportPage").then((m) => ({ default: m.CreateReportPage }))
@@ -84,6 +91,7 @@ export const tenantRoutes = [
     id: "business_intelligence.reports.detail",
     module: MODULE,
     path: "/business-intelligence/reports/:id",
+    title: "Report details",
     sourceFile: "modules/business_intelligence/pages/ReportDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/ReportDetailPage").then((m) => ({ default: m.ReportDetailPage }))
@@ -95,6 +103,7 @@ export const tenantRoutes = [
     id: "business_intelligence.reports.edit",
     module: MODULE,
     path: "/business-intelligence/reports/:id/edit",
+    title: "Edit report",
     sourceFile: "modules/business_intelligence/pages/EditReportPage.tsx",
     Page: lazy(() => import("./pages/EditReportPage").then((m) => ({ default: m.EditReportPage }))),
     modes,
@@ -104,6 +113,7 @@ export const tenantRoutes = [
     id: "business_intelligence.queries.list",
     module: MODULE,
     path: "/business-intelligence/queries",
+    title: "Queries",
     sourceFile: "modules/business_intelligence/pages/QueryListPage.tsx",
     Page: lazy(() => import("./pages/QueryListPage").then((m) => ({ default: m.QueryListPage }))),
     modes,
@@ -113,6 +123,7 @@ export const tenantRoutes = [
     id: "business_intelligence.queries.create",
     module: MODULE,
     path: "/business-intelligence/queries/new",
+    title: "Create query",
     sourceFile: "modules/business_intelligence/pages/CreateQueryPage.tsx",
     Page: lazy(() =>
       import("./pages/CreateQueryPage").then((m) => ({ default: m.CreateQueryPage }))
@@ -124,6 +135,7 @@ export const tenantRoutes = [
     id: "business_intelligence.queries.detail",
     module: MODULE,
     path: "/business-intelligence/queries/:id",
+    title: "Query details",
     sourceFile: "modules/business_intelligence/pages/QueryDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/QueryDetailPage").then((m) => ({ default: m.QueryDetailPage }))
@@ -135,6 +147,7 @@ export const tenantRoutes = [
     id: "business_intelligence.queries.edit",
     module: MODULE,
     path: "/business-intelligence/queries/:id/edit",
+    title: "Edit query",
     sourceFile: "modules/business_intelligence/pages/EditQueryPage.tsx",
     Page: lazy(() => import("./pages/EditQueryPage").then((m) => ({ default: m.EditQueryPage }))),
     modes,
@@ -144,6 +157,7 @@ export const tenantRoutes = [
     id: "business_intelligence.executions.list",
     module: MODULE,
     path: "/business-intelligence/executions",
+    title: "Execution history",
     sourceFile: "modules/business_intelligence/pages/ExecutionListPage.tsx",
     Page: lazy(() =>
       import("./pages/ExecutionListPage").then((m) => ({ default: m.ExecutionListPage }))
@@ -155,6 +169,7 @@ export const tenantRoutes = [
     id: "business_intelligence.executions.detail",
     module: MODULE,
     path: "/business-intelligence/executions/:id",
+    title: "Execution details",
     sourceFile: "modules/business_intelligence/pages/ExecutionDetailPage.tsx",
     Page: lazy(() =>
       import("./pages/ExecutionDetailPage").then((m) => ({ default: m.ExecutionDetailPage }))
