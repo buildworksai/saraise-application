@@ -64,17 +64,13 @@ export function AccountForm({
     guard.markClean();
   }
   return (
-    <form
-      onSubmit={(e) => void submit(e)}
-      onChange={guard.markDirty}
-      className="space-y-5"
-      noValidate
-    >
+    <form onSubmit={(e) => void submit(e)} onChange={guard.markDirty} className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id="name" label="Account name" required error={errors.name}>
           <input
             id="name"
             name="name"
+            required
             defaultValue={initial?.name}
             className={fieldClass}
             onBlur={(e) =>

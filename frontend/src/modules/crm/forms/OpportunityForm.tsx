@@ -81,17 +81,13 @@ export function OpportunityForm({
     guard.markClean();
   }
   return (
-    <form
-      onSubmit={(event) => void submit(event)}
-      onChange={guard.markDirty}
-      className="space-y-5"
-      noValidate
-    >
+    <form onSubmit={(event) => void submit(event)} onChange={guard.markDirty} className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id="account_id" label="Account ID" required error={errors.account_id}>
           <input
             id="account_id"
             name="account_id"
+            required
             defaultValue={initial?.account_id}
             readOnly={!!initial}
             className={fieldClass}
@@ -110,7 +106,13 @@ export function OpportunityForm({
           />
         </Field>
         <Field id="name" label="Opportunity name" required error={errors.name}>
-          <input id="name" name="name" defaultValue={initial?.name} className={fieldClass} />
+          <input
+            id="name"
+            name="name"
+            required
+            defaultValue={initial?.name}
+            className={fieldClass}
+          />
         </Field>
         <Field id="owner_id" label="Owner ID">
           <input
@@ -127,6 +129,7 @@ export function OpportunityForm({
             type="number"
             min={rules.minimum_amount}
             step={rules.minimum_amount}
+            required
             defaultValue={initial?.amount}
             className={fieldClass}
           />
@@ -136,6 +139,8 @@ export function OpportunityForm({
             id="currency"
             name="currency"
             maxLength={currencyLength}
+            pattern={`[A-Z]{${currencyLength}}`}
+            required
             defaultValue={initial?.currency ?? rules.default_currency}
             className={fieldClass}
           />
@@ -157,6 +162,7 @@ export function OpportunityForm({
             name="close_date"
             type="date"
             min={initial ? undefined : isoToday()}
+            required
             defaultValue={initial?.close_date}
             className={fieldClass}
           />

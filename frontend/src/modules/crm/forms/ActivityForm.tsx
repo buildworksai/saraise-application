@@ -61,12 +61,7 @@ export function ActivityForm({
   }
   const readOnly = initial?.completed === true;
   return (
-    <form
-      onSubmit={(e) => void submit(e)}
-      onChange={guard.markDirty}
-      className="space-y-5"
-      noValidate
-    >
+    <form onSubmit={(e) => void submit(e)} onChange={guard.markDirty} className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id="activity_type" label="Activity type">
           <select
@@ -104,6 +99,7 @@ export function ActivityForm({
           <input
             id="related_to_id"
             name="related_to_id"
+            required
             readOnly={!!initial || !!preselected?.related_to_id}
             defaultValue={initial?.related_to_id ?? preselected?.related_to_id}
             className={fieldClass}
@@ -122,6 +118,7 @@ export function ActivityForm({
           <input
             id="subject"
             name="subject"
+            required
             disabled={readOnly}
             defaultValue={initial?.subject}
             className={fieldClass}

@@ -155,10 +155,12 @@ def _runner_for_files(files: list[Path]) -> str:
         test_targets.update(DEFAULT_TEST_TARGETS)
 
     quoted_targets = " ".join(shlex.quote(target) for target in sorted(test_targets))
-    return (
-        "sh -c 'SARAISE_MODE=development DJANGO_USE_SQLITE_FOR_TESTS=1 "
-        f"python -m pytest --nomigrations -x -q {quoted_targets}'"
+    python = shlex.quote(sys.executable)
+    command = (
+        "SARAISE_MODE=development DJANGO_USE_SQLITE_FOR_TESTS=1 "
+        f"{python} -m pytest --nomigrations -x -q {quoted_targets}"
     )
+    return f"sh -c {shlex.quote(command)}"
 
 
 def run_gate(arguments: list[str], package_root: Path) -> int:
@@ -182,6 +184,8 @@ def run_gate(arguments: list[str], package_root: Path) -> int:
         mutation_paths,
         "--runner",
         runner,
+        "--tests-dir",
+        "src",
         "--simple-output",
         "--no-progress",
     ]

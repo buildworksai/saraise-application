@@ -69,6 +69,40 @@ def test_local_access_collector_includes_crm_configuration_and_dynamic_api_quota
     assert all(not resource.startswith("None.api.") for resource in resources)
 
 
+def test_local_access_collector_pins_standard_actions_and_local_quota_resources() -> None:
+    _, resources, _ = Command()._collect_local_access_contracts()
+
+    assert seed_default_users_module.STANDARD_VIEWSET_ACTIONS == (
+        "list",
+        "retrieve",
+        "create",
+        "update",
+        "partial_update",
+        "destroy",
+        "preview",
+        "versions",
+        "rollback",
+        "import_configuration",
+        "export_configuration",
+        "health",
+    )
+    assert seed_default_users_module.LOCAL_DEVELOPMENT_QUOTA_RESOURCES == (
+        "active-schedules",
+        "backup-jobs-per-period",
+        "backup-recovery.archive",
+        "backup-recovery.health",
+        "backup-recovery.job",
+        "backup-recovery.read",
+        "backup-recovery.retention",
+        "backup-recovery.schedule",
+        "backup-recovery.storage_target",
+        "integrity-verifications",
+        "provider-probes",
+    )
+    assert {f"crm.api.{action}" for action in seed_default_users_module.STANDARD_VIEWSET_ACTIONS}.issubset(resources)
+    assert set(seed_default_users_module.LOCAL_DEVELOPMENT_QUOTA_RESOURCES).issubset(resources)
+
+
 def test_declared_action_quota_collector_handles_permission_map_shapes(tmp_path) -> None:
     permissions_file = tmp_path / "permissions.py"
     permissions_file.write_text(

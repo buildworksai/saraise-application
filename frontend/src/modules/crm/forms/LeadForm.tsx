@@ -40,12 +40,7 @@ export function LeadForm({
     guard.markClean();
   }
   return (
-    <form
-      onSubmit={(event) => void submit(event)}
-      onChange={guard.markDirty}
-      className="space-y-5"
-      noValidate
-    >
+    <form onSubmit={(event) => void submit(event)} onChange={guard.markDirty} className="space-y-5">
       <LiveRegion message={serverError} />
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id="first_name" label="First name">
@@ -60,6 +55,7 @@ export function LeadForm({
           <input
             id="last_name"
             name="last_name"
+            required
             defaultValue={initial?.last_name}
             className={fieldClass}
             aria-invalid={!!errors.last_name}

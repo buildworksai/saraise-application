@@ -47,17 +47,13 @@ export function ContactForm({
     guard.markClean();
   }
   return (
-    <form
-      onSubmit={(e) => void submit(e)}
-      onChange={guard.markDirty}
-      className="space-y-5"
-      noValidate
-    >
+    <form onSubmit={(e) => void submit(e)} onChange={guard.markDirty} className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id="account_id" label="Account ID" required error={errors.account_id}>
           <input
             id="account_id"
             name="account_id"
+            required
             defaultValue={initial?.account_id}
             readOnly={!!initial}
             className={fieldClass}
@@ -83,6 +79,7 @@ export function ContactForm({
           <input
             id="last_name"
             name="last_name"
+            required
             defaultValue={initial?.last_name}
             className={fieldClass}
           />
