@@ -103,6 +103,7 @@ export const BackupExecutionCreatePage = () => {
             <input
               id="scope-ref"
               className={inputClass}
+              required
               value={scopeRef}
               aria-describedby="scope-ref-hint scope-ref-error"
               aria-invalid={Boolean(validation)}

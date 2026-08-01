@@ -108,6 +108,7 @@ export const ExerciseForm = ({
         <input
           id="exercise-name"
           className={inputClass}
+          required
           value={values.name}
           onChange={(event) => setValues({ ...values, name: event.target.value })}
         />
@@ -121,6 +122,7 @@ export const ExerciseForm = ({
           id="scheduled-for"
           type="datetime-local"
           className={inputClass}
+          required
           value={values.scheduledFor}
           onChange={(event) => setValues({ ...values, scheduledFor: event.target.value })}
         />
@@ -134,6 +136,7 @@ export const ExerciseForm = ({
           id="exercise-runbook"
           className={inputClass}
           disabled={editMode}
+          required
           value={values.runbookId}
           onChange={(event) => setValues({ ...values, runbookId: event.target.value })}
         />

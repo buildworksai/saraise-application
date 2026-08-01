@@ -96,6 +96,7 @@ export const RunbookForm = ({
         <input
           id="name"
           className={inputClass}
+          required
           value={values.name}
           onChange={(event) => setValues({ ...values, name: event.target.value })}
         />
@@ -111,6 +112,7 @@ export const RunbookForm = ({
           className={inputClass}
           value={values.slug}
           pattern="[a-z0-9-]+"
+          required
           onChange={(event) => setValues({ ...values, slug: event.target.value })}
         />
       </FormField>
@@ -145,6 +147,7 @@ export const RunbookForm = ({
         <input
           id="scope-ref"
           className={inputClass}
+          required
           value={values.scopeRef}
           onChange={(event) => setValues({ ...values, scopeRef: event.target.value })}
         />
@@ -172,6 +175,7 @@ export const RunbookForm = ({
           type="number"
           min="1"
           step="1"
+          required
           className={inputClass}
           value={values.rpoTargetSeconds}
           onChange={(event) => setValues({ ...values, rpoTargetSeconds: event.target.value })}
@@ -187,6 +191,7 @@ export const RunbookForm = ({
           type="number"
           min="1"
           step="1"
+          required
           className={inputClass}
           value={values.rtoTargetSeconds}
           onChange={(event) => setValues({ ...values, rtoTargetSeconds: event.target.value })}

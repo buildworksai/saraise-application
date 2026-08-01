@@ -95,6 +95,7 @@ export const RestoreRunCreatePage = () => {
           <input
             id="recovery-point"
             className={inputClass}
+            required
             value={recoveryPoint}
             onChange={(event) => setRecoveryPoint(event.target.value)}
           />
@@ -126,6 +127,7 @@ export const RestoreRunCreatePage = () => {
           <input
             id="target-ref"
             className={inputClass}
+            required
             value={targetRef}
             onChange={(event) => setTargetRef(event.target.value)}
           />
@@ -152,6 +154,7 @@ export const RestoreRunCreatePage = () => {
               <input
                 id="components"
                 className={inputClass}
+                required
                 value={components}
                 onChange={(event) => setComponents(event.target.value)}
               />

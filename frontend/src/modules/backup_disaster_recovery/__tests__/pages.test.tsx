@@ -12,6 +12,8 @@ import {
 import { BackupExecutionCreatePage } from "../pages/BackupExecutionCreatePage";
 import { DisasterRecoveryDashboardPage } from "../pages/DisasterRecoveryDashboardPage";
 import { BackupDisasterRecoveryConfigurationPage } from "../pages/BackupDisasterRecoveryConfigurationPage";
+import { DRExerciseCreatePage } from "../pages/DRExerciseCreatePage";
+import { DRRunbookCreatePage } from "../pages/DRRunbookCreatePage";
 import { RestoreRunCreatePage } from "../pages/RestoreRunCreatePage";
 import { configurationFixture } from "./configuration-fixture";
 
@@ -123,6 +125,36 @@ describe("configuration-first UI", () => {
     expect(screen.queryByLabelText(/step-up/i)).not.toBeInTheDocument();
   });
 
+  it("marks restore planning fields with browser-native constraints", () => {
+    renderPage(<RestoreRunCreatePage />, "/backup-disaster-recovery/restores/new");
+
+    expect(screen.getByLabelText("Recovery point ID")).toBeRequired();
+    expect(screen.getByLabelText("Registered target reference")).toBeRequired();
+  });
+
+  it("marks runbook identity and objective fields with browser-native constraints", async () => {
+    mockConfiguration();
+    renderPage(<DRRunbookCreatePage />, "/backup-disaster-recovery/runbooks/new");
+
+    expect(await screen.findByLabelText("Name")).toBeRequired();
+    expect(screen.getByLabelText("Slug")).toBeRequired();
+    expect(screen.getByLabelText("Slug")).toHaveAttribute("pattern", "[a-z0-9-]+");
+    expect(screen.getByLabelText("Scope reference")).toBeRequired();
+    expect(screen.getByLabelText("RPO target (seconds)")).toBeRequired();
+    expect(screen.getByLabelText("RPO target (seconds)")).toHaveAttribute("min", "1");
+    expect(screen.getByLabelText("RTO target (seconds)")).toBeRequired();
+    expect(screen.getByLabelText("RTO target (seconds)")).toHaveAttribute("min", "1");
+  });
+
+  it("marks exercise schedule fields with browser-native constraints", async () => {
+    mockConfiguration();
+    renderPage(<DRExerciseCreatePage />, "/backup-disaster-recovery/exercises/new");
+
+    expect(await screen.findByLabelText("Exercise name")).toBeRequired();
+    expect(screen.getByLabelText("Scheduled for")).toBeRequired();
+    expect(screen.getByLabelText("Published runbook ID")).toBeRequired();
+  });
+
   it("requires a server preview before applying configuration", async () => {
     vi.spyOn(backupDisasterRecoveryService, "getConfiguration").mockResolvedValue(
       configurationFixture
@@ -147,13 +179,19 @@ describe("configuration-first UI", () => {
 });
 
 describe("BackupExecutionCreatePage", () => {
+  it("marks the canonical scope reference as browser-required", () => {
+    renderPage(<BackupExecutionCreatePage />, "/backup-disaster-recovery/backups/new");
+
+    expect(screen.getByLabelText("Canonical scope reference")).toBeRequired();
+  });
+
   it("validates the scope before submission", async () => {
     const request = vi.spyOn(backupDisasterRecoveryService, "requestBackup");
     renderPage(<BackupExecutionCreatePage />, "/backup-disaster-recovery/backups/new");
     const input = screen.getByLabelText("Canonical scope reference");
     await userEvent.clear(input);
     await userEvent.click(screen.getByRole("button", { name: "Queue backup" }));
-    expect(await screen.findByText("Enter the canonical scope reference.")).toBeInTheDocument();
+    expect(input).toBeInvalid();
     expect(request).not.toHaveBeenCalled();
   });
 

@@ -324,7 +324,7 @@ export const FormCard = ({
       <p className="text-sm text-muted-foreground">{description}</p>
     </CardHeader>
     <CardContent>
-      <form noValidate onSubmit={onSubmit} className="space-y-5">
+      <form onSubmit={onSubmit} className="space-y-5">
         <div className="grid gap-5 md:grid-cols-2">{children}</div>
         <div className="flex flex-wrap justify-end gap-3 border-t pt-5">{footer}</div>
       </form>
