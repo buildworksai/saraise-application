@@ -354,7 +354,7 @@ function LoadingFallback() {
   );
 }
 
-function RouteTitle({ title, children }: { title: string; children: ReactNode }) {
+function RouteTitle({ title, children }: { title?: string; children: ReactNode }) {
   useEffect(() => {
     document.title = formatRouteTitle(title);
     return undefined;
@@ -861,7 +861,7 @@ function AnimatedRoutes() {
               element={
                 <ProtectedRoute>
                   <ModuleLayout>
-                    <RouteTitle title={title!}>
+                    <RouteTitle title={title}>
                       <Page />
                     </RouteTitle>
                   </ModuleLayout>

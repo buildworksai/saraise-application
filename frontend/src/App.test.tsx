@@ -76,7 +76,10 @@ describe("App", () => {
 
   it.each([
     ["Inventory", "Inventory · SARAISE"],
+    ["  Inventory  ", "Inventory · SARAISE"],
     ["Already branded · SARAISE", "Already branded · SARAISE"],
+    [undefined, "SARAISE · SARAISE"],
+    ["   ", "SARAISE · SARAISE"],
   ])("formats route title %s", (title, expected) => {
     expect(formatRouteTitle(title)).toBe(expected);
   });
