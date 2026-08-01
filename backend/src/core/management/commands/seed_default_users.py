@@ -624,13 +624,17 @@ class Command(BaseCommand):
         if not isinstance(value, str):
             return
 
-        if key in {"permission", "permissions"} and PERMISSION_CODE_RE.fullmatch(value):
-            permissions.add(value)
-            capabilities.add(value.split(".", maxsplit=1)[0])
+        token = value.strip()
+        if not token:
+            return
+
+        if key in {"permission", "permissions"} and PERMISSION_CODE_RE.fullmatch(token):
+            permissions.add(token)
+            capabilities.add(token.split(".", maxsplit=1)[0])
         elif key in {"entitlement", "entitlements"}:
-            capabilities.add(value)
+            capabilities.add(token)
         elif key in {"quota_resource", "quota_resources"}:
-            resources.add(value)
+            resources.add(token)
 
     def _create_or_update_user(
         self,

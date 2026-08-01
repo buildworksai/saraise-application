@@ -534,6 +534,24 @@ function CompanyFormPage({ edit }: { edit: boolean }) {
         <GovernedError error={companyQuery.error} onRetry={() => void companyQuery.refetch()} />
       </PageScaffold>
     );
+  const fieldConstraints: Partial<
+    Record<
+      keyof CompanyFormState,
+      {
+        max?: number;
+        min?: number;
+        pattern?: string;
+        required?: boolean;
+      }
+    >
+  > = {
+    company_code: { pattern: "\\s*[A-Za-z0-9_-]+\\s*", required: true },
+    company_name: { required: true },
+    currency: { pattern: "\\s*[A-Za-z]{3}\\s*", required: true },
+    fiscal_year_start_month: { max: 12, min: 1, required: true },
+    legal_name: { required: true },
+    ownership_percentage: { max: 100, min: 0 },
+  };
   const field = (key: keyof CompanyFormState, label: string, hint: string, type = "text") => (
     <div>
       <Label htmlFor={`company-${key}`}>{label}</Label>
@@ -544,6 +562,7 @@ function CompanyFormPage({ edit }: { edit: boolean }) {
         value={String(form[key])}
         onChange={(event) => setForm({ ...form, [key]: event.target.value })}
         aria-describedby={`company-${key}-hint`}
+        {...fieldConstraints[key]}
       />
       <p id={`company-${key}-hint`} className="mt-1 text-xs text-muted-foreground">
         {hint}

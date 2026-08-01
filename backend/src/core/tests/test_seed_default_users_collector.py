@@ -10,6 +10,7 @@ from datetime import timezone as datetime_timezone
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.management.base import CommandError
+from django.test import override_settings
 from django.utils import timezone
 
 from src.core.licensing.models import Organization
@@ -103,6 +104,20 @@ view.CRM_ACTION_PERMISSIONS = {"attr_action": []}
     }
 
 
+def test_declared_action_quota_collector_ignores_unreadable_and_malformed_python(tmp_path) -> None:
+    command = Command()
+    resources = {"crm.api.existing"}
+
+    missing_file = tmp_path / "missing_permissions.py"
+    malformed_file = tmp_path / "permissions.py"
+    malformed_file.write_text("permission_map = {", encoding="utf-8")
+
+    command._collect_declared_action_quotas("crm", missing_file, resources)
+    command._collect_declared_action_quotas("crm", malformed_file, resources)
+
+    assert resources == {"crm.api.existing"}
+
+
 def test_permission_action_dictionary_accepts_only_governed_targets() -> None:
     command = Command()
 
@@ -119,6 +134,87 @@ def test_permission_action_dictionary_accepts_only_governed_targets() -> None:
     assert command._permission_action_dictionary(wrapped) is not None
     assert command._permission_action_dictionary(attribute) is not None
     assert command._permission_action_dictionary(empty_annotation) is None
+
+
+def test_manifest_access_collector_normalizes_values_and_rejects_invalid_scalars() -> None:
+    permissions: set[str] = set()
+    resources: set[str] = set()
+    capabilities: set[str] = set()
+    document = {
+        "permission": " crm.configuration:read ",
+        "permissions": [
+            "crm.customer:read",
+            "CRM.customer:read",
+            "",
+            42,
+        ],
+        "entitlement": " module.crm ",
+        "entitlements": [" crm ", " ", None],
+        "quota_resource": " crm.api.list ",
+        "quota_resources": ["crm.api.retrieve", "", object()],
+    }
+
+    Command()._collect_manifest_access_values(document, permissions, resources, capabilities)
+
+    assert permissions == {"crm.configuration:read", "crm.customer:read"}
+    assert resources == {"crm.api.list", "crm.api.retrieve"}
+    assert capabilities == {"crm", "module.crm"}
+
+
+def test_local_access_collector_skips_bad_manifests_tests_and_invalid_literals(tmp_path) -> None:
+    modules_root = tmp_path / "src" / "modules"
+    crm_root = modules_root / "crm"
+    broken_root = modules_root / "broken"
+    crm_root.mkdir(parents=True)
+    broken_root.mkdir()
+    (crm_root / "manifest.yaml").write_text(
+        """
+permissions:
+  - " crm.configuration:read "
+  - "CRM.invalid:read"
+entitlements:
+  - "module.crm"
+  - ""
+quota_resources:
+  - "crm.api.list"
+  - ""
+""",
+        encoding="utf-8",
+    )
+    (broken_root / "manifest.yaml").write_text("permissions: [", encoding="utf-8")
+    (crm_root / "permissions.py").write_text(
+        """
+permission_map = {"forecast": "crm.forecast:read", "bad-action": "crm.bad:read"}
+CRM_ACTION_PERMISSIONS = {"pipeline": "crm.pipeline:read"}
+ACCESS = [
+    "crm.customer:read",
+    "crm.api.export",
+    "module.crm",
+    "backup-recovery",
+    "not captured because it has spaces",
+]
+""",
+        encoding="utf-8",
+    )
+    (crm_root / "test_permissions.py").write_text(
+        'permission_map = {"should_not_seed": "crm.test:read"}',
+        encoding="utf-8",
+    )
+
+    with override_settings(BASE_DIR=tmp_path):
+        permissions, resources, capabilities = Command()._collect_local_access_contracts()
+
+    assert "crm.configuration:read" in permissions
+    assert "crm.customer:read" in permissions
+    assert "CRM.invalid:read" not in permissions
+    assert "crm.api.list" in resources
+    assert "crm.api.forecast" in resources
+    assert "crm.api.pipeline" in resources
+    assert "crm.api.bad-action" not in resources
+    assert "crm.api.export" in resources
+    assert "crm.api.should_not_seed" not in resources
+    assert "backup-recovery" in capabilities
+    assert "" not in permissions | resources | capabilities
 
 
 def test_seeded_tenant_emails_extracts_configured_email_keys() -> None:

@@ -687,6 +687,38 @@ describe("CompanyDetailPage", () => {
   });
 });
 
+describe("CompanyFormPage constraints", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal("crypto", { randomUUID: () => "create-key" });
+  });
+
+  it("marks company identity and fiscal controls with native constraints", () => {
+    renderPage(<CreateCompanyPage />, {
+      path: "/multi-company/companies/new",
+      route: "/multi-company/companies/new",
+    });
+
+    expect(screen.getByLabelText("Company code")).toBeRequired();
+    expect(screen.getByLabelText("Company code")).toHaveAttribute(
+      "pattern",
+      "\\s*[A-Za-z0-9_-]+\\s*"
+    );
+    expect(screen.getByLabelText("Display name")).toBeRequired();
+    expect(screen.getByLabelText("Legal name")).toBeRequired();
+    expect(screen.getByLabelText("Functional currency")).toBeRequired();
+    expect(screen.getByLabelText("Functional currency")).toHaveAttribute(
+      "pattern",
+      "\\s*[A-Za-z]{3}\\s*"
+    );
+    expect(screen.getByLabelText("Fiscal year start month")).toBeRequired();
+    expect(screen.getByLabelText("Fiscal year start month")).toHaveAttribute("min", "1");
+    expect(screen.getByLabelText("Fiscal year start month")).toHaveAttribute("max", "12");
+    expect(screen.getByLabelText("Ownership percentage")).toHaveAttribute("min", "0");
+    expect(screen.getByLabelText("Ownership percentage")).toHaveAttribute("max", "100");
+  });
+});
+
 describe("CompanyFormPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -701,14 +733,15 @@ describe("CompanyFormPage", () => {
       route: "/multi-company/companies/new",
     });
 
+    await user.click(screen.getByRole("button", { name: "Create company" }));
+    expect(multiCompanyService.createCompany).not.toHaveBeenCalled();
+
     await user.clear(screen.getByLabelText("Functional currency"));
     await user.type(screen.getByLabelText("Functional currency"), "US");
     await user.click(screen.getByRole("button", { name: "Create company" }));
 
     expect(multiCompanyService.createCompany).not.toHaveBeenCalled();
-    expect(toast.error).toHaveBeenCalledWith(
-      "Code, names, a 3-letter currency, and fiscal month 1–12 are required."
-    );
+    expect(screen.getByLabelText("Functional currency")).toBeInvalid();
   });
 
   it("normalizes create payload values and preserves optional null boundaries", async () => {
