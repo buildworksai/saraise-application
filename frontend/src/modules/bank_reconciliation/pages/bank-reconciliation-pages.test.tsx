@@ -483,11 +483,18 @@ describe("bank reconciliation governed pages", () => {
     renderPage("/bank-reconciliation/accounts/new", <CreateBankAccountPage />);
 
     expect(await screen.findByText("Accounting integration disconnected")).toBeInTheDocument();
+    expect(screen.getByLabelText("Account number")).toBeRequired();
+    expect(screen.getByLabelText("Account display name")).toBeRequired();
+    expect(screen.getByLabelText("Bank name")).toBeRequired();
+    expect(screen.getByLabelText("Currency")).toBeRequired();
+    expect(screen.getByLabelText("Currency")).toHaveAttribute("pattern", "[A-Z]{3}");
     await userEvent.clear(screen.getByLabelText("Currency"));
     await userEvent.type(screen.getByLabelText("Currency"), "usd");
     await userEvent.click(screen.getByRole("button", { name: "Create account" }));
 
-    expect(await screen.findAllByRole("alert")).toHaveLength(3);
+    expect(screen.getByLabelText("Account number")).toBeInvalid();
+    expect(screen.getByLabelText("Account display name")).toBeInvalid();
+    expect(screen.getByLabelText("Bank name")).toBeInvalid();
     expect(service.createBankAccount).not.toHaveBeenCalled();
 
     await userEvent.type(screen.getByLabelText("Account number"), "000-111");
@@ -539,6 +546,13 @@ describe("bank reconciliation governed pages", () => {
     service.createManualStatement.mockResolvedValue(statement);
     renderPage("/bank-reconciliation/statements/manual", <CreateManualStatementPage />);
 
+    expect(screen.getByLabelText("Bank account ID")).toBeRequired();
+    expect(screen.getByLabelText("Statement reference")).toBeRequired();
+    expect(screen.getByLabelText("Period start")).toBeRequired();
+    expect(screen.getByLabelText("Period end")).toBeRequired();
+    expect(screen.getByLabelText("Transaction 1 date")).toBeRequired();
+    expect(screen.getByLabelText("Transaction 1 description")).toBeRequired();
+
     await userEvent.type(screen.getByLabelText("Bank account ID"), "account-1");
     await userEvent.type(screen.getByLabelText("Statement reference"), "MAN-1");
     await userEvent.type(screen.getByLabelText("Period start"), "2026-07-01");
@@ -582,6 +596,7 @@ describe("bank reconciliation governed pages", () => {
     service.requestImport.mockResolvedValue(accepted);
     renderPage("/bank-reconciliation/statements/import", <ImportStatementPage />);
 
+    expect(screen.getByLabelText("Bank account ID")).toBeRequired();
     await userEvent.type(screen.getByLabelText("Bank account ID"), "account-1");
     const fileInput = document.querySelector<HTMLInputElement>("#statement-file");
     expect(fileInput).not.toBeNull();
@@ -724,6 +739,22 @@ describe("bank reconciliation governed pages", () => {
     expect(service.listImports).toHaveBeenLastCalledWith(
       expect.objectContaining({ status: "failed", file_format: "csv" })
     );
+  });
+
+  it("marks reconciliation and matching-rule create forms with native constraints", () => {
+    renderPage("/bank-reconciliation/reconciliations/new", <CreateReconciliationPage />);
+
+    expect(screen.getByLabelText("Bank account ID")).toBeRequired();
+    expect(screen.getByLabelText("Statement ID")).toBeRequired();
+    expect(screen.getByLabelText("Reconciliation date")).toBeRequired();
+    expect(screen.getByLabelText("Verified ledger balance")).toBeRequired();
+
+    renderPage("/bank-reconciliation/rules/new", <CreateMatchingRulePage />);
+
+    expect(screen.getByLabelText("Rule name")).toBeRequired();
+    expect(screen.getByLabelText("Priority")).toBeRequired();
+    expect(screen.getByLabelText("Priority")).toHaveAttribute("min", "1");
+    expect(screen.getByLabelText("Minimum score")).toBeRequired();
   });
 
   it("renders matching rule details and import retry/cancel/success diagnostics", async () => {
