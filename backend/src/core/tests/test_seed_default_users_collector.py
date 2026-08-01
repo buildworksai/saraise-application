@@ -9,6 +9,7 @@ from datetime import timezone as datetime_timezone
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.core.management.base import CommandError
 from django.utils import timezone
 
 from src.core.licensing.models import Organization
@@ -18,6 +19,35 @@ from src.core.tenancy.rls import tenant_context
 from src.core.user_models import UserProfile
 
 User = get_user_model()
+
+
+def test_seed_default_users_requires_password_from_exact_option_or_environment(monkeypatch) -> None:
+    command = Command()
+    assert seed_default_users_module.PASSWORD_ENV == "SARAISE_SEED_DEFAULT_PASSWORD"  # pragma: allowlist secret
+    monkeypatch.delenv(seed_default_users_module.PASSWORD_ENV, raising=False)
+
+    with pytest.raises(CommandError, match=seed_default_users_module.PASSWORD_ENV):
+        Command.handle.__wrapped__(command, stdout=None)
+
+
+def test_seed_default_users_uses_exact_password_environment_variable(monkeypatch) -> None:
+    password = "EnvSeedRegression123!"  # pragma: allowlist secret
+    observed_passwords: list[str] = []
+    command = Command()
+
+    assert seed_default_users_module.PASSWORD_ENV == "SARAISE_SEED_DEFAULT_PASSWORD"  # pragma: allowlist secret
+    monkeypatch.setenv(seed_default_users_module.PASSWORD_ENV, password)
+    monkeypatch.setattr(command, "_cleanup_orphaned_profiles", lambda: None)
+
+    def create_or_update_user(**kwargs):
+        observed_passwords.append(kwargs["password"])
+        return object(), False
+
+    monkeypatch.setattr(command, "_create_or_update_user", create_or_update_user)
+
+    Command.handle.__wrapped__(command, stdout=None)
+
+    assert observed_passwords[:2] == [password, password]
 
 
 def test_local_access_collector_includes_crm_configuration_and_dynamic_api_quotas() -> None:
