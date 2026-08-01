@@ -93,7 +93,14 @@ export function BudgetForm({
       });
   };
   return (
-    <form className="space-y-6" onSubmit={submit} noValidate>
+    <form
+      className="space-y-6"
+      onInvalid={(event) => {
+        event.preventDefault();
+        setErrors(validate(value));
+      }}
+      onSubmit={submit}
+    >
       <div className="grid gap-5 sm:grid-cols-2">
         <Input
           id="budget-code"
@@ -129,6 +136,7 @@ export function BudgetForm({
           Budget type
           <select
             id="budget-type"
+            required
             value={value.budget_type}
             onChange={(event) => update("budget_type", event.target.value as BudgetType)}
             className="mt-1 block h-10 w-full rounded-md border bg-background px-3"

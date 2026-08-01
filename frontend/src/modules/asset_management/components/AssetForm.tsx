@@ -196,7 +196,15 @@ export function AssetForm({
   };
 
   return (
-    <form className="space-y-6" onSubmit={submit} noValidate aria-busy={pending}>
+    <form
+      className="space-y-6"
+      onInvalid={(event) => {
+        event.preventDefault();
+        setSubmitted(true);
+      }}
+      onSubmit={submit}
+      aria-busy={pending}
+    >
       {error && !hasMappedServerError ? <ProblemState error={error} compact /> : null}
       <Card className="grid gap-5 p-5 sm:p-6 md:grid-cols-2">
         <Input
@@ -224,6 +232,7 @@ export function AssetForm({
           </label>
           <select
             id="asset-category"
+            required
             className="h-10 w-full rounded-md border border-input bg-background px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             value={form.category}
             onChange={(event) => {
@@ -284,6 +293,7 @@ export function AssetForm({
           </label>
           <select
             id="depreciation-method"
+            required
             className="h-10 w-full rounded-md border border-input bg-background px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             value={form.depreciation_method}
             disabled={configuration.non_depreciable_categories.includes(form.category)}

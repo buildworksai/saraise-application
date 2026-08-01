@@ -109,6 +109,17 @@ describe("CustomerForm", () => {
     expect(navigate).toHaveBeenCalledWith("/sales-management/customers/customer-1");
   });
 
+  it("uses native form constraints for required customer identity fields", () => {
+    const { container } = renderForm(<CustomerForm />);
+
+    expect(container.querySelector("form")?.noValidate).toBe(false);
+    expect(screen.getByLabelText("Customer code")).toBeRequired();
+    expect(screen.getByLabelText("Customer name")).toBeRequired();
+    expect(screen.getByLabelText("Currency")).toBeRequired();
+    expect(screen.getByLabelText("Currency")).toHaveAttribute("maxLength", "3");
+    expect(screen.getByLabelText("Credit limit")).toHaveAttribute("min", "0");
+  });
+
   it("updates existing customers with expected version and guards dirty cancel navigation", async () => {
     vi.mocked(salesService.updateCustomer).mockResolvedValue({
       ...customer,

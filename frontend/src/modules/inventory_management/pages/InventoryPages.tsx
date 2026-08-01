@@ -1202,7 +1202,7 @@ function ResourceFormPage({ kind, mode }: { kind: ResourceKind; mode: "create" |
       }
     >
       {mutation.error ? <InventoryErrorState error={mutation.error} /> : null}
-      <form onSubmit={submit} noValidate>
+      <form onSubmit={submit}>
         <Card className="grid gap-5 p-5 sm:grid-cols-2">
           {descriptor.fields.map((field) => (
             <div key={field.key} className="space-y-2">
@@ -1213,6 +1213,13 @@ function ResourceFormPage({ kind, mode }: { kind: ResourceKind; mode: "create" |
               <Input
                 id={`${kind}-${field.key}`}
                 type={field.type ?? "text"}
+                required={field.required}
+                min={
+                  field.type === "number" &&
+                  (field.key === "line_quantity" || field.key === "quantity")
+                    ? "0.000001"
+                    : undefined
+                }
                 value={values[field.key] ?? ""}
                 aria-invalid={Boolean(clientErrors[field.key])}
                 aria-describedby={`${kind}-${field.key}-help`}

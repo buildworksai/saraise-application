@@ -74,7 +74,6 @@ export function CustomerForm({ customer }: { customer?: Customer }) {
               event.preventDefault();
               if (Object.keys(errors).length === 0 && !mutation.isPending) mutation.mutate();
             }}
-            noValidate
           >
             <Input
               id="customer-code"

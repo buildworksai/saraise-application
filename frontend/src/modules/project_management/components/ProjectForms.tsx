@@ -1,5 +1,14 @@
 /* eslint-disable complexity -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import {
+  cloneElement,
+  isValidElement,
+  useEffect,
+  useId,
+  useState,
+  type FormEvent,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import type {
   MemberCreateRequest,
   MilestoneCreateRequest,
@@ -61,13 +70,19 @@ function FormFrame({
     </form>
   );
 }
-const Label = ({ name, help, children }: { name: string; help?: string; children: ReactNode }) => (
-  <label className="grid gap-1 text-sm font-medium text-foreground">
-    {name}
-    {children}
-    {help && <span className="text-xs font-normal text-muted-foreground">{help}</span>}
-  </label>
-);
+const Label = ({ name, help, children }: { name: string; help?: string; children: ReactNode }) => {
+  const id = useId();
+  const control = isValidElement(children)
+    ? cloneElement(children as ReactElement<{ id?: string }>, { id })
+    : children;
+  return (
+    <div className="grid gap-1 text-sm font-medium text-foreground">
+      <label htmlFor={id}>{name}</label>
+      {control}
+      {help && <span className="text-xs font-normal text-muted-foreground">{help}</span>}
+    </div>
+  );
+};
 export function ProjectForm({
   initial = {},
   pending = false,

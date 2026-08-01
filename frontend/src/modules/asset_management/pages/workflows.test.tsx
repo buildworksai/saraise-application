@@ -185,6 +185,28 @@ describe("asset management workflows", () => {
 });
 
 describe("asset form edit governance", () => {
+  it("projects required native constraints for asset create forms", () => {
+    const { container } = render(
+      <AssetForm
+        configuration={configurationDocument}
+        pending={false}
+        error={null}
+        onCancel={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    );
+
+    expect(container.querySelector("form")?.noValidate).toBe(false);
+    expect(screen.getByLabelText("Asset code")).toBeRequired();
+    expect(screen.getByLabelText("Asset name")).toBeRequired();
+    expect(screen.getByLabelText("Category")).toBeRequired();
+    expect(screen.getByLabelText("Purchase date")).toBeRequired();
+    expect(screen.getByLabelText("Purchase cost")).toBeRequired();
+    expect(screen.getByLabelText("Residual value")).toBeRequired();
+    expect(screen.getByLabelText("Depreciation method")).toBeRequired();
+    expect(screen.getByLabelText("Useful life (years)")).toBeRequired();
+  });
+
   it("submits only changed fields when editing a financially locked asset", () => {
     const submit = vi.fn();
     render(
