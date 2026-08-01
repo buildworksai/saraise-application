@@ -393,6 +393,7 @@ def test_bootstrap_local_access_refreshes_exact_expiry_grant_reason(monkeypatch)
     monkeypatch.setattr(seed_default_users_module.timezone, "now", lambda: fixed_now)
     tenant_uuid = uuid.uuid4()
     old_actor = uuid.uuid4()
+    permission_set_update_saves = []
     user = User.objects.create_user(
         username="exact-expiry@example.com",
         email="exact-expiry@example.com",
@@ -421,9 +422,20 @@ def test_bootstrap_local_access_refreshes_exact_expiry_grant_reason(monkeypatch)
 
     command = Command()
     monkeypatch.setattr(command, "_collect_local_access_contracts", lambda: (set(), set(), set()))
+    original_permission_set_save = PermissionSet.save
+
+    def record_permission_set_update_save(permission_set: PermissionSet, *args, **kwargs) -> None:
+        if not permission_set._state.adding:
+            permission_set_update_saves.append(tuple(kwargs.get("update_fields") or ()))
+        return original_permission_set_save(permission_set, *args, **kwargs)
+
+    monkeypatch.setattr(PermissionSet, "save", record_permission_set_update_save)
 
     command._bootstrap_local_access(str(tenant_uuid), (user,))
 
+    permission_set.refresh_from_db()
     grant.refresh_from_db()
+    assert permission_set.updated_by == old_actor
+    assert permission_set_update_saves == []
     assert grant.expires_at == fixed_now + timedelta(days=365)
     assert grant.reason == "Seeded local development UAT access"

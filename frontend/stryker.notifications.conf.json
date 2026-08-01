@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "coverageAnalysis": "all",
+  "disableTypeChecks": false,
+  "concurrency": 3,
+  "inPlace": true,
+  "maxTestRunnerReuse": 1,
+  "mutate": ["src/modules/notifications/services/notification-service.ts"],
+  "vitest": {
+    "configFile": "src/modules/notifications/vitest.config.ts",
+    "related": false
+  },
+  "testFiles": ["src/modules/notifications/__tests__/notification-service.test.ts"],
+  "thresholds": {
+    "high": 90,
+    "low": 90,
+    "break": 90
+  },
+  "cleanTempDir": "always",
+  "reporters": ["clear-text", "progress"]
+}
