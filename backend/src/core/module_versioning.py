@@ -24,8 +24,6 @@ class VersionComparison(str, Enum):
 class VersionError(Exception):
     """Version error."""
 
-    pass
-
 
 class Version:
     """Semantic version representation.

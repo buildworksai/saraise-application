@@ -6,18 +6,18 @@ export type JsonPrimitive = string | number | boolean | null;
 export type DocumentMetadata = Readonly<Record<string, JsonPrimitive>>;
 
 export type DmsAllowedAction =
-  | 'read'
-  | 'write'
-  | 'manage'
-  | 'create'
-  | 'update'
-  | 'move'
-  | 'download'
-  | 'delete'
-  | 'create_version'
-  | 'restore_version'
-  | 'manage_permissions'
-  | 'share';
+  | "read"
+  | "write"
+  | "manage"
+  | "create"
+  | "update"
+  | "move"
+  | "download"
+  | "delete"
+  | "create_version"
+  | "restore_version"
+  | "manage_permissions"
+  | "share";
 
 export interface Folder {
   readonly id: UUID;
@@ -45,7 +45,9 @@ export interface FolderUpdate {
   readonly sort_order?: number;
 }
 
-export interface FolderMove { readonly parent_id: UUID | null }
+export interface FolderMove {
+  readonly parent_id: UUID | null;
+}
 
 export interface DocumentVersionSummary {
   readonly id: UUID;
@@ -95,7 +97,10 @@ export interface DocumentUpdate {
   readonly expected_updated_at: ISODateTime;
 }
 
-export interface DocumentMove { readonly folder_id: UUID | null; readonly expected_updated_at?: ISODateTime }
+export interface DocumentMove {
+  readonly folder_id: UUID | null;
+  readonly expected_updated_at?: ISODateTime;
+}
 
 export interface DocumentVersion extends DocumentVersionSummary {
   readonly document_id: UUID;
@@ -109,10 +114,12 @@ export interface DocumentVersionCreate {
   readonly change_note?: string;
 }
 
-export interface DocumentVersionRestore { readonly change_note?: string }
+export interface DocumentVersionRestore {
+  readonly change_note?: string;
+}
 
-export type PrincipalType = 'user' | 'role' | 'group';
-export type DocumentPermissionLevel = 'read' | 'write' | 'delete' | 'share' | 'manage';
+export type PrincipalType = "user" | "role" | "group";
+export type DocumentPermissionLevel = "read" | "write" | "delete" | "share" | "manage";
 
 export interface PrincipalSummary {
   readonly id: UUID;
@@ -140,7 +147,9 @@ export interface DocumentPermissionCreate {
   readonly permission: DocumentPermissionLevel;
 }
 
-export interface DocumentPermissionUpdate { readonly permission: DocumentPermissionLevel }
+export interface DocumentPermissionUpdate {
+  readonly permission: DocumentPermissionLevel;
+}
 
 export interface DocumentShare {
   readonly id: UUID;
@@ -154,7 +163,7 @@ export interface DocumentShare {
   readonly revoked_at: ISODateTime | null;
   readonly created_by: UUID;
   readonly created_at: ISODateTime;
-  readonly state: 'active' | 'expired' | 'exhausted' | 'revoked';
+  readonly state: "active" | "expired" | "exhausted" | "revoked";
 }
 
 export interface DocumentShareCreate {
@@ -179,8 +188,20 @@ export interface FolderContents {
   readonly allowed_actions: readonly DmsAllowedAction[];
 }
 
-export type DocumentOrdering = 'name' | '-name' | 'updated_at' | '-updated_at' | 'created_at' | '-created_at';
-export type FolderOrdering = 'name' | '-name' | 'sort_order' | '-sort_order' | 'updated_at' | '-updated_at';
+export type DocumentOrdering =
+  | "name"
+  | "-name"
+  | "updated_at"
+  | "-updated_at"
+  | "created_at"
+  | "-created_at";
+export type FolderOrdering =
+  | "name"
+  | "-name"
+  | "sort_order"
+  | "-sort_order"
+  | "updated_at"
+  | "-updated_at";
 
 export interface DmsListQuery {
   /** UUID or the explicit `root` sentinel accepted by the governed filter. */
@@ -233,22 +254,70 @@ export interface ApiErrorEnvelope {
   readonly error: {
     readonly code: string;
     readonly message: string;
-    readonly detail?: { readonly field_errors?: readonly FieldError[]; readonly retry_after_seconds?: number };
+    readonly detail?: {
+      readonly field_errors?: readonly FieldError[];
+      readonly retry_after_seconds?: number;
+    };
     readonly correlation_id: string;
   };
 }
 
 export type DmsFrontendError =
-  | { readonly kind: 'denied'; readonly status: 401 | 403; readonly message: string; readonly correlation_id: string | null }
-  | { readonly kind: 'not_found'; readonly status: 404; readonly message: string; readonly correlation_id: string | null }
-  | { readonly kind: 'conflict'; readonly status: 409; readonly message: string; readonly correlation_id: string | null }
-  | { readonly kind: 'validation'; readonly status: 400 | 422; readonly message: string; readonly field_errors: readonly FieldError[]; readonly correlation_id: string | null }
-  | { readonly kind: 'rate_limited'; readonly status: 429; readonly message: string; readonly retry_after_seconds: number | null; readonly correlation_id: string | null }
-  | { readonly kind: 'unavailable'; readonly status: 503; readonly message: string; readonly correlation_id: string | null }
-  | { readonly kind: 'unexpected'; readonly status: number; readonly message: string; readonly correlation_id: string | null };
+  | {
+      readonly kind: "denied";
+      readonly status: 401 | 403;
+      readonly message: string;
+      readonly correlation_id: string | null;
+    }
+  | {
+      readonly kind: "not_found";
+      readonly status: 404;
+      readonly message: string;
+      readonly correlation_id: string | null;
+    }
+  | {
+      readonly kind: "conflict";
+      readonly status: 409;
+      readonly message: string;
+      readonly correlation_id: string | null;
+    }
+  | {
+      readonly kind: "validation";
+      readonly status: 400 | 422;
+      readonly message: string;
+      readonly field_errors: readonly FieldError[];
+      readonly correlation_id: string | null;
+    }
+  | {
+      readonly kind: "rate_limited";
+      readonly status: 429;
+      readonly message: string;
+      readonly retry_after_seconds: number | null;
+      readonly correlation_id: string | null;
+    }
+  | {
+      readonly kind: "unavailable";
+      readonly status: 503;
+      readonly message: string;
+      readonly correlation_id: string | null;
+    }
+  | {
+      readonly kind: "unexpected";
+      readonly status: number;
+      readonly message: string;
+      readonly correlation_id: string | null;
+    };
 
-export interface DownloadResult { readonly blob: Blob; readonly filename: string; readonly mime_type: string }
-export interface UploadProgress { readonly loaded: number; readonly total: number; readonly percent: number }
+export interface DownloadResult {
+  readonly blob: Blob;
+  readonly filename: string;
+  readonly mime_type: string;
+}
+export interface UploadProgress {
+  readonly loaded: number;
+  readonly total: number;
+  readonly percent: number;
+}
 export interface DmsUploadTransportPolicy {
   readonly timeout_ms: number;
   readonly max_retries: number;
@@ -260,10 +329,13 @@ export interface UploadOptions {
   readonly onProgress?: (progress: UploadProgress) => void;
   readonly transport: DmsUploadTransportPolicy;
 }
-export interface DmsHealth { readonly status: 'healthy' | 'degraded' | 'unhealthy'; readonly checks: Readonly<Record<string, Readonly<Record<string, JsonPrimitive>>>> }
+export interface DmsHealth {
+  readonly status: "healthy" | "degraded" | "unhealthy";
+  readonly checks: Readonly<Record<string, Readonly<Record<string, JsonPrimitive>>>>;
+}
 
-export type DmsEnvironment = 'default' | 'development' | 'staging' | 'production';
-export type FolderDeletionPolicy = 'empty_only' | 'recursive_soft_delete';
+export type DmsEnvironment = "default" | "development" | "staging" | "production";
+export type FolderDeletionPolicy = "empty_only" | "recursive_soft_delete";
 
 /** Complete tenant-owned policy document. No business threshold is defined by a page. */
 export interface DmsConfigurationValues {
@@ -273,7 +345,9 @@ export interface DmsConfigurationValues {
   readonly max_metadata_bytes: number;
   readonly max_share_lifetime_days: number;
   readonly max_share_access_count: number;
-  readonly permission_implications: Readonly<Record<DocumentPermissionLevel, readonly DocumentPermissionLevel[]>>;
+  readonly permission_implications: Readonly<
+    Record<DocumentPermissionLevel, readonly DocumentPermissionLevel[]>
+  >;
   readonly principal_search_min_limit: number;
   readonly principal_search_max_limit: number;
   readonly principal_search_default_limit: number;
@@ -360,7 +434,7 @@ export interface DmsConfigurationPreview {
 export interface DmsConfigurationAuditRecord {
   readonly id: UUID;
   readonly actor_id: UUID;
-  readonly action: 'created' | 'updated' | 'rolled_back' | 'imported';
+  readonly action: "created" | "updated" | "rolled_back" | "imported";
   readonly correlation_id: string;
   readonly from_version: number | null;
   readonly to_version: number;
@@ -381,13 +455,13 @@ export interface DmsConfigurationVersion {
 
 export interface DmsConfigurationExportDocument {
   readonly schema_version: number;
-  readonly module: 'dms';
+  readonly module: "dms";
   readonly environment: DmsEnvironment;
   readonly version: number;
   readonly values: DmsConfigurationValues;
 }
 
-export const MODULE_API_PREFIX = '/api/v2/dms';
+export const MODULE_API_PREFIX = "/api/v2/dms";
 
 export const ENDPOINTS = {
   FOLDERS: {
@@ -397,7 +471,8 @@ export const ENDPOINTS = {
     UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/folders/${encodeURIComponent(id)}/` as const,
     DELETE: (id: UUID) => `${MODULE_API_PREFIX}/folders/${encodeURIComponent(id)}/` as const,
     MOVE: (id: UUID) => `${MODULE_API_PREFIX}/folders/${encodeURIComponent(id)}/move/` as const,
-    CONTENTS: (id: UUID) => `${MODULE_API_PREFIX}/folders/${encodeURIComponent(id)}/contents/` as const,
+    CONTENTS: (id: UUID) =>
+      `${MODULE_API_PREFIX}/folders/${encodeURIComponent(id)}/contents/` as const,
   },
   DOCUMENTS: {
     LIST: `${MODULE_API_PREFIX}/documents/`,
@@ -406,29 +481,38 @@ export const ENDPOINTS = {
     UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/documents/${encodeURIComponent(id)}/` as const,
     DELETE: (id: UUID) => `${MODULE_API_PREFIX}/documents/${encodeURIComponent(id)}/` as const,
     MOVE: (id: UUID) => `${MODULE_API_PREFIX}/documents/${encodeURIComponent(id)}/move/` as const,
-    DOWNLOAD: (id: UUID) => `${MODULE_API_PREFIX}/documents/${encodeURIComponent(id)}/download/` as const,
+    DOWNLOAD: (id: UUID) =>
+      `${MODULE_API_PREFIX}/documents/${encodeURIComponent(id)}/download/` as const,
   },
   VERSIONS: {
     LIST: `${MODULE_API_PREFIX}/document-versions/`,
     CREATE: `${MODULE_API_PREFIX}/document-versions/`,
-    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/document-versions/${encodeURIComponent(id)}/` as const,
-    RESTORE: (id: UUID) => `${MODULE_API_PREFIX}/document-versions/${encodeURIComponent(id)}/restore/` as const,
+    DETAIL: (id: UUID) =>
+      `${MODULE_API_PREFIX}/document-versions/${encodeURIComponent(id)}/` as const,
+    RESTORE: (id: UUID) =>
+      `${MODULE_API_PREFIX}/document-versions/${encodeURIComponent(id)}/restore/` as const,
   },
   PERMISSIONS: {
     LIST: `${MODULE_API_PREFIX}/document-permissions/`,
     CREATE: `${MODULE_API_PREFIX}/document-permissions/`,
-    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/document-permissions/${encodeURIComponent(id)}/` as const,
-    UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/document-permissions/${encodeURIComponent(id)}/` as const,
-    DELETE: (id: UUID) => `${MODULE_API_PREFIX}/document-permissions/${encodeURIComponent(id)}/` as const,
+    DETAIL: (id: UUID) =>
+      `${MODULE_API_PREFIX}/document-permissions/${encodeURIComponent(id)}/` as const,
+    UPDATE: (id: UUID) =>
+      `${MODULE_API_PREFIX}/document-permissions/${encodeURIComponent(id)}/` as const,
+    DELETE: (id: UUID) =>
+      `${MODULE_API_PREFIX}/document-permissions/${encodeURIComponent(id)}/` as const,
   },
   SHARES: {
     LIST: `${MODULE_API_PREFIX}/document-shares/`,
     CREATE: `${MODULE_API_PREFIX}/document-shares/`,
-    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/document-shares/${encodeURIComponent(id)}/` as const,
-    REVOKE: (id: UUID) => `${MODULE_API_PREFIX}/document-shares/${encodeURIComponent(id)}/revoke/` as const,
+    DETAIL: (id: UUID) =>
+      `${MODULE_API_PREFIX}/document-shares/${encodeURIComponent(id)}/` as const,
+    REVOKE: (id: UUID) =>
+      `${MODULE_API_PREFIX}/document-shares/${encodeURIComponent(id)}/revoke/` as const,
   },
   PRINCIPALS: `${MODULE_API_PREFIX}/principals/`,
-  PUBLIC_SHARE_DOWNLOAD: (token: string) => `${MODULE_API_PREFIX}/public/shares/${encodeURIComponent(token)}/download/` as const,
+  PUBLIC_SHARE_DOWNLOAD: (token: string) =>
+    `${MODULE_API_PREFIX}/public/shares/${encodeURIComponent(token)}/download/` as const,
   HEALTH: `${MODULE_API_PREFIX}/health/`,
   CONFIGURATION: {
     CURRENT: `${MODULE_API_PREFIX}/configuration/current/`,
@@ -442,12 +526,12 @@ export const ENDPOINTS = {
 } as const;
 
 export const ROUTES = {
-  DOCUMENTS: '/dms/documents',
-  DOCUMENT_CREATE: '/dms/documents/new',
+  DOCUMENTS: "/dms/documents",
+  DOCUMENT_CREATE: "/dms/documents/new",
   DOCUMENT_DETAIL: (id: UUID) => `/dms/documents/${encodeURIComponent(id)}` as const,
   DOCUMENT_EDIT: (id: UUID) => `/dms/documents/${encodeURIComponent(id)}/edit` as const,
-  FOLDER_CREATE: '/dms/folders/new',
+  FOLDER_CREATE: "/dms/folders/new",
   FOLDER_DETAIL: (id: UUID) => `/dms/folders/${encodeURIComponent(id)}` as const,
   FOLDER_EDIT: (id: UUID) => `/dms/folders/${encodeURIComponent(id)}/edit` as const,
-  CONFIGURATION: '/dms/configuration',
+  CONFIGURATION: "/dms/configuration",
 } as const;

@@ -4,7 +4,6 @@ import django.db.models.deletion
 from django.db import migrations, models
 from django.db.models import F, Q
 
-
 RELATIONS = (
     ("inventory_storage_locations", "warehouse_id", "inventory_warehouses"),
     ("inventory_storage_locations", "parent_id", "inventory_storage_locations"),
@@ -93,7 +92,9 @@ def remove_postgres_guards(apps, schema_editor):
     if schema_editor.connection.vendor != "postgresql":
         return
     schema_editor.execute("DROP TRIGGER IF EXISTS inventory_ledger_immutable ON inventory_stock_ledger_entries")
-    schema_editor.execute("DROP TRIGGER IF EXISTS inventory_config_revision_immutable ON inventory_configuration_revisions")
+    schema_editor.execute(
+        "DROP TRIGGER IF EXISTS inventory_config_revision_immutable ON inventory_configuration_revisions"
+    )
     schema_editor.execute("DROP FUNCTION IF EXISTS inventory_reject_evidence_mutation()")
     for index, (table, column, _parent) in reversed(tuple(enumerate(RELATIONS, start=1))):
         name = _constraint_name(index, table, column)
@@ -103,20 +104,12 @@ def remove_postgres_guards(apps, schema_editor):
 class Migration(migrations.Migration):
     dependencies = [("inventory_management", "0003_legacy_backfill")]
     operations = [
-        migrations.AlterField(
-            model_name="warehouse", name="country_code", field=models.CharField(max_length=2)
-        ),
-        migrations.AlterField(
-            model_name="warehouse", name="timezone", field=models.CharField(max_length=64)
-        ),
+        migrations.AlterField(model_name="warehouse", name="country_code", field=models.CharField(max_length=2)),
+        migrations.AlterField(model_name="warehouse", name="timezone", field=models.CharField(max_length=64)),
         migrations.AlterField(model_name="item", name="base_uom", field=models.CharField(max_length=32)),
         migrations.AlterField(model_name="stockentry", name="posting_at", field=models.DateTimeField()),
-        migrations.AlterField(
-            model_name="stockentry", name="idempotency_key", field=models.CharField(max_length=255)
-        ),
-        migrations.AlterField(
-            model_name="stockentryline", name="line_number", field=models.PositiveIntegerField()
-        ),
+        migrations.AlterField(model_name="stockentry", name="idempotency_key", field=models.CharField(max_length=255)),
+        migrations.AlterField(model_name="stockentryline", name="line_number", field=models.PositiveIntegerField()),
         migrations.AlterField(model_name="stockentryline", name="uom", field=models.CharField(max_length=32)),
         migrations.AlterField(
             model_name="stockbalance",

@@ -7,6 +7,7 @@ Each migration file will be ≤200 lines per SARAISE standards.
 
 Strategy: 21 models → ~21-24 model migrations + 4-5 index migrations
 """
+
 import re
 from pathlib import Path
 

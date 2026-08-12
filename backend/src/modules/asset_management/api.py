@@ -6,7 +6,8 @@ import logging
 from datetime import date
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from django.core.exceptions import ObjectDoesNotExist, ValidationError as DjangoValidationError
+from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import QuerySet
 from rest_framework import filters, status
 from rest_framework.decorators import action
@@ -18,14 +19,13 @@ from rest_framework.views import APIView
 
 from src.core.views.tenant_scoped import TenantScopedModelViewSet, TenantScopedReadOnlyModelViewSet
 
-from .api_auth import StrictSessionAuthentication
 from .health import AssetHealthUnavailable, get_module_health
 from .models import Asset, AssetCategory, AssetManagementConfiguration, DepreciationEntry
 from .permissions import (
-    ASSET_CREATE,
-    ASSET_DELETE,
     ASSET_ACTIVATE,
+    ASSET_CREATE,
     ASSET_DEACTIVATE,
+    ASSET_DELETE,
     ASSET_READ,
     ASSET_UPDATE,
     CONFIGURATION_EXPORT,
@@ -51,7 +51,7 @@ from .serializers import (
     DepreciationCalculationSerializer,
     DepreciationEntrySerializer,
 )
-from .services import AssetConfigurationService, AssetService, DEFAULT_CONFIGURATION, DepreciationService
+from .services import DEFAULT_CONFIGURATION, AssetConfigurationService, AssetService, DepreciationService
 
 logger = logging.getLogger("saraise.asset_management")
 
@@ -63,7 +63,9 @@ class AssetPagination(PageNumberPagination):
     page_size_query_param = "page_size"
     max_page_size = 100
 
-    def paginate_queryset(self, queryset: QuerySet[object], request: object, view: object | None = None) -> list[object] | None:
+    def paginate_queryset(
+        self, queryset: QuerySet[object], request: object, view: object | None = None
+    ) -> list[object] | None:
         tenant = TenantAssetRateThrottle._tenant_id(request)
         if tenant:
             configuration = AssetConfigurationService().resolve(tenant)
@@ -89,7 +91,9 @@ class TenantAssetRateThrottle(SimpleRateThrottle):
             self.rate = str(AssetConfigurationService().resolve(tenant)["tenant_throttle_rate"])
             self.num_requests, self.duration = self.parse_rate(self.rate)
         except Exception as exc:
-            logger.exception("asset.throttle_configuration_unavailable", extra={"event": "asset.throttle_configuration_unavailable"})
+            logger.exception(
+                "asset.throttle_configuration_unavailable", extra={"event": "asset.throttle_configuration_unavailable"}
+            )
             raise APIException("Asset Management throttle configuration is unavailable.") from exc
         return super().allow_request(request, view)
 
@@ -294,7 +298,11 @@ class AssetViewSet(DomainErrorMixin, AssetAccessMixin, TenantScopedModelViewSet)
         del request, pk
         asset = self.get_object()
         updated = AssetService.set_active_state(
-            self._require_tenant_id(), asset.pk, is_active=True, correlation_id=_correlation_id(self.request), idempotency_key=_require_idempotency_key(self.request)
+            self._require_tenant_id(),
+            asset.pk,
+            is_active=True,
+            correlation_id=_correlation_id(self.request),
+            idempotency_key=_require_idempotency_key(self.request),
         )
         return Response(AssetDetailSerializer(updated).data)
 
@@ -303,7 +311,11 @@ class AssetViewSet(DomainErrorMixin, AssetAccessMixin, TenantScopedModelViewSet)
         del request, pk
         asset = self.get_object()
         updated = AssetService.set_active_state(
-            self._require_tenant_id(), asset.pk, is_active=False, correlation_id=_correlation_id(self.request), idempotency_key=_require_idempotency_key(self.request)
+            self._require_tenant_id(),
+            asset.pk,
+            is_active=False,
+            correlation_id=_correlation_id(self.request),
+            idempotency_key=_require_idempotency_key(self.request),
         )
         return Response(AssetDetailSerializer(updated).data)
 
@@ -400,14 +412,20 @@ class AssetConfigurationViewSet(DomainErrorMixin, AssetAccessMixin, TenantScoped
         del request
         serializer = ConfigurationDocumentSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
-        return Response(AssetConfigurationService().preview(self._require_tenant_id(), serializer.validated_data["document"]))
+        return Response(
+            AssetConfigurationService().preview(self._require_tenant_id(), serializer.validated_data["document"])
+        )
 
     @action(detail=False, methods=("get",))
     def history(self, request: object) -> Response:
         del request
         page = self.paginate_queryset(AssetConfigurationService().history(self._require_tenant_id()))
         if page is None:
-            return Response(AssetConfigurationVersionSerializer(AssetConfigurationService().history(self._require_tenant_id()), many=True).data)
+            return Response(
+                AssetConfigurationVersionSerializer(
+                    AssetConfigurationService().history(self._require_tenant_id()), many=True
+                ).data
+            )
         return self.get_paginated_response(AssetConfigurationVersionSerializer(page, many=True).data)
 
     @action(detail=False, methods=("post",))

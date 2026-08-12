@@ -42,11 +42,14 @@ def order_table(django_db_setup: Any, django_db_blocker: Any) -> Any:
     del django_db_setup
     with django_db_blocker.unblock():
         with connection.schema_editor() as editor:
+            if StateMachineOrder._meta.db_table in connection.introspection.table_names():
+                editor.delete_model(StateMachineOrder)
             editor.create_model(StateMachineOrder)
     yield
     with django_db_blocker.unblock():
         with connection.schema_editor() as editor:
-            editor.delete_model(StateMachineOrder)
+            if StateMachineOrder._meta.db_table in connection.introspection.table_names():
+                editor.delete_model(StateMachineOrder)
 
 
 @pytest.fixture

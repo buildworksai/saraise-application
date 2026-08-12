@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Mapping
-from typing import Any, Protocol, TypeVar
+from typing import Any, Generic, Protocol, TypeVar
 
 
 class AgentRunner(Protocol):
@@ -18,11 +18,11 @@ class EvaluationSuiteRunner(Protocol):
 HandlerT = TypeVar("HandlerT", AgentRunner, EvaluationSuiteRunner)
 
 
-class ExtensionRegistry:
+class ExtensionRegistry(Generic[HandlerT]):
     def __init__(self, kind: str, maximum_key_length: int | None = None) -> None:
         self.kind = kind
         self.maximum_key_length = maximum_key_length
-        self._handlers: dict[str, Any] = {}
+        self._handlers: dict[str, HandlerT] = {}
         self._lock = threading.RLock()
 
     def configure(self, maximum_key_length: int) -> None:
@@ -74,7 +74,7 @@ class ExtensionRegistry:
             return tuple(sorted(self._handlers))
 
 
-runner_registry: ExtensionRegistry = ExtensionRegistry("agent runner")
-evaluation_registry: ExtensionRegistry = ExtensionRegistry("evaluation suite")
+runner_registry: ExtensionRegistry[AgentRunner] = ExtensionRegistry("agent runner")
+evaluation_registry: ExtensionRegistry[EvaluationSuiteRunner] = ExtensionRegistry("evaluation suite")
 
 __all__ = ["AgentRunner", "EvaluationSuiteRunner", "ExtensionRegistry", "evaluation_registry", "runner_registry"]

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from decimal import Decimal
+from typing import Any, cast
 
 from rest_framework import serializers
 
@@ -120,7 +121,7 @@ class BankAccountCreateSerializer(ServerOwnedFieldGuard, serializers.Serializer)
     currency = serializers.RegexField(r"^[A-Za-z]{3}$", default="USD")
     bank_identifier = serializers.CharField(max_length=34, required=False, allow_blank=True)
     ledger_account_id = serializers.UUIDField(required=False, allow_null=True)
-    opening_balance = serializers.DecimalField(max_digits=19, decimal_places=4, default="0.0000")
+    opening_balance = serializers.DecimalField(max_digits=19, decimal_places=4, default=Decimal("0.0000"))
     opening_balance_date = serializers.DateField(required=False, allow_null=True)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
@@ -198,7 +199,10 @@ class StatementDetailSerializer(StatementListSerializer):
     transaction_count = serializers.IntegerField(read_only=True, required=False)
 
     class Meta(StatementListSerializer.Meta):
-        fields = StatementListSerializer.Meta.fields + ("statement_import", "transaction_count")
+        fields = StatementListSerializer.Meta.fields + (  # type: ignore[assignment]
+            "statement_import",
+            "transaction_count",
+        )
 
 
 class ManualTransactionRowSerializer(serializers.Serializer):
@@ -243,7 +247,7 @@ class StatementVoidSerializer(ServerOwnedFieldGuard, serializers.Serializer):
 
 class TransactionListSerializer(serializers.ModelSerializer):
     statement_reference = serializers.CharField(source="bank_statement.statement_reference", read_only=True)
-    source = serializers.SerializerMethodField()
+    source = serializers.SerializerMethodField()  # type: ignore[assignment]
 
     def get_source(self, obj: BankTransaction) -> str:
         statement_import = obj.bank_statement.statement_import
@@ -322,12 +326,15 @@ class TransactionDetailSerializer(TransactionListSerializer):
     match_history = serializers.SerializerMethodField()
 
     def get_match_history(self, obj: BankTransaction) -> list[dict[str, Any]]:
-        return ReconciliationMatchCompactSerializer(
-            [line.match for line in obj.match_lines.select_related("match").all()], many=True
-        ).data
+        return cast(
+            list[dict[str, Any]],
+            ReconciliationMatchCompactSerializer(
+                [line.match for line in obj.match_lines.select_related("match").all()], many=True
+            ).data,
+        )
 
     class Meta(TransactionListSerializer.Meta):
-        fields = TransactionListSerializer.Meta.fields + (
+        fields = TransactionListSerializer.Meta.fields + (  # type: ignore[assignment]
             "external_id",
             "source_data",
             "matched_payment_id",
@@ -428,7 +435,7 @@ class StatementImportDetailSerializer(StatementImportListSerializer):
         return job.correlation_id if job else None
 
     class Meta(StatementImportListSerializer.Meta):
-        fields = StatementImportListSerializer.Meta.fields + (
+        fields = StatementImportListSerializer.Meta.fields + (  # type: ignore[assignment]
             "source_document_id",
             "content_sha256",
             "mapping",
@@ -492,7 +499,7 @@ class MatchingRuleDetailSerializer(MatchingRuleListSerializer):
     configuration = serializers.JSONField(read_only=True)
 
     class Meta(MatchingRuleListSerializer.Meta):
-        fields = MatchingRuleListSerializer.Meta.fields + ("configuration",)
+        fields = MatchingRuleListSerializer.Meta.fields + ("configuration",)  # type: ignore[assignment]
 
 
 class MatchingRuleCreateSerializer(ServerOwnedFieldGuard, serializers.Serializer):
@@ -502,7 +509,9 @@ class MatchingRuleCreateSerializer(ServerOwnedFieldGuard, serializers.Serializer
     priority = serializers.IntegerField(min_value=1, max_value=32767)
     configuration = serializers.JSONField(default=dict)
     auto_confirm = serializers.BooleanField(default=False)
-    minimum_score = serializers.DecimalField(max_digits=5, decimal_places=4, min_value=0, max_value=1)
+    minimum_score = serializers.DecimalField(
+        max_digits=5, decimal_places=4, min_value=Decimal("0"), max_value=Decimal("1")
+    )
     extension_key = serializers.CharField(max_length=100, required=False, allow_blank=True)
 
 
@@ -512,7 +521,9 @@ class MatchingRuleUpdateSerializer(MatchingRuleCreateSerializer):
     priority = serializers.IntegerField(min_value=1, max_value=32767, required=False)
     configuration = serializers.JSONField(required=False)
     auto_confirm = serializers.BooleanField(required=False)
-    minimum_score = serializers.DecimalField(max_digits=5, decimal_places=4, min_value=0, max_value=1, required=False)
+    minimum_score = serializers.DecimalField(
+        max_digits=5, decimal_places=4, min_value=Decimal("0"), max_value=Decimal("1"), required=False
+    )
 
 
 class ReconciliationListSerializer(serializers.ModelSerializer):
@@ -568,7 +579,12 @@ class ReconciliationDetailSerializer(ReconciliationListSerializer):
         ]
 
     class Meta(ReconciliationListSerializer.Meta):
-        fields = ReconciliationListSerializer.Meta.fields + ("notes", "transition_history", "matches", "statement")
+        fields = ReconciliationListSerializer.Meta.fields + (  # type: ignore[assignment]
+            "notes",
+            "transition_history",
+            "matches",
+            "statement",
+        )
 
 
 class ReconciliationCreateSerializer(ServerOwnedFieldGuard, serializers.Serializer):
@@ -576,7 +592,9 @@ class ReconciliationCreateSerializer(ServerOwnedFieldGuard, serializers.Serializ
     bank_statement = serializers.UUIDField()
     reconciliation_date = serializers.DateField()
     ledger_balance = serializers.DecimalField(max_digits=19, decimal_places=4)
-    tolerance = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=0, default="0.0000")
+    tolerance = serializers.DecimalField(
+        max_digits=19, decimal_places=4, min_value=Decimal("0"), default=Decimal("0.0000")
+    )
     notes = serializers.CharField(required=False, allow_blank=True)
     idempotency_key = serializers.CharField(max_length=128, allow_blank=False, write_only=True)
 
@@ -647,7 +665,7 @@ class MatchLineCreateSerializer(serializers.Serializer):
 
 class ManualMatchCreateSerializer(ServerOwnedFieldGuard, serializers.Serializer):
     match_type = serializers.ChoiceField(choices=["manual", "one_to_many", "many_to_one", "adjustment"], required=False)
-    lines = MatchLineCreateSerializer(many=True, min_length=2)
+    lines = MatchLineCreateSerializer(many=True, min_length=2)  # type: ignore[call-arg]
 
 
 class ReconciliationMatchDetailSerializer(ReconciliationMatchCompactSerializer):

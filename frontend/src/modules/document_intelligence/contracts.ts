@@ -5,45 +5,39 @@ export type ISODateTime = string;
 export type DecimalString = string;
 
 export type ExtractionEngine =
-  | 'tesseract'
-  | 'aws_textract'
-  | 'azure_form_recognizer'
-  | 'google_vision'
+  | "tesseract"
+  | "aws_textract"
+  | "azure_form_recognizer"
+  | "google_vision"
   | (string & {});
-export type ExtractionType = 'text' | 'structured' | 'table' | 'zone';
+export type ExtractionType = "text" | "structured" | "table" | "zone";
 export type ExtractionStatus =
-  | 'queued'
-  | 'processing'
-  | 'completed'
-  | 'needs_review'
-  | 'failed'
-  | 'cancelled'
-  | 'timed_out';
+  | "queued"
+  | "processing"
+  | "completed"
+  | "needs_review"
+  | "failed"
+  | "cancelled"
+  | "timed_out";
 export type ClassificationStatus =
-  | 'queued'
-  | 'processing'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'timed_out';
-export type ReviewStatus = 'not_required' | 'pending' | 'confirmed' | 'corrected';
+  | "queued"
+  | "processing"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "timed_out";
+export type ReviewStatus = "not_required" | "pending" | "confirmed" | "corrected";
 export type TrainingStatus =
-  | 'queued'
-  | 'training'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'timed_out';
-export type ModelVersionStatus = 'candidate' | 'active' | 'retired' | 'failed';
-export type TemplateStatus = 'draft' | 'active' | 'inactive' | 'retired';
-export type ZoneType = 'text' | 'table' | 'checkbox' | 'barcode';
-export type ExpectedDataType =
-  | 'string'
-  | 'integer'
-  | 'decimal'
-  | 'date'
-  | 'boolean'
-  | 'array';
+  | "queued"
+  | "training"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "timed_out";
+export type ModelVersionStatus = "candidate" | "active" | "retired" | "failed";
+export type TemplateStatus = "draft" | "active" | "inactive" | "retired";
+export type ZoneType = "text" | "table" | "checkbox" | "barcode";
+export type ExpectedDataType = "string" | "integer" | "decimal" | "date" | "boolean" | "array";
 
 export interface NormalizedBounds {
   x: DecimalString;
@@ -152,11 +146,25 @@ export interface DocumentExtraction extends EntityTimestamps, SoftDeleteFields {
   transition_history: readonly DomainTransition[];
 }
 
-export type DocumentExtractionListItem = Pick<DocumentExtraction,
-  | 'id' | 'tenant_id' | 'created_by' | 'document_id' | 'document_version_id'
-  | 'engine' | 'extraction_type' | 'template' | 'status' | 'confidence'
-  | 'page_count' | 'processing_time_ms' | 'created_at' | 'updated_at'
-  | 'completed_at' | 'is_deleted' | 'deleted_at'
+export type DocumentExtractionListItem = Pick<
+  DocumentExtraction,
+  | "id"
+  | "tenant_id"
+  | "created_by"
+  | "document_id"
+  | "document_version_id"
+  | "engine"
+  | "extraction_type"
+  | "template"
+  | "status"
+  | "confidence"
+  | "page_count"
+  | "processing_time_ms"
+  | "created_at"
+  | "updated_at"
+  | "completed_at"
+  | "is_deleted"
+  | "deleted_at"
 >;
 
 export interface DocumentExtractionPage extends EntityTimestamps {
@@ -201,11 +209,25 @@ export interface DocumentClassification extends EntityTimestamps, SoftDeleteFiel
   transition_history: readonly DomainTransition[];
 }
 
-export type DocumentClassificationListItem = Pick<DocumentClassification,
-  | 'id' | 'tenant_id' | 'created_by' | 'document_id' | 'document_version_id'
-  | 'status' | 'category' | 'confidence' | 'needs_review' | 'review_status'
-  | 'model_version' | 'processing_time_ms' | 'created_at' | 'completed_at'
-  | 'updated_at' | 'is_deleted' | 'deleted_at'
+export type DocumentClassificationListItem = Pick<
+  DocumentClassification,
+  | "id"
+  | "tenant_id"
+  | "created_by"
+  | "document_id"
+  | "document_version_id"
+  | "status"
+  | "category"
+  | "confidence"
+  | "needs_review"
+  | "review_status"
+  | "model_version"
+  | "processing_time_ms"
+  | "created_at"
+  | "completed_at"
+  | "updated_at"
+  | "is_deleted"
+  | "deleted_at"
 >;
 
 export interface DocumentClassificationScore extends EntityTimestamps {
@@ -244,10 +266,21 @@ export interface ClassifierTrainingJob extends EntityTimestamps {
   transition_history: readonly DomainTransition[];
 }
 
-export type ClassifierTrainingJobListItem = Pick<ClassifierTrainingJob,
-  | 'id' | 'tenant_id' | 'created_by' | 'name' | 'requested_version' | 'status'
-  | 'training_data_count' | 'category_counts' | 'accuracy' | 'created_at'
-  | 'started_at' | 'completed_at' | 'updated_at'
+export type ClassifierTrainingJobListItem = Pick<
+  ClassifierTrainingJob,
+  | "id"
+  | "tenant_id"
+  | "created_by"
+  | "name"
+  | "requested_version"
+  | "status"
+  | "training_data_count"
+  | "category_counts"
+  | "accuracy"
+  | "created_at"
+  | "started_at"
+  | "completed_at"
+  | "updated_at"
 >;
 
 export interface ClassifierTrainingJobDetail extends ClassifierTrainingJob {
@@ -271,10 +304,21 @@ export interface ClassifierModelVersion extends EntityTimestamps {
   transition_history: readonly DomainTransition[];
 }
 
-export type ClassifierModelVersionListItem = Pick<ClassifierModelVersion,
-  | 'id' | 'tenant_id' | 'created_by' | 'version' | 'provider_key' | 'accuracy'
-  | 'status' | 'training_job' | 'activated_by' | 'activated_at' | 'retired_at'
-  | 'created_at' | 'updated_at'
+export type ClassifierModelVersionListItem = Pick<
+  ClassifierModelVersion,
+  | "id"
+  | "tenant_id"
+  | "created_by"
+  | "version"
+  | "provider_key"
+  | "accuracy"
+  | "status"
+  | "training_job"
+  | "activated_by"
+  | "activated_at"
+  | "retired_at"
+  | "created_at"
+  | "updated_at"
 >;
 
 export interface ExtractionTemplate extends EntityTimestamps, SoftDeleteFields {
@@ -293,10 +337,23 @@ export interface ExtractionTemplate extends EntityTimestamps, SoftDeleteFields {
   zones: readonly ExtractionTemplateZone[];
 }
 
-export type ExtractionTemplateListItem = Pick<ExtractionTemplate,
-  | 'id' | 'tenant_id' | 'created_by' | 'name' | 'description' | 'document_category'
-  | 'engine' | 'match_threshold' | 'status' | 'version' | 'activated_at'
-  | 'created_at' | 'updated_at' | 'is_deleted' | 'deleted_at'
+export type ExtractionTemplateListItem = Pick<
+  ExtractionTemplate,
+  | "id"
+  | "tenant_id"
+  | "created_by"
+  | "name"
+  | "description"
+  | "document_category"
+  | "engine"
+  | "match_threshold"
+  | "status"
+  | "version"
+  | "activated_at"
+  | "created_at"
+  | "updated_at"
+  | "is_deleted"
+  | "deleted_at"
 > & { zone_count: number };
 
 export interface ExtractionTemplateZone extends EntityTimestamps, SoftDeleteFields {
@@ -346,13 +403,13 @@ export interface ProviderFailure {
   retryable: boolean;
 }
 
-export type HealthStatus = 'healthy' | 'degraded' | 'unavailable';
+export type HealthStatus = "healthy" | "degraded" | "unavailable";
 export interface DependencyHealth {
-  name: 'database' | 'async_execution' | 'dms' | 'providers';
+  name: "database" | "async_execution" | "dms" | "providers";
   status: HealthStatus;
   code: string;
   checked_at: ISODateTime;
-  circuit_state?: 'closed' | 'open' | 'half_open' | 'not_applicable';
+  circuit_state?: "closed" | "open" | "half_open" | "not_applicable";
 }
 
 export interface ModuleHealth {
@@ -449,22 +506,42 @@ export interface ExtractionFilters extends PageFilters {
 
 export function parseExtractionStatus(value: string | null): ExtractionStatus | undefined {
   switch (value) {
-    case 'queued': case 'processing': case 'completed': case 'needs_review': case 'failed': case 'cancelled': case 'timed_out': return value;
-    default: return undefined;
+    case "queued":
+    case "processing":
+    case "completed":
+    case "needs_review":
+    case "failed":
+    case "cancelled":
+    case "timed_out":
+      return value;
+    default:
+      return undefined;
   }
 }
 
 export function parseClassificationStatus(value: string | null): ClassificationStatus | undefined {
   switch (value) {
-    case 'queued': case 'processing': case 'completed': case 'failed': case 'cancelled': case 'timed_out': return value;
-    default: return undefined;
+    case "queued":
+    case "processing":
+    case "completed":
+    case "failed":
+    case "cancelled":
+    case "timed_out":
+      return value;
+    default:
+      return undefined;
   }
 }
 
 export function parseTemplateStatus(value: string | null): TemplateStatus | undefined {
   switch (value) {
-    case 'draft': case 'active': case 'inactive': case 'retired': return value;
-    default: return undefined;
+    case "draft":
+    case "active":
+    case "inactive":
+    case "retired":
+      return value;
+    default:
+      return undefined;
   }
 }
 export interface ClassificationFilters extends PageFilters {
@@ -506,11 +583,22 @@ export interface ClassificationReviewRequest {
   category: string;
   note: string;
 }
-export interface RetryRequest { idempotency_key: string }
-export interface CancelRequest { reason: string }
-export interface TransitionRequest { transition_key: string }
-export interface TemplateMatchRequest { document_id: UUID; document_version_id: UUID }
-export interface CloneTemplateRequest { name: string }
+export interface RetryRequest {
+  idempotency_key: string;
+}
+export interface CancelRequest {
+  reason: string;
+}
+export interface TransitionRequest {
+  transition_key: string;
+}
+export interface TemplateMatchRequest {
+  document_id: UUID;
+  document_version_id: UUID;
+}
+export interface CloneTemplateRequest {
+  name: string;
+}
 
 export interface ExtractionTemplateZoneInput {
   zone_name: string;
@@ -539,7 +627,9 @@ export interface ExtractionTemplateUpdateRequest {
   engine?: ExtractionEngine;
   match_threshold?: DecimalString;
 }
-export type ExtractionTemplateZoneCreateRequest = ExtractionTemplateZoneInput & { template_id: UUID };
+export type ExtractionTemplateZoneCreateRequest = ExtractionTemplateZoneInput & {
+  template_id: UUID;
+};
 export type ExtractionTemplateZoneUpdateRequest = Partial<ExtractionTemplateZoneInput>;
 export interface ClassifierTrainingJobCreateRequest {
   name: string;
@@ -548,23 +638,103 @@ export interface ClassifierTrainingJobCreateRequest {
   idempotency_key: string;
 }
 
-export type DeploymentEnvironment = 'development' | 'self-hosted' | 'saas';
+export type DeploymentEnvironment = "development" | "self-hosted" | "saas";
 
 /** Tenant-owned, versioned runtime values. The server remains authoritative for every bound. */
 export interface DocumentIntelligenceConfigurationDocument {
-  limits: { max_document_bytes: number; max_pages: number; max_text_characters: number; max_structured_bytes: number; max_categories: number; category_schema: string; category_slug_max_length: number; content_handle_max_length: number; page_dimension_max: number; search_max_length: number };
-  providers: { allowed_mime_types: readonly string[]; allowed_extraction_types: readonly ExtractionType[]; allowed_ocr_engines: readonly ExtractionEngine[]; default_ocr_engine: ExtractionEngine; default_classifier_provider: string; artifact_root_environment_variable: string };
+  limits: {
+    max_document_bytes: number;
+    max_pages: number;
+    max_text_characters: number;
+    max_structured_bytes: number;
+    max_categories: number;
+    category_schema: string;
+    category_slug_max_length: number;
+    content_handle_max_length: number;
+    page_dimension_max: number;
+    search_max_length: number;
+  };
+  providers: {
+    allowed_mime_types: readonly string[];
+    allowed_extraction_types: readonly ExtractionType[];
+    allowed_ocr_engines: readonly ExtractionEngine[];
+    default_ocr_engine: ExtractionEngine;
+    default_classifier_provider: string;
+    artifact_root_environment_variable: string;
+  };
   extraction: { max_active: number; stale_job_hours: number };
-  classifier: { feature_buckets: number; provider_max_categories: number; minimum_training_documents: number; minimum_documents_per_category: number; activation_accuracy_threshold: number; secondary_confidence_threshold: number };
+  classifier: {
+    feature_buckets: number;
+    provider_max_categories: number;
+    minimum_training_documents: number;
+    minimum_documents_per_category: number;
+    activation_accuracy_threshold: number;
+    secondary_confidence_threshold: number;
+  };
   review: { low_confidence_threshold: number; note_max_length: number };
   templates: { default_engine: ExtractionEngine; default_match_threshold: number };
-  resilience: { stream_chunk_size_bytes: number; timeout_seconds: number; max_attempts: number; initial_backoff_seconds: number; max_backoff_seconds: number; jitter_ratio: number; circuit_failure_threshold: number; circuit_recovery_seconds: number };
+  resilience: {
+    stream_chunk_size_bytes: number;
+    timeout_seconds: number;
+    max_attempts: number;
+    initial_backoff_seconds: number;
+    max_backoff_seconds: number;
+    jitter_ratio: number;
+    circuit_failure_threshold: number;
+    circuit_recovery_seconds: number;
+  };
   health: { stale_after_seconds: number };
-  observability: { provider_duration_buckets_seconds: readonly number[]; queue_delay_buckets_seconds: readonly number[] };
-  editor: { new_zone: { x: number; y: number; width: number; height: number; page_number: number; zone_type: ZoneType; expected_data_type: ExpectedDataType; is_required: boolean }; coordinate_snap: number; coordinate_precision: number; undo_history_limit: number; zoom_min_percent: number; zoom_max_percent: number; zoom_step_percent: number };
-  ui: { page_size: number; template_zone_page_size: number; poll_interval_ms: number; stale_after_ms: number; confidence_filter_presets: readonly number[]; positive_statuses: readonly string[]; warning_statuses: readonly string[]; navigation_order: { extractions: number; classifications: number; training: number; templates: number; health: number; configuration: number } };
-  feature_flags: { auto_classification_enabled: boolean; rollout_percentage: number; allowed_roles: readonly string[]; allowed_cohorts: readonly string[] };
-  workflows: Readonly<Record<'extraction' | 'classification' | 'training' | 'model_version' | 'template', readonly { command: string; from: string; to: string }[]>>;
+  observability: {
+    provider_duration_buckets_seconds: readonly number[];
+    queue_delay_buckets_seconds: readonly number[];
+  };
+  editor: {
+    new_zone: {
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      page_number: number;
+      zone_type: ZoneType;
+      expected_data_type: ExpectedDataType;
+      is_required: boolean;
+    };
+    coordinate_snap: number;
+    coordinate_precision: number;
+    undo_history_limit: number;
+    zoom_min_percent: number;
+    zoom_max_percent: number;
+    zoom_step_percent: number;
+  };
+  ui: {
+    page_size: number;
+    template_zone_page_size: number;
+    poll_interval_ms: number;
+    stale_after_ms: number;
+    confidence_filter_presets: readonly number[];
+    positive_statuses: readonly string[];
+    warning_statuses: readonly string[];
+    navigation_order: {
+      extractions: number;
+      classifications: number;
+      training: number;
+      templates: number;
+      health: number;
+      configuration: number;
+    };
+  };
+  feature_flags: {
+    auto_classification_enabled: boolean;
+    rollout_percentage: number;
+    allowed_roles: readonly string[];
+    allowed_cohorts: readonly string[];
+  };
+  workflows: Readonly<
+    Record<
+      "extraction" | "classification" | "training" | "model_version" | "template",
+      readonly { command: string; from: string; to: string }[]
+    >
+  >;
 }
 
 export interface DocumentIntelligenceConfiguration extends EntityTimestamps {
@@ -594,7 +764,7 @@ export interface ConfigurationAuditRecord {
   tenant_id: UUID;
   environment: DeploymentEnvironment;
   version: number;
-  operation: 'initialize' | 'update' | 'import' | 'rollback';
+  operation: "initialize" | "update" | "import" | "rollback";
   previous_document: DocumentIntelligenceConfigurationDocument | null;
   new_document: DocumentIntelligenceConfigurationDocument;
   created_by: UUID;
@@ -611,7 +781,7 @@ export interface ConfigurationWriteRequest {
 
 export interface ConfigurationImportRequest {
   schema_version: 1;
-  module: 'document_intelligence';
+  module: "document_intelligence";
   environment: DeploymentEnvironment;
   document: DocumentIntelligenceConfigurationDocument;
   change_reason?: string;
@@ -643,34 +813,41 @@ export interface ConfigurationSimulation {
 
 export interface ConfigurationExportDocument {
   schema_version: 1;
-  module: 'document_intelligence';
+  module: "document_intelligence";
   environment: DeploymentEnvironment;
   version: number;
   exported_at: ISODateTime;
   document: DocumentIntelligenceConfigurationDocument;
 }
 
-export const MODULE_API_PREFIX = '/api/v2/document-intelligence';
+export const MODULE_API_PREFIX = "/api/v2/document-intelligence";
 export const ENDPOINTS = {
   EXTRACTIONS: {
-    LIST: `${MODULE_API_PREFIX}/extractions/`, CREATE: `${MODULE_API_PREFIX}/extractions/`,
+    LIST: `${MODULE_API_PREFIX}/extractions/`,
+    CREATE: `${MODULE_API_PREFIX}/extractions/`,
     DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/extractions/${id}/` as const,
     PAGES: (id: UUID) => `${MODULE_API_PREFIX}/extractions/${id}/pages/` as const,
     RETRY: (id: UUID) => `${MODULE_API_PREFIX}/extractions/${id}/retry/` as const,
     CANCEL: (id: UUID) => `${MODULE_API_PREFIX}/extractions/${id}/cancel/` as const,
   },
-  EXTRACTION_PAGES: { DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/extraction-pages/${id}/` as const },
+  EXTRACTION_PAGES: {
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/extraction-pages/${id}/` as const,
+  },
   CLASSIFICATIONS: {
-    LIST: `${MODULE_API_PREFIX}/classifications/`, CREATE: `${MODULE_API_PREFIX}/classifications/`,
+    LIST: `${MODULE_API_PREFIX}/classifications/`,
+    CREATE: `${MODULE_API_PREFIX}/classifications/`,
     DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/classifications/${id}/` as const,
     SCORES: (id: UUID) => `${MODULE_API_PREFIX}/classifications/${id}/scores/` as const,
     REVIEW: (id: UUID) => `${MODULE_API_PREFIX}/classifications/${id}/review/` as const,
     RETRY: (id: UUID) => `${MODULE_API_PREFIX}/classifications/${id}/retry/` as const,
     CANCEL: (id: UUID) => `${MODULE_API_PREFIX}/classifications/${id}/cancel/` as const,
   },
-  CLASSIFICATION_SCORES: { DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/classification-scores/${id}/` as const },
+  CLASSIFICATION_SCORES: {
+    DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/classification-scores/${id}/` as const,
+  },
   TEMPLATES: {
-    LIST: `${MODULE_API_PREFIX}/templates/`, CREATE: `${MODULE_API_PREFIX}/templates/`,
+    LIST: `${MODULE_API_PREFIX}/templates/`,
+    CREATE: `${MODULE_API_PREFIX}/templates/`,
     DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/templates/${id}/` as const,
     ACTIVATE: (id: UUID) => `${MODULE_API_PREFIX}/templates/${id}/activate/` as const,
     DEACTIVATE: (id: UUID) => `${MODULE_API_PREFIX}/templates/${id}/deactivate/` as const,
@@ -678,11 +855,13 @@ export const ENDPOINTS = {
     MATCH: (id: UUID) => `${MODULE_API_PREFIX}/templates/${id}/match/` as const,
   },
   TEMPLATE_ZONES: {
-    LIST: `${MODULE_API_PREFIX}/template-zones/`, CREATE: `${MODULE_API_PREFIX}/template-zones/`,
+    LIST: `${MODULE_API_PREFIX}/template-zones/`,
+    CREATE: `${MODULE_API_PREFIX}/template-zones/`,
     DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/template-zones/${id}/` as const,
   },
   TRAINING_JOBS: {
-    LIST: `${MODULE_API_PREFIX}/training-jobs/`, CREATE: `${MODULE_API_PREFIX}/training-jobs/`,
+    LIST: `${MODULE_API_PREFIX}/training-jobs/`,
+    CREATE: `${MODULE_API_PREFIX}/training-jobs/`,
     DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/training-jobs/${id}/` as const,
     RETRY: (id: UUID) => `${MODULE_API_PREFIX}/training-jobs/${id}/retry/` as const,
     CANCEL: (id: UUID) => `${MODULE_API_PREFIX}/training-jobs/${id}/cancel/` as const,

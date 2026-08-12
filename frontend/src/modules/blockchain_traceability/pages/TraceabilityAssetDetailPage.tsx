@@ -1,1 +1,1 @@
-export { TraceabilityAssetDetailPage } from './domain-pages';
+export { TraceabilityAssetDetailPage } from "./domain-pages";

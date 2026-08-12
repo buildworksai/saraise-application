@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any, cast
 
+from django.db.models import QuerySet
 from django.utils import timezone
 from rest_framework import filters, status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
+from rest_framework.permissions import BasePermission
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from src.core.access import RequiresAccess
@@ -25,6 +29,7 @@ from .models import (
     BackupVerification,
 )
 from .permissions import access_rule
+from .ports import BackupRequestReceipt
 from .serializers import (
     BackupArchiveDetailSerializer,
     BackupArchiveListSerializer,
@@ -65,11 +70,11 @@ from .services import (
 )
 
 
-def _actor(request) -> str:
+def _actor(request: Request) -> str:
     return str(request.user.pk)
 
 
-def _receipt_payload(receipt, job: BackupJob) -> dict[str, object]:
+def _receipt_payload(receipt: BackupRequestReceipt, job: BackupJob) -> dict[str, object]:
     return {
         "job_id": receipt.backup_job_id,
         "async_job_id": job.async_job_id,
@@ -79,14 +84,19 @@ def _receipt_payload(receipt, job: BackupJob) -> dict[str, object]:
 
 
 class AccessControlledMixin:
-    permission_classes = (RequiresAccess,)
-    authentication_classes = (SessionAuthentication,)
-    pagination_class = GovernedPageNumberPagination
+    permission_classes: Any = (RequiresAccess,)
+    authentication_classes: Any = (SessionAuthentication,)
+    pagination_class: Any = GovernedPageNumberPagination
     access_resource = ""
+    required_permission: str | None
+    required_entitlement: str | None
+    quota_resource: str | None
+    quota_cost: int
 
-    def get_permissions(self):
-        self.request.tenant_id = self._get_tenant_id()
-        action_name = getattr(self, "action", None)
+    def get_permissions(self) -> tuple[BasePermission, ...]:
+        view = cast(Any, self)
+        setattr(view.request, "tenant_id", view._get_tenant_id())
+        action_name = getattr(view, "action", None)
         if action_name is None:
             return ()
         rule = access_rule(self.access_resource, action_name)
@@ -94,10 +104,10 @@ class AccessControlledMixin:
         self.required_entitlement = rule.required_entitlement if rule else None
         self.quota_resource = rule.quota_resource if rule else None
         self.quota_cost = rule.quota_cost if rule else 0
-        return super().get_permissions()
+        return cast(tuple[BasePermission, ...], super().get_permissions())  # type: ignore[misc]
 
-    def finalize_response(self, request, response, *args, **kwargs):
-        response = super().finalize_response(request, response, *args, **kwargs)
+    def finalize_response(self, request: Request, response: Response, *args: object, **kwargs: object) -> Response:
+        response = super().finalize_response(request, response, *args, **kwargs)  # type: ignore[misc]
         error = response.data.get("error") if isinstance(response.data, dict) else None
         if response.status_code >= 400 and isinstance(error, dict):
             response.data.setdefault(
@@ -119,7 +129,7 @@ class BackupJobViewSet(GovernedAPIViewMixin, AccessControlledMixin, TenantScoped
     ordering = ("-requested_at",)
     http_method_names = ("get", "post", "patch", "delete", "head", "options")
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[BackupJob]:
         tenant = self._require_tenant_id()
         values = {
             key: self.request.query_params.get(key)
@@ -139,7 +149,7 @@ class BackupJobViewSet(GovernedAPIViewMixin, AccessControlledMixin, TenantScoped
             .select_related("schedule", "storage_target", "retention_policy")
         )
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[Any]:
         return {
             "list": BackupJobListSerializer,
             "retrieve": BackupJobDetailSerializer,
@@ -149,7 +159,7 @@ class BackupJobViewSet(GovernedAPIViewMixin, AccessControlledMixin, TenantScoped
             "retry": BackupJobRetrySerializer,
         }.get(self.action, BackupJobDetailSerializer)
 
-    def create(self, request, *args, **kwargs):
+    def create(self, request: Request, *args: object, **kwargs: object) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         receipt = BackupRecoveryService().request_backup(
@@ -160,8 +170,8 @@ class BackupJobViewSet(GovernedAPIViewMixin, AccessControlledMixin, TenantScoped
             BackupRequestReceiptSerializer(_receipt_payload(receipt, job)).data, status=status.HTTP_202_ACCEPTED
         )
 
-    def partial_update(self, request, *args, **kwargs):
-        job = self.get_object()
+    def partial_update(self, request: Request, *args: object, **kwargs: object) -> Response:
+        job = cast(BackupJob, self.get_object())
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         job = BackupRecoveryService().update_job_description(
@@ -169,14 +179,14 @@ class BackupJobViewSet(GovernedAPIViewMixin, AccessControlledMixin, TenantScoped
         )
         return Response(BackupJobDetailSerializer(job).data)
 
-    def destroy(self, request, *args, **kwargs):
-        job = self.get_object()
+    def destroy(self, request: Request, *args: object, **kwargs: object) -> Response:
+        job = cast(BackupJob, self.get_object())
         BackupRecoveryService().soft_delete_job(self._require_tenant_id(), _actor(request), job.id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=("post",))
-    def cancel(self, request, pk=None):
-        job = self.get_object()
+    def cancel(self, request: Request, pk: str | None = None) -> Response:
+        job = cast(BackupJob, self.get_object())
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         job = BackupRecoveryService().cancel_backup(
@@ -185,8 +195,8 @@ class BackupJobViewSet(GovernedAPIViewMixin, AccessControlledMixin, TenantScoped
         return Response(BackupJobDetailSerializer(job).data)
 
     @action(detail=True, methods=("post",))
-    def retry(self, request, pk=None):
-        job = self.get_object()
+    def retry(self, request: Request, pk: str | None = None) -> Response:
+        job = cast(BackupJob, self.get_object())
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         receipt = BackupRecoveryService().retry_backup(
@@ -208,17 +218,18 @@ class BackupScheduleViewSet(GovernedAPIViewMixin, AccessControlledMixin, TenantS
     ordering = ("name",)
     http_method_names = ("get", "post", "patch", "delete", "head", "options")
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[BackupSchedule]:
         tenant = self._require_tenant_id()
-        values = {
+        values: dict[str, object] = {
             key: self.request.query_params.get(key)
             for key in ("is_active", "frequency", "backup_type", "scope_type", "storage_target_id")
         }
         if values["is_active"] is not None:
-            values["is_active"] = values["is_active"].lower() == "true"
+            raw_is_active = values["is_active"]
+            values["is_active"] = raw_is_active.lower() == "true" if isinstance(raw_is_active, str) else None
         return BackupScheduleService().list(tenant, values).select_related("storage_target", "retention_policy")
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[Any]:
         return {
             "list": BackupScheduleListSerializer,
             "retrieve": BackupScheduleDetailSerializer,
@@ -227,14 +238,14 @@ class BackupScheduleViewSet(GovernedAPIViewMixin, AccessControlledMixin, TenantS
             "run_now": ScheduleRunNowSerializer,
         }.get(self.action, BackupScheduleDetailSerializer)
 
-    def create(self, request, *args, **kwargs):
+    def create(self, request: Request, *args: object, **kwargs: object) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         schedule = BackupScheduleService().create(self._require_tenant_id(), _actor(request), serializer.validated_data)
         return Response(BackupScheduleDetailSerializer(schedule).data, status=status.HTTP_201_CREATED)
 
-    def partial_update(self, request, *args, **kwargs):
-        schedule = self.get_object()
+    def partial_update(self, request: Request, *args: object, **kwargs: object) -> Response:
+        schedule = cast(BackupSchedule, self.get_object())
         serializer = self.get_serializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         schedule = BackupScheduleService().update(
@@ -242,23 +253,29 @@ class BackupScheduleViewSet(GovernedAPIViewMixin, AccessControlledMixin, TenantS
         )
         return Response(BackupScheduleDetailSerializer(schedule).data)
 
-    def destroy(self, request, *args, **kwargs):
-        BackupScheduleService().delete(self._require_tenant_id(), _actor(request), self.get_object().id)
+    def destroy(self, request: Request, *args: object, **kwargs: object) -> Response:
+        BackupScheduleService().delete(
+            self._require_tenant_id(), _actor(request), cast(BackupSchedule, self.get_object()).id
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=("post",))
-    def activate(self, request, pk=None):
-        schedule = BackupScheduleService().activate(self._require_tenant_id(), _actor(request), self.get_object().id)
+    def activate(self, request: Request, pk: str | None = None) -> Response:
+        schedule = BackupScheduleService().activate(
+            self._require_tenant_id(), _actor(request), cast(BackupSchedule, self.get_object()).id
+        )
         return Response(BackupScheduleDetailSerializer(schedule).data)
 
     @action(detail=True, methods=("post",))
-    def deactivate(self, request, pk=None):
-        schedule = BackupScheduleService().deactivate(self._require_tenant_id(), _actor(request), self.get_object().id)
+    def deactivate(self, request: Request, pk: str | None = None) -> Response:
+        schedule = BackupScheduleService().deactivate(
+            self._require_tenant_id(), _actor(request), cast(BackupSchedule, self.get_object()).id
+        )
         return Response(BackupScheduleDetailSerializer(schedule).data)
 
     @action(detail=True, methods=("post",), url_path="run-now")
-    def run_now(self, request, pk=None):
-        schedule = self.get_object()
+    def run_now(self, request: Request, pk: str | None = None) -> Response:
+        schedule = cast(BackupSchedule, self.get_object())
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         job = BackupScheduleService().run_now(
@@ -282,13 +299,13 @@ class BackupRetentionPolicyViewSet(GovernedAPIViewMixin, AccessControlledMixin, 
     ordering = ("name",)
     http_method_names = ("get", "post", "patch", "delete", "head", "options")
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[BackupRetentionPolicy]:
         value = self.request.query_params.get("is_active")
         return RetentionPolicyService().list(
             self._require_tenant_id(), {"is_active": value.lower() == "true" if value is not None else None}
         )
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[Any]:
         return {
             "list": BackupRetentionPolicyListSerializer,
             "retrieve": BackupRetentionPolicyDetailSerializer,
@@ -297,14 +314,14 @@ class BackupRetentionPolicyViewSet(GovernedAPIViewMixin, AccessControlledMixin, 
             "preview": RetentionPreviewSerializer,
         }.get(self.action, BackupRetentionPolicyDetailSerializer)
 
-    def create(self, request, *args, **kwargs):
+    def create(self, request: Request, *args: object, **kwargs: object) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         policy = RetentionPolicyService().create(self._require_tenant_id(), _actor(request), serializer.validated_data)
         return Response(BackupRetentionPolicyDetailSerializer(policy).data, status=status.HTTP_201_CREATED)
 
-    def partial_update(self, request, *args, **kwargs):
-        policy = self.get_object()
+    def partial_update(self, request: Request, *args: object, **kwargs: object) -> Response:
+        policy = cast(BackupRetentionPolicy, self.get_object())
         serializer = self.get_serializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         policy = RetentionPolicyService().update(
@@ -312,25 +329,33 @@ class BackupRetentionPolicyViewSet(GovernedAPIViewMixin, AccessControlledMixin, 
         )
         return Response(BackupRetentionPolicyDetailSerializer(policy).data)
 
-    def destroy(self, request, *args, **kwargs):
-        RetentionPolicyService().delete(self._require_tenant_id(), _actor(request), self.get_object().id)
+    def destroy(self, request: Request, *args: object, **kwargs: object) -> Response:
+        RetentionPolicyService().delete(
+            self._require_tenant_id(), _actor(request), cast(BackupRetentionPolicy, self.get_object()).id
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=("post",))
-    def activate(self, request, pk=None):
-        policy = RetentionPolicyService().activate(self._require_tenant_id(), _actor(request), self.get_object().id)
+    def activate(self, request: Request, pk: str | None = None) -> Response:
+        policy = RetentionPolicyService().activate(
+            self._require_tenant_id(), _actor(request), cast(BackupRetentionPolicy, self.get_object()).id
+        )
         return Response(BackupRetentionPolicyDetailSerializer(policy).data)
 
     @action(detail=True, methods=("post",))
-    def deactivate(self, request, pk=None):
-        policy = RetentionPolicyService().deactivate(self._require_tenant_id(), _actor(request), self.get_object().id)
+    def deactivate(self, request: Request, pk: str | None = None) -> Response:
+        policy = RetentionPolicyService().deactivate(
+            self._require_tenant_id(), _actor(request), cast(BackupRetentionPolicy, self.get_object()).id
+        )
         return Response(BackupRetentionPolicyDetailSerializer(policy).data)
 
     @action(detail=True, methods=("get",))
-    def preview(self, request, pk=None):
+    def preview(self, request: Request, pk: str | None = None) -> Response:
         captured_at = request.query_params.get("captured_at")
         parsed = datetime.fromisoformat(captured_at.replace("Z", "+00:00")) if captured_at else timezone.now()
-        result = RetentionPolicyService().preview(self._require_tenant_id(), self.get_object().id, captured_at=parsed)
+        result = RetentionPolicyService().preview(
+            self._require_tenant_id(), cast(BackupRetentionPolicy, self.get_object()).id, captured_at=parsed
+        )
         return Response(RetentionPreviewSerializer(result).data)
 
 
@@ -343,14 +368,17 @@ class BackupStorageTargetViewSet(GovernedAPIViewMixin, AccessControlledMixin, Te
     ordering = ("name",)
     http_method_names = ("get", "post", "patch", "delete", "head", "options")
 
-    def get_queryset(self):
-        values = {key: self.request.query_params.get(key) for key in ("is_active", "is_default", "adapter_key")}
+    def get_queryset(self) -> QuerySet[BackupStorageTarget]:
+        values: dict[str, object] = {
+            key: self.request.query_params.get(key) for key in ("is_active", "is_default", "adapter_key")
+        }
         for key in ("is_active", "is_default"):
-            if values[key] is not None:
-                values[key] = values[key].lower() == "true"
+            raw_value = values[key]
+            if isinstance(raw_value, str):
+                values[key] = raw_value.lower() == "true"
         return StorageTargetService().list(self._require_tenant_id(), values)
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[Any]:
         return {
             "list": BackupStorageTargetListSerializer,
             "retrieve": BackupStorageTargetDetailSerializer,
@@ -359,14 +387,14 @@ class BackupStorageTargetViewSet(GovernedAPIViewMixin, AccessControlledMixin, Te
             "probe": StorageTargetProbeSerializer,
         }.get(self.action, BackupStorageTargetDetailSerializer)
 
-    def create(self, request, *args, **kwargs):
+    def create(self, request: Request, *args: object, **kwargs: object) -> Response:
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         target = StorageTargetService().create(self._require_tenant_id(), _actor(request), serializer.validated_data)
         return Response(BackupStorageTargetDetailSerializer(target).data, status=status.HTTP_201_CREATED)
 
-    def partial_update(self, request, *args, **kwargs):
-        target = self.get_object()
+    def partial_update(self, request: Request, *args: object, **kwargs: object) -> Response:
+        target = cast(BackupStorageTarget, self.get_object())
         serializer = self.get_serializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         target = StorageTargetService().update(
@@ -374,28 +402,38 @@ class BackupStorageTargetViewSet(GovernedAPIViewMixin, AccessControlledMixin, Te
         )
         return Response(BackupStorageTargetDetailSerializer(target).data)
 
-    def destroy(self, request, *args, **kwargs):
-        StorageTargetService().delete(self._require_tenant_id(), _actor(request), self.get_object().id)
+    def destroy(self, request: Request, *args: object, **kwargs: object) -> Response:
+        StorageTargetService().delete(
+            self._require_tenant_id(), _actor(request), cast(BackupStorageTarget, self.get_object()).id
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=("post",))
-    def activate(self, request, pk=None):
-        target = StorageTargetService().activate(self._require_tenant_id(), _actor(request), self.get_object().id)
+    def activate(self, request: Request, pk: str | None = None) -> Response:
+        target = StorageTargetService().activate(
+            self._require_tenant_id(), _actor(request), cast(BackupStorageTarget, self.get_object()).id
+        )
         return Response(BackupStorageTargetDetailSerializer(target).data)
 
     @action(detail=True, methods=("post",))
-    def deactivate(self, request, pk=None):
-        target = StorageTargetService().deactivate(self._require_tenant_id(), _actor(request), self.get_object().id)
+    def deactivate(self, request: Request, pk: str | None = None) -> Response:
+        target = StorageTargetService().deactivate(
+            self._require_tenant_id(), _actor(request), cast(BackupStorageTarget, self.get_object()).id
+        )
         return Response(BackupStorageTargetDetailSerializer(target).data)
 
     @action(detail=True, methods=("post",), url_path="set-default")
-    def set_default(self, request, pk=None):
-        target = StorageTargetService().set_default(self._require_tenant_id(), _actor(request), self.get_object().id)
+    def set_default(self, request: Request, pk: str | None = None) -> Response:
+        target = StorageTargetService().set_default(
+            self._require_tenant_id(), _actor(request), cast(BackupStorageTarget, self.get_object()).id
+        )
         return Response(BackupStorageTargetDetailSerializer(target).data)
 
     @action(detail=True, methods=("post",))
-    def probe(self, request, pk=None):
-        result = StorageTargetService().probe(self._require_tenant_id(), _actor(request), self.get_object().id)
+    def probe(self, request: Request, pk: str | None = None) -> Response:
+        result = StorageTargetService().probe(
+            self._require_tenant_id(), _actor(request), cast(BackupStorageTarget, self.get_object()).id
+        )
         health = result.unwrap()
         return Response(StorageTargetProbeSerializer(health).data)
 
@@ -408,7 +446,7 @@ class BackupArchiveViewSet(GovernedAPIViewMixin, AccessControlledMixin, TenantSc
     ordering_fields = ("captured_at", "expires_at", "size_bytes")
     ordering = ("-captured_at",)
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[BackupArchive]:
         values = {
             key: self.request.query_params.get(key)
             for key in ("lifecycle", "integrity_status", "backup_job_id", "expires_before", "captured_after")
@@ -417,12 +455,12 @@ class BackupArchiveViewSet(GovernedAPIViewMixin, AccessControlledMixin, TenantSc
         backup_type = self.request.query_params.get("backup_type")
         return queryset.filter(backup_job__backup_type=backup_type) if backup_type else queryset
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[Any]:
         return BackupArchiveListSerializer if self.action == "list" else BackupArchiveDetailSerializer
 
     @action(detail=True, methods=("post",))
-    def verify(self, request, pk=None):
-        archive = self.get_object()
+    def verify(self, request: Request, pk: str | None = None) -> Response:
+        archive = cast(BackupArchive, self.get_object())
         serializer = BackupVerificationCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         verification = BackupArtifactService().request_verification(
@@ -438,9 +476,9 @@ class BackupVerificationViewSet(GovernedAPIViewMixin, AccessControlledMixin, Ten
     ordering_fields = ("requested_at", "completed_at")
     ordering = ("-requested_at",)
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[BackupVerification]:
         tenant = self._require_tenant_id()
-        queryset = super().get_queryset()
+        queryset = cast(QuerySet[BackupVerification], super().get_queryset())
         mapping = {
             "status": "status",
             "archive_id": "archive_id",
@@ -453,12 +491,12 @@ class BackupVerificationViewSet(GovernedAPIViewMixin, AccessControlledMixin, Ten
                 queryset = queryset.filter(**{lookup: value})
         return queryset.filter(tenant_id=tenant)
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[Any]:
         return BackupVerificationListSerializer if self.action == "list" else BackupVerificationDetailSerializer
 
     @action(detail=True, methods=("post",))
-    def cancel(self, request, pk=None):
-        verification = self.get_object()
+    def cancel(self, request: Request, pk: str | None = None) -> Response:
+        verification = cast(BackupVerification, self.get_object())
         serializer = BackupVerificationCancelSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         verification = BackupArtifactService().cancel_verification(
@@ -472,7 +510,7 @@ class ModuleHealthViewSet(GovernedAPIViewMixin, AccessControlledMixin, TenantSco
     access_resource = "health"
     http_method_names = ("get", "head", "options")
 
-    def list(self, request, *args, **kwargs):
+    def list(self, request: Request, *args: object, **kwargs: object) -> Response:
         report = check_module_health(self._require_tenant_id())
         serializer = ModuleHealthSerializer(report)
         return Response(

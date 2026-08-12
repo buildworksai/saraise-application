@@ -1,16 +1,16 @@
 /* eslint-disable complexity, max-lines-per-function */
-import { useState, type FormEvent } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Calculator, Edit, Trash2 } from 'lucide-react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Dialog } from '@/components/ui/Dialog';
-import { Input } from '@/components/ui/Input';
-import { Skeleton } from '@/components/ui/Skeleton';
-import { useAuthStore } from '@/stores/auth-store';
-import { ROUTES } from '../contracts';
+import { useState, type FormEvent } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Calculator, Edit, Trash2 } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Dialog } from "@/components/ui/Dialog";
+import { Input } from "@/components/ui/Input";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { useAuthStore } from "@/stores/auth-store";
+import { ROUTES } from "../contracts";
 import {
   EmptyPanel,
   formatAmount,
@@ -20,8 +20,10 @@ import {
   ProblemState,
   StatusPill,
   titleCase,
-} from '../components/AssetManagementUI';
-import { assetQueryKeys, assetService } from '../services/asset-service';
+  isRouteUuid,
+  routeAssetNotFoundError,
+} from "../components/AssetManagementUI";
+import { assetQueryKeys, assetService } from "../services/asset-service";
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -33,13 +35,14 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 export const AssetDetailPage = () => {
-  const { id = '' } = useParams();
+  const { id = "" } = useParams();
+  const routeIdValid = isRouteUuid(id);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const tenantId = useAuthStore((state) => state.user?.tenant_id ?? null);
   const [historyPage, setHistoryPage] = useState(1);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [calculateOpen, setCalculateOpen] = useState(false);
   const [entryDate, setEntryDate] = useState(new Date().toISOString().slice(0, 10));
   const configurationQuery = useQuery({
@@ -51,24 +54,24 @@ export const AssetDetailPage = () => {
   const assetQuery = useQuery({
     queryKey: assetQueryKeys.asset(tenantId, id),
     queryFn: () => assetService.getAsset(id),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const historyFilters = {
     asset_id: id,
-    ordering: '-entry_date',
+    ordering: "-entry_date",
     page: historyPage,
     page_size: configuration?.asset_detail_history_page_size ?? 1,
   };
   const historyQuery = useQuery({
     queryKey: assetQueryKeys.depreciation(tenantId, historyFilters),
     queryFn: () => assetService.listDepreciationEntries(historyFilters),
-    enabled: Boolean(id && configuration),
+    enabled: routeIdValid && Boolean(configuration),
   });
   const deleteMutation = useMutation({
     mutationFn: () => assetService.deleteAsset(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: assetQueryKeys.root(tenantId) });
-      toast.success('Asset archived');
+      toast.success("Asset archived");
       navigate(ROUTES.ASSETS.LIST);
     },
   });
@@ -82,27 +85,50 @@ export const AssetDetailPage = () => {
     },
   });
 
+  if (!routeIdValid)
+    return (
+      <main className="p-4 sm:p-8">
+        <ProblemState error={routeAssetNotFoundError()} />
+      </main>
+    );
   if (assetQuery.isLoading || configurationQuery.isLoading) return <PageSkeleton />;
   if (configurationQuery.error || !configuration) {
-    return <main className="p-4 sm:p-8"><ProblemState error={configurationQuery.error ?? new Error('Configuration unavailable')} onRetry={() => void configurationQuery.refetch()} /></main>;
+    return (
+      <main className="p-4 sm:p-8">
+        <ProblemState
+          error={configurationQuery.error ?? new Error("Configuration unavailable")}
+          onRetry={() => void configurationQuery.refetch()}
+        />
+      </main>
+    );
   }
   if (assetQuery.error || !assetQuery.data) {
-    return <main className="p-4 sm:p-8"><ProblemState error={assetQuery.error ?? new Error('Asset unavailable')} onRetry={() => void assetQuery.refetch()} /></main>;
+    return (
+      <main className="p-4 sm:p-8">
+        <ProblemState
+          error={assetQuery.error ?? new Error("Asset unavailable")}
+          onRetry={() => void assetQuery.refetch()}
+        />
+      </main>
+    );
   }
 
   const asset = assetQuery.data;
-  const canDepreciate = !configuration.non_depreciable_categories.includes(asset.category)
-    && (configuration.inactive_assets_depreciable || asset.is_active)
-    && asset.depreciation_method !== 'none'
-    && (!configuration.require_useful_life_for_depreciation || asset.useful_life_years !== null)
-    && Number(asset.current_value) > Number(asset.residual_value);
+  const canDepreciate =
+    !configuration.non_depreciable_categories.includes(asset.category) &&
+    (configuration.inactive_assets_depreciable || asset.is_active) &&
+    asset.depreciation_method !== "none" &&
+    (!configuration.require_useful_life_for_depreciation || asset.useful_life_years !== null) &&
+    Number(asset.current_value) > Number(asset.residual_value);
   const depreciationUnavailableReason = !asset.is_active
-    ? 'Inactive assets cannot receive new depreciation entries.'
-    : asset.depreciation_method === 'none'
-      ? 'This asset has no depreciation method.'
-      : asset.useful_life_years === null
-        ? 'A useful life is required before depreciation can be calculated.'
-        : 'The asset is already at its residual value.';
+    ? "Inactive assets cannot receive new depreciation entries."
+    : configuration.non_depreciable_categories.includes(asset.category)
+      ? `${titleCase(asset.category)} assets are configured as non-depreciable.`
+      : asset.depreciation_method === "none"
+        ? "This asset has no depreciation method."
+        : asset.useful_life_years === null
+          ? "A useful life is required before depreciation can be calculated."
+          : "The asset is already at its residual value.";
 
   const submitDepreciation = (event: FormEvent) => {
     event.preventDefault();
@@ -116,7 +142,7 @@ export const AssetDetailPage = () => {
         description={`${titleCase(asset.category)} · acquired ${formatDate(asset.purchase_date)}`}
         backLabel="Asset register"
         onBack={() => navigate(ROUTES.ASSETS.LIST)}
-        actions={(
+        actions={
           <>
             <StatusPill active={asset.is_active} />
             <Button variant="secondary" onClick={() => navigate(ROUTES.ASSETS.EDIT(asset.id))}>
@@ -127,7 +153,9 @@ export const AssetDetailPage = () => {
               <Button
                 disabled={!canDepreciate}
                 onClick={() => {
-                  setEntryDate((current) => current < asset.purchase_date ? asset.purchase_date : current);
+                  setEntryDate((current) =>
+                    current < asset.purchase_date ? asset.purchase_date : current
+                  );
                   setCalculateOpen(true);
                 }}
               >
@@ -140,21 +168,27 @@ export const AssetDetailPage = () => {
               Archive
             </Button>
           </>
-        )}
+        }
       />
 
       <section className="grid gap-4 sm:grid-cols-3" aria-label="Asset value summary">
         <Card className="p-5">
           <p className="text-sm text-muted-foreground">Purchase cost</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums">{formatAmount(asset.purchase_cost, configuration.monetary_decimal_places)}</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums">
+            {formatAmount(asset.purchase_cost, configuration.monetary_decimal_places)}
+          </p>
         </Card>
         <Card className="p-5">
           <p className="text-sm text-muted-foreground">Current value</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums">{formatAmount(asset.current_value, configuration.monetary_decimal_places)}</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums">
+            {formatAmount(asset.current_value, configuration.monetary_decimal_places)}
+          </p>
         </Card>
         <Card className="p-5">
           <p className="text-sm text-muted-foreground">Residual value</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums">{formatAmount(asset.residual_value, configuration.monetary_decimal_places)}</p>
+          <p className="mt-2 text-2xl font-semibold tabular-nums">
+            {formatAmount(asset.residual_value, configuration.monetary_decimal_places)}
+          </p>
         </Card>
       </section>
 
@@ -164,45 +198,80 @@ export const AssetDetailPage = () => {
           <Field label="Asset code" value={asset.asset_code} />
           <Field label="Category" value={titleCase(asset.category)} />
           <Field label="Purchase date" value={formatDate(asset.purchase_date)} />
-          <Field label="Location" value={asset.location || 'Not specified'} />
+          <Field label="Location" value={asset.location || "Not specified"} />
           <Field label="Depreciation method" value={titleCase(asset.depreciation_method)} />
-          <Field label="Useful life" value={asset.useful_life_years ? `${asset.useful_life_years} years` : 'Not applicable'} />
+          <Field
+            label="Useful life"
+            value={asset.useful_life_years ? `${asset.useful_life_years} years` : "Not applicable"}
+          />
           <Field
             label="Declining balance rate"
-            value={asset.declining_balance_rate ? `${formatAmount(asset.declining_balance_rate, configuration.monetary_decimal_places)}% annually` : 'Not applicable'}
+            value={
+              asset.declining_balance_rate
+                ? `${formatAmount(asset.declining_balance_rate, configuration.monetary_decimal_places)}% annually`
+                : "Not applicable"
+            }
           />
           <Field label="Last updated" value={new Date(asset.updated_at).toLocaleString()} />
         </dl>
-        {!canDepreciate && <p className="mt-5 border-t pt-4 text-sm text-muted-foreground">{depreciationUnavailableReason}</p>}
+        {!canDepreciate && (
+          <p className="mt-5 border-t pt-4 text-sm text-muted-foreground">
+            {depreciationUnavailableReason}
+          </p>
+        )}
       </Card>
 
       <section className="space-y-3" aria-labelledby="depreciation-history-heading">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 id="depreciation-history-heading" className="text-lg font-semibold">Depreciation history</h2>
-            <p className="text-sm text-muted-foreground">Append-only calculations recorded by the server.</p>
+            <h2 id="depreciation-history-heading" className="text-lg font-semibold">
+              Depreciation history
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Append-only calculations recorded by the server.
+            </p>
           </div>
-          {historyQuery.data && <p className="text-sm text-muted-foreground">{historyQuery.data.count} entries</p>}
+          {historyQuery.data && (
+            <p className="text-sm text-muted-foreground">{historyQuery.data.count} entries</p>
+          )}
         </div>
         {historyQuery.isLoading ? (
-          <Card className="space-y-2 p-4" aria-label="Loading depreciation history" aria-busy="true">
-            {Array.from({ length: 4 }, (_, index) => <Skeleton key={index} className="h-12 w-full" />)}
+          <Card
+            className="space-y-2 p-4"
+            aria-label="Loading depreciation history"
+            aria-busy="true"
+          >
+            {Array.from({ length: 4 }, (_, index) => (
+              <Skeleton key={index} className="h-12 w-full" />
+            ))}
           </Card>
         ) : historyQuery.error ? (
-          <ProblemState error={historyQuery.error} onRetry={() => void historyQuery.refetch()} compact />
+          <ProblemState
+            error={historyQuery.error}
+            onRetry={() => void historyQuery.refetch()}
+            compact
+          />
         ) : !historyQuery.data?.items.length ? (
           <EmptyPanel
             title="No depreciation recorded"
-            description={canDepreciate
-              ? 'Calculate the first period when its entry date is due.'
-              : depreciationUnavailableReason}
-            action={canDepreciate ? {
-              label: 'Calculate depreciation',
-              onClick: () => {
-                setEntryDate((current) => current < asset.purchase_date ? asset.purchase_date : current);
-                setCalculateOpen(true);
-              },
-            } : undefined}
+            description={
+              canDepreciate
+                ? "Calculate the first period when its entry date is due."
+                : depreciationUnavailableReason
+            }
+            action={
+              canDepreciate
+                ? {
+                    label: "Calculate depreciation",
+                    onClick: () => {
+                      setEntryDate((current) =>
+                        current < asset.purchase_date ? asset.purchase_date : current
+                      );
+                      setCalculateOpen(true);
+                    },
+                  }
+                : undefined
+            }
           />
         ) : (
           <Card className="overflow-hidden">
@@ -211,29 +280,62 @@ export const AssetDetailPage = () => {
                 <caption className="sr-only">Depreciation entries for {asset.asset_name}</caption>
                 <thead className="bg-muted text-left">
                   <tr>
-                    {['Entry date', 'Depreciation', 'Accumulated', 'Book value', 'Recorded'].map((heading) => (
-                      <th key={heading} scope="col" className="px-4 py-3 font-medium">{heading}</th>
-                    ))}
+                    {["Entry date", "Depreciation", "Accumulated", "Book value", "Recorded"].map(
+                      (heading) => (
+                        <th key={heading} scope="col" className="px-4 py-3 font-medium">
+                          {heading}
+                        </th>
+                      )
+                    )}
                   </tr>
                 </thead>
                 <tbody>
                   {historyQuery.data.items.map((entry) => (
                     <tr key={entry.id} className="border-t">
                       <td className="px-4 py-3 font-medium">{formatDate(entry.entry_date)}</td>
-                      <td className="px-4 py-3 tabular-nums">{formatAmount(entry.depreciation_amount, configuration.monetary_decimal_places)}</td>
-                      <td className="px-4 py-3 tabular-nums">{formatAmount(entry.accumulated_depreciation, configuration.monetary_decimal_places)}</td>
-                      <td className="px-4 py-3 font-medium tabular-nums">{formatAmount(entry.book_value, configuration.monetary_decimal_places)}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{new Date(entry.created_at).toLocaleString()}</td>
+                      <td className="px-4 py-3 tabular-nums">
+                        {formatAmount(
+                          entry.depreciation_amount,
+                          configuration.monetary_decimal_places
+                        )}
+                      </td>
+                      <td className="px-4 py-3 tabular-nums">
+                        {formatAmount(
+                          entry.accumulated_depreciation,
+                          configuration.monetary_decimal_places
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-medium tabular-nums">
+                        {formatAmount(entry.book_value, configuration.monetary_decimal_places)}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {new Date(entry.created_at).toLocaleString()}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <nav className="flex items-center justify-between border-t p-4" aria-label="Depreciation history pagination">
+            <nav
+              className="flex items-center justify-between border-t p-4"
+              aria-label="Depreciation history pagination"
+            >
               <p className="text-sm text-muted-foreground">Page {historyPage}</p>
               <div className="flex gap-2">
-                <Button variant="secondary" disabled={!historyQuery.data.previous} onClick={() => setHistoryPage((page) => Math.max(page - 1, 1))}>Previous</Button>
-                <Button variant="secondary" disabled={!historyQuery.data.next} onClick={() => setHistoryPage((page) => page + 1)}>Next</Button>
+                <Button
+                  variant="secondary"
+                  disabled={!historyQuery.data.previous}
+                  onClick={() => setHistoryPage((page) => Math.max(page - 1, 1))}
+                >
+                  Previous
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={!historyQuery.data.next}
+                  onClick={() => setHistoryPage((page) => page + 1)}
+                >
+                  Next
+                </Button>
               </div>
             </nav>
           </Card>
@@ -261,9 +363,11 @@ export const AssetDetailPage = () => {
           />
           {calculateMutation.error && <ProblemState error={calculateMutation.error} compact />}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="secondary" onClick={() => setCalculateOpen(false)}>Cancel</Button>
+            <Button type="button" variant="secondary" onClick={() => setCalculateOpen(false)}>
+              Cancel
+            </Button>
             <Button type="submit" disabled={!entryDate || calculateMutation.isPending}>
-              {calculateMutation.isPending ? 'Calculating…' : 'Calculate and record'}
+              {calculateMutation.isPending ? "Calculating…" : "Calculate and record"}
             </Button>
           </div>
         </form>
@@ -274,7 +378,7 @@ export const AssetDetailPage = () => {
         onOpenChange={(open) => {
           setDeleteOpen(open);
           if (!open) {
-            setDeleteConfirmation('');
+            setDeleteConfirmation("");
             deleteMutation.reset();
           }
         }}
@@ -284,20 +388,27 @@ export const AssetDetailPage = () => {
         <div className="space-y-4">
           <Input
             id="delete-asset-confirmation"
-            label={`Type ${configuration.archive_confirmation === 'asset_name' ? asset.asset_name : asset.asset_code} to confirm`}
+            label={`Type ${configuration.archive_confirmation === "asset_name" ? asset.asset_name : asset.asset_code} to confirm`}
             autoComplete="off"
             value={deleteConfirmation}
             onChange={(event) => setDeleteConfirmation(event.target.value)}
           />
           {deleteMutation.error && <ProblemState error={deleteMutation.error} compact />}
           <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={() => setDeleteOpen(false)}>Cancel</Button>
+            <Button variant="secondary" onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </Button>
             <Button
               variant="danger"
-              disabled={deleteConfirmation !== (configuration.archive_confirmation === 'asset_name' ? asset.asset_name : asset.asset_code) || deleteMutation.isPending}
+              disabled={
+                deleteConfirmation !==
+                  (configuration.archive_confirmation === "asset_name"
+                    ? asset.asset_name
+                    : asset.asset_code) || deleteMutation.isPending
+              }
               onClick={() => deleteMutation.mutate()}
             >
-              {deleteMutation.isPending ? 'Archiving…' : 'Archive asset'}
+              {deleteMutation.isPending ? "Archiving…" : "Archive asset"}
             </Button>
           </div>
         </div>

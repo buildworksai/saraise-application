@@ -400,7 +400,12 @@ def run_operation_guards(
         guards: Sequence[OperationGuard] = tuple(_operation_guards.values())
     from .services import DmsConfigurationService
 
-    required_operations = DmsConfigurationService.runtime_values(context.tenant_id)["governance_required_operations"]
+    raw_required_operations = DmsConfigurationService.runtime_values(context.tenant_id)[
+        "governance_required_operations"
+    ]
+    if isinstance(raw_required_operations, (str, bytes)) or not isinstance(raw_required_operations, Sequence):
+        raise ExtensionOperationError("invalid_required_operations")
+    required_operations = tuple(str(operation) for operation in raw_required_operations)
     if operation_value.value in required_operations and not guards:
         raise ExtensionOperationError("guard_unavailable")
     for guard in guards:

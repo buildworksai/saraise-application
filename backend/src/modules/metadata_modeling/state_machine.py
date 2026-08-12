@@ -19,12 +19,16 @@ class EntityTransitionRecorder:
     """Persist idempotency/audit evidence in the durable outbox transaction."""
 
     def find(self, aggregate: EntityDefinition, transition_key: str) -> TransitionRecord | None:
-        event = OutboxEvent.objects.for_tenant(aggregate.tenant_id).filter(
-            aggregate_type="entity_definition",
-            aggregate_id=aggregate.id,
-            event_type="metadata_modeling.entity.transitioned.v1",
-            payload__transition_key=transition_key,
-        ).first()
+        event = (
+            OutboxEvent.objects.for_tenant(aggregate.tenant_id)
+            .filter(
+                aggregate_type="entity_definition",
+                aggregate_id=aggregate.id,
+                event_type="metadata_modeling.entity.transitioned.v1",
+                payload__transition_key=transition_key,
+            )
+            .first()
+        )
         if event is None:
             return None
         payload = event.payload

@@ -1,1 +1,2 @@
-import { ResourceFormPage } from './ResourceWorkspace'; export const EditQuotePage = () => <ResourceFormPage kind="quotes" edit />;
+import { ResourceFormPage } from "./ResourceWorkspace";
+export const EditQuotePage = () => <ResourceFormPage kind="quotes" edit />;

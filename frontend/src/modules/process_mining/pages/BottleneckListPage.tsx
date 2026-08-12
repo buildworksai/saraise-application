@@ -1,3 +1,104 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'; import { Plus, Trash2 } from 'lucide-react'; import { useNavigate, useSearchParams } from 'react-router-dom'; import { Button } from '@/components/ui/Button'; import { Card } from '@/components/ui/Card';
-import { ApiProblem, DataTable, EmptyPanel, PageHeader, PageSkeleton, Pagination, StatusPill } from '../components/ModuleShell'; import { PROCESS_MINING_ROUTES, type BottleneckAnalysis } from '../contracts'; import { processMiningService } from '../services/process_mining-service';
-export function BottleneckListPage() { const navigate = useNavigate(); const client = useQueryClient(); const [params, setParams] = useSearchParams(); const page = Number(params.get('page') ?? 1); const configuration = useQuery({ queryKey: ['process-mining', 'configuration'], queryFn: processMiningService.getConfiguration }); const query = useQuery({ queryKey: ['process-mining', 'bottlenecks', page, configuration.data?.version], queryFn: () => processMiningService.listBottlenecks({ page, page_size: configuration.data!.document.list_page_size, ordering: '-created_at' }), enabled: Boolean(configuration.data), refetchInterval: (state) => state.state.data?.items.some((item) => ['queued', 'running'].includes(item.status)) ? configuration.data?.document.polling_interval_ms : false }); const remove = useMutation({ mutationFn: (item: BottleneckAnalysis) => processMiningService.deleteBottleneck(item.id), onSuccess: () => client.invalidateQueries({ queryKey: ['process-mining', 'bottlenecks'] }) }); if (!configuration.data || query.isLoading) return <PageSkeleton/>; if (query.error || !query.data) return <main className="p-8"><ApiProblem error={query.error} onRetry={() => void query.refetch()}/></main>; return <main className="space-y-6 p-4 sm:p-8"><PageHeader title="Bottleneck analyses" description={`Configured minimum: ${configuration.data.document.bottleneck_min_cases} cases.`} actions={<Button onClick={() => navigate(PROCESS_MINING_ROUTES.BOTTLENECK_CREATE)}><Plus className="mr-2 h-4 w-4"/>New analysis</Button>}/>{query.data.items.length === 0 ? <EmptyPanel title="No bottleneck evidence" description="Analyze a bounded process window."/> : <Card className="overflow-hidden"><DataTable headers={['Process', 'Status', 'Cases', 'Variants', 'Actions']} rows={query.data.items.map((item) => [<button className="text-primary" onClick={() => navigate(PROCESS_MINING_ROUTES.BOTTLENECK(item.id))}>{item.process_name}</button>, <StatusPill status={item.status}/>, item.total_cases, item.total_variants, <Button size="sm" variant="ghost" disabled={!['completed', 'failed', 'timed_out', 'cancelled'].includes(item.status) || remove.isPending} onClick={() => remove.mutate(item)}><Trash2 className="mr-1 h-4 w-4"/>Delete</Button>])}/><Pagination value={query.data.pagination} onPage={(next) => setParams({ page: String(next) })}/></Card>}</main>; }
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, Trash2 } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import {
+  ApiProblem,
+  DataTable,
+  EmptyPanel,
+  PageHeader,
+  PageSkeleton,
+  Pagination,
+  StatusPill,
+} from "../components/ModuleShell";
+import { PROCESS_MINING_ROUTES, type BottleneckAnalysis } from "../contracts";
+import { processMiningService } from "../services/process_mining-service";
+export function BottleneckListPage() {
+  const navigate = useNavigate();
+  const client = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const page = Number(params.get("page") ?? 1);
+  const configuration = useQuery({
+    queryKey: ["process-mining", "configuration"],
+    queryFn: processMiningService.getConfiguration,
+  });
+  const query = useQuery({
+    queryKey: ["process-mining", "bottlenecks", page, configuration.data?.version],
+    queryFn: () =>
+      processMiningService.listBottlenecks({
+        page,
+        page_size: configuration.data!.document.list_page_size,
+        ordering: "-created_at",
+      }),
+    enabled: Boolean(configuration.data),
+    refetchInterval: (state) =>
+      state.state.data?.items.some((item) => ["queued", "running"].includes(item.status))
+        ? configuration.data?.document.polling_interval_ms
+        : false,
+  });
+  const remove = useMutation({
+    mutationFn: (item: BottleneckAnalysis) => processMiningService.deleteBottleneck(item.id),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["process-mining", "bottlenecks"] }),
+  });
+  if (!configuration.data || query.isLoading) return <PageSkeleton />;
+  if (query.error || !query.data)
+    return (
+      <main className="p-8">
+        <ApiProblem error={query.error} onRetry={() => void query.refetch()} />
+      </main>
+    );
+  return (
+    <main className="space-y-6 p-4 sm:p-8">
+      <PageHeader
+        title="Bottleneck analyses"
+        description={`Configured minimum: ${configuration.data.document.bottleneck_min_cases} cases.`}
+        actions={
+          <Button onClick={() => navigate(PROCESS_MINING_ROUTES.BOTTLENECK_CREATE)}>
+            <Plus className="mr-2 h-4 w-4" />
+            New analysis
+          </Button>
+        }
+      />
+      {query.data.items.length === 0 ? (
+        <EmptyPanel
+          title="No bottleneck evidence"
+          description="Analyze a bounded process window."
+        />
+      ) : (
+        <Card className="overflow-hidden">
+          <DataTable
+            headers={["Process", "Status", "Cases", "Variants", "Actions"]}
+            rows={query.data.items.map((item) => [
+              <button
+                className="text-primary"
+                onClick={() => navigate(PROCESS_MINING_ROUTES.BOTTLENECK(item.id))}
+              >
+                {item.process_name}
+              </button>,
+              <StatusPill status={item.status} />,
+              item.total_cases,
+              item.total_variants,
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={
+                  !["completed", "failed", "timed_out", "cancelled"].includes(item.status) ||
+                  remove.isPending
+                }
+                onClick={() => remove.mutate(item)}
+              >
+                <Trash2 className="mr-1 h-4 w-4" />
+                Delete
+              </Button>,
+            ])}
+          />
+          <Pagination
+            value={query.data.pagination}
+            onPage={(next) => setParams({ page: String(next) })}
+          />
+        </Card>
+      )}
+    </main>
+  );
+}

@@ -12,8 +12,8 @@ from rest_framework import status
 
 from src.core.access.decision import AccessDecision, AccessReasonCode
 from src.core.async_jobs.models import AsyncJob
-from src.core.testing.tenant_contract import TenantIsolationContract
 from src.core.tenancy import tenant_context
+from src.core.testing.tenant_contract import TenantIsolationContract
 from src.modules.fixed_assets.models import (
     AssetCategory,
     AssetTransaction,

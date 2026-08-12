@@ -78,7 +78,9 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name="rowsecurityrule",
             name="priority",
-            field=models.SmallIntegerField(default=src.modules.security_access_control.models.default_row_rule_priority),
+            field=models.SmallIntegerField(
+                default=src.modules.security_access_control.models.default_row_rule_priority
+            ),
         ),
         migrations.AlterField(
             model_name="securityprofile",
@@ -108,14 +110,62 @@ class Migration(migrations.Migration):
                 max_length=20,
             ),
         ),
-        migrations.AlterField(model_name="securityprofile", name="session_timeout_minutes", field=models.PositiveIntegerField(default=src.modules.security_access_control.models.default_session_timeout_minutes)),
-        migrations.AlterField(model_name="securityprofile", name="absolute_session_timeout_hours", field=models.PositiveIntegerField(default=src.modules.security_access_control.models.default_absolute_session_timeout_hours)),
-        migrations.AlterField(model_name="securityprofile", name="max_concurrent_sessions", field=models.PositiveIntegerField(default=src.modules.security_access_control.models.default_max_concurrent_sessions)),
-        migrations.AlterField(model_name="securityprofile", name="download_allowed", field=models.BooleanField(default=src.modules.security_access_control.models.default_download_allowed)),
-        migrations.AlterField(model_name="securityprofile", name="print_allowed", field=models.BooleanField(default=src.modules.security_access_control.models.default_print_allowed)),
-        migrations.AlterField(model_name="securityprofile", name="copy_paste_allowed", field=models.BooleanField(default=src.modules.security_access_control.models.default_copy_paste_allowed)),
-        migrations.AlterField(model_name="securityprofile", name="mobile_access_allowed", field=models.BooleanField(default=src.modules.security_access_control.models.default_mobile_access_allowed)),
-        migrations.AlterField(model_name="securityprofile", name="login_notification", field=models.BooleanField(default=src.modules.security_access_control.models.default_login_notification)),
-        migrations.AlterField(model_name="securityprofile", name="access_notification", field=models.BooleanField(default=src.modules.security_access_control.models.default_access_notification)),
-        migrations.AlterField(model_name="securityprofileassignment", name="precedence", field=models.SmallIntegerField(default=src.modules.security_access_control.models.default_profile_assignment_precedence)),
+        migrations.AlterField(
+            model_name="securityprofile",
+            name="session_timeout_minutes",
+            field=models.PositiveIntegerField(
+                default=src.modules.security_access_control.models.default_session_timeout_minutes
+            ),
+        ),
+        migrations.AlterField(
+            model_name="securityprofile",
+            name="absolute_session_timeout_hours",
+            field=models.PositiveIntegerField(
+                default=src.modules.security_access_control.models.default_absolute_session_timeout_hours
+            ),
+        ),
+        migrations.AlterField(
+            model_name="securityprofile",
+            name="max_concurrent_sessions",
+            field=models.PositiveIntegerField(
+                default=src.modules.security_access_control.models.default_max_concurrent_sessions
+            ),
+        ),
+        migrations.AlterField(
+            model_name="securityprofile",
+            name="download_allowed",
+            field=models.BooleanField(default=src.modules.security_access_control.models.default_download_allowed),
+        ),
+        migrations.AlterField(
+            model_name="securityprofile",
+            name="print_allowed",
+            field=models.BooleanField(default=src.modules.security_access_control.models.default_print_allowed),
+        ),
+        migrations.AlterField(
+            model_name="securityprofile",
+            name="copy_paste_allowed",
+            field=models.BooleanField(default=src.modules.security_access_control.models.default_copy_paste_allowed),
+        ),
+        migrations.AlterField(
+            model_name="securityprofile",
+            name="mobile_access_allowed",
+            field=models.BooleanField(default=src.modules.security_access_control.models.default_mobile_access_allowed),
+        ),
+        migrations.AlterField(
+            model_name="securityprofile",
+            name="login_notification",
+            field=models.BooleanField(default=src.modules.security_access_control.models.default_login_notification),
+        ),
+        migrations.AlterField(
+            model_name="securityprofile",
+            name="access_notification",
+            field=models.BooleanField(default=src.modules.security_access_control.models.default_access_notification),
+        ),
+        migrations.AlterField(
+            model_name="securityprofileassignment",
+            name="precedence",
+            field=models.SmallIntegerField(
+                default=src.modules.security_access_control.models.default_profile_assignment_precedence
+            ),
+        ),
     ]

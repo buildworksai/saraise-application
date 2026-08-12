@@ -5,11 +5,14 @@ Provides REST API endpoints for all models.
 """
 
 import uuid
+from typing import Any
 
 from rest_framework import viewsets
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 
+from src.core.api import GovernedPageNumberPagination, SuccessEnvelopeRenderer
+from src.core.api.exception_handler import stable_exception_handler
 from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
 
@@ -30,7 +33,32 @@ def _actor_id(request):
     return str(request.user.pk)
 
 
-class AccountViewSet(viewsets.ModelViewSet):
+class AccountingApiVersionMixin:
+    """Serve legacy v1 raw JSON and governed v2 envelopes from one router."""
+
+    pagination_class: Any = GovernedPageNumberPagination
+    request: Any
+
+    def _is_v2_request(self) -> bool:
+        return self.request.path.startswith("/api/v2/")
+
+    def get_renderers(self):
+        if self._is_v2_request():
+            return [SuccessEnvelopeRenderer()]
+        return super().get_renderers()
+
+    def get_exception_handler(self):
+        if self._is_v2_request():
+            return stable_exception_handler
+        return super().get_exception_handler()
+
+    def paginate_queryset(self, queryset):
+        if self._is_v2_request():
+            return super().paginate_queryset(queryset)
+        return None
+
+
+class AccountViewSet(AccountingApiVersionMixin, viewsets.ModelViewSet):
     """ViewSet for Account CRUD operations."""
 
     serializer_class = AccountSerializer
@@ -66,7 +94,7 @@ class AccountViewSet(viewsets.ModelViewSet):
         serializer.save(tenant_id=tenant_id, created_by=actor_id, updated_by=actor_id)
 
 
-class PostingPeriodViewSet(viewsets.ModelViewSet):
+class PostingPeriodViewSet(AccountingApiVersionMixin, viewsets.ModelViewSet):
     """ViewSet for PostingPeriod CRUD operations."""
 
     serializer_class = PostingPeriodSerializer
@@ -102,7 +130,7 @@ class PostingPeriodViewSet(viewsets.ModelViewSet):
         serializer.save(tenant_id=tenant_id, created_by=actor_id, updated_by=actor_id)
 
 
-class JournalEntryViewSet(viewsets.ModelViewSet):
+class JournalEntryViewSet(AccountingApiVersionMixin, viewsets.ModelViewSet):
     """ViewSet for JournalEntry CRUD operations."""
 
     serializer_class = JournalEntrySerializer
@@ -138,7 +166,7 @@ class JournalEntryViewSet(viewsets.ModelViewSet):
         serializer.save(tenant_id=tenant_id, created_by=actor_id, updated_by=actor_id)
 
 
-class APInvoiceViewSet(viewsets.ModelViewSet):
+class APInvoiceViewSet(AccountingApiVersionMixin, viewsets.ModelViewSet):
     """ViewSet for APInvoice CRUD operations."""
 
     serializer_class = APInvoiceSerializer
@@ -174,7 +202,7 @@ class APInvoiceViewSet(viewsets.ModelViewSet):
         serializer.save(tenant_id=tenant_id, created_by=actor_id, updated_by=actor_id)
 
 
-class ARInvoiceViewSet(viewsets.ModelViewSet):
+class ARInvoiceViewSet(AccountingApiVersionMixin, viewsets.ModelViewSet):
     """ViewSet for ARInvoice CRUD operations."""
 
     serializer_class = ARInvoiceSerializer
@@ -210,7 +238,7 @@ class ARInvoiceViewSet(viewsets.ModelViewSet):
         serializer.save(tenant_id=tenant_id, created_by=actor_id, updated_by=actor_id)
 
 
-class PaymentViewSet(viewsets.ModelViewSet):
+class PaymentViewSet(AccountingApiVersionMixin, viewsets.ModelViewSet):
     """ViewSet for Payment CRUD operations."""
 
     serializer_class = PaymentSerializer

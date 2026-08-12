@@ -1,3 +1,92 @@
 /* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
-import { useQuery } from '@tanstack/react-query';import { Link,useSearchParams } from 'react-router-dom';import { CrmPage,GovernedError,PageSkeleton } from '../components/CrmPage';import { EntityList } from '../components/EntityList';import { useCrmConfiguration } from '../hooks/use-crm-configuration';import { crmKeys,crmService } from '../services/crm-service';import type { AccountFilters } from '../contracts';
-export function AccountListPage(){const[p]=useSearchParams(),configuration=useCrmConfiguration(),document=configuration.data?.document;const filters:AccountFilters={search:p.get('search')||undefined,account_type:(p.get('account_type')as AccountFilters['account_type'])||undefined,parent_account_id:p.get('parent_account_id')||undefined,industry:p.get('industry')||undefined,page:Number(p.get('page')||1),page_size:document?Number(p.get('page_size')||document.ui.saved_page_size):undefined,ordering:p.get('ordering')||undefined};const q=useQuery({queryKey:crmKeys.accounts(filters),queryFn:()=>crmService.listAccounts(filters),enabled:!!document});if(configuration.isLoading)return <CrmPage title="Accounts"><PageSkeleton label="Loading account configuration"/></CrmPage>;if(configuration.error||!document)return <CrmPage title="Accounts"><GovernedError error={configuration.error} onRetry={()=>void configuration.refetch()} subject="Account configuration"/></CrmPage>;return <EntityList title="Accounts" description="Manage customer organizations and bounded account hierarchies." createPath="/crm/accounts/new" emptyTitle="Create your first account" emptyDescription="Accounts connect contacts, opportunities, and activities." query={q.data} isLoading={q.isLoading} error={q.error} refetch={()=>void q.refetch()} filters={[{key:'account_type',label:'Type',choices:document.account.allowed_types.map(value=>({value,label:value}))},{key:'parent_account_id',label:'Parent account ID'},{key:'industry',label:'Industry'}]} columns={[{key:'name',label:'Name',sortable:true,render:account=><Link className="font-medium text-primary hover:underline" to={`/crm/accounts/${account.id}`}>{account.name}</Link>},{key:'account_type',label:'Type',render:account=>account.account_type},{key:'industry',label:'Industry',render:account=>account.industry||'—'},{key:'billing_country',label:'Country',render:account=>account.billing_country||'—'},{key:'annual_revenue',label:'Revenue',render:account=>account.annual_revenue??'—'}]}/>}
+import { useQuery } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router-dom";
+import { CrmPage, GovernedError, PageSkeleton } from "../components/CrmPage";
+import { EntityList } from "../components/EntityList";
+import { useCrmConfiguration } from "../hooks/use-crm-configuration";
+import { crmKeys, crmService } from "../services/crm-service";
+import type { AccountFilters } from "../contracts";
+export function AccountListPage() {
+  const [p] = useSearchParams(),
+    configuration = useCrmConfiguration(),
+    document = configuration.data?.document;
+  const filters: AccountFilters = {
+    search: p.get("search") || undefined,
+    account_type: (p.get("account_type") as AccountFilters["account_type"]) || undefined,
+    parent_account_id: p.get("parent_account_id") || undefined,
+    industry: p.get("industry") || undefined,
+    page: Number(p.get("page") || 1),
+    page_size: document ? Number(p.get("page_size") || document.ui.saved_page_size) : undefined,
+    ordering: p.get("ordering") || undefined,
+  };
+  const q = useQuery({
+    queryKey: crmKeys.accounts(filters),
+    queryFn: () => crmService.listAccounts(filters),
+    enabled: !!document,
+  });
+  if (configuration.isLoading)
+    return (
+      <CrmPage title="Accounts">
+        <PageSkeleton label="Loading account configuration" />
+      </CrmPage>
+    );
+  if (configuration.error || !document)
+    return (
+      <CrmPage title="Accounts">
+        <GovernedError
+          error={configuration.error}
+          onRetry={() => void configuration.refetch()}
+          subject="Account configuration"
+        />
+      </CrmPage>
+    );
+  return (
+    <EntityList
+      title="Accounts"
+      description="Manage customer organizations and bounded account hierarchies."
+      createPath="/crm/accounts/new"
+      emptyTitle="Create your first account"
+      emptyDescription="Accounts connect contacts, opportunities, and activities."
+      query={q.data}
+      isLoading={q.isLoading}
+      error={q.error}
+      refetch={() => void q.refetch()}
+      filters={[
+        {
+          key: "account_type",
+          label: "Type",
+          choices: document.account.allowed_types.map((value) => ({ value, label: value })),
+        },
+        { key: "parent_account_id", label: "Parent account ID" },
+        { key: "industry", label: "Industry" },
+      ]}
+      columns={[
+        {
+          key: "name",
+          label: "Name",
+          sortable: true,
+          render: (account) => (
+            <Link
+              className="font-medium text-primary hover:underline"
+              to={`/crm/accounts/${account.id}`}
+            >
+              {account.name}
+            </Link>
+          ),
+        },
+        { key: "account_type", label: "Type", render: (account) => account.account_type },
+        { key: "industry", label: "Industry", render: (account) => account.industry || "—" },
+        {
+          key: "billing_country",
+          label: "Country",
+          render: (account) => account.billing_country || "—",
+        },
+        {
+          key: "annual_revenue",
+          label: "Revenue",
+          render: (account) => account.annual_revenue ?? "—",
+        },
+      ]}
+    />
+  );
+}

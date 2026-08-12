@@ -61,7 +61,9 @@ class BaseFilterSet:
 
     def apply_ordering(self, queryset: QuerySet[Any]) -> QuerySet[Any]:
         raw = self.get("ordering")
-        ordering = [part.strip() for part in str(raw).split(",") if part.strip()] if raw else list(self.default_ordering)
+        ordering = (
+            [part.strip() for part in str(raw).split(",") if part.strip()] if raw else list(self.default_ordering)
+        )
         if not ordering or any(item.removeprefix("-") not in self.ordering_fields | {"id"} for item in ordering):
             raise FilterValidationError({"ordering": "Unsupported ordering field."})
         if "id" not in {item.removeprefix("-") for item in ordering}:
@@ -92,7 +94,9 @@ class MigrationJobFilterSet(BaseFilterSet):
         value = str(search).strip()
         if len(value) > 200:
             raise FilterValidationError({"search": "Search is limited to 200 characters."})
-        return queryset.filter(Q(name__icontains=value) | Q(description__icontains=value) | Q(target_entity__icontains=value))
+        return queryset.filter(
+            Q(name__icontains=value) | Q(description__icontains=value) | Q(target_entity__icontains=value)
+        )
 
 
 def _date_time(value: object, field: str, *, upper: bool = False) -> datetime:

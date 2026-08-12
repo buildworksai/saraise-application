@@ -7,6 +7,7 @@ Fixes:
 2. Field name mismatches (task_definition → task_data)
 3. QuotaUsage model structure (use ForeignKey instead of direct quota_type)
 """
+
 import re
 import sys
 from pathlib import Path

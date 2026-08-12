@@ -89,9 +89,28 @@ class ExternalConnection(MutableTenantModel):
         db_table = "data_migration_external_connections"
         constraints = [
             models.UniqueConstraint(fields=("tenant_id", "name"), name="dm_conn_tenant_name_uniq"),
-            models.CheckConstraint(condition=Q(port__isnull=True) | Q(port__gte=1, port__lte=65535), name="dm_conn_port_range"),
             models.CheckConstraint(
-                condition=(Q(kind__in=("postgresql", "mysql"), host__isnull=False, port__isnull=False, database__isnull=False, username__isnull=False, base_url__isnull=True) | Q(kind="http", host__isnull=True, port__isnull=True, database__isnull=True, username__isnull=True, base_url__isnull=False)),
+                condition=Q(port__isnull=True) | Q(port__gte=1, port__lte=65535), name="dm_conn_port_range"
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        kind__in=("postgresql", "mysql"),
+                        host__isnull=False,
+                        port__isnull=False,
+                        database__isnull=False,
+                        username__isnull=False,
+                        base_url__isnull=True,
+                    )
+                    | Q(
+                        kind="http",
+                        host__isnull=True,
+                        port__isnull=True,
+                        database__isnull=True,
+                        username__isnull=True,
+                        base_url__isnull=False,
+                    )
+                ),
                 name="dm_conn_kind_fields",
             ),
         ]
@@ -161,7 +180,9 @@ class MigrationJob(MutableTenantModel):
     class Meta:
         db_table = "data_migration_jobs"
         constraints = [
-            models.UniqueConstraint(fields=("tenant_id", "name"), condition=Q(is_deleted=False), name="dm_job_live_name_uniq"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "name"), condition=Q(is_deleted=False), name="dm_job_live_name_uniq"
+            ),
             models.CheckConstraint(condition=Q(configuration_version__gte=1), name="dm_job_version_gte_1"),
         ]
         indexes = [
@@ -176,11 +197,16 @@ class MigrationJob(MutableTenantModel):
         from .schemas import validate_source_config
 
         self.source_config = validate_source_config(self.source_type, self.source_config)
-        if self.source_type in {self.SourceType.CSV, self.SourceType.EXCEL, self.SourceType.JSON, self.SourceType.XML} and not self.source_artifact_id:
+        if (
+            self.source_type in {self.SourceType.CSV, self.SourceType.EXCEL, self.SourceType.JSON, self.SourceType.XML}
+            and not self.source_artifact_id
+        ):
             raise ValidationError({"source_artifact_id": "File sources require an immutable DMS artifact version."})
         if self.write_mode == self.WriteMode.UPSERT and not self.lookup_fields:
             raise ValidationError({"lookup_fields": "Upsert mode requires at least one lookup field."})
-        if not isinstance(self.lookup_fields, list) or not all(isinstance(v, str) and v.strip() for v in self.lookup_fields):
+        if not isinstance(self.lookup_fields, list) or not all(
+            isinstance(v, str) and v.strip() for v in self.lookup_fields
+        ):
             raise ValidationError({"lookup_fields": "Lookup fields must be a list of non-empty field names."})
 
     def __str__(self) -> str:
@@ -203,14 +229,20 @@ class MigrationJobVersion(AppendOnlyTenantModel):
 
     def clean(self) -> None:
         super().clean()
-        if self.job_id and self.tenant_id and not MigrationJob.objects.filter(id=self.job_id, tenant_id=self.tenant_id).exists():
+        if (
+            self.job_id
+            and self.tenant_id
+            and not MigrationJob.objects.filter(id=self.job_id, tenant_id=self.tenant_id).exists()
+        ):
             raise ValidationError({"job": "The job must belong to the same tenant."})
         if isinstance(self.snapshot, dict):
             if self.snapshot.get("tenant_id") != str(self.tenant_id) or self.snapshot.get("job_id") != str(self.job_id):
                 raise ValidationError({"snapshot": "Snapshot tenant and job identity must match the parent."})
             forbidden = {"created_by", "updated_by", "async_job_id"}.intersection(self.snapshot)
             if forbidden:
-                raise ValidationError({"snapshot": f"Snapshot contains forbidden identity fields: {', '.join(sorted(forbidden))}."})
+                raise ValidationError(
+                    {"snapshot": f"Snapshot contains forbidden identity fields: {', '.join(sorted(forbidden))}."}
+                )
 
     def __str__(self) -> str:
         return f"{self.job_id} v{self.version}"
@@ -240,7 +272,10 @@ class MigrationMapping(MutableTenantModel):
             models.UniqueConstraint(fields=("job", "source_field"), name="dm_mapping_source_uniq"),
             models.UniqueConstraint(fields=("job", "target_field"), name="dm_mapping_target_uniq"),
             models.UniqueConstraint(fields=("job", "position"), name="dm_mapping_position_uniq"),
-            models.CheckConstraint(condition=Q(confidence__isnull=True) | Q(confidence__gte=0, confidence__lte=1), name="dm_mapping_confidence_range"),
+            models.CheckConstraint(
+                condition=Q(confidence__isnull=True) | Q(confidence__gte=0, confidence__lte=1),
+                name="dm_mapping_confidence_range",
+            ),
         ]
         indexes = [
             models.Index(fields=("tenant_id", "job", "position"), name="dm_mapping_position_idx"),
@@ -336,8 +371,13 @@ class MigrationRun(MutableTenantModel):
         db_table = "data_migration_runs"
         constraints = [
             models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="dm_run_idempotency_uniq"),
-            models.CheckConstraint(condition=Q(processed_records__lte=models.F("total_records")), name="dm_run_processed_lte_total"),
-            models.CheckConstraint(condition=Q(succeeded_records__lte=models.F("processed_records") - models.F("failed_records")), name="dm_run_outcomes_lte_processed"),
+            models.CheckConstraint(
+                condition=Q(processed_records__lte=models.F("total_records")), name="dm_run_processed_lte_total"
+            ),
+            models.CheckConstraint(
+                condition=Q(succeeded_records__lte=models.F("processed_records") - models.F("failed_records")),
+                name="dm_run_outcomes_lte_processed",
+            ),
         ]
         indexes = [
             models.Index(fields=("tenant_id", "job", "-created_at"), name="dm_run_job_created_idx"),
@@ -349,7 +389,12 @@ class MigrationRun(MutableTenantModel):
         super().clean()
         if self.job_id and not MigrationJob.objects.filter(id=self.job_id, tenant_id=self.tenant_id).exists():
             raise ValidationError({"job": "The job must belong to the same tenant."})
-        if self.job_version_id and not MigrationJobVersion.objects.filter(id=self.job_version_id, tenant_id=self.tenant_id, job_id=self.job_id).exists():
+        if (
+            self.job_version_id
+            and not MigrationJobVersion.objects.filter(
+                id=self.job_version_id, tenant_id=self.tenant_id, job_id=self.job_id
+            ).exists()
+        ):
             raise ValidationError({"job_version": "The version must belong to this tenant and job."})
 
     def __str__(self) -> str:
@@ -419,16 +464,27 @@ class MigrationChange(AppendOnlyTenantModel):
         constraints = [
             models.UniqueConstraint(fields=("run", "sequence"), name="dm_change_sequence_uniq"),
             models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="dm_change_idempotency_uniq"),
-            models.CheckConstraint(condition=Q(operation="create", before_payload_encrypted="") | (Q(operation="update") & ~Q(before_payload_encrypted="")), name="dm_change_before_payload"),
+            models.CheckConstraint(
+                condition=Q(operation="create", before_payload_encrypted="")
+                | (Q(operation="update") & ~Q(before_payload_encrypted="")),
+                name="dm_change_before_payload",
+            ),
         ]
         indexes = [
             models.Index(fields=("tenant_id", "run", "-sequence"), name="dm_change_sequence_idx"),
-            models.Index(fields=("tenant_id", "target_adapter", "target_entity", "target_record_id"), name="dm_change_target_idx"),
+            models.Index(
+                fields=("tenant_id", "target_adapter", "target_entity", "target_record_id"), name="dm_change_target_idx"
+            ),
         ]
 
     def clean(self) -> None:
         super().clean()
-        if self.run_id and not MigrationRun.objects.filter(id=self.run_id, tenant_id=self.tenant_id, mode=MigrationRun.Mode.COMMIT).exists():
+        if (
+            self.run_id
+            and not MigrationRun.objects.filter(
+                id=self.run_id, tenant_id=self.tenant_id, mode=MigrationRun.Mode.COMMIT
+            ).exists()
+        ):
             raise ValidationError({"run": "Changes require a committed run owned by the tenant."})
 
     def mark_reversed(self, occurred_at: Any) -> None:
@@ -462,7 +518,9 @@ class MigrationRollback(MutableTenantModel):
 
     class Meta:
         db_table = "data_migration_rollbacks"
-        constraints = [models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="dm_rollback_idempotency_uniq")]
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="dm_rollback_idempotency_uniq")
+        ]
         indexes = [
             models.Index(fields=("tenant_id", "status", "-created_at"), name="dm_rollback_status_idx"),
             models.Index(fields=("tenant_id", "run"), name="dm_rollback_run_idx"),
@@ -471,7 +529,12 @@ class MigrationRollback(MutableTenantModel):
     def clean(self) -> None:
         super().clean()
         allowed = (MigrationRun.Status.SUCCEEDED, MigrationRun.Status.PARTIAL)
-        if self.run_id and not MigrationRun.objects.filter(id=self.run_id, tenant_id=self.tenant_id, mode=MigrationRun.Mode.COMMIT, status__in=allowed).exists():
+        if (
+            self.run_id
+            and not MigrationRun.objects.filter(
+                id=self.run_id, tenant_id=self.tenant_id, mode=MigrationRun.Mode.COMMIT, status__in=allowed
+            ).exists()
+        ):
             raise ValidationError({"run": "Only successful or partial committed runs may be rolled back."})
 
     def __str__(self) -> str:
@@ -481,17 +544,29 @@ class MigrationRollback(MutableTenantModel):
 class DataMigrationConfiguration(MutableTenantModel):
     """Runtime operational controls; exactly one current document per tenant."""
 
-    source_row_limit = models.PositiveIntegerField(default=100_000, validators=[MinValueValidator(1), MaxValueValidator(10_000_000)])
+    source_row_limit = models.PositiveIntegerField(
+        default=100_000, validators=[MinValueValidator(1), MaxValueValidator(10_000_000)]
+    )
     batch_size = models.PositiveIntegerField(default=500, validators=[MinValueValidator(1), MaxValueValidator(10_000)])
-    connect_timeout_seconds = models.PositiveIntegerField(default=10, validators=[MinValueValidator(1), MaxValueValidator(120)])
-    read_timeout_seconds = models.PositiveIntegerField(default=30, validators=[MinValueValidator(1), MaxValueValidator(600)])
+    connect_timeout_seconds = models.PositiveIntegerField(
+        default=10, validators=[MinValueValidator(1), MaxValueValidator(120)]
+    )
+    read_timeout_seconds = models.PositiveIntegerField(
+        default=30, validators=[MinValueValidator(1), MaxValueValidator(600)]
+    )
     retry_count = models.PositiveSmallIntegerField(default=2, validators=[MinValueValidator(0), MaxValueValidator(10)])
-    issue_sample_limit = models.PositiveSmallIntegerField(default=25, validators=[MinValueValidator(0), MaxValueValidator(1000)])
-    preview_row_limit = models.PositiveSmallIntegerField(default=100, validators=[MinValueValidator(1), MaxValueValidator(100)])
+    issue_sample_limit = models.PositiveSmallIntegerField(
+        default=25, validators=[MinValueValidator(0), MaxValueValidator(1000)]
+    )
+    preview_row_limit = models.PositiveSmallIntegerField(
+        default=100, validators=[MinValueValidator(1), MaxValueValidator(100)]
+    )
     retention_days = models.PositiveIntegerField(default=90, validators=[MinValueValidator(1), MaxValueValidator(3650)])
     allowed_target_adapters = models.JSONField(default=default_allowed_target_adapters)
     enabled_roles = models.JSONField(default=list, blank=True)
-    rollout_percentage = models.PositiveSmallIntegerField(default=100, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    rollout_percentage = models.PositiveSmallIntegerField(
+        default=100, validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
     enabled = models.BooleanField(default=True)
     version = models.PositiveIntegerField(default=1)
     created_by = models.UUIDField()
@@ -502,13 +577,24 @@ class DataMigrationConfiguration(MutableTenantModel):
         constraints = [
             models.UniqueConstraint(fields=("tenant_id",), name="dm_config_tenant_uniq"),
             models.CheckConstraint(condition=Q(version__gte=1), name="dm_config_version_gte_1"),
-            models.CheckConstraint(condition=Q(source_row_limit__gte=1, source_row_limit__lte=10_000_000), name="dm_config_row_limit_range"),
-            models.CheckConstraint(condition=Q(batch_size__gte=1, batch_size__lte=10_000), name="dm_config_batch_range"),
-            models.CheckConstraint(condition=Q(connect_timeout_seconds__gte=1, connect_timeout_seconds__lte=120), name="dm_config_connect_range"),
-            models.CheckConstraint(condition=Q(read_timeout_seconds__gte=1, read_timeout_seconds__lte=600), name="dm_config_read_range"),
+            models.CheckConstraint(
+                condition=Q(source_row_limit__gte=1, source_row_limit__lte=10_000_000), name="dm_config_row_limit_range"
+            ),
+            models.CheckConstraint(
+                condition=Q(batch_size__gte=1, batch_size__lte=10_000), name="dm_config_batch_range"
+            ),
+            models.CheckConstraint(
+                condition=Q(connect_timeout_seconds__gte=1, connect_timeout_seconds__lte=120),
+                name="dm_config_connect_range",
+            ),
+            models.CheckConstraint(
+                condition=Q(read_timeout_seconds__gte=1, read_timeout_seconds__lte=600), name="dm_config_read_range"
+            ),
             models.CheckConstraint(condition=Q(retry_count__lte=10), name="dm_config_retry_range"),
             models.CheckConstraint(condition=Q(issue_sample_limit__lte=1000), name="dm_config_sample_range"),
-            models.CheckConstraint(condition=Q(retention_days__gte=1, retention_days__lte=3650), name="dm_config_retention_range"),
+            models.CheckConstraint(
+                condition=Q(retention_days__gte=1, retention_days__lte=3650), name="dm_config_retention_range"
+            ),
         ]
 
     def clean(self) -> None:
@@ -527,9 +613,17 @@ class DataMigrationConfiguration(MutableTenantModel):
         return {
             field: getattr(self, field)
             for field in (
-                "source_row_limit", "batch_size", "connect_timeout_seconds", "read_timeout_seconds",
-                "retry_count", "issue_sample_limit", "preview_row_limit", "retention_days",
-                "enabled_roles", "rollout_percentage", "enabled",
+                "source_row_limit",
+                "batch_size",
+                "connect_timeout_seconds",
+                "read_timeout_seconds",
+                "retry_count",
+                "issue_sample_limit",
+                "preview_row_limit",
+                "retention_days",
+                "enabled_roles",
+                "rollout_percentage",
+                "enabled",
                 "allowed_target_adapters",
             )
         }
@@ -538,7 +632,9 @@ class DataMigrationConfiguration(MutableTenantModel):
 class DataMigrationConfigurationAudit(AppendOnlyTenantModel):
     """Immutable configuration version used for audit, export, and rollback."""
 
-    configuration = models.ForeignKey(DataMigrationConfiguration, on_delete=models.PROTECT, related_name="audit_versions")
+    configuration = models.ForeignKey(
+        DataMigrationConfiguration, on_delete=models.PROTECT, related_name="audit_versions"
+    )
     version = models.PositiveIntegerField()
     before = models.JSONField(default=dict, blank=True)
     after = models.JSONField()
@@ -548,17 +644,25 @@ class DataMigrationConfigurationAudit(AppendOnlyTenantModel):
 
     class Meta:
         db_table = "data_migration_configuration_audits"
-        constraints = [models.UniqueConstraint(fields=("configuration", "version"), name="dm_config_audit_version_uniq")]
+        constraints = [
+            models.UniqueConstraint(fields=("configuration", "version"), name="dm_config_audit_version_uniq")
+        ]
         indexes = [models.Index(fields=("tenant_id", "configuration", "-version"), name="dm_config_audit_version_idx")]
 
     def clean(self) -> None:
         super().clean()
-        if self.configuration_id and not DataMigrationConfiguration.objects.filter(id=self.configuration_id, tenant_id=self.tenant_id).exists():
+        if (
+            self.configuration_id
+            and not DataMigrationConfiguration.objects.filter(
+                id=self.configuration_id, tenant_id=self.tenant_id
+            ).exists()
+        ):
             raise ValidationError({"configuration": "Configuration must belong to the same tenant."})
 
 
 class MigrationLog(MutableTenantModel):
     """Preserved read-only-compatible legacy execution log."""
+
     created_by = models.UUIDField()
     updated_by = models.UUIDField(null=True, blank=True)
     job = models.ForeignKey(MigrationJob, on_delete=models.CASCADE, related_name="legacy_logs")
@@ -573,6 +677,7 @@ class MigrationLog(MutableTenantModel):
 
 class MigrationValidation(MutableTenantModel):
     """Preserved legacy validation outcome; new rules use ValidationRule."""
+
     created_by = models.UUIDField()
     updated_by = models.UUIDField(null=True, blank=True)
     job = models.ForeignKey(MigrationJob, on_delete=models.CASCADE, related_name="legacy_validations")
@@ -589,6 +694,7 @@ class MigrationValidation(MutableTenantModel):
 
 class LegacyMigrationRollback(MutableTenantModel):
     """Preserved ambiguous v1 checkpoints; never executable."""
+
     created_by = models.UUIDField()
     updated_by = models.UUIDField(null=True, blank=True)
     job = models.ForeignKey(MigrationJob, on_delete=models.CASCADE, related_name="legacy_rollbacks")
@@ -599,8 +705,19 @@ class LegacyMigrationRollback(MutableTenantModel):
 
 
 __all__ = [
-    "DataMigrationConfiguration", "DataMigrationConfigurationAudit", "ExternalConnection",
-    "LegacyMigrationRollback", "MigrationChange", "MigrationJob", "MigrationJobVersion",
-    "MigrationLog", "MigrationMapping", "MigrationRollback", "MigrationRun", "MigrationRunIssue",
-    "MigrationValidation", "ValidationRule", "generate_uuid",
+    "DataMigrationConfiguration",
+    "DataMigrationConfigurationAudit",
+    "ExternalConnection",
+    "LegacyMigrationRollback",
+    "MigrationChange",
+    "MigrationJob",
+    "MigrationJobVersion",
+    "MigrationLog",
+    "MigrationMapping",
+    "MigrationRollback",
+    "MigrationRun",
+    "MigrationRunIssue",
+    "MigrationValidation",
+    "ValidationRule",
+    "generate_uuid",
 ]

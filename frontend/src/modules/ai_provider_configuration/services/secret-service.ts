@@ -1,10 +1,10 @@
-import { apiClient } from '@/services/api-client';
+import { apiClient } from "@/services/api-client";
 import {
   ENDPOINTS,
   type ReEncryptRequest,
   type ReEncryptResponse,
   type RotateKeyResponse,
-} from '../contracts';
+} from "../contracts";
 
 export const secretService = {
   rotateKey: () => apiClient.post<RotateKeyResponse>(ENDPOINTS.SECRETS.ROTATE_KEY),

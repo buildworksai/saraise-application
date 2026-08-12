@@ -7,8 +7,8 @@ import time
 import uuid
 from collections.abc import Mapping
 from datetime import timedelta
-from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP
-from typing import Any
+from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
+from typing import Any, cast
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -21,6 +21,7 @@ from src.core.async_jobs.models import AsyncJob
 from src.core.async_jobs.services import enqueue
 from src.core.state_machine import StateMachine
 
+from .integrations import Capability, IntegrationUnavailable, InventoryAvailabilityRequest, get_integration_registry
 from .models import (
     Customer,
     DeliveryNote,
@@ -32,12 +33,6 @@ from .models import (
     SalesDocumentSequence,
     SalesOrder,
     SalesOrderLine,
-)
-from .integrations import (
-    Capability,
-    IntegrationUnavailable,
-    InventoryAvailabilityRequest,
-    get_integration_registry,
 )
 
 logger = logging.getLogger("saraise.sales_management")
@@ -83,7 +78,18 @@ def _uuid(value: uuid.UUID | str, field: str) -> uuid.UUID:
 
 
 def _active(model: type[Any], tenant_id: uuid.UUID) -> QuerySet[Any]:
-    return model.objects.for_tenant(tenant_id).filter(deleted_at__isnull=True)
+    return cast(QuerySet[Any], model.objects.for_tenant(tenant_id).filter(deleted_at__isnull=True))
+
+
+def _bool_filter(value: Any, field: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    raise ValidationError({field: "A valid boolean is required."})
 
 
 def _server_environment(environment: str | None = None) -> str:
@@ -119,7 +125,7 @@ def _config(tenant_id: uuid.UUID, environment: str | None = None) -> SalesConfig
     env = _server_environment(environment)
     config = _active(SalesConfiguration, tenant_id).filter(environment=env).first()
     if config is not None:
-        return config
+        return cast(SalesConfiguration, config)
     # Creation is a deterministic platform bootstrap, not a client-selected policy.
     actor = uuid.UUID(int=0)
     try:
@@ -143,7 +149,7 @@ def _config(tenant_id: uuid.UUID, environment: str | None = None) -> SalesConfig
         existing = _active(SalesConfiguration, tenant_id).filter(environment=env).first()
         if existing is None:
             raise
-        return existing
+        return cast(SalesConfiguration, existing)
 
 
 def _round(value: Decimal, config: SalesConfiguration) -> Decimal:
@@ -361,7 +367,7 @@ class CustomerService:
         filters: Mapping[str, Any] | None = None,
         pagination: Any = None,
         ordering: str = "customer_code",
-    ):
+    ) -> QuerySet[Any]:
         del pagination
         qs = _active(Customer, _uuid(tenant_id, "tenant_id"))
         filters = filters or {}
@@ -370,9 +376,10 @@ class CustomerService:
             qs = qs.filter(
                 Q(customer_code__icontains=search) | Q(customer_name__icontains=search) | Q(email__icontains=search)
             )
-        for key in ("is_active", "currency"):
-            if filters.get(key) not in (None, ""):
-                qs = qs.filter(**{key: filters[key]})
+        if filters.get("is_active") not in (None, ""):
+            qs = qs.filter(is_active=_bool_filter(filters["is_active"], "is_active"))
+        if filters.get("currency") not in (None, ""):
+            qs = qs.filter(currency=str(filters["currency"]).strip().upper())
         allowed = {"customer_code", "customer_name", "created_at"}
         selected = ordering if ordering.removeprefix("-") in allowed else "customer_code"
         return qs.order_by(selected, "id")
@@ -380,13 +387,19 @@ class CustomerService:
     @staticmethod
     def get_customer(tenant_id: uuid.UUID, customer_id: uuid.UUID) -> Customer:
         try:
-            return _active(Customer, _uuid(tenant_id, "tenant_id")).get(pk=customer_id)
+            return cast(Customer, _active(Customer, _uuid(tenant_id, "tenant_id")).get(pk=customer_id))
         except Customer.DoesNotExist as exc:
             raise LookupError("Customer not found.") from exc
 
     @staticmethod
     @transaction.atomic
-    def create_customer(tenant_id, actor_id, correlation_id, idempotency_key, data) -> Customer:
+    def create_customer(
+        tenant_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+        data: Mapping[str, Any],
+    ) -> Customer:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -394,7 +407,7 @@ class CustomerService:
         )
         existing = _idempotent_existing(tenant, idempotency_key, "sales_management.customer.created.v1", Customer)
         if existing is not None:
-            return existing
+            return cast(Customer, existing)
         start = time.monotonic()
         values = dict(data)
         values.pop("tenant_id", None)
@@ -408,7 +421,14 @@ class CustomerService:
 
     @staticmethod
     @transaction.atomic
-    def update_customer(tenant_id, customer_id, actor_id, correlation_id, expected_version, data) -> Customer:
+    def update_customer(
+        tenant_id: uuid.UUID | str,
+        customer_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        expected_version: int,
+        data: Mapping[str, Any],
+    ) -> Customer:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -435,11 +455,17 @@ class CustomerService:
         customer.lock_version += 1
         _clean_save(customer)
         _log("customer.updated", tenant, actor, correlation, customer, start)
-        return customer
+        return cast(Customer, customer)
 
     @staticmethod
     @transaction.atomic
-    def archive_customer(tenant_id, customer_id, actor_id, correlation_id, expected_version) -> Customer:
+    def archive_customer(
+        tenant_id: uuid.UUID | str,
+        customer_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        expected_version: int,
+    ) -> Customer:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -465,12 +491,17 @@ class CustomerService:
         customer.lock_version += 1
         _clean_save(customer)
         _log("customer.archived", tenant, actor, correlation, customer, start)
-        return customer
+        return cast(Customer, customer)
 
 
 class QuotationService:
     @staticmethod
-    def list_quotations(tenant_id, filters=None, pagination=None, ordering="-quotation_date"):
+    def list_quotations(
+        tenant_id: uuid.UUID | str,
+        filters: Mapping[str, Any] | None = None,
+        pagination: Any = None,
+        ordering: str = "-quotation_date",
+    ) -> QuerySet[Any]:
         del pagination
         qs = _active(Quotation, _uuid(tenant_id, "tenant_id"))
         filters = filters or {}
@@ -493,16 +524,18 @@ class QuotationService:
         return qs.select_related("customer").order_by(selected, "id")
 
     @staticmethod
-    def get_quotation(tenant_id, quotation_id):
+    def get_quotation(tenant_id: uuid.UUID | str, quotation_id: uuid.UUID | str) -> Quotation:
         obj = (
             _active(Quotation, _uuid(tenant_id, "tenant_id")).select_related("customer").filter(pk=quotation_id).first()
         )
         if obj is None:
             raise LookupError("Quotation not found.")
-        return obj
+        return cast(Quotation, obj)
 
     @staticmethod
-    def preview_quotation(tenant_id, actor_id, data):
+    def preview_quotation(
+        tenant_id: uuid.UUID | str, actor_id: uuid.UUID | str, data: Mapping[str, Any]
+    ) -> dict[str, Any]:
         del actor_id
         lines, totals = _calculate_lines(_uuid(tenant_id, "tenant_id"), list(data.get("lines", [])))
         return {
@@ -513,7 +546,13 @@ class QuotationService:
 
     @staticmethod
     @transaction.atomic
-    def create_quotation(tenant_id, actor_id, correlation_id, idempotency_key, data):
+    def create_quotation(
+        tenant_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+        data: Mapping[str, Any],
+    ) -> Quotation:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -521,7 +560,7 @@ class QuotationService:
         )
         existing = _idempotent_existing(tenant, idempotency_key, "sales_management.quotation.created.v1", Quotation)
         if existing is not None:
-            return existing
+            return cast(Quotation, existing)
         customer = _active(Customer, tenant).filter(pk=data.get("customer_id"), is_active=True).first()
         if customer is None:
             raise LookupError("Customer not found.")
@@ -529,7 +568,7 @@ class QuotationService:
         number = _allocate_number(tenant, "quotation")
         existing = _idempotent_existing(tenant, idempotency_key, "sales_management.quotation.created.v1", Quotation)
         if existing is not None:
-            return existing
+            return cast(Quotation, existing)
         values = {k: v for k, v in dict(data).items() if k in {"quotation_date", "valid_until", "currency", "notes"}}
         config = _config(tenant)
         values.setdefault("currency", config.default_currency)
@@ -555,7 +594,14 @@ class QuotationService:
 
     @staticmethod
     @transaction.atomic
-    def update_draft(tenant_id, quotation_id, actor_id, correlation_id, expected_version, data):
+    def update_draft(
+        tenant_id: uuid.UUID | str,
+        quotation_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        expected_version: int,
+        data: Mapping[str, Any],
+    ) -> Quotation:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -591,11 +637,17 @@ class QuotationService:
                     tenant_id=tenant, quotation=obj, created_by=actor, updated_by=actor, **line
                 )
         _log("quotation.updated", tenant, actor, correlation, obj, start)
-        return obj
+        return cast(Quotation, obj)
 
     @staticmethod
     @transaction.atomic
-    def archive_draft(tenant_id, quotation_id, actor_id, correlation_id, expected_version):
+    def archive_draft(
+        tenant_id: uuid.UUID | str,
+        quotation_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        expected_version: int,
+    ) -> Quotation:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -614,11 +666,20 @@ class QuotationService:
         obj.lock_version += 1
         _clean_save(obj)
         _log("quotation.archived", tenant, actor, correlation, obj, start)
-        return obj
+        return cast(Quotation, obj)
 
     @staticmethod
     @transaction.atomic
-    def _transition(tenant_id, quotation_id, actor_id, correlation_id, idempotency_key, command, event_type, reason=""):
+    def _transition(
+        tenant_id: uuid.UUID | str,
+        quotation_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+        command: str,
+        event_type: str,
+        reason: str = "",
+    ) -> Quotation:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -642,7 +703,13 @@ class QuotationService:
         return obj
 
     @staticmethod
-    def send(tenant_id, quotation_id, actor_id, correlation_id, idempotency_key):
+    def send(
+        tenant_id: uuid.UUID | str,
+        quotation_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+    ) -> Quotation:
         return QuotationService._transition(
             tenant_id,
             quotation_id,
@@ -654,7 +721,13 @@ class QuotationService:
         )
 
     @staticmethod
-    def accept(tenant_id, quotation_id, actor_id, correlation_id, idempotency_key):
+    def accept(
+        tenant_id: uuid.UUID | str,
+        quotation_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+    ) -> Quotation:
         return QuotationService._transition(
             tenant_id,
             quotation_id,
@@ -666,7 +739,14 @@ class QuotationService:
         )
 
     @staticmethod
-    def reject(tenant_id, quotation_id, actor_id, correlation_id, idempotency_key, reason):
+    def reject(
+        tenant_id: uuid.UUID | str,
+        quotation_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+        reason: str,
+    ) -> Quotation:
         if not str(reason).strip():
             raise ValidationError({"reason": "A rejection reason is required."})
         return QuotationService._transition(
@@ -681,7 +761,13 @@ class QuotationService:
         )
 
     @staticmethod
-    def expire(tenant_id, quotation_id, actor_id, correlation_id, idempotency_key):
+    def expire(
+        tenant_id: uuid.UUID | str,
+        quotation_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+    ) -> Quotation:
         return QuotationService._transition(
             tenant_id,
             quotation_id,
@@ -694,7 +780,13 @@ class QuotationService:
 
     @staticmethod
     @transaction.atomic
-    def revise(tenant_id, quotation_id, actor_id, correlation_id, idempotency_key):
+    def revise(
+        tenant_id: uuid.UUID | str,
+        quotation_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+    ) -> Quotation:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -702,17 +794,21 @@ class QuotationService:
         )
         existing = _idempotent_existing(tenant, idempotency_key, "sales_management.quotation.created.v1", Quotation)
         if existing is not None:
-            return existing
+            return cast(Quotation, existing)
         original = _active(Quotation, tenant).select_for_update().filter(pk=quotation_id).first()
         if original is None:
             raise LookupError("Quotation not found.")
         if original.status in ("draft", "converted"):
             raise ResourceConflict("This quotation cannot be revised.")
+        revision_date = timezone.localdate()
+        revision_valid_until = original.valid_until
+        if revision_valid_until < revision_date:
+            revision_valid_until = revision_date + timedelta(days=_config(tenant).quotation_validity_days)
         revision = Quotation.objects.create(
             tenant_id=tenant,
             quotation_number=original.quotation_number,
-            quotation_date=timezone.localdate(),
-            valid_until=original.valid_until,
+            quotation_date=revision_date,
+            valid_until=revision_valid_until,
             customer=original.customer,
             currency=original.currency,
             subtotal_amount=original.subtotal_amount,
@@ -750,7 +846,13 @@ class QuotationService:
 
     @staticmethod
     @transaction.atomic
-    def convert_to_sales_order(tenant_id, quotation_id, actor_id, correlation_id, idempotency_key):
+    def convert_to_sales_order(
+        tenant_id: uuid.UUID | str,
+        quotation_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+    ) -> SalesOrder:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -758,7 +860,7 @@ class QuotationService:
         )
         existing = _idempotent_existing(tenant, idempotency_key, "sales_management.quotation.converted.v1", SalesOrder)
         if existing is not None:
-            return existing
+            return cast(SalesOrder, existing)
         quote = _active(Quotation, tenant).select_for_update().filter(pk=quotation_id).first()
         if quote is None:
             raise LookupError("Quotation not found.")
@@ -827,7 +929,12 @@ class SalesOrderService:
     inventory_gateway: Any = None
 
     @staticmethod
-    def list_orders(tenant_id, filters=None, pagination=None, ordering="-order_date"):
+    def list_orders(
+        tenant_id: uuid.UUID | str,
+        filters: Mapping[str, Any] | None = None,
+        pagination: Any = None,
+        ordering: str = "-order_date",
+    ) -> QuerySet[Any]:
         del pagination
         qs = _active(SalesOrder, _uuid(tenant_id, "tenant_id"))
         filters = filters or {}
@@ -850,7 +957,7 @@ class SalesOrderService:
         return qs.select_related("customer", "quotation").order_by(selected, "id")
 
     @staticmethod
-    def get_order(tenant_id, order_id):
+    def get_order(tenant_id: uuid.UUID | str, order_id: uuid.UUID | str) -> SalesOrder:
         obj = (
             _active(SalesOrder, _uuid(tenant_id, "tenant_id"))
             .select_related("customer", "quotation")
@@ -859,11 +966,17 @@ class SalesOrderService:
         )
         if obj is None:
             raise LookupError("Sales order not found.")
-        return obj
+        return cast(SalesOrder, obj)
 
     @staticmethod
     @transaction.atomic
-    def create_order(tenant_id, actor_id, correlation_id, idempotency_key, data):
+    def create_order(
+        tenant_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+        data: Mapping[str, Any],
+    ) -> SalesOrder:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -871,7 +984,7 @@ class SalesOrderService:
         )
         existing = _idempotent_existing(tenant, idempotency_key, "sales_management.order.created.v1", SalesOrder)
         if existing is not None:
-            return existing
+            return cast(SalesOrder, existing)
         customer = _active(Customer, tenant).filter(pk=data.get("customer_id"), is_active=True).first()
         if customer is None:
             raise LookupError("Customer not found.")
@@ -915,7 +1028,14 @@ class SalesOrderService:
 
     @staticmethod
     @transaction.atomic
-    def update_draft(tenant_id, order_id, actor_id, correlation_id, expected_version, data):
+    def update_draft(
+        tenant_id: uuid.UUID | str,
+        order_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        expected_version: int,
+        data: Mapping[str, Any],
+    ) -> SalesOrder:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -952,11 +1072,17 @@ class SalesOrderService:
                     tenant_id=tenant, sales_order=obj, created_by=actor, updated_by=actor, **line
                 )
         _log("order.updated", tenant, actor, correlation, obj, start)
-        return obj
+        return cast(SalesOrder, obj)
 
     @staticmethod
     @transaction.atomic
-    def archive_draft(tenant_id, order_id, actor_id, correlation_id, expected_version):
+    def archive_draft(
+        tenant_id: uuid.UUID | str,
+        order_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        expected_version: int,
+    ) -> SalesOrder:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -975,13 +1101,21 @@ class SalesOrderService:
         obj.lock_version += 1
         _clean_save(obj)
         _log("order.archived", tenant, actor, correlation, obj, start)
-        return obj
+        return cast(SalesOrder, obj)
 
     @staticmethod
     @transaction.atomic
     def _transition(
-        tenant_id, order_id, actor_id, correlation_id, idempotency_key, command, *, reason="", invoice_id=None
-    ):
+        tenant_id: uuid.UUID | str,
+        order_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+        command: str,
+        *,
+        reason: str = "",
+        invoice_id: uuid.UUID | str | None = None,
+    ) -> SalesOrder:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -1062,43 +1196,93 @@ class SalesOrderService:
         return obj
 
     @staticmethod
-    def confirm(tenant_id, order_id, actor_id, correlation_id, idempotency_key):
+    def confirm(
+        tenant_id: uuid.UUID | str,
+        order_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+    ) -> SalesOrder:
         return SalesOrderService._transition(tenant_id, order_id, actor_id, correlation_id, idempotency_key, "confirm")
 
     @staticmethod
-    def start_picking(tenant_id, order_id, actor_id, correlation_id, idempotency_key):
+    def start_picking(
+        tenant_id: uuid.UUID | str,
+        order_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+    ) -> SalesOrder:
         return SalesOrderService._transition(
             tenant_id, order_id, actor_id, correlation_id, idempotency_key, "start_picking"
         )
 
     @staticmethod
-    def start_packing(tenant_id, order_id, actor_id, correlation_id, idempotency_key):
+    def start_packing(
+        tenant_id: uuid.UUID | str,
+        order_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+    ) -> SalesOrder:
         return SalesOrderService._transition(
             tenant_id, order_id, actor_id, correlation_id, idempotency_key, "start_packing"
         )
 
     @staticmethod
-    def mark_ready(tenant_id, order_id, actor_id, correlation_id, idempotency_key):
+    def mark_ready(
+        tenant_id: uuid.UUID | str,
+        order_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+    ) -> SalesOrder:
         return SalesOrderService._transition(
             tenant_id, order_id, actor_id, correlation_id, idempotency_key, "mark_ready"
         )
 
     @staticmethod
-    def ship(tenant_id, order_id, actor_id, correlation_id, idempotency_key):
+    def ship(
+        tenant_id: uuid.UUID | str,
+        order_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+    ) -> SalesOrder:
         return SalesOrderService._transition(tenant_id, order_id, actor_id, correlation_id, idempotency_key, "ship")
 
     @staticmethod
-    def deliver(tenant_id, order_id, actor_id, correlation_id, idempotency_key):
+    def deliver(
+        tenant_id: uuid.UUID | str,
+        order_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+    ) -> SalesOrder:
         return SalesOrderService._transition(tenant_id, order_id, actor_id, correlation_id, idempotency_key, "deliver")
 
     @staticmethod
-    def mark_invoiced(tenant_id, order_id, actor_id, correlation_id, idempotency_key, invoice_id):
+    def mark_invoiced(
+        tenant_id: uuid.UUID | str,
+        order_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+        invoice_id: uuid.UUID | str,
+    ) -> SalesOrder:
         return SalesOrderService._transition(
             tenant_id, order_id, actor_id, correlation_id, idempotency_key, "mark_invoiced", invoice_id=invoice_id
         )
 
     @staticmethod
-    def cancel(tenant_id, order_id, actor_id, correlation_id, idempotency_key, reason):
+    def cancel(
+        tenant_id: uuid.UUID | str,
+        order_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+        reason: str,
+    ) -> SalesOrder:
         if not str(reason).strip():
             raise ValidationError({"reason": "A cancellation reason is required."})
         return SalesOrderService._transition(
@@ -1108,7 +1292,12 @@ class SalesOrderService:
 
 class DeliveryNoteService:
     @staticmethod
-    def list_delivery_notes(tenant_id, filters=None, pagination=None, ordering="-delivery_date"):
+    def list_delivery_notes(
+        tenant_id: uuid.UUID | str,
+        filters: Mapping[str, Any] | None = None,
+        pagination: Any = None,
+        ordering: str = "-delivery_date",
+    ) -> QuerySet[Any]:
         del pagination
         qs = _active(DeliveryNote, _uuid(tenant_id, "tenant_id"))
         filters = filters or {}
@@ -1126,7 +1315,7 @@ class DeliveryNoteService:
         return qs.select_related("sales_order").order_by(selected, "id")
 
     @staticmethod
-    def get_delivery_note(tenant_id, delivery_note_id):
+    def get_delivery_note(tenant_id: uuid.UUID | str, delivery_note_id: uuid.UUID | str) -> DeliveryNote:
         obj = (
             _active(DeliveryNote, _uuid(tenant_id, "tenant_id"))
             .select_related("sales_order")
@@ -1135,11 +1324,17 @@ class DeliveryNoteService:
         )
         if obj is None:
             raise LookupError("Delivery note not found.")
-        return obj
+        return cast(DeliveryNote, obj)
 
     @staticmethod
     @transaction.atomic
-    def create_delivery_note(tenant_id, actor_id, correlation_id, idempotency_key, data):
+    def create_delivery_note(
+        tenant_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+        data: Mapping[str, Any],
+    ) -> DeliveryNote:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -1147,7 +1342,7 @@ class DeliveryNoteService:
         )
         existing = _idempotent_existing(tenant, idempotency_key, "sales_management.delivery.created.v1", DeliveryNote)
         if existing is not None:
-            return existing
+            return cast(DeliveryNote, existing)
         order = (
             _active(SalesOrder, tenant)
             .filter(
@@ -1205,7 +1400,14 @@ class DeliveryNoteService:
 
     @staticmethod
     @transaction.atomic
-    def update_draft(tenant_id, delivery_note_id, actor_id, correlation_id, expected_version, data):
+    def update_draft(
+        tenant_id: uuid.UUID | str,
+        delivery_note_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        expected_version: int,
+        data: Mapping[str, Any],
+    ) -> DeliveryNote:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -1260,11 +1462,17 @@ class DeliveryNoteService:
                     **line,
                 )
         _log("delivery.updated", tenant, actor, correlation, obj, start)
-        return obj
+        return cast(DeliveryNote, obj)
 
     @staticmethod
     @transaction.atomic
-    def archive_draft(tenant_id, delivery_note_id, actor_id, correlation_id, expected_version):
+    def archive_draft(
+        tenant_id: uuid.UUID | str,
+        delivery_note_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        expected_version: int,
+    ) -> DeliveryNote:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -1283,11 +1491,17 @@ class DeliveryNoteService:
         obj.lock_version += 1
         _clean_save(obj)
         _log("delivery.archived", tenant, actor, correlation, obj, start)
-        return obj
+        return cast(DeliveryNote, obj)
 
     @staticmethod
     @transaction.atomic
-    def complete(tenant_id, delivery_note_id, actor_id, correlation_id, idempotency_key):
+    def complete(
+        tenant_id: uuid.UUID | str,
+        delivery_note_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+    ) -> DeliveryNote:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -1299,7 +1513,7 @@ class DeliveryNoteService:
         if note.status == "completed" and any(
             record.get("transition_key") == idempotency_key for record in note.transition_history
         ):
-            return note
+            return cast(DeliveryNote, note)
         order = _active(SalesOrder, tenant).select_for_update().filter(pk=note.sales_order_id).first()
         if order is None:
             raise LookupError("Sales order not found.")
@@ -1341,7 +1555,13 @@ class DeliveryNoteService:
 
     @staticmethod
     @transaction.atomic
-    def cancel(tenant_id, delivery_note_id, actor_id, correlation_id, idempotency_key):
+    def cancel(
+        tenant_id: uuid.UUID | str,
+        delivery_note_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        idempotency_key: str,
+    ) -> DeliveryNote:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -1366,11 +1586,16 @@ class DeliveryNoteService:
 
 class SalesConfigurationService:
     @staticmethod
-    def get_current(tenant_id, environment):
+    def get_current(tenant_id: uuid.UUID | str, environment: str | None) -> SalesConfiguration:
         return _config(_uuid(tenant_id, "tenant_id"), environment)
 
     @staticmethod
-    def preview_change(tenant_id, actor_id, environment, proposed_values):
+    def preview_change(
+        tenant_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        environment: str | None,
+        proposed_values: Mapping[str, Any],
+    ) -> dict[str, Any]:
         del actor_id
         current = _config(_uuid(tenant_id, "tenant_id"), environment)
         values = SalesConfigurationService._validate(current, proposed_values)
@@ -1388,9 +1613,11 @@ class SalesConfigurationService:
                 {
                     (
                         "quotation"
-                        if "quotation" in item["field"]
+                        if "quotation" in str(item["field"])
                         else (
-                            "pricing" if "discount" in item["field"] or "tax" in item["field"] else "document_numbering"
+                            "pricing"
+                            if "discount" in str(item["field"]) or "tax" in str(item["field"])
+                            else "document_numbering"
                         )
                     )
                     for item in diff
@@ -1401,7 +1628,7 @@ class SalesConfigurationService:
         }
 
     @staticmethod
-    def _validate(current, proposed_values):
+    def _validate(current: SalesConfiguration, proposed_values: Mapping[str, Any]) -> dict[str, Any]:
         from .serializers import SalesConfigurationWriteSerializer
 
         serializer = SalesConfigurationWriteSerializer(data=dict(proposed_values), partial=True)
@@ -1415,7 +1642,15 @@ class SalesConfigurationService:
 
     @staticmethod
     @transaction.atomic
-    def apply_change(tenant_id, actor_id, correlation_id, environment, expected_version, proposed_values, reason):
+    def apply_change(
+        tenant_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        environment: str | None,
+        expected_version: int,
+        proposed_values: Mapping[str, Any],
+        reason: str,
+    ) -> SalesConfiguration:
         tenant, actor, correlation = (
             _uuid(tenant_id, "tenant_id"),
             _uuid(actor_id, "actor_id"),
@@ -1456,7 +1691,7 @@ class SalesConfigurationService:
         return current
 
     @staticmethod
-    def list_versions(tenant_id, environment, pagination=None):
+    def list_versions(tenant_id: uuid.UUID | str, environment: str | None, pagination: Any = None) -> QuerySet[Any]:
         del pagination
         config = _config(_uuid(tenant_id, "tenant_id"), environment)
         return (
@@ -1466,7 +1701,7 @@ class SalesConfigurationService:
         )
 
     @staticmethod
-    def get_version(tenant_id, environment, version):
+    def get_version(tenant_id: uuid.UUID | str, environment: str | None, version: int) -> SalesConfigurationVersion:
         config = _config(_uuid(tenant_id, "tenant_id"), environment)
         obj = (
             SalesConfigurationVersion.objects.for_tenant(config.tenant_id)
@@ -1475,17 +1710,25 @@ class SalesConfigurationService:
         )
         if obj is None:
             raise LookupError("Configuration version not found.")
-        return obj
+        return cast(SalesConfigurationVersion, obj)
 
     @staticmethod
-    def rollback(tenant_id, actor_id, correlation_id, environment, target_version, expected_version, reason):
+    def rollback(
+        tenant_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        environment: str | None,
+        target_version: int,
+        expected_version: int,
+        reason: str,
+    ) -> SalesConfiguration:
         version = SalesConfigurationService.get_version(tenant_id, environment, target_version)
         return SalesConfigurationService.apply_change(
             tenant_id, actor_id, correlation_id, environment, expected_version, version.snapshot, reason
         )
 
     @staticmethod
-    def export_configuration(tenant_id, environment):
+    def export_configuration(tenant_id: uuid.UUID | str, environment: str | None) -> dict[str, Any]:
         config = _config(_uuid(tenant_id, "tenant_id"), environment)
         return {
             "schema_version": 1,
@@ -1496,8 +1739,15 @@ class SalesConfigurationService:
 
     @staticmethod
     def import_configuration(
-        tenant_id, actor_id, correlation_id, environment, expected_version, document, dry_run, reason
-    ):
+        tenant_id: uuid.UUID | str,
+        actor_id: uuid.UUID | str,
+        correlation_id: uuid.UUID | str,
+        environment: str | None,
+        expected_version: int,
+        document: Mapping[str, Any],
+        dry_run: bool,
+        reason: str,
+    ) -> dict[str, Any] | SalesConfiguration:
         if not isinstance(document, Mapping) or set(document) != {
             "schema_version",
             "environment",

@@ -1,1 +1,1 @@
-export { EditConfigurationPage } from './CompliancePages';
+export { EditConfigurationPage } from "./CompliancePages";

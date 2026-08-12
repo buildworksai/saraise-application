@@ -1,1 +1,1 @@
-export { EliminationListPage } from './workspaces';
+export { EliminationListPage } from "./workspaces";

@@ -14,6 +14,7 @@ from typing import Optional, Tuple
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
 from cryptography.hazmat.primitives.serialization import (
     Encoding,
     NoEncryption,
@@ -29,13 +30,9 @@ from .module_manifest_schema import ModuleManifest
 class SigningError(Exception):
     """Signing error."""
 
-    pass
-
 
 class VerificationError(Exception):
     """Verification error."""
-
-    pass
 
 
 class ManifestSigner:
@@ -63,6 +60,22 @@ class ManifestSigner:
         self.public_key = public_key
         self.hmac_secret = hmac_secret
 
+    @staticmethod
+    def _load_rsa_private_key(private_key: bytes) -> RSAPrivateKey:
+        """Load a PEM private key and reject non-RSA key material."""
+        key = load_pem_private_key(private_key, password=None, backend=default_backend())
+        if not isinstance(key, RSAPrivateKey):
+            raise SigningError("RS256 signing requires an RSA private key")
+        return key
+
+    @staticmethod
+    def _load_rsa_public_key(public_key: bytes) -> RSAPublicKey:
+        """Load a PEM public key and reject non-RSA key material."""
+        key = load_pem_public_key(public_key, backend=default_backend())
+        if not isinstance(key, RSAPublicKey):
+            raise VerificationError("RS256 verification requires an RSA public key")
+        return key
+
     def sign(self, manifest: ModuleManifest, algorithm: str = "RS256") -> Tuple[str, str]:
         """Sign a manifest.
 
@@ -83,7 +96,7 @@ class ManifestSigner:
                 raise SigningError("Private key required for RS256 signing")
 
             try:
-                key = load_pem_private_key(self.private_key, password=None, backend=default_backend())
+                key = self._load_rsa_private_key(self.private_key)
                 signature_bytes = key.sign(
                     content_hash.encode(),
                     padding.PSS(
@@ -134,7 +147,7 @@ class ManifestSigner:
                 raise VerificationError("Public key required for RS256 verification")
 
             try:
-                key = load_pem_public_key(self.public_key, backend=default_backend())
+                key = self._load_rsa_public_key(self.public_key)
                 signature_bytes = base64.b64decode(signature)
                 key.verify(
                     signature_bytes,

@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final, Mapping
+from typing import TYPE_CHECKING, Any, ClassVar, Final, Mapping
 from uuid import UUID
 
-from rest_framework.authentication import SessionAuthentication
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import BaseAuthentication, SessionAuthentication
+from rest_framework.permissions import BasePermission, IsAuthenticated
 
 from src.core.access.permissions import RequiresAccess
 from src.core.auth_utils import get_user_tenant_id
+
+if TYPE_CHECKING:
+    from rest_framework.permissions import _PermissionClass
 
 PERMISSIONS: Final[tuple[str, ...]] = (
     "compliance.framework:read",
@@ -60,9 +64,9 @@ READ_PERMISSIONS: Final[frozenset[str]] = frozenset(
     if permission.endswith(":read") or permission.endswith(":validate") or permission.endswith(":export")
 )
 PERMISSION_QUOTAS: Final[dict[str, str]] = {
-    permission: "compliance_management.api_reads"
-    if permission in READ_PERMISSIONS
-    else "compliance_management.api_writes"
+    permission: (
+        "compliance_management.api_reads" if permission in READ_PERMISSIONS else "compliance_management.api_writes"
+    )
     for permission in PERMISSIONS
 }
 
@@ -157,6 +161,7 @@ def requirement_for(viewset: str, action: str, method: str | None = None) -> Acc
             return qualified
     return ACTION_ACCESS.get(f"{viewset}.{action}")
 
+
 FRAMEWORK_ACTION_PERMISSIONS: Final[dict[str, str]] = {
     "list": "compliance.framework:read",
     "retrieve": "compliance.framework:read",
@@ -245,13 +250,14 @@ class ComplianceActionAccessMixin:
     denies the request.
     """
 
-    authentication_classes = (StrictSessionAuthentication,)
-    permission_classes = (IsAuthenticated, RequiresAccess)
-    action_permissions: dict[str, str] = {}
-    action_quotas: dict[str, str] = {}
-    quota_cost = 1
+    authentication_classes: ClassVar[Sequence[type[BaseAuthentication]]] = (StrictSessionAuthentication,)
+    permission_classes: ClassVar[Sequence[_PermissionClass]] = (IsAuthenticated, RequiresAccess)
+    action_permissions: ClassVar[dict[str, str]] = {}
+    action_quotas: ClassVar[dict[str, str]] = {}
+    quota_cost: int = 1
+    request: Any
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         tenant_value = get_user_tenant_id(getattr(self.request, "user", None))
         try:
             self.request.tenant_id = UUID(str(tenant_value)) if tenant_value is not None else None

@@ -1,1 +1,1 @@
-export {ProjectMemberDetailPage} from './ModulePages';
+export { ProjectMemberDetailPage } from "./ModulePages";

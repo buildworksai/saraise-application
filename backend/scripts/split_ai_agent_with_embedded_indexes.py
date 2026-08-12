@@ -3,6 +3,7 @@
 Split ai_agent_management migration with indexes EMBEDDED in CreateModel operations.
 This avoids the AddIndex state management issue.
 """
+
 import re
 from pathlib import Path
 

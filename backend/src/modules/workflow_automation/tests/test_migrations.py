@@ -39,19 +39,23 @@ def test_forward_reverse_forward_preserves_existing_workflow() -> None:
         status="draft",
         trigger_type="manual",
     )
-    step = LegacyStep.objects.create(
-        tenant_id=None if hasattr(LegacyStep, "tenant_id") else None,
-        workflow=workflow,
-        name="Approve",
-        step_type="approval",
-        order=1,
-        config={},
-    ) if hasattr(LegacyStep, "tenant_id") else LegacyStep.objects.create(
-        workflow=workflow,
-        name="Approve",
-        step_type="approval",
-        order=1,
-        config={},
+    step = (
+        LegacyStep.objects.create(
+            tenant_id=None if hasattr(LegacyStep, "tenant_id") else None,
+            workflow=workflow,
+            name="Approve",
+            step_type="approval",
+            order=1,
+            config={},
+        )
+        if hasattr(LegacyStep, "tenant_id")
+        else LegacyStep.objects.create(
+            workflow=workflow,
+            name="Approve",
+            step_type="approval",
+            order=1,
+            config={},
+        )
     )
     instance = LegacyInstance.objects.create(
         tenant_id=tenant_id,

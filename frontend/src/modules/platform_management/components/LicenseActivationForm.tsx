@@ -54,10 +54,7 @@ export const LicenseActivationForm = () => {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label
-            htmlFor="licenseKey"
-            className="block text-sm font-medium mb-2"
-          >
+          <label htmlFor="licenseKey" className="block text-sm font-medium mb-2">
             License Key
           </label>
           <div className="relative">
@@ -86,8 +83,8 @@ export const LicenseActivationForm = () => {
           <div className="flex items-start gap-2">
             <CheckCircle2 className="w-4 h-4 mt-0.5 text-green-500" />
             <p>
-              Your license key is securely encrypted. We never share your key
-              with third parties without your permission.
+              Your license key is securely encrypted. We never share your key with third parties
+              without your permission.
             </p>
           </div>
         </div>

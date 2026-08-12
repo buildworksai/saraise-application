@@ -84,7 +84,7 @@ def test_builtin_registration_is_idempotent_but_rejects_competing_owner() -> Non
         register_builtin_adapters()
         register_builtin_adapters()
         credential_issuer_registry.unregister(DjangoSigningCredentialIssuer.issuer_type)
-        credential_issuer_registry.register(DjangoSigningCredentialIssuer.issuer_type, DescriptorAdapter())  # type: ignore[arg-type]
+        credential_issuer_registry.register(DjangoSigningCredentialIssuer.issuer_type, DescriptorAdapter())  # type: ignore[arg-type]  # noqa: E501
         with pytest.raises(AdapterRegistrationError, match="competing"):
             register_builtin_adapters()
     finally:

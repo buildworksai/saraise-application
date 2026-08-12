@@ -1,4 +1,4 @@
-import { ENDPOINTS as AUTH_ENDPOINTS } from './auth-contracts';
+import { ENDPOINTS as AUTH_ENDPOINTS } from "./auth-contracts";
 
 export interface ApiClientOptions {
   baseUrl?: string;
@@ -10,10 +10,10 @@ export class ApiError extends Error {
     public status: number,
     public details?: unknown,
     public code?: string,
-    public correlationId?: string,
+    public correlationId?: string
   ) {
     super(message);
-    this.name = 'ApiError';
+    this.name = "ApiError";
   }
 }
 
@@ -24,7 +24,7 @@ interface ParsedApiError {
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /** Parse both legacy top-level errors and the governed v2 nested error envelope. */
@@ -34,23 +34,21 @@ function parseApiError(value: unknown): ParsedApiError {
   const nested = isObject(value.error) ? value.error : undefined;
   if (nested) {
     return {
-      message: typeof nested.message === 'string' ? nested.message : undefined,
-      code: typeof nested.code === 'string' ? nested.code : undefined,
-      correlationId:
-        typeof nested.correlation_id === 'string' ? nested.correlation_id : undefined,
+      message: typeof nested.message === "string" ? nested.message : undefined,
+      code: typeof nested.code === "string" ? nested.code : undefined,
+      correlationId: typeof nested.correlation_id === "string" ? nested.correlation_id : undefined,
     };
   }
 
   return {
     message:
-      typeof value.message === 'string'
+      typeof value.message === "string"
         ? value.message
-        : typeof value.error === 'string'
+        : typeof value.error === "string"
           ? value.error
           : undefined,
-    code: typeof value.code === 'string' ? value.code : undefined,
-    correlationId:
-      typeof value.correlation_id === 'string' ? value.correlation_id : undefined,
+    code: typeof value.code === "string" ? value.code : undefined,
+    correlationId: typeof value.correlation_id === "string" ? value.correlation_id : undefined,
   };
 }
 
@@ -63,7 +61,7 @@ export class ApiClient {
     // This ensures session cookies work correctly (SameSite=Lax instead of SameSite=None)
     // In production, this should be configured via nginx or similar
     const envBaseUrl = import.meta.env.VITE_API_BASE_URL;
-    this.baseUrl = options.baseUrl ?? (envBaseUrl && envBaseUrl !== '' ? envBaseUrl : '');
+    this.baseUrl = options.baseUrl ?? (envBaseUrl && envBaseUrl !== "" ? envBaseUrl : "");
   }
 
   /**
@@ -71,11 +69,11 @@ export class ApiClient {
    */
   private getCsrfToken(): string | null {
     // CSRF token is stored in cookie named 'saraise_csrftoken'
-    const name = 'saraise_csrftoken';
+    const name = "saraise_csrftoken";
     const value = `; ${document.cookie}`;
     const parts = value.split(`; ${name}=`);
     if (parts.length === 2) {
-      return parts.pop()?.split(';').shift() ?? null;
+      return parts.pop()?.split(";").shift() ?? null;
     }
     return null;
   }
@@ -87,7 +85,7 @@ export class ApiClient {
     init: RequestInit = {}
   ): Promise<T> {
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...(init.headers as Record<string, string>),
     };
 
@@ -95,14 +93,14 @@ export class ApiClient {
     // Login endpoint uses CsrfExemptSessionAuthentication
     const csrfToken = this.getCsrfToken();
     if (csrfToken && path !== AUTH_ENDPOINTS.LOGIN) {
-      headers['X-CSRFToken'] = csrfToken;
+      headers["X-CSRFToken"] = csrfToken;
     }
 
     const config: RequestInit = {
       ...init,
       method,
       headers,
-      credentials: 'include', // Include session cookies
+      credentials: "include", // Include session cookies
     };
 
     if (body !== undefined) {
@@ -131,7 +129,7 @@ export class ApiClient {
       // Exception: For auth/me endpoint, 403 means not authenticated, so logout.
       if (response.status === 401 || (response.status === 403 && path === AUTH_ENDPOINTS.ME)) {
         try {
-          const { useAuthStore } = await import('@/stores/auth-store');
+          const { useAuthStore } = await import("@/stores/auth-store");
           useAuthStore.getState().logout();
         } catch {
           // Best-effort only. Never block error propagation.
@@ -144,7 +142,7 @@ export class ApiClient {
         response.status,
         errorDetails,
         parsedError.code,
-        parsedError.correlationId,
+        parsedError.correlationId
       );
     }
 
@@ -157,23 +155,23 @@ export class ApiClient {
   }
 
   async get<T>(path: string, init?: RequestInit): Promise<T> {
-    return this.request<T>(path, 'GET', undefined, init);
+    return this.request<T>(path, "GET", undefined, init);
   }
 
   async post<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
-    return this.request<T>(path, 'POST', body, init);
+    return this.request<T>(path, "POST", body, init);
   }
 
   async put<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
-    return this.request<T>(path, 'PUT', body, init);
+    return this.request<T>(path, "PUT", body, init);
   }
 
   async patch<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
-    return this.request<T>(path, 'PATCH', body, init);
+    return this.request<T>(path, "PATCH", body, init);
   }
 
   async delete<T>(path: string, init?: RequestInit): Promise<T> {
-    return this.request<T>(path, 'DELETE', undefined, init);
+    return this.request<T>(path, "DELETE", undefined, init);
   }
 }
 

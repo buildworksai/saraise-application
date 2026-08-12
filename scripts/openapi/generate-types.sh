@@ -5,11 +5,11 @@ set -e
 
 echo "🔍 Generating TypeScript types from OpenAPI schema..."
 
-# Check if backend is running (using port 18000)
-if ! curl -s http://localhost:18000/api/schema/ > /dev/null 2>&1; then
+# Check if backend is running (using the application API port)
+if ! curl -s http://localhost:28000/api/schema/ > /dev/null 2>&1; then
     echo "❌ Backend API is not running. Please start the backend first:"
     echo "   docker-compose -f docker-compose.dev.yml up -d backend"
-    echo "   Backend should be accessible at http://localhost:18000"
+    echo "   Backend should be accessible at http://localhost:28000"
     exit 1
 fi
 

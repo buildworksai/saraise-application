@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 TENANT_TABLES = (
     "budget_budgets",
     "budget_lines",

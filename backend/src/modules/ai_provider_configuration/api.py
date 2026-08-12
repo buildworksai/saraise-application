@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
 import uuid
+from typing import Any
 from uuid import UUID
 
+from django.db import connection
 from django.db.models import Count, Q, QuerySet
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.pagination import PageNumberPagination
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from src.core.auth_utils import get_user_tenant_id
@@ -34,11 +35,11 @@ from .serializers import (
     AIModelDeploymentUpdateSerializer,
     AIModelDetailSerializer,
     AIModelListSerializer,
+    AIProviderConfigurationResourceSerializer,
     AIProviderCredentialCreateSerializer,
     AIProviderCredentialDetailSerializer,
     AIProviderCredentialListSerializer,
     AIProviderCredentialUpdateSerializer,
-    AIProviderConfigurationResourceSerializer,
     AIProviderDetailSerializer,
     AIProviderListSerializer,
     AIProviderRuntimeConfigurationAuditSerializer,
@@ -51,19 +52,19 @@ from .serializers import (
     ReEncryptSerializer,
     RotateKeySerializer,
 )
-from .services import AIProviderConfigurationService, AIProviderRuntimeConfigurationService, _section
+from .services import AIProviderConfigurationService, AIProviderRuntimeConfigurationService, _config_int, _section
 
 
 class ModulePagination(PageNumberPagination):
     page_size_query_param = "page_size"
 
-    def get_page_size(self, request: object) -> int:
+    def get_page_size(self, request: Request) -> int:
         tenant_id = get_user_tenant_id(getattr(request, "user", None))
         policy = AIProviderRuntimeConfigurationService.runtime_values(tenant_id)
         pagination = _section(policy, "pagination")
-        self.page_size = int(pagination["default_page_size"])
-        self.max_page_size = int(pagination["max_page_size"])
-        return super().get_page_size(request)
+        self.page_size = _config_int(pagination, "default_page_size")
+        self.max_page_size = _config_int(pagination, "max_page_size")
+        return super().get_page_size(request) or self.page_size
 
 
 class TenantContextMixin:
@@ -193,7 +194,7 @@ class AIProviderViewSet(ActionPermissionMixin, TenantContextMixin, viewsets.Read
             queryset = queryset.filter(provider_type=provider_type)
         search = self.request.query_params.get("search")
         if search:
-            queryset = queryset.filter(name__icontains=search[: int(fields["search_provider_max"])])
+            queryset = queryset.filter(name__icontains=search[: _config_int(fields, "search_provider_max")])
         return queryset.order_by("name")
 
     def get_serializer_class(self) -> type:
@@ -221,8 +222,8 @@ class AIProviderCredentialViewSet(ActionPermissionMixin, TenantContextMixin, vie
             return AIProviderCredential.objects.none()
         policy = AIProviderRuntimeConfigurationService.runtime_values(tenant_id)
         fields = _section(policy, "field_limits")
-        queryset = AIProviderCredential.objects.for_tenant(tenant_id).filter(is_deleted=False).select_related(
-            "provider"
+        queryset = (
+            AIProviderCredential.objects.for_tenant(tenant_id).filter(is_deleted=False).select_related("provider")
         )
         provider_id = self.request.query_params.get("provider_id") or self.request.query_params.get("provider")
         if provider_id:
@@ -232,7 +233,7 @@ class AIProviderCredentialViewSet(ActionPermissionMixin, TenantContextMixin, vie
             queryset = queryset.filter(status=status_filter)
         search = self.request.query_params.get("search")
         if search:
-            queryset = queryset.filter(label__icontains=search[: int(fields["search_credential_max"])])
+            queryset = queryset.filter(label__icontains=search[: _config_int(fields, "search_credential_max")])
         return queryset.order_by("-created_at")
 
     def get_serializer_class(self) -> type:
@@ -302,10 +303,14 @@ class AIModelViewSet(ActionPermissionMixin, TenantContextMixin, viewsets.ReadOnl
         policy = AIProviderRuntimeConfigurationService.runtime_values(tenant_id)
         fields = _section(policy, "field_limits")
         visibility = _section(policy, "catalog_visibility")
-        queryset = AIModel.objects.all().select_related("provider").annotate(
-            deployments_count=Count(
-                "deployments",
-                filter=Q(deployments__tenant_id=tenant_id, deployments__is_deleted=False),
+        queryset = (
+            AIModel.objects.all()
+            .select_related("provider")
+            .annotate(
+                deployments_count=Count(
+                    "deployments",
+                    filter=Q(deployments__tenant_id=tenant_id, deployments__is_deleted=False),
+                )
             )
         )
         if bool(visibility["models_active_only"]):
@@ -315,10 +320,13 @@ class AIModelViewSet(ActionPermissionMixin, TenantContextMixin, viewsets.ReadOnl
             queryset = queryset.filter(provider_id=provider_id)
         capability = self.request.query_params.get("capability")
         if capability:
-            queryset = queryset.filter(capabilities__contains=[capability])
+            if connection.features.supports_json_field_contains:
+                queryset = queryset.filter(capabilities__contains=[capability])
+            else:
+                queryset = queryset.filter(capabilities__icontains=capability)
         search = self.request.query_params.get("search")
         if search:
-            queryset = queryset.filter(display_name__icontains=search[: int(fields["search_model_max"])])
+            queryset = queryset.filter(display_name__icontains=search[: _config_int(fields, "search_model_max")])
         return queryset.order_by("display_name")
 
     def get_serializer_class(self) -> type:
@@ -361,7 +369,9 @@ class AIModelDeploymentViewSet(ActionPermissionMixin, TenantContextMixin, viewse
             queryset = queryset.filter(status=status_filter)
         search = self.request.query_params.get("search")
         if search:
-            queryset = queryset.filter(deployment_name__icontains=search[: int(fields["search_deployment_max"])])
+            queryset = queryset.filter(
+                deployment_name__icontains=search[: _config_int(fields, "search_deployment_max")]
+            )
         return queryset.order_by("-created_at")
 
     def get_serializer_class(self) -> type:
@@ -398,9 +408,7 @@ class AIModelDeploymentViewSet(ActionPermissionMixin, TenantContextMixin, viewse
             if source in data:
                 changes[target] = data.pop(source)
         changes.update(data)
-        deployment = self.service_class().update_deployment(
-            self.tenant_id(), self.kwargs["pk"], **changes
-        )
+        deployment = self.service_class().update_deployment(self.tenant_id(), self.kwargs["pk"], **changes)
         return Response(AIModelDeploymentDetailSerializer(deployment).data)
 
     def update(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -444,9 +452,7 @@ class AIUsageLogViewSet(ActionPermissionMixin, TenantContextMixin, viewsets.Read
         tenant_id = self.tenant_id_or_none()
         if tenant_id is None:
             return AIUsageLog.objects.none()
-        queryset = AIUsageLog.objects.for_tenant(tenant_id).select_related(
-            "deployment__model__provider"
-        )
+        queryset = AIUsageLog.objects.for_tenant(tenant_id).select_related("deployment__model__provider")
         deployment_id = self.request.query_params.get("deployment_id") or self.request.query_params.get("deployment")
         if deployment_id:
             queryset = queryset.filter(deployment_id=deployment_id)
@@ -481,7 +487,7 @@ class AIProviderRuntimeConfigurationViewSet(ActionPermissionMixin, TenantContext
         configuration = self.service_class.current(self.tenant_id(), self.actor_id())
         return Response(AIProviderRuntimeConfigurationSerializer(configuration).data)
 
-    @action(detail=False, methods=["put"], url_path="current")
+    @current.mapping.put
     def update_current(self, request: object) -> Response:
         del request
         serializer = AIProviderRuntimeConfigurationWriteSerializer(data=self.request.data)

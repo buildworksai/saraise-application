@@ -7,7 +7,6 @@ from django.db import migrations, models
 
 import src.modules.customization_framework.models
 
-
 SAME_TENANT_RELATIONSHIPS = (
     ("customization_field_values", "definition_id", "customization_field_definitions"),
     ("customization_form_layout_versions", "form_id", "customization_form_definitions"),
@@ -141,10 +140,7 @@ def remove_relationship_guards(apps, schema_editor) -> None:
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute(
-        "DROP TRIGGER IF EXISTS cust_execution_version_rule "
-        "ON customization_rule_executions;"
-    )
+    schema_editor.execute("DROP TRIGGER IF EXISTS cust_execution_version_rule " "ON customization_rule_executions;")
     for child_table, fk_column, _parent_table in reversed(SAME_TENANT_RELATIONSHIPS):
         trigger_name = f"cust_same_tenant_{fk_column}_{child_table[-8:]}"
         schema_editor.execute(
@@ -160,9 +156,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.SeparateDatabaseAndState(
-            database_operations=[
-                migrations.RunPython(make_legacy_table_read_only, restore_legacy_table_writes)
-            ],
+            database_operations=[migrations.RunPython(make_legacy_table_read_only, restore_legacy_table_writes)],
             state_operations=[migrations.DeleteModel(name="CustomizationFrameworkResource")],
         ),
         migrations.CreateModel(

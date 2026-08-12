@@ -1,1 +1,2 @@
-import { ResourceDetailPage } from './ResourceWorkspace'; export const ReceiptDetailPage = () => <ResourceDetailPage kind="receipts" />;
+import { ResourceDetailPage } from "./ResourceWorkspace";
+export const ReceiptDetailPage = () => <ResourceDetailPage kind="receipts" />;

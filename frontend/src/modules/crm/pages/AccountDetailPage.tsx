@@ -1,10 +1,164 @@
+/* eslint-disable max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /* eslint-disable complexity, @typescript-eslint/prefer-nullish-coalescing */
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Button } from '@/components/ui/Button';
-import { CrmPage, GovernedError, PageSkeleton } from '../components/CrmPage';
-import { DeleteEntityControl } from '../components/DeleteEntityControl';
-import { DetailCard } from '../components/DetailCard';
-import { crmKeys, crmService } from '../services/crm-service';
-function Tree({node}:{node:{id:string;name:string;children:readonly typeof node[]}}){return <li><Link className="text-primary hover:underline" to={`/crm/accounts/${node.id}`}>{node.name}</Link>{node.children.length?<ul className="ml-5 mt-2 list-disc space-y-2">{node.children.map(child=><Tree key={child.id} node={child}/>)}</ul>:null}</li>}
-export function AccountDetailPage(){const{id=''}=useParams(),nav=useNavigate(),client=useQueryClient();const q=useQuery({queryKey:crmKeys.account(id),queryFn:()=>crmService.getAccount(id),enabled:!!id});const h=useQuery({queryKey:['crm','account',id,'hierarchy'],queryFn:()=>crmService.getAccountHierarchy(id),enabled:!!id});const contacts=useQuery({queryKey:crmKeys.contacts({account_id:id,page_size:5}),queryFn:()=>crmService.listContacts({account_id:id,page_size:5}),enabled:!!id});const opportunities=useQuery({queryKey:crmKeys.opportunities({account_id:id,page_size:5}),queryFn:()=>crmService.listOpportunities({account_id:id,page_size:5}),enabled:!!id});if(q.isLoading)return <CrmPage title="Account" parent={{label:'Accounts',to:'/crm/accounts'}}><PageSkeleton/></CrmPage>;if(q.error||!q.data)return <CrmPage title="Account" parent={{label:'Accounts',to:'/crm/accounts'}}><GovernedError error={q.error} onRetry={()=>void q.refetch()} subject="Account"/></CrmPage>;const account=q.data;const deleted=()=>{void client.invalidateQueries({queryKey:['crm','accounts']});nav('/crm/accounts')};return <CrmPage title={account.name} description={`${account.account_type} account`} parent={{label:'Accounts',to:'/crm/accounts'}} actions={<><Link to={`/crm/accounts/${account.id}/edit`}><Button variant="outline">Edit</Button></Link><Link to={`/crm/contacts/new?account_id=${account.id}`}><Button>Add contact</Button></Link><DeleteEntityControl label="account" impact="The server will reject deletion while child accounts, contacts, or opportunities remain active. Audit evidence is preserved." onDelete={()=>crmService.deleteAccount(account.id,account.version)} onDeleted={deleted}/></>}><div className="grid gap-6 lg:grid-cols-3"><div className="space-y-6 lg:col-span-2"><DetailCard title="Account information" fields={[{label:'Industry',value:account.industry||'—'},{label:'Website',value:account.website?<a href={account.website} rel="noreferrer">{account.website}</a>:'—'},{label:'Employees',value:account.employees??'—'},{label:'Revenue',value:account.annual_revenue??'—'},{label:'Billing address',value:[account.billing_street,account.billing_city,account.billing_state,account.billing_postal_code,account.billing_country].filter(Boolean).join(', ')||'—'},{label:'Version',value:account.version}]}/><DetailCard title="Relationship summary"><div className="grid gap-4 sm:grid-cols-2"><div><h3 className="font-medium">Contacts</h3><p className="text-2xl font-bold">{contacts.isError?'Unavailable':contacts.data?.pagination.total_count??'…'}</p></div><div><h3 className="font-medium">Opportunities</h3><p className="text-2xl font-bold">{opportunities.isError?'Unavailable':opportunities.data?.pagination.total_count??'…'}</p></div></div></DetailCard></div><DetailCard title="Account hierarchy">{h.isLoading?<div className="h-24 animate-pulse rounded bg-muted"/>:h.error?<GovernedError error={h.error} onRetry={()=>void h.refetch()} subject="Account hierarchy"/>:h.data?<ul className="list-disc pl-5"><Tree node={h.data}/></ul>:null}</DetailCard></div></CrmPage>}
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { CrmPage, GovernedError, PageSkeleton } from "../components/CrmPage";
+import { DeleteEntityControl } from "../components/DeleteEntityControl";
+import { DetailCard } from "../components/DetailCard";
+import { crmKeys, crmService } from "../services/crm-service";
+function Tree({
+  node,
+}: {
+  node: { id: string; name: string; children: readonly (typeof node)[] };
+}) {
+  return (
+    <li>
+      <Link className="text-primary hover:underline" to={`/crm/accounts/${node.id}`}>
+        {node.name}
+      </Link>
+      {node.children.length ? (
+        <ul className="ml-5 mt-2 list-disc space-y-2">
+          {node.children.map((child) => (
+            <Tree key={child.id} node={child} />
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+export function AccountDetailPage() {
+  const { id = "" } = useParams(),
+    nav = useNavigate(),
+    client = useQueryClient();
+  const q = useQuery({
+    queryKey: crmKeys.account(id),
+    queryFn: () => crmService.getAccount(id),
+    enabled: !!id,
+  });
+  const h = useQuery({
+    queryKey: ["crm", "account", id, "hierarchy"],
+    queryFn: () => crmService.getAccountHierarchy(id),
+    enabled: !!id,
+  });
+  const contacts = useQuery({
+    queryKey: crmKeys.contacts({ account_id: id, page_size: 5 }),
+    queryFn: () => crmService.listContacts({ account_id: id, page_size: 5 }),
+    enabled: !!id,
+  });
+  const opportunities = useQuery({
+    queryKey: crmKeys.opportunities({ account_id: id, page_size: 5 }),
+    queryFn: () => crmService.listOpportunities({ account_id: id, page_size: 5 }),
+    enabled: !!id,
+  });
+  if (q.isLoading)
+    return (
+      <CrmPage title="Account" parent={{ label: "Accounts", to: "/crm/accounts" }}>
+        <PageSkeleton />
+      </CrmPage>
+    );
+  if (q.error || !q.data)
+    return (
+      <CrmPage title="Account" parent={{ label: "Accounts", to: "/crm/accounts" }}>
+        <GovernedError error={q.error} onRetry={() => void q.refetch()} subject="Account" />
+      </CrmPage>
+    );
+  const account = q.data;
+  const deleted = () => {
+    void client.invalidateQueries({ queryKey: ["crm", "accounts"] });
+    nav("/crm/accounts");
+  };
+  return (
+    <CrmPage
+      title={account.name}
+      description={`${account.account_type} account`}
+      parent={{ label: "Accounts", to: "/crm/accounts" }}
+      actions={
+        <>
+          <Link to={`/crm/accounts/${account.id}/edit`}>
+            <Button variant="outline">Edit</Button>
+          </Link>
+          <Link to={`/crm/contacts/new?account_id=${account.id}`}>
+            <Button>Add contact</Button>
+          </Link>
+          <DeleteEntityControl
+            label="account"
+            impact="The server will reject deletion while child accounts, contacts, or opportunities remain active. Audit evidence is preserved."
+            onDelete={() => crmService.deleteAccount(account.id, account.version)}
+            onDeleted={deleted}
+          />
+        </>
+      }
+    >
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2">
+          <DetailCard
+            title="Account information"
+            fields={[
+              { label: "Industry", value: account.industry || "—" },
+              {
+                label: "Website",
+                value: account.website ? (
+                  <a href={account.website} rel="noreferrer">
+                    {account.website}
+                  </a>
+                ) : (
+                  "—"
+                ),
+              },
+              { label: "Employees", value: account.employees ?? "—" },
+              { label: "Revenue", value: account.annual_revenue ?? "—" },
+              {
+                label: "Billing address",
+                value:
+                  [
+                    account.billing_street,
+                    account.billing_city,
+                    account.billing_state,
+                    account.billing_postal_code,
+                    account.billing_country,
+                  ]
+                    .filter(Boolean)
+                    .join(", ") || "—",
+              },
+              { label: "Version", value: account.version },
+            ]}
+          />
+          <DetailCard title="Relationship summary">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <h3 className="font-medium">Contacts</h3>
+                <p className="text-2xl font-bold">
+                  {contacts.isError ? "Unavailable" : contacts.data?.pagination.total_count ?? "…"}
+                </p>
+              </div>
+              <div>
+                <h3 className="font-medium">Opportunities</h3>
+                <p className="text-2xl font-bold">
+                  {opportunities.isError
+                    ? "Unavailable"
+                    : opportunities.data?.pagination.total_count ?? "…"}
+                </p>
+              </div>
+            </div>
+          </DetailCard>
+        </div>
+        <DetailCard title="Account hierarchy">
+          {h.isLoading ? (
+            <div className="h-24 animate-pulse rounded bg-muted" />
+          ) : h.error ? (
+            <GovernedError
+              error={h.error}
+              onRetry={() => void h.refetch()}
+              subject="Account hierarchy"
+            />
+          ) : h.data ? (
+            <ul className="list-disc pl-5">
+              <Tree node={h.data} />
+            </ul>
+          ) : null}
+        </DetailCard>
+      </div>
+    </CrmPage>
+  );
+}

@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, ClassVar, cast
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -21,7 +21,6 @@ from django.db.models import Q
 from django.utils import timezone
 
 from src.core.tenancy import TenantQuerySet, TenantScopedModel, TimestampedModel
-
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 MAX_TAGS = 50
@@ -166,7 +165,7 @@ class AppendOnlyComplianceModel(TenantScopedModel):
     """Base for immutable historical and audit records."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    objects = ImmutableQuerySet.as_manager()
+    objects: ClassVar[Any] = ImmutableQuerySet.as_manager()
 
     class Meta:
         abstract = True
@@ -266,8 +265,7 @@ class ComplianceRequirement(MutableComplianceModel):
                 name="cmp_req_tenant_fw_code_uq",
             ),
             models.CheckConstraint(
-                condition=~Q(applicability=RequirementApplicability.NOT_APPLICABLE)
-                | ~Q(applicability_rationale=""),
+                condition=~Q(applicability=RequirementApplicability.NOT_APPLICABLE) | ~Q(applicability_rationale=""),
                 name="cmp_req_na_rationale_ck",
             ),
         ]
@@ -337,10 +335,7 @@ class CompliancePolicy(MutableComplianceModel):
             models.CheckConstraint(condition=Q(current_version__gte=0), name="cmp_policy_version_nonneg_ck"),
             models.CheckConstraint(
                 condition=~Q(status=PolicyStatus.PUBLISHED)
-                | (
-                    Q(current_version__gt=0)
-                    & Q(effective_date__isnull=False)
-                ),
+                | (Q(current_version__gt=0) & Q(effective_date__isnull=False)),
                 name="cmp_policy_published_ready_ck",
             ),
         ]
@@ -479,9 +474,10 @@ class RequirementPolicyMapping(MutableComplianceModel):
         if self.policy_id and self.tenant_id and self.policy.tenant_id != self.tenant_id:
             errors["policy"] = "Policy must belong to the same tenant."
         if self.policy_version_id:
-            if self.policy_version.tenant_id != self.tenant_id:
+            policy_version = cast(CompliancePolicyVersion, self.policy_version)
+            if policy_version.tenant_id != self.tenant_id:
                 errors["policy_version"] = "Policy version must belong to the same tenant."
-            elif self.policy_id and self.policy_version.policy_id != self.policy_id:
+            elif self.policy_id and policy_version.policy_id != self.policy_id:
                 errors["policy_version"] = "Policy version must belong to the mapped policy."
         if errors:
             raise ValidationError(errors)
@@ -532,7 +528,9 @@ class ComplianceAssessment(AppendOnlyComplianceModel):
         db_table = "compliance_assessments"
         constraints = [
             models.CheckConstraint(
-                condition=Q(status__in=(AssessmentStatus.NOT_ASSESSED, AssessmentStatus.IN_PROGRESS, AssessmentStatus.COMPLIANT))
+                condition=Q(
+                    status__in=(AssessmentStatus.NOT_ASSESSED, AssessmentStatus.IN_PROGRESS, AssessmentStatus.COMPLIANT)
+                )
                 | ~Q(notes=""),
                 name="cmp_assessment_notes_ck",
             ),
@@ -551,9 +549,10 @@ class ComplianceAssessment(AppendOnlyComplianceModel):
         if self.requirement_id and self.tenant_id and self.requirement.tenant_id != self.tenant_id:
             errors["requirement"] = "Requirement must belong to the same tenant."
         if self.mapping_id:
-            if self.mapping.tenant_id != self.tenant_id:
+            mapping = cast(RequirementPolicyMapping, self.mapping)
+            if mapping.tenant_id != self.tenant_id:
                 errors["mapping"] = "Mapping must belong to the same tenant."
-            elif self.requirement_id and self.mapping.requirement_id != self.requirement_id:
+            elif self.requirement_id and mapping.requirement_id != self.requirement_id:
                 errors["mapping"] = "Mapping must reference the assessed requirement."
         if errors:
             raise ValidationError(errors)
@@ -744,19 +743,13 @@ class ComplianceConfigurationRevision(TenantScopedModel):
     default_review_frequency_days = models.PositiveSmallIntegerField(
         validators=(MinValueValidator(1), MaxValueValidator(3650))
     )
-    expiry_warning_days = models.PositiveSmallIntegerField(
-        validators=(MinValueValidator(0), MaxValueValidator(365))
-    )
-    evidence_warning_days = models.PositiveSmallIntegerField(
-        validators=(MinValueValidator(0), MaxValueValidator(365))
-    )
+    expiry_warning_days = models.PositiveSmallIntegerField(validators=(MinValueValidator(0), MaxValueValidator(365)))
+    evidence_warning_days = models.PositiveSmallIntegerField(validators=(MinValueValidator(0), MaxValueValidator(365)))
     minimum_assessment_note_length = models.PositiveSmallIntegerField(
         validators=(MinValueValidator(0), MaxValueValidator(2000))
     )
     allow_external_evidence_urls = models.BooleanField()
-    bulk_import_row_limit = models.PositiveIntegerField(
-        validators=(MinValueValidator(1), MaxValueValidator(10_000))
-    )
+    bulk_import_row_limit = models.PositiveIntegerField(validators=(MinValueValidator(1), MaxValueValidator(10_000)))
     regulation_categories = models.JSONField(default=list, validators=(validate_regulation_categories,))
     rollout = models.JSONField(default=dict, blank=True, validators=(validate_rollout,))
     created_by = models.ForeignKey(

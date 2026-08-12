@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import uuid
+from copy import deepcopy
 
 import pytest
 from rest_framework.permissions import IsAuthenticated
 
 from src.modules.customization_framework import api
+from src.modules.customization_framework.services import default_configuration_document
 
 from .factories import (
     BusinessRuleFactory,
@@ -261,12 +263,8 @@ def test_complete_field_and_value_http_workflow(authenticated_tenant_a_client: o
     assert activated["status"] == "active"
     assert activated["lock_version"] > updated["lock_version"]
 
-    invalid = authenticated_tenant_a_client.post(
-        f"{detail}validate-value/", {"value": "x"}, format="json"
-    )
-    valid = authenticated_tenant_a_client.post(
-        f"{detail}validate-value/", {"value": "valid"}, format="json"
-    )
+    invalid = authenticated_tenant_a_client.post(f"{detail}validate-value/", {"value": "x"}, format="json")
+    valid = authenticated_tenant_a_client.post(f"{detail}validate-value/", {"value": "valid"}, format="json")
     assert invalid.status_code == 400
     assert valid.status_code == 200 and valid.json()["data"]["valid"] is True
 
@@ -327,7 +325,7 @@ def test_complete_form_version_publication_rollback_and_archive_http_workflow(
         format="json",
     ).json()["data"]
     detail = f"{BASE}/forms/{created['id']}/"
-    updated = authenticated_tenant_a_client.patch(
+    updated = authenticated_tenant_a_client.patch(  # noqa: F841
         detail,
         {"name": "Updated HTTP intake", "expected_lock_version": created["lock_version"]},
         format="json",
@@ -343,18 +341,17 @@ def test_complete_form_version_publication_rollback_and_archive_http_workflow(
     ).json()["data"]
     versions = authenticated_tenant_a_client.get(f"{detail}layout-versions/")
     assert candidate["id"] in {item["id"] for item in versions.json()["data"]}
-    assert authenticated_tenant_a_client.get(
-        f"{BASE}/form-layouts/{candidate['id']}/"
-    ).json()["data"]["content_hash"]
+    assert authenticated_tenant_a_client.get(f"{BASE}/form-layouts/{candidate['id']}/").json()["data"]["content_hash"]
     published = authenticated_tenant_a_client.post(
         f"{detail}publish/",
         {"layout_version_id": candidate["id"], "transition_key": "publish-http-form"},
         format="json",
     ).json()["data"]
     assert published["status"] == "published"
-    assert authenticated_tenant_a_client.get(
-        f"{BASE}/form-layouts/{published['id']}/"
-    ).json()["data"]["status"] == "published"
+    assert (
+        authenticated_tenant_a_client.get(f"{BASE}/form-layouts/{published['id']}/").json()["data"]["status"]
+        == "published"
+    )
     render = authenticated_tenant_a_client.get(f"{detail}render-schema/").json()["data"]
     assert render["layout"] == layout
     assert authenticated_tenant_a_client.get(f"{detail}impact/").status_code == 200
@@ -370,11 +367,14 @@ def test_complete_form_version_publication_rollback_and_archive_http_workflow(
         },
         format="json",
     ).json()["data"]
-    assert authenticated_tenant_a_client.post(
-        f"{detail}publish/",
-        {"layout_version_id": second["id"], "transition_key": "publish-second-http-form"},
-        format="json",
-    ).status_code == 200
+    assert (
+        authenticated_tenant_a_client.post(
+            f"{detail}publish/",
+            {"layout_version_id": second["id"], "transition_key": "publish-second-http-form"},
+            format="json",
+        ).status_code
+        == 200
+    )
     rollback = authenticated_tenant_a_client.post(
         f"{detail}publish/",
         {"layout_version_id": published["id"], "transition_key": "republish-http-form"},
@@ -428,9 +428,7 @@ def test_complete_rule_version_evaluation_lifecycle_and_rollback_http_workflow(
     assert version["id"] in {
         item["id"] for item in authenticated_tenant_a_client.get(f"{detail}versions/").json()["data"]
     }
-    assert authenticated_tenant_a_client.get(
-        f"{BASE}/rule-versions/{version['id']}/"
-    ).status_code == 200
+    assert authenticated_tenant_a_client.get(f"{BASE}/rule-versions/{version['id']}/").status_code == 200
     published = authenticated_tenant_a_client.post(
         f"{detail}publish/",
         {"version_id": version["id"], "transition_key": "publish-http-rule"},
@@ -456,9 +454,9 @@ def test_complete_rule_version_evaluation_lifecycle_and_rollback_http_workflow(
     assert not_matched_response.status_code == 200, not_matched_response.json()
     not_matched = not_matched_response.json()["data"]
     assert matched["status"] == "matched" and not_matched["status"] == "not_matched"
-    assert authenticated_tenant_a_client.get(
-        f"{BASE}/rule-executions/{matched['id']}/"
-    ).json()["data"]["correlation_id"]
+    assert authenticated_tenant_a_client.get(f"{BASE}/rule-executions/{matched['id']}/").json()["data"][
+        "correlation_id"
+    ]
     assert authenticated_tenant_a_client.get(f"{detail}impact/").json()["data"]["execution_count"] == 2
 
     paused = authenticated_tenant_a_client.post(
@@ -472,18 +470,19 @@ def test_complete_rule_version_evaluation_lifecycle_and_rollback_http_workflow(
         f"{detail}versions/",
         {
             "condition_ast": {"operator": "eq", "field": "status", "value": "inactive"},
-            "action_ast": [
-                {"type": "emit-field-diagnostic", "field": "status", "message": "Inactive"}
-            ],
+            "action_ast": [{"type": "emit-field-diagnostic", "field": "status", "message": "Inactive"}],
             "change_summary": "Second rule",
         },
         format="json",
     ).json()["data"]
-    assert authenticated_tenant_a_client.post(
-        f"{detail}publish/",
-        {"version_id": second["id"], "transition_key": "publish-second-http-rule"},
-        format="json",
-    ).status_code == 200
+    assert (
+        authenticated_tenant_a_client.post(
+            f"{detail}publish/",
+            {"version_id": second["id"], "transition_key": "publish-second-http-rule"},
+            format="json",
+        ).status_code
+        == 200
+    )
     rollback = authenticated_tenant_a_client.post(
         f"{detail}publish/",
         {"version_id": published["id"], "transition_key": "republish-http-rule"},
@@ -495,6 +494,87 @@ def test_complete_rule_version_evaluation_lifecycle_and_rollback_http_workflow(
         f"{detail}retire/", {"transition_key": "retire-http-rule"}, format="json"
     ).json()["data"]
     assert retired["status"] == "retired"
-    assert authenticated_tenant_a_client.delete(
-        detail, {"expected_lock_version": retired["lock_version"]}, format="json"
-    ).status_code == 200
+    assert (
+        authenticated_tenant_a_client.delete(
+            detail, {"expected_lock_version": retired["lock_version"]}, format="json"
+        ).status_code
+        == 200
+    )
+
+
+def test_configuration_http_workflow_import_export_history_and_rollback(
+    authenticated_tenant_a_client: object,
+    tenant_a: object,
+) -> None:
+    current = authenticated_tenant_a_client.get(f"{BASE}/configuration/")
+    assert current.status_code == 200
+    assert current.json()["data"]["version"] == 0
+
+    document = default_configuration_document()
+    document["list_preferences"]["page_size"] = 75
+    correlation_id = uuid.uuid4()
+    preview = authenticated_tenant_a_client.post(
+        f"{BASE}/configuration/preview/",
+        {"document": document},
+        HTTP_X_CORRELATION_ID=str(correlation_id),
+        format="json",
+    )
+    assert preview.status_code == 200
+    assert preview.json()["data"]["valid"] is True
+
+    updated = authenticated_tenant_a_client.patch(
+        f"{BASE}/configuration/update/",
+        {"document": document, "environment": "default", "expected_version": 0},
+        HTTP_X_CORRELATION_ID=str(correlation_id),
+        HTTP_IDEMPOTENCY_KEY="customization-config-update",
+        format="json",
+    )
+    assert updated.status_code == 200, updated.content
+    assert updated.json()["data"]["version"] == 1
+
+    history = authenticated_tenant_a_client.get(f"{BASE}/configuration/history/")
+    versions = authenticated_tenant_a_client.get(f"{BASE}/configuration/versions/")
+    assert history.status_code == versions.status_code == 200
+    assert history.json()["data"][0]["correlation_id"] == str(correlation_id)
+    assert versions.json()["data"][0]["version"] == 1
+
+    exported = authenticated_tenant_a_client.get(f"{BASE}/configuration/export/")
+    assert exported.status_code == 200
+    payload = exported.json()["data"]
+    assert payload["schema"] == "saraise.customization-framework.configuration/v1"
+    assert payload["tenant_id"] == str(tenant_a.id)
+
+    imported_payload = deepcopy(payload)
+    imported_payload["document"]["list_preferences"]["page_size"] = 25
+    imported = authenticated_tenant_a_client.post(
+        f"{BASE}/configuration/import/",
+        {"payload": imported_payload, "expected_version": 1},
+        HTTP_X_CORRELATION_ID=str(uuid.uuid4()),
+        HTTP_IDEMPOTENCY_KEY="customization-config-import",
+        format="json",
+    )
+    assert imported.status_code == 200, imported.content
+    assert imported.json()["data"]["version"] == 2
+
+    rolled_back = authenticated_tenant_a_client.post(
+        f"{BASE}/configuration/rollback/",
+        {"target_version": 1, "expected_version": 2},
+        HTTP_X_CORRELATION_ID=str(uuid.uuid4()),
+        HTTP_IDEMPOTENCY_KEY="customization-config-rollback",
+        format="json",
+    )
+    assert rolled_back.status_code == 200
+    assert rolled_back.json()["data"]["version"] == 3
+    assert rolled_back.json()["data"]["document"]["list_preferences"]["page_size"] == 75
+
+    wrong_tenant = deepcopy(payload)
+    wrong_tenant["tenant_id"] = str(uuid.uuid4())
+    rejected = authenticated_tenant_a_client.post(
+        f"{BASE}/configuration/import/",
+        {"payload": wrong_tenant, "expected_version": 3},
+        HTTP_X_CORRELATION_ID=str(uuid.uuid4()),
+        HTTP_IDEMPOTENCY_KEY="customization-config-wrong-tenant",
+        format="json",
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["error"]["correlation_id"]

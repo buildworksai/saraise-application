@@ -14,12 +14,13 @@ classes used by individual modules.
 
 from __future__ import annotations
 
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, cast
 
 import factory
 import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password
 from django.http import HttpRequest
 from django.middleware.csrf import get_token
 from rest_framework.test import APIClient
@@ -64,7 +65,7 @@ class UserFactory(factory.django.DjangoModelFactory):
 
     username = factory.Sequence(lambda number: f"test-user-{number}")
     email = factory.LazyAttribute(lambda user: f"{user.username}@example.test")
-    password = factory.PostGenerationMethodCall("set_password", TEST_PASSWORD)
+    password = factory.LazyFunction(lambda: make_password(TEST_PASSWORD))
     is_active = True
 
 
@@ -126,6 +127,7 @@ class TenantUserFactory(UserFactory):
     class Meta:
         model = User
         exclude = ("organization", "tenant_role")
+        skip_postgeneration_save = True
 
     organization = factory.SubFactory(OrganizationFactory)
     tenant_role = "tenant_admin"
@@ -143,6 +145,7 @@ class PlatformUserFactory(UserFactory):
     class Meta:
         model = User
         exclude = ("platform_role",)
+        skip_postgeneration_save = True
 
     platform_role = "platform_owner"
     profile = factory.RelatedFactory(
@@ -157,21 +160,28 @@ def create_tenant_identity(label: str) -> TenantIdentity:
 
     normalized_label = label.lower().replace("_", "-").replace(" ", "-")
     if settings.SARAISE_MODE == "saas":
-        return TenantFactory(
-            name=f"Test Tenant {label.upper()}",
-            slug=f"test-tenant-{normalized_label}",
-            subdomain=f"test-tenant-{normalized_label}",
+        return cast(
+            TenantIdentity,
+            TenantFactory(
+                name=f"Test Tenant {label.upper()}",
+                slug=f"test-tenant-{normalized_label}",
+                subdomain=f"test-tenant-{normalized_label}",
+            ),
         )
-    return OrganizationFactory(
-        name=f"Test Organization {label.upper()}",
-        domain=f"tenant-{normalized_label}.example.test",
+    return cast(
+        TenantIdentity,
+        OrganizationFactory(
+            name=f"Test Organization {label.upper()}",
+            domain=f"tenant-{normalized_label}.example.test",
+        ),
     )
 
 
+# nosemgrep: python.lang.security.audit.hardcoded-password-default-argument.hardcoded-password-default-argument
 def authenticated_api_client(
     user: Any,
     *,
-    password: str = TEST_PASSWORD,
+    password: str = TEST_PASSWORD,  # nosemgrep: python.lang.security.audit.hardcoded-password-default-argument.hardcoded-password-default-argument -- deterministic test credential only.  # noqa: E501
     enforce_csrf_checks: bool = True,
 ) -> APIClient:
     """Return a DRF client authenticated through Django's real session backend.

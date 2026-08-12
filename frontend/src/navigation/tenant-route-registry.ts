@@ -41,17 +41,22 @@ export class TenantRouteRegistryError extends Error {
     super(
       `Tenant route registry validation failed:\n${issues
         .map((issue) => `- ${issue.sourceFile} [${issue.routeId}]: ${issue.message}`)
-        .join("\n")}`,
+        .join("\n")}`
     );
     this.name = "TenantRouteRegistryError";
     this.issues = issues;
   }
 }
 
-const routeModules = import.meta.glob<TenantRouteModule>(
-  "../modules/*/routes.ts",
-  { eager: true },
-);
+// Stryker disable all: Vite requires static glob literals; mutating them creates invalid source before tests run.
+const moduleRouteModules = import.meta.glob<TenantRouteModule>("../modules/*/routes.ts", {
+  eager: true,
+});
+const featureRouteModules = import.meta.glob<TenantRouteModule>("../features/*/routes.ts", {
+  eager: true,
+});
+// Stryker restore all
+const routeModules = { ...moduleRouteModules, ...featureRouteModules };
 
 const KNOWN_ACRONYMS = new Map<string, string>([["crm", "CRM"]]);
 
@@ -60,9 +65,7 @@ function normalizePath(path: string): string {
 }
 
 function hasRouteParameter(path: string): boolean {
-  return path
-    .split("/")
-    .some((segment) => segment.startsWith(":") || segment === "*");
+  return path.split("/").some((segment) => segment.startsWith(":") || segment === "*");
 }
 
 function compareOptionalOrder(left: number | undefined, right: number | undefined): number {
@@ -76,20 +79,19 @@ function formatModuleLabel(moduleName: string): string {
     .split(/[_-]/u)
     .map(
       (word) =>
-        KNOWN_ACRONYMS.get(word.toLowerCase()) ??
-        `${word.charAt(0).toUpperCase()}${word.slice(1)}`,
+        KNOWN_ACRONYMS.get(word.toLowerCase()) ?? `${word.charAt(0).toUpperCase()}${word.slice(1)}`
     )
     .join(" ");
 }
 
 function getRoutesFromModule(
   modulePath: string,
-  routeModule: TenantRouteModule,
+  routeModule: TenantRouteModule
 ): readonly TenantRoute[] {
   const routes = routeModule.tenantRoutes ?? routeModule.default;
   if (!routes) {
     throw new Error(
-      `${modulePath} must export a tenantRoutes array or a default TenantRoute array.`,
+      `${modulePath} must export a tenantRoutes array or a default TenantRoute array.`
     );
   }
   return routes;
@@ -98,16 +100,10 @@ function getRoutesFromModule(
 function aggregateTenantRoutes(): readonly TenantRoute[] {
   return Object.entries(routeModules)
     .sort(([leftPath], [rightPath]) => leftPath.localeCompare(rightPath))
-    .flatMap(([modulePath, routeModule]) =>
-      getRoutesFromModule(modulePath, routeModule),
-    );
+    .flatMap(([modulePath, routeModule]) => getRoutesFromModule(modulePath, routeModule));
 }
 
-function addIssue(
-  issues: TenantRouteValidationIssue[],
-  route: TenantRoute,
-  message: string,
-): void {
+function addIssue(issues: TenantRouteValidationIssue[], route: TenantRoute, message: string): void {
   issues.push({
     routeId: route.id || "<missing-id>",
     sourceFile: route.sourceFile || "<missing-source>",
@@ -115,10 +111,7 @@ function addIssue(
   });
 }
 
-function validateRequiredFields(
-  route: TenantRoute,
-  issues: TenantRouteValidationIssue[],
-): void {
+function validateRequiredFields(route: TenantRoute, issues: TenantRouteValidationIssue[]): void {
   if (!route.id.trim()) addIssue(issues, route, "id must not be empty");
   if (!route.module.trim()) addIssue(issues, route, "module must not be empty");
   if (!route.sourceFile.trim()) {
@@ -132,10 +125,7 @@ function validateRequiredFields(
   }
 }
 
-function validateSidebarRoute(
-  route: TenantRoute,
-  issues: TenantRouteValidationIssue[],
-): void {
+function validateSidebarRoute(route: TenantRoute, issues: TenantRouteValidationIssue[]): void {
   if (route.navigation.type !== "sidebar") return;
   if (!route.navigation.label.trim()) {
     addIssue(issues, route, "sidebar label must not be empty");
@@ -156,7 +146,7 @@ function validateSidebarRoute(
 
 /** Return every structural violation without hiding later failures behind the first. */
 export function getTenantRouteValidationIssues(
-  routes: readonly TenantRoute[],
+  routes: readonly TenantRoute[]
 ): readonly TenantRouteValidationIssue[] {
   const issues: TenantRouteValidationIssue[] = [];
   const routesById = new Map<string, TenantRoute>();
@@ -178,7 +168,7 @@ export function getTenantRouteValidationIssues(
       addIssue(
         issues,
         route,
-        `duplicate path also declared by ${existingPath.sourceFile} [${existingPath.id}]`,
+        `duplicate path also declared by ${existingPath.sourceFile} [${existingPath.id}]`
       );
     } else {
       routesByPath.set(normalizedPath, route);
@@ -191,20 +181,18 @@ export function getTenantRouteValidationIssues(
     if (route.navigation.type !== "contextual") continue;
     const parent = routesById.get(route.navigation.parentRouteId);
     if (!parent) {
-      addIssue(
-        issues,
-        route,
-        `contextual parent ${route.navigation.parentRouteId} does not exist`,
-      );
+      addIssue(issues, route, `contextual parent ${route.navigation.parentRouteId} does not exist`);
     } else if (parent.navigation.type !== "sidebar") {
       addIssue(issues, route, "contextual parent must be a sidebar route");
     } else if (parent.module !== route.module) {
       addIssue(issues, route, "contextual parent must belong to the same module");
     }
     if (route.module === "document_intelligence" || route.module === "email_marketing") {
-      if (!route.navigation.label?.trim()) addIssue(issues, route, "contextual NavItem label must not be empty");
+      if (!route.navigation.label?.trim())
+        addIssue(issues, route, "contextual NavItem label must not be empty");
       if (!route.navigation.icon) addIssue(issues, route, "contextual NavItem icon is required");
-      if (!Number.isFinite(route.navigation.order)) addIssue(issues, route, "contextual NavItem order must be finite");
+      if (!Number.isFinite(route.navigation.order))
+        addIssue(issues, route, "contextual NavItem order must be finite");
     }
   }
 
@@ -220,7 +208,7 @@ export function validateTenantRoutes(routes: readonly TenantRoute[]): void {
 /** Ensure derived sidebar leaves still resolve after future tree transformations. */
 export function validateTenantSidebarTree(
   routes: readonly TenantRoute[],
-  tree: readonly TenantSidebarBranch[],
+  tree: readonly TenantSidebarBranch[]
 ): void {
   const routesById = new Map(routes.map((route) => [route.id, route]));
 
@@ -230,11 +218,12 @@ export function validateTenantSidebarTree(
       if (!route) {
         throw new Error(`Sidebar leaf ${leaf.id} does not resolve to a tenant route.`);
       }
-      const expectedPath = route.navigation.type === "sidebar"
-        ? route.navigation.path ?? route.path
-        : (hasRouteParameter(route.path)
-          ? routesById.get(route.navigation.parentRouteId)?.path
-          : route.path);
+      const expectedPath =
+        route.navigation.type === "sidebar"
+          ? route.navigation.path ?? route.path
+          : hasRouteParameter(route.path)
+            ? routesById.get(route.navigation.parentRouteId)?.path
+            : route.path;
       if (expectedPath !== leaf.path) {
         throw new Error(`Sidebar leaf ${leaf.id} does not match its tenant route.`);
       }
@@ -249,29 +238,65 @@ export function validateTenantSidebarTree(
 // eslint-disable-next-line complexity -- registry construction validates and derives both static and governed leaves.
 export function buildTenantSidebarTree(
   routes: readonly TenantRoute[],
-  grantedPermissions?: ReadonlySet<string>,
+  grantedPermissions?: ReadonlySet<string>
 ): readonly TenantSidebarBranch[] {
   validateTenantRoutes(routes);
   const leavesByModule = new Map<string, TenantSidebarLeaf[]>();
 
   const routesById = new Map(routes.map((route) => [route.id, route]));
   for (const route of routes) {
-    const contextualNavItem = ["process_mining", "customization_framework", "integration_platform", "email_marketing", "ai_agent_management", "asset_management"].includes(route.module) && route.navigation.type === "contextual";
+    const contextualNavItem =
+      [
+        "process_mining",
+        "customization_framework",
+        "integration_platform",
+        "email_marketing",
+        "ai_agent_management",
+        "asset_management",
+      ].includes(route.module) && route.navigation.type === "contextual";
     if (route.navigation.type !== "sidebar" && !contextualNavItem) continue;
-    if (grantedPermissions && route.requiredPermission && !grantedPermissions.has(route.requiredPermission)) continue;
-    const parent = route.navigation.type === "contextual" ? routesById.get(route.navigation.parentRouteId) : undefined;
+    if (
+      grantedPermissions &&
+      route.requiredPermission &&
+      !grantedPermissions.has(route.requiredPermission)
+    )
+      continue;
+    const parent =
+      route.navigation.type === "contextual"
+        ? routesById.get(route.navigation.parentRouteId)
+        : undefined;
     const parentNavigation = parent?.navigation.type === "sidebar" ? parent.navigation : undefined;
-    const derivedLabel = route.sourceFile.split('/').at(-1)?.replace(/Page\.tsx$/, '').replace(/([a-z])([A-Z])/g, '$1 $2') ?? route.id;
+    const derivedLabel =
+      route.sourceFile
+        .split("/")
+        .at(-1)
+        ?.replace(/Page\.tsx$/, "")
+        .replace(/([a-z])([A-Z])/g, "$1 $2") ?? route.id;
     const leaves = leavesByModule.get(route.module) ?? [];
     leaves.push({
       id: route.id,
       routeId: route.id,
       module: route.module,
-      path: route.navigation.type === "sidebar" ? route.navigation.path ?? route.path : (hasRouteParameter(route.path) ? parent?.path ?? route.path : route.path),
-      label: route.navigation.type === "sidebar" ? route.navigation.label : route.navigation.label ?? derivedLabel,
-      icon: route.navigation.type === "sidebar" ? route.navigation.icon : route.navigation.icon ?? parentNavigation!.icon,
-      order: route.navigation.type === "sidebar" ? route.navigation.order : route.navigation.order ?? (parentNavigation?.order ?? 0) + (leaves.length + 1) / 100,
-      runtimeOrderKey: route.navigation.type === "sidebar" ? route.navigation.runtimeOrderKey : undefined,
+      path:
+        route.navigation.type === "sidebar"
+          ? route.navigation.path ?? route.path
+          : hasRouteParameter(route.path)
+            ? parent?.path ?? route.path
+            : route.path,
+      label:
+        route.navigation.type === "sidebar"
+          ? route.navigation.label
+          : route.navigation.label ?? derivedLabel,
+      icon:
+        route.navigation.type === "sidebar"
+          ? route.navigation.icon
+          : route.navigation.icon ?? parentNavigation!.icon,
+      order:
+        route.navigation.type === "sidebar"
+          ? route.navigation.order
+          : route.navigation.order ?? (parentNavigation?.order ?? 0) + (leaves.length + 1) / 100,
+      runtimeOrderKey:
+        route.navigation.type === "sidebar" ? route.navigation.runtimeOrderKey : undefined,
     });
     leavesByModule.set(route.module, leaves);
   }
@@ -280,8 +305,7 @@ export function buildTenantSidebarTree(
     .map(([module, leaves]) => {
       const sortedLeaves = leaves.sort(
         (left, right) =>
-          compareOptionalOrder(left.order, right.order) ||
-          left.label.localeCompare(right.label),
+          compareOptionalOrder(left.order, right.order) || left.label.localeCompare(right.label)
       );
       const firstLeaf = sortedLeaves[0];
       if (!firstLeaf) throw new Error(`Sidebar module ${module} has no routes.`);
@@ -296,8 +320,7 @@ export function buildTenantSidebarTree(
     })
     .sort(
       (left, right) =>
-        compareOptionalOrder(left.order, right.order) ||
-        left.label.localeCompare(right.label),
+        compareOptionalOrder(left.order, right.order) || left.label.localeCompare(right.label)
     );
 
   validateTenantSidebarTree(routes, tree);
@@ -307,7 +330,7 @@ export function buildTenantSidebarTree(
 /** Filter descriptors for the configured runtime while retaining all routes by default. */
 export function getTenantRoutesForMode(
   routes: readonly TenantRoute[],
-  mode?: TenantApplicationMode,
+  mode?: TenantApplicationMode
 ): readonly TenantRoute[] {
   if (!mode) return routes;
   return routes.filter((route) => !route.modes || route.modes.includes(mode));
@@ -320,7 +343,7 @@ export const tenantSidebarTree = buildTenantSidebarTree(tenantRoutes);
 
 export function getTenantSidebarTreeForMode(
   mode?: TenantApplicationMode,
-  grantedPermissions?: ReadonlySet<string>,
+  grantedPermissions?: ReadonlySet<string>
 ): readonly TenantSidebarBranch[] {
   return buildTenantSidebarTree(getTenantRoutesForMode(tenantRoutes, mode), grantedPermissions);
 }

@@ -135,9 +135,7 @@ def backfill_sales_domain(apps, schema_editor):
 
     for tenant_id in tenant_ids:
         currencies = list(
-            Customer.objects.filter(tenant_id=tenant_id)
-            .exclude(currency="")
-            .values_list("currency", flat=True)[:1]
+            Customer.objects.filter(tenant_id=tenant_id).exclude(currency="").values_list("currency", flat=True)[:1]
         )
         configuration = SalesConfiguration.objects.create(
             tenant_id=tenant_id,

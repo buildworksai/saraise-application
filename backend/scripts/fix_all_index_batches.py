@@ -2,6 +2,7 @@
 """
 Fix ForeignKey field names in ALL AddIndex batch migrations.
 """
+
 import re
 from pathlib import Path
 

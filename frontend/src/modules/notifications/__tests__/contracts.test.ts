@@ -6,9 +6,15 @@ describe("notification v2 contracts", () => {
     expect(MODULE_API_PREFIX).toBe("/api/v2/notifications");
     const serialized = JSON.stringify(ENDPOINTS);
     expect(serialized).not.toContain("/api/v1");
-    expect(ENDPOINTS.INBOX.MARK_UNREAD("id with space")).toContain("id%20with%20space/mark-unread/");
-    expect(ENDPOINTS.TEMPLATES.PREVIEW_DRAFT).toBe("/api/v2/notifications/templates/preview-draft/");
-    expect(ENDPOINTS.CONFIGURATION.EXPORT("production")).toBe("/api/v2/notifications/configuration/production/export/");
+    expect(ENDPOINTS.INBOX.MARK_UNREAD("id with space")).toContain(
+      "id%20with%20space/mark-unread/"
+    );
+    expect(ENDPOINTS.TEMPLATES.PREVIEW_DRAFT).toBe(
+      "/api/v2/notifications/templates/preview-draft/"
+    );
+    expect(ENDPOINTS.CONFIGURATION.EXPORT("production")).toBe(
+      "/api/v2/notifications/configuration/production/export/"
+    );
   });
 
   it("declares every brief-owned page path", () => {

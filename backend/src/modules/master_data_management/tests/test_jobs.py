@@ -7,13 +7,7 @@ import uuid
 import pytest
 
 from src.core.async_jobs.models import JobStatus, JobTransition, OutboxEvent
-from src.core.async_jobs.services import (
-    JobExecutionError,
-    enqueue,
-    execute,
-    get_handler,
-    transition,
-)
+from src.core.async_jobs.services import JobExecutionError, enqueue, execute, get_handler, transition
 from src.core.observability import get_task_context
 from src.core.tenancy import get_current_tenant_id
 from src.modules.master_data_management import jobs
@@ -64,11 +58,11 @@ def test_quality_job_runs_in_persisted_tenant_and_uses_job_idempotency() -> None
         "issue_count": 0,
     }
     assert completed.attempts == 1
-    assert list(
-        JobTransition.objects.for_tenant(tenant)
-        .filter(job=job)
-        .values_list("to_status", flat=True)
-    ) == [JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.SUCCEEDED]
+    assert list(JobTransition.objects.for_tenant(tenant).filter(job=job).values_list("to_status", flat=True)) == [
+        JobStatus.QUEUED,
+        JobStatus.RUNNING,
+        JobStatus.SUCCEEDED,
+    ]
     # At-least-once redelivery returns durable evidence without evaluating twice.
     replay = execute(job.id, tenant)
     assert replay.id == completed.id and replay.attempts == 1
@@ -107,14 +101,16 @@ def test_deduplication_job_blocks_compares_creates_once_and_reuses_on_redelivery
     assert {candidate.left_entity_id, candidate.right_entity_id} == {first.id, second.id}
     assert candidate.status == "confirmed"
     assert len(candidate.transition_history) == 1
+    assert candidate.transition_history[0]["metadata"]["correlation_id"] == job.correlation_id
     assert (
-        candidate.transition_history[0]["metadata"]["correlation_id"]
-        == job.correlation_id
+        OutboxEvent.objects.for_tenant(tenant)
+        .filter(
+            event_type="mdm.match_candidate.created",
+            aggregate_id=candidate.id,
+        )
+        .count()
+        == 1
     )
-    assert OutboxEvent.objects.for_tenant(tenant).filter(
-        event_type="mdm.match_candidate.created",
-        aggregate_id=candidate.id,
-    ).count() == 1
     replay = execute(job.id, tenant)
     assert replay.attempts == 1
     assert MatchCandidate.objects.for_tenant(tenant).count() == 1
@@ -269,7 +265,11 @@ def test_timeout_retry_and_cancellation_states_are_persisted_truthfully() -> Non
     )
     retry.refresh_from_db()
     assert retry.status == JobStatus.RETRYING and retry.error_message == "Transient storage failure"
-    assert OutboxEvent.objects.for_tenant(tenant).filter(
-        aggregate_id=retry.id,
-        event_type="async_job.retry_requested",
-    ).exists()
+    assert (
+        OutboxEvent.objects.for_tenant(tenant)
+        .filter(
+            aggregate_id=retry.id,
+            event_type="async_job.retry_requested",
+        )
+        .exists()
+    )

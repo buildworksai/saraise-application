@@ -13,11 +13,7 @@ from django.utils import timezone
 from src.core.async_jobs.services import get_handler
 from src.core.tenancy import MissingTenantContext
 from src.modules.document_intelligence import tasks
-from src.modules.document_intelligence.models import (
-    DocumentClassification,
-    DocumentExtraction,
-    ExtractionStatus,
-)
+from src.modules.document_intelligence.models import DocumentClassification, DocumentExtraction, ExtractionStatus
 from src.modules.document_intelligence.services import ConfigurationService, default_configuration_document
 
 from .factories import (

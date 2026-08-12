@@ -5,8 +5,8 @@
  *
  * Displays an error state with icon, title, message, and optional retry action.
  */
-import { AlertCircle, RefreshCw } from 'lucide-react';
-import { Button } from './Button';
+import { AlertCircle, RefreshCw } from "lucide-react";
+import { Button } from "./Button";
 
 interface ErrorStateProps {
   title?: string;
@@ -19,10 +19,12 @@ export const ErrorState = ({
   title = "Something went wrong",
   message,
   onRetry,
-  className
+  className,
 }: ErrorStateProps) => {
   return (
-    <div className={`flex flex-col items-center justify-center min-h-[400px] text-center p-8 ${className ?? ''}`}>
+    <div
+      className={`flex flex-col items-center justify-center min-h-[400px] text-center p-8 ${className ?? ""}`}
+    >
       <div className="bg-destructive/10 rounded-full p-4 mb-4">
         <AlertCircle className="w-12 h-12 text-destructive" />
       </div>

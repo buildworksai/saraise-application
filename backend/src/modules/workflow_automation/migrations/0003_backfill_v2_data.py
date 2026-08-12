@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 MARKER_COMMAND = "legacy_import"
 
 
@@ -32,6 +31,7 @@ def backfill_v2_data(apps, schema_editor) -> None:
     WorkflowInstance = apps.get_model("workflow_automation", "WorkflowInstance")
     WorkflowTask = apps.get_model("workflow_automation", "WorkflowTask")
 
+    updates: dict[str, object]
     for workflow in Workflow.objects.all().iterator(chunk_size=1000):
         updates = {}
         if workflow.key is None:
@@ -51,8 +51,7 @@ def backfill_v2_data(apps, schema_editor) -> None:
             Workflow.objects.filter(pk=workflow.pk).update(**updates)
 
     workflow_values = {
-        row["id"]: row
-        for row in Workflow.objects.values("id", "tenant_id", "created_at", "updated_at", "version")
+        row["id"]: row for row in Workflow.objects.values("id", "tenant_id", "created_at", "updated_at", "version")
     }
     for step in WorkflowStep.objects.all().iterator(chunk_size=1000):
         owner = workflow_values[step.workflow_id]
@@ -130,6 +129,7 @@ def reverse_v2_backfill(apps, schema_editor) -> None:
     WorkflowInstance = apps.get_model("workflow_automation", "WorkflowInstance")
     WorkflowTask = apps.get_model("workflow_automation", "WorkflowTask")
 
+    updates: dict[str, object]
     for task in WorkflowTask.objects.all().iterator(chunk_size=1000):
         updates = {"assignment_kind": None, "assignment_key": None, "correlation_id": None, "updated_at": None}
         markers = [item for item in (task.transition_history or []) if item.get("command") == MARKER_COMMAND]
@@ -152,9 +152,7 @@ def reverse_v2_backfill(apps, schema_editor) -> None:
         reasons = {item.get("metadata", {}).get("reason") for item in markers}
         if "terminal_timestamp_copied" in reasons:
             updates["completed_at"] = None
-        if "failure_code_classified" in reasons or (
-            instance.failure_code == "LEGACY_FAILURE_UNSPECIFIED" and markers
-        ):
+        if "failure_code_classified" in reasons or (instance.failure_code == "LEGACY_FAILURE_UNSPECIFIED" and markers):
             updates["failure_code"] = ""
         updates["transition_history"] = [
             item for item in (instance.transition_history or []) if item.get("command") != MARKER_COMMAND

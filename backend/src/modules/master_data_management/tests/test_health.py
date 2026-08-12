@@ -72,9 +72,7 @@ def test_readiness_failure_is_503_and_does_not_leak_exception(
     assert "secret-password" not in serialized
     assert response.data["module"] == "master_data_management"
     assert response.data["status"] == "not_ready"
-    assert response.data["components"] == {
-        "probe": {"ready": False, "code": "READINESS_PROBE_FAILED"}
-    }
+    assert response.data["components"] == {"probe": {"ready": False, "code": "READINESS_PROBE_FAILED"}}
     assert response.data["correlation_id"]
 
 

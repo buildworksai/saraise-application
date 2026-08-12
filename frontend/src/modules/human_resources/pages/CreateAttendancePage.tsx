@@ -1,1 +1,1 @@
-export { CreateAttendancePage } from './form-pages';
+export { CreateAttendancePage } from "./form-pages";

@@ -9,7 +9,7 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping, cast
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -193,6 +193,36 @@ def _section(values: Mapping[str, object], key: str) -> dict[str, object]:
     return dict(section)
 
 
+def _config_int(values: Mapping[str, object], key: str) -> int:
+    value = values.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValidationError({key: "Configuration value must be an integer."})
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError({key: "Configuration value must be an integer."}) from exc
+
+
+def _config_float(values: Mapping[str, object], key: str) -> float:
+    value = values.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValidationError({key: "Configuration value must be numeric."})
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError({key: "Configuration value must be numeric."}) from exc
+
+
+def _config_str_iterable(values: Mapping[str, object], key: str) -> tuple[str, ...]:
+    value = values.get(key)
+    if not isinstance(value, Iterable) or isinstance(value, (str, bytes)):
+        raise ValidationError({key: "Configuration value must be a list of strings."})
+    normalized = tuple(str(item) for item in value)
+    if any(not item for item in normalized):
+        raise ValidationError({key: "Configuration value must be a list of strings."})
+    return normalized
+
+
 class AIProviderRuntimeConfigurationService:
     """Validate, version, audit, import/export and resolve tenant runtime policy."""
 
@@ -223,7 +253,7 @@ class AIProviderRuntimeConfigurationService:
                 detail["missing_fields"] = missing
             if unknown:
                 detail["unknown_fields"] = unknown
-            raise ValidationError(detail)
+            raise ValidationError(cast(dict[str, Any], detail))
         values = _deep_copy(supplied)
         errors: dict[str, list[str]] = {}
 
@@ -286,18 +316,28 @@ class AIProviderRuntimeConfigurationService:
                 errors[f"{section_name}.{dotted_key}"] = [f"Must be an integer between {minimum} and {maximum}."]
 
         resilience = _section(values, "resilience")
-        for field, minimum, maximum in (
+        for field, minimum_value, maximum_value in (
             ("connect_timeout_seconds", 0.1, 60.0),
             ("read_timeout_seconds", 0.1, 300.0),
             ("retry_backoff_seconds", 0.0, 30.0),
             ("reset_timeout_seconds", 1.0, 3600.0),
         ):
             number = resilience.get(field)
-            if isinstance(number, bool) or not isinstance(number, (int, float)) or not minimum <= float(number) <= maximum:
-                errors[f"resilience.{field}"] = [f"Must be a number between {minimum} and {maximum}."]
-        if isinstance(resilience.get("max_retries"), bool) or not isinstance(resilience.get("max_retries"), int) or not 1 <= int(resilience.get("max_retries", 0)) <= 10:
+            if (
+                isinstance(number, bool)
+                or not isinstance(number, (int, float))
+                or not minimum_value <= float(number) <= maximum_value
+            ):
+                errors[f"resilience.{field}"] = [f"Must be a number between {minimum_value} and {maximum_value}."]
+        max_retries = resilience.get("max_retries")
+        if isinstance(max_retries, bool) or not isinstance(max_retries, int) or not 1 <= max_retries <= 10:
             errors["resilience.max_retries"] = ["Must be an integer from 1 to 10."]
-        if isinstance(resilience.get("failure_threshold"), bool) or not isinstance(resilience.get("failure_threshold"), int) or not 1 <= int(resilience.get("failure_threshold", 0)) <= 100:
+        failure_threshold = resilience.get("failure_threshold")
+        if (
+            isinstance(failure_threshold, bool)
+            or not isinstance(failure_threshold, int)
+            or not 1 <= failure_threshold <= 100
+        ):
             errors["resilience.failure_threshold"] = ["Must be an integer from 1 to 100."]
 
         deployment = _section(values, "deployment_policy")
@@ -307,11 +347,19 @@ class AIProviderRuntimeConfigurationService:
         if not isinstance(limits, Mapping) or not isinstance(defaults, Mapping):
             errors["deployment_policy"] = ["Must define limits and defaults."]
         else:
-            if int(limits["max_tokens_min"]) > int(limits["max_tokens_max"]):
+            required_limit_fields = {"max_tokens_min", "max_tokens_max", "temperature_min", "temperature_max"}
+            required_default_fields = {"max_tokens", "temperature"}
+            if not required_limit_fields.issubset(limits) or not required_default_fields.issubset(defaults):
+                errors["deployment_policy"] = ["Must define complete limits and defaults."]
+            elif int(limits["max_tokens_min"]) > int(limits["max_tokens_max"]):
                 errors["deployment_policy.limits"] = ["max_tokens_min must not exceed max_tokens_max."]
-            if not int(limits["max_tokens_min"]) <= int(defaults["max_tokens"]) <= int(limits["max_tokens_max"]):
+            elif not int(limits["max_tokens_min"]) <= int(defaults["max_tokens"]) <= int(limits["max_tokens_max"]):
                 errors["deployment_policy.defaults.max_tokens"] = ["Must be within token limits."]
-            if not float(limits["temperature_min"]) <= float(defaults["temperature"]) <= float(limits["temperature_max"]):
+            elif (
+                not float(limits["temperature_min"])
+                <= float(defaults["temperature"])
+                <= float(limits["temperature_max"])
+            ):
                 errors["deployment_policy.defaults.temperature"] = ["Must be within temperature limits."]
         if not isinstance(editable_fields, list) or not set(editable_fields).issubset(
             {"temperature", "max_tokens", "top_p", "timeout_seconds"}
@@ -329,15 +377,21 @@ class AIProviderRuntimeConfigurationService:
 
         metering = _section(values, "metering")
         currencies = metering.get("currency_allowlist")
-        if not isinstance(currencies, list) or not currencies or any(
-            not isinstance(item, str) or len(item) != 3 or item.upper() != item for item in currencies
+        if (
+            not isinstance(currencies, list)
+            or not currencies
+            or any(not isinstance(item, str) or len(item) != 3 or item.upper() != item for item in currencies)
         ):
             errors["metering.currency_allowlist"] = ["Must contain uppercase ISO-like currency codes."]
         elif metering.get("default_currency") not in currencies:
             errors["metering.default_currency"] = ["Must be present in currency_allowlist."]
 
         feature_flags = values["feature_flags"]
-        if not isinstance(feature_flags, dict) or set(feature_flags) != {"configuration_ui", "provider_catalog", "secret_rotation"} or not all(isinstance(enabled, bool) for enabled in feature_flags.values()):
+        if (
+            not isinstance(feature_flags, dict)
+            or set(feature_flags) != {"configuration_ui", "provider_catalog", "secret_rotation"}
+            or not all(isinstance(enabled, bool) for enabled in feature_flags.values())
+        ):
             errors["feature_flags"] = ["Must define supported feature flags as booleans."]
         rollout = values["rollout"]
         if not isinstance(rollout, dict) or set(rollout) != {"enabled", "roles", "cohorts"}:
@@ -348,7 +402,9 @@ class AIProviderRuntimeConfigurationService:
         return values
 
     @classmethod
-    def current(cls, tenant_id: UUID | str, actor_id: UUID | str, environment: str | None = None) -> AIProviderRuntimeConfiguration:
+    def current(
+        cls, tenant_id: UUID | str, actor_id: UUID | str, environment: str | None = None
+    ) -> AIProviderRuntimeConfiguration:
         tenant_uuid = _uuid(tenant_id, "tenant_id")
         actor_uuid = _uuid(actor_id, "actor_id")
         env = _environment(environment)
@@ -392,7 +448,9 @@ class AIProviderRuntimeConfigurationService:
             return configuration
 
     @classmethod
-    def preview(cls, tenant_id: UUID | str, actor_id: UUID | str, values: Mapping[str, object], environment: str | None = None) -> dict[str, object]:
+    def preview(
+        cls, tenant_id: UUID | str, actor_id: UUID | str, values: Mapping[str, object], environment: str | None = None
+    ) -> dict[str, object]:
         current = cls.current(tenant_id, actor_id, environment)
         proposed = cls.validate_values(values)
         return {
@@ -407,7 +465,16 @@ class AIProviderRuntimeConfigurationService:
         }
 
     @classmethod
-    def update(cls, tenant_id: UUID | str, actor_id: UUID | str, values: Mapping[str, object], environment: str | None = None, *, action: str = "updated", rollback_of: int | None = None) -> AIProviderRuntimeConfiguration:
+    def update(
+        cls,
+        tenant_id: UUID | str,
+        actor_id: UUID | str,
+        values: Mapping[str, object],
+        environment: str | None = None,
+        *,
+        action: str = "updated",
+        rollback_of: int | None = None,
+    ) -> AIProviderRuntimeConfiguration:
         tenant_uuid = _uuid(tenant_id, "tenant_id")
         actor_uuid = _uuid(actor_id, "actor_id")
         proposed = cls.validate_values(values)
@@ -446,7 +513,9 @@ class AIProviderRuntimeConfigurationService:
             return locked
 
     @classmethod
-    def rollback(cls, tenant_id: UUID | str, actor_id: UUID | str, version: int, environment: str | None = None) -> AIProviderRuntimeConfiguration:
+    def rollback(
+        cls, tenant_id: UUID | str, actor_id: UUID | str, version: int, environment: str | None = None
+    ) -> AIProviderRuntimeConfiguration:
         configuration = cls.current(tenant_id, actor_id, environment)
         target = configuration.versions.filter(version=version).first()
         if target is None:
@@ -464,7 +533,9 @@ class AIProviderRuntimeConfigurationService:
         }
 
     @classmethod
-    def import_document(cls, tenant_id: UUID | str, actor_id: UUID | str, document: Mapping[str, object]) -> AIProviderRuntimeConfiguration:
+    def import_document(
+        cls, tenant_id: UUID | str, actor_id: UUID | str, document: Mapping[str, object]
+    ) -> AIProviderRuntimeConfiguration:
         if document.get("module") != "ai_provider_configuration":
             raise ValidationError({"module": "Unsupported configuration document."})
         return cls.update(
@@ -508,12 +579,12 @@ class AIProviderService(ABC):
                     "allowed_hosts": [host],
                 }
             },
-            connect_timeout=float(resilience["connect_timeout_seconds"]),
-            read_timeout=float(resilience["read_timeout_seconds"]),
-            max_retries=int(resilience["max_retries"]),
-            retry_backoff=float(resilience["retry_backoff_seconds"]),
-            failure_threshold=int(resilience["failure_threshold"]),
-            reset_timeout=float(resilience["reset_timeout_seconds"]),
+            connect_timeout=_config_float(resilience, "connect_timeout_seconds"),
+            read_timeout=_config_float(resilience, "read_timeout_seconds"),
+            max_retries=_config_int(resilience, "max_retries"),
+            retry_backoff=_config_float(resilience, "retry_backoff_seconds"),
+            failure_threshold=_config_int(resilience, "failure_threshold"),
+            reset_timeout=_config_float(resilience, "reset_timeout_seconds"),
         )
 
     @abstractmethod
@@ -552,11 +623,21 @@ class AIProviderService(ABC):
         limits = deployment["limits"]
         if not isinstance(limits, Mapping):
             raise ValidationError({"deployment_policy": "Deployment limits are invalid."})
-        prompt = _text(prompt, "prompt", maximum=int(fields["prompt_max"]))
-        model = _text(model, "model", maximum=int(fields["model_identifier_max"]))
-        if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or not int(limits["max_tokens_min"]) <= max_tokens <= int(limits["max_tokens_max"]):
+        prompt = _text(prompt, "prompt", maximum=_config_int(fields, "prompt_max"))
+        model = _text(model, "model", maximum=_config_int(fields, "model_identifier_max"))
+        if (
+            isinstance(max_tokens, bool)
+            or not isinstance(max_tokens, int)
+            or not _config_int(limits, "max_tokens_min") <= max_tokens <= _config_int(limits, "max_tokens_max")
+        ):
             raise ValidationError({"max_tokens": "Violates tenant deployment token limits."})
-        if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not float(limits["temperature_min"]) <= float(temperature) <= float(limits["temperature_max"]):
+        if (
+            isinstance(temperature, bool)
+            or not isinstance(temperature, (int, float))
+            or not _config_float(limits, "temperature_min")
+            <= float(temperature)
+            <= _config_float(limits, "temperature_max")
+        ):
             raise ValidationError({"temperature": "Violates tenant deployment temperature limits."})
         return prompt, model
 
@@ -587,7 +668,9 @@ class OpenAICompatibleProvider(AIProviderService):
 
 class OpenAIProvider(OpenAICompatibleProvider):
     def __init__(self, api_key: str, base_url: str | None = None, **kwargs: Any) -> None:
-        policy = AIProviderRuntimeConfigurationService.validate_values(kwargs.get("policy") or DEFAULT_RUNTIME_CONFIGURATION)
+        policy = AIProviderRuntimeConfigurationService.validate_values(
+            kwargs.get("policy") or DEFAULT_RUNTIME_CONFIGURATION
+        )
         endpoints = _section(policy, "provider_endpoints")
         super().__init__(
             api_key,
@@ -599,7 +682,9 @@ class OpenAIProvider(OpenAICompatibleProvider):
 
 class GroqProvider(OpenAICompatibleProvider):
     def __init__(self, api_key: str, base_url: str | None = None, **kwargs: Any) -> None:
-        policy = AIProviderRuntimeConfigurationService.validate_values(kwargs.get("policy") or DEFAULT_RUNTIME_CONFIGURATION)
+        policy = AIProviderRuntimeConfigurationService.validate_values(
+            kwargs.get("policy") or DEFAULT_RUNTIME_CONFIGURATION
+        )
         endpoints = _section(policy, "provider_endpoints")
         super().__init__(
             api_key,
@@ -611,7 +696,9 @@ class GroqProvider(OpenAICompatibleProvider):
 
 class MistralProvider(OpenAICompatibleProvider):
     def __init__(self, api_key: str, base_url: str | None = None, **kwargs: Any) -> None:
-        policy = AIProviderRuntimeConfigurationService.validate_values(kwargs.get("policy") or DEFAULT_RUNTIME_CONFIGURATION)
+        policy = AIProviderRuntimeConfigurationService.validate_values(
+            kwargs.get("policy") or DEFAULT_RUNTIME_CONFIGURATION
+        )
         endpoints = _section(policy, "provider_endpoints")
         super().__init__(
             api_key,
@@ -679,7 +766,9 @@ class AzureOpenAIProvider(AIProviderService):
 
 class AnthropicProvider(AIProviderService):
     def __init__(self, api_key: str, base_url: str | None = None, **kwargs: Any) -> None:
-        policy = AIProviderRuntimeConfigurationService.validate_values(kwargs.get("policy") or DEFAULT_RUNTIME_CONFIGURATION)
+        policy = AIProviderRuntimeConfigurationService.validate_values(
+            kwargs.get("policy") or DEFAULT_RUNTIME_CONFIGURATION
+        )
         endpoints = _section(policy, "provider_endpoints")
         super().__init__(
             api_key,
@@ -721,7 +810,9 @@ class AnthropicProvider(AIProviderService):
 
 class GoogleGeminiProvider(AIProviderService):
     def __init__(self, api_key: str, base_url: str | None = None, **kwargs: Any) -> None:
-        policy = AIProviderRuntimeConfigurationService.validate_values(kwargs.get("policy") or DEFAULT_RUNTIME_CONFIGURATION)
+        policy = AIProviderRuntimeConfigurationService.validate_values(
+            kwargs.get("policy") or DEFAULT_RUNTIME_CONFIGURATION
+        )
         endpoints = _section(policy, "provider_endpoints")
         super().__init__(
             api_key,
@@ -751,7 +842,9 @@ class GoogleGeminiProvider(AIProviderService):
 
 class HuggingFaceProvider(AIProviderService):
     def __init__(self, api_key: str, base_url: str | None = None, **kwargs: Any) -> None:
-        policy = AIProviderRuntimeConfigurationService.validate_values(kwargs.get("policy") or DEFAULT_RUNTIME_CONFIGURATION)
+        policy = AIProviderRuntimeConfigurationService.validate_values(
+            kwargs.get("policy") or DEFAULT_RUNTIME_CONFIGURATION
+        )
         endpoints = _section(policy, "provider_endpoints")
         super().__init__(
             api_key,
@@ -805,7 +898,7 @@ class AIProviderFactory:
         tenant_id = _uuid(tenant_id, "tenant_id")
         policy = AIProviderRuntimeConfigurationService.runtime_values(tenant_id)
         credential_policy = _section(policy, "credential_policy")
-        permitted_statuses = credential_policy["permitted_deployment_statuses"]
+        permitted_statuses = _config_str_iterable(credential_policy, "permitted_deployment_statuses")
         credential = (
             AIProviderCredential.objects.for_tenant(tenant_id)
             .select_related("provider")
@@ -836,16 +929,25 @@ class AIProviderFactory:
                 extra={"credential_id": str(credential.id), "provider_id": str(provider.id)},
             )
             raise ProviderUnavailable("Provider credential is unavailable.") from exc
-        kwargs: dict[str, object] = {
-            "dependency": f"ai-provider-{provider.id}",
-            "policy": policy,
-            "http_client": http_client,
-        }
         if adapter_type is AzureOpenAIProvider:
             defaults = _section(policy, "provider_defaults")
             versions = defaults.get("api_version_by_type", {})
-            kwargs["api_version"] = provider.api_version or (versions.get("azure") if isinstance(versions, Mapping) else "")
-        return adapter_type(api_key, base_url, **kwargs)
+            api_version = provider.api_version or (versions.get("azure") if isinstance(versions, Mapping) else "")
+            return AzureOpenAIProvider(
+                api_key,
+                base_url,
+                dependency=f"ai-provider-{provider.id}",
+                policy=policy,
+                http_client=http_client,
+                api_version=str(api_version),
+            )
+        return adapter_type(
+            api_key,
+            base_url,
+            dependency=f"ai-provider-{provider.id}",
+            policy=policy,
+            http_client=http_client,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -875,7 +977,7 @@ class AIProviderConfigurationService:
         if not isinstance(value, Mapping):
             raise ValidationError({"config": "Must be an object."})
         deployment = _section(policy, "deployment_policy")
-        allowed = set(deployment["editable_config_fields"])
+        allowed = set(_config_str_iterable(deployment, "editable_config_fields"))
         config = _deep_copy(value)
         unknown = sorted(set(config) - allowed)
         if unknown:
@@ -890,15 +992,27 @@ class AIProviderConfigurationService:
             config["temperature"] = defaults["temperature"]
         max_tokens = config.get("max_tokens")
         temperature = config.get("temperature")
-        if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or not int(limits["max_tokens_min"]) <= max_tokens <= int(limits["max_tokens_max"]):
+        if (
+            isinstance(max_tokens, bool)
+            or not isinstance(max_tokens, int)
+            or not int(limits["max_tokens_min"]) <= max_tokens <= int(limits["max_tokens_max"])
+        ):
             raise ValidationError({"config.max_tokens": "Violates tenant token limits."})
-        if isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or not float(limits["temperature_min"]) <= float(temperature) <= float(limits["temperature_max"]):
+        if (
+            isinstance(temperature, bool)
+            or not isinstance(temperature, (int, float))
+            or not float(limits["temperature_min"]) <= float(temperature) <= float(limits["temperature_max"])
+        ):
             raise ValidationError({"config.temperature": "Violates tenant temperature limits."})
         top_p = config.get("top_p")
-        if top_p is not None and (isinstance(top_p, bool) or not isinstance(top_p, (int, float)) or not 0 <= float(top_p) <= 1):
+        if top_p is not None and (
+            isinstance(top_p, bool) or not isinstance(top_p, (int, float)) or not 0 <= float(top_p) <= 1
+        ):
             raise ValidationError({"config.top_p": "Must be a number from 0 to 1."})
         timeout = config.get("timeout_seconds")
-        if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0.1 <= float(timeout) <= 300):
+        if timeout is not None and (
+            isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0.1 <= float(timeout) <= 300
+        ):
             raise ValidationError({"config.timeout_seconds": "Must be a number from 0.1 to 300."})
         return config
 
@@ -965,11 +1079,11 @@ class AIProviderConfigurationService:
             return AIProviderConfigurationResource.objects.for_tenant(tenant_uuid).get(pk=replay)
         resource = AIProviderConfigurationResource(
             tenant_id=tenant_uuid,
-            name=_text(name, "name", maximum=int(fields["resource_name_max"])),
+            name=_text(name, "name", maximum=_config_int(fields, "resource_name_max")),
             description=_text(
                 description if description is not None else str(resource_policy["default_description"]),
                 "description",
-                maximum=int(fields["resource_description_max"]),
+                maximum=_config_int(fields, "resource_description_max"),
                 allow_blank=True,
             ),
             config=self.validate_resource_config(policy, config or resource_policy["default_config"]),
@@ -984,10 +1098,14 @@ class AIProviderConfigurationService:
     def get_resource(self, resource_id: UUID | str, tenant_id: UUID | str) -> AIProviderConfigurationResource | None:
         """Return a resource only when it belongs to the requested tenant."""
 
-        return AIProviderConfigurationResource.objects.for_tenant(_uuid(tenant_id, "tenant_id")).filter(
-            pk=_uuid(resource_id, "resource_id"),
-            is_deleted=False,
-        ).first()
+        return (
+            AIProviderConfigurationResource.objects.for_tenant(_uuid(tenant_id, "tenant_id"))
+            .filter(
+                pk=_uuid(resource_id, "resource_id"),
+                is_deleted=False,
+            )
+            .first()
+        )
 
     def list_resources(
         self,
@@ -1015,20 +1133,30 @@ class AIProviderConfigurationService:
         tenant_uuid = _uuid(tenant_id, "tenant_id")
         policy = AIProviderRuntimeConfigurationService.runtime_values(tenant_uuid)
         fields = _section(policy, "field_limits")
-        editable = set(_section(policy, "resource_policy")["editable_fields"])
-        resource = AIProviderConfigurationResource.objects.for_tenant(tenant_uuid).select_for_update().filter(
-            pk=_uuid(resource_id, "resource_id"),
-            is_deleted=False,
-        ).first()
+        editable = set(_config_str_iterable(_section(policy, "resource_policy"), "editable_fields"))
+        resource = (
+            AIProviderConfigurationResource.objects.for_tenant(tenant_uuid)
+            .select_for_update()
+            .filter(
+                pk=_uuid(resource_id, "resource_id"),
+                is_deleted=False,
+            )
+            .first()
+        )
         if resource is None:
             return None
         for field, value in updates.items():
             if field not in editable:
                 continue
             if field == "name":
-                value = _text(value, "name", maximum=int(fields["resource_name_max"]))  # type: ignore[arg-type]
+                value = _text(value, "name", maximum=_config_int(fields, "resource_name_max"))
             elif field == "description":
-                value = _text(value, "description", maximum=int(fields["resource_description_max"]), allow_blank=True)  # type: ignore[arg-type]
+                value = _text(
+                    value,
+                    "description",
+                    maximum=_config_int(fields, "resource_description_max"),
+                    allow_blank=True,
+                )
             elif field == "config":
                 value = self.validate_resource_config(policy, value)
             elif field == "is_active" and not isinstance(value, bool):
@@ -1042,10 +1170,14 @@ class AIProviderConfigurationService:
     def delete_resource(self, resource_id: UUID | str, tenant_id: UUID | str) -> bool:
         """Reversibly archive a resource only from its owning tenant."""
 
-        resource = AIProviderConfigurationResource.objects.for_tenant(_uuid(tenant_id, "tenant_id")).filter(
-            pk=_uuid(resource_id, "resource_id"),
-            is_deleted=False,
-        ).first()
+        resource = (
+            AIProviderConfigurationResource.objects.for_tenant(_uuid(tenant_id, "tenant_id"))
+            .filter(
+                pk=_uuid(resource_id, "resource_id"),
+                is_deleted=False,
+            )
+            .first()
+        )
         if resource is None:
             return False
         resource.is_deleted = True
@@ -1059,24 +1191,29 @@ class AIProviderConfigurationService:
         resource_id: UUID | str,
         tenant_id: UUID | str,
     ) -> AIProviderConfigurationResource | None:
-        return self.update_resource(resource_id, tenant_id, is_active=True)
+        return self.update_resource(str(resource_id), tenant_id, is_active=True)
 
     def deactivate_resource(
         self,
         resource_id: UUID | str,
         tenant_id: UUID | str,
     ) -> AIProviderConfigurationResource | None:
-        return self.update_resource(resource_id, tenant_id, is_active=False)
+        return self.update_resource(str(resource_id), tenant_id, is_active=False)
 
     @transaction.atomic
     def restore_resource(self, resource_id: UUID | str, tenant_id: UUID | str) -> AIProviderConfigurationResource:
         """Restore a previously archived resource within its tenant boundary."""
 
         tenant_uuid = _uuid(tenant_id, "tenant_id")
-        resource = AIProviderConfigurationResource.objects.for_tenant(tenant_uuid).select_for_update().filter(
-            pk=_uuid(resource_id, "resource_id"),
-            is_deleted=True,
-        ).first()
+        resource = (
+            AIProviderConfigurationResource.objects.for_tenant(tenant_uuid)
+            .select_for_update()
+            .filter(
+                pk=_uuid(resource_id, "resource_id"),
+                is_deleted=True,
+            )
+            .first()
+        )
         if resource is None:
             raise NotFound()
         resource.is_deleted = False
@@ -1111,15 +1248,17 @@ class AIProviderConfigurationService:
         replay = self._idempotency_replay(tenant_id, idempotency_key, payload, "credential")
         if replay is not None:
             return AIProviderCredential.objects.for_tenant(tenant_id).get(pk=replay)
-        provider = AIProvider.objects.filter(pk=_uuid(provider_id, "provider"), is_active=True).first()
+        provider = AIProvider.objects.filter(
+            pk=_uuid(provider_id, "provider"), is_active=True
+        ).first()  # nosemgrep: semgrep.tenant-id-required-in-queries -- reviewed false positive; scope enforced by surrounding domain policy.  # noqa: E501
         if provider is None:
             raise ValidationError({"provider": "An active provider is required."})
-        secret = _text(api_key, "api_key", maximum=int(fields["credential_api_key_max"]))
-        hint_length = int(fields["credential_secret_hint_length"])
+        secret = _text(api_key, "api_key", maximum=_config_int(fields, "credential_api_key_max"))
+        hint_length = _config_int(fields, "credential_secret_hint_length")
         credential = AIProviderCredential(
             tenant_id=tenant_id,
             provider=provider,
-            label=_text(label_value, "label", maximum=int(fields["credential_label_max"])),
+            label=_text(label_value, "label", maximum=_config_int(fields, "credential_label_max")),
             api_key_encrypted=EncryptionService.encrypt(secret),
             secret_hint=secret[-hint_length:],
         )
@@ -1153,17 +1292,20 @@ class AIProviderConfigurationService:
             provider = AIProvider.objects.filter(pk=_uuid(provider_id, "provider"), is_active=True).first()
             if provider is None:
                 raise ValidationError({"provider": "An active provider is required."})
-            if AIModelDeployment.objects.for_tenant(tenant_id).filter(
-                credential=credential, is_deleted=False
-            ).exclude(model__provider=provider).exists():
+            if (
+                AIModelDeployment.objects.for_tenant(tenant_id)
+                .filter(credential=credential, is_deleted=False)
+                .exclude(model__provider=provider)
+                .exists()
+            ):
                 raise ValidationError({"provider": "Provider cannot change while incompatible deployments use it."})
             credential.provider = provider
         if label is not None:
-            credential.label = _text(label, "label", maximum=int(fields["credential_label_max"]))
+            credential.label = _text(label, "label", maximum=_config_int(fields, "credential_label_max"))
         if api_key is not None:
-            secret = _text(api_key, "api_key", maximum=int(fields["credential_api_key_max"]))
+            secret = _text(api_key, "api_key", maximum=_config_int(fields, "credential_api_key_max"))
             credential.api_key_encrypted = EncryptionService.encrypt(secret)
-            credential.secret_hint = secret[-int(fields["credential_secret_hint_length"]):]
+            credential.secret_hint = secret[-_config_int(fields, "credential_secret_hint_length") :]
             credential.status = CredentialStatus.UNVERIFIED
             credential.last_verified_at = None
             credential.last_error_code = ""
@@ -1184,9 +1326,12 @@ class AIProviderConfigurationService:
         )
         if credential is None:
             raise NotFound()
-        if bool(credential_policy["archive_requires_no_active_deployments"]) and AIModelDeployment.objects.for_tenant(tenant_id).filter(
-            credential=credential, is_deleted=False, status=DeploymentStatus.ACTIVE
-        ).exists():
+        if (
+            bool(credential_policy["archive_requires_no_active_deployments"])
+            and AIModelDeployment.objects.for_tenant(tenant_id)
+            .filter(credential=credential, is_deleted=False, status=DeploymentStatus.ACTIVE)
+            .exists()
+        ):
             raise ValidationError({"credential": "Deactivate dependent deployments before archiving this credential."})
         credential.is_deleted = True
         credential.deleted_at = timezone.now()
@@ -1229,21 +1374,29 @@ class AIProviderConfigurationService:
             raise ValidationError({"model": "An active model is required."})
         credential = None
         if credential_id is not None:
-            credential = AIProviderCredential.objects.for_tenant(tenant_id).filter(
-                pk=_uuid(credential_id, "credential"),
-                provider=model.provider,
-                is_deleted=False,
-                status__in=credential_policy["permitted_deployment_statuses"],
-            ).first()
+            credential = (
+                AIProviderCredential.objects.for_tenant(tenant_id)
+                .filter(
+                    pk=_uuid(credential_id, "credential"),
+                    provider=model.provider,
+                    is_deleted=False,
+                    status__in=_config_str_iterable(credential_policy, "permitted_deployment_statuses"),
+                )
+                .first()
+            )
             if credential is None:
-                raise ValidationError({"credential": "A permitted, verified credential for the model provider is required."})
+                raise ValidationError(
+                    {"credential": "A permitted, verified credential for the model provider is required."}
+                )
         elif not bool(deployment_policy["allow_without_credential"]):
             raise ValidationError({"credential": "A permitted credential is required by tenant policy."})
         deployment = AIModelDeployment(
             tenant_id=tenant_id,
             model=model,
             credential=credential,
-            deployment_name=_text(deployment_name, "deployment_name", maximum=int(fields["deployment_name_max"])),
+            deployment_name=_text(
+                deployment_name, "deployment_name", maximum=_config_int(fields, "deployment_name_max")
+            ),
             config=self.validate_deployment_config(policy, config or {}),
             status=status_value,
             created_by=str(actor_uuid),
@@ -1275,9 +1428,11 @@ class AIProviderConfigurationService:
         if deployment is None:
             raise NotFound()
         if "model_id" in changes:
-            model = AIModel.objects.select_related("provider").filter(
-                pk=_uuid(changes["model_id"], "model"), is_active=True
-            ).first()
+            model = (
+                AIModel.objects.select_related("provider")
+                .filter(pk=_uuid(cast(UUID | str, changes["model_id"]), "model"), is_active=True)
+                .first()
+            )
             if model is None:
                 raise ValidationError({"model": "An active model is required."})
             deployment.model = model
@@ -1286,17 +1441,27 @@ class AIProviderConfigurationService:
             if raw_credential is None:
                 deployment.credential = None
             else:
-                credential = AIProviderCredential.objects.for_tenant(tenant_id).filter(
-                    pk=_uuid(raw_credential, "credential"),
-                    provider=deployment.model.provider,
-                    is_deleted=False,
-                    status__in=credential_policy["permitted_deployment_statuses"],
-                ).first()
+                credential = (
+                    AIProviderCredential.objects.for_tenant(tenant_id)
+                    .filter(
+                        pk=_uuid(cast(UUID | str, raw_credential), "credential"),
+                        provider=deployment.model.provider,
+                        is_deleted=False,
+                        status__in=_config_str_iterable(credential_policy, "permitted_deployment_statuses"),
+                    )
+                    .first()
+                )
                 if credential is None:
-                    raise ValidationError({"credential": "A permitted, verified credential for the model provider is required."})
+                    raise ValidationError(
+                        {"credential": "A permitted, verified credential for the model provider is required."}
+                    )
                 deployment.credential = credential
         if "deployment_name" in changes:
-            deployment.deployment_name = _text(changes["deployment_name"], "deployment_name", maximum=int(fields["deployment_name_max"]))  # type: ignore[arg-type]
+            deployment.deployment_name = _text(
+                changes["deployment_name"],
+                "deployment_name",
+                maximum=_config_int(fields, "deployment_name_max"),
+            )
         if "config" in changes:
             value = changes["config"]
             if not isinstance(value, Mapping):
@@ -1316,9 +1481,12 @@ class AIProviderConfigurationService:
     @transaction.atomic
     def delete_deployment(self, tenant_id: UUID | str, deployment_id: UUID | str) -> None:
         tenant_id = _uuid(tenant_id, "tenant_id")
-        deployment = AIModelDeployment.objects.for_tenant(tenant_id).select_for_update().filter(
-            pk=_uuid(deployment_id, "deployment_id"), is_deleted=False
-        ).first()
+        deployment = (
+            AIModelDeployment.objects.for_tenant(tenant_id)
+            .select_for_update()
+            .filter(pk=_uuid(deployment_id, "deployment_id"), is_deleted=False)
+            .first()
+        )
         if deployment is None:
             raise NotFound()
         deployment.status = DeploymentStatus.INACTIVE
@@ -1330,8 +1498,8 @@ class AIProviderConfigurationService:
     def re_encrypt_credentials(self, tenant_id: UUID | str, *, old_key: str, new_key: str) -> RotationResult:
         tenant_id = _uuid(tenant_id, "tenant_id")
         fields = _section(AIProviderRuntimeConfigurationService.runtime_values(tenant_id), "field_limits")
-        old_key = _text(old_key, "old_key", maximum=int(fields["rotation_key_max"]))
-        new_key = _text(new_key, "new_key", maximum=int(fields["rotation_key_max"]))
+        old_key = _text(old_key, "old_key", maximum=_config_int(fields, "rotation_key_max"))
+        new_key = _text(new_key, "new_key", maximum=_config_int(fields, "rotation_key_max"))
         credentials = list(
             AIProviderCredential.objects.for_tenant(tenant_id).select_for_update().filter(is_deleted=False)
         )
@@ -1364,17 +1532,32 @@ class AIUsageService:
         policy = AIProviderRuntimeConfigurationService.runtime_values(tenant_id)
         fields = _section(policy, "field_limits")
         metering = _section(policy, "metering")
-        deployment = AIModelDeployment.objects.for_tenant(tenant_id).filter(
-            pk=_uuid(deployment_id, "deployment_id"), is_deleted=False
-        ).first()
+        deployment = (
+            AIModelDeployment.objects.for_tenant(tenant_id)
+            .filter(pk=_uuid(deployment_id, "deployment_id"), is_deleted=False)
+            .first()
+        )
         if deployment is None:
             raise NotFound()
-        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in (prompt_tokens, completion_tokens)):
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in (prompt_tokens, completion_tokens)
+        ):
             raise ValidationError({"tokens": "Token counts must be non-negative integers."})
         try:
             normalized_cost = Decimal(str(cost))
         except (InvalidOperation, TypeError, ValueError) as exc:
             raise ValidationError({"cost": "A valid decimal amount is required."}) from exc
+        normalized_currency = _text(
+            currency or str(metering["default_currency"]),
+            "currency",
+            maximum=_config_int(metering, "currency_code_length"),
+        ).upper()
+        allowed_currencies = metering.get("currency_allowlist", [])
+        if not isinstance(allowed_currencies, list) or normalized_currency not in {
+            str(value).upper() for value in allowed_currencies
+        }:
+            raise ValidationError({"currency": "Currency is not permitted by tenant metering policy."})
         usage = AIUsageLog(
             tenant_id=tenant_id,
             deployment=deployment,
@@ -1382,9 +1565,12 @@ class AIUsageService:
             completion_tokens=completion_tokens,
             total_tokens=prompt_tokens + completion_tokens,
             cost=normalized_cost,
-            currency=_text(currency or str(metering["default_currency"]), "currency", maximum=int(metering["currency_code_length"])).upper(),
+            currency=normalized_currency,
             provider_request_id=_text(
-                provider_request_id, "provider_request_id", maximum=int(fields["provider_request_id_max"]), allow_blank=True
+                provider_request_id,
+                "provider_request_id",
+                maximum=_config_int(fields, "provider_request_id_max"),
+                allow_blank=True,
             ),
         )
         _clean(usage)

@@ -23,7 +23,7 @@ from src.modules.blockchain_traceability.models import (
     VerificationAttempt,
 )
 from src.modules.blockchain_traceability.providers import CapabilityMetadata, DocumentReferenceResult
-from src.modules.blockchain_traceability.services import LedgerAnchorService, SUBMIT_ANCHOR_COMMAND
+from src.modules.blockchain_traceability.services import SUBMIT_ANCHOR_COMMAND, LedgerAnchorService
 
 pytest_plugins = ["src.core.testing"]
 pytestmark = pytest.mark.django_db

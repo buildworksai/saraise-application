@@ -18,11 +18,7 @@ class AiAgentManagementConfig(AppConfig):
 
         from .jobs import evaluation_job, execute_agent_job
         from .providers.factory import configure_provider_factory
-        from .providers.published import (
-            ADAPTER_KEY,
-            TenantConfiguredProvider,
-            resolve_published_deployment,
-        )
+        from .providers.published import ADAPTER_KEY, TenantConfiguredProvider, resolve_published_deployment
         from .providers.registry import get_registry
         from .registries import runner_registry
         from .runners import published_provider_runner
@@ -31,6 +27,7 @@ class AiAgentManagementConfig(AppConfig):
         maximum_key_length = int(DEFAULT_CONFIGURATION["registry"]["key_maximum_length"])
         runner_registry.configure(maximum_key_length)
         from .registries import evaluation_registry
+
         evaluation_registry.configure(maximum_key_length)
         get_registry().register(ADAPTER_KEY, TenantConfiguredProvider)
         configure_provider_factory(resolve_published_deployment)

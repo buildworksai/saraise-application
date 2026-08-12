@@ -233,7 +233,9 @@ class Migration(migrations.Migration):
         migrations.AddField("backuparchive", "integrity_status", models.CharField(max_length=20, null=True)),
         migrations.AddField("backuparchive", "last_verified_at", models.DateTimeField(null=True, blank=True)),
         migrations.AddField("backuparchive", "purged_at", models.DateTimeField(null=True, blank=True)),
-        migrations.AddField("backuparchive", "purge_async_job_id", models.UUIDField(null=True, blank=True, unique=True)),
+        migrations.AddField(
+            "backuparchive", "purge_async_job_id", models.UUIDField(null=True, blank=True, unique=True)
+        ),
         migrations.AddField("backuparchive", "purge_idempotency_key", models.CharField(max_length=128, blank=True)),
         migrations.AddField("backuparchive", "purge_attempt_count", models.PositiveIntegerField(default=0)),
         migrations.AddField("backuparchive", "last_purge_attempt_at", models.DateTimeField(null=True, blank=True)),

@@ -18,9 +18,7 @@ TEMPLATE_STATUSES = frozenset({"draft", "active", "archived"})
 DELIVERY_STATUSES = frozenset(
     {"pending", "queued", "sending", "sent", "delivered", "retry_wait", "failed", "cancelled", "skipped"}
 )
-ATTEMPT_OUTCOMES = frozenset(
-    {"accepted", "retryable_failure", "permanent_failure", "circuit_open", "timeout"}
-)
+ATTEMPT_OUTCOMES = frozenset({"accepted", "retryable_failure", "permanent_failure", "circuit_open", "timeout"})
 
 
 class FilterValidationError(ValueError):
@@ -92,9 +90,7 @@ class BaseNotificationFilterSet:
     def apply_ordering(self, queryset: QuerySet[Any]) -> QuerySet[Any]:
         raw = self.get("ordering")
         ordering = (
-            [part.strip() for part in str(raw).split(",") if part.strip()]
-            if raw
-            else list(self.default_ordering)
+            [part.strip() for part in str(raw).split(",") if part.strip()] if raw else list(self.default_ordering)
         )
         if not ordering or any(item.lstrip("-") not in self.ordering_fields | {"id"} for item in ordering):
             raise FilterValidationError({"ordering": "Ordering field is not allowed."})
@@ -141,10 +137,14 @@ def _bounded_identifier(value: object | None, field_name: str, maximum: int) -> 
 def _datetime(value: object | None, field_name: str, *, upper: bool = False) -> datetime | None:
     if value in (None, ""):
         return None
-    parsed = parse_datetime(str(value))
+    raw = str(value)
+    parsed_date = parse_date(raw)
+    parsed = None
+    if parsed_date is not None and "T" not in raw and " " not in raw:
+        parsed = datetime.combine(parsed_date, time.max if upper else time.min)
     if parsed is None:
-        parsed_date = parse_date(str(value))
-        if parsed_date is not None:
+        parsed = parse_datetime(raw)
+        if parsed is None and parsed_date is not None:
             parsed = datetime.combine(parsed_date, time.max if upper else time.min)
     if parsed is None:
         raise FilterValidationError({field_name: "Must be an ISO-8601 date or datetime."})

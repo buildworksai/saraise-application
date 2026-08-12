@@ -1,21 +1,28 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useParams } from 'react-router-dom';
-import { toast } from 'sonner';
-import { useAuthStore } from '@/stores/auth-store';
-import { ROUTES, type AssetUpdate } from '../contracts';
-import { AssetForm } from '../components/AssetForm';
-import { PageHeader, PageSkeleton, ProblemState } from '../components/AssetManagementUI';
-import { assetQueryKeys, assetService } from '../services/asset-service';
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useParams } from "react-router-dom";
+import { toast } from "sonner";
+import { useAuthStore } from "@/stores/auth-store";
+import { ROUTES, type AssetUpdate } from "../contracts";
+import { AssetForm } from "../components/AssetForm";
+import {
+  PageHeader,
+  PageSkeleton,
+  ProblemState,
+  isRouteUuid,
+  routeAssetNotFoundError,
+} from "../components/AssetManagementUI";
+import { assetQueryKeys, assetService } from "../services/asset-service";
 
 export const EditAssetPage = () => {
-  const { id = '' } = useParams();
+  const { id = "" } = useParams();
+  const routeIdValid = isRouteUuid(id);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const tenantId = useAuthStore((state) => state.user?.tenant_id ?? null);
   const query = useQuery({
     queryKey: assetQueryKeys.asset(tenantId, id),
     queryFn: () => assetService.getAsset(id),
-    enabled: Boolean(id),
+    enabled: routeIdValid,
   });
   const configurationQuery = useQuery({
     queryKey: assetQueryKeys.configuration(tenantId),
@@ -25,17 +32,37 @@ export const EditAssetPage = () => {
     mutationFn: (data: AssetUpdate) => assetService.updateAsset(id, data),
     onSuccess: (asset) => {
       void queryClient.invalidateQueries({ queryKey: assetQueryKeys.root(tenantId) });
-      toast.success('Asset updated');
+      toast.success("Asset updated");
       navigate(ROUTES.ASSETS.DETAIL(asset.id));
     },
   });
 
+  if (!routeIdValid)
+    return (
+      <main className="p-4 sm:p-8">
+        <ProblemState error={routeAssetNotFoundError()} />
+      </main>
+    );
   if (query.isLoading || configurationQuery.isLoading) return <PageSkeleton />;
   if (query.error || !query.data) {
-    return <main className="p-4 sm:p-8"><ProblemState error={query.error ?? new Error('Asset unavailable')} onRetry={() => void query.refetch()} /></main>;
+    return (
+      <main className="p-4 sm:p-8">
+        <ProblemState
+          error={query.error ?? new Error("Asset unavailable")}
+          onRetry={() => void query.refetch()}
+        />
+      </main>
+    );
   }
   if (configurationQuery.error || !configurationQuery.data) {
-    return <main className="p-4 sm:p-8"><ProblemState error={configurationQuery.error ?? new Error('Configuration unavailable')} onRetry={() => void configurationQuery.refetch()} /></main>;
+    return (
+      <main className="p-4 sm:p-8">
+        <ProblemState
+          error={configurationQuery.error ?? new Error("Configuration unavailable")}
+          onRetry={() => void configurationQuery.refetch()}
+        />
+      </main>
+    );
   }
 
   return (

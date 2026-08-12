@@ -30,11 +30,7 @@ from django.utils import timezone
 from django.utils.crypto import constant_time_compare, salted_hmac
 from rest_framework.exceptions import APIException, NotFound, ValidationError
 
-from src.core.access.entitlements import (
-    EntitlementService,
-    Quota,
-    QuotaService,
-)
+from src.core.access.entitlements import EntitlementService, Quota, QuotaService
 from src.core.async_jobs.models import AsyncJob, JobStatus, OutboxEvent
 from src.core.async_jobs.services import enqueue, transition
 from src.core.middleware.correlation import get_correlation_id
@@ -53,11 +49,7 @@ from .models import (
     MutationIdempotencyRecord,
     SuppressionEntry,
 )
-from .state_machines import (
-    CAMPAIGN_STATE_MACHINE,
-    RECIPIENT_STATE_MACHINE,
-    TEMPLATE_STATE_MACHINE,
-)
+from .state_machines import CAMPAIGN_STATE_MACHINE, RECIPIENT_STATE_MACHINE, TEMPLATE_STATE_MACHINE
 
 logger = logging.getLogger("saraise.email_marketing")
 SYSTEM_ACTOR_ID = uuid5(NAMESPACE_URL, "saraise:email-marketing:system")
@@ -343,7 +335,15 @@ class DependencyUnavailable(APIException):
 def get_platform_runtime_defaults() -> dict[str, Any]:
     """Return a defensive copy used only to materialize real tenant configuration."""
 
-    return deepcopy(DEFAULT_CONFIGURATION_DOCUMENT)
+    document = deepcopy(DEFAULT_CONFIGURATION_DOCUMENT)
+    configured_gateway = str(getattr(settings, "EMAIL_MARKETING_DEFAULT_GATEWAY", "")).strip()
+    if configured_gateway:
+        document["defaults"]["delivery_gateway"] = configured_gateway
+        gateway_keys = list(document["integrations"]["gateway_keys"])
+        if configured_gateway not in gateway_keys:
+            gateway_keys.append(configured_gateway)
+        document["integrations"]["gateway_keys"] = gateway_keys
+    return document
 
 
 def _configuration_environment() -> str:
@@ -524,13 +524,7 @@ def validate_configuration_document(
     for key in ("roles", "cohorts"):
         values = feature_flags[key]
         if len(values) != len(set(values)) or any(not value.strip() for value in values):
-            raise ValidationError(
-                {
-                    f"feature_flags.{key}": (
-                        "Values must be unique, non-empty strings."
-                    )
-                }
-            )
+            raise ValidationError({f"feature_flags.{key}": ("Values must be unique, non-empty strings.")})
     if any(value not in PLATFORM_SEMANTICS for value in candidate["display"]["status_semantics"].values()):
         raise ValidationError({"display.status_semantics": "Only semantic design tokens are allowed."})
     if not 1 <= candidate["rate_limits"]["public_per_minute"] <= 300:
@@ -1474,7 +1468,9 @@ class CampaignService:
         public_url = str(getattr(settings, "SARAISE_PUBLIC_URL", "")).rstrip("/")
         public_url_valid = urlparse(public_url).scheme == "https" and bool(urlparse(public_url).netloc)
         entitlement = EntitlementService().check(tenant, "email_marketing").entitled
-        quota_state = Quota.objects.filter(tenant_id=tenant, resource="email_marketing.monthly_recipients").first()
+        quota_state = Quota.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
+            tenant_id=tenant, resource="email_marketing.monthly_recipients"
+        ).first()
         quota_remaining = int(quota_state.remaining) if quota_state else 0
         quota_available = eligible > 0 and quota_remaining >= eligible
         gateway_status = "unavailable"
@@ -1962,8 +1958,8 @@ class ComplianceService:
             "notice_version",
         }
         unknown = set(values) - allowed
-        for key in unknown:
-            values.pop(key, None)
+        for unknown_field in unknown:
+            values.pop(unknown_field, None)
         values["email"] = normalize_email(str(values.get("email", "")))
         values.setdefault("purpose", configuration["defaults"]["consent_purpose"])
         if values.get("source") not in configuration["compliance"]["consent_sources"]:
@@ -2417,11 +2413,7 @@ class DeliveryService:
                 SYSTEM_ACTOR_ID,
             )
 
-        from .adapters import (
-            DeliveryMessage,
-            get_delivery_gateway,
-            get_renderer,
-        )
+        from .adapters import DeliveryMessage, get_delivery_gateway, get_renderer
 
         campaign = recipient.campaign
         rendered = get_renderer("default").render(

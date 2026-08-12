@@ -11,4 +11,3 @@ class BudgetManagementConfig(AppConfig):
     def ready(self) -> None:
         # Importing registers durable job handlers with the shared executor.
         from . import jobs  # noqa: F401
-

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -93,13 +93,14 @@ def _require_list(value: Any, field_name: str) -> None:
         raise ValidationError({field_name: "Must be a JSON array."})
 
 
-def _stored_values(instance: models.Model, fields: Sequence[str]) -> dict[str, Any] | None:
+def _stored_values(instance: TenantScopedModel, fields: Sequence[str]) -> dict[str, Any] | None:
     if instance._state.adding or instance.pk is None:
         return None
-    return type(instance).objects.for_tenant(instance.tenant_id).filter(pk=instance.pk).values(*fields).first()
+    manager = cast(Any, type(instance).objects)
+    return manager.for_tenant(instance.tenant_id).filter(pk=instance.pk).values(*fields).first()
 
 
-def _validate_immutable(instance: models.Model, fields: Sequence[str]) -> None:
+def _validate_immutable(instance: TenantScopedModel, fields: Sequence[str]) -> None:
     stored = _stored_values(instance, fields)
     if stored is None:
         return
@@ -108,7 +109,7 @@ def _validate_immutable(instance: models.Model, fields: Sequence[str]) -> None:
         raise ValidationError({name: "This field is immutable after creation." for name in changed})
 
 
-def _validate_append_only_history(instance: models.Model, *, state_field: str) -> None:
+def _validate_append_only_history(instance: TenantScopedModel, *, state_field: str) -> None:
     history = getattr(instance, "transition_history")
     _require_list(history, "transition_history")
     if not all(isinstance(entry, dict) for entry in history):
@@ -136,7 +137,8 @@ def _related_belongs_to_tenant(
     if relation_id is None:
         return
     field = instance._meta.get_field(relation_name)
-    related_model = field.remote_field.model
+    remote_field = getattr(field, "remote_field", None)
+    related_model = cast(Any, remote_field.model if remote_field is not None else None)
     queryset = related_model.objects.for_tenant(instance.tenant_id).filter(pk=relation_id)
     if extra_filters:
         queryset = queryset.filter(**extra_filters)
@@ -162,7 +164,7 @@ class HistoricalTenantQuerySet(TenantQuerySet):
             raise ValidationError("Workflow execution evidence cannot be replaced by a bulk update.")
         if model_name in {"workflowinstance", "workflowtask"} and state_field in kwargs:
             raise ValidationError("Lifecycle state changes must use the registered state machine.")
-        terminal_states = getattr(self.model, "TERMINAL_STATES", frozenset())
+        terminal_states: frozenset[str] = getattr(self.model, "TERMINAL_STATES", frozenset())
         if terminal_states and self.filter(**{f"{state_field}__in": terminal_states}).exists():
             raise ValidationError("Terminal workflow execution evidence is immutable.")
         return super().update(**kwargs)
@@ -250,7 +252,7 @@ class WorkflowAutomationConfiguration(TenantScopedModel, TimestampedModel):
         related_name="updated_workflow_automation_configurations",
     )
 
-    objects = TenantQuerySet.as_manager()
+    objects: ClassVar[Any] = TenantQuerySet.as_manager()
 
     class Meta:
         db_table = "workflow_automation_configurations"
@@ -303,7 +305,7 @@ class WorkflowAutomationConfigurationRevision(HistoricalRecordMixin, TenantScope
     change_reason = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    objects = ImmutableAuditQuerySet.as_manager()
+    objects: ClassVar[Any] = ImmutableAuditQuerySet.as_manager()
 
     class Meta:
         db_table = "workflow_automation_configuration_revisions"
@@ -363,7 +365,7 @@ class WorkflowTransitionAudit(HistoricalRecordMixin, TenantScopedModel):
     correlation_id = models.CharField(max_length=64, db_index=True)
     occurred_at = models.DateTimeField()
 
-    objects = ImmutableAuditQuerySet.as_manager()
+    objects: ClassVar[Any] = ImmutableAuditQuerySet.as_manager()
 
     class Meta:
         db_table = "workflow_transition_audits"
@@ -373,9 +375,7 @@ class WorkflowTransitionAudit(HistoricalRecordMixin, TenantScopedModel):
                 name="wf_transition_audit_idempotency_uniq",
             )
         ]
-        indexes = [
-            models.Index(fields=("tenant_id", "workflow", "-occurred_at"), name="wf_trans_audit_tenant_idx")
-        ]
+        indexes = [models.Index(fields=("tenant_id", "workflow", "-occurred_at"), name="wf_trans_audit_tenant_idx")]
 
     def clean(self) -> None:
         super().clean()
@@ -432,7 +432,7 @@ class Workflow(TenantScopedModel, TimestampedModel):
     archived_at = models.DateTimeField(null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    objects = WorkflowQuerySet.as_manager()
+    objects: ClassVar[Any] = WorkflowQuerySet.as_manager()
 
     class Meta:
         db_table = "workflow_definitions"
@@ -533,7 +533,7 @@ class WorkflowStep(TenantScopedModel, TimestampedModel):
     )
     is_terminal = models.BooleanField(default=False)
 
-    objects = WorkflowStepQuerySet.as_manager()
+    objects: ClassVar[Any] = WorkflowStepQuerySet.as_manager()
 
     class Meta:
         db_table = "workflow_steps"
@@ -644,7 +644,7 @@ class WorkflowInstance(HistoricalRecordMixin, TenantScopedModel, TimestampedMode
     failure_code = models.CharField(max_length=64, blank=True, default="")
     failure_message = models.TextField(blank=True, default="")
 
-    objects = HistoricalTenantQuerySet.as_manager()
+    objects: ClassVar[Any] = HistoricalTenantQuerySet.as_manager()
 
     TERMINAL_STATES: ClassVar[frozenset[str]] = frozenset(
         {WorkflowInstanceState.COMPLETED, WorkflowInstanceState.FAILED, WorkflowInstanceState.CANCELLED}
@@ -710,7 +710,7 @@ class WorkflowInstance(HistoricalRecordMixin, TenantScopedModel, TimestampedMode
             changed = {
                 field.attname
                 for field in self._meta.concrete_fields
-                if field.attname != "updated_at" and prior[field.attname] != getattr(self, field.attname)
+                if field.attname != "updated_at" and prior.get(field.attname) != getattr(self, field.attname)
             }
             if changed:
                 raise ValidationError({"state": "Terminal workflow instance evidence is immutable."})
@@ -753,7 +753,7 @@ class WorkflowTask(HistoricalRecordMixin, TenantScopedModel, TimestampedModel):
     transition_history = models.JSONField(default=list, blank=True, editable=False)
     correlation_id = models.CharField(max_length=64, db_index=True)
 
-    objects = HistoricalTenantQuerySet.as_manager()
+    objects: ClassVar[Any] = HistoricalTenantQuerySet.as_manager()
 
     TERMINAL_STATES: ClassVar[frozenset[str]] = frozenset(
         {
@@ -851,7 +851,7 @@ class WorkflowTask(HistoricalRecordMixin, TenantScopedModel, TimestampedModel):
             changed = {
                 field.attname
                 for field in self._meta.concrete_fields
-                if field.attname != "updated_at" and prior[field.attname] != getattr(self, field.attname)
+                if field.attname != "updated_at" and prior.get(field.attname) != getattr(self, field.attname)
             }
             if changed:
                 raise ValidationError({"status": "Terminal workflow task evidence is immutable."})
@@ -893,7 +893,7 @@ class WorkflowStepExecution(HistoricalRecordMixin, TenantScopedModel, Timestampe
     failure_code = models.CharField(max_length=64, blank=True, default="")
     failure_message = models.TextField(blank=True, default="")
 
-    objects = HistoricalTenantQuerySet.as_manager()
+    objects: ClassVar[Any] = HistoricalTenantQuerySet.as_manager()
 
     TERMINAL_STATES: ClassVar[frozenset[str]] = frozenset(
         {StepExecutionState.SUCCEEDED, StepExecutionState.FAILED, StepExecutionState.CANCELLED}
@@ -973,7 +973,7 @@ class WorkflowStepExecution(HistoricalRecordMixin, TenantScopedModel, Timestampe
             changed = {
                 field.attname
                 for field in self._meta.concrete_fields
-                if field.attname != "updated_at" and prior[field.attname] != getattr(self, field.attname)
+                if field.attname != "updated_at" and prior.get(field.attname) != getattr(self, field.attname)
             }
             if changed:
                 raise ValidationError({"state": "Completed step execution evidence is immutable."})

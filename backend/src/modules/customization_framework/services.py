@@ -18,7 +18,7 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from functools import wraps
 from types import MappingProxyType
-from typing import Any, Final
+from typing import Any, Final, cast
 from uuid import UUID
 
 from django.apps import apps
@@ -32,12 +32,7 @@ from jsonschema.exceptions import SchemaError
 from src.core.api import CapabilityUnavailable
 from src.core.async_jobs.models import OutboxEvent
 from src.core.observability import get_correlation_id
-from src.core.observability.correlation import correlation_id_var
-from src.core.state_machine import (
-    IdempotencyConflictError,
-    StateMachine,
-    Transition,
-)
+from src.core.state_machine import IdempotencyConflictError, StateMachine, Transition
 from src.core.state_machine import registry as state_machine_registry
 
 from .models import (
@@ -108,7 +103,7 @@ PLATFORM_ACTION_TYPES: Final[frozenset[str]] = frozenset(
 )
 
 
-def default_configuration_document() -> dict[str, object]:
+def default_configuration_document() -> dict[str, Any]:
     """Return the complete, safe tenant configuration seed.
 
     Defaults are centralized here so runtime code never embeds business
@@ -218,7 +213,7 @@ class EvaluationIdempotencyConflict(CustomizationError):
     """An evaluation key was reused for different input."""
 
 
-def _configuration_section(document: Mapping[str, object], name: str) -> Mapping[str, object]:
+def _configuration_section(document: Mapping[str, Any], name: str) -> Mapping[str, Any]:
     value = document.get(name)
     if not isinstance(value, Mapping):
         raise CustomizationValidationError(f"configuration.{name} must be an object")
@@ -241,7 +236,7 @@ def _positive_config_int(
     return value
 
 
-def validate_configuration_document(document: object) -> dict[str, object]:
+def validate_configuration_document(document: object) -> dict[str, Any]:
     """Validate and normalize the complete tenant document server-side."""
 
     if not isinstance(document, Mapping):
@@ -440,7 +435,7 @@ def validate_configuration_document(document: object) -> dict[str, object]:
     return normalized
 
 
-def effective_configuration(tenant_id: UUID) -> dict[str, object]:
+def effective_configuration(tenant_id: UUID) -> dict[str, Any]:
     """Return validated tenant configuration, falling back to the safe seed.
 
     The seed enforces every check and therefore never turns missing
@@ -521,6 +516,8 @@ class CustomizationConfigurationService:
             if replay is not None:
                 if replay.request_fingerprint != fingerprint:
                     raise EvaluationIdempotencyConflict("idempotency key was already used for another command")
+                if replay.resource_id is None:
+                    raise CustomizationError("idempotent command evidence references a missing result")
                 existing = RuntimeConfiguration.objects.filter(
                     tenant_id=tenant,
                     id=replay.resource_id,
@@ -722,9 +719,28 @@ class CustomizationRegistry:
         if not isinstance(fields, Mapping) or not isinstance(capabilities, Mapping):
             raise CustomizationValidationError("fields and capabilities must be objects")
         defaults = default_configuration_document()
-        policies = defaults["policies"]
-        supported_types = frozenset(capabilities.get("custom_field_types", policies["field_types"]))
-        triggers = frozenset(capabilities.get("rule_triggers", policies["rule_triggers"]))
+        policies = cast(Mapping[str, Any], defaults["policies"])
+        default_values = cast(Mapping[str, Any], defaults["defaults"])
+        custom_field_types = capabilities.get("custom_field_types", policies["field_types"])
+        rule_triggers = capabilities.get("rule_triggers", policies["rule_triggers"])
+        form_surfaces = capabilities.get("form_surfaces", (default_values["form_surface"],))
+        entitlement_keys = capabilities.get("entitlement_keys", ())
+        discovery = capabilities.get("discovery", {})
+        supported_types = (
+            frozenset(str(item) for item in custom_field_types)
+            if isinstance(custom_field_types, Sequence)
+            else frozenset()
+        )
+        triggers = (
+            frozenset(str(item) for item in rule_triggers) if isinstance(rule_triggers, Sequence) else frozenset()
+        )
+        surfaces = (
+            frozenset(str(item) for item in form_surfaces) if isinstance(form_surfaces, Sequence) else frozenset()
+        )
+        entitlements = (
+            frozenset(str(item) for item in entitlement_keys) if isinstance(entitlement_keys, Sequence) else frozenset()
+        )
+        discovery_mapping = discovery if isinstance(discovery, Mapping) else {}
         if not supported_types or not supported_types.issubset(PLATFORM_FIELD_TYPES):
             raise CustomizationValidationError("resource contract declares unsupported custom field types")
         if not triggers.issubset(PLATFORM_RULE_TRIGGERS):
@@ -736,12 +752,12 @@ class CustomizationRegistry:
             version_key,
             MappingProxyType(normalized_fields),
             supported_types,
-            frozenset(str(item) for item in capabilities.get("form_surfaces", (defaults["defaults"]["form_surface"],))),
+            surfaces,
             triggers,
-            frozenset(str(item) for item in capabilities.get("entitlement_keys", ())),
+            entitlements,
             MappingProxyType(dict(capabilities)),
             bool(capabilities.get("available", False)),
-            MappingProxyType(dict(capabilities.get("discovery", {}))),
+            MappingProxyType(dict(discovery_mapping)),
         )
         identity = (module_key, resource_key, version_key)
         with cls._lock:
@@ -932,9 +948,7 @@ def _hash(*documents: object) -> str:
 def _correlation_uuid() -> UUID:
     raw = get_correlation_id()
     if not raw:
-        established = uuid.uuid4()
-        correlation_id_var.set(str(established))
-        return established
+        return uuid.uuid4()
     try:
         return UUID(raw)
     except (TypeError, ValueError, AttributeError) as exc:
@@ -1173,7 +1187,7 @@ def _normalize_definition_data(
             if not isinstance(normalized[key], Mapping):
                 raise CustomizationValidationError(f"{key} must be an object")
             _json_size(normalized[key], key, tenant_id=tenant_id)
-            normalized[key] = dict(normalized[key])
+            normalized[key] = dict(cast(Mapping[str, object], normalized[key]))
     if not partial:
         missing = {"key", "label", "owner_module", "target_resource", "target_contract_version", "data_type"} - set(
             normalized
@@ -1723,20 +1737,32 @@ class CustomFieldService:
             tenant_id=tenant, definition_id=definition.id, deleted_at__isnull=True
         ).count()
         forms = []
-        for version in FormLayoutVersion.objects.filter(tenant_id=tenant, form__deleted_at__isnull=True).select_related(
-            "form"
-        ):
-            if definition.key in _collect_field_refs(version.layout):
-                forms.append({"form_id": str(version.form_id), "version_id": str(version.id), "status": version.status})
+        for form_version in FormLayoutVersion.objects.filter(
+            tenant_id=tenant, form__deleted_at__isnull=True
+        ).select_related("form"):
+            if definition.key in _collect_field_refs(form_version.layout):
+                forms.append(
+                    {
+                        "form_id": str(form_version.form_id),
+                        "version_id": str(form_version.id),
+                        "status": form_version.status,
+                    }
+                )
         rules = []
-        for version in BusinessRuleVersion.objects.filter(
+        for rule_version in BusinessRuleVersion.objects.filter(
             tenant_id=tenant, rule__deleted_at__isnull=True
         ).select_related("rule"):
-            dependencies = version.dependencies or []
+            dependencies = rule_version.dependencies or []
             if definition.key in dependencies or any(
                 isinstance(item, Mapping) and item.get("field_key") == definition.key for item in dependencies
             ):
-                rules.append({"rule_id": str(version.rule_id), "version_id": str(version.id), "status": version.status})
+                rules.append(
+                    {
+                        "rule_id": str(rule_version.rule_id),
+                        "version_id": str(rule_version.id),
+                        "status": rule_version.status,
+                    }
+                )
         return {
             "entity_type": "field_definition",
             "entity_id": str(definition.id),
@@ -2168,10 +2194,11 @@ class FormService:
         form_key: str | None = None,
     ) -> dict[str, object]:
         tenant = _uuid(tenant_id, "tenant_id")
+        form: FormDefinition
         if form_id is not None:
             form = self.get_form(tenant, form_id=form_id)
         elif module and resource and form_key:
-            form = FormDefinition.objects.filter(
+            form_candidate = FormDefinition.objects.filter(
                 tenant_id=tenant,
                 owner_module=_slug(module, "module"),
                 target_resource=_slug(resource, "resource"),
@@ -2179,8 +2206,9 @@ class FormService:
                 status="published",
                 deleted_at__isnull=True,
             ).first()
-            if form is None:
+            if form_candidate is None:
                 raise CustomizationNotFound("published form not found")
+            form = form_candidate
         else:
             raise CustomizationValidationError("form_id or module/resource/form_key is required")
         if form.status != "published" or form.published_version is None:
@@ -2389,25 +2417,29 @@ def _evaluate_condition(
     budget.visit(depth)
     operator = str(node["operator"])
     if operator == "and":
-        result = all(_evaluate_condition(item, record, changed, budget, diagnostics, depth + 1) for item in node["operands"])  # type: ignore[arg-type]
+        operands = cast(Sequence[Mapping[str, object]], node["operands"])
+        result = all(_evaluate_condition(item, record, changed, budget, diagnostics, depth + 1) for item in operands)
     elif operator == "or":
-        result = any(_evaluate_condition(item, record, changed, budget, diagnostics, depth + 1) for item in node["operands"])  # type: ignore[arg-type]
+        operands = cast(Sequence[Mapping[str, object]], node["operands"])
+        result = any(_evaluate_condition(item, record, changed, budget, diagnostics, depth + 1) for item in operands)
     elif operator == "not":
-        result = not _evaluate_condition(node["operand"], record, changed, budget, diagnostics, depth + 1)  # type: ignore[arg-type]
+        result = not _evaluate_condition(node["operand"], record, changed, budget, diagnostics, depth + 1)  # type: ignore[arg-type]  # noqa: E501
     else:
         field = str(node["field"])
         actual = record.get(field)
         expected = node.get("value", node.get("values"))
+        actual_value = cast(Any, actual)
+        expected_value = cast(Any, expected)
         operations = {
             "eq": lambda: actual == expected,
             "ne": lambda: actual != expected,
-            "gt": lambda: actual is not None and actual > expected,
-            "gte": lambda: actual is not None and actual >= expected,
-            "lt": lambda: actual is not None and actual < expected,
-            "lte": lambda: actual is not None and actual <= expected,
-            "in": lambda: actual in expected,
-            "not_in": lambda: actual not in expected,
-            "contains": lambda: expected in actual,
+            "gt": lambda: actual is not None and actual_value > expected_value,
+            "gte": lambda: actual is not None and actual_value >= expected_value,
+            "lt": lambda: actual is not None and actual_value < expected_value,
+            "lte": lambda: actual is not None and actual_value <= expected_value,
+            "in": lambda: actual_value in expected_value,
+            "not_in": lambda: actual_value not in expected_value,
+            "contains": lambda: expected_value in actual_value,
             "starts_with": lambda: isinstance(actual, str)
             and isinstance(expected, str)
             and actual.startswith(expected),

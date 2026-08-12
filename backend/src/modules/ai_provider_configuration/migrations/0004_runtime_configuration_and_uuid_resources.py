@@ -40,6 +40,15 @@ def refresh_resource_rls(apps, schema_editor):
     )
 
 
+def drop_resource_rls(apps, schema_editor):
+    del apps
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    table = schema_editor.quote_name("ai_provider_configuration_resources")
+    policy = schema_editor.quote_name("aiprov_resources_tenant_policy")
+    schema_editor.execute(f"DROP POLICY IF EXISTS {policy} ON {table};")
+
+
 def restore_resource_rls(apps, schema_editor):
     del apps
     if schema_editor.connection.vendor != "postgresql":
@@ -112,10 +121,7 @@ class Migration(migrations.Migration):
         ),
         # Postgres refuses to ALTER TYPE of a column referenced by an RLS policy;
         # drop the policy, run the type changes, then recreate it in UUID form.
-        migrations.RunSQL(
-            "DROP POLICY IF EXISTS aiprov_resources_tenant_policy ON ai_provider_configuration_resources;",
-            reverse_sql=migrations.RunSQL.noop,
-        ),
+        migrations.RunPython(drop_resource_rls, migrations.RunPython.noop),
         migrations.AlterField(
             model_name="aiproviderconfigurationresource",
             name="id",
@@ -131,12 +137,7 @@ class Migration(migrations.Migration):
             name="created_by",
             field=models.UUIDField(db_index=True),
         ),
-        migrations.RunSQL(
-            """CREATE POLICY aiprov_resources_tenant_policy ON ai_provider_configuration_resources
-               USING (tenant_id = saraise_current_tenant_id())
-               WITH CHECK (tenant_id = saraise_current_tenant_id());""",
-            reverse_sql="DROP POLICY IF EXISTS aiprov_resources_tenant_policy ON ai_provider_configuration_resources;",
-        ),
+        migrations.RunPython(refresh_resource_rls, drop_resource_rls),
         migrations.AddField(
             model_name="aiproviderconfigurationresource",
             name="is_deleted",
@@ -175,8 +176,12 @@ class Migration(migrations.Migration):
                 "db_table": "ai_provider_configuration_runtime_configs",
                 "indexes": [models.Index(fields=["tenant_id", "environment"], name="aiprov_runtime_config_env_idx")],
                 "constraints": [
-                    models.UniqueConstraint(fields=("tenant_id", "environment"), name="aiprov_runtime_config_tenant_env_uq"),
-                    models.CheckConstraint(condition=models.Q(("version__gte", 1)), name="aiprov_runtime_config_version_gte1"),
+                    models.UniqueConstraint(
+                        fields=("tenant_id", "environment"), name="aiprov_runtime_config_tenant_env_uq"
+                    ),
+                    models.CheckConstraint(
+                        condition=models.Q(("version__gte", 1)), name="aiprov_runtime_config_version_gte1"
+                    ),
                 ],
             },
         ),
@@ -196,7 +201,9 @@ class Migration(migrations.Migration):
             options={
                 "db_table": "ai_provider_configuration_idempotency_keys",
                 "indexes": [models.Index(fields=["tenant_id", "key_digest"], name="aiprov_idem_lookup_idx")],
-                "constraints": [models.UniqueConstraint(fields=("tenant_id", "key_digest"), name="aiprov_idem_tenant_key_uq")],
+                "constraints": [
+                    models.UniqueConstraint(fields=("tenant_id", "key_digest"), name="aiprov_idem_tenant_key_uq")
+                ],
             },
         ),
         migrations.CreateModel(
@@ -213,13 +220,23 @@ class Migration(migrations.Migration):
                 ("rollback_of", models.PositiveIntegerField(blank=True, null=True)),
                 (
                     "configuration",
-                    models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="versions", to="ai_provider_configuration.aiproviderruntimeconfiguration"),
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="versions",
+                        to="ai_provider_configuration.aiproviderruntimeconfiguration",
+                    ),
                 ),
             ],
             options={
                 "db_table": "ai_provider_configuration_runtime_config_versions",
-                "indexes": [models.Index(fields=["tenant_id", "configuration", "-version"], name="aiprov_runtime_cfg_ver_idx")],
-                "constraints": [models.UniqueConstraint(fields=("tenant_id", "configuration", "version"), name="aiprov_runtime_config_version_uq")],
+                "indexes": [
+                    models.Index(fields=["tenant_id", "configuration", "-version"], name="aiprov_runtime_cfg_ver_idx")
+                ],
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=("tenant_id", "configuration", "version"), name="aiprov_runtime_config_version_uq"
+                    )
+                ],
             },
         ),
         migrations.CreateModel(
@@ -238,12 +255,20 @@ class Migration(migrations.Migration):
                 ("rollback_of", models.PositiveIntegerField(blank=True, null=True)),
                 (
                     "configuration",
-                    models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="audit_records", to="ai_provider_configuration.aiproviderruntimeconfiguration"),
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="audit_records",
+                        to="ai_provider_configuration.aiproviderruntimeconfiguration",
+                    ),
                 ),
             ],
             options={
                 "db_table": "ai_provider_configuration_runtime_config_audit",
-                "indexes": [models.Index(fields=["tenant_id", "configuration", "-created_at"], name="aiprov_runtime_cfg_audit_idx")],
+                "indexes": [
+                    models.Index(
+                        fields=["tenant_id", "configuration", "-created_at"], name="aiprov_runtime_cfg_audit_idx"
+                    )
+                ],
             },
         ),
         migrations.RunPython(refresh_resource_rls, restore_resource_rls),

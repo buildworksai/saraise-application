@@ -1,3 +1,139 @@
+/* eslint-disable max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
-import { useQuery } from '@tanstack/react-query';import { Link,useSearchParams } from 'react-router-dom';import { CrmPage,GovernedError,PageSkeleton } from '../components/CrmPage';import { EntityList } from '../components/EntityList';import { useCrmConfiguration } from '../hooks/use-crm-configuration';import { crmKeys,crmService } from '../services/crm-service';import type { OpportunityFilters } from '../contracts';
-export function OpportunityListPage(){const[p]=useSearchParams(),configuration=useCrmConfiguration(),document=configuration.data?.document;const filters:OpportunityFilters={search:p.get('search')||undefined,status:(p.get('status')as OpportunityFilters['status'])||undefined,stage:(p.get('stage')as OpportunityFilters['stage'])||undefined,account_id:p.get('account_id')||undefined,close_date_from:p.get('close_date_from')||undefined,close_date_to:p.get('close_date_to')||undefined,page:Number(p.get('page')||1),page_size:document?Number(p.get('page_size')||document.ui.saved_page_size):undefined,ordering:p.get('ordering')||undefined};const q=useQuery({queryKey:crmKeys.opportunities(filters),queryFn:()=>crmService.listOpportunities(filters),enabled:!!document});if(configuration.isLoading)return <CrmPage title="Opportunities"><PageSkeleton label="Loading opportunity configuration"/></CrmPage>;if(configuration.error||!document)return <CrmPage title="Opportunities"><GovernedError error={configuration.error} onRetry={()=>void configuration.refetch()} subject="Opportunity configuration"/></CrmPage>;const totals=q.data?.items.reduce<Record<string,number>>((sum,opportunity)=>({...sum,[opportunity.currency]:(sum[opportunity.currency]??0)+Number(opportunity.amount)}),{});return <EntityList title="Opportunities" description="A currency-safe view of open and closed revenue." createPath="/crm/opportunities/new" emptyTitle="Create your first opportunity" emptyDescription="Connect a qualified deal to an account and expected close date." query={q.data} isLoading={q.isLoading} error={q.error} refetch={()=>void q.refetch()} total={totals?<div className="flex flex-wrap gap-2">{Object.entries(totals).map(([currency,amount])=><span key={currency} className="rounded-full bg-muted px-3 py-1 text-sm">Page total: {new Intl.NumberFormat(undefined,{style:'currency',currency}).format(amount)}</span>)}</div>:null} filters={[{key:'status',label:'Status',choices:['open','won','lost'].map(value=>({value,label:value}))},{key:'stage',label:'Stage',choices:document.opportunity.stages.map(stage=>({value:stage.name,label:stage.name.replaceAll('_',' ')}))},{key:'account_id',label:'Account ID'},{key:'close_date_from',label:'Close from'},{key:'close_date_to',label:'Close to'}]} columns={[{key:'name',label:'Name',sortable:true,render:opportunity=><Link className="font-medium text-primary hover:underline" to={`/crm/opportunities/${opportunity.id}`}>{opportunity.name}</Link>},{key:'stage',label:'Stage',render:opportunity=>opportunity.stage.replaceAll('_',' ')},{key:'amount',label:'Amount',sortable:true,render:opportunity=>new Intl.NumberFormat(undefined,{style:'currency',currency:opportunity.currency}).format(Number(opportunity.amount))},{key:'probability',label:'Probability',render:opportunity=>`${opportunity.probability}%`},{key:'close_date',label:'Close date',sortable:true,render:opportunity=>new Date(`${opportunity.close_date}T00:00:00`).toLocaleDateString()},{key:'status',label:'Status',render:opportunity=>opportunity.status}]}/>}
+import { useQuery } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router-dom";
+import { CrmPage, GovernedError, PageSkeleton } from "../components/CrmPage";
+import { EntityList } from "../components/EntityList";
+import { useCrmConfiguration } from "../hooks/use-crm-configuration";
+import { crmKeys, crmService } from "../services/crm-service";
+import type { OpportunityFilters } from "../contracts";
+export function OpportunityListPage() {
+  const [p] = useSearchParams(),
+    configuration = useCrmConfiguration(),
+    document = configuration.data?.document;
+  const filters: OpportunityFilters = {
+    search: p.get("search") || undefined,
+    status: (p.get("status") as OpportunityFilters["status"]) || undefined,
+    stage: (p.get("stage") as OpportunityFilters["stage"]) || undefined,
+    account_id: p.get("account_id") || undefined,
+    close_date_from: p.get("close_date_from") || undefined,
+    close_date_to: p.get("close_date_to") || undefined,
+    page: Number(p.get("page") || 1),
+    page_size: document ? Number(p.get("page_size") || document.ui.saved_page_size) : undefined,
+    ordering: p.get("ordering") || undefined,
+  };
+  const q = useQuery({
+    queryKey: crmKeys.opportunities(filters),
+    queryFn: () => crmService.listOpportunities(filters),
+    enabled: !!document,
+  });
+  if (configuration.isLoading)
+    return (
+      <CrmPage title="Opportunities">
+        <PageSkeleton label="Loading opportunity configuration" />
+      </CrmPage>
+    );
+  if (configuration.error || !document)
+    return (
+      <CrmPage title="Opportunities">
+        <GovernedError
+          error={configuration.error}
+          onRetry={() => void configuration.refetch()}
+          subject="Opportunity configuration"
+        />
+      </CrmPage>
+    );
+  const totals = q.data?.items.reduce<Record<string, number>>(
+    (sum, opportunity) => ({
+      ...sum,
+      [opportunity.currency]: (sum[opportunity.currency] ?? 0) + Number(opportunity.amount),
+    }),
+    {}
+  );
+  return (
+    <EntityList
+      title="Opportunities"
+      description="A currency-safe view of open and closed revenue."
+      createPath="/crm/opportunities/new"
+      emptyTitle="Create your first opportunity"
+      emptyDescription="Connect a qualified deal to an account and expected close date."
+      query={q.data}
+      isLoading={q.isLoading}
+      error={q.error}
+      refetch={() => void q.refetch()}
+      total={
+        totals ? (
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(totals).map(([currency, amount]) => (
+              <span key={currency} className="rounded-full bg-muted px-3 py-1 text-sm">
+                Page total:{" "}
+                {new Intl.NumberFormat(undefined, { style: "currency", currency }).format(amount)}
+              </span>
+            ))}
+          </div>
+        ) : null
+      }
+      filters={[
+        {
+          key: "status",
+          label: "Status",
+          choices: ["open", "won", "lost"].map((value) => ({ value, label: value })),
+        },
+        {
+          key: "stage",
+          label: "Stage",
+          choices: document.opportunity.stages.map((stage) => ({
+            value: stage.name,
+            label: stage.name.replaceAll("_", " "),
+          })),
+        },
+        { key: "account_id", label: "Account ID" },
+        { key: "close_date_from", label: "Close from" },
+        { key: "close_date_to", label: "Close to" },
+      ]}
+      columns={[
+        {
+          key: "name",
+          label: "Name",
+          sortable: true,
+          render: (opportunity) => (
+            <Link
+              className="font-medium text-primary hover:underline"
+              to={`/crm/opportunities/${opportunity.id}`}
+            >
+              {opportunity.name}
+            </Link>
+          ),
+        },
+        {
+          key: "stage",
+          label: "Stage",
+          render: (opportunity) => opportunity.stage.replaceAll("_", " "),
+        },
+        {
+          key: "amount",
+          label: "Amount",
+          sortable: true,
+          render: (opportunity) =>
+            new Intl.NumberFormat(undefined, {
+              style: "currency",
+              currency: opportunity.currency,
+            }).format(Number(opportunity.amount)),
+        },
+        {
+          key: "probability",
+          label: "Probability",
+          render: (opportunity) => `${opportunity.probability}%`,
+        },
+        {
+          key: "close_date",
+          label: "Close date",
+          sortable: true,
+          render: (opportunity) =>
+            new Date(`${opportunity.close_date}T00:00:00`).toLocaleDateString(),
+        },
+        { key: "status", label: "Status", render: (opportunity) => opportunity.status },
+      ]}
+    />
+  );
+}

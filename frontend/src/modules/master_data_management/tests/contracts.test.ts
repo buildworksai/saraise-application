@@ -5,10 +5,18 @@ describe("master data contracts", () => {
   it("publishes only governed v2 endpoints", () => {
     expect(MODULE_API_PREFIX).toBe("/api/v2/master-data-management");
     expect(JSON.stringify(ENDPOINTS)).not.toContain("/api/v1/");
-    expect(ENDPOINTS.ENTITIES.VERSION("entity", 4)).toBe("/api/v2/master-data-management/entities/entity/versions/4/");
-    expect(ENDPOINTS.MERGES.REVERSE("merge")).toBe("/api/v2/master-data-management/merges/merge/reverse/");
-    expect(ENDPOINTS.MERGES.REVERSAL_PREVIEW("merge")).toBe("/api/v2/master-data-management/merges/merge/reversal-preview/");
-    expect(ENDPOINTS.CONFIGURATION.HISTORY).toBe("/api/v2/master-data-management/configurations/history/");
+    expect(ENDPOINTS.ENTITIES.VERSION("entity", 4)).toBe(
+      "/api/v2/master-data-management/entities/entity/versions/4/"
+    );
+    expect(ENDPOINTS.MERGES.REVERSE("merge")).toBe(
+      "/api/v2/master-data-management/merges/merge/reverse/"
+    );
+    expect(ENDPOINTS.MERGES.REVERSAL_PREVIEW("merge")).toBe(
+      "/api/v2/master-data-management/merges/merge/reversal-preview/"
+    );
+    expect(ENDPOINTS.CONFIGURATION.HISTORY).toBe(
+      "/api/v2/master-data-management/configurations/history/"
+    );
   });
 
   it("builds every parameterized application path", () => {

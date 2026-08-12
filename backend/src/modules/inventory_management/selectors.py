@@ -11,12 +11,7 @@ from uuid import UUID
 
 from django.db.models import QuerySet
 
-from .models import (
-    Batch,
-    SerialNumber,
-    StockBalance,
-    StockLedgerEntry,
-)
+from .models import Batch, SerialNumber, StockBalance, StockLedgerEntry
 
 
 def balances_for_tenant(tenant_id: UUID) -> QuerySet[StockBalance]:

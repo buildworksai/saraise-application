@@ -10,15 +10,30 @@ export type ImportSource = "file" | "manual" | "bank_feed";
 export type ParserFormat = "csv" | "ofx" | "qif" | "bai2" | "mt940" | "camt053" | "manual";
 export type ImportStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 export type AsyncJobStatus =
-  "queued" | "running" | "succeeded" | "failed" | "cancelled" | "timed_out" | "retrying";
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "timed_out"
+  | "retrying";
 export type StatementStatus = "imported" | "reconciling" | "reconciled" | "void";
 export type TransactionType = "debit" | "credit";
 export type MatchStatus = "unmatched" | "proposed" | "matched" | "excluded";
 export type RuleType =
-  "exact" | "date_window" | "reference" | "amount_tolerance" | "counterparty" | "extension";
+  | "exact"
+  | "date_window"
+  | "reference"
+  | "amount_tolerance"
+  | "counterparty"
+  | "extension";
 export type ReconciliationStatus = "draft" | "in_progress" | "review" | "finalized" | "void";
 export type ReconciliationMatchType =
-  "auto" | "manual" | "one_to_many" | "many_to_one" | "adjustment";
+  | "auto"
+  | "manual"
+  | "one_to_many"
+  | "many_to_one"
+  | "adjustment";
 export type ReconciliationMatchStatus = "proposed" | "confirmed" | "rejected" | "reversed";
 export type MatchLineSide = "bank" | "ledger";
 export type LedgerEntryType = "payment" | "journal_line" | "deposit" | "other";
@@ -111,7 +126,12 @@ export interface BankAccountFilters extends PageFilters {
   account_type?: AccountType;
   currency?: string;
   ordering?:
-    "bank_name" | "-bank_name" | "account_name" | "-account_name" | "created_at" | "-created_at";
+    | "bank_name"
+    | "-bank_name"
+    | "account_name"
+    | "-account_name"
+    | "created_at"
+    | "-created_at";
 }
 
 export interface StatementImportSummary {

@@ -1,7 +1,6 @@
 """Complete numeric/financial checks and verify tenant-leading indexes."""
 
-from django.db import migrations
-from django.db import models
+from django.db import migrations, models
 from django.db.models import Q
 
 

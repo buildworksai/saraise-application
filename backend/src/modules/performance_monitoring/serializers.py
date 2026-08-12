@@ -475,7 +475,7 @@ class SLADefinitionSerializer(TenantReadOnlySerializer):
 class SLADefinitionCreateSerializer(serializers.Serializer):
     service_name = serializers.CharField(max_length=255)
     metric_name = serializers.CharField(max_length=255)
-    target = serializers.DecimalField(max_digits=10, decimal_places=4, min_value=0)
+    target = serializers.DecimalField(max_digits=10, decimal_places=4, min_value=Decimal("0"))
     window = serializers.ChoiceField(choices=SLAWindow.choices)
     comparison = serializers.ChoiceField(choices=((Comparison.GTE, "gte"), (Comparison.LTE, "lte")))
     expected_interval_seconds = serializers.IntegerField(min_value=1, required=False)
@@ -484,7 +484,7 @@ class SLADefinitionCreateSerializer(serializers.Serializer):
 class SLADefinitionUpdateSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=180, required=False)
     description = serializers.CharField(required=False, allow_blank=True)
-    target = serializers.DecimalField(max_digits=10, decimal_places=4, min_value=0, required=False)
+    target = serializers.DecimalField(max_digits=10, decimal_places=4, min_value=Decimal("0"), required=False)
     window = serializers.ChoiceField(choices=SLAWindow.choices, required=False)
     comparison = serializers.ChoiceField(choices=((Comparison.GTE, "gte"), (Comparison.LTE, "lte")), required=False)
     expected_interval_seconds = serializers.IntegerField(min_value=1, required=False)

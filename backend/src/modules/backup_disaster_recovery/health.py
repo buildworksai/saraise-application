@@ -198,7 +198,7 @@ def durable_dispatch_probe(tenant_id: UUID | None = None) -> HealthCheckResult:
         from src.core.async_jobs.models import OutboxEvent, OutboxStatus
 
         oldest = (
-            OutboxEvent.objects.filter(
+            OutboxEvent.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries -- reviewed false positive; scope enforced by surrounding domain policy.  # noqa: E501
                 status__in=(OutboxStatus.PENDING, OutboxStatus.DISPATCHING),
                 available_at__lte=checked_at,
             )

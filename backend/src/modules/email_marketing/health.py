@@ -26,12 +26,7 @@ from src.core.async_jobs.services import get_handler
 from src.core.health import HealthCheckResult, health_registry
 from src.core.state_machine import registry as state_machine_registry
 
-from .adapters import (
-    AdapterNotRegistered,
-    get_audience_resolver,
-    get_delivery_gateway,
-    get_renderer,
-)
+from .adapters import AdapterNotRegistered, get_audience_resolver, get_delivery_gateway, get_renderer
 from .jobs import COMMANDS
 
 DOMAIN_TABLES: Final = (
@@ -61,10 +56,7 @@ STATE_MACHINES: Final = (
 
 def _health_policy(tenant_id: UUID | None = None) -> Mapping[str, object]:
     # Lazy import avoids the health/services/adapters dependency cycle.
-    from .services import (
-        get_platform_runtime_defaults,
-        get_runtime_configuration,
-    )
+    from .services import get_platform_runtime_defaults, get_runtime_configuration
 
     document = (
         getattr(get_runtime_configuration(tenant_id), "document", None)
@@ -233,7 +225,8 @@ def _handlers() -> tuple[bool, str]:
 def _outbox(tenant_id: UUID) -> tuple[bool, str]:
     freshness_seconds = _positive_seconds(_health_policy(tenant_id), "outbox_freshness_seconds")
     stale_before = timezone.now() - timedelta(seconds=freshness_seconds)
-    stale = OutboxEvent.objects.filter(
+    # The tenant predicate is explicit; this health probe returns only bounded readiness state.
+    stale = OutboxEvent.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
         tenant_id=tenant_id,
         status=OutboxStatus.PENDING,
         created_at__lt=stale_before,
@@ -242,7 +235,14 @@ def _outbox(tenant_id: UUID) -> tuple[bool, str]:
 
 
 def _gateway(tenant_id: UUID | None = None) -> tuple[bool, str, str]:
-    gateway = get_delivery_gateway()
+    from .services import get_platform_runtime_defaults, get_runtime_configuration
+
+    document = (
+        get_runtime_configuration(tenant_id).document if tenant_id is not None else get_platform_runtime_defaults()
+    )
+    defaults = document.get("defaults") if isinstance(document, Mapping) else None
+    gateway_key = defaults.get("delivery_gateway") if isinstance(defaults, Mapping) else None
+    gateway = get_delivery_gateway(str(gateway_key or "django"))
     tenant_health = getattr(gateway, "health_for_tenant", None)
     result = tenant_health(tenant_id) if callable(tenant_health) else gateway.health()
     return result.available, result.code, result.circuit_state

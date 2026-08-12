@@ -19,20 +19,16 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.core.validators import validate_email
-from django.core.exceptions import ValidationError
 
 from src.core.api.results import CapabilityUnavailable
 from src.core.resilience.http import ResilientHttpClient
 
 SPI_VERSION: Final[str] = "1.0"
-SUPPORTED_CHANNELS: Final[frozenset[str]] = frozenset(
-    {"in_app", "email", "sms", "push", "webhook"}
-)
-SUPPORTED_CONTENT_TYPES: Final[frozenset[str]] = frozenset(
-    {"text/plain", "text/html", "application/json"}
-)
+SUPPORTED_CHANNELS: Final[frozenset[str]] = frozenset({"in_app", "email", "sms", "push", "webhook"})
+SUPPORTED_CONTENT_TYPES: Final[frozenset[str]] = frozenset({"text/plain", "text/html", "application/json"})
 _ADAPTER_KEY = re.compile(r"^[a-z][a-z0-9_.-]{0,99}$")
 _EXTENSION_KEY = re.compile(r"^extensions\.[a-z][a-z0-9_]{0,63}$")
 _HEALTH_DETAIL_KEYS: Final[frozenset[str]] = frozenset(
@@ -371,7 +367,11 @@ class DjangoEmailAdapter:
             validate_email(command.recipient_address)
         except ValidationError as exc:
             raise ValueError("email recipient is invalid") from exc
-        from_email = command.configuration.get("sender_ref") or command.configuration.get("from_email") or getattr(settings, "DEFAULT_FROM_EMAIL", "")
+        from_email = (
+            command.configuration.get("sender_ref")
+            or command.configuration.get("from_email")
+            or getattr(settings, "DEFAULT_FROM_EMAIL", "")
+        )
         try:
             validate_email(str(from_email))
         except ValidationError as exc:
@@ -478,8 +478,10 @@ def resilient_http_client(
 
     key = _required_text(dependency, "dependency", 100)
     hosts = configuration.get("allowed_hosts")
-    if not isinstance(hosts, (list, tuple)) or not hosts or any(
-        not isinstance(host, str) or not host.strip() for host in hosts
+    if (
+        not isinstance(hosts, (list, tuple))
+        or not hosts
+        or any(not isinstance(host, str) or not host.strip() for host in hosts)
     ):
         raise CapabilityUnavailable(
             capability=f"notifications.egress.{key}",

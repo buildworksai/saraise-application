@@ -6,7 +6,6 @@ import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
 
-
 TENANT_TABLES = (
     "workflow_automation_configurations",
     "workflow_automation_configuration_revisions",
@@ -20,11 +19,16 @@ def install_configuration_rls(apps, schema_editor) -> None:
         return
     for table_name in TENANT_TABLES:
         policy_name = f"tenant_isolation_{table_name}"
-        schema_editor.execute(f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY;")
-        schema_editor.execute(f"ALTER TABLE {table_name} FORCE ROW LEVEL SECURITY;")
-        schema_editor.execute(f"DROP POLICY IF EXISTS {policy_name} ON {table_name};")
+        quoted_table = schema_editor.quote_name(table_name)
+        quoted_policy = schema_editor.quote_name(policy_name)
+        # Static migration identifiers are quoted by Django; DDL identifiers cannot be parameterized.
+        schema_editor.execute(f"ALTER TABLE {quoted_table} ENABLE ROW LEVEL SECURITY;")  # nosemgrep
+        # Static migration identifiers are quoted by Django; DDL identifiers cannot be parameterized.
+        schema_editor.execute(f"ALTER TABLE {quoted_table} FORCE ROW LEVEL SECURITY;")  # nosemgrep
+        # Static migration identifiers are quoted by Django; DDL identifiers cannot be parameterized.
+        schema_editor.execute(f"DROP POLICY IF EXISTS {quoted_policy} ON {quoted_table};")  # nosemgrep
         schema_editor.execute(
-            f"CREATE POLICY {policy_name} ON {table_name} "
+            f"CREATE POLICY {quoted_policy} ON {quoted_table} "  # nosemgrep
             "USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid) "
             "WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid);"
         )
@@ -36,9 +40,14 @@ def remove_configuration_rls(apps, schema_editor) -> None:
         return
     for table_name in reversed(TENANT_TABLES):
         policy_name = f"tenant_isolation_{table_name}"
-        schema_editor.execute(f"DROP POLICY IF EXISTS {policy_name} ON {table_name};")
-        schema_editor.execute(f"ALTER TABLE {table_name} NO FORCE ROW LEVEL SECURITY;")
-        schema_editor.execute(f"ALTER TABLE {table_name} DISABLE ROW LEVEL SECURITY;")
+        quoted_table = schema_editor.quote_name(table_name)
+        quoted_policy = schema_editor.quote_name(policy_name)
+        # Static migration identifiers are quoted by Django; DDL identifiers cannot be parameterized.
+        schema_editor.execute(f"DROP POLICY IF EXISTS {quoted_policy} ON {quoted_table};")  # nosemgrep
+        # Static migration identifiers are quoted by Django; DDL identifiers cannot be parameterized.
+        schema_editor.execute(f"ALTER TABLE {quoted_table} NO FORCE ROW LEVEL SECURITY;")  # nosemgrep
+        # Static migration identifiers are quoted by Django; DDL identifiers cannot be parameterized.
+        schema_editor.execute(f"ALTER TABLE {quoted_table} DISABLE ROW LEVEL SECURITY;")  # nosemgrep
 
 
 class Migration(migrations.Migration):
@@ -152,9 +161,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="workflowautomationconfigurationrevision",
-            index=models.Index(
-                fields=["tenant_id", "configuration", "-version"], name="wf_config_rev_tenant_ver_idx"
-            ),
+            index=models.Index(fields=["tenant_id", "configuration", "-version"], name="wf_config_rev_tenant_ver_idx"),
         ),
         migrations.AddIndex(
             model_name="workflowautomationconfigurationrevision",

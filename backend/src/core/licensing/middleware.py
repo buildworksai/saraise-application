@@ -8,11 +8,13 @@ Reference: saraise-documentation/planning/phases/phase-7.5-licensing.md
 """
 
 import logging
+from collections.abc import Callable
 from datetime import timedelta
 from typing import Optional
 
 from django.conf import settings
-from django.http import JsonResponse
+from django.http import HttpRequest, JsonResponse
+from django.http.response import HttpResponseBase
 from django.utils import timezone
 
 from .models import License, LicenseStatus
@@ -24,10 +26,13 @@ logger = logging.getLogger("saraise.licensing")
 class LicenseValidationMiddleware:
     """Middleware to validate license on each request."""
 
-    def __init__(self, get_response):
+    def __init__(
+        self,
+        get_response: Callable[[HttpRequest], HttpResponseBase],
+    ) -> None:
         self.get_response = get_response
 
-    def __call__(self, request):
+    def __call__(self, request: HttpRequest) -> HttpResponseBase:
         # Skip for development mode
         if getattr(settings, "SARAISE_MODE", "development") == "development":
             return self.get_response(request)
@@ -45,7 +50,10 @@ class LicenseValidationMiddleware:
             license = self._get_license()
         except Exception as e:
             # Database might not be ready yet (during migrations)
-            logger.debug(f"License check failed (database may not be ready): {e}")
+            logger.debug(
+                "License check failed (database may not be ready): %s",
+                e,
+            )
             return self.get_response(request)
 
         if not license:
@@ -57,13 +65,18 @@ class LicenseValidationMiddleware:
             return JsonResponse(
                 {
                     "error": "no_license",
-                    "message": "No license configured. Please register to start trial.",
+                    # fmt: off
+                    "message": (
+                        "No license configured. "
+                        "Please register to start trial."
+                    ),
+                    # fmt: on
                 },
                 status=403,
             )
 
         # Store license in request for later use
-        request.license = license
+        setattr(request, "license", license)
 
         # Periodic validation (every 24 hours)
         try:
@@ -92,7 +105,8 @@ class LicenseValidationMiddleware:
         skip_paths = [
             "/api/v1/health/",
             "/api/v1/auth/",  # Allow login/logout
-            "/api/v1/licensing/",  # Allow license status/activate (needed when no license yet)
+            # Allow license status/activate when no license exists yet.
+            "/api/v1/licensing/",
             "/static/",
             "/admin/",
             "/api/schema/",  # OpenAPI schema
@@ -108,7 +122,10 @@ class LicenseValidationMiddleware:
             return License.objects.first()
         except Exception as e:
             # Database might not be ready yet (migrations not run)
-            logger.debug(f"Could not get license (database may not be ready): {e}")
+            logger.debug(
+                "Could not get license (database may not be ready): %s",
+                e,
+            )
             return None
 
     def _should_validate(self, license: License) -> bool:
@@ -117,4 +134,5 @@ class LicenseValidationMiddleware:
             return True
 
         # Re-validate every 24 hours
-        return timezone.now() > license.last_validated_at + timedelta(hours=24)
+        next_validation_at = license.last_validated_at + timedelta(hours=24)
+        return timezone.now() > next_validation_at

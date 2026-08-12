@@ -13,7 +13,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 # Build paths inside the project
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -38,7 +38,7 @@ SARAISE_LICENSE_MODE = cast(Literal["connected", "isolated"], os.getenv("SARAISE
 
 # Platform URL for SaaS mode (auth delegation and policy engine)
 # Required when SARAISE_MODE=saas (Phase 7.6)
-SARAISE_PLATFORM_URL: str = os.getenv("SARAISE_PLATFORM_URL", "http://localhost:18000")
+SARAISE_PLATFORM_URL: str = os.getenv("SARAISE_PLATFORM_URL", "http://localhost:18001")
 if SARAISE_MODE == "saas" and not (SARAISE_PLATFORM_URL or "").strip():
     from django.core.exceptions import ImproperlyConfigured
 
@@ -268,13 +268,15 @@ DATABASES = {
         "USER": os.getenv("DB_USER", "postgres"),
         "PASSWORD": os.getenv("DB_PASSWORD", "postgres"),
         "HOST": os.getenv("DB_HOST", "localhost"),
-        "PORT": os.getenv("DB_PORT", "5432"),
+        "PORT": os.getenv("DB_PORT", "25432"),
     }
 }
 
-# For tests, use SQLite (pytest/manage.py test)
-_use_sqlite = (
-    os.getenv("DJANGO_USE_SQLITE_FOR_TESTS") == "1" or "test" in sys.argv or any("pytest" in arg for arg in sys.argv)
+# For tests, use SQLite by default, while allowing PostgreSQL-required gates to
+# opt into the configured database with DJANGO_USE_SQLITE_FOR_TESTS=0.
+_sqlite_test_setting = os.getenv("DJANGO_USE_SQLITE_FOR_TESTS")
+_use_sqlite = _sqlite_test_setting == "1" or (
+    _sqlite_test_setting is None and ("test" in sys.argv or any("pytest" in arg for arg in sys.argv))
 )
 if _use_sqlite:
     DATABASES["default"] = {
@@ -291,7 +293,32 @@ if SARAISE_MODE == "saas" and not _in_test:
     }
 
 # Redis configuration
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:26379/0")
+CACHES: dict[str, dict[str, Any]]
+if _use_sqlite:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "saraise-test-cache",
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": REDIS_URL,
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            },
+        }
+    }
+
+# Local development integration provider roots. Adapters read these through
+# django.conf.settings so env values must be promoted explicitly.
+BDR_LOCAL_STORAGE_ROOT = os.getenv("BDR_LOCAL_STORAGE_ROOT")
+BDR_LOCAL_RESTORE_ROOT = os.getenv("BDR_LOCAL_RESTORE_ROOT")
+EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.smtp.EmailBackend")
+EMAIL_MARKETING_DEFAULT_GATEWAY = os.getenv("EMAIL_MARKETING_DEFAULT_GATEWAY", "")
 # Domain events (Stream A3) — disable in unit tests via env if needed
 SARAISE_EVENTS_ENABLED = os.getenv("SARAISE_EVENTS_ENABLED", "true").lower() in ("1", "true", "yes")
 
@@ -320,12 +347,8 @@ elif SARAISE_MODE == "development":
     CORS_ALLOWED_ORIGINS = [
         "http://localhost:25173",  # Application frontend (Runtime Plane)
         "http://localhost:17000",  # Platform frontend (Control Plane UI)
-        "http://localhost:15173",  # Legacy/alternative port
-        "http://localhost:5173",  # Standard Vite dev server port
         "http://127.0.0.1:25173",
         "http://127.0.0.1:17000",
-        "http://127.0.0.1:15173",
-        "http://127.0.0.1:5173",
     ]
 else:
     # Non-development mode without explicit CORS origins: deny all cross-origin
@@ -355,12 +378,8 @@ elif SARAISE_MODE == "development":
     CSRF_TRUSTED_ORIGINS = [
         "http://localhost:25173",  # Application frontend (Runtime Plane)
         "http://localhost:17000",  # Platform frontend (Control Plane UI)
-        "http://localhost:15173",  # Legacy/alternative port
-        "http://localhost:5173",  # Standard Vite dev server port
         "http://127.0.0.1:25173",
         "http://127.0.0.1:17000",
-        "http://127.0.0.1:15173",
-        "http://127.0.0.1:5173",
     ]
 else:
     CSRF_TRUSTED_ORIGINS = []

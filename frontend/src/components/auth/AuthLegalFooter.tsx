@@ -2,23 +2,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Link } from 'react-router-dom'
-import { cn } from '@/lib/utils'
+import { Link } from "react-router-dom";
+import { cn } from "@/lib/utils";
 
 const legalLinks = [
-  { label: 'Terms of Service', href: '/terms' },
-  { label: 'Privacy Policy', href: '/privacy' },
-  { label: 'Security', href: '/security' },
-  { label: 'Support', href: '/support' },
-]
+  { label: "Terms of Service", href: "/terms" },
+  { label: "Privacy Policy", href: "/privacy" },
+  { label: "Security", href: "/security" },
+  { label: "Support", href: "/support" },
+];
 
 interface AuthLegalFooterProps {
-  className?: string
+  className?: string;
 }
 
 export function AuthLegalFooter({ className }: AuthLegalFooterProps) {
   return (
-    <div className={cn('text-center border-t border-gray-200 dark:border-gray-700 pt-6 mt-6', className)}>
+    <div
+      className={cn(
+        "text-center border-t border-gray-200 dark:border-gray-700 pt-6 mt-6",
+        className
+      )}
+    >
       <p className="text-sm text-gray-500 dark:text-gray-400">
         SARAISE - Secure and Reliable AI Symphony ERP
       </p>
@@ -34,5 +39,5 @@ export function AuthLegalFooter({ className }: AuthLegalFooterProps) {
         ))}
       </div>
     </div>
-  )
+  );
 }

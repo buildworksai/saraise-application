@@ -1,17 +1,13 @@
 /**
  * Localization Service
- * 
+ *
  * Service client for Localization module API calls.
- * 
+ *
  * Uses contracts.ts for types and endpoints.
  */
-import { apiClient } from '@/services/api-client';
-import { ENDPOINTS } from '../contracts';
-import type {
-  Translation,
-  TranslationCreate,
-  TranslationUpdate,
-} from '../contracts';
+import { apiClient } from "@/services/api-client";
+import { ENDPOINTS } from "../contracts";
+import type { Translation, TranslationCreate, TranslationUpdate } from "../contracts";
 
 export const localizationService = {
   /**

@@ -7,7 +7,6 @@ tests exercise the most important relational invariant as well.
 
 from django.db import migrations
 
-
 POSTGRES_TABLES = ("asset_assets", "asset_depreciation_entries")
 
 
@@ -105,12 +104,10 @@ def disable_tenant_guards(apps, schema_editor):
     with connection.cursor() as cursor:
         if connection.vendor == "postgresql":
             cursor.execute(
-                "DROP TRIGGER IF EXISTS asset_depreciation_immutable_guard_trigger "
-                "ON asset_depreciation_entries"
+                "DROP TRIGGER IF EXISTS asset_depreciation_immutable_guard_trigger " "ON asset_depreciation_entries"
             )
             cursor.execute(
-                "DROP TRIGGER IF EXISTS asset_depreciation_tenant_guard_trigger "
-                "ON asset_depreciation_entries"
+                "DROP TRIGGER IF EXISTS asset_depreciation_tenant_guard_trigger " "ON asset_depreciation_entries"
             )
             cursor.execute("DROP FUNCTION IF EXISTS asset_depreciation_immutable_guard()")
             cursor.execute("DROP FUNCTION IF EXISTS asset_depreciation_tenant_guard()")

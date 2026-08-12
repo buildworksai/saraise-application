@@ -11,7 +11,7 @@ Reference: saraise-documentation/licensing/licensing-architecture.md
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TypeVar, cast
 
 from django.conf import settings
 
@@ -19,6 +19,7 @@ from .client import LicenseClient
 from .models import LicenseInfo, LicenseTier, LicenseValidationStatus
 
 logger = logging.getLogger("saraise.licensing")
+LicenseValidatorT = TypeVar("LicenseValidatorT", bound="LicenseValidator")
 
 
 class LicenseValidator:
@@ -33,15 +34,19 @@ class LicenseValidator:
     """
 
     _instance: Optional["LicenseValidator"] = None
+    _initialized: bool
+    _client: LicenseClient
+    _license_info: Optional[LicenseInfo]
+    _last_check: Optional[datetime]
 
-    def __new__(cls):
+    def __new__(cls: type[LicenseValidatorT]) -> LicenseValidatorT:
         """Singleton pattern for license validator."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
-        return cls._instance
+        return cast(LicenseValidatorT, cls._instance)
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the license validator."""
         if self._initialized:
             return
@@ -54,12 +59,14 @@ class LicenseValidator:
     @property
     def is_development_mode(self) -> bool:
         """Check if running in development mode."""
-        return getattr(settings, "SARAISE_MODE", "development") == "development"
+        mode = getattr(settings, "SARAISE_MODE", "development")
+        return mode == "development"
 
     @property
     def is_self_hosted(self) -> bool:
         """Check if running in self-hosted mode."""
-        return getattr(settings, "SARAISE_MODE", "development") == "self-hosted"
+        mode = getattr(settings, "SARAISE_MODE", "development")
+        return mode == "self-hosted"
 
     @property
     def is_saas_mode(self) -> bool:
@@ -72,7 +79,11 @@ class LicenseValidator:
             return self._client._mock_development_license("dev-org")
         return self._license_info
 
-    def validate_startup(self, license_key: str, organization_id: str) -> LicenseInfo:
+    def validate_startup(
+        self,
+        license_key: str,
+        organization_id: str,
+    ) -> LicenseInfo:
         """
         Validate license on application startup.
 
@@ -87,7 +98,11 @@ class LicenseValidator:
         """
         if self.is_development_mode:
             logger.info("Development mode - skipping license validation")
-            self._license_info = self._client._mock_development_license(organization_id)
+            # fmt: off
+            self._license_info = self._client._mock_development_license(
+                organization_id
+            )
+            # fmt: on
             return self._license_info
 
         if self.is_saas_mode:
@@ -97,22 +112,37 @@ class LicenseValidator:
 
         # Self-hosted mode - actual validation
         logger.info(f"Validating license for organization: {organization_id}")
-        self._license_info = self._client.validate(license_key, organization_id)
+        # fmt: off
+        self._license_info = self._client.validate(
+            license_key,
+            organization_id,
+        )
+        # fmt: on
         self._last_check = datetime.utcnow()
 
         if self._license_info.status == LicenseValidationStatus.GRACE_PERIOD:
             days_left = self._license_info.days_until_expiry
             logger.warning(
-                f"License in grace period! {days_left} days remaining. " "Please renew to avoid service interruption."
+                "License in grace period! "
+                f"{days_left} days remaining. "
+                "Please renew to avoid service interruption."
             )
         elif self._license_info.status == LicenseValidationStatus.EXPIRED:
-            logger.error(
-                "License has expired! Application will operate in read-only mode. " "Please renew your subscription."
+            # fmt: off
+            expired_message = (
+                "License has expired! Application will operate in "
+                "read-only mode. Please renew your subscription."
             )
+            # fmt: on
+            logger.error(expired_message)
 
         return self._license_info
 
-    def check_module_access(self, module_id: str, write_operation: bool = False) -> bool:
+    def check_module_access(
+        self,
+        module_id: str,
+        write_operation: bool = False,
+    ) -> bool:
         """
         Check if a module is accessible.
 
@@ -139,7 +169,10 @@ class LicenseValidator:
         if not license_info.is_valid:
             if write_operation:
                 # Soft-lock: deny write operations for expired licenses
-                logger.warning(f"License expired - denying write access to {module_id}")
+                logger.warning(
+                    "License expired - denying write access to %s",
+                    module_id,
+                )
                 return False
             # Allow read operations even with expired license
             return True
@@ -162,7 +195,12 @@ class LicenseValidator:
         """Check if trial period is active."""
         license_info = self.get_license()
         if license_info:
-            return license_info.tier == LicenseTier.TRIAL and license_info.is_valid
+            # fmt: off
+            return (
+                license_info.tier == LicenseTier.TRIAL
+                and license_info.is_valid
+            )
+            # fmt: on
         return False
 
     def get_trial_days_remaining(self) -> int:

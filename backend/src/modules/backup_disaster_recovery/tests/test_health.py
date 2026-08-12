@@ -11,14 +11,12 @@ from django.utils import timezone
 from src.core.async_jobs.models import OutboxEvent
 from src.core.async_jobs.services import enqueue
 from src.core.health import HealthCheckResult, HealthRegistry
-from src.modules.backup_disaster_recovery.adapter_registry import (
-    register_storage_adapter,
-    unregister_storage_adapter,
-)
+from src.modules.backup_disaster_recovery.adapter_registry import register_storage_adapter, unregister_storage_adapter
 from src.modules.backup_disaster_recovery.health import (
     adapter_registry_probe,
     circuit_state_probe,
     durable_dispatch_probe,
+    exercise_freshness_probe,
     module_readiness,
     register_health_probes,
     storage_provider_probe,
@@ -55,6 +53,18 @@ def test_missing_configured_adapter_fails_closed() -> None:
     with override_settings(BDR_STORAGE_ADAPTER_KEY=f"missing-{uuid4()}"):
         assert adapter_registry_probe().healthy is False
         assert storage_provider_probe().healthy is False
+
+
+def test_health_value_and_registry_misconfiguration_fail_closed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "src.modules.backup_disaster_recovery.health._configuration_document",
+        lambda tenant_id: {"health": {"probe_timeout_seconds": "bad"}, "providers": {"storage_adapter_key": ""}},
+    )
+
+    assert adapter_registry_probe().healthy is False
+    assert storage_provider_probe().message == "configured storage provider is unavailable"
+    with pytest.raises(ValueError, match="staleness configuration"):
+        register_health_probes(HealthRegistry())
 
 
 def test_provider_probe_is_healthy_and_sanitizes_details() -> None:
@@ -105,6 +115,31 @@ def test_open_circuit_is_explicitly_unhealthy() -> None:
         unregister_storage_adapter(key)
 
 
+def test_provider_probe_rejects_misconfigured_timeout_future_stale_and_unknown_circuit() -> None:
+    future_key = _register(
+        _Adapter(
+            HealthCheckResult(
+                True,
+                checked_at=timezone.now() + timedelta(minutes=1),
+                details={"circuit_state": "secret-state"},
+            )
+        )
+    )
+    try:
+        with override_settings(BDR_STORAGE_ADAPTER_KEY=future_key, BDR_HEALTH_PROBE_TIMEOUT_SECONDS=99):
+            timeout = storage_provider_probe()
+        assert timeout.healthy is False
+        assert timeout.message == "storage provider probe timeout is misconfigured"
+
+        with override_settings(BDR_STORAGE_ADAPTER_KEY=future_key):
+            future = storage_provider_probe()
+        assert future.healthy is False
+        assert future.message == "storage provider probe result is stale"
+        assert future.details == {"adapter": future_key, "circuit_state": "unknown"}
+    finally:
+        unregister_storage_adapter(future_key)
+
+
 @pytest.mark.django_db
 def test_durable_dispatch_probe_detects_queue_lag() -> None:
     job = enqueue(uuid4(), uuid4(), "test.health.command", {}, f"health-{uuid4()}")
@@ -113,6 +148,39 @@ def test_durable_dispatch_probe_detects_queue_lag() -> None:
         result = durable_dispatch_probe()
     assert result.healthy is False
     assert result.details == {"lag_within_threshold": False}
+
+
+@pytest.mark.django_db
+def test_durable_dispatch_probe_reports_healthy_empty_queue_and_bad_threshold() -> None:
+    empty = durable_dispatch_probe()
+    assert empty.healthy is True
+    assert empty.details == {"lag_within_threshold": True}
+
+    with override_settings(BDR_OUTBOX_MAX_LAG_SECONDS="bad"):
+        bad_threshold = durable_dispatch_probe()
+    assert bad_threshold.healthy is False
+    assert bad_threshold.message == "outbox lag threshold is misconfigured"
+
+
+def test_exercise_freshness_probe_handles_missing_fresh_and_stale_aggregates() -> None:
+    with override_settings(BDR_EXERCISE_FRESHNESS_CHECKED_AT=None):
+        missing = exercise_freshness_probe()
+    assert missing.healthy is False
+
+    with override_settings(
+        BDR_EXERCISE_FRESHNESS_CHECKED_AT=timezone.now(),
+        BDR_EXERCISE_FRESHNESS_MAX_AGE_SECONDS=30,
+    ):
+        fresh = exercise_freshness_probe()
+    assert fresh.healthy is True
+
+    with override_settings(
+        BDR_EXERCISE_FRESHNESS_CHECKED_AT=timezone.now() - timedelta(days=2),
+        BDR_EXERCISE_FRESHNESS_MAX_AGE_SECONDS=30,
+    ):
+        stale = exercise_freshness_probe()
+    assert stale.healthy is False
+    assert stale.message == "exercise freshness aggregate is stale"
 
 
 def test_health_registry_registration_is_duplicate_safe() -> None:

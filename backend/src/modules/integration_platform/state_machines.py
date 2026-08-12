@@ -13,7 +13,6 @@ from .models import (
     WebhookStatus,
 )
 
-
 INTEGRATION_STATE_MACHINE = StateMachine(
     name="integration_platform.integration",
     model=Integration,
@@ -77,7 +76,12 @@ webhook_state_machine = WEBHOOK_STATE_MACHINE
 delivery_state_machine = DELIVERY_STATE_MACHINE
 
 __all__ = [
-    "CREDENTIAL_STATE_MACHINE", "DELIVERY_STATE_MACHINE", "INTEGRATION_STATE_MACHINE",
-    "WEBHOOK_STATE_MACHINE", "credential_state_machine", "delivery_state_machine",
-    "integration_state_machine", "webhook_state_machine",
+    "CREDENTIAL_STATE_MACHINE",
+    "DELIVERY_STATE_MACHINE",
+    "INTEGRATION_STATE_MACHINE",
+    "WEBHOOK_STATE_MACHINE",
+    "credential_state_machine",
+    "delivery_state_machine",
+    "integration_state_machine",
+    "webhook_state_machine",
 ]

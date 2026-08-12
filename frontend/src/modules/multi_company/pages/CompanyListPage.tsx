@@ -1,1 +1,1 @@
-export { CompanyListPage } from './workspaces';
+export { CompanyListPage } from "./workspaces";

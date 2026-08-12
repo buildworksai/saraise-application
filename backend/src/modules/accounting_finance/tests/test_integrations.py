@@ -18,8 +18,10 @@ from src.modules.accounting_finance.integrations import (
     JournalPostingResultV1,
     PartyDirectoryPortV1,
     PartyRecordV1,
+    PeriodCloseEvidenceV1,
     RegistrationConflict,
     SchemaVersionRejected,
+    TaxCalculationResultV1,
     extension_registry,
 )
 
@@ -138,11 +140,7 @@ def test_dimension_validation_is_namespaced_and_provider_backed() -> None:
 
 @pytest.mark.django_db
 def test_fixed_asset_facade_returns_exact_fixed_assets_result(monkeypatch) -> None:
-    from src.modules.fixed_assets.integrations import (
-        AccountingPostingRequest,
-        AccountingPostingResult,
-        JournalLeg,
-    )
+    from src.modules.fixed_assets.integrations import AccountingPostingRequest, AccountingPostingResult, JournalLeg
 
     tenant, asset, line = uuid4(), uuid4(), uuid4()
     captured = {}
@@ -184,3 +182,152 @@ def test_fixed_asset_facade_rejects_unknown_schema() -> None:
             account_ids=(uuid4(),),
             schema_version="9.0",
         )
+
+
+def test_journal_request_rejects_mutation_sensitive_identity_and_metadata_fields() -> None:
+    account = uuid4()
+    balanced_legs = (
+        JournalLegV1(account, "debit", Decimal("10.00"), "USD"),
+        JournalLegV1(uuid4(), "credit", Decimal("10.00"), "USD"),
+    )
+
+    with pytest.raises(ExtensionValidationError, match="source_module"):
+        JournalPostingRequestV1(
+            schema_version="1.0",
+            tenant_id=uuid4(),
+            posting_date=date.today(),
+            currency="USD",
+            source_module="FixedAssets",
+            entry_number="FA-2",
+            source_reference="asset:2",
+            idempotency_key="posting-2",
+            correlation_id="cmd-fixed-asset-2",
+            actor_id="actor-1",
+            legs=balanced_legs,
+        )
+
+    with pytest.raises(ExtensionValidationError, match="correlation_id"):
+        JournalPostingRequestV1(
+            schema_version="1.0",
+            tenant_id=uuid4(),
+            posting_date=date.today(),
+            currency="USD",
+            source_module="fixed_assets",
+            entry_number="FA-3",
+            source_reference="asset:3",
+            idempotency_key="posting-3",
+            correlation_id="bad correlation with spaces",
+            actor_id="actor-1",
+            legs=balanced_legs,
+        )
+
+    with pytest.raises(ExtensionValidationError, match="metadata"):
+        JournalPostingRequestV1(
+            schema_version="1.0",
+            tenant_id=uuid4(),
+            posting_date=date.today(),
+            currency="USD",
+            source_module="fixed_assets",
+            entry_number="FA-4",
+            source_reference="asset:4",
+            idempotency_key="posting-4",
+            correlation_id="cmd-fixed-asset-4",
+            actor_id="actor-1",
+            legs=balanced_legs,
+            metadata={"not_namespaced": "value"},
+        )
+
+
+def test_registry_rejects_dimension_provider_key_drift_and_invalid_values() -> None:
+    registry = AccountingExtensionRegistry()
+
+    class ChangedKeys(Dimensions):
+        def validate(self, tenant_id, values):
+            del tenant_id, values
+            return {"project.other": "ALPHA"}
+
+    class BlankValue(Dimensions):
+        def validate(self, tenant_id, values):
+            del tenant_id
+            return {key: " " for key in values}
+
+    registry.register_dimension_provider("project", ChangedKeys())
+    with pytest.raises(InvalidProviderResult, match="changed"):
+        registry.validate_dimensions(uuid4(), {"project.code": "alpha"})
+
+    registry = AccountingExtensionRegistry()
+    registry.register_dimension_provider("project", BlankValue())
+    with pytest.raises(InvalidProviderResult, match="invalid value"):
+        registry.validate_dimensions(uuid4(), {"project.code": "alpha"})
+
+
+def test_registry_tax_period_evidence_and_circuit_state_fail_closed() -> None:
+    registry = AccountingExtensionRegistry()
+
+    class TaxPort:
+        schema_version = "1.0"
+        provider = "vat"
+
+        def calculate(self, tenant_id, request):
+            del tenant_id, request
+            return TaxCalculationResultV1("1.0", Decimal("1.25"), "USD", "vat-engine")
+
+        def circuit_state(self):
+            return "closed"
+
+    class EvidencePort:
+        schema_version = "1.0"
+        provider = "close_guard"
+
+        def check(self, tenant_id, *, period_id, start_date, end_date):
+            del tenant_id, period_id, start_date, end_date
+            return PeriodCloseEvidenceV1("1.0", "close_guard", True, "period-close-ok")
+
+        def circuit_state(self):
+            return "invalid"
+
+    with pytest.raises(CapabilityUnavailable):
+        registry.tax_calculator("vat")
+
+    registry.register_tax_calculator("vat", TaxPort())
+    assert registry.tax_calculator("vat").calculate(uuid4(), {}).tax_amount == Decimal("1.25")
+
+    registry.register_period_close_evidence("close_guard", EvidencePort())
+    assert registry.period_close_evidence()[0].provider == "close_guard"
+    with pytest.raises(InvalidProviderResult, match="circuit state"):
+        registry.circuit_states()
+
+
+def test_fixed_asset_facade_rejects_wrong_request_type_and_bad_posting_result(monkeypatch) -> None:
+    from src.modules.fixed_assets.integrations import AccountingPostingRequest, JournalLeg
+
+    with pytest.raises(ExtensionValidationError, match="Expected fixed-assets"):
+        FixedAssetAccountingFacade.post_fixed_asset_journal(object())
+
+    class BadPostingPort:
+        schema_version = "1.0"
+
+        def post_journal(self, request):
+            del request
+            return object()
+
+    monkeypatch.setattr(extension_registry, "_posting", BadPostingPort())
+    request = AccountingPostingRequest(
+        schema_version="1.0",
+        tenant_id=uuid4(),
+        asset_id=uuid4(),
+        depreciation_line_id=uuid4(),
+        posting_date=date(2026, 7, 23),
+        currency="USD",
+        idempotency_key="asset-post-bad-result",
+        correlation_id="cmd-fixed-asset-bad-result",
+        actor_id="actor-1",
+        legs=(
+            JournalLeg(uuid4(), "debit", Decimal("12.50"), "USD"),
+            JournalLeg(uuid4(), "credit", Decimal("12.50"), "USD"),
+        ),
+        metadata={},
+    )
+
+    with pytest.raises(InvalidProviderResult, match="posting port"):
+        FixedAssetAccountingFacade.post_fixed_asset_journal(request)

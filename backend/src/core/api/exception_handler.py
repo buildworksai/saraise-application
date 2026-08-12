@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
+from django.http import Http404
 from rest_framework import status
 from rest_framework.exceptions import (
     AuthenticationFailed,
@@ -37,6 +38,7 @@ _ERROR_MAPPINGS: tuple[tuple[type[Exception], ErrorDescriptor], ...] = (
     (NotAuthenticated, ErrorDescriptor("AUTHENTICATION_REQUIRED", "Authentication is required.")),
     (AuthenticationFailed, ErrorDescriptor("AUTHENTICATION_REQUIRED", "Authentication is required.")),
     (PermissionDenied, ErrorDescriptor("POLICY_DENIED", "You do not have permission to perform this action.")),
+    (Http404, ErrorDescriptor("RESOURCE_NOT_FOUND", "The requested resource was not found.")),
     (NotFound, ErrorDescriptor("RESOURCE_NOT_FOUND", "The requested resource was not found.")),
     (MethodNotAllowed, ErrorDescriptor("METHOD_NOT_ALLOWED", "This method is not allowed for the resource.")),
     (NotAcceptable, ErrorDescriptor("NOT_ACCEPTABLE", "The requested response format is not available.")),

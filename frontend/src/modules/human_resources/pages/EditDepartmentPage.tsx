@@ -1,1 +1,1 @@
-export { EditDepartmentPage } from './form-pages';
+export { EditDepartmentPage } from "./form-pages";

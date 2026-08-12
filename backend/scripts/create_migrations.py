@@ -2,6 +2,7 @@
 """
 Create migrations for new modules, handling billing_subscriptions separately.
 """
+
 import os
 import sys
 

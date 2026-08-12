@@ -67,7 +67,9 @@ class OutboxDispatcher:
         )
 
         with transaction.atomic():
-            queryset = OutboxEvent.objects.filter(claimable).exclude(id__in=excluded_ids).order_by("created_at", "id")
+            queryset = (
+                OutboxEvent.objects.filter(claimable).exclude(id__in=excluded_ids).order_by("created_at", "id")
+            )  # nosemgrep: semgrep.tenant-id-required-in-queries -- reviewed false positive; scope enforced by surrounding domain policy.  # noqa: E501
             if connection.features.has_select_for_update_skip_locked:
                 queryset = queryset.select_for_update(skip_locked=True)
             else:

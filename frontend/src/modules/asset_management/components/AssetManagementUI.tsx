@@ -1,32 +1,35 @@
 /* eslint-disable react-refresh/only-export-components */
-import type { ReactNode } from 'react';
-import { AlertTriangle, ArrowLeft, Boxes, LockKeyhole, RefreshCw, SearchX } from 'lucide-react';
-import { ApiError } from '@/services/api-client';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Skeleton } from '@/components/ui/Skeleton';
-import { AssetManagementApiError } from '../services/asset-service';
+import type { ReactNode } from "react";
+import { AlertTriangle, ArrowLeft, Boxes, LockKeyhole, RefreshCw, SearchX } from "lucide-react";
+import { ApiError } from "@/services/api-client";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { AssetManagementApiError } from "../services/asset-service";
 
 export function titleCase(value: string): string {
-  return value.replaceAll('_', ' ').replace(/\b\w/gu, (letter) => letter.toUpperCase());
+  return value.replaceAll("_", " ").replace(/\b\w/gu, (letter) => letter.toUpperCase());
 }
 
 export function formatAmount(value: string, decimalPlaces: number): string {
   const parsed = Number(value);
   return Number.isFinite(parsed)
-    ? parsed.toLocaleString(undefined, { minimumFractionDigits: decimalPlaces, maximumFractionDigits: decimalPlaces })
+    ? parsed.toLocaleString(undefined, {
+        minimumFractionDigits: decimalPlaces,
+        maximumFractionDigits: decimalPlaces,
+      })
     : value;
 }
 
 export function formatDate(value: string | null | undefined): string {
-  if (!value) return '—';
-  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  if (!value) return "—";
+  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
   if (!year || !month || !day) return value;
   return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'UTC',
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
   }).format(new Date(Date.UTC(year, month - 1, day)));
 }
 
@@ -49,11 +52,13 @@ export function PageHeader({
         {onBack && (
           <Button variant="ghost" className="-ml-3 mb-2" onClick={onBack}>
             <ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />
-            {backLabel ?? 'Back'}
+            {backLabel ?? "Back"}
           </Button>
         )}
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
-        {description && <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{description}</p>}
+        {description && (
+          <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{description}</p>
+        )}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </header>
@@ -71,9 +76,9 @@ export function PageSkeleton({ table = false }: { table?: boolean }) {
         <Skeleton className="h-9 w-64" />
         <Skeleton className="h-4 w-full max-w-xl" />
       </div>
-      <div className={table ? 'space-y-2' : 'grid gap-4 sm:grid-cols-2 lg:grid-cols-4'}>
+      <div className={table ? "space-y-2" : "grid gap-4 sm:grid-cols-2 lg:grid-cols-4"}>
         {Array.from({ length: table ? 7 : 4 }, (_, index) => (
-          <Skeleton key={index} className={table ? 'h-12 w-full' : 'h-28 w-full'} />
+          <Skeleton key={index} className={table ? "h-12 w-full" : "h-28 w-full"} />
         ))}
       </div>
     </main>
@@ -91,10 +96,14 @@ function describeError(error: unknown): {
   if (error instanceof ApiError) {
     return { message: error.message, status: error.status, correlationId: error.correlationId };
   }
-  return { message: error instanceof Error ? error.message : 'The request failed safely.' };
+  return { message: error instanceof Error ? error.message : "The request failed safely." };
 }
 
-export function ProblemState({ error, onRetry, compact = false }: {
+export function ProblemState({
+  error,
+  onRetry,
+  compact = false,
+}: {
   error: unknown;
   onRetry?: () => void;
   compact?: boolean;
@@ -103,15 +112,22 @@ export function ProblemState({ error, onRetry, compact = false }: {
   const forbidden = problem.status === 403;
   const missing = problem.status === 404;
   const Icon = forbidden ? LockKeyhole : missing ? SearchX : AlertTriangle;
-  const title = forbidden ? 'Access denied' : missing ? 'Asset not found' : 'We could not complete this request';
-  const message = forbidden
-    ? 'Your current policy does not allow this action.'
+  const title = forbidden
+    ? "Access denied"
     : missing
-      ? 'The record is unavailable or belongs to another tenant.'
+      ? "Asset not found"
+      : "We could not complete this request";
+  const message = forbidden
+    ? "Your current policy does not allow this action."
+    : missing
+      ? "The record is unavailable or belongs to another tenant."
       : problem.message;
 
   return (
-    <Card role="alert" className={`flex flex-col items-center justify-center p-6 text-center ${compact ? '' : 'min-h-72'}`}>
+    <Card
+      role="alert"
+      className={`flex flex-col items-center justify-center p-6 text-center ${compact ? "" : "min-h-72"}`}
+    >
       <div className="rounded-full bg-destructive/10 p-3">
         <Icon className="h-7 w-7 text-destructive" aria-hidden="true" />
       </div>
@@ -132,7 +148,21 @@ export function ProblemState({ error, onRetry, compact = false }: {
   );
 }
 
-export function EmptyPanel({ title, description, action }: {
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+export function isRouteUuid(value: string): boolean {
+  return UUID_PATTERN.test(value);
+}
+
+export function routeAssetNotFoundError(): AssetManagementApiError {
+  return new AssetManagementApiError("Asset not found.", 404, "NOT_FOUND", null);
+}
+
+export function EmptyPanel({
+  title,
+  description,
+  action,
+}: {
   title: string;
   description: string;
   action?: { label: string; onClick: () => void };
@@ -142,19 +172,25 @@ export function EmptyPanel({ title, description, action }: {
       <Boxes className="h-10 w-10 text-muted-foreground" aria-hidden="true" />
       <h2 className="mt-4 text-lg font-semibold">{title}</h2>
       <p className="mt-2 max-w-md text-sm text-muted-foreground">{description}</p>
-      {action && <Button className="mt-5" onClick={action.onClick}>{action.label}</Button>}
+      {action && (
+        <Button className="mt-5" onClick={action.onClick}>
+          {action.label}
+        </Button>
+      )}
     </Card>
   );
 }
 
 export function StatusPill({ active }: { active: boolean }) {
   return (
-    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
-      active
-        ? 'border-success/30 bg-success/10 text-success'
-        : 'border-border bg-muted text-muted-foreground'
-    }`}>
-      {active ? 'Active' : 'Inactive'}
+    <span
+      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
+        active
+          ? "border-success/30 bg-success/10 text-success"
+          : "border-border bg-muted text-muted-foreground"
+      }`}
+    >
+      {active ? "Active" : "Inactive"}
     </span>
   );
 }

@@ -20,4 +20,3 @@ class ProcessMiningConfig(AppConfig):
 
 
 __all__ = ["ProcessMiningConfig"]
-

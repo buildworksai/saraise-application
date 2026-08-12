@@ -108,9 +108,9 @@ from .serializers import (
     MergeReverseSerializer,
     QualityIssueResolutionSerializer,
     QualityReportSerializer,
+    RollbackSerializer,
     RuleImportSerializer,
     RuleRollbackSerializer,
-    RollbackSerializer,
     ScanRequestSerializer,
     ValidateRequestSerializer,
 )

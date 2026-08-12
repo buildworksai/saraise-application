@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Any, Final, cast
 from uuid import UUID
 
 from rest_framework.authentication import SessionAuthentication
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission
 
-from src.core.access.permissions import RequiresAccess
 from src.core.auth_utils import get_user_tenant_id
 
 NETWORK_READ: Final = "blockchain_traceability.network:read"
@@ -100,25 +99,25 @@ class SessionAuthentication401(SessionAuthentication):
 class ActionAccessMixin:
     """Bind each DRF action to an explicit permission, entitlement and quota."""
 
-    authentication_classes = (SessionAuthentication401,)
-    permission_classes = (IsAuthenticated, RequiresAccess)
+    request: Any
     action_permissions: dict[str, str] = {}
     action_quotas: dict[str, str] = {}
     unsupported_method_permission: str | None = None
     read_actions: frozenset[str] = frozenset({"list", "retrieve", "history"})
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         action_name = getattr(self, "action", "")
-        raw_tenant_id = get_user_tenant_id(getattr(self.request, "user", None))
+        request = cast(Any, self.request)
+        raw_tenant_id = get_user_tenant_id(getattr(request, "user", None))
         try:
-            self.request.tenant_id = UUID(str(raw_tenant_id)) if raw_tenant_id else None
+            request.tenant_id = UUID(str(raw_tenant_id)) if raw_tenant_id else None
         except (AttributeError, TypeError, ValueError):
             # RequiresAccess deliberately fails closed for invalid ownership.
-            self.request.tenant_id = None
+            request.tenant_id = None
 
         permission = self.action_permissions.get(action_name)
         allowed_methods = getattr(self, "http_method_names", ())
-        if permission is None and self.request.method.lower() not in allowed_methods:
+        if permission is None and request.method.lower() not in allowed_methods:
             permission = self.unsupported_method_permission
         self.required_permission = permission
         self.required_entitlement = permission
@@ -131,7 +130,7 @@ class ActionAccessMixin:
             ),
         )
         self.quota_cost = 1
-        return super().get_permissions()
+        return cast(list[BasePermission], cast(Any, super()).get_permissions())
 
 
 __all__ = [

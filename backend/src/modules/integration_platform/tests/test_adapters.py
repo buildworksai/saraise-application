@@ -5,7 +5,12 @@ from django.core.exceptions import ValidationError
 
 from src.core.api.results import OperationResult
 
-from ..adapter_registry import AdapterUnavailableError, ConnectorAdapterRegistry, DuplicateAdapterError, transformation_registry
+from ..adapter_registry import (
+    AdapterUnavailableError,
+    ConnectorAdapterRegistry,
+    DuplicateAdapterError,
+    transformation_registry,
+)
 from ..adapters import AdapterDescriptor, ConnectorAdapter, RecordBatch
 
 pytest_plugins = ["src.core.testing"]
@@ -14,11 +19,20 @@ pytest_plugins = ["src.core.testing"]
 class Adapter(ConnectorAdapter):
     descriptor = AdapterDescriptor("tests.adapter", "1.0.0", frozenset({"test"}))
 
-    def validate_config(self, config): return OperationResult.succeeded(dict(config), evidence={"valid": True})
-    def test_connection(self, config, credential): return OperationResult.succeeded(True, evidence={"probe": True})
-    def pull(self, config, credential, cursor, limit): return OperationResult.unavailable(capability="pull")
-    def push(self, config, credential, records, idempotency_key): return OperationResult.unavailable(capability="push")
-    def health(self): return OperationResult.succeeded({"status": "healthy"}, evidence={"probe": True})
+    def validate_config(self, config):
+        return OperationResult.succeeded(dict(config), evidence={"valid": True})
+
+    def test_connection(self, config, credential):
+        return OperationResult.succeeded(True, evidence={"probe": True})
+
+    def pull(self, config, credential, cursor, limit):
+        return OperationResult.unavailable(capability="pull")
+
+    def push(self, config, credential, records, idempotency_key):
+        return OperationResult.unavailable(capability="push")
+
+    def health(self):
+        return OperationResult.succeeded({"status": "healthy"}, evidence={"probe": True})
 
 
 def test_descriptor_fingerprint_is_stable_and_spi_is_fail_closed():

@@ -49,6 +49,8 @@ _PII_KEYS = frozenset(
         "tax_id",
     }
 )
+
+
 def _string_array(value: object, field: str, *, maximum: int) -> list[str]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or len(value) > maximum:
         raise ValidationError({field: f"Must be an array containing at most {maximum} strings."})

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+from decimal import Decimal
+from typing import Any, cast
 
 from rest_framework import serializers
 
@@ -356,7 +357,7 @@ class TrainingItemSerializer(serializers.Serializer):
 
 class ClassifierTrainingJobCreateSerializer(RejectServerOwnedFieldsMixin, serializers.Serializer):
     name = serializers.CharField(max_length=255, trim_whitespace=True)
-    items = TrainingItemSerializer(many=True, min_length=1, max_length=100_000)
+    items = TrainingItemSerializer(many=True, min_length=1, max_length=100_000)  # type: ignore[call-arg]
     requested_version = serializers.CharField(max_length=50, trim_whitespace=True)
     idempotency_key = serializers.CharField(max_length=255, write_only=True)
 
@@ -416,10 +417,18 @@ class ExtractionTemplateZoneUpdateSerializer(RejectServerOwnedFieldsMixin, seria
     zone_name = serializers.CharField(max_length=100, required=False)
     extraction_key = serializers.CharField(max_length=100, required=False)
     zone_type = serializers.ChoiceField(choices=ZoneType.choices, required=False)
-    x = serializers.DecimalField(max_digits=8, decimal_places=4, required=False, min_value=0, max_value=1)
-    y = serializers.DecimalField(max_digits=8, decimal_places=4, required=False, min_value=0, max_value=1)
-    width = serializers.DecimalField(max_digits=8, decimal_places=4, required=False, min_value=0, max_value=1)
-    height = serializers.DecimalField(max_digits=8, decimal_places=4, required=False, min_value=0, max_value=1)
+    x = serializers.DecimalField(
+        max_digits=8, decimal_places=4, required=False, min_value=Decimal("0"), max_value=Decimal("1")
+    )
+    y = serializers.DecimalField(
+        max_digits=8, decimal_places=4, required=False, min_value=Decimal("0"), max_value=Decimal("1")
+    )
+    width = serializers.DecimalField(
+        max_digits=8, decimal_places=4, required=False, min_value=Decimal("0"), max_value=Decimal("1")
+    )
+    height = serializers.DecimalField(
+        max_digits=8, decimal_places=4, required=False, min_value=Decimal("0"), max_value=Decimal("1")
+    )
     page_number = serializers.IntegerField(min_value=1, required=False)
     expected_data_type = serializers.ChoiceField(choices=ExpectedDataType.choices, required=False)
     is_required = serializers.BooleanField(required=False)
@@ -479,7 +488,7 @@ class ExtractionTemplateDetailSerializer(serializers.ModelSerializer):
 
     def get_zones(self, obj: ExtractionTemplate) -> list[dict[str, Any]]:
         zones = obj.zones.filter(tenant_id=obj.tenant_id, is_deleted=False).order_by("page_number", "zone_name")
-        return ExtractionTemplateZoneReadSerializer(zones, many=True).data
+        return cast(list[dict[str, Any]], ExtractionTemplateZoneReadSerializer(zones, many=True).data)
 
 
 class ExtractionTemplateZoneReadSerializer(serializers.ModelSerializer):
@@ -516,7 +525,9 @@ class ExtractionTemplateCreateSerializer(RejectServerOwnedFieldsMixin, serialize
         r"^[a-z0-9][a-z0-9._-]{0,79}$", required=False, allow_blank=True, max_length=80
     )
     engine = serializers.CharField(max_length=50, trim_whitespace=True)
-    match_threshold = serializers.DecimalField(max_digits=5, decimal_places=4, min_value=0, max_value=1, required=False)
+    match_threshold = serializers.DecimalField(
+        max_digits=5, decimal_places=4, min_value=Decimal("0"), max_value=Decimal("1"), required=False
+    )
     zones = ExtractionTemplateZoneCreateSerializer(many=True, required=False)
 
 
@@ -527,7 +538,9 @@ class ExtractionTemplateUpdateSerializer(RejectServerOwnedFieldsMixin, serialize
         r"^[a-z0-9][a-z0-9._-]{0,79}$", required=False, allow_blank=True, max_length=80
     )
     engine = serializers.CharField(max_length=50, trim_whitespace=True, required=False)
-    match_threshold = serializers.DecimalField(max_digits=5, decimal_places=4, min_value=0, max_value=1, required=False)
+    match_threshold = serializers.DecimalField(
+        max_digits=5, decimal_places=4, min_value=Decimal("0"), max_value=Decimal("1"), required=False
+    )
 
 
 class ClassifierModelVersionListSerializer(serializers.ModelSerializer):

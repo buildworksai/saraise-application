@@ -7,14 +7,61 @@ from typing import Any
 from rest_framework import serializers
 
 from .models import (
-    BottleneckAnalysis, BottleneckFinding, ConformanceCaseMetric, ConformanceCheck,
-    ConformanceDeviation, EventExportJob, ExportFormat, MiningAlgorithmName, ProcessDiscoveryJob,
-    ProcessEvent, ProcessModel, ProcessModelVersion, ProcessVariant, validate_graph,
-    ProcessMiningConfiguration, ProcessMiningConfigurationAudit, ProcessMiningConfigurationVersion,
+    BottleneckAnalysis,
+    BottleneckFinding,
+    ConformanceCaseMetric,
+    ConformanceCheck,
+    ConformanceDeviation,
+    EventExportJob,
+    ExportFormat,
+    MiningAlgorithmName,
+    ProcessDiscoveryJob,
+    ProcessEvent,
+    ProcessMiningConfiguration,
+    ProcessMiningConfigurationAudit,
+    ProcessMiningConfigurationVersion,
+    ProcessModel,
+    ProcessModelVersion,
+    ProcessVariant,
+    validate_graph,
 )
 from .services import FLOAT_LIMITS, INTEGER_LIMITS
 
-SERVER_OWNED = frozenset({"id", "tenant_id", "created_by", "created_at", "updated_at", "is_deleted", "deleted_at", "status", "transition_history", "async_job_id", "artifact_key", "content_type", "row_count", "byte_size", "sha256", "expires_at", "completed_at", "started_at", "error_code", "error_message", "event_count", "case_count", "activity_count", "fitness", "precision", "generalization", "total_cases", "conformant_cases", "deviating_cases", "total_variants", "avg_case_duration_seconds"})
+SERVER_OWNED = frozenset(
+    {
+        "id",
+        "tenant_id",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "is_deleted",
+        "deleted_at",
+        "status",
+        "transition_history",
+        "async_job_id",
+        "artifact_key",
+        "content_type",
+        "row_count",
+        "byte_size",
+        "sha256",
+        "expires_at",
+        "completed_at",
+        "started_at",
+        "error_code",
+        "error_message",
+        "event_count",
+        "case_count",
+        "activity_count",
+        "fitness",
+        "precision",
+        "generalization",
+        "total_cases",
+        "conformant_cases",
+        "deviating_cases",
+        "total_variants",
+        "avg_case_duration_seconds",
+    }
+)
 
 
 class RejectServerOwnedFieldsMixin:
@@ -31,7 +78,18 @@ class ReadOnlyModelSerializer(serializers.ModelSerializer):
         read_only_fields: tuple[str, ...] = ()
 
 
-EVENT_LIST_FIELDS = ("id", "process_name", "source_module", "source_event_id", "case_id", "activity", "occurred_at", "resource", "ingested_at", "created_at")
+EVENT_LIST_FIELDS = (
+    "id",
+    "process_name",
+    "source_module",
+    "source_event_id",
+    "case_id",
+    "activity",
+    "occurred_at",
+    "resource",
+    "ingested_at",
+    "created_at",
+)
 
 
 class ProcessEventListSerializer(ReadOnlyModelSerializer):
@@ -51,7 +109,10 @@ class ProcessEventDetailSerializer(ReadOnlyModelSerializer):
 
     def get_attributes(self, instance: ProcessEvent) -> dict[str, object]:
         sensitive = {"email", "phone", "address", "name", "ssn", "tax_id", "account_number"}
-        return {key: "[REDACTED]" if key.lower() in sensitive or key.lower().startswith("sensitive_") else value for key, value in instance.attributes.items()}
+        return {
+            key: "[REDACTED]" if key.lower() in sensitive or key.lower().startswith("sensitive_") else value
+            for key, value in instance.attributes.items()
+        }
 
 
 class CanonicalEventInputSerializer(serializers.Serializer):
@@ -66,10 +127,28 @@ class CanonicalEventInputSerializer(serializers.Serializer):
 class EventBatchIngestSerializer(RejectServerOwnedFieldsMixin, serializers.Serializer):
     process_name = serializers.CharField(max_length=255)
     source_module = serializers.CharField(max_length=100)
-    events = CanonicalEventInputSerializer(many=True, allow_empty=False, max_length=10_000)
+    events = CanonicalEventInputSerializer(many=True, allow_empty=False)
+
+    def validate_events(self, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if len(value) > 10_000:
+            raise serializers.ValidationError("At most 10000 events can be ingested in one batch.")
+        return value
 
 
-EXPORT_LIST_FIELDS = ("id", "process_name", "format", "status", "row_count", "byte_size", "sha256", "expires_at", "completed_at", "error_code", "created_at", "updated_at")
+EXPORT_LIST_FIELDS = (
+    "id",
+    "process_name",
+    "format",
+    "status",
+    "row_count",
+    "byte_size",
+    "sha256",
+    "expires_at",
+    "completed_at",
+    "error_code",
+    "created_at",
+    "updated_at",
+)
 
 
 class EventExportListSerializer(ReadOnlyModelSerializer):
@@ -93,7 +172,20 @@ class EventExportCreateSerializer(RejectServerOwnedFieldsMixin, serializers.Seri
     idempotency_key = serializers.CharField(max_length=255)
 
 
-DISCOVERY_LIST_FIELDS = ("id", "process_name", "algorithm", "status", "event_count", "case_count", "activity_count", "started_at", "completed_at", "error_code", "created_at", "updated_at")
+DISCOVERY_LIST_FIELDS = (
+    "id",
+    "process_name",
+    "algorithm",
+    "status",
+    "event_count",
+    "case_count",
+    "activity_count",
+    "started_at",
+    "completed_at",
+    "error_code",
+    "created_at",
+    "updated_at",
+)
 
 
 class DiscoveryListSerializer(ReadOnlyModelSerializer):
@@ -117,7 +209,17 @@ class DiscoveryCreateSerializer(RejectServerOwnedFieldsMixin, serializers.Serial
     idempotency_key = serializers.CharField(max_length=255)
 
 
-MODEL_LIST_FIELDS = ("id", "name", "process_name", "description", "source_kind", "current_version_number", "reference_version_number", "created_at", "updated_at")
+MODEL_LIST_FIELDS = (
+    "id",
+    "name",
+    "process_name",
+    "description",
+    "source_kind",
+    "current_version_number",
+    "reference_version_number",
+    "created_at",
+    "updated_at",
+)
 
 
 class ProcessModelListSerializer(ReadOnlyModelSerializer):
@@ -150,7 +252,19 @@ class ProcessModelUpdateSerializer(RejectServerOwnedFieldsMixin, serializers.Ser
     description = serializers.CharField(required=False, allow_blank=True)
 
 
-VERSION_LIST_FIELDS = ("id", "process_model", "version", "algorithm", "event_count", "case_count", "activity_count", "avg_case_duration_seconds", "is_reference", "published_at", "created_at")
+VERSION_LIST_FIELDS = (
+    "id",
+    "process_model",
+    "version",
+    "algorithm",
+    "event_count",
+    "case_count",
+    "activity_count",
+    "avg_case_duration_seconds",
+    "is_reference",
+    "published_at",
+    "created_at",
+)
 
 
 class ProcessModelVersionListSerializer(ReadOnlyModelSerializer):
@@ -162,7 +276,11 @@ class ProcessModelVersionListSerializer(ReadOnlyModelSerializer):
         read_only_fields = fields
 
     def get_is_reference(self, instance: ProcessModelVersion) -> bool:
-        latest = instance.process_model.reference_assignments.filter(tenant_id=instance.tenant_id).order_by("-created_at", "-id").first()
+        latest = (
+            instance.process_model.reference_assignments.filter(tenant_id=instance.tenant_id)
+            .order_by("-created_at", "-id")
+            .first()
+        )
         return bool(latest and latest.process_model_version_id == instance.id)
 
 
@@ -179,7 +297,22 @@ class SetReferenceSerializer(RejectServerOwnedFieldsMixin, serializers.Serialize
     reason = serializers.CharField(required=False, allow_blank=True, max_length=1000)
 
 
-CONFORMANCE_LIST_FIELDS = ("id", "process_model_version", "status", "fitness", "precision", "generalization", "total_cases", "conformant_cases", "deviating_cases", "started_at", "completed_at", "error_code", "created_at", "updated_at")
+CONFORMANCE_LIST_FIELDS = (
+    "id",
+    "process_model_version",
+    "status",
+    "fitness",
+    "precision",
+    "generalization",
+    "total_cases",
+    "conformant_cases",
+    "deviating_cases",
+    "started_at",
+    "completed_at",
+    "error_code",
+    "created_at",
+    "updated_at",
+)
 
 
 class ConformanceListSerializer(ReadOnlyModelSerializer):
@@ -205,18 +338,51 @@ class ConformanceCreateSerializer(RejectServerOwnedFieldsMixin, serializers.Seri
 class DeviationListSerializer(ReadOnlyModelSerializer):
     class Meta:
         model = ConformanceDeviation
-        fields = ("id", "conformance_check", "case_id", "deviation_type", "expected", "actual", "position", "description", "created_at")
+        fields = (
+            "id",
+            "conformance_check",
+            "case_id",
+            "deviation_type",
+            "expected",
+            "actual",
+            "position",
+            "description",
+            "created_at",
+        )
         read_only_fields = fields
 
 
 class CaseFitnessSerializer(ReadOnlyModelSerializer):
     class Meta:
         model = ConformanceCaseMetric
-        fields = ("id", "conformance_check", "case_id", "fitness", "is_conformant", "deviation_count", "trace_length", "created_at")
+        fields = (
+            "id",
+            "conformance_check",
+            "case_id",
+            "fitness",
+            "is_conformant",
+            "deviation_count",
+            "trace_length",
+            "created_at",
+        )
         read_only_fields = fields
 
 
-BOTTLENECK_LIST_FIELDS = ("id", "process_name", "time_range_start", "time_range_end", "status", "total_cases", "total_variants", "avg_case_duration_seconds", "started_at", "completed_at", "error_code", "created_at", "updated_at")
+BOTTLENECK_LIST_FIELDS = (
+    "id",
+    "process_name",
+    "time_range_start",
+    "time_range_end",
+    "status",
+    "total_cases",
+    "total_variants",
+    "avg_case_duration_seconds",
+    "started_at",
+    "completed_at",
+    "error_code",
+    "created_at",
+    "updated_at",
+)
 
 
 class BottleneckAnalysisListSerializer(ReadOnlyModelSerializer):
@@ -249,14 +415,38 @@ class BottleneckCreateSerializer(RejectServerOwnedFieldsMixin, serializers.Seria
 class BottleneckFindingSerializer(ReadOnlyModelSerializer):
     class Meta:
         model = BottleneckFinding
-        fields = ("id", "analysis", "from_activity", "to_activity", "avg_duration_seconds", "median_duration_seconds", "p95_duration_seconds", "case_count", "severity", "resource_bottleneck", "rank", "created_at")
+        fields = (
+            "id",
+            "analysis",
+            "from_activity",
+            "to_activity",
+            "avg_duration_seconds",
+            "median_duration_seconds",
+            "p95_duration_seconds",
+            "case_count",
+            "severity",
+            "resource_bottleneck",
+            "rank",
+            "created_at",
+        )
         read_only_fields = fields
 
 
 class ProcessVariantSerializer(ReadOnlyModelSerializer):
     class Meta:
         model = ProcessVariant
-        fields = ("id", "analysis", "variant_key", "activities", "case_count", "percentage", "avg_duration_seconds", "is_happy_path", "is_grouped_other", "created_at")
+        fields = (
+            "id",
+            "analysis",
+            "variant_key",
+            "activities",
+            "case_count",
+            "percentage",
+            "avg_duration_seconds",
+            "is_happy_path",
+            "is_grouped_other",
+            "created_at",
+        )
         read_only_fields = fields
 
 

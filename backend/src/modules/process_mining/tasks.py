@@ -9,7 +9,14 @@ from src.core.async_jobs.models import AsyncJob
 from src.core.async_jobs.services import register_handler
 from src.core.tenancy import tenant_context_worker
 
-from .services import BottleneckService, ConformanceService, EventLogService, ExportService, ProcessDiscoveryService, ProcessMiningConfigurationService
+from .services import (
+    BottleneckService,
+    ConformanceService,
+    EventLogService,
+    ExportService,
+    ProcessDiscoveryService,
+    ProcessMiningConfigurationService,
+)
 
 
 def _uuid(payload: Mapping[str, object], key: str) -> UUID:
@@ -53,12 +60,16 @@ def purge_events_task(*, tenant_id: UUID, retention_days: int | None, actor_id: 
 
 @register_handler("process_mining.export_event_log")
 def _export_handler(job: AsyncJob) -> dict[str, str]:
-    return export_event_log_task(tenant_id=job.tenant_id, export_id=_uuid(job.payload, "export_id"), async_job_id=job.id)
+    return export_event_log_task(
+        tenant_id=job.tenant_id, export_id=_uuid(job.payload, "export_id"), async_job_id=job.id
+    )
 
 
 @register_handler("process_mining.discover_process")
 def _discovery_handler(job: AsyncJob) -> dict[str, str]:
-    return discover_process_task(tenant_id=job.tenant_id, discovery_id=_uuid(job.payload, "discovery_id"), async_job_id=job.id)
+    return discover_process_task(
+        tenant_id=job.tenant_id, discovery_id=_uuid(job.payload, "discovery_id"), async_job_id=job.id
+    )
 
 
 @register_handler("process_mining.check_conformance")
@@ -68,7 +79,9 @@ def _conformance_handler(job: AsyncJob) -> dict[str, str]:
 
 @register_handler("process_mining.analyze_bottlenecks")
 def _bottleneck_handler(job: AsyncJob) -> dict[str, str]:
-    return analyze_bottlenecks_task(tenant_id=job.tenant_id, analysis_id=_uuid(job.payload, "analysis_id"), async_job_id=job.id)
+    return analyze_bottlenecks_task(
+        tenant_id=job.tenant_id, analysis_id=_uuid(job.payload, "analysis_id"), async_job_id=job.id
+    )
 
 
 @register_handler("process_mining.purge_events")
@@ -81,4 +94,10 @@ def _purge_handler(job: AsyncJob) -> dict[str, int]:
     return purge_events_task(tenant_id=job.tenant_id, retention_days=days, actor_id=_uuid(job.payload, "actor_id"))
 
 
-__all__ = ["analyze_bottlenecks_task", "check_conformance_task", "discover_process_task", "export_event_log_task", "purge_events_task"]
+__all__ = [
+    "analyze_bottlenecks_task",
+    "check_conformance_task",
+    "discover_process_task",
+    "export_event_log_task",
+    "purge_events_task",
+]

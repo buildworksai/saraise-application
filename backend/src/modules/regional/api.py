@@ -20,7 +20,6 @@ from rest_framework.response import Response
 from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
 
-from .models import RegionalResource
 from .permissions import RegionalPolicyPermission
 from .serializers import (
     RegionalConfigurationResponseSerializer,
@@ -95,9 +94,7 @@ class RegionalPagination(PageNumberPagination):
     ) -> list[Any] | None:
         tenant = _tenant_id(request)
         environment = str(request.query_params.get("environment") or settings.SARAISE_MODE)
-        configuration = _call_service(
-            lambda: RegionalConfigurationService.get_or_create(tenant, environment)
-        )
+        configuration = _call_service(lambda: RegionalConfigurationService.get_or_create(tenant, environment))
         self.page_size = int(configuration.document["api"]["default_page_size"])
         self.max_page_size = int(configuration.document["api"]["max_page_size"])
         return super().paginate_queryset(queryset, request, view=view)
@@ -116,9 +113,7 @@ class RegionalResourceViewSet(viewsets.ModelViewSet):
     def _enforce_rollout(self, request: Request) -> None:
         role, cohort = _rollout_context(request)
         _call_service(
-            lambda: self.service.ensure_rollout_access(
-                _tenant_id(request), settings.SARAISE_MODE, role, cohort
-            )
+            lambda: self.service.ensure_rollout_access(_tenant_id(request), settings.SARAISE_MODE, role, cohort)
         )
 
     def get_serializer_class(self) -> type[Any]:
@@ -130,9 +125,7 @@ class RegionalResourceViewSet(viewsets.ModelViewSet):
         self._enforce_rollout(self.request)
         tenant = _tenant_id(self.request)
         query = self.request.query_params if self.action == "list" else {}
-        return _call_service(
-            lambda: self.service.query_resources(tenant, settings.SARAISE_MODE, query)
-        )
+        return _call_service(lambda: self.service.query_resources(tenant, settings.SARAISE_MODE, query))
 
     def create(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         del args, kwargs
@@ -304,9 +297,7 @@ class RegionalConfigurationViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"])
     def history(self, request: Request) -> Response:
         versions = _call_service(
-            lambda: RegionalConfigurationService.history(
-                _tenant_id(request), _environment(request)
-            )
+            lambda: RegionalConfigurationService.history(_tenant_id(request), _environment(request))
         )
         return Response(RegionalConfigurationVersionSerializer(versions, many=True).data)
 
@@ -345,8 +336,6 @@ class RegionalConfigurationViewSet(viewsets.ViewSet):
     @action(detail=False, methods=["get"], url_path="export_document")
     def export_document(self, request: Request) -> Response:
         document = _call_service(
-            lambda: RegionalConfigurationService.export_document(
-                _tenant_id(request), _environment(request)
-            )
+            lambda: RegionalConfigurationService.export_document(_tenant_id(request), _environment(request))
         )
         return Response(document)

@@ -24,11 +24,13 @@ def enable_domain_rls(apps, schema_editor):
         schema_editor.execute(f"ALTER TABLE {quoted_table} ENABLE ROW LEVEL SECURITY;")
         schema_editor.execute(f"ALTER TABLE {quoted_table} FORCE ROW LEVEL SECURITY;")
         schema_editor.execute(f"DROP POLICY IF EXISTS {quoted_policy} ON {quoted_table};")
-        schema_editor.execute(f"""
+        schema_editor.execute(
+            f"""
             CREATE POLICY {quoted_policy} ON {quoted_table}
             USING (tenant_id = saraise_current_tenant_id())
             WITH CHECK (tenant_id = saraise_current_tenant_id());
-            """)
+            """
+        )
 
 
 def disable_domain_rls(apps, schema_editor):

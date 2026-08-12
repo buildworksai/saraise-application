@@ -6,11 +6,29 @@ from uuid import uuid4
 
 import pytest
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 
 from src.modules.asset_management.models import Asset, DepreciationEntry, DepreciationMethod
 
 pytestmark = pytest.mark.django_db
+
+
+def _skip_without_depreciation_tenant_guard() -> None:
+    if connection.vendor != "sqlite":
+        return
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'trigger'
+              AND name IN ('asset_depreciation_tenant_guard_insert', 'asset_depreciation_tenant_guard_update')
+            """
+        )
+        triggers = {row[0] for row in cursor.fetchall()}
+    if triggers != {"asset_depreciation_tenant_guard_insert", "asset_depreciation_tenant_guard_update"}:
+        pytest.skip("SQLite test database was created with --nomigrations and lacks tenant guard triggers.")
 
 
 def test_tenant_fields_are_indexed_uuid_fields():
@@ -101,6 +119,8 @@ def test_depreciation_entry_validates_same_tenant_parent(asset_factory, tenant_a
 
 
 def test_database_rejects_cross_tenant_depreciation_relationship(asset_factory, tenant_a, tenant_b):
+    _skip_without_depreciation_tenant_guard()
+
     foreign_asset = asset_factory(tenant_b)
 
     with pytest.raises(IntegrityError), transaction.atomic():

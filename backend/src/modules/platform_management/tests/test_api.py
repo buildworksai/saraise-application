@@ -2,12 +2,26 @@ import uuid
 
 import pytest
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
-from src.modules.platform_management.api import PlatformSettingViewSet
-from src.modules.platform_management.models import FeatureFlag, PlatformAuditEvent, PlatformSetting, SystemHealth
+from src.modules.platform_management.api import (
+    FeatureFlagViewSet,
+    PlatformAuditEventViewSet,
+    PlatformMetricsViewSet,
+    PlatformSettingViewSet,
+    SystemHealthViewSet,
+)
+from src.modules.platform_management.models import (
+    FeatureFlag,
+    PlatformAuditEvent,
+    PlatformMetrics,
+    PlatformSetting,
+    SystemHealth,
+)
 
 User = get_user_model()
 
@@ -180,6 +194,62 @@ class TestPlatformSettingViewSet:
         assert response.status_code == status.HTTP_204_NO_CONTENT
         assert not PlatformSetting.objects.filter(id=setting.id).exists()
 
+    def test_setting_object_lookup_fail_closed_for_missing_lookup_and_cross_tenant(self, tenant_admin_user):
+        view = PlatformSettingViewSet()
+        request = APIRequestFactory().get("/")
+        request.user = tenant_admin_user
+        view.request = request
+        view.kwargs = {}
+        view.lookup_field = "pk"
+        view.lookup_url_kwarg = None
+
+        with pytest.raises(NotFound):
+            view.get_object()
+
+    def test_setting_queryset_and_object_access_for_non_platform_tenant_variants(self, tenant_admin_user, monkeypatch):
+        tenant_id = uuid.UUID(tenant_admin_user.profile.tenant_id)
+        platform_setting = PlatformSetting.objects.create(tenant_id=None, key="platform_visible", value="ok")
+        tenant_setting = PlatformSetting.objects.create(tenant_id=tenant_id, key="tenant_visible", value="ok")
+        hidden_setting = PlatformSetting.objects.create(tenant_id=uuid.uuid4(), key="tenant_hidden", value="no")
+
+        view = PlatformSettingViewSet()
+        request = APIRequestFactory().get("/")
+        request.user = tenant_admin_user
+        view.request = request
+
+        assert set(view.get_queryset().values_list("key", flat=True)) == {"platform_visible", "tenant_visible"}
+
+        view.lookup_field = "pk"
+        view.lookup_url_kwarg = None
+        view.kwargs = {"pk": str(platform_setting.pk)}
+        assert view.get_object().id == platform_setting.id
+        view.kwargs = {"pk": str(tenant_setting.pk)}
+        assert view.get_object().id == tenant_setting.id
+        view.kwargs = {"pk": str(hidden_setting.pk)}
+        with pytest.raises(NotFound):
+            view.get_object()
+
+        monkeypatch.setattr("src.modules.platform_management.api.get_user_tenant_id", lambda _user: "not-a-uuid")
+        assert list(view.get_queryset().values_list("key", flat=True)) == ["platform_visible"]
+
+        setting = PlatformSetting.objects.create(tenant_id=uuid.uuid4(), key="foreign", value="hidden")
+        view.kwargs = {"pk": str(setting.pk)}
+        with pytest.raises(NotFound):
+            view.get_object()
+
+    @override_settings(SARAISE_MODE="saas")
+    def test_setting_mutations_are_denied_in_saas_mode(self, authenticated_client):
+        view = PlatformSettingViewSet()
+        request = APIRequestFactory().post("/")
+        force_authenticate(request, user=authenticated_client.handler._force_user)
+
+        with pytest.raises(PermissionDenied, match="Control Plane"):
+            view.create(request)
+        with pytest.raises(PermissionDenied, match="Control Plane"):
+            view.update(request)
+        with pytest.raises(PermissionDenied, match="Control Plane"):
+            view.destroy(request)
+
 
 @pytest.mark.django_db
 class TestFeatureFlagViewSet:
@@ -246,6 +316,72 @@ class TestFeatureFlagViewSet:
         assert "platform_flag" in names
         assert "tenant_flag" in names
 
+    def test_feature_flag_object_lookup_fail_closed_for_missing_unknown_and_cross_tenant(self, tenant_admin_user):
+        view = FeatureFlagViewSet()
+        request = APIRequestFactory().get("/")
+        request.user = tenant_admin_user
+        view.request = request
+        view.lookup_field = "pk"
+        view.lookup_url_kwarg = None
+        view.kwargs = {}
+
+        with pytest.raises(NotFound):
+            view.get_object()
+
+    def test_feature_flag_queryset_and_object_access_for_non_platform_tenant_variants(
+        self, tenant_admin_user, monkeypatch
+    ):
+        tenant_id = uuid.UUID(tenant_admin_user.profile.tenant_id)
+        platform_flag = FeatureFlag.objects.create(tenant_id=None, name="platform_visible_flag", enabled=True)
+        tenant_flag = FeatureFlag.objects.create(tenant_id=tenant_id, name="tenant_visible_flag", enabled=True)
+        hidden_flag = FeatureFlag.objects.create(tenant_id=uuid.uuid4(), name="tenant_hidden_flag", enabled=True)
+
+        view = FeatureFlagViewSet()
+        request = APIRequestFactory().get("/")
+        request.user = tenant_admin_user
+        view.request = request
+        view.lookup_field = "pk"
+        view.lookup_url_kwarg = None
+
+        assert set(view.get_queryset().values_list("name", flat=True)) == {
+            "platform_visible_flag",
+            "tenant_visible_flag",
+        }
+        view.kwargs = {"pk": str(platform_flag.pk)}
+        assert view.get_object().id == platform_flag.id
+        view.kwargs = {"pk": str(tenant_flag.pk)}
+        assert view.get_object().id == tenant_flag.id
+        view.kwargs = {"pk": str(hidden_flag.pk)}
+        with pytest.raises(NotFound):
+            view.get_object()
+
+        monkeypatch.setattr("src.modules.platform_management.api.get_user_tenant_id", lambda _user: None)
+        assert list(view.get_queryset().values_list("name", flat=True)) == ["platform_visible_flag"]
+
+        view.kwargs = {"pk": str(uuid.uuid4())}
+        with pytest.raises(NotFound):
+            view.get_object()
+
+        flag = FeatureFlag.objects.create(tenant_id=uuid.uuid4(), name="foreign_flag", enabled=True)
+        view.kwargs = {"pk": str(flag.pk)}
+        with pytest.raises(NotFound):
+            view.get_object()
+
+    @override_settings(SARAISE_MODE="saas")
+    def test_feature_flag_mutations_are_denied_in_saas_mode(self, authenticated_client):
+        view = FeatureFlagViewSet()
+        request = APIRequestFactory().post("/")
+        force_authenticate(request, user=authenticated_client.handler._force_user)
+
+        with pytest.raises(PermissionDenied, match="Control Plane"):
+            view.create(request)
+        with pytest.raises(PermissionDenied, match="Control Plane"):
+            view.update(request)
+        with pytest.raises(PermissionDenied, match="Control Plane"):
+            view.destroy(request)
+        with pytest.raises(PermissionDenied, match="Control Plane"):
+            view.toggle(request)
+
 
 @pytest.mark.django_db
 class TestSystemHealthViewSet:
@@ -270,6 +406,19 @@ class TestSystemHealthViewSet:
         assert "unhealthy" in response.data
         assert "total" in response.data
         assert "timestamp" in response.data
+
+    @override_settings(SARAISE_MODE="saas")
+    def test_health_mutations_are_denied_in_saas_mode(self, authenticated_client):
+        view = SystemHealthViewSet()
+        request = APIRequestFactory().post("/")
+        force_authenticate(request, user=authenticated_client.handler._force_user)
+
+        with pytest.raises(PermissionDenied, match="Control Plane"):
+            view.create(request)
+        with pytest.raises(PermissionDenied, match="Control Plane"):
+            view.update(request)
+        with pytest.raises(PermissionDenied, match="Control Plane"):
+            view.destroy(request)
 
 
 @pytest.mark.django_db
@@ -316,6 +465,75 @@ class TestPlatformAuditEventViewSet:
         response = authenticated_client.delete(f"/api/v1/platform/audit-events/{event.id}/")
         assert response.status_code == status.HTTP_403_FORBIDDEN
 
+    def test_audit_queryset_and_object_lookup_fail_closed_for_anonymous_and_cross_tenant(self, tenant_admin_user):
+        view = PlatformAuditEventViewSet()
+        request = APIRequestFactory().get("/")
+        request.user = type("Anonymous", (), {"is_authenticated": False})()
+        view.request = request
+        assert list(view.get_queryset()) == []
+
+        request = APIRequestFactory().get("/")
+        request.user = tenant_admin_user
+        view.request = request
+        view.lookup_field = "pk"
+        view.lookup_url_kwarg = None
+        view.kwargs = {}
+        with pytest.raises(NotFound):
+            view.get_object()
+
+        event = PlatformAuditEvent.objects.create(
+            tenant_id=uuid.uuid4(),
+            action="foreign.action",
+            actor_type="user",
+            actor_id=tenant_admin_user.id,
+            resource_type="Foreign",
+        )
+        view.kwargs = {"pk": str(event.pk)}
+        with pytest.raises(NotFound):
+            view.get_object()
+
+    def test_audit_queryset_and_object_access_for_tenant_and_invalid_tenant_context(
+        self, tenant_admin_user, monkeypatch
+    ):
+        tenant_id = uuid.UUID(tenant_admin_user.profile.tenant_id)
+        platform_event = PlatformAuditEvent.objects.create(
+            tenant_id=None,
+            action="platform.visible",
+            actor_type="system",
+            actor_id=uuid.uuid4(),
+            resource_type="Platform",
+        )
+        tenant_event = PlatformAuditEvent.objects.create(
+            tenant_id=tenant_id,
+            action="tenant.visible",
+            actor_type="user",
+            actor_id=tenant_admin_user.id,
+            resource_type="Tenant",
+        )
+        PlatformAuditEvent.objects.create(
+            tenant_id=uuid.uuid4(),
+            action="tenant.hidden",
+            actor_type="user",
+            actor_id=tenant_admin_user.id,
+            resource_type="Tenant",
+        )
+
+        view = PlatformAuditEventViewSet()
+        request = APIRequestFactory().get("/")
+        request.user = tenant_admin_user
+        view.request = request
+        view.lookup_field = "pk"
+        view.lookup_url_kwarg = None
+
+        assert set(view.get_queryset().values_list("action", flat=True)) == {"platform.visible", "tenant.visible"}
+        view.kwargs = {"pk": str(platform_event.pk)}
+        assert view.get_object().id == platform_event.id
+        view.kwargs = {"pk": str(tenant_event.pk)}
+        assert view.get_object().id == tenant_event.id
+
+        monkeypatch.setattr("src.modules.platform_management.api.get_user_tenant_id", lambda _user: "bad-tenant")
+        assert list(view.get_queryset().values_list("action", flat=True)) == ["platform.visible"]
+
 
 @pytest.mark.django_db
 class TestPlatformMetricsViewSet:
@@ -336,3 +554,53 @@ class TestPlatformMetricsViewSet:
         )
         assert response.status_code == status.HTTP_201_CREATED
         assert response.data["metric_type"] == "api_metrics"
+
+    def test_metrics_queryset_and_direct_save_action(self, tenant_admin_user, monkeypatch):
+        PlatformMetrics.objects.create(metric_type="api_metrics", time_range="24h", metrics_data={"calls": 1})
+        PlatformMetrics.objects.create(metric_type="user_metrics", time_range="7d", metrics_data={"users": 2})
+
+        view = PlatformMetricsViewSet()
+        request = APIRequestFactory().get("/")
+        request.user = tenant_admin_user
+        request.query_params = {"metric_type": "api_metrics", "time_range": "24h"}
+        view.request = request
+        assert list(view.get_queryset().values_list("metric_type", "time_range")) == [("api_metrics", "24h")]
+
+        monkeypatch.setattr(
+            "src.modules.platform_management.api.AnalyticsService",
+            lambda: SimpleAnalyticsService(),
+        )
+        action_request = type(
+            "MetricsRequest",
+            (),
+            {
+                "data": {"metric_type": "api_metrics", "time_range": "24h"},
+                "user": tenant_admin_user,
+            },
+        )()
+        response = view.save(action_request)
+        assert response.status_code == status.HTTP_201_CREATED
+        assert response.data["metrics_data"] == {"time_range": "24h"}
+
+    @override_settings(SARAISE_MODE="saas")
+    def test_metrics_mutations_are_denied_in_saas_mode(self, authenticated_client):
+        view = PlatformMetricsViewSet()
+        request = APIRequestFactory().post("/")
+        force_authenticate(request, user=authenticated_client.handler._force_user)
+
+        with pytest.raises(PermissionDenied, match="Control Plane"):
+            view.create(request)
+        with pytest.raises(PermissionDenied, match="Control Plane"):
+            view.update(request)
+        with pytest.raises(PermissionDenied, match="Control Plane"):
+            view.destroy(request)
+
+
+class SimpleAnalyticsService:
+    def save_metrics(self, metric_type="system_metrics", time_range="24h", created_by=None):
+        return PlatformMetrics.objects.create(
+            metric_type=metric_type,
+            time_range=time_range,
+            metrics_data={"time_range": time_range},
+            created_by=created_by,
+        )

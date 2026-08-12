@@ -8,13 +8,13 @@
 
 export type UUID = string;
 export type ISODateTime = string;
-export type HealthState = 'healthy' | 'degraded' | 'stale' | 'no_telemetry' | 'disabled';
-export type Severity = 'info' | 'warning' | 'critical';
-export type MetricType = 'gauge' | 'counter' | 'histogram' | 'summary';
-export type ComparisonOperator = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq';
-export type AlertCondition = 'above_threshold' | 'below_threshold' | 'rate_of_change' | 'absence';
-export type SLAWindow = 'rolling_1h' | 'rolling_24h' | 'calendar_month';
-export type TimeRangePreset = '15m' | '1h' | '6h' | '24h' | '7d' | '30d';
+export type HealthState = "healthy" | "degraded" | "stale" | "no_telemetry" | "disabled";
+export type Severity = "info" | "warning" | "critical";
+export type MetricType = "gauge" | "counter" | "histogram" | "summary";
+export type ComparisonOperator = "gt" | "gte" | "lt" | "lte" | "eq" | "neq";
+export type AlertCondition = "above_threshold" | "below_threshold" | "rate_of_change" | "absence";
+export type SLAWindow = "rolling_1h" | "rolling_24h" | "calendar_month";
+export type TimeRangePreset = "15m" | "1h" | "6h" | "24h" | "7d" | "30d";
 
 export interface PaginationMeta {
   page: number;
@@ -48,7 +48,7 @@ export interface TelemetrySource {
   id: UUID;
   tenant_id: UUID;
   name: string;
-  source_type: 'otlp' | 'prometheus' | 'application' | 'webhook' | 'import';
+  source_type: "otlp" | "prometheus" | "application" | "webhook" | "import";
   description: string;
   status: HealthState;
   sampling_rate: number;
@@ -63,7 +63,7 @@ export interface TelemetrySource {
 
 export interface TelemetrySourceCreate {
   name: string;
-  source_type: TelemetrySource['source_type'];
+  source_type: TelemetrySource["source_type"];
   description?: string;
   sampling_rate?: number;
   retention_days?: number;
@@ -164,7 +164,7 @@ export interface MetricQuery {
   metric_name: string;
   start?: ISODateTime;
   end?: ISODateTime;
-  aggregation?: 'avg' | 'sum' | 'min' | 'max' | 'count' | 'p50' | 'p95' | 'p99';
+  aggregation?: "avg" | "sum" | "min" | "max" | "count" | "p50" | "p95" | "p99";
   interval?: string;
   tags?: Record<string, string>;
 }
@@ -210,7 +210,7 @@ export interface LogEntry {
   service: UUID | null;
   environment: UUID | null;
   observed_at: ISODateTime;
-  level: 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
+  level: "trace" | "debug" | "info" | "warn" | "error" | "fatal";
   message: string;
   trace_id: string | null;
   span_id: string | null;
@@ -221,7 +221,7 @@ export interface LogEntry {
 export interface LogQuery extends ListQuery {
   from?: ISODateTime;
   to?: ISODateTime;
-  level?: LogEntry['level'];
+  level?: LogEntry["level"];
   service_id?: UUID;
   environment_id?: UUID;
   trace_id?: string;
@@ -238,7 +238,7 @@ export interface Span {
   started_at: ISODateTime;
   ended_at: ISODateTime;
   duration_ms: number;
-  status: 'unset' | 'ok' | 'error';
+  status: "unset" | "ok" | "error";
   attributes: Record<string, string | number | boolean | null>;
 }
 
@@ -253,7 +253,7 @@ export interface Trace {
   started_at: ISODateTime;
   ended_at: ISODateTime;
   duration_ms: number;
-  status: 'unset' | 'ok' | 'error';
+  status: "unset" | "ok" | "error";
   span_count: number;
   error_span_count: number;
   sampled: boolean;
@@ -265,7 +265,7 @@ export interface TraceQuery extends ListQuery {
   to?: ISODateTime;
   service_id?: UUID;
   environment_id?: UUID;
-  status?: Trace['status'];
+  status?: Trace["status"];
   min_duration_ms?: number;
 }
 
@@ -309,7 +309,7 @@ export interface Alert {
   tenant_id: UUID;
   alert_rule: UUID;
   metric_name: string;
-  status: 'firing' | 'acknowledged' | 'resolved';
+  status: "firing" | "acknowledged" | "resolved";
   severity: Severity;
   title: string;
   description: string;
@@ -338,7 +338,7 @@ export interface SLADefinition {
   metric_name: string;
   service: UUID | null;
   service_name: string;
-  comparison: 'gte' | 'lte';
+  comparison: "gte" | "lte";
   target: number;
   window: SLAWindow;
   expected_interval_seconds: number;
@@ -353,7 +353,7 @@ export interface SLADefinition {
 export interface SLADefinitionCreate {
   metric_name: string;
   service_name: string;
-  comparison: 'gte' | 'lte';
+  comparison: "gte" | "lte";
   target: number;
   window: SLAWindow;
   expected_interval_seconds?: number;
@@ -362,7 +362,7 @@ export interface SLADefinitionCreate {
 export interface SLAReportRequest {
   sla_id: UUID;
   period: string;
-  format: 'json' | 'csv';
+  format: "json" | "csv";
 }
 
 export interface SLAComplianceRecord {
@@ -379,7 +379,7 @@ export interface SLAComplianceRecord {
   is_compliant: boolean;
   compliance_percentage: number | null;
   breach_duration_minutes: number;
-  status: 'compliant' | 'breached' | 'insufficient_data';
+  status: "compliant" | "breached" | "insufficient_data";
   created_at: ISODateTime;
 }
 
@@ -450,13 +450,20 @@ export interface SLOCreate {
 }
 
 export interface ErrorBudgetSnapshot {
-  id: UUID; slo: UUID; period_start: ISODateTime; period_end: ISODateTime;
-  budget_minutes: number; consumed_minutes: number; remaining_minutes: number;
-  burn_rate: number; status: string; created_at: ISODateTime;
+  id: UUID;
+  slo: UUID;
+  period_start: ISODateTime;
+  period_end: ISODateTime;
+  budget_minutes: number;
+  consumed_minutes: number;
+  remaining_minutes: number;
+  burn_rate: number;
+  status: string;
+  created_at: ISODateTime;
 }
 
 export interface HealthCheck {
-  status: 'healthy' | 'degraded' | 'unavailable';
+  status: "healthy" | "degraded" | "unavailable";
   generated_at: ISODateTime;
   checks: Record<string, { status: string; message?: string }>;
 }
@@ -468,7 +475,7 @@ export interface ActionResult {
 }
 
 export interface ExtensionContribution {
-  schema_version: '1.0';
+  schema_version: "1.0";
   module: string;
   metric_namespaces?: string[];
   semantic_attributes?: Record<string, string>;
@@ -492,106 +499,209 @@ export interface MonitoringConfigurationDocument {
     [name: string]: readonly string[];
   };
   defaults: {
-    telemetry_source: { sampling_rate: number; retention_days: number; daily_event_quota: number; redaction_fields: readonly string[] };
+    telemetry_source: {
+      sampling_rate: number;
+      retention_days: number;
+      daily_event_quota: number;
+      redaction_fields: readonly string[];
+    };
     environment: { kind: string };
     service: { namespace: string };
-    metric: { namespace: string; unit: string; expected_interval_seconds: number; retention_days: number };
-    dashboard: { refresh_interval_seconds: number; service_list_limit: number; alert_list_limit: number };
-    alert_rule: { threshold: number; aggregation: string; evaluation_window_minutes: number; evaluation_interval_seconds: number; cooldown_minutes: number; severity: Severity; notification_channels: readonly string[] };
+    metric: {
+      namespace: string;
+      unit: string;
+      expected_interval_seconds: number;
+      retention_days: number;
+    };
+    dashboard: {
+      refresh_interval_seconds: number;
+      service_list_limit: number;
+      alert_list_limit: number;
+    };
+    alert_rule: {
+      threshold: number;
+      aggregation: string;
+      evaluation_window_minutes: number;
+      evaluation_interval_seconds: number;
+      cooldown_minutes: number;
+      severity: Severity;
+      notification_channels: readonly string[];
+    };
     alert: { initial_occurrence_count: number };
-    sla: { target_percentage: number; window: SLAWindow; expected_interval_seconds: number; timezone: string; initial_version: number };
+    sla: {
+      target_percentage: number;
+      window: SLAWindow;
+      expected_interval_seconds: number;
+      timezone: string;
+      initial_version: number;
+    };
     slo: { window_days: number; expected_interval_seconds: number; error_budget_minutes: number };
   };
   limits: {
-    sampling_rate_min: number; sampling_rate_max: number; retention_days_min: number; retention_days_max: number;
-    daily_event_quota_min: number; daily_event_quota_max: number; metric_name_max_length: number; metric_name_pattern: string;
-    max_tags_per_data_point: number; max_batch_data_points: number; metric_query_max_range_days: number; max_alert_rules: number;
-    alert_evaluation_timeout_seconds: number; compliance_max_range_days: number; log_message_max_length: number;
-    max_spans_per_trace: number; evaluation_window_max_minutes: number; cooldown_max_minutes: number;
-    sla_cadence_min_seconds: number; sla_cadence_max_seconds: number;
+    sampling_rate_min: number;
+    sampling_rate_max: number;
+    retention_days_min: number;
+    retention_days_max: number;
+    daily_event_quota_min: number;
+    daily_event_quota_max: number;
+    metric_name_max_length: number;
+    metric_name_pattern: string;
+    max_tags_per_data_point: number;
+    max_batch_data_points: number;
+    metric_query_max_range_days: number;
+    max_alert_rules: number;
+    alert_evaluation_timeout_seconds: number;
+    compliance_max_range_days: number;
+    log_message_max_length: number;
+    max_spans_per_trace: number;
+    evaluation_window_max_minutes: number;
+    cooldown_max_minutes: number;
+    sla_cadence_min_seconds: number;
+    sla_cadence_max_seconds: number;
   };
   rules: Record<string, boolean | number>;
   query: {
-    interval_seconds: Record<string, number>; summary_period_seconds: Record<string, number>;
+    interval_seconds: Record<string, number>;
+    summary_period_seconds: Record<string, number>;
     automatic_buckets: readonly { max_range_seconds: number; bucket_seconds: number }[];
-    summary_percentiles: readonly number[]; explorer_time_ranges_minutes: readonly number[];
-    metric_stale_interval_multiplier: number; global_stale_threshold_minutes: number;
+    summary_percentiles: readonly number[];
+    explorer_time_ranges_minutes: readonly number[];
+    metric_stale_interval_multiplier: number;
+    global_stale_threshold_minutes: number;
   };
-  delivery: { timeout_seconds: number; max_attempts: number; initial_backoff_seconds: number; max_backoff_seconds: number; jitter_ratio: number; circuit_failure_threshold: number; circuit_recovery_seconds: number };
+  delivery: {
+    timeout_seconds: number;
+    max_attempts: number;
+    initial_backoff_seconds: number;
+    max_backoff_seconds: number;
+    jitter_ratio: number;
+    circuit_failure_threshold: number;
+    circuit_recovery_seconds: number;
+  };
   health: { cache_probe_timeout_seconds: number; critical_dependencies: readonly string[] };
   evidence: { retention_days: number; archival_enabled: boolean; archive_provider: string };
   pagination: { default_page_size: number; max_page_size: number };
-  rollout: { enabled: boolean; percentage: number; roles: readonly string[]; cohorts: readonly string[] };
+  rollout: {
+    enabled: boolean;
+    percentage: number;
+    roles: readonly string[];
+    cohorts: readonly string[];
+  };
   visual: {
-    status_tokens: { success: string; warning: string; danger: string; stale: string; degraded: string };
-    log_level_tokens: { trace: string; debug: string; info: string; warning: string; error: string };
+    status_tokens: {
+      success: string;
+      warning: string;
+      danger: string;
+      stale: string;
+      degraded: string;
+    };
+    log_level_tokens: {
+      trace: string;
+      debug: string;
+      info: string;
+      warning: string;
+      error: string;
+    };
   };
 }
 
 export interface MonitoringConfiguration {
-  id: UUID; tenant_id: UUID; environment: MonitoringConfigurationEnvironment; version: number;
-  document: MonitoringConfigurationDocument; updated_by: UUID; correlation_id: string;
-  created_at: ISODateTime; updated_at: ISODateTime;
+  id: UUID;
+  tenant_id: UUID;
+  environment: MonitoringConfigurationEnvironment;
+  version: number;
+  document: MonitoringConfigurationDocument;
+  updated_by: UUID;
+  correlation_id: string;
+  created_at: ISODateTime;
+  updated_at: ISODateTime;
 }
 
-export interface MonitoringConfigurationDiff { path: string; before: unknown; after: unknown }
+export interface MonitoringConfigurationDiff {
+  path: string;
+  before: unknown;
+  after: unknown;
+}
 export interface MonitoringConfigurationPreview {
-  valid: true; current_version: number; proposed_document: MonitoringConfigurationDocument;
+  valid: true;
+  current_version: number;
+  proposed_document: MonitoringConfigurationDocument;
   diff: readonly MonitoringConfigurationDiff[];
 }
 export interface MonitoringConfigurationVersion {
-  id: UUID; environment: MonitoringConfigurationEnvironment; version: number; document: MonitoringConfigurationDocument;
-  actor_id: UUID; correlation_id: string; change_reason: string; created_at: ISODateTime;
+  id: UUID;
+  environment: MonitoringConfigurationEnvironment;
+  version: number;
+  document: MonitoringConfigurationDocument;
+  actor_id: UUID;
+  correlation_id: string;
+  change_reason: string;
+  created_at: ISODateTime;
 }
 export interface MonitoringConfigurationAudit {
-  id: UUID; environment: MonitoringConfigurationEnvironment; action: 'create' | 'update' | 'import' | 'rollback';
-  from_version: number | null; to_version: number; before: MonitoringConfigurationDocument | null;
-  after: MonitoringConfigurationDocument; actor_id: UUID; correlation_id: string; change_reason?: string; created_at: ISODateTime;
+  id: UUID;
+  environment: MonitoringConfigurationEnvironment;
+  action: "create" | "update" | "import" | "rollback";
+  from_version: number | null;
+  to_version: number;
+  before: MonitoringConfigurationDocument | null;
+  after: MonitoringConfigurationDocument;
+  actor_id: UUID;
+  correlation_id: string;
+  change_reason?: string;
+  created_at: ISODateTime;
 }
 export interface MonitoringConfigurationWriteRequest {
-  document: MonitoringConfigurationDocument; environment?: MonitoringConfigurationEnvironment;
-  expected_version: number; change_reason: string;
+  document: MonitoringConfigurationDocument;
+  environment?: MonitoringConfigurationEnvironment;
+  expected_version: number;
+  change_reason: string;
 }
 export interface MonitoringConfigurationRollbackRequest {
-  version: number; environment?: MonitoringConfigurationEnvironment; expected_version: number; change_reason: string;
+  version: number;
+  environment?: MonitoringConfigurationEnvironment;
+  expected_version: number;
+  change_reason: string;
 }
 export interface MonitoringConfigurationExport {
-  schema_version: string; environment: MonitoringConfigurationEnvironment; exported_version: number;
+  schema_version: string;
+  environment: MonitoringConfigurationEnvironment;
+  exported_version: number;
   document: MonitoringConfigurationDocument;
 }
 
-export const MODULE_API_PREFIX = '/api/v2/performance-monitoring';
+export const MODULE_API_PREFIX = "/api/v2/performance-monitoring";
 
 const detail = (resource: string, id: string) => `${MODULE_API_PREFIX}/${resource}/${id}/`;
 
 export const ENDPOINTS = {
   DASHBOARDS: {
     LIST: `${MODULE_API_PREFIX}/dashboards/`,
-    DETAIL: (id: UUID) => detail('dashboards', id),
+    DETAIL: (id: UUID) => detail("dashboards", id),
   },
   TELEMETRY_SOURCES: {
     LIST: `${MODULE_API_PREFIX}/telemetry-sources/`,
-    DETAIL: (id: UUID) => detail('telemetry-sources', id),
+    DETAIL: (id: UUID) => detail("telemetry-sources", id),
   },
   SERVICES: {
     LIST: `${MODULE_API_PREFIX}/services/`,
-    DETAIL: (id: UUID) => detail('services', id),
+    DETAIL: (id: UUID) => detail("services", id),
   },
   ENVIRONMENTS: {
     LIST: `${MODULE_API_PREFIX}/environments/`,
-    DETAIL: (id: UUID) => detail('environments', id),
+    DETAIL: (id: UUID) => detail("environments", id),
   },
   METRICS: {
     LIST: `${MODULE_API_PREFIX}/metrics/`,
-    DETAIL: (id: UUID) => detail('metrics', id),
+    DETAIL: (id: UUID) => detail("metrics", id),
     BATCH: `${MODULE_API_PREFIX}/metrics/batch/`,
     QUERY: `${MODULE_API_PREFIX}/metrics/query/`,
     SUMMARY: `${MODULE_API_PREFIX}/metrics/summary/`,
   },
   DATA_POINTS: { LIST: `${MODULE_API_PREFIX}/metric-data-points/` },
-  LOGS: { LIST: `${MODULE_API_PREFIX}/logs/`, DETAIL: (id: UUID) => detail('logs', id) },
-  TRACES: { LIST: `${MODULE_API_PREFIX}/traces/`, DETAIL: (id: UUID) => detail('traces', id) },
-  SPANS: { FOR_TRACE: (id: UUID) => `${detail('traces', id)}spans/` },
+  LOGS: { LIST: `${MODULE_API_PREFIX}/logs/`, DETAIL: (id: UUID) => detail("logs", id) },
+  TRACES: { LIST: `${MODULE_API_PREFIX}/traces/`, DETAIL: (id: UUID) => detail("traces", id) },
+  SPANS: { FOR_TRACE: (id: UUID) => `${detail("traces", id)}spans/` },
   ALERT_RULES: {
     LIST: `${MODULE_API_PREFIX}/alerts/rules/`,
     DETAIL: (id: UUID) => `${MODULE_API_PREFIX}/alerts/rules/${id}/`,
@@ -599,28 +709,28 @@ export const ENDPOINTS = {
   },
   ALERTS: {
     LIST: `${MODULE_API_PREFIX}/alerts/`,
-    DETAIL: (id: UUID) => detail('alerts', id),
+    DETAIL: (id: UUID) => detail("alerts", id),
     EVALUATE: `${MODULE_API_PREFIX}/alerts/evaluate/`,
-    ACKNOWLEDGE: (id: UUID) => `${detail('alerts', id)}acknowledge/`,
-    RESOLVE: (id: UUID) => `${detail('alerts', id)}resolve/`,
+    ACKNOWLEDGE: (id: UUID) => `${detail("alerts", id)}acknowledge/`,
+    RESOLVE: (id: UUID) => `${detail("alerts", id)}resolve/`,
   },
   SLA: {
     LIST: `${MODULE_API_PREFIX}/sla/`,
-    DETAIL: (id: UUID) => detail('sla', id),
-    COMPLIANCE: (id: UUID) => `${detail('sla', id)}compliance/`,
+    DETAIL: (id: UUID) => detail("sla", id),
+    COMPLIANCE: (id: UUID) => `${detail("sla", id)}compliance/`,
     REPORTS: `${MODULE_API_PREFIX}/sla/reports/`,
   },
   SLOS: {
     LIST: `${MODULE_API_PREFIX}/slos/`,
-    DETAIL: (id: UUID) => detail('slos', id),
-    EVALUATE: (id: UUID) => `${detail('slos', id)}evaluate/`,
-    BUDGET: (id: UUID) => `${detail('slos', id)}budget/`,
+    DETAIL: (id: UUID) => detail("slos", id),
+    EVALUATE: (id: UUID) => `${detail("slos", id)}evaluate/`,
+    BUDGET: (id: UUID) => `${detail("slos", id)}budget/`,
   },
   COMPLIANCE_RECORDS: {
     LIST: `${MODULE_API_PREFIX}/compliance-records/`,
-    DETAIL: (id: UUID) => detail('compliance-records', id),
+    DETAIL: (id: UUID) => detail("compliance-records", id),
   },
-  REPORTS: { LIST: `${MODULE_API_PREFIX}/reports/`, DETAIL: (id: UUID) => detail('reports', id) },
+  REPORTS: { LIST: `${MODULE_API_PREFIX}/reports/`, DETAIL: (id: UUID) => detail("reports", id) },
   CONFIGURATION: {
     CURRENT: `${MODULE_API_PREFIX}/configuration/current/`,
     PREVIEW: `${MODULE_API_PREFIX}/configuration/preview/`,
@@ -634,16 +744,16 @@ export const ENDPOINTS = {
 } as const;
 
 export const ROUTES = {
-  INDEX: '/performance-monitoring',
-  OVERVIEW: '/performance-monitoring/dashboard',
-  METRICS: '/performance-monitoring/metrics',
-  LOGS: '/performance-monitoring/logs',
-  TRACES: '/performance-monitoring/traces',
-  SERVICES: '/performance-monitoring/services',
-  ALERTS: '/performance-monitoring/alerts',
-  ALERT_RULES: '/performance-monitoring/alerts/rules',
-  SLOS: '/performance-monitoring/sla',
-  CATALOG: '/performance-monitoring/catalog',
-  CONFIGURATION: '/performance-monitoring/configuration',
-  SETUP: '/performance-monitoring/setup',
+  INDEX: "/performance-monitoring",
+  OVERVIEW: "/performance-monitoring/dashboard",
+  METRICS: "/performance-monitoring/metrics",
+  LOGS: "/performance-monitoring/logs",
+  TRACES: "/performance-monitoring/traces",
+  SERVICES: "/performance-monitoring/services",
+  ALERTS: "/performance-monitoring/alerts",
+  ALERT_RULES: "/performance-monitoring/alerts/rules",
+  SLOS: "/performance-monitoring/sla",
+  CATALOG: "/performance-monitoring/catalog",
+  CONFIGURATION: "/performance-monitoring/configuration",
+  SETUP: "/performance-monitoring/setup",
 } as const;

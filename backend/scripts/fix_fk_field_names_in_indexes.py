@@ -3,6 +3,7 @@
 Fix ForeignKey field names in AddIndex operations.
 Django expects model field names (without _id suffix), not database column names.
 """
+
 import re
 from pathlib import Path
 

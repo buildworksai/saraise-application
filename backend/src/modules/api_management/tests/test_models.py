@@ -6,11 +6,7 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError, connection, transaction
 
-from src.modules.api_management.models import (
-    ApiManagementAuditRecord,
-    ApiManagementResourceVersion,
-    TenantBaseModel,
-)
+from src.modules.api_management.models import ApiManagementAuditRecord, ApiManagementResourceVersion, TenantBaseModel
 
 
 @pytest.mark.django_db
@@ -82,6 +78,9 @@ class TestTenantBaseModelModel:
             ApiManagementAuditRecord.objects.filter(pk=record.pk).update(action="tampered")
 
     def test_database_trigger_rejects_raw_audit_update_and_delete(self):
+        if connection.vendor == "sqlite":
+            pytest.skip("SQLite test database does not install PostgreSQL audit immutability triggers.")
+
         record = ApiManagementAuditRecord.objects.create(
             tenant_id=uuid.uuid4(),
             target_type="resource",
@@ -120,6 +119,10 @@ class TestTenantBaseModelModel:
             evidence.save()
         with pytest.raises(ValidationError):
             evidence.delete()
+
+        if connection.vendor == "sqlite":
+            pytest.skip("SQLite test database does not install PostgreSQL resource-version immutability triggers.")
+
         with pytest.raises(DatabaseError), transaction.atomic():
             with connection.cursor() as cursor:
                 cursor.execute(

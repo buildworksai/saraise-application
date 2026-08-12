@@ -38,7 +38,8 @@ class _SchemaEditor:
         self.connection = SimpleNamespace(vendor=vendor)
         self.statements: list[str] = []
 
-    def execute(self, statement: str) -> None:
+    def execute(self, statement: str, params: list[object] | None = None) -> None:
+        del params
         self.statements.append(statement)
 
 
@@ -71,7 +72,8 @@ class _LegacyCursor:
     def __exit__(self, exc_type, exc, traceback) -> None:
         del exc_type, exc, traceback
 
-    def execute(self, statement: str) -> None:
+    def execute(self, statement: str, params: list[object] | None = None) -> None:
+        del params
         self.statements.append(statement)
 
     def fetchall(self) -> list[tuple[object, object, object]]:

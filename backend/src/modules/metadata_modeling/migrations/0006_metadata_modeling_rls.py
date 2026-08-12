@@ -62,7 +62,8 @@ def install_security(apps, schema_editor):
 
         for child, column, parent in RELATIONS:
             trigger, function = _guard_names(child, column)
-            cursor.execute(f"""
+            cursor.execute(
+                f"""
                 CREATE OR REPLACE FUNCTION {qn(function)}() RETURNS trigger
                 LANGUAGE plpgsql AS $$
                 BEGIN
@@ -77,14 +78,16 @@ def install_security(apps, schema_editor):
                     RETURN NEW;
                 END;
                 $$
-                """)
+                """
+            )
             cursor.execute(f"DROP TRIGGER IF EXISTS {qn(trigger)} ON {qn(child)}")
             cursor.execute(
                 f"CREATE TRIGGER {qn(trigger)} BEFORE INSERT OR UPDATE OF tenant_id, {qn(column)} "
                 f"ON {qn(child)} FOR EACH ROW EXECUTE FUNCTION {qn(function)}()"
             )
 
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE OR REPLACE FUNCTION meta_schema_snapshot_guard() RETURNS trigger
             LANGUAGE plpgsql AS $$
             BEGIN
@@ -105,20 +108,23 @@ def install_security(apps, schema_editor):
                 RETURN NEW;
             END;
             $$
-            """)
+            """
+        )
         cursor.execute(
             "CREATE TRIGGER meta_schema_snapshot_immutable BEFORE UPDATE OR DELETE "
             "ON metadata_modeling_entityschemaversion FOR EACH ROW EXECUTE FUNCTION meta_schema_snapshot_guard()"
         )
 
-        cursor.execute("""
+        cursor.execute(
+            """
             CREATE OR REPLACE FUNCTION meta_append_only_guard() RETURNS trigger
             LANGUAGE plpgsql AS $$
             BEGIN
                 RAISE EXCEPTION 'metadata evidence is append-only' USING ERRCODE = '55000';
             END;
             $$
-            """)
+            """
+        )
         for table in IMMUTABLE_TABLES:
             trigger = f"meta_append_only_{table.removeprefix('metadata_modeling_')}"[:63]
             cursor.execute(

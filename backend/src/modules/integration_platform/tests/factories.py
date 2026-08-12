@@ -20,8 +20,16 @@ def connector_factory(**overrides: Any) -> Connector:
         "connector_type": "api",
         "adapter_key": f"tests.integration_platform.{identity}",
         "version": "1.0.0",
-        "schema": {"type": "object", "properties": {"base_url": {"type": "string", "format": "uri"}}, "additionalProperties": False},
-        "credential_schema": {"type": "object", "properties": {"api_key": {"type": "string", "writeOnly": True}}, "additionalProperties": False},
+        "schema": {
+            "type": "object",
+            "properties": {"base_url": {"type": "string", "format": "uri"}},
+            "additionalProperties": False,
+        },
+        "credential_schema": {
+            "type": "object",
+            "properties": {"api_key": {"type": "string", "writeOnly": True}},
+            "additionalProperties": False,
+        },
         "capabilities": ["test", "pull", "push"],
     }
     values.update(overrides)
@@ -118,7 +126,16 @@ DataMappingFactory = mapping_factory
 
 
 __all__ = [
-    "ConnectorFactory", "CredentialFactory", "DataMappingFactory", "DeliveryFactory", "IntegrationFactory",
-    "WebhookFactory", "connector_factory", "credential_factory", "delivery_factory", "integration_factory",
-    "mapping_factory", "webhook_factory",
+    "ConnectorFactory",
+    "CredentialFactory",
+    "DataMappingFactory",
+    "DeliveryFactory",
+    "IntegrationFactory",
+    "WebhookFactory",
+    "connector_factory",
+    "credential_factory",
+    "delivery_factory",
+    "integration_factory",
+    "mapping_factory",
+    "webhook_factory",
 ]

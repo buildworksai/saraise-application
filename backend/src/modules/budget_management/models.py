@@ -207,10 +207,7 @@ class Budget(MutableBudgetModel):
             models.CheckConstraint(
                 condition=(
                     ~Q(status=BudgetStatus.REJECTED)
-                    | (
-                        Q(rejected_at__isnull=False, rejected_by__isnull=False)
-                        & ~Q(rejection_reason="")
-                    )
+                    | (Q(rejected_at__isnull=False, rejected_by__isnull=False) & ~Q(rejection_reason=""))
                 ),
                 name="budget_rejection_metadata_ck",
             ),
@@ -260,11 +257,7 @@ class BudgetLine(MutableBudgetModel):
                 name="budget_line_allocation_live_uniq",
             ),
             models.CheckConstraint(
-                condition=(
-                    Q(budget_amount__gte=0)
-                    & Q(committed_amount__gte=0)
-                    & Q(actual_amount__gte=0)
-                ),
+                condition=(Q(budget_amount__gte=0) & Q(committed_amount__gte=0) & Q(actual_amount__gte=0)),
                 name="budget_line_amounts_nonnegative_ck",
             ),
             models.CheckConstraint(
@@ -324,8 +317,7 @@ class BudgetApproval(AppendOnlyTenantModel):
             models.CheckConstraint(condition=Q(status__in=ApprovalStatus.values), name="budget_approval_status_ck"),
             models.CheckConstraint(
                 condition=(
-                    ~Q(status__in=[ApprovalStatus.APPROVED, ApprovalStatus.REJECTED])
-                    | Q(decision_at__isnull=False)
+                    ~Q(status__in=[ApprovalStatus.APPROVED, ApprovalStatus.REJECTED]) | Q(decision_at__isnull=False)
                 ),
                 name="budget_approval_decision_at_ck",
             ),
@@ -365,9 +357,7 @@ class BudgetTransition(AppendOnlyTenantModel):
                 name="budget_transition_key_uniq",
             )
         ]
-        indexes = [
-            models.Index(fields=["tenant_id", "budget", "occurred_at"], name="budget_trans_tenant_budget_idx")
-        ]
+        indexes = [models.Index(fields=["tenant_id", "budget", "occurred_at"], name="budget_trans_tenant_budget_idx")]
 
 
 class BudgetApprovalDecision(AppendOnlyTenantModel):
@@ -543,18 +533,22 @@ class VarianceAlert(TenantScopedModel):
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self._state.adding:
-            original = type(self).objects.only(
-                "budget_id",
-                "budget_line_id",
-                "alert_type",
-                "threshold_percentage",
-                "variance_percentage",
-                "budget_amount",
-                "actual_amount",
-                "committed_amount",
-                "alert_date",
-                "created_at",
-            ).get(pk=self.pk)
+            original = (
+                type(self)
+                .objects.only(
+                    "budget_id",
+                    "budget_line_id",
+                    "alert_type",
+                    "threshold_percentage",
+                    "variance_percentage",
+                    "budget_amount",
+                    "actual_amount",
+                    "committed_amount",
+                    "alert_date",
+                    "created_at",
+                )
+                .get(pk=self.pk)
+            )
             immutable = (
                 "budget_id",
                 "budget_line_id",

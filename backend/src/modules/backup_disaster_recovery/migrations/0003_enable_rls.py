@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 TENANT_TABLES = (
     "bdr_recovery_points",
     "bdr_runbooks",

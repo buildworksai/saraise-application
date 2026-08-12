@@ -17,17 +17,34 @@ from src.modules.data_migration.serializers import (
 
 def test_safe_source_config_explicitly_removes_sensitive_fields() -> None:
     connection_id = str(uuid4())
-    result = safe_source_config({"connection_id": connection_id, "table": "customer", "password": "secret", "headers": {"Authorization": "secret"}})
+    result = safe_source_config(
+        {
+            "connection_id": connection_id,
+            "table": "customer",
+            "password": "secret",
+            "headers": {"Authorization": "secret"},
+        }
+    )
     assert result == {"connection_id": connection_id, "table": "customer"}
 
 
 def test_client_cannot_set_tenant_actor_state_or_counters() -> None:
-    serializer = MigrationJobCreateSerializer(data={
-        "tenant_id": str(uuid4()), "created_by": str(uuid4()), "status": "ready", "configuration_version": 999,
-        "name": "Customers", "source_type": "csv", "source_artifact_id": str(uuid4()),
-        "source_config": {"batch_size": 100}, "target_adapter": "crm.customer", "target_entity": "customer",
-        "write_mode": "create", "lookup_fields": [],
-    })
+    serializer = MigrationJobCreateSerializer(
+        data={
+            "tenant_id": str(uuid4()),
+            "created_by": str(uuid4()),
+            "status": "ready",
+            "configuration_version": 999,
+            "name": "Customers",
+            "source_type": "csv",
+            "source_artifact_id": str(uuid4()),
+            "source_config": {"batch_size": 100},
+            "target_adapter": "crm.customer",
+            "target_entity": "customer",
+            "write_mode": "create",
+            "lookup_fields": [],
+        }
+    )
     assert not serializer.is_valid()
     assert set(serializer.errors) >= {"tenant_id", "created_by", "status", "configuration_version"}
 
@@ -48,9 +65,16 @@ def test_run_serializer_never_exposes_async_payload_or_change_evidence() -> None
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    (("batch_size", 0), ("batch_size", 10001), ("connect_timeout_seconds", 121),
-     ("read_timeout_seconds", 601), ("retry_count", 11), ("preview_row_limit", 101),
-     ("retention_days", 3651), ("rollout_percentage", 101)),
+    (
+        ("batch_size", 0),
+        ("batch_size", 10001),
+        ("connect_timeout_seconds", 121),
+        ("read_timeout_seconds", 601),
+        ("retry_count", 11),
+        ("preview_row_limit", 101),
+        ("retention_days", 3651),
+        ("rollout_percentage", 101),
+    ),
 )
 def test_configuration_limits_are_unsavable(field: str, value: int) -> None:
     serializer = DataMigrationConfigurationUpdateSerializer(data={"expected_version": 1, field: value})

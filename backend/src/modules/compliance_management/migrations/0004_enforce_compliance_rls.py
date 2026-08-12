@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 COMPLIANCE_TABLES = (
     "compliance_frameworks",
     "compliance_requirements",

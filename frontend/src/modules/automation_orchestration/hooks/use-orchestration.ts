@@ -11,10 +11,12 @@ import { automationOrchestrationService as service } from "../services/automatio
 export const orchestrationKeys = {
   all: ["automation-orchestration"] as const,
   configuration: () => [...orchestrationKeys.all, "configuration", "development", "all"] as const,
-  definitions: (filters: DefinitionFilters) => [...orchestrationKeys.all, "definitions", filters] as const,
+  definitions: (filters: DefinitionFilters) =>
+    [...orchestrationKeys.all, "definitions", filters] as const,
   definition: (id: string) => [...orchestrationKeys.all, "definition", id] as const,
   nodeTypes: (pageSize: number) => [...orchestrationKeys.all, "node-types", pageSize] as const,
-  schedules: (filters: ScheduleFilters) => [...orchestrationKeys.all, "schedules", filters] as const,
+  schedules: (filters: ScheduleFilters) =>
+    [...orchestrationKeys.all, "schedules", filters] as const,
   schedule: (id: string) => [...orchestrationKeys.all, "schedule", id] as const,
   runs: (filters: RunFilters) => [...orchestrationKeys.all, "runs", filters] as const,
   run: (id: string) => [...orchestrationKeys.all, "run", id] as const,
@@ -58,10 +60,11 @@ export function useNodeTypes(enabled = true) {
   });
 }
 
-export function useSchedules(filters: ScheduleFilters) {
+export function useSchedules(filters: ScheduleFilters, enabled = true) {
   return useQuery({
     queryKey: orchestrationKeys.schedules(filters),
     queryFn: () => service.listSchedules(filters),
+    enabled,
   });
 }
 
@@ -73,13 +76,16 @@ export function useSchedule(id: string) {
   });
 }
 
-export function useRuns(filters: RunFilters) {
+export function useRuns(filters: RunFilters, enabled = true) {
   const configuration = useRuntimeConfiguration();
   return useQuery({
     queryKey: orchestrationKeys.runs(filters),
     queryFn: () => service.listRuns(filters),
+    enabled,
     refetchInterval: (query) => {
-      const hasLiveRun = query.state.data?.items.some((run) => NONTERMINAL_RUNS.includes(run.status));
+      const hasLiveRun = query.state.data?.items.some((run) =>
+        NONTERMINAL_RUNS.includes(run.status)
+      );
       return hasLiveRun ? configuration.data?.document.ui.run_poll_interval_ms ?? false : false;
     },
   });
@@ -100,21 +106,21 @@ export function useRun(id: string) {
   });
 }
 
-export function useTaskRuns(runId: string, filters: TaskRunFilters = {}) {
+export function useTaskRuns(runId: string, filters: TaskRunFilters = {}, enabled = true) {
   return useQuery({
     queryKey: orchestrationKeys.taskRuns(runId, filters),
     queryFn: () => service.listTaskRuns(runId, filters),
-    enabled: Boolean(runId),
+    enabled: enabled && Boolean(runId),
   });
 }
 
-export function useRunEvents(runId: string) {
+export function useRunEvents(runId: string, enabled = true) {
   const configuration = useRuntimeConfiguration();
   return useQuery({
     queryKey: orchestrationKeys.events(runId),
     queryFn: () => service.listEvents(runId),
     select: (result) => result.items,
-    enabled: Boolean(runId),
+    enabled: enabled && Boolean(runId),
     refetchInterval: configuration.data?.document.ui.event_poll_interval_ms ?? false,
   });
 }

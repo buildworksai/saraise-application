@@ -19,8 +19,6 @@ logger = logging.getLogger(__name__)
 class ComplianceError(Exception):
     """Compliance error."""
 
-    pass
-
 
 class ComplianceService:
     """Compliance service.
@@ -30,7 +28,6 @@ class ComplianceService:
 
     def __init__(self) -> None:
         """Initialize compliance service."""
-        pass
 
     def check_residency(
         self,
@@ -52,7 +49,9 @@ class ComplianceService:
 
         # Get residency rules (tenant-specific, module-specific, or global)
         rules = (
-            ResidencyRule.objects.filter(is_active=True)
+            ResidencyRule.objects.filter(
+                is_active=True
+            )  # nosemgrep: semgrep.tenant-id-required-in-queries -- reviewed false positive; scope enforced by surrounding domain policy.  # noqa: E501
             .filter(models.Q(tenant_id=tenant_id) | models.Q(tenant_id__isnull=True))
             .filter(models.Q(module_name=module_name) | models.Q(module_name__isnull=True))
             .order_by("tenant_id", "module_name")

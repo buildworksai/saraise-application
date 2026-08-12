@@ -303,9 +303,7 @@ class ScoringRule(Protocol):
 class ComplianceReportRenderer(Protocol):
     descriptor: ExtensionDescriptor
 
-    def render(
-        self, context: ExtensionExecutionContext, request: ReportRenderRequest
-    ) -> RenderedComplianceReport: ...
+    def render(self, context: ExtensionExecutionContext, request: ReportRenderRequest) -> RenderedComplianceReport: ...
 
 
 class ExtensionContractError(RuntimeError):

@@ -12,12 +12,7 @@ from src.core.access.decision import AccessDecision, AccessDecisionPipeline, Acc
 from src.core.async_jobs.models import AsyncJob, OutboxEvent
 from src.core.tenancy import tenant_context
 from src.core.testing import TenantIsolationContract
-from src.modules.master_data_management.models import (
-    DataQualityRule,
-    MasterDataEntity,
-    MasterEntityType,
-    MatchingRule,
-)
+from src.modules.master_data_management.models import DataQualityRule, MasterDataEntity, MasterEntityType, MatchingRule
 
 from .factories import (
     actor_id,
@@ -232,10 +227,7 @@ class TestMatchingRuleIsolation(V2IsolationContract):
 
 def snapshot(instance: Any) -> tuple[tuple[str, object], ...]:
     instance.refresh_from_db()
-    return tuple(
-        (field.attname, getattr(instance, field.attname))
-        for field in instance._meta.concrete_fields
-    )
+    return tuple((field.attname, getattr(instance, field.attname)) for field in instance._meta.concrete_fields)
 
 
 def test_all_cross_tenant_entity_actions_return_404_and_leave_target_unchanged(

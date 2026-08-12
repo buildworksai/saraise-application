@@ -24,8 +24,10 @@ class ActiveQuerySet(TenantQuerySet):
     def active(self):
         return self.filter(archived_at__isnull=True)
 
+
 class ActiveManager(models.Manager.from_queryset(ActiveQuerySet)):
-    def get_queryset(self): return super().get_queryset().filter(archived_at__isnull=True)
+    def get_queryset(self):
+        return super().get_queryset().filter(archived_at__isnull=True)
 
 
 class MutableTenantModel(TenantScopedModel, TimestampedModel):
@@ -99,10 +101,21 @@ class Project(MutableTenantModel):
     class Meta:
         db_table = "project_projects"
         constraints = [
-            models.UniqueConstraint(fields=("tenant_id", "project_code"), condition=Q(archived_at__isnull=True), name="pm_project_active_code_uniq"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "project_code"),
+                condition=Q(archived_at__isnull=True),
+                name="pm_project_active_code_uniq",
+            ),
             models.UniqueConstraint(fields=("tenant_id", "id"), name="pm_project_tenant_id_uniq"),
-            models.CheckConstraint(condition=Q(budget__isnull=True) | Q(budget__gte=0), name="pm_project_budget_nonnegative"),
-            models.CheckConstraint(condition=Q(start_date__isnull=True) | Q(end_date__isnull=True) | Q(start_date__lte=models.F("end_date")), name="pm_project_dates_valid"),
+            models.CheckConstraint(
+                condition=Q(budget__isnull=True) | Q(budget__gte=0), name="pm_project_budget_nonnegative"
+            ),
+            models.CheckConstraint(
+                condition=Q(start_date__isnull=True)
+                | Q(end_date__isnull=True)
+                | Q(start_date__lte=models.F("end_date")),
+                name="pm_project_dates_valid",
+            ),
             models.CheckConstraint(condition=Q(version__gte=1), name="pm_project_version_positive"),
         ]
         indexes = [
@@ -117,12 +130,18 @@ class Project(MutableTenantModel):
         self.project_name = self.project_name.strip()
         self.currency = self.currency.strip().upper()
         errors = {}
-        if not self.project_code: errors["project_code"] = "Project code is required."
-        if not self.project_name: errors["project_name"] = "Project name is required."
-        if len(self.description) > 20_000: errors["description"] = "Description cannot exceed 20000 characters."
-        if len(self.currency) != 3 or not self.currency.isalpha(): errors["currency"] = "Use a three-letter ISO currency code."
-        if self.start_date and self.end_date and self.start_date > self.end_date: errors["end_date"] = "End date cannot precede start date."
-        if errors: raise ValidationError(errors)
+        if not self.project_code:
+            errors["project_code"] = "Project code is required."
+        if not self.project_name:
+            errors["project_name"] = "Project name is required."
+        if len(self.description) > 20_000:
+            errors["description"] = "Description cannot exceed 20000 characters."
+        if len(self.currency) != 3 or not self.currency.isalpha():
+            errors["currency"] = "Use a three-letter ISO currency code."
+        if self.start_date and self.end_date and self.start_date > self.end_date:
+            errors["end_date"] = "End date cannot precede start date."
+        if errors:
+            raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
         self.full_clean()
@@ -155,12 +174,26 @@ class Task(MutableTenantModel):
     class Meta:
         db_table = "project_tasks"
         constraints = [
-            models.UniqueConstraint(fields=("tenant_id", "project", "task_code"), condition=Q(archived_at__isnull=True), name="pm_task_active_code_uniq"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "project", "task_code"),
+                condition=Q(archived_at__isnull=True),
+                name="pm_task_active_code_uniq",
+            ),
             models.UniqueConstraint(fields=("tenant_id", "id"), name="pm_task_tenant_id_uniq"),
-            models.CheckConstraint(condition=Q(estimated_hours__isnull=True) | Q(estimated_hours__gte=0), name="pm_task_estimate_nonnegative"),
+            models.CheckConstraint(
+                condition=Q(estimated_hours__isnull=True) | Q(estimated_hours__gte=0),
+                name="pm_task_estimate_nonnegative",
+            ),
             models.CheckConstraint(condition=Q(actual_hours__gte=0), name="pm_task_actual_nonnegative"),
-            models.CheckConstraint(condition=Q(percent_complete__gte=0, percent_complete__lte=100), name="pm_task_progress_range"),
-            models.CheckConstraint(condition=Q(start_date__isnull=True) | Q(due_date__isnull=True) | Q(start_date__lte=models.F("due_date")), name="pm_task_dates_valid"),
+            models.CheckConstraint(
+                condition=Q(percent_complete__gte=0, percent_complete__lte=100), name="pm_task_progress_range"
+            ),
+            models.CheckConstraint(
+                condition=Q(start_date__isnull=True)
+                | Q(due_date__isnull=True)
+                | Q(start_date__lte=models.F("due_date")),
+                name="pm_task_dates_valid",
+            ),
             models.CheckConstraint(condition=Q(position__gte=1), name="pm_task_position_positive"),
             models.CheckConstraint(condition=Q(version__gte=1), name="pm_task_version_positive"),
         ]
@@ -179,27 +212,39 @@ class Task(MutableTenantModel):
         self.task_code = self.task_code.strip().upper()
         self.task_name = self.task_name.strip()
         errors = {}
-        if not self.task_code: errors["task_code"] = "Task code is required."
-        if not self.task_name: errors["task_name"] = "Task name is required."
-        if len(self.description) > 20_000: errors["description"] = "Description cannot exceed 20000 characters."
-        if self.project_id and self.tenant_id != self.project.tenant_id: errors["project"] = "Project must belong to this tenant."
+        if not self.task_code:
+            errors["task_code"] = "Task code is required."
+        if not self.task_name:
+            errors["task_name"] = "Task name is required."
+        if len(self.description) > 20_000:
+            errors["description"] = "Description cannot exceed 20000 characters."
+        if self.project_id and self.tenant_id != self.project.tenant_id:
+            errors["project"] = "Project must belong to this tenant."
         if self.parent_task_id:
-            if self.pk and self.parent_task_id == self.pk: errors["parent_task"] = "A task cannot be its own parent."
-            elif self.parent_task.tenant_id != self.tenant_id or self.parent_task.project_id != self.project_id: errors["parent_task"] = "Parent must belong to the same tenant and project."
+            if self.pk and self.parent_task_id == self.pk:
+                errors["parent_task"] = "A task cannot be its own parent."
+            elif self.parent_task.tenant_id != self.tenant_id or self.parent_task.project_id != self.project_id:
+                errors["parent_task"] = "Parent must belong to the same tenant and project."
             else:
                 seen = {self.pk} if self.pk else set()
                 node = self.parent_task
                 while node:
-                    if node.pk in seen: errors["parent_task"] = "Parent relationship creates a cycle."; break
-                    seen.add(node.pk); node = node.parent_task
-        if self.start_date and self.due_date and self.start_date > self.due_date: errors["due_date"] = "Due date cannot precede start date."
-        if errors: raise ValidationError(errors)
+                    if node.pk in seen:
+                        errors["parent_task"] = "Parent relationship creates a cycle."
+                        break
+                    seen.add(node.pk)
+                    node = node.parent_task
+        if self.start_date and self.due_date and self.start_date > self.due_date:
+            errors["due_date"] = "Due date cannot precede start date."
+        if errors:
+            raise ValidationError(errors)
 
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
 
-    def __str__(self): return f"{self.task_code} - {self.task_name}"
+    def __str__(self):
+        return f"{self.task_code} - {self.task_name}"
 
 
 @tenancy_scope(TENANT_SCOPED)
@@ -208,25 +253,48 @@ class ProjectMember(MutableTenantModel):
     project = models.ForeignKey(Project, on_delete=models.PROTECT, related_name="members")
     employee_id = models.UUIDField()
     role = models.CharField(max_length=24, choices=MemberRole.choices, default=MemberRole.MEMBER)
-    allocation_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("100.00"), validators=[MinValueValidator(Decimal("0.01")), MaxValueValidator(Decimal("100.00"))])
+    allocation_percentage = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("100.00"),
+        validators=[MinValueValidator(Decimal("0.01")), MaxValueValidator(Decimal("100.00"))],
+    )
     joined_at = models.DateField(default=timezone.localdate)
     left_at = models.DateField(null=True, blank=True)
 
     class Meta:
         db_table = "project_members"
         constraints = [
-            models.UniqueConstraint(fields=("tenant_id", "project", "employee_id"), condition=Q(archived_at__isnull=True), name="pm_member_active_uniq"),
-            models.CheckConstraint(condition=Q(allocation_percentage__gt=0, allocation_percentage__lte=100), name="pm_member_allocation_range"),
-            models.CheckConstraint(condition=Q(left_at__isnull=True) | Q(left_at__gte=models.F("joined_at")), name="pm_member_dates_valid"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "project", "employee_id"),
+                condition=Q(archived_at__isnull=True),
+                name="pm_member_active_uniq",
+            ),
+            models.CheckConstraint(
+                condition=Q(allocation_percentage__gt=0, allocation_percentage__lte=100),
+                name="pm_member_allocation_range",
+            ),
+            models.CheckConstraint(
+                condition=Q(left_at__isnull=True) | Q(left_at__gte=models.F("joined_at")), name="pm_member_dates_valid"
+            ),
         ]
-        indexes = [models.Index(fields=("tenant_id", "project", "role"), name="pm_member_project_idx"), models.Index(fields=("tenant_id", "employee_id", "archived_at"), name="pm_member_employee_idx")]
+        indexes = [
+            models.Index(fields=("tenant_id", "project", "role"), name="pm_member_project_idx"),
+            models.Index(fields=("tenant_id", "employee_id", "archived_at"), name="pm_member_employee_idx"),
+        ]
 
     def clean(self):
-        if self.project_id and self.project.tenant_id != self.tenant_id: raise ValidationError({"project": "Project must belong to this tenant."})
-        if self.left_at and self.joined_at and self.left_at < self.joined_at: raise ValidationError({"left_at": "Left date cannot precede joined date."})
+        if self.project_id and self.project.tenant_id != self.tenant_id:
+            raise ValidationError({"project": "Project must belong to this tenant."})
+        if self.left_at and self.joined_at and self.left_at < self.joined_at:
+            raise ValidationError({"left_at": "Left date cannot precede joined date."})
 
-    def save(self, *args, **kwargs): self.full_clean(); return super().save(*args, **kwargs)
-    def __str__(self): return f"{self.project.project_code} - Employee {self.employee_id}"
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.project.project_code} - Employee {self.employee_id}"
 
 
 @tenancy_scope(TENANT_SCOPED)
@@ -236,7 +304,11 @@ class TimeEntry(MutableTenantModel):
     task = models.ForeignKey(Task, on_delete=models.PROTECT, related_name="time_entries", null=True, blank=True)
     employee_id = models.UUIDField()
     entry_date = models.DateField()
-    hours_worked = models.DecimalField(max_digits=6, decimal_places=2, validators=[MinValueValidator(Decimal("0.01")), MaxValueValidator(Decimal("24.00"))])
+    hours_worked = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.01")), MaxValueValidator(Decimal("24.00"))],
+    )
     description = models.TextField()
     billable = models.BooleanField(default=False)
     version = models.PositiveBigIntegerField(default=1)
@@ -247,19 +319,35 @@ class TimeEntry(MutableTenantModel):
         constraints = [
             models.CheckConstraint(condition=Q(hours_worked__gt=0, hours_worked__lte=24), name="pm_time_hours_range"),
             models.CheckConstraint(condition=Q(version__gte=1), name="pm_time_version_positive"),
-            models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), condition=Q(idempotency_key__isnull=False), name="pm_time_idempotency_uniq"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "idempotency_key"),
+                condition=Q(idempotency_key__isnull=False),
+                name="pm_time_idempotency_uniq",
+            ),
         ]
-        indexes = [models.Index(fields=("tenant_id", "employee_id", "entry_date"), name="pm_time_employee_idx"), models.Index(fields=("tenant_id", "project", "entry_date"), name="pm_time_project_idx"), models.Index(fields=("tenant_id", "task", "entry_date"), name="pm_time_task_idx")]
+        indexes = [
+            models.Index(fields=("tenant_id", "employee_id", "entry_date"), name="pm_time_employee_idx"),
+            models.Index(fields=("tenant_id", "project", "entry_date"), name="pm_time_project_idx"),
+            models.Index(fields=("tenant_id", "task", "entry_date"), name="pm_time_task_idx"),
+        ]
 
     def clean(self):
         errors = {}
-        if self.project_id and self.project.tenant_id != self.tenant_id: errors["project"] = "Project must belong to this tenant."
-        if self.task_id and (self.task.tenant_id != self.tenant_id or self.task.project_id != self.project_id): errors["task"] = "Task must belong to the same tenant and project."
-        if len(self.description) > 4000: errors["description"] = "Description cannot exceed 4000 characters."
-        if errors: raise ValidationError(errors)
+        if self.project_id and self.project.tenant_id != self.tenant_id:
+            errors["project"] = "Project must belong to this tenant."
+        if self.task_id and (self.task.tenant_id != self.tenant_id or self.task.project_id != self.project_id):
+            errors["task"] = "Task must belong to the same tenant and project."
+        if len(self.description) > 4000:
+            errors["description"] = "Description cannot exceed 4000 characters."
+        if errors:
+            raise ValidationError(errors)
 
-    def save(self, *args, **kwargs): self.full_clean(); return super().save(*args, **kwargs)
-    def __str__(self): return f"{self.entry_date} - {self.hours_worked} hours"
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.entry_date} - {self.hours_worked} hours"
 
 
 @tenancy_scope(TENANT_SCOPED)
@@ -276,40 +364,73 @@ class ProjectMilestone(MutableTenantModel):
     class Meta:
         db_table = "project_milestones"
         constraints = [
-            models.UniqueConstraint(fields=("tenant_id", "project", "milestone_name"), condition=Q(archived_at__isnull=True), name="pm_milestone_active_uniq"),
-            models.CheckConstraint(condition=Q(achieved_date__isnull=True) | Q(cancelled_at__isnull=True), name="pm_milestone_one_outcome"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "project", "milestone_name"),
+                condition=Q(archived_at__isnull=True),
+                name="pm_milestone_active_uniq",
+            ),
+            models.CheckConstraint(
+                condition=Q(achieved_date__isnull=True) | Q(cancelled_at__isnull=True), name="pm_milestone_one_outcome"
+            ),
             models.CheckConstraint(condition=Q(version__gte=1), name="pm_milestone_version_positive"),
         ]
-        indexes = [models.Index(fields=("tenant_id", "project", "target_date"), name="pm_milestone_project_idx"), models.Index(fields=("tenant_id", "achieved_date"), name="pm_milestone_achieved_idx"), models.Index(fields=("tenant_id", "cancelled_at"), name="pm_milestone_cancelled_idx")]
+        indexes = [
+            models.Index(fields=("tenant_id", "project", "target_date"), name="pm_milestone_project_idx"),
+            models.Index(fields=("tenant_id", "achieved_date"), name="pm_milestone_achieved_idx"),
+            models.Index(fields=("tenant_id", "cancelled_at"), name="pm_milestone_cancelled_idx"),
+        ]
 
     def clean(self):
         self.milestone_name = self.milestone_name.strip()
         errors = {}
-        if not self.milestone_name: errors["milestone_name"] = "Milestone name is required."
-        if self.project_id and self.project.tenant_id != self.tenant_id: errors["project"] = "Project must belong to this tenant."
-        if self.achieved_date and self.cancelled_at: errors["achieved_date"] = "A milestone cannot be achieved and cancelled."
-        if len(self.description) > 10_000: errors["description"] = "Description cannot exceed 10000 characters."
-        if errors: raise ValidationError(errors)
+        if not self.milestone_name:
+            errors["milestone_name"] = "Milestone name is required."
+        if self.project_id and self.project.tenant_id != self.tenant_id:
+            errors["project"] = "Project must belong to this tenant."
+        if self.achieved_date and self.cancelled_at:
+            errors["achieved_date"] = "A milestone cannot be achieved and cancelled."
+        if len(self.description) > 10_000:
+            errors["description"] = "Description cannot exceed 10000 characters."
+        if errors:
+            raise ValidationError(errors)
 
-    def save(self, *args, **kwargs): self.full_clean(); return super().save(*args, **kwargs)
-    def __str__(self): return f"{self.project.project_code} - {self.milestone_name}"
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.project.project_code} - {self.milestone_name}"
 
 
 @tenancy_scope(TENANT_SCOPED)
 class ProjectManagementConfiguration(TenantScopedModel, TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     environment = models.CharField(max_length=20, choices=ConfigurationEnvironment.choices)
-    active_version = models.ForeignKey("ProjectManagementConfigurationVersion", on_delete=models.PROTECT, related_name="active_for", null=True, blank=True)
+    active_version = models.ForeignKey(
+        "ProjectManagementConfigurationVersion",
+        on_delete=models.PROTECT,
+        related_name="active_for",
+        null=True,
+        blank=True,
+    )
 
     class Meta:
         db_table = "project_management_configurations"
-        constraints = [models.UniqueConstraint(fields=("tenant_id", "environment"), name="pm_config_environment_uniq"), models.UniqueConstraint(fields=("tenant_id", "id"), name="pm_config_tenant_id_uniq")]
+        constraints = [
+            models.UniqueConstraint(fields=("tenant_id", "environment"), name="pm_config_environment_uniq"),
+            models.UniqueConstraint(fields=("tenant_id", "id"), name="pm_config_tenant_id_uniq"),
+        ]
 
 
 class ImmutableQuerySet(TenantQuerySet):
-    def update(self, **kwargs): raise ValidationError("Immutable history cannot be updated.", code="immutable_history")
-    def delete(self): raise ValidationError("Immutable history cannot be deleted.", code="immutable_history")
-    def _service_update(self, **kwargs): return super().update(**kwargs)
+    def update(self, **kwargs):
+        raise ValidationError("Immutable history cannot be updated.", code="immutable_history")
+
+    def delete(self):
+        raise ValidationError("Immutable history cannot be deleted.", code="immutable_history")
+
+    def _service_update(self, **kwargs):
+        return super().update(**kwargs)
 
 
 @tenancy_scope(TENANT_SCOPED)
@@ -339,21 +460,40 @@ class ProjectManagementConfigurationVersion(TenantScopedModel):
         constraints = [
             models.UniqueConstraint(fields=("tenant_id", "configuration", "version"), name="pmgmt_config_version_uniq"),
             models.UniqueConstraint(fields=("tenant_id", "id"), name="pm_configver_tenant_id_uniq"),
-            models.UniqueConstraint(fields=("tenant_id", "configuration"), condition=Q(state=ConfigurationState.ACTIVE), name="pm_config_one_active_uniq"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "configuration"),
+                condition=Q(state=ConfigurationState.ACTIVE),
+                name="pm_config_one_active_uniq",
+            ),
             models.CheckConstraint(condition=Q(version__gte=1), name="pmgmt_config_version_positive"),
-            models.CheckConstraint(condition=Q(max_daily_hours__gt=0, max_daily_hours__lte=24), name="pm_config_hours_range"),
-            models.CheckConstraint(condition=Q(max_allocation_percentage__gt=0, max_allocation_percentage__lte=100), name="pm_config_allocation_range"),
+            models.CheckConstraint(
+                condition=Q(max_daily_hours__gt=0, max_daily_hours__lte=24), name="pm_config_hours_range"
+            ),
+            models.CheckConstraint(
+                condition=Q(max_allocation_percentage__gt=0, max_allocation_percentage__lte=100),
+                name="pm_config_allocation_range",
+            ),
         ]
 
     def save(self, *args, **kwargs):
-        if self.pk and type(self)._base_manager.filter(pk=self.pk).exists(): raise ValidationError("Configuration versions are immutable.", code="immutable_history")
+        if self.pk and type(self)._base_manager.filter(pk=self.pk).exists():
+            raise ValidationError("Configuration versions are immutable.", code="immutable_history")
         return super().save(*args, **kwargs)
-    def delete(self, *args, **kwargs): raise ValidationError("Configuration versions are immutable.", code="immutable_history")
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Configuration versions are immutable.", code="immutable_history")
 
 
 @tenancy_scope(TENANT_SCOPED)
 class ProjectActivity(TenantScopedModel):
-    ENTITY_TYPES = (("project", "Project"), ("task", "Task"), ("member", "Member"), ("time_entry", "Time entry"), ("milestone", "Milestone"), ("configuration", "Configuration"))
+    ENTITY_TYPES = (
+        ("project", "Project"),
+        ("task", "Task"),
+        ("member", "Member"),
+        ("time_entry", "Time entry"),
+        ("milestone", "Milestone"),
+        ("configuration", "Configuration"),
+    )
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     project = models.ForeignKey(Project, on_delete=models.PROTECT, related_name="activities", null=True, blank=True)
     entity_type = models.CharField(max_length=32, choices=ENTITY_TYPES)
@@ -369,9 +509,16 @@ class ProjectActivity(TenantScopedModel):
 
     class Meta:
         db_table = "project_activities"
-        indexes = [models.Index(fields=("tenant_id", "project", "created_at"), name="pm_activity_project_idx"), models.Index(fields=("tenant_id", "entity_type", "entity_id"), name="pm_activity_entity_idx"), models.Index(fields=("tenant_id", "correlation_id"), name="pm_activity_correlation_idx")]
+        indexes = [
+            models.Index(fields=("tenant_id", "project", "created_at"), name="pm_activity_project_idx"),
+            models.Index(fields=("tenant_id", "entity_type", "entity_id"), name="pm_activity_entity_idx"),
+            models.Index(fields=("tenant_id", "correlation_id"), name="pm_activity_correlation_idx"),
+        ]
 
     def save(self, *args, **kwargs):
-        if self.pk and type(self)._base_manager.filter(pk=self.pk).exists(): raise ValidationError("Activity history is immutable.", code="immutable_history")
+        if self.pk and type(self)._base_manager.filter(pk=self.pk).exists():
+            raise ValidationError("Activity history is immutable.", code="immutable_history")
         return super().save(*args, **kwargs)
-    def delete(self, *args, **kwargs): raise ValidationError("Activity history is immutable.", code="immutable_history")
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Activity history is immutable.", code="immutable_history")

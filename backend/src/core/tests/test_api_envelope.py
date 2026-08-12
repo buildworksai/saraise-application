@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from django.conf import settings
-from django.http import FileResponse, HttpResponse, StreamingHttpResponse
+from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
 from rest_framework import status
 from rest_framework.exceptions import NotFound, Throttled, ValidationError
 from rest_framework.request import Request
@@ -22,13 +22,16 @@ from src.core.api import (
     GovernedAPIViewMixin,
     GovernedMultipartAPIViewMixin,
     GovernedPageNumberPagination,
+    GovernedPagination,
     OperationFailed,
     OperationResult,
+    SaraiseV2Pagination,
     SuccessEnvelopeRenderer,
     operation_result_to_response,
     stable_exception_handler,
 )
 from src.core.api.envelope import bypasses_json_envelope, correlation_id_for_request, is_json_media_type
+from src.core.middleware.correlation import correlation_id_var
 
 
 def _renderer_context(response: object, correlation_id: str = "req_contract_test_000001") -> dict[str, object]:
@@ -135,6 +138,7 @@ def test_exception_handler_has_stable_validation_and_not_found_codes() -> None:
         {"request": request},
     )
     not_found = stable_exception_handler(NotFound(), {"request": request})
+    django_not_found = stable_exception_handler(Http404(), {"request": request})
 
     assert validation.status_code == status.HTTP_400_BAD_REQUEST
     assert validation.data == {
@@ -148,6 +152,8 @@ def test_exception_handler_has_stable_validation_and_not_found_codes() -> None:
     assert not_found.status_code == status.HTTP_404_NOT_FOUND
     assert not_found.data["error"]["code"] == "RESOURCE_NOT_FOUND"
     assert set(not_found.data["error"]) == {"code", "message", "detail", "correlation_id"}
+    assert django_not_found.status_code == status.HTTP_404_NOT_FOUND
+    assert django_not_found.data["error"]["code"] == "RESOURCE_NOT_FOUND"
 
 
 def test_exception_handler_maps_unavailable_to_503_without_exposing_evidence() -> None:
@@ -174,10 +180,14 @@ def test_exception_handler_maps_unavailable_to_503_without_exposing_evidence() -
 
 
 def test_exception_handler_safely_maps_unexpected_errors() -> None:
-    response = stable_exception_handler(
-        RuntimeError("database password must not leak"),
-        {"request": SimpleNamespace()},
-    )
+    token = correlation_id_var.set("")
+    try:
+        response = stable_exception_handler(
+            RuntimeError("database password must not leak"),
+            {"request": SimpleNamespace()},
+        )
+    finally:
+        correlation_id_var.reset(token)
 
     assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
     assert response.data["error"]["code"] == "INTERNAL_ERROR"
@@ -221,18 +231,82 @@ def test_pagination_caps_page_size_and_renders_governed_metadata() -> None:
     }
 
 
-def test_paginated_response_schema_matches_wire_contract() -> None:
-    schema = GovernedPageNumberPagination().get_paginated_response_schema(
-        {"type": "object", "properties": {"id": {"type": "string"}}}
+def test_pagination_renders_empty_collection_metadata() -> None:
+    request = Request(APIRequestFactory().get("/api/v2/items/?page_size=25&page=1"))
+    paginator = GovernedPageNumberPagination()
+    page = paginator.paginate_queryset([], request)
+
+    assert page == []
+    response = paginator.get_paginated_response(page)
+    rendered = SuccessEnvelopeRenderer().render(
+        response.data,
+        "application/json",
+        _renderer_context(response, "req_empty_page_000001"),
     )
+    payload = json.loads(rendered)
 
-    assert schema["required"] == ["data", "meta"]
-    assert schema["properties"]["data"]["type"] == "array"
-    page_size = schema["properties"]["meta"]["properties"]["pagination"]["properties"]["page_size"]
-    assert page_size == {"type": "integer", "minimum": 1, "maximum": 100, "default": 25}
+    assert payload["data"] == []
+    assert payload["meta"]["pagination"] == {
+        "count": 0,
+        "page": 1,
+        "page_size": 25,
+        "total_pages": 0,
+        "has_next": False,
+        "has_previous": False,
+    }
 
-    with pytest.raises(RuntimeError, match="paginate_queryset"):
+
+def test_paginated_response_schema_matches_wire_contract() -> None:
+    item_schema = {"type": "object", "properties": {"id": {"type": "string"}}}
+    schema = GovernedPageNumberPagination().get_paginated_response_schema(item_schema)
+
+    assert schema == {
+        "type": "object",
+        "required": ["data", "meta"],
+        "properties": {
+            "data": {"type": "array", "items": item_schema},
+            "meta": {
+                "type": "object",
+                "required": ["correlation_id", "timestamp", "pagination"],
+                "properties": {
+                    "correlation_id": {"type": "string"},
+                    "timestamp": {"type": "string", "format": "date-time"},
+                    "pagination": {
+                        "type": "object",
+                        "required": [
+                            "count",
+                            "page",
+                            "page_size",
+                            "total_pages",
+                            "has_next",
+                            "has_previous",
+                        ],
+                        "properties": {
+                            "count": {"type": "integer", "minimum": 0},
+                            "page": {"type": "integer", "minimum": 1},
+                            "page_size": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 100,
+                                "default": 25,
+                            },
+                            "total_pages": {"type": "integer", "minimum": 0},
+                            "has_next": {"type": "boolean"},
+                            "has_previous": {"type": "boolean"},
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+    with pytest.raises(RuntimeError, match=r"^paginate_queryset\(\) must be called before get_paginated_response\(\)$"):
         GovernedPageNumberPagination().get_paginated_response([])
+
+
+def test_governed_pagination_aliases_remain_stable() -> None:
+    assert GovernedPagination is GovernedPageNumberPagination
+    assert SaraiseV2Pagination is GovernedPageNumberPagination
 
 
 def test_binary_and_streaming_responses_bypass_json_envelope() -> None:
@@ -286,7 +360,12 @@ def test_error_rendering_is_not_wrapped_as_success() -> None:
 
 
 def test_correlation_fallback_handles_immutable_request_objects() -> None:
-    correlation_id = correlation_id_for_request(object())
+    token = correlation_id_var.set("")
+    try:
+        correlation_id = correlation_id_for_request(object())
+    finally:
+        correlation_id_var.reset(token)
+
     assert correlation_id.startswith("req_")
     assert len(correlation_id) == 28
 

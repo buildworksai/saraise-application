@@ -5,10 +5,7 @@ from __future__ import annotations
 import uuid
 
 from src.modules.metadata_modeling.models import EntityDefinition
-from src.modules.metadata_modeling.services import (
-    DynamicResourceService,
-    SchemaVersionService,
-)
+from src.modules.metadata_modeling.services import DynamicResourceService, SchemaVersionService
 
 ACTOR_ID = uuid.UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 

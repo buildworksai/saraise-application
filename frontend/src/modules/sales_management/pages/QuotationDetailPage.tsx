@@ -1,1 +1,4 @@
-import { DocumentDetail } from '../components/DocumentDetail';export function QuotationDetailPage(){return <DocumentDetail kind="quotation"/>;}
+import { DocumentDetail } from "../components/DocumentDetail";
+export function QuotationDetailPage() {
+  return <DocumentDetail kind="quotation" />;
+}

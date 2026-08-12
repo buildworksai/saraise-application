@@ -6,6 +6,7 @@ import { useAuthStore } from "@/stores/auth-store";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
 import { ErrorState, Skeleton } from "@/components/ui";
+import { formatRouteTitle } from "@/route-title";
 import type { LifecycleState, PaginatedMeta } from "../contracts";
 
 export const BI_PATH = "/business-intelligence";
@@ -13,7 +14,7 @@ export const useTenantIdentity = () =>
   useAuthStore((state) => state.user?.tenant_id ?? state.user?.id ?? "anonymous");
 export const useDocumentTitle = (title: string) =>
   useEffect(() => {
-    document.title = `${title} | SARAISE`;
+    document.title = formatRouteTitle(title);
   }, [title]);
 export const formatDate = (value?: string | null) =>
   value

@@ -7,7 +7,9 @@
 export type UUID = string;
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | readonly JsonValue[];
-export interface JsonObject { readonly [key: string]: JsonValue }
+export interface JsonObject {
+  readonly [key: string]: JsonValue;
+}
 
 export interface ApiManagementResource {
   readonly id: UUID;
@@ -66,10 +68,10 @@ export interface PaginatedResponse<T> {
 
 /** Environments are governed by the server registry, never a frontend allow-list. */
 export type DeploymentEnvironment = string;
-export type ResourceWritableField = 'name' | 'description' | 'config';
-export type ResourceFilterField = 'is_active';
-export type ResourceSearchField = 'name' | 'description';
-export type ResourceOrderingField = 'name' | 'created_at' | 'updated_at';
+export type ResourceWritableField = "name" | "description" | "config";
+export type ResourceFilterField = "is_active";
+export type ResourceSearchField = "name" | "description";
+export type ResourceOrderingField = "name" | "created_at" | "updated_at";
 
 export interface ApiManagementNavigationConfiguration {
   readonly resources_list: { readonly order: number };
@@ -151,7 +153,7 @@ export interface ApiManagementConfiguration {
 }
 
 export interface PortableApiManagementConfiguration {
-  readonly module: 'api_management';
+  readonly module: "api_management";
   readonly schema_version: 2;
   readonly version: number;
   readonly environment: DeploymentEnvironment;
@@ -191,14 +193,14 @@ export interface ConfigurationImportRequest {
 }
 
 export type ConfigurationFieldType =
-  | 'boolean'
-  | 'integer'
-  | 'number'
-  | 'string'
-  | 'select'
-  | 'multi_select'
-  | 'string_list'
-  | 'json_object';
+  | "boolean"
+  | "integer"
+  | "number"
+  | "string"
+  | "select"
+  | "multi_select"
+  | "string_list"
+  | "json_object";
 
 export interface ConfigurationFieldSchema {
   readonly type: ConfigurationFieldType;
@@ -214,16 +216,16 @@ export interface ConfigurationFieldSchema {
 }
 
 export type ConfigurationDependencyOperator =
-  | 'equals'
-  | 'not_equals'
-  | 'less_than'
-  | 'less_than_or_equal'
-  | 'greater_than'
-  | 'greater_than_or_equal'
-  | 'in';
+  | "equals"
+  | "not_equals"
+  | "less_than"
+  | "less_than_or_equal"
+  | "greater_than"
+  | "greater_than_or_equal"
+  | "in";
 
 export interface ConfigurationDependencyEffect {
-  readonly kind: 'set' | 'clear' | 'disable';
+  readonly kind: "set" | "clear" | "disable";
   readonly value?: JsonValue;
 }
 
@@ -251,35 +253,46 @@ export interface ConfigurationHistoryFilters {
   readonly page_size?: number;
 }
 
-export interface ConfigurationPreviewRequest { readonly document: unknown }
-export interface ConfigurationRollbackRequest { readonly version: number; readonly idempotency_key: UUID }
+export interface ConfigurationPreviewRequest {
+  readonly document: unknown;
+}
+export interface ConfigurationRollbackRequest {
+  readonly version: number;
+  readonly idempotency_key: UUID;
+}
 
-export const MODULE_API_PREFIX = '/api/v1/api-management';
+export const MODULE_API_PREFIX = "/api/v1/api-management";
 
 function resourceListEndpoint(filters: ResourceListFilters = {}): string {
   const params = new URLSearchParams();
-  if (filters.search) params.set('search', filters.search);
-  if (filters.is_active !== undefined) params.set('is_active', String(filters.is_active));
-  if (filters.ordering) params.set('ordering', filters.ordering);
-  if (filters.page !== undefined) params.set('page', String(filters.page));
-  if (filters.page_size !== undefined) params.set('page_size', String(filters.page_size));
+  if (filters.search) params.set("search", filters.search);
+  if (filters.is_active !== undefined) params.set("is_active", String(filters.is_active));
+  if (filters.ordering) params.set("ordering", filters.ordering);
+  if (filters.page !== undefined) params.set("page", String(filters.page));
+  if (filters.page_size !== undefined) params.set("page_size", String(filters.page_size));
   const query = params.toString();
-  return `${MODULE_API_PREFIX}/resources/${query ? `?${query}` : ''}`;
+  return `${MODULE_API_PREFIX}/resources/${query ? `?${query}` : ""}`;
 }
 
 function environmentEndpoint(endpoint: string, environment: DeploymentEnvironment): string {
-  const separator = endpoint.includes('?') ? '&' : '?';
+  const separator = endpoint.includes("?") ? "&" : "?";
   return `${endpoint}${separator}environment=${encodeURIComponent(environment)}`;
 }
 
-function optionalEnvironmentEndpoint(endpoint: string, environment?: DeploymentEnvironment): string {
+function optionalEnvironmentEndpoint(
+  endpoint: string,
+  environment?: DeploymentEnvironment
+): string {
   return environment ? environmentEndpoint(endpoint, environment) : endpoint;
 }
 
-function configurationHistoryEndpoint(environment: DeploymentEnvironment, filters: ConfigurationHistoryFilters = {}): string {
+function configurationHistoryEndpoint(
+  environment: DeploymentEnvironment,
+  filters: ConfigurationHistoryFilters = {}
+): string {
   const params = new URLSearchParams({ environment });
-  if (filters.page !== undefined) params.set('page', String(filters.page));
-  if (filters.page_size !== undefined) params.set('page_size', String(filters.page_size));
+  if (filters.page !== undefined) params.set("page", String(filters.page));
+  if (filters.page_size !== undefined) params.set("page_size", String(filters.page_size));
   return `${MODULE_API_PREFIX}/configuration/history/?${params.toString()}`;
 }
 
@@ -290,40 +303,56 @@ export const ENDPOINTS = {
     CREATE: `${MODULE_API_PREFIX}/resources/`,
     UPDATE: (id: UUID) => `${MODULE_API_PREFIX}/resources/${encodeURIComponent(id)}/` as const,
     DELETE: (id: UUID) => `${MODULE_API_PREFIX}/resources/${encodeURIComponent(id)}/` as const,
-    RESTORE: (id: UUID) => `${MODULE_API_PREFIX}/resources/${encodeURIComponent(id)}/restore/` as const,
-    ACTIVATE: (id: UUID) => `${MODULE_API_PREFIX}/resources/${encodeURIComponent(id)}/activate/` as const,
-    DEACTIVATE: (id: UUID) => `${MODULE_API_PREFIX}/resources/${encodeURIComponent(id)}/deactivate/` as const,
-    VERSIONS: (id: UUID) => `${MODULE_API_PREFIX}/resources/${encodeURIComponent(id)}/versions/` as const,
-    ROLLBACK: (id: UUID) => `${MODULE_API_PREFIX}/resources/${encodeURIComponent(id)}/rollback/` as const,
+    RESTORE: (id: UUID) =>
+      `${MODULE_API_PREFIX}/resources/${encodeURIComponent(id)}/restore/` as const,
+    ACTIVATE: (id: UUID) =>
+      `${MODULE_API_PREFIX}/resources/${encodeURIComponent(id)}/activate/` as const,
+    DEACTIVATE: (id: UUID) =>
+      `${MODULE_API_PREFIX}/resources/${encodeURIComponent(id)}/deactivate/` as const,
+    VERSIONS: (id: UUID) =>
+      `${MODULE_API_PREFIX}/resources/${encodeURIComponent(id)}/versions/` as const,
+    ROLLBACK: (id: UUID) =>
+      `${MODULE_API_PREFIX}/resources/${encodeURIComponent(id)}/rollback/` as const,
   },
   CONFIGURATION: {
     SCHEMA: (environment?: DeploymentEnvironment) =>
       optionalEnvironmentEndpoint(`${MODULE_API_PREFIX}/configuration/schema/`, environment),
-    CURRENT: (environment: DeploymentEnvironment) => environmentEndpoint(`${MODULE_API_PREFIX}/configuration/`, environment),
-    PREVIEW: (environment: DeploymentEnvironment) => environmentEndpoint(`${MODULE_API_PREFIX}/configuration/preview/`, environment),
+    CURRENT: (environment: DeploymentEnvironment) =>
+      environmentEndpoint(`${MODULE_API_PREFIX}/configuration/`, environment),
+    PREVIEW: (environment: DeploymentEnvironment) =>
+      environmentEndpoint(`${MODULE_API_PREFIX}/configuration/preview/`, environment),
     HISTORY: configurationHistoryEndpoint,
-    ROLLBACK: (environment: DeploymentEnvironment) => environmentEndpoint(`${MODULE_API_PREFIX}/configuration/rollback/`, environment),
-    IMPORT: (environment: DeploymentEnvironment) => environmentEndpoint(`${MODULE_API_PREFIX}/configuration/import/`, environment),
-    EXPORT: (environment: DeploymentEnvironment) => environmentEndpoint(`${MODULE_API_PREFIX}/configuration/export/`, environment),
+    ROLLBACK: (environment: DeploymentEnvironment) =>
+      environmentEndpoint(`${MODULE_API_PREFIX}/configuration/rollback/`, environment),
+    IMPORT: (environment: DeploymentEnvironment) =>
+      environmentEndpoint(`${MODULE_API_PREFIX}/configuration/import/`, environment),
+    EXPORT: (environment: DeploymentEnvironment) =>
+      environmentEndpoint(`${MODULE_API_PREFIX}/configuration/export/`, environment),
   },
   HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
 
 export const ROUTES = {
-  RESOURCES: '/api-management',
-  RESOURCE_CREATE: '/api-management/create',
-  RESOURCE_DETAIL_PATTERN: '/api-management/:id',
+  RESOURCES: "/api-management",
+  RESOURCE_CREATE: "/api-management/create",
+  RESOURCE_DETAIL_PATTERN: "/api-management/:id",
   RESOURCE_DETAIL: (id: UUID) => `/api-management/${encodeURIComponent(id)}` as const,
-  CONFIGURATION: '/api-management/configuration',
+  CONFIGURATION: "/api-management/configuration",
 } as const;
 
 export const QUERY_KEYS = {
-  ROOT: ['api-management'] as const,
-  RESOURCES: (filters: ResourceListFilters = {}) => ['api-management', 'resources', filters] as const,
-  RESOURCE: (id: UUID) => ['api-management', 'resources', id] as const,
-  RESOURCE_VERSIONS: (id: UUID) => ['api-management', 'resources', id, 'versions'] as const,
-  CONFIGURATION_SCHEMA: (environment?: DeploymentEnvironment) => ['api-management', 'configuration', 'schema', environment ?? 'runtime'] as const,
-  RUNTIME_CONFIGURATION: ['api-management', 'configuration', 'runtime'] as const,
-  CONFIGURATION: (environment: DeploymentEnvironment) => ['api-management', 'configuration', environment] as const,
-  CONFIGURATION_HISTORY: (environment: DeploymentEnvironment, filters: ConfigurationHistoryFilters = {}) => ['api-management', 'configuration', environment, 'history', filters] as const,
+  ROOT: ["api-management"] as const,
+  RESOURCES: (filters: ResourceListFilters = {}) =>
+    ["api-management", "resources", filters] as const,
+  RESOURCE: (id: UUID) => ["api-management", "resources", id] as const,
+  RESOURCE_VERSIONS: (id: UUID) => ["api-management", "resources", id, "versions"] as const,
+  CONFIGURATION_SCHEMA: (environment?: DeploymentEnvironment) =>
+    ["api-management", "configuration", "schema", environment ?? "runtime"] as const,
+  RUNTIME_CONFIGURATION: ["api-management", "configuration", "runtime"] as const,
+  CONFIGURATION: (environment: DeploymentEnvironment) =>
+    ["api-management", "configuration", environment] as const,
+  CONFIGURATION_HISTORY: (
+    environment: DeploymentEnvironment,
+    filters: ConfigurationHistoryFilters = {}
+  ) => ["api-management", "configuration", environment, "history", filters] as const,
 } as const;

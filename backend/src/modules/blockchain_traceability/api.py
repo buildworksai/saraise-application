@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 from uuid import UUID
 
 from django.core.exceptions import ObjectDoesNotExist
@@ -23,11 +23,14 @@ from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ViewSet
 
+from src.core.access.decision import AccessDecisionPipeline
+from src.core.access.permissions import RequiresAccess
 from src.core.api.profile import GovernedAPIViewMixin
 from src.core.api.results import OperationFailed, OperationResult
 from src.core.state_machine import (
@@ -214,6 +217,8 @@ def _parse_date(value: str, field_name: str) -> datetime:
 class GovernedTenantMixin(ActionAccessMixin):
     """Common identity, bounded list, filter, and ordering helpers."""
 
+    request: Any
+
     @property
     def tenant_id(self) -> UUID:
         tenant_id = getattr(self.request, "tenant_id", None)
@@ -223,32 +228,34 @@ class GovernedTenantMixin(ActionAccessMixin):
 
     @property
     def actor_id(self) -> str:
-        identifier = getattr(self.request.user, "pk", None)
+        identifier = getattr(cast(Any, self.request).user, "pk", None)
         if identifier is None:
             raise ValidationError({"actor": ["Authenticated identity is incomplete."]})
         return str(identifier)
 
     def get_serializer_context(self) -> dict[str, object]:
-        context = super().get_serializer_context()
+        context = cast(dict[str, object], cast(Any, super()).get_serializer_context())
         context["configuration"] = BlockchainTraceabilityConfigurationService().document(self.tenant_id)
         return context
 
     def _paginate(self, queryset: QuerySet[Any], serializer_class: type) -> Response:
-        page = self.paginate_queryset(queryset)
+        view = cast(Any, self)
+        page = view.paginate_queryset(queryset)
         if page is None:
             raise RuntimeError("Governed collection endpoints require bounded pagination.")
         serializer = serializer_class(page, many=True, context=self.get_serializer_context())
-        return self.get_paginated_response(serializer.data)
+        return cast(Response, view.get_paginated_response(serializer.data))
 
     def _exact_filters(self, queryset: QuerySet[Any], names: tuple[str, ...]) -> QuerySet[Any]:
+        query_params = cast(Any, self.request).query_params
         for name in names:
-            value = self.request.query_params.get(name)
+            value = query_params.get(name)
             if value is not None and value != "":
                 queryset = queryset.filter(**{name: value})
         return queryset
 
     def _uuid_filter(self, queryset: QuerySet[Any], parameter: str, field: str | None = None) -> QuerySet[Any]:
-        value = self.request.query_params.get(parameter)
+        value = cast(Any, self.request).query_params.get(parameter)
         if not value:
             return queryset
         return queryset.filter(**{field or parameter: _parse_uuid(value, parameter)})
@@ -261,9 +268,10 @@ class GovernedTenantMixin(ActionAccessMixin):
         after: str,
         before: str,
     ) -> QuerySet[Any]:
-        if value := self.request.query_params.get(after):
+        query_params = cast(Any, self.request).query_params
+        if value := query_params.get(after):
             queryset = queryset.filter(**{f"{field}__gte": _parse_date(value, after)})
-        if value := self.request.query_params.get(before):
+        if value := query_params.get(before):
             queryset = queryset.filter(**{f"{field}__lte": _parse_date(value, before)})
         return queryset
 
@@ -274,7 +282,7 @@ class GovernedTenantMixin(ActionAccessMixin):
         allowed: Mapping[str, str],
         default: str,
     ) -> QuerySet[Any]:
-        requested = self.request.query_params.get("ordering", default)
+        requested = cast(Any, self.request).query_params.get("ordering", default)
         descending = requested.startswith("-")
         key = requested[1:] if descending else requested
         if key not in allowed:
@@ -290,6 +298,9 @@ class GovernedTenantModelViewSet(
 ):
     """Mutable tenant boundary; concrete controllers still delegate writes."""
 
+    authentication_classes = [SessionAuthentication401]
+    permission_classes = [IsAuthenticated, RequiresAccess]
+
 
 class GovernedTenantReadOnlyViewSet(
     GovernedAPIViewMixin,
@@ -297,6 +308,9 @@ class GovernedTenantReadOnlyViewSet(
     TenantScopedReadOnlyModelViewSet,
 ):
     """Immutable tenant boundary for audit evidence."""
+
+    authentication_classes = [SessionAuthentication401]
+    permission_classes = [IsAuthenticated, RequiresAccess]
 
 
 def _configuration_payload(current: object) -> dict[str, object]:
@@ -318,6 +332,8 @@ class BlockchainTraceabilityConfigurationViewSet(
 ):
     """RBAC-gated singleton configuration API; all decisions live in the service."""
 
+    authentication_classes = [SessionAuthentication401]
+    permission_classes = [IsAuthenticated, RequiresAccess]
     service = BlockchainTraceabilityConfigurationService()
     action_permissions = {
         "list": CONFIG_READ,
@@ -414,11 +430,17 @@ class BlockchainTraceabilityConfigurationViewSet(
 
     @action(detail=False, methods=("get",))
     def capabilities(self, request: Request) -> Response:
-        user = request.user
+        pipeline = AccessDecisionPipeline()
 
         def permitted(permission: str) -> bool:
-            checker = getattr(user, "has_perm", None)
-            return bool(checker(permission)) if callable(checker) else False
+            return pipeline.decide(
+                self.tenant_id,
+                request.user,
+                permission,
+                entitlement=permission,
+                quota=permission,
+                request=request,
+            ).allowed
 
         return Response(
             {
@@ -429,6 +451,8 @@ class BlockchainTraceabilityConfigurationViewSet(
                 "can_import": permitted(CONFIG_IMPORT),
                 "can_export": permitted(CONFIG_EXPORT),
                 "can_mutate_resources": permitted(NETWORK_MANAGE),
+                "can_finalize_compliance_evidence": permitted(COMPLIANCE_FINALIZE),
+                "can_supersede_compliance_evidence": permitted(COMPLIANCE_FINALIZE),
                 "document": self.service.document(self.tenant_id, self._environment(request)),
             }
         )
@@ -451,7 +475,7 @@ class LedgerNetworkViewSet(GovernedTenantModelViewSet):
     }
 
     def get_queryset(self) -> QuerySet[LedgerNetwork]:
-        queryset = super().get_queryset().filter(is_deleted=False)
+        queryset = cast(QuerySet[LedgerNetwork], super().get_queryset().filter(is_deleted=False))
         if self.action == "list":
             queryset = self._exact_filters(queryset, ("status", "provider_type"))
             if search := self.request.query_params.get("search"):
@@ -537,9 +561,9 @@ class LedgerNetworkViewSet(GovernedTenantModelViewSet):
     @action(detail=True, methods=("post",))
     def probe(self, request: Request, pk: str | None = None) -> Response:
         del request
-        network = self.get_object()
+        network = cast(LedgerNetwork, self.get_object())
         result = _service_call(lambda: self.service.probe_network(self.tenant_id, _parse_uuid(pk, "id"), self.actor_id))
-        health = _unwrap_result(result)
+        health = result.unwrap() if isinstance(result, OperationResult) else result
         checked_at = getattr(health, "checked_at", None) or timezone.now()
         provider_health = {
             "status": "healthy" if bool(getattr(health, "available", False)) else "unavailable",
@@ -581,7 +605,7 @@ class TraceabilityAssetViewSet(GovernedTenantModelViewSet):
     }
 
     def get_queryset(self) -> QuerySet[TraceabilityAsset]:
-        queryset = super().get_queryset().filter(is_deleted=False)
+        queryset = cast(QuerySet[TraceabilityAsset], super().get_queryset().filter(is_deleted=False))
         if self.action == "list":
             queryset = self._exact_filters(
                 queryset,
@@ -682,7 +706,7 @@ class TraceabilityAssetViewSet(GovernedTenantModelViewSet):
 
     @action(detail=True, methods=("get",))
     def history(self, request: Request, pk: str | None = None) -> Response:
-        asset = self.get_object()
+        asset = cast(TraceabilityAsset, self.get_object())
         list_policy = BlockchainTraceabilityConfigurationService().document(self.tenant_id)["list_policy"]
         page = request.query_params.get("page", "1")
         page_size = request.query_params.get("page_size", str(list_policy["default_page_size"]))
@@ -725,7 +749,7 @@ class TraceabilityEventViewSet(GovernedTenantModelViewSet):
     action_permissions = {"list": EVENT_READ, "retrieve": EVENT_READ, "create": EVENT_APPEND}
 
     def get_queryset(self) -> QuerySet[TraceabilityEvent]:
-        queryset = super().get_queryset().select_related("asset")
+        queryset = cast(QuerySet[TraceabilityEvent], super().get_queryset().select_related("asset"))
         if self.action == "list":
             queryset = self._exact_filters(queryset, ("event_type", "actor_ref"))
             queryset = self._uuid_filter(queryset, "asset_id")
@@ -776,7 +800,7 @@ class LedgerAnchorViewSet(GovernedTenantModelViewSet):
     }
 
     def get_queryset(self) -> QuerySet[LedgerAnchor]:
-        queryset = super().get_queryset().select_related("asset", "network")
+        queryset = cast(QuerySet[LedgerAnchor], super().get_queryset().select_related("asset", "network"))
         if self.action == "list":
             queryset = self._exact_filters(queryset, ("status",))
             queryset = self._uuid_filter(queryset, "asset_id")
@@ -850,7 +874,7 @@ class LedgerAnchorViewSet(GovernedTenantModelViewSet):
         result = _service_call(
             lambda: self.service.refresh_receipt(self.tenant_id, _parse_uuid(pk, "id"), self.actor_id)
         )
-        anchor = _unwrap_result(result)
+        anchor = result.unwrap() if isinstance(result, OperationResult) else result
         return Response(
             _operation_payload(
                 LedgerAnchorDetailSerializer(anchor).data,
@@ -889,7 +913,7 @@ class AuthenticityCredentialViewSet(GovernedTenantModelViewSet):
     }
 
     def get_queryset(self) -> QuerySet[AuthenticityCredential]:
-        queryset = super().get_queryset().select_related("asset")
+        queryset = cast(QuerySet[AuthenticityCredential], super().get_queryset().select_related("asset"))
         if self.action == "list":
             queryset = self._exact_filters(queryset, ("status", "credential_type"))
             queryset = self._uuid_filter(queryset, "asset_id")
@@ -901,7 +925,12 @@ class AuthenticityCredentialViewSet(GovernedTenantModelViewSet):
             )
             queryset = self._ordering(
                 queryset,
-                allowed={"created_at": "created_at", "expires_at": "expires_at", "status": "status"},
+                allowed={
+                    "created_at": "created_at",
+                    "expires_at": "expires_at",
+                    "issued_at": "issued_at",
+                    "status": "status",
+                },
                 default="-created_at",
             )
         return queryset
@@ -991,7 +1020,10 @@ class ComplianceEvidenceViewSet(GovernedTenantModelViewSet):
     }
 
     def get_queryset(self) -> QuerySet[ComplianceEvidence]:
-        queryset = super().get_queryset().filter(is_deleted=False).select_related("asset", "event", "supersedes")
+        queryset = cast(
+            QuerySet[ComplianceEvidence],
+            super().get_queryset().filter(is_deleted=False).select_related("asset", "event", "supersedes"),
+        )
         if self.action == "list":
             queryset = self._exact_filters(
                 queryset,
@@ -1109,7 +1141,10 @@ class VerificationAttemptViewSet(GovernedTenantReadOnlyViewSet):
     action_permissions = {"list": VERIFICATION_READ, "retrieve": VERIFICATION_READ}
 
     def get_queryset(self) -> QuerySet[VerificationAttempt]:
-        queryset = super().get_queryset().select_related("asset", "anchor", "credential", "compliance_evidence")
+        queryset = cast(
+            QuerySet[VerificationAttempt],
+            super().get_queryset().select_related("asset", "anchor", "credential", "compliance_evidence"),
+        )
         if self.action == "list":
             queryset = self._exact_filters(queryset, ("verification_type", "outcome", "reason_code"))
             queryset = self._uuid_filter(queryset, "asset_id")
@@ -1135,21 +1170,19 @@ class VerificationAttemptViewSet(GovernedTenantReadOnlyViewSet):
 
 
 class BlockchainTraceabilityHealthView(GovernedAPIViewMixin, APIView):
-    authentication_classes = (SessionAuthentication401,)
+    authentication_classes = [SessionAuthentication401]
+    permission_classes = [IsAuthenticated, RequiresAccess]
     action_permissions = {"health": HEALTH_READ}
 
-    def get_permissions(self) -> list[object]:
-        from rest_framework.permissions import IsAuthenticated
-
-        from src.core.access.permissions import RequiresAccess
-
+    def get_permissions(self) -> list[BasePermission]:
         user = getattr(self.request, "user", None)
         profile = getattr(user, "profile", None)
         raw_tenant_id = getattr(profile, "tenant_id", None)
+        request = cast(Any, self.request)
         try:
-            self.request.tenant_id = UUID(str(raw_tenant_id)) if raw_tenant_id else None
+            request.tenant_id = UUID(str(raw_tenant_id)) if raw_tenant_id else None
         except (AttributeError, TypeError, ValueError):
-            self.request.tenant_id = None
+            request.tenant_id = None
         self.required_permission = HEALTH_READ
         self.required_entitlement = HEALTH_READ
         self.quota_resource = "blockchain_traceability.api_reads"

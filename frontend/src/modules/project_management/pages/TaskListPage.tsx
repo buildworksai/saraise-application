@@ -1,1 +1,1 @@
-export {TaskListPage} from './ModulePages';
+export { TaskListPage } from "./ModulePages";

@@ -13,7 +13,6 @@ from decimal import Decimal
 from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 from uuid import UUID
 
-
 CAPABILITY_UNAVAILABLE = "CAPABILITY_UNAVAILABLE"
 
 
@@ -117,13 +116,17 @@ class ApprovalVerification:
 @runtime_checkable
 class LedgerGateway(Protocol):
     def is_period_closed(self, tenant_id: UUID, company_id: UUID, period_end: date) -> bool: ...
+
     def get_trial_balance(
         self, tenant_id: UUID, company_id: UUID, period_start: date, period_end: date, correlation_id: str
     ) -> Sequence[TrialBalanceLine]: ...
+
     def post_dual_journals(self, tenant_id: UUID, request: DualJournalRequest) -> DualJournalResult: ...
+
     def reverse_journal(
         self, tenant_id: UUID, company_id: UUID, journal_id: UUID, reason: str, correlation_id: str
     ) -> ReversalResult: ...
+
     def verify_journal(
         self, tenant_id: UUID, company_id: UUID, journal_id: UUID, correlation_id: str
     ) -> JournalVerification: ...
@@ -139,9 +142,14 @@ class ExchangeRateGateway(Protocol):
 @runtime_checkable
 class WorkflowGateway(Protocol):
     def request_dual_approval(
-        self, tenant_id: UUID, transaction_id: UUID, source_company_id: UUID,
-        target_company_id: UUID, correlation_id: str
+        self,
+        tenant_id: UUID,
+        transaction_id: UUID,
+        source_company_id: UUID,
+        target_company_id: UUID,
+        correlation_id: str,
     ) -> str: ...
+
     def verify_dual_approval(
         self, tenant_id: UUID, transaction_id: UUID, workflow_reference: str, correlation_id: str
     ) -> ApprovalVerification: ...
@@ -149,12 +157,16 @@ class WorkflowGateway(Protocol):
 
 @runtime_checkable
 class NotificationGateway(Protocol):
-    def notify(self, tenant_id: UUID, event: str, recipients: Sequence[str], context: Mapping[str, Any], correlation_id: str) -> None: ...
+    def notify(
+        self, tenant_id: UUID, event: str, recipients: Sequence[str], context: Mapping[str, Any], correlation_id: str
+    ) -> None: ...
 
 
 @runtime_checkable
 class ReportGateway(Protocol):
-    def render(self, tenant_id: UUID, report_type: str, snapshot: Mapping[str, Any], output_format: str, correlation_id: str) -> bytes: ...
+    def render(
+        self, tenant_id: UUID, report_type: str, snapshot: Mapping[str, Any], output_format: str, correlation_id: str
+    ) -> bytes: ...
 
 
 @dataclass(slots=True)

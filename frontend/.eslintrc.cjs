@@ -37,5 +37,14 @@ module.exports = {
     'max-nested-callbacks': ['error', { max: 3 }],
     'max-lines-per-function': ['warn', { max: 100, skipBlankLines: true, skipComments: true }],
   },
+  overrides: [
+    {
+      files: ['*.cjs', 'scripts/**/*.mjs'],
+      extends: ['plugin:@typescript-eslint/disable-type-checked'],
+      parserOptions: {
+        project: null,
+      },
+    },
+  ],
   ignorePatterns: ['dist', 'node_modules'],
 };

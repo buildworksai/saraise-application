@@ -47,10 +47,7 @@ def test_rls_forward_and_reverse_cover_only_inventory_tables() -> None:
     reverse = RecordingSchemaEditor()
     module.disable_inventory_rls(None, reverse)
     assert len(reverse.statements) == len(module.TENANT_TABLES) * 3
-    assert all(
-        any(table in statement for table in module.TENANT_TABLES)
-        for statement in reverse.statements
-    )
+    assert all(any(table in statement for table in module.TENANT_TABLES) for statement in reverse.statements)
     assert not any("saraise_enable_rls" in statement for statement in reverse.statements)
 
 

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-import uuid
 import hashlib
+import uuid
 from datetime import date
 
 import pytest
 from django.contrib.auth import get_user_model
 
-from src.core.state_machine import GuardFailedError, IdempotencyConflictError, IllegalTransitionError, TerminalStateError
+from src.core.state_machine import (
+    GuardFailedError,
+    IdempotencyConflictError,
+    IllegalTransitionError,
+    TerminalStateError,
+)
 from src.modules.compliance_management.models import (
     ComplianceConfigurationRevision,
     ComplianceFramework,
@@ -24,7 +29,6 @@ from src.modules.compliance_management.state_machines import (
     POLICY_MACHINE,
     REQUIREMENT_MACHINE,
 )
-
 
 pytestmark = pytest.mark.django_db
 

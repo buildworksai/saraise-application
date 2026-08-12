@@ -6,12 +6,12 @@
  * These tests need to be updated to match the actual Radix UI Select implementation.
  */
 
-import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from './Select';
+import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "./Select";
 
-describe('Select', () => {
-  it('should render select component', () => {
+describe("Select", () => {
+  it("should render select component", () => {
     render(
       <Select>
         <SelectTrigger>
@@ -24,7 +24,7 @@ describe('Select', () => {
       </Select>
     );
     // Basic render test - Radix UI Select renders as a button, not a select element
-    const trigger = screen.getByRole('combobox');
+    const trigger = screen.getByRole("combobox");
     expect(trigger).toBeInTheDocument();
   });
 

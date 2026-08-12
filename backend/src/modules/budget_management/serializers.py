@@ -7,7 +7,7 @@ are executed by :mod:`services` under transaction locks.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from rest_framework import serializers
 
@@ -22,11 +22,31 @@ ALERT_TYPES = ("over_budget", "approaching_limit", "underspend")
 
 SERVER_OWNED_FIELDS = frozenset(
     {
-        "id", "tenant_id", "status", "total_budget", "variance", "committed_amount",
-        "actual_amount", "actuals_as_of", "source", "account_name", "created_at",
-        "updated_at", "created_by", "updated_by", "deleted_at", "deleted_by",
-        "is_deleted", "submitted_at", "submitted_by", "approved_at", "approved_by",
-        "rejected_at", "rejected_by", "rejection_reason", "transition_state",
+        "id",
+        "tenant_id",
+        "status",
+        "total_budget",
+        "variance",
+        "committed_amount",
+        "actual_amount",
+        "actuals_as_of",
+        "source",
+        "account_name",
+        "created_at",
+        "updated_at",
+        "created_by",
+        "updated_by",
+        "deleted_at",
+        "deleted_by",
+        "is_deleted",
+        "submitted_at",
+        "submitted_by",
+        "approved_at",
+        "approved_by",
+        "rejected_at",
+        "rejected_by",
+        "rejection_reason",
+        "transition_state",
     }
 )
 
@@ -37,7 +57,8 @@ class ServiceRequestSerializer(serializers.Serializer):
     allowed_server_fields: frozenset[str] = frozenset()
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        submitted = set(self.initial_data) if isinstance(self.initial_data, Mapping) else set()
+        initial_data = getattr(self, "initial_data", None)
+        submitted = set(initial_data) if isinstance(initial_data, Mapping) else set()
         forbidden = sorted(submitted & (SERVER_OWNED_FIELDS - self.allowed_server_fields))
         if forbidden:
             raise serializers.ValidationError({field: "This field is controlled by the server." for field in forbidden})
@@ -54,7 +75,7 @@ class ServiceRequestSerializer(serializers.Serializer):
 
 class TrimmedCharField(serializers.CharField):
     def to_internal_value(self, data: object) -> str:
-        return super().to_internal_value(data).strip()
+        return super().to_internal_value(cast(str, data)).strip()
 
 
 class UppercaseCharField(TrimmedCharField):
@@ -68,9 +89,13 @@ class StrictDecimalField(serializers.DecimalField):
     def to_internal_value(self, data: object) -> Decimal:
         if isinstance(data, (float, bool)):
             self.fail("invalid")
-        value = super().to_internal_value(data)
-        if value.as_tuple().exponent < -self.decimal_places:
-            self.fail("max_decimal_places", max_decimal_places=self.decimal_places)
+        value = super().to_internal_value(cast(Decimal | int | str, data))
+        decimal_places = self.decimal_places
+        if decimal_places is None:
+            raise AssertionError("StrictDecimalField requires decimal_places.")
+        exponent = value.as_tuple().exponent
+        if isinstance(exponent, str) or exponent < -decimal_places:
+            self.fail("max_decimal_places", max_decimal_places=decimal_places)
         return value.quantize(Decimal("0.01"))
 
 
@@ -88,9 +113,21 @@ class BudgetLineReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = BudgetLine
         fields = (
-            "id", "budget_id", "account_id", "account_code", "account_name", "period_type",
-            "period_number", "budget_amount", "committed_amount", "actual_amount", "variance",
-            "actuals_as_of", "source", "created_at", "updated_at",
+            "id",
+            "budget_id",
+            "account_id",
+            "account_code",
+            "account_name",
+            "period_type",
+            "period_number",
+            "budget_amount",
+            "committed_amount",
+            "actual_amount",
+            "variance",
+            "actuals_as_of",
+            "source",
+            "created_at",
+            "updated_at",
         )
 
 
@@ -104,8 +141,17 @@ class BudgetApprovalSerializer(serializers.ModelSerializer):
     class Meta:
         model = BudgetApproval
         fields = (
-            "id", "budget_id", "workflow_request_id", "approver_id", "approval_level", "status",
-            "decision_at", "notes", "rejection_reason", "created_by", "created_at",
+            "id",
+            "budget_id",
+            "workflow_request_id",
+            "approver_id",
+            "approval_level",
+            "status",
+            "decision_at",
+            "notes",
+            "rejection_reason",
+            "created_by",
+            "created_at",
         )
         read_only_fields = fields
 
@@ -134,8 +180,16 @@ class BudgetTransitionSerializer(serializers.ModelSerializer):
     class Meta:
         model = BudgetTransition
         fields = (
-            "id", "budget_id", "transition_key", "command", "from_state", "to_state",
-            "actor_id", "notes", "metadata", "occurred_at",
+            "id",
+            "budget_id",
+            "transition_key",
+            "command",
+            "from_state",
+            "to_state",
+            "actor_id",
+            "notes",
+            "metadata",
+            "occurred_at",
         )
         read_only_fields = fields
 
@@ -152,10 +206,21 @@ class VarianceAlertListSerializer(serializers.ModelSerializer):
     class Meta:
         model = VarianceAlert
         fields = (
-            "id", "budget_id", "budget_line_id", "alert_type", "threshold_percentage",
-            "variance_percentage", "budget_amount", "actual_amount", "committed_amount",
-            "alert_date", "notification_status", "notification_job_id", "acknowledged_at",
-            "acknowledged_by", "created_at",
+            "id",
+            "budget_id",
+            "budget_line_id",
+            "alert_type",
+            "threshold_percentage",
+            "variance_percentage",
+            "budget_amount",
+            "actual_amount",
+            "committed_amount",
+            "alert_date",
+            "notification_status",
+            "notification_job_id",
+            "acknowledged_at",
+            "acknowledged_by",
+            "created_at",
         )
 
 
@@ -170,9 +235,22 @@ class BudgetListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Budget
         fields = (
-            "id", "budget_code", "budget_name", "fiscal_year", "start_date", "end_date",
-            "budget_type", "department_id", "project_id", "status", "currency", "budget_ceiling",
-            "total_budget", "variance_indicator", "created_at", "updated_at",
+            "id",
+            "budget_code",
+            "budget_name",
+            "fiscal_year",
+            "start_date",
+            "end_date",
+            "budget_type",
+            "department_id",
+            "project_id",
+            "status",
+            "currency",
+            "budget_ceiling",
+            "total_budget",
+            "variance_indicator",
+            "created_at",
+            "updated_at",
         )
 
     def get_variance_indicator(self, obj: Budget) -> str:
@@ -184,7 +262,9 @@ class BudgetListSerializer(serializers.ModelSerializer):
         return "on_budget"
 
 
-class BudgetDetailSerializer(BudgetListSerializer):
+class BudgetDetailSerializer(serializers.ModelSerializer):
+    total_budget = MoneyField(read_only=True)
+    variance_indicator = serializers.SerializerMethodField()
     lines = BudgetLineReadSerializer(many=True, read_only=True)
     approvals = BudgetApprovalSerializer(many=True, read_only=True)
     transitions = BudgetTransitionSerializer(many=True, read_only=True)
@@ -192,12 +272,42 @@ class BudgetDetailSerializer(BudgetListSerializer):
     allowed_commands = serializers.SerializerMethodField()
     variance_summary = serializers.SerializerMethodField()
 
-    class Meta(BudgetListSerializer.Meta):
-        fields = BudgetListSerializer.Meta.fields + (
-            "submitted_at", "submitted_by", "approved_at", "approved_by", "rejected_at",
-            "rejected_by", "rejection_reason", "lines", "approvals", "transitions",
-            "variance_alerts", "allowed_commands", "variance_summary",
+    class Meta:
+        model = Budget
+        fields = (
+            "id",
+            "budget_code",
+            "budget_name",
+            "fiscal_year",
+            "start_date",
+            "end_date",
+            "budget_type",
+            "department_id",
+            "project_id",
+            "status",
+            "currency",
+            "budget_ceiling",
+            "total_budget",
+            "variance_indicator",
+            "created_at",
+            "updated_at",
+            "submitted_at",
+            "submitted_by",
+            "approved_at",
+            "approved_by",
+            "rejected_at",
+            "rejected_by",
+            "rejection_reason",
+            "lines",
+            "approvals",
+            "transitions",
+            "variance_alerts",
+            "allowed_commands",
+            "variance_summary",
         )
+
+    def get_variance_indicator(self, obj: Budget) -> str:
+        return BudgetListSerializer().get_variance_indicator(obj)
 
     def get_allowed_commands(self, obj: Budget) -> list[str]:
         return {
@@ -214,10 +324,14 @@ class BudgetDetailSerializer(BudgetListSerializer):
         actual = sum((line.actual_amount for line in active), Decimal("0.00"))
         committed = sum((line.committed_amount for line in active), Decimal("0.00"))
         variance = obj.total_budget - actual
-        percentage = None if obj.total_budget == 0 else (variance / obj.total_budget * Decimal("100")).quantize(Decimal("0.01"))
+        percentage = (
+            None if obj.total_budget == 0 else (variance / obj.total_budget * Decimal("100")).quantize(Decimal("0.01"))
+        )
         return {
-            "budgeted": f"{obj.total_budget:.2f}", "committed": f"{committed:.2f}",
-            "actual": f"{actual:.2f}", "variance": f"{variance:.2f}",
+            "budgeted": f"{obj.total_budget:.2f}",
+            "committed": f"{committed:.2f}",
+            "actual": f"{actual:.2f}",
+            "variance": f"{variance:.2f}",
             "variance_percentage": None if percentage is None else f"{percentage:.2f}",
         }
 
@@ -374,8 +488,14 @@ class AsyncJobSummarySerializer(serializers.ModelSerializer):
     class Meta:
         model = AsyncJob
         fields = (
-            "id", "job_type", "command", "status", "idempotency_key", "correlation_id",
-            "created_at", "updated_at",
+            "id",
+            "job_type",
+            "command",
+            "status",
+            "idempotency_key",
+            "correlation_id",
+            "created_at",
+            "updated_at",
         )
         read_only_fields = fields
 

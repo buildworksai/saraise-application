@@ -22,7 +22,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from difflib import SequenceMatcher
-from typing import Final
+from typing import Any, Final, cast
 from uuid import UUID
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -30,8 +30,8 @@ from django.db import IntegrityError, transaction
 from django.db.models import Avg, Count, Q, QuerySet
 from django.db.models.functions import TruncDate
 from django.utils import timezone
-from jsonschema import Draft202012Validator, FormatChecker
-from jsonschema.exceptions import SchemaError
+from jsonschema import Draft202012Validator, FormatChecker  # type: ignore[import-untyped]
+from jsonschema.exceptions import SchemaError  # type: ignore[import-untyped]
 
 from src.core.api import OperationFailed
 from src.core.async_jobs.models import AsyncJob, OutboxEvent
@@ -235,7 +235,7 @@ def _imported_rule_snapshot(
     *,
     kind: str,
     expected_rule_id: UUID,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     maximum = int(_configuration_section(tenant_id, "schema_policy")["max_payload_bytes"])
     value = _object(document, "document", maximum_bytes=maximum)
     expected = {"schema", "document_version", "rule_id", "version_number", "snapshot"}
@@ -322,7 +322,7 @@ def _text(value: object, field: str, *, maximum: int, blank: bool = False) -> st
     return normalized
 
 
-def _object(value: object, field: str, *, maximum_bytes: int = 10_485_760) -> dict[str, object]:
+def _object(value: object, field: str, *, maximum_bytes: int = 10_485_760) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise MDMDomainError("VALIDATION_ERROR", f"{field} must be an object.", detail={field: "Must be an object."})
     try:
@@ -336,7 +336,7 @@ def _object(value: object, field: str, *, maximum_bytes: int = 10_485_760) -> di
             f"{field} exceeds the configured payload limit.",
             http_status=413,
         )
-    return decoded
+    return cast(dict[str, Any], decoded)
 
 
 def _paths(
@@ -637,7 +637,7 @@ BUILTIN_TYPES: Final[tuple[dict[str, object], ...]] = (
 )
 
 
-DEFAULT_CONFIGURATION: Final[dict[str, object]] = {
+DEFAULT_CONFIGURATION: Final[dict[str, Any]] = {
     "environment": "default",
     "schema_policy": {
         "entity_type_key_pattern": r"^[a-z][a-z0-9_]{1,63}$",
@@ -834,11 +834,11 @@ class ConfigurationService:
     REQUIRED_SECTIONS: Final = frozenset(DEFAULT_CONFIGURATION)
 
     @staticmethod
-    def defaults() -> dict[str, object]:
+    def defaults() -> dict[str, Any]:
         return deepcopy(DEFAULT_CONFIGURATION)
 
     @classmethod
-    def validate_document(cls, value: object) -> dict[str, object]:
+    def validate_document(cls, value: object) -> dict[str, Any]:
         document = _object(value, "document")
         missing = cls.REQUIRED_SECTIONS - set(document)
         unknown = set(document) - cls.REQUIRED_SECTIONS
@@ -852,7 +852,7 @@ class ConfigurationService:
         if not isinstance(environment, str) or not environment.strip() or len(environment) > 64:
             raise MDMDomainError("INVALID_CONFIGURATION", "environment must be a non-empty identifier.")
 
-        def section(name: str) -> dict[str, object]:
+        def section(name: str) -> dict[str, Any]:
             raw = document.get(name)
             if not isinstance(raw, dict):
                 raise MDMDomainError(
@@ -860,7 +860,7 @@ class ConfigurationService:
                     f"{name} must be an object.",
                     detail={name: "Must be an object."},
                 )
-            return raw
+            return cast(dict[str, Any], raw)
 
         def bounded_integer(
             values: Mapping[str, object],
@@ -984,13 +984,13 @@ class ConfigurationService:
         for bucket in buckets:
             if not isinstance(bucket, dict):
                 raise MDMDomainError("INVALID_CONFIGURATION", "Each dashboard score bucket must be an object.")
-            minimum = Decimal(str(bucket.get("minimum")))
-            maximum = Decimal(str(bucket.get("maximum")))
-            if minimum < 0 or maximum > score_scale or minimum >= maximum:
+            bucket_minimum = Decimal(str(bucket.get("minimum")))
+            bucket_maximum = Decimal(str(bucket.get("maximum")))
+            if bucket_minimum < 0 or bucket_maximum > score_scale or bucket_minimum >= bucket_maximum:
                 raise MDMDomainError("INVALID_CONFIGURATION", "Dashboard score bucket bounds are invalid.")
-            if previous_minimum is not None and maximum != previous_minimum:
+            if previous_minimum is not None and bucket_maximum != previous_minimum:
                 raise MDMDomainError("INVALID_CONFIGURATION", "Dashboard score buckets must be contiguous.")
-            previous_minimum = minimum
+            previous_minimum = bucket_minimum
         bounded_integer(dashboard, "trend_window_days", minimum=1, maximum=3_650)
         bounded_integer(dashboard, "recent_activity_limit", minimum=1, maximum=1_000)
         bounded_integer(dashboard, "minimum_bar_percent", minimum=0, maximum=100)
@@ -1001,7 +1001,8 @@ class ConfigurationService:
         if not isinstance(operational.get("job_poll_statuses"), list):
             raise MDMDomainError("INVALID_CONFIGURATION", "operational.job_poll_statuses must be an array.")
         valid_job_statuses = {"queued", "running", "retrying", "succeeded", "failed", "cancelled", "timed_out"}
-        if not set(operational["job_poll_statuses"]).issubset(valid_job_statuses):
+        job_poll_statuses = operational["job_poll_statuses"]
+        if not isinstance(job_poll_statuses, list) or not set(job_poll_statuses).issubset(valid_job_statuses):
             raise MDMDomainError("INVALID_CONFIGURATION", "operational.job_poll_statuses contains an invalid status.")
 
         rollout = section("feature_rollout")
@@ -1009,7 +1010,8 @@ class ConfigurationService:
         if not isinstance(rollout.get("enabled"), bool):
             raise MDMDomainError("INVALID_CONFIGURATION", "feature_rollout.enabled must be boolean.")
         for key in ("modes", "roles", "cohorts"):
-            if not isinstance(rollout.get(key), list) or any(not isinstance(item, str) for item in rollout[key]):
+            rollout_values = rollout.get(key)
+            if not isinstance(rollout_values, list) or any(not isinstance(item, str) for item in rollout_values):
                 raise MDMDomainError("INVALID_CONFIGURATION", f"feature_rollout.{key} must be a string list.")
 
         lifecycle = section("lifecycle")
@@ -1062,7 +1064,8 @@ class ConfigurationService:
         bounded_integer(ui, "sidebar_order", minimum=0, maximum=10_000)
         bounded_integer(ui, "skeleton_cards", minimum=1, maximum=50)
         bounded_integer(ui, "list_page_size", minimum=1, maximum=500)
-        issue_statuses = workflows["quality_issue"]["states"]
+        issue_workflow = workflows["quality_issue"]
+        issue_statuses = issue_workflow["states"]
         if (
             not isinstance(ui.get("quality_issue_default_status"), str)
             or ui["quality_issue_default_status"] not in issue_statuses
@@ -1086,7 +1089,8 @@ class ConfigurationService:
             )
 
         merge = section("merge")
-        entity_states = set(workflows["entity"]["states"])
+        entity_workflow = workflows["entity"]
+        entity_states = set(entity_workflow["states"])
         allowed_statuses = merge.get("allowed_statuses")
         if (
             not isinstance(allowed_statuses, list)
@@ -1128,13 +1132,13 @@ class ConfigurationService:
         if (
             not isinstance(source_system, str)
             or not source_system.strip()
-            or len(source_system) > int(limits["source_system_max"])
+            or len(source_system) > int(cast(int, limits["source_system_max"]))
         ):
             raise MDMDomainError("INVALID_CONFIGURATION", "entity_defaults.source_system is invalid.")
         return document
 
     @classmethod
-    def get_effective(cls, tenant_id: UUID) -> dict[str, object]:
+    def get_effective(cls, tenant_id: UUID) -> dict[str, Any]:
         tenant = _uuid(tenant_id, "tenant_id")
         with tenant_context(tenant):
             current = MasterDataConfiguration.objects.for_tenant(tenant).first()
@@ -1301,7 +1305,7 @@ class ConfigurationService:
             )
 
 
-def _configuration_section(tenant_id: UUID, name: str) -> dict[str, object]:
+def _configuration_section(tenant_id: UUID, name: str) -> dict[str, Any]:
     section = ConfigurationService.get_effective(tenant_id).get(name)
     if not isinstance(section, dict):
         raise MDMDomainError(
@@ -1309,7 +1313,7 @@ def _configuration_section(tenant_id: UUID, name: str) -> dict[str, object]:
             f"The required {name} policy is unavailable.",
             http_status=503,
         )
-    return section
+    return cast(dict[str, Any], section)
 
 
 class EntityTypeService:
@@ -1354,9 +1358,7 @@ class EntityTypeService:
             ),
             "json_schema": _validate_schema(
                 json_schema,
-                allowed_keywords=frozenset(
-                    str(item) for item in schema_policy["allowed_json_schema_keywords"]  # type: ignore[union-attr]
-                ),
+                allowed_keywords=frozenset(str(item) for item in schema_policy["allowed_json_schema_keywords"]),
                 maximum_bytes=maximum_bytes,
             ),
             "required_fields": _paths(required_fields, "required_fields", pattern=path_pattern),
@@ -1459,10 +1461,7 @@ class EntityTypeService:
                 if name == "json_schema":
                     value = _validate_schema(
                         value,
-                        allowed_keywords=frozenset(
-                            str(item)
-                            for item in schema_policy["allowed_json_schema_keywords"]  # type: ignore[union-attr]
-                        ),
+                        allowed_keywords=frozenset(str(item) for item in schema_policy["allowed_json_schema_keywords"]),
                         maximum_bytes=maximum_bytes,
                     )
                 elif name in {"required_fields", "sensitive_fields", "searchable_fields"}:
@@ -1587,8 +1586,8 @@ class EntityTypeService:
                             "required": required,
                             "additionalProperties": False,
                         },
-                        required_fields=required,  # type: ignore[arg-type]
-                        sensitive_fields=definition["sensitive"],  # type: ignore[arg-type]
+                        required_fields=required,
+                        sensitive_fields=definition["sensitive"],
                         searchable_fields=["name"],
                         owner_module="master_data_management",
                         idempotency_key=f"seed-builtin:{key}",
@@ -1628,7 +1627,7 @@ class DataQualityService:
                 findings.append(ValidationFinding(path, "SCHEMA_VALIDATION", error.message))
             for path in entity_type.required_fields:
                 exists, value = _get_path(payload, path)
-                if not exists or value in missing_values:  # type: ignore[operator]
+                if not exists or value in missing_values:
                     if not any(item.field_path == path and item.code == "REQUIRED" for item in findings):
                         findings.append(
                             ValidationFinding(path, "REQUIRED", "A required value is missing.", "completeness", "error")
@@ -1644,7 +1643,7 @@ class DataQualityService:
         failed = False
         code = f"QUALITY_{rule.rule_type.upper()}"
         if rule.rule_type == "required":
-            failed = not exists or value in missing_values  # type: ignore[operator]
+            failed = not exists or value in missing_values
         elif rule.rule_type == "format":
             pattern = config.get("pattern")
             failed = (
@@ -1748,7 +1747,7 @@ class DataQualityService:
                     else {}
                 )
                 raw_findings = stored.get("finding_summaries", [])
-                findings = (
+                stored_findings = (
                     tuple(
                         ValidationFinding(
                             field_path=str(item.get("field_path", "")),
@@ -1770,7 +1769,7 @@ class DataQualityService:
                     Decimal(str(stored["quality_score"])) if stored.get("quality_score") is not None else None,
                     dimensions,
                     int(stored.get("issue_count", 0)),
-                    findings,
+                    stored_findings,
                 )
             entity = (
                 MasterDataEntity.objects.for_tenant(tenant)
@@ -2122,7 +2121,7 @@ class MasterEntityService:
                 "Entity data does not satisfy its schema.",
                 detail={"findings": [asdict(finding) for finding in report.findings]},
             )
-        values = {
+        values: dict[str, Any] = {
             "entity_type_id": str(type_id),
             "entity_code": _text(entity_code, "entity_code", maximum=int(limits["entity_code_max"])),
             "entity_name": _text(entity_name, "entity_name", maximum=int(limits["entity_name_max"])),
@@ -2531,7 +2530,10 @@ def _soundex(value: object, policy: Mapping[str, object]) -> str:
     if not isinstance(raw_mapping, Mapping):
         raise MDMDomainError("CONFIGURATION_UNAVAILABLE", "Soundex mapping is unavailable.", http_status=503)
     mapping = {str(key): str(code) for key, code in raw_mapping.items()}
-    output_length = int(policy["soundex_output_length"])
+    raw_output_length = policy["soundex_output_length"]
+    if isinstance(raw_output_length, bool) or not isinstance(raw_output_length, int):
+        raise MDMDomainError("CONFIGURATION_UNAVAILABLE", "Soundex output length is unavailable.", http_status=503)
+    output_length = raw_output_length
     output = [normalized[0]]
     previous = mapping.get(normalized[0], "")
     for character in normalized[1:]:
@@ -2539,7 +2541,7 @@ def _soundex(value: object, policy: Mapping[str, object]) -> str:
         if code and code != previous:
             output.append(code)
         previous = code
-    return ("".join(output) + ("0" * output_length))[:output_length]
+    return str(("".join(output) + ("0" * output_length))[:output_length])
 
 
 class MatchingService:
@@ -2554,7 +2556,7 @@ class MatchingService:
     ) -> tuple[dict[str, str], list[str], Decimal, Decimal]:
         matching = _configuration_section(tenant_id, "matching")
         schema_policy = _configuration_section(tenant_id, "schema_policy")
-        if algorithm not in matching["algorithms"]:  # type: ignore[operator]
+        if algorithm not in matching["algorithms"]:
             raise MDMDomainError("UNSUPPORTED_MATCHING_ALGORITHM", "Unsupported deterministic matching algorithm.")
         if not isinstance(field_weights, Mapping):
             raise MDMDomainError("VALIDATION_ERROR", "field_weights must be an object.")
@@ -2845,8 +2847,8 @@ class MatchingService:
             weights, blocks, review, auto = cls._validate_rule(
                 tenant,
                 str(snapshot["algorithm"]),
-                snapshot["field_weights"],  # type: ignore[arg-type]
-                snapshot["blocking_fields"],  # type: ignore[arg-type]
+                snapshot["field_weights"],
+                snapshot["blocking_fields"],
                 snapshot["review_threshold"],
                 snapshot["auto_confirm_threshold"],
             )
@@ -3169,7 +3171,7 @@ class MatchingService:
             _uuid(candidate_id, "candidate_id"),
         )
         matching = _configuration_section(tenant, "matching")
-        if decision not in matching["review_decisions"]:  # type: ignore[operator]
+        if decision not in matching["review_decisions"]:
             raise MDMDomainError("INVALID_MATCH_DECISION", "Decision is not enabled by matching policy.")
         review_note = _text(
             note,
@@ -3451,7 +3453,9 @@ class QualityRuleService:
         with tenant_context(tenant):
             if not DataQualityRule.objects.for_tenant(tenant).filter(pk=identifier).exists():
                 raise MDMDomainError("RESOURCE_NOT_FOUND", "Quality rule not found.", http_status=404)
-            return DataQualityRuleVersion.objects.for_tenant(tenant).filter(rule_id=identifier).order_by("-version_number")
+            return (
+                DataQualityRuleVersion.objects.for_tenant(tenant).filter(rule_id=identifier).order_by("-version_number")
+            )
 
     @classmethod
     def export_document(cls, tenant_id: UUID, rule_id: UUID) -> dict[str, object]:
@@ -3509,7 +3513,7 @@ class QualityRuleService:
             configuration = cls._configuration(
                 tenant,
                 rule_type,
-                snapshot["configuration"],  # type: ignore[arg-type]
+                snapshot["configuration"],
                 path,
             )
             if not isinstance(snapshot["is_active"], bool) or not isinstance(snapshot["is_deleted"], bool):
@@ -3639,7 +3643,7 @@ class MergeService:
             entity_query = entity_query.select_for_update()
         current = {entity.id: entity for entity in entity_query.order_by("id")}
         configuration = ConfigurationService.get_effective(tenant)
-        increment = int(configuration["merge"]["reversal_expected_version_increment"])  # type: ignore[index]
+        increment = int(configuration["merge"]["reversal_expected_version_increment"])
         versions: dict[str, int] = {}
         conflicts: list[MergeReversalConflict] = []
         for participant in participants:
@@ -3718,7 +3722,7 @@ class MergeService:
             if len({record.entity_type_id for record in records}) != 1:
                 raise MDMDomainError("MERGE_TYPE_MISMATCH", "All merge entities must share one entity type.")
             allowed_statuses = merge_policy["allowed_statuses"]
-            if any(record.status not in allowed_statuses for record in records):  # type: ignore[operator]
+            if any(record.status not in allowed_statuses for record in records):
                 raise MDMDomainError(
                     "MERGE_STATUS_INVALID", "A record state is not enabled for merge.", http_status=409
                 )
@@ -3848,7 +3852,7 @@ class MergeService:
                     tenant_id=tenant,
                     merge_history=history,
                     source_entity=record,
-                    source_version=int(snapshots[record.id]["version"]),
+                    source_version=int(cast(int, snapshots[record.id]["version"])),
                     source_snapshot=snapshots[record.id],
                     role=role,
                 )
@@ -4103,20 +4107,20 @@ class DashboardService:
                 }
             )
             trend_since = timezone.now() - timedelta(days=int(dashboard["trend_window_days"]))
-            quality_trend = list(
+            raw_quality_trend = list(
                 entities.filter(quality_evaluated_at__gte=trend_since)
                 .annotate(day=TruncDate("quality_evaluated_at"))
                 .values("day")
                 .annotate(score=Avg("quality_score"), evaluated_count=Count("id"))
                 .order_by("day")
             )
-            quality_trend = [
+            quality_trend: list[dict[str, object]] = [
                 {
                     "date": row["day"],
                     "score": row["score"],
                     "evaluated_count": row["evaluated_count"],
                 }
-                for row in quality_trend
+                for row in raw_quality_trend
             ]
             events = OutboxEvent.objects.for_tenant(tenant).filter(
                 event_type__startswith="mdm.",

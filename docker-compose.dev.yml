@@ -2,7 +2,7 @@
 # All services (Phase 1-6) in single network with port standardization
 #
 # PORT CONVENTION:
-# - Platform containers: 1xxxx (e.g., 18000:8000)
+# - Platform containers: 1xxxx (e.g., 18004:8004)
 # - Application containers: 2xxxx (e.g., 28000:8000)
 
 services:
@@ -16,6 +16,7 @@ services:
   postgres:
     image: postgres:17-alpine
     container_name: application-db
+    command: ["postgres", "-c", "max_connections=300"]
     deploy:
       resources:
         limits:
@@ -23,7 +24,7 @@ services:
         reservations:
           memory: 256M
     ports:
-      - "25432:5432" # Application: 2xxxx
+      - "${POSTGRES_PORT:-25432}:5432" # Application: 2xxxx
     environment:
       - POSTGRES_DB=saraise
       - POSTGRES_USER=postgres
@@ -50,7 +51,7 @@ services:
         reservations:
           memory: 64M
     ports:
-      - "26379:6379" # Application: 2xxxx
+      - "${REDIS_PORT:-26379}:6379" # Application: 2xxxx
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -90,31 +91,159 @@ services:
         reservations:
           memory: 256M
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@application-db:5432/saraise
+      - DATABASE_URL=postgresql://saraise_app:saraise_app@application-db:5432/saraise
       - DB_NAME=saraise
-      - DB_USER=postgres
-      - DB_PASSWORD=postgres
+      - DB_USER=saraise_app
+      - DB_PASSWORD=saraise_app
+      - DB_MIGRATION_USER=postgres
+      - DB_MIGRATION_PASSWORD=postgres
+      - DB_RUNTIME_USER=saraise_app
+      - DB_RUNTIME_PASSWORD=saraise_app
       - DB_HOST=application-db
       - DB_PORT=5432
       - REDIS_URL=redis://application-redis:6379/0
       - DJANGO_SETTINGS_MODULE=saraise_backend.settings
       - PYTHONPATH=/app
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - SARAISE_ENCRYPTION_KEYS=${SARAISE_ENCRYPTION_KEYS:-}
+      - SARAISE_ACTIVE_ENCRYPTION_KEY_ID=${SARAISE_ACTIVE_ENCRYPTION_KEY_ID:-}
       - DEBUG=True
-      - ALLOWED_HOSTS=localhost,backend,backend:8000,0.0.0.0
+      - ALLOWED_HOSTS=localhost,127.0.0.1,backend,backend:8000,0.0.0.0
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:${FRONTEND_PORT:-25173},http://127.0.0.1:${FRONTEND_PORT:-25173},http://localhost:17000,http://127.0.0.1:17000}
+      - CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS:-http://localhost:${FRONTEND_PORT:-25173},http://127.0.0.1:${FRONTEND_PORT:-25173},http://localhost:17000,http://127.0.0.1:17000}
       - SARAISE_MODE=${SARAISE_MODE:-development}
       - SARAISE_LICENSE_MODE=${SARAISE_LICENSE_MODE:-connected}
+      - DOCUMENT_INTELLIGENCE_ARTIFACT_ROOT=/app/runtime/document-intelligence/artifacts
+      - BDR_LOCAL_STORAGE_ROOT=/app/runtime/bdr/storage
+      - BDR_LOCAL_RESTORE_ROOT=/app/runtime/bdr/restore
+      - EMAIL_BACKEND=django.core.mail.backends.locmem.EmailBackend
+      - EMAIL_MARKETING_DEFAULT_GATEWAY=local_development
     ports:
-      - "28000:8000" # Application: 2xxxx (fixed port)
+      - "${BACKEND_PORT:-28000}:8000" # Application: 2xxxx
     volumes:
       - ./backend:/app
       - backend_venv:/app/venv
+      - backend_runtime:/app/runtime
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"from urllib.request import urlopen; urlopen('http://localhost:8000/metrics/', timeout=2)\"",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
     command: ["/bin/bash", "/app/start.sh"]
+    networks:
+      - saraise-network
+
+  orchestration-scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: application-orchestration-scheduler
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 256M
+    environment:
+      - DATABASE_URL=postgresql://saraise_app:saraise_app@application-db:5432/saraise
+      - DB_NAME=saraise
+      - DB_USER=saraise_app
+      - DB_PASSWORD=saraise_app
+      - DB_HOST=application-db
+      - DB_PORT=5432
+      - REDIS_URL=redis://application-redis:6379/0
+      - DJANGO_SETTINGS_MODULE=saraise_backend.settings
+      - PYTHONPATH=/app
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - SARAISE_ENCRYPTION_KEYS=${SARAISE_ENCRYPTION_KEYS:-}
+      - SARAISE_ACTIVE_ENCRYPTION_KEY_ID=${SARAISE_ACTIVE_ENCRYPTION_KEY_ID:-}
+      - DEBUG=True
+      - ALLOWED_HOSTS=localhost,127.0.0.1,backend,backend:8000,0.0.0.0
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:${FRONTEND_PORT:-25173},http://127.0.0.1:${FRONTEND_PORT:-25173},http://localhost:17000,http://127.0.0.1:17000}
+      - CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS:-http://localhost:${FRONTEND_PORT:-25173},http://127.0.0.1:${FRONTEND_PORT:-25173},http://localhost:17000,http://127.0.0.1:17000}
+      - SARAISE_MODE=${SARAISE_MODE:-development}
+      - SARAISE_LICENSE_MODE=${SARAISE_LICENSE_MODE:-connected}
+      - DOCUMENT_INTELLIGENCE_ARTIFACT_ROOT=/app/runtime/document-intelligence/artifacts
+      - BDR_LOCAL_STORAGE_ROOT=/app/runtime/bdr/storage
+      - BDR_LOCAL_RESTORE_ROOT=/app/runtime/bdr/restore
+      - EMAIL_BACKEND=django.core.mail.backends.locmem.EmailBackend
+      - EMAIL_MARKETING_DEFAULT_GATEWAY=local_development
+    volumes:
+      - ./backend:/app
+      - backend_venv:/app/venv
+      - backend_runtime:/app/runtime
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "manage.py", "run_orchestration_scheduler"]
+    networks:
+      - saraise-network
+
+  outbox-dispatcher:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: application-outbox-dispatcher
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 256M
+    environment:
+      - DATABASE_URL=postgresql://saraise_app:saraise_app@application-db:5432/saraise
+      - DB_NAME=saraise
+      - DB_USER=saraise_app
+      - DB_PASSWORD=saraise_app
+      - DB_HOST=application-db
+      - DB_PORT=5432
+      - REDIS_URL=redis://application-redis:6379/0
+      - DJANGO_SETTINGS_MODULE=saraise_backend.settings
+      - PYTHONPATH=/app
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - SARAISE_ENCRYPTION_KEYS=${SARAISE_ENCRYPTION_KEYS:-}
+      - SARAISE_ACTIVE_ENCRYPTION_KEY_ID=${SARAISE_ACTIVE_ENCRYPTION_KEY_ID:-}
+      - DEBUG=True
+      - ALLOWED_HOSTS=localhost,127.0.0.1,backend,backend:8000,0.0.0.0
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:${FRONTEND_PORT:-25173},http://127.0.0.1:${FRONTEND_PORT:-25173},http://localhost:17000,http://127.0.0.1:17000}
+      - CSRF_TRUSTED_ORIGINS=${CSRF_TRUSTED_ORIGINS:-http://localhost:${FRONTEND_PORT:-25173},http://127.0.0.1:${FRONTEND_PORT:-25173},http://localhost:17000,http://127.0.0.1:17000}
+      - SARAISE_MODE=${SARAISE_MODE:-development}
+      - SARAISE_LICENSE_MODE=${SARAISE_LICENSE_MODE:-connected}
+      - DOCUMENT_INTELLIGENCE_ARTIFACT_ROOT=/app/runtime/document-intelligence/artifacts
+      - BDR_LOCAL_STORAGE_ROOT=/app/runtime/bdr/storage
+      - BDR_LOCAL_RESTORE_ROOT=/app/runtime/bdr/restore
+      - EMAIL_BACKEND=django.core.mail.backends.locmem.EmailBackend
+      - EMAIL_MARKETING_DEFAULT_GATEWAY=local_development
+    volumes:
+      - ./backend:/app
+      - backend_venv:/app/venv
+      - backend_runtime:/app/runtime
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      [
+        "python",
+        "manage.py",
+        "run_outbox_dispatcher",
+        "--acknowledge-domain-events",
+        "--interval",
+        "1",
+      ]
     networks:
       - saraise-network
 
@@ -129,20 +258,23 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 768M
         reservations:
-          memory: 128M
+          memory: 256M
     environment:
       - VITE_API_BASE_URL= # Empty - endpoints already include /api prefix, Vite proxy handles /api/*
+      - VITE_API_PROXY_TARGET=http://backend:8000
+      - VITE_DEV_SERVER_PORT=5173
       - NODE_ENV=development
       - DOCKER_ENV=true # Signal to Vite that we're in Docker
     ports:
-      - "25173:5173" # Application: 2xxxx (fixed port)
+      - "${FRONTEND_PORT:-25173}:5173" # Application: 2xxxx
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     command: npm run dev
     networks:
       - saraise-network
@@ -161,7 +293,7 @@ services:
         reservations:
           memory: 128M
     ports:
-      - "29090:9090" # Application: 2xxxx
+      - "${PROMETHEUS_PORT:-29090}:9090" # Application: 2xxxx
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
@@ -180,14 +312,14 @@ services:
     image: jaegertracing/all-in-one:latest
     container_name: application-jaeger
     ports:
-      - "25775:5775/udp" # Application: 2xxxx
-      - "26831:6831/udp" # Application: 2xxxx
-      - "26832:6832/udp" # Application: 2xxxx
-      - "25778:5778" # Application: 2xxxx
-      - "26686:16686" # Jaeger UI (Application: 2xxxx)
-      - "24268:14268" # Application: 2xxxx
-      - "24250:14250" # Application: 2xxxx
-      - "29411:9411" # Application: 2xxxx
+      - "${JAEGER_ZIPKIN_THRIFT_COMPACT_PORT:-25775}:5775/udp" # Application: 2xxxx
+      - "${JAEGER_AGENT_COMPACT_PORT:-26831}:6831/udp" # Application: 2xxxx
+      - "${JAEGER_AGENT_BINARY_PORT:-26832}:6832/udp" # Application: 2xxxx
+      - "${JAEGER_CONFIG_PORT:-25778}:5778" # Application: 2xxxx
+      - "${JAEGER_UI_PORT:-26686}:16686" # Jaeger UI (Application: 2xxxx)
+      - "${JAEGER_HTTP_COLLECTOR_PORT:-24268}:14268" # Application: 2xxxx
+      - "${JAEGER_GRPC_COLLECTOR_PORT:-24250}:14250" # Application: 2xxxx
+      - "${JAEGER_ZIPKIN_PORT:-29411}:9411" # Application: 2xxxx
     environment:
       - COLLECTOR_ZIPKIN_HOST_PORT=:9411
     networks:
@@ -205,7 +337,7 @@ services:
         reservations:
           memory: 128M
     ports:
-      - "23000:3000" # Application: 2xxxx
+      - "${GRAFANA_PORT:-23000}:3000" # Application: 2xxxx
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_ALLOW_SIGN_UP=false
@@ -232,7 +364,7 @@ services:
         reservations:
           memory: 64M
     ports:
-      - "29093:9093" # Application: 2xxxx
+      - "${ALERTMANAGER_PORT:-29093}:9093" # Application: 2xxxx
     volumes:
       - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     command:
@@ -252,3 +384,4 @@ volumes:
   grafana_data:
   backend_venv:
   frontend_node_modules:
+  backend_runtime:

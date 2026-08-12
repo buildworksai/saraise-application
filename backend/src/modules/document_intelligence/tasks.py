@@ -15,12 +15,7 @@ from src.core.async_jobs.services import register_handler
 from src.core.observability import get_correlation_id
 from src.core.tenancy import tenant_context_worker
 
-from .models import (
-    ClassificationStatus,
-    DocumentClassification,
-    DocumentExtraction,
-    ExtractionStatus,
-)
+from .models import ClassificationStatus, DocumentClassification, DocumentExtraction, ExtractionStatus
 from .services import ConfigurationService, DocumentClassificationService, DocumentExtractionService
 
 logger = logging.getLogger("saraise.document_intelligence.tasks")

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import Any, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from django.core import signing
@@ -12,11 +12,8 @@ from django.http import HttpResponse, HttpResponseRedirect
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import (
-    NotFound,
-    PermissionDenied,
-    ValidationError,
-)
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
@@ -94,7 +91,10 @@ from .services import (
 class PublicEmailThrottle(SimpleRateThrottle):
     scope = "email_marketing_public"
 
-    def allow_request(self, request: object, view: object) -> bool:
+    def get_rate(self) -> str:
+        return str(self.THROTTLE_RATES.get(self.scope) or "1/min")
+
+    def allow_request(self, request: Request, view: APIView) -> bool:
         tenant_id = getattr(request, "tenant_id", None)
         if tenant_id is None:
             return False
@@ -103,7 +103,7 @@ class PublicEmailThrottle(SimpleRateThrottle):
         self.num_requests, self.duration = self.parse_rate(self.rate)
         return super().allow_request(request, view)
 
-    def get_cache_key(self, request: object, view: object) -> str:
+    def get_cache_key(self, request: Request, view: APIView) -> str:
         del view
         ident = self.get_ident(request)
         return self.cache_format % {"scope": self.scope, "ident": ident}
@@ -132,9 +132,9 @@ class EmailMarketingViewSet(
         try:
             tenant = UUID(str(value))
         except (TypeError, ValueError, AttributeError):
-            self.request.tenant_id = None
+            cast(Any, self.request).tenant_id = None
             return None
-        self.request.tenant_id = tenant
+        cast(Any, self.request).tenant_id = tenant
         return tenant
 
     def tenant_id(self) -> UUID:
@@ -183,6 +183,7 @@ class EmailMarketingViewSet(
         paginator = self.paginator
         if paginator is None:
             raise RuntimeError("Governed pagination is required.")
+        paginator = cast(Any, paginator)
         paginator.page_size = pagination["default_page_size"]
         paginator.max_page_size = pagination["max_page_size"]
         page = self.paginate_queryset(queryset)
@@ -716,13 +717,10 @@ class ConfigurationViewSet(EmailMarketingViewSet):
         "import_document": "email_marketing.configuration:manage",
     }
 
-    def get_permissions(self) -> list:
+    def required_permission_for_action(self, action: str) -> str | None:
         if self.action == "current" and self.request.method == "PUT":
-            self.action_permissions = {
-                **self.action_permissions,
-                "current": "email_marketing.configuration:manage",
-            }
-        return super().get_permissions()
+            return "email_marketing.configuration:manage"
+        return super().required_permission_for_action(action)
 
     def get_queryset(self) -> Any:
         tenant = self.resolved_tenant_id()
@@ -795,15 +793,16 @@ class ProviderEventAPIView(GovernedAPIViewMixin, APIView):
     permission_classes = (ProviderWebhookPermission,)
     throttle_classes = (PublicEmailThrottle,)
 
-    def post(self, request: object) -> Response:
+    def post(self, request: Request) -> Response:
         gateway_key = str(getattr(request, "gateway_key", ""))
         try:
             verifier = get_provider_event_verifier(gateway_key)
         except AdapterNotRegistered as exc:
             raise PermissionDenied("No verifier is registered for this provider account.") from exc
         verified = verifier.verify(dict(self.request.headers), bytes(self.request.body))
+        tenant_id = cast(Any, self.request).tenant_id
         job = DeliveryService.enqueue_verified_provider_event(
-            self.request.tenant_id,
+            tenant_id,
             gateway_key,
             verified,
         )
@@ -837,12 +836,12 @@ class PublicUnsubscribeAPIView(GovernedAPIViewMixin, APIView):
     permission_classes: tuple = ()
     throttle_classes = (PublicEmailThrottle,)
 
-    def initial(self, request: object, *args: object, **kwargs: object) -> None:
+    def initial(self, request: Request, *args: object, **kwargs: object) -> None:
         token = str(getattr(request, "data", {}).get("token", ""))
-        request.tenant_id = _signed_tenant(token, "email_marketing.unsubscribe", "unsubscribe")
+        cast(Any, request).tenant_id = _signed_tenant(token, "email_marketing.unsubscribe", "unsubscribe")
         super().initial(request, *args, **kwargs)
 
-    def post(self, request: object) -> Response:
+    def post(self, request: Request) -> Response:
         token = str(self.request.data.get("token", ""))
         tenant = _signed_tenant(token, "email_marketing.unsubscribe", "unsubscribe")
         value = DeliveryService.unsubscribe(tenant, token, timezone.now())
@@ -854,19 +853,18 @@ class TrackingOpenAPIView(APIView):
     authentication_classes: tuple = ()
     permission_classes: tuple = ()
     throttle_classes = (PublicEmailThrottle,)
-    renderer_classes: tuple = ()
     pixel = (
         b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff"
         b"!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01"
         b"\x00\x00\x02\x02D\x01\x00;"
     )
 
-    def initial(self, request: object, *args: object, **kwargs: object) -> None:
+    def initial(self, request: Request, *args: object, **kwargs: object) -> None:
         token = str(kwargs.get("token", ""))
-        request.tenant_id = _signed_tenant(token, "email_marketing.tracking", "tracking")
+        cast(Any, request).tenant_id = _signed_tenant(token, "email_marketing.tracking", "tracking")
         super().initial(request, *args, **kwargs)
 
-    def get(self, request: object, token: str) -> HttpResponse:
+    def get(self, request: Request, token: str) -> HttpResponse:
         del request
         tenant = _signed_tenant(token, "email_marketing.tracking", "tracking")
         DeliveryService.record_open(tenant, token)
@@ -880,12 +878,12 @@ class TrackingClickAPIView(APIView):
     permission_classes: tuple = ()
     throttle_classes = (PublicEmailThrottle,)
 
-    def initial(self, request: object, *args: object, **kwargs: object) -> None:
+    def initial(self, request: Request, *args: object, **kwargs: object) -> None:
         token = str(kwargs.get("token", ""))
-        request.tenant_id = _signed_tenant(token, "email_marketing.tracking", "tracking")
+        cast(Any, request).tenant_id = _signed_tenant(token, "email_marketing.tracking", "tracking")
         super().initial(request, *args, **kwargs)
 
-    def get(self, request: object, token: str) -> HttpResponseRedirect:
+    def get(self, request: Request, token: str) -> HttpResponseRedirect:
         tenant = _signed_tenant(token, "email_marketing.tracking", "tracking")
         destination = str(self.request.query_params.get("destination", ""))
         _, url = DeliveryService.record_click(tenant, token, destination)

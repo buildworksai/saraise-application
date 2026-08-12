@@ -86,9 +86,7 @@ def profile_pair(tenant_a, tenant_b) -> tuple[SecurityProfile, SecurityProfile]:
 
 
 @pytest.fixture
-def user_role_pair(
-    tenant_a, tenant_b, tenant_a_user, tenant_b_user, role_pair
-) -> tuple[UserRole, UserRole]:
+def user_role_pair(tenant_a, tenant_b, tenant_a_user, tenant_b_user, role_pair) -> tuple[UserRole, UserRole]:
     own_role, foreign_role = role_pair
     return (
         UserRole.objects.create(
@@ -155,15 +153,11 @@ def resource_extension() -> SecurityExtensionDescriptor:
     )
     register_security_extension(descriptor)
     yield descriptor
-    unregister_security_extension(
-        descriptor.owner_manifest, expected_version=descriptor.owner_version
-    )
+    unregister_security_extension(descriptor.owner_manifest, expected_version=descriptor.owner_version)
 
 
 @pytest.fixture
-def field_security_pair(
-    tenant_a, tenant_b, role_pair
-) -> tuple[FieldSecurity, FieldSecurity]:
+def field_security_pair(tenant_a, tenant_b, role_pair) -> tuple[FieldSecurity, FieldSecurity]:
     own_role, foreign_role = role_pair
     return (
         FieldSecurity.objects.create(
@@ -184,9 +178,7 @@ def field_security_pair(
 
 
 @pytest.fixture
-def row_security_pair(
-    tenant_a, tenant_b, role_pair
-) -> tuple[RowSecurityRule, RowSecurityRule]:
+def row_security_pair(tenant_a, tenant_b, role_pair) -> tuple[RowSecurityRule, RowSecurityRule]:
     own_role, foreign_role = role_pair
     criteria = {"op": "tenant", "field": "tenant_id"}
     return (
@@ -276,9 +268,7 @@ class TestUserRoleIsolation(V2IsolationContract):
     update_payload = {"reason": "Attempted cross-tenant update"}
 
     @pytest.fixture(autouse=True)
-    def context(
-        self, authenticated_tenant_a_client, tenant_a, tenant_a_user, user_role_pair
-    ) -> None:
+    def context(self, authenticated_tenant_a_client, tenant_a, tenant_a_user, user_role_pair) -> None:
         self.client = authenticated_tenant_a_client
         self.tenant_a_row, self.tenant_b_row = user_role_pair
         self.create_role = Role.objects.create(
@@ -474,12 +464,86 @@ def test_every_tenant_list_and_detail_excludes_foreign_resources(
     actor = tenant_a_user.id
     foreign_actor = tenant_b_user.id
     pairs = [
-        ("user-roles", UserRole.objects.create(tenant_id=tenant_a.id, user=tenant_a_user, role=own_role, assigned_by=actor, reason="own"), UserRole.objects.create(tenant_id=tenant_b.id, user=tenant_b_user, role=foreign_role, assigned_by=foreign_actor, reason="foreign")),
-        ("user-permission-sets", UserPermissionSet.objects.create(tenant_id=tenant_a.id, user=tenant_a_user, permission_set=own_set, expires_at=timezone.now() + timedelta(days=1), granted_by=actor, reason="own"), UserPermissionSet.objects.create(tenant_id=tenant_b.id, user=tenant_b_user, permission_set=foreign_set, expires_at=timezone.now() + timedelta(days=1), granted_by=foreign_actor, reason="foreign")),
-        ("field-security", FieldSecurity.objects.create(tenant_id=tenant_a.id, module="m", resource="r", field="f", role=own_role), FieldSecurity.objects.create(tenant_id=tenant_b.id, module="m", resource="r", field="f", role=foreign_role)),
-        ("row-security-rules", RowSecurityRule.objects.create(tenant_id=tenant_a.id, module="m", resource="r", role=own_role, filter_criteria={"op": "tenant", "field": "tenant_id"}), RowSecurityRule.objects.create(tenant_id=tenant_b.id, module="m", resource="r", role=foreign_role, filter_criteria={"op": "tenant", "field": "tenant_id"})),
-        ("security-profile-assignments", SecurityProfileAssignment.objects.create(tenant_id=tenant_a.id, security_profile=own_profile, user=tenant_a_user, assigned_by=actor, reason="own"), SecurityProfileAssignment.objects.create(tenant_id=tenant_b.id, security_profile=foreign_profile, user=tenant_b_user, assigned_by=foreign_actor, reason="foreign")),
-        ("audit-logs", SecurityAuditLog.objects.create(tenant_id=tenant_a.id, action="own", actor_id=actor, resource_type="test", correlation_id="own"), SecurityAuditLog.objects.create(tenant_id=tenant_b.id, action="foreign", actor_id=foreign_actor, resource_type="test", correlation_id="foreign")),
+        (
+            "user-roles",
+            UserRole.objects.create(
+                tenant_id=tenant_a.id, user=tenant_a_user, role=own_role, assigned_by=actor, reason="own"
+            ),
+            UserRole.objects.create(
+                tenant_id=tenant_b.id,
+                user=tenant_b_user,
+                role=foreign_role,
+                assigned_by=foreign_actor,
+                reason="foreign",
+            ),
+        ),
+        (
+            "user-permission-sets",
+            UserPermissionSet.objects.create(
+                tenant_id=tenant_a.id,
+                user=tenant_a_user,
+                permission_set=own_set,
+                expires_at=timezone.now() + timedelta(days=1),
+                granted_by=actor,
+                reason="own",
+            ),
+            UserPermissionSet.objects.create(
+                tenant_id=tenant_b.id,
+                user=tenant_b_user,
+                permission_set=foreign_set,
+                expires_at=timezone.now() + timedelta(days=1),
+                granted_by=foreign_actor,
+                reason="foreign",
+            ),
+        ),
+        (
+            "field-security",
+            FieldSecurity.objects.create(tenant_id=tenant_a.id, module="m", resource="r", field="f", role=own_role),
+            FieldSecurity.objects.create(tenant_id=tenant_b.id, module="m", resource="r", field="f", role=foreign_role),
+        ),
+        (
+            "row-security-rules",
+            RowSecurityRule.objects.create(
+                tenant_id=tenant_a.id,
+                module="m",
+                resource="r",
+                role=own_role,
+                filter_criteria={"op": "tenant", "field": "tenant_id"},
+            ),
+            RowSecurityRule.objects.create(
+                tenant_id=tenant_b.id,
+                module="m",
+                resource="r",
+                role=foreign_role,
+                filter_criteria={"op": "tenant", "field": "tenant_id"},
+            ),
+        ),
+        (
+            "security-profile-assignments",
+            SecurityProfileAssignment.objects.create(
+                tenant_id=tenant_a.id, security_profile=own_profile, user=tenant_a_user, assigned_by=actor, reason="own"
+            ),
+            SecurityProfileAssignment.objects.create(
+                tenant_id=tenant_b.id,
+                security_profile=foreign_profile,
+                user=tenant_b_user,
+                assigned_by=foreign_actor,
+                reason="foreign",
+            ),
+        ),
+        (
+            "audit-logs",
+            SecurityAuditLog.objects.create(
+                tenant_id=tenant_a.id, action="own", actor_id=actor, resource_type="test", correlation_id="own"
+            ),
+            SecurityAuditLog.objects.create(
+                tenant_id=tenant_b.id,
+                action="foreign",
+                actor_id=foreign_actor,
+                resource_type="test",
+                correlation_id="foreign",
+            ),
+        ),
     ]
     for collection, own, foreign in pairs:
         response = authenticated_tenant_a_client.get(f"{BASE}/{collection}/")
@@ -502,31 +566,122 @@ def test_cross_tenant_nested_membership_decision_assignment_simulation_and_mutat
     _, foreign_profile = profile_pair
     permission = Permission.objects.create(module="m", resource="r", action="read", name="Read")
     role_decision = RolePermission.objects.create(tenant_id=tenant_b.id, role=foreign_role, permission=permission)
-    membership = PermissionSetPermission.objects.create(tenant_id=tenant_b.id, permission_set=foreign_set, permission=permission, added_by=tenant_b_user.id)
-    role_decision.refresh_from_db(); membership.refresh_from_db()
+    membership = PermissionSetPermission.objects.create(
+        tenant_id=tenant_b.id, permission_set=foreign_set, permission=permission, added_by=tenant_b_user.id
+    )
+    role_decision.refresh_from_db()
+    membership.refresh_from_db()
     before_role, before_set = snapshot(role_decision), snapshot(membership)
-    assert authenticated_tenant_a_client.post(f"{BASE}/roles/{foreign_role.id}/permissions/", {"permission_id": str(permission.id), "is_granted": False}, format="json").status_code == 404
-    assert authenticated_tenant_a_client.delete(f"{BASE}/roles/{foreign_role.id}/permissions/{permission.id}/").status_code == 404
-    assert authenticated_tenant_a_client.put(f"{BASE}/permission-sets/{foreign_set.id}/permissions/", {"permission_ids": []}, format="json").status_code == 404
-    assert authenticated_tenant_a_client.post(f"{BASE}/user-roles/", {"user_id": str(tenant_b_user.id), "role_id": str(foreign_role.id), "reason": "spoof"}, format="json").status_code == 404
-    assert authenticated_tenant_a_client.post(f"{BASE}/user-permission-sets/", {"user_id": str(tenant_b_user.id), "permission_set_id": str(foreign_set.id), "duration_days": 1, "reason": "spoof"}, format="json").status_code == 404
-    assert authenticated_tenant_a_client.post(f"{BASE}/security-profile-assignments/", {"security_profile_id": str(foreign_profile.id), "user_id": str(tenant_b_user.id), "reason": "spoof"}, format="json").status_code == 404
-    assert authenticated_tenant_a_client.post(f"{BASE}/access-decisions/simulate/", {"subject_id": str(tenant_b_user.id), "permission_code": permission.code, "resource_context": {}}, format="json").status_code == 404
-    role_decision.refresh_from_db(); membership.refresh_from_db()
+    assert (
+        authenticated_tenant_a_client.post(
+            f"{BASE}/roles/{foreign_role.id}/permissions/",
+            {"permission_id": str(permission.id), "is_granted": False},
+            format="json",
+        ).status_code
+        == 404
+    )
+    assert (
+        authenticated_tenant_a_client.delete(f"{BASE}/roles/{foreign_role.id}/permissions/{permission.id}/").status_code
+        == 404
+    )
+    assert (
+        authenticated_tenant_a_client.put(
+            f"{BASE}/permission-sets/{foreign_set.id}/permissions/", {"permission_ids": []}, format="json"
+        ).status_code
+        == 404
+    )
+    assert (
+        authenticated_tenant_a_client.post(
+            f"{BASE}/user-roles/",
+            {"user_id": str(tenant_b_user.id), "role_id": str(foreign_role.id), "reason": "spoof"},
+            format="json",
+        ).status_code
+        == 404
+    )
+    assert (
+        authenticated_tenant_a_client.post(
+            f"{BASE}/user-permission-sets/",
+            {
+                "user_id": str(tenant_b_user.id),
+                "permission_set_id": str(foreign_set.id),
+                "duration_days": 1,
+                "reason": "spoof",
+            },
+            format="json",
+        ).status_code
+        == 404
+    )
+    assert (
+        authenticated_tenant_a_client.post(
+            f"{BASE}/security-profile-assignments/",
+            {"security_profile_id": str(foreign_profile.id), "user_id": str(tenant_b_user.id), "reason": "spoof"},
+            format="json",
+        ).status_code
+        == 404
+    )
+    assert (
+        authenticated_tenant_a_client.post(
+            f"{BASE}/access-decisions/simulate/",
+            {"subject_id": str(tenant_b_user.id), "permission_code": permission.code, "resource_context": {}},
+            format="json",
+        ).status_code
+        == 404
+    )
+    role_decision.refresh_from_db()
+    membership.refresh_from_db()
     assert snapshot(role_decision) == before_role and snapshot(membership) == before_set
 
 
 def test_foreign_update_delete_for_assignment_rule_and_profile_are_404(
     authenticated_tenant_a_client, tenant_b, tenant_b_user, role_pair, set_pair, profile_pair
 ) -> None:
-    _, role = role_pair; _, permission_set = set_pair; _, profile = profile_pair
+    _, role = role_pair
+    _, permission_set = set_pair
+    _, profile = profile_pair
     actor = tenant_b_user.id
     rows = [
-        (UserRole.objects.create(tenant_id=tenant_b.id, user=tenant_b_user, role=role, assigned_by=actor, reason="foreign"), "user-roles", {"reason": "changed"}),
-        (UserPermissionSet.objects.create(tenant_id=tenant_b.id, user=tenant_b_user, permission_set=permission_set, expires_at=timezone.now() + timedelta(days=1), granted_by=actor, reason="foreign"), "user-permission-sets", {"expires_at": (timezone.now() + timedelta(days=2)).isoformat()}),
-        (FieldSecurity.objects.create(tenant_id=tenant_b.id, module="m", resource="r", field="f2", role=role), "field-security", {"visibility": "hidden"}),
-        (RowSecurityRule.objects.create(tenant_id=tenant_b.id, module="m", resource="r2", role=role, filter_criteria={"op": "tenant", "field": "tenant_id"}), "row-security-rules", {"priority": 10}),
-        (SecurityProfileAssignment.objects.create(tenant_id=tenant_b.id, security_profile=profile, user=tenant_b_user, assigned_by=actor, reason="foreign"), "security-profile-assignments", {"precedence": 10}),
+        (
+            UserRole.objects.create(
+                tenant_id=tenant_b.id, user=tenant_b_user, role=role, assigned_by=actor, reason="foreign"
+            ),
+            "user-roles",
+            {"reason": "changed"},
+        ),
+        (
+            UserPermissionSet.objects.create(
+                tenant_id=tenant_b.id,
+                user=tenant_b_user,
+                permission_set=permission_set,
+                expires_at=timezone.now() + timedelta(days=1),
+                granted_by=actor,
+                reason="foreign",
+            ),
+            "user-permission-sets",
+            {"expires_at": (timezone.now() + timedelta(days=2)).isoformat()},
+        ),
+        (
+            FieldSecurity.objects.create(tenant_id=tenant_b.id, module="m", resource="r", field="f2", role=role),
+            "field-security",
+            {"visibility": "hidden"},
+        ),
+        (
+            RowSecurityRule.objects.create(
+                tenant_id=tenant_b.id,
+                module="m",
+                resource="r2",
+                role=role,
+                filter_criteria={"op": "tenant", "field": "tenant_id"},
+            ),
+            "row-security-rules",
+            {"priority": 10},
+        ),
+        (
+            SecurityProfileAssignment.objects.create(
+                tenant_id=tenant_b.id, security_profile=profile, user=tenant_b_user, assigned_by=actor, reason="foreign"
+            ),
+            "security-profile-assignments",
+            {"precedence": 10},
+        ),
     ]
     for row, collection, update in rows:
         assert_foreign_unchanged(authenticated_tenant_a_client, row, collection, update)

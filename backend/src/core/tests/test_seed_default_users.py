@@ -1,0 +1,274 @@
+"""Regression tests for development user seeding guardrails."""
+
+from __future__ import annotations
+
+import os
+import sys
+import uuid
+from io import StringIO
+
+import pytest
+
+if os.environ.get("DJANGO_USE_SQLITE_FOR_TESTS") == "1" or (
+    os.environ.get("DJANGO_USE_SQLITE_FOR_TESTS") is None and any("pytest" in arg for arg in sys.argv)
+):
+    pytest.skip(
+        "seed_default_users identity-scope regression requires PostgreSQL migrations",
+        allow_module_level=True,
+    )
+
+from django.contrib.auth import get_user_model
+from django.core.management import call_command
+from django.test import override_settings
+
+from src.core.access.entitlements import Entitlement, Quota
+from src.core.licensing.models import License, LicenseStatus, Organization
+from src.core.management.commands.seed_default_users import LOCAL_DEVELOPMENT_API_CALLS_PER_DAY
+from src.core.tenancy.rls import tenant_context
+from src.core.user_models import UserProfile
+from src.modules.ai_provider_configuration.models import AIModel, AIProvider
+from src.modules.multi_company.models import MultiCompanyConfigurationVersion
+from src.modules.purchase_management.models import (
+    ConfigurationEnvironment,
+    ConfigurationStatus,
+    ProcurementConfiguration,
+)
+from src.modules.security_access_control.models import PermissionSet, PermissionSetPermission, UserPermissionSet
+from src.modules.tenant_management.models import Tenant
+
+User = get_user_model()
+
+
+@pytest.mark.django_db
+@pytest.mark.postgresql
+@override_settings(SARAISE_MODE="development")
+def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
+    """Seeded tenant users must satisfy the development Organization guardrail."""
+
+    password = "UatSeedRegression123!"  # pragma: allowlist secret
+
+    call_command("seed_default_users", password=password, force=True, stdout=StringIO())
+
+    organization = Organization.objects.get(domain="buildworks.ai")
+    tenant = Tenant.objects.get(slug="buildworks")
+    license_record = License.objects.get(organization=organization)
+    tenant_admin = User.objects.get(email="admin@buildworks.ai")
+    profile = UserProfile.objects.get(user=tenant_admin)
+
+    assert license_record.status == LicenseStatus.ACTIVE
+    assert tenant.max_api_calls_per_day == LOCAL_DEVELOPMENT_API_CALLS_PER_DAY
+    assert profile.tenant_id == str(organization.id)
+    assert profile.tenant_role == "tenant_admin"
+    assert profile.platform_role is None
+
+    profile.full_clean()
+    assert tenant_admin.check_password(password)
+
+    reconciled_password = "UatSeedReconciled123!"  # pragma: allowlist secret
+    tenant.max_api_calls_per_day = 10000
+    tenant.save(update_fields=["max_api_calls_per_day"])
+    call_command("seed_default_users", password=reconciled_password, stdout=StringIO())
+    tenant.refresh_from_db()
+    tenant_admin.refresh_from_db()
+    assert tenant.max_api_calls_per_day == LOCAL_DEVELOPMENT_API_CALLS_PER_DAY
+    assert tenant_admin.check_password(reconciled_password)
+
+    tenant_uuid = uuid.UUID(profile.tenant_id)
+    ad_hoc_admin = User.objects.create_user(
+        username="uat-local@example.com",
+        email="uat-local@example.com",
+        password=password,
+    )
+    UserProfile.objects.update_or_create(
+        user=ad_hoc_admin,
+        defaults={
+            "tenant_id": str(tenant_uuid),
+            "tenant_role": "tenant_admin",
+            "platform_role": None,
+        },
+    )
+
+    call_command("seed_default_users", password=password, stdout=StringIO())
+
+    seeded_tenant_emails = {
+        "admin@buildworks.ai",
+        "user@buildworks.ai",
+        "developer@buildworks.ai",
+        "operator@buildworks.ai",
+        "billing@buildworks.ai",
+        "auditor@buildworks.ai",
+        "viewer@buildworks.ai",
+    }
+    with tenant_context(tenant_uuid):
+        permission_set = PermissionSet.objects.for_tenant(tenant_uuid).get(
+            name="Local development administrator",
+            is_active=True,
+            is_deleted=False,
+        )
+        seeded_tenant_users = User.objects.filter(email__in=seeded_tenant_emails)
+        grants = UserPermissionSet.objects.for_tenant(tenant_uuid).filter(
+            user__in=seeded_tenant_users,
+            permission_set=permission_set,
+            revoked_at__isnull=True,
+        )
+
+        assert set(seeded_tenant_users.values_list("email", flat=True)) == seeded_tenant_emails
+        assert grants.count() == len(seeded_tenant_emails)
+        assert all(grant.expires_at is not None for grant in grants)
+        assert (
+            UserPermissionSet.objects.for_tenant(tenant_uuid)
+            .filter(
+                user=ad_hoc_admin,
+                permission_set=permission_set,
+                revoked_at__isnull=True,
+            )
+            .exists()
+        )
+        assert (
+            PermissionSetPermission.objects.for_tenant(tenant_uuid)
+            .filter(
+                permission_set=permission_set,
+                removed_at__isnull=True,
+                permission__module="crm",
+                permission__resource="configuration",
+                permission__action="read",
+            )
+            .exists()
+        )
+        assert set(
+            MultiCompanyConfigurationVersion.objects.for_tenant(tenant_uuid)
+            .filter(status=MultiCompanyConfigurationVersion.Status.ACTIVE)
+            .values_list("environment", flat=True)
+        ) == set(MultiCompanyConfigurationVersion.Environment.values)
+        assert (
+            Entitlement.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                capability="crm.configuration:read",
+                enabled=True,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="crm.api.list",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="crm.api.retrieve",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            PermissionSetPermission.objects.for_tenant(tenant_uuid)
+            .filter(
+                permission_set=permission_set,
+                removed_at__isnull=True,
+                permission__module="document_intelligence",
+                permission__resource="configuration",
+                permission__action="read",
+            )
+            .exists()
+        )
+        assert (
+            Entitlement.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                capability="document_intelligence.configuration:read",
+                enabled=True,
+            )
+            .exists()
+        )
+        assert (
+            Entitlement.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                capability="module.workflow_automation",
+                enabled=True,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="crm.api.list",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="crm.api.versions",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="crm.api.win_rate",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="crm.api.predict",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="budget_management.api_reads",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="automation_orchestration.definition:view:read",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            Quota.objects.filter(tenant_id=tenant_uuid)
+            .filter(
+                resource="document_intelligence.configuration:read",
+                limit__gte=1,
+                remaining__gte=1,
+            )
+            .exists()
+        )
+        assert (
+            ProcurementConfiguration.objects.for_tenant(tenant_uuid)
+            .filter(environment=ConfigurationEnvironment.DEVELOPMENT, status=ConfigurationStatus.ACTIVE)
+            .exists()
+        )
+
+    openai = AIProvider.objects.get(name="OpenAI", is_active=True)
+    anthropic = AIProvider.objects.get(name="Anthropic", is_active=True)
+    assert openai.provider_type == "openai"
+    assert anthropic.provider_type == "anthropic"
+    assert AIModel.objects.filter(provider=openai, model_id="gpt-4.1-mini", is_active=True).exists()
+    assert AIModel.objects.filter(
+        provider=anthropic,
+        model_id="claude-3-5-sonnet-latest",
+        is_active=True,
+    ).exists()

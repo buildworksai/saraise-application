@@ -22,15 +22,9 @@ pytestmark = pytest.mark.django_db
 
 
 def started_instance(tenant, actor, *, key="job-workflow", idempotency="job-start"):
-    workflow = WorkflowDefinitionService.create_workflow(
-        tenant.id, actor, action_payload(key=key)
-    )
-    workflow = WorkflowDefinitionService.publish_workflow(
-        tenant.id, workflow.id, actor, f"publish:{key}"
-    )
-    return WorkflowExecutionService.start_workflow(
-        tenant.id, workflow.id, actor, {}, idempotency
-    )
+    workflow = WorkflowDefinitionService.create_workflow(tenant.id, actor, action_payload(key=key))
+    workflow = WorkflowDefinitionService.publish_workflow(tenant.id, workflow.id, actor, f"publish:{key}")
+    return WorkflowExecutionService.start_workflow(tenant.id, workflow.id, actor, {}, idempotency)
 
 
 def test_duplicate_delivery_executes_action_once(tenant_a, tenant_a_user) -> None:
@@ -46,12 +40,8 @@ def test_duplicate_delivery_executes_action_once(tenant_a, tenant_a_user) -> Non
 
 
 def test_cancellation_wins_before_worker_claim(tenant_a, tenant_a_user) -> None:
-    instance = started_instance(
-        tenant_a, tenant_a_user, key="cancel-race", idempotency="cancel-race-start"
-    )
-    WorkflowExecutionService.cancel_instance(
-        tenant_a.id, instance.id, tenant_a_user, "cancel-before-claim"
-    )
+    instance = started_instance(tenant_a, tenant_a_user, key="cancel-race", idempotency="cancel-race-start")
+    WorkflowExecutionService.cancel_instance(tenant_a.id, instance.id, tenant_a_user, "cancel-before-claim")
     job = execute(instance.async_job_id, tenant_a.id)
     instance.refresh_from_db()
     assert job.status == JobStatus.CANCELLED
@@ -64,9 +54,7 @@ def test_failed_action_is_terminal_and_not_retried_without_evidence(
 ) -> None:
     from src.core.api.results import OperationResult
 
-    instance = started_instance(
-        tenant_a, tenant_a_user, key="retry-exhaustion", idempotency="retry-exhaustion-start"
-    )
+    instance = started_instance(tenant_a, tenant_a_user, key="retry-exhaustion", idempotency="retry-exhaustion-start")
     calls = 0
 
     def unavailable(invocation):
@@ -87,9 +75,7 @@ def test_failed_action_is_terminal_and_not_retried_without_evidence(
 
 
 def test_stale_job_is_recovered_with_retry_outbox(tenant_a, tenant_a_user) -> None:
-    instance = started_instance(
-        tenant_a, tenant_a_user, key="stale-job", idempotency="stale-job-start"
-    )
+    instance = started_instance(tenant_a, tenant_a_user, key="stale-job", idempotency="stale-job-start")
     job = transition(
         instance.async_job_id,
         tenant_a.id,
@@ -97,25 +83,19 @@ def test_stale_job_is_recovered_with_retry_outbox(tenant_a, tenant_a_user) -> No
         expected_status=JobStatus.QUEUED,
         reason="simulated worker claim",
     )
-    AsyncJob.objects.for_tenant(tenant_a.id).filter(id=job.id).update(
-        updated_at=timezone.now() - timedelta(minutes=10)
-    )
-    recovered = recover_stale_jobs(
-        tenant_a.id, stale_before=timezone.now() - timedelta(minutes=1)
-    )
+    AsyncJob.objects.for_tenant(tenant_a.id).filter(id=job.id).update(updated_at=timezone.now() - timedelta(minutes=10))
+    recovered = recover_stale_jobs(tenant_a.id, stale_before=timezone.now() - timedelta(minutes=1))
     assert [item.id for item in recovered] == [job.id]
     assert recovered[0].status == JobStatus.RETRYING
-    assert OutboxEvent.objects.for_tenant(tenant_a.id).filter(
-        aggregate_id=job.id, event_type="async_job.retry_requested"
-    ).exists()
-
-
-def test_worker_installs_tenant_context(
-    tenant_a, tenant_a_user, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    instance = started_instance(
-        tenant_a, tenant_a_user, key="tenant-context", idempotency="tenant-context-start"
+    assert (
+        OutboxEvent.objects.for_tenant(tenant_a.id)
+        .filter(aggregate_id=job.id, event_type="async_job.retry_requested")
+        .exists()
     )
+
+
+def test_worker_installs_tenant_context(tenant_a, tenant_a_user, monkeypatch: pytest.MonkeyPatch) -> None:
+    instance = started_instance(tenant_a, tenant_a_user, key="tenant-context", idempotency="tenant-context-start")
     job = AsyncJob.objects.for_tenant(tenant_a.id).get(id=instance.async_job_id)
     seen = None
 
@@ -133,9 +113,7 @@ def test_worker_installs_tenant_context(
 
 
 def test_expiry_worker_rejects_malformed_timestamp(tenant_a, tenant_a_user) -> None:
-    instance = started_instance(
-        tenant_a, tenant_a_user, key="expiry-command", idempotency="expiry-command-start"
-    )
+    instance = started_instance(tenant_a, tenant_a_user, key="expiry-command", idempotency="expiry-command-start")
     job = AsyncJob.objects.for_tenant(tenant_a.id).get(id=instance.async_job_id)
     job.command = "workflow_automation.expire_tasks"
     job.payload = {"now": "not-a-date"}
@@ -144,16 +122,16 @@ def test_expiry_worker_rejects_malformed_timestamp(tenant_a, tenant_a_user) -> N
 
 
 def test_outbox_recovers_after_broker_rejection(tenant_a, tenant_a_user) -> None:
-    instance = started_instance(
-        tenant_a, tenant_a_user, key="outbox-recovery", idempotency="outbox-recovery-start"
+    instance = started_instance(tenant_a, tenant_a_user, key="outbox-recovery", idempotency="outbox-recovery-start")
+    event = (
+        OutboxEvent.objects.for_tenant(tenant_a.id)
+        .filter(
+            aggregate_id=instance.async_job_id,
+            event_type="async_job.enqueued",
+        )
+        .get()
     )
-    event = OutboxEvent.objects.for_tenant(tenant_a.id).filter(
-        aggregate_id=instance.async_job_id,
-        event_type="async_job.enqueued",
-    ).get()
-    OutboxEvent.objects.exclude(id=event.id).update(
-        status=OutboxStatus.DISPATCHED, dispatched_at=timezone.now()
-    )
+    OutboxEvent.objects.exclude(id=event.id).update(status=OutboxStatus.DISPATCHED, dispatched_at=timezone.now())
 
     class Broker:
         accepted = False

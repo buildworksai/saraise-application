@@ -19,7 +19,7 @@ from typing import Any
 from uuid import UUID
 
 from django.conf import settings
-from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import QuerySet
 from django.utils import timezone
@@ -29,6 +29,7 @@ from src.core.async_jobs.models import AsyncJob, OutboxEvent, OutboxStatus
 from src.core.async_jobs.services import enqueue
 from src.core.observability import get_correlation_id
 from src.core.state_machine import StateMachine, StateMachineError, Transition, TransitionRecord
+from src.core.tenancy.rls import tenant_context
 
 from . import metrics
 from .hashing import canonical_json, compute_event_hash, compute_merkle_root, normalize_utc_timestamp, sha256_hex
@@ -69,7 +70,6 @@ from .providers import (
     ProviderTimeoutError,
     ProviderUnavailableError,
     SubmissionReceipt,
-    credential_issuer_registry,
     get_credential_issuer,
     get_document_resolver,
     get_inventory_resolver,
@@ -427,16 +427,17 @@ class BlockchainTraceabilityConfigurationService:
     def current(self, tenant_id: UUID, environment: str = "default") -> BlockchainTraceabilityConfiguration:
         tenant = _uuid(tenant_id, "tenant_id")
         env = self._environment(environment)
-        try:
-            return BlockchainTraceabilityConfiguration.objects.get(tenant_id=tenant, environment=env)
-        except BlockchainTraceabilityConfiguration.DoesNotExist:
-            return self._create_default(tenant, env)
+        with tenant_context(tenant):
+            try:
+                return BlockchainTraceabilityConfiguration.objects.get(tenant_id=tenant, environment=env)
+            except BlockchainTraceabilityConfiguration.DoesNotExist:
+                return self._create_default(tenant, env)
 
     def _create_default(self, tenant: UUID, environment: str) -> BlockchainTraceabilityConfiguration:
         document = self.validate_document(DEFAULT_CONFIGURATION)
         correlation_id = _correlation()
         try:
-            with transaction.atomic():
+            with tenant_context(tenant), transaction.atomic():
                 existing = (
                     BlockchainTraceabilityConfiguration.objects.select_for_update()
                     .filter(tenant_id=tenant, environment=environment)
@@ -501,7 +502,7 @@ class BlockchainTraceabilityConfigurationService:
         tenant = _uuid(tenant_id, "tenant_id")
         actor = _actor(actor_id, tenant)
         validated = self.validate_document(document)
-        with transaction.atomic():
+        with tenant_context(tenant), transaction.atomic():
             current = self.current(tenant, environment)
             current = BlockchainTraceabilityConfiguration.objects.select_for_update().get(pk=current.pk)
             before = _configuration_copy(current.document)
@@ -1073,7 +1074,7 @@ class LedgerNetworkService:
             )
             if not isinstance(health, ProviderHealth):
                 raise InvalidProviderResponseError("provider returned invalid health evidence")
-        except (AdapterNotRegisteredError, ProviderUnavailableError) as exc:
+        except (AdapterNotRegisteredError, ProviderUnavailableError):
             metrics.PROVIDER_UNAVAILABLE.labels(capability="network_probe").inc()
             network.last_health_status = "unavailable"
             network.last_health_code = "PROVIDER_UNAVAILABLE"

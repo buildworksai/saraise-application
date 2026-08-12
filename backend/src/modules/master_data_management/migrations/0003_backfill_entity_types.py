@@ -6,7 +6,6 @@ import uuid
 from django.db import migrations
 from django.utils import timezone
 
-
 KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 SYSTEM_ACTOR_NAMESPACE = uuid.UUID("56edcf59-5d8e-4bee-88ec-95c93891b95c")
 

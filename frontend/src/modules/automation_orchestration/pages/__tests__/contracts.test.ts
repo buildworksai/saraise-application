@@ -10,7 +10,7 @@ describe("automation orchestration contracts", () => {
 
   it("builds every nested lifecycle path", () => {
     expect(ENDPOINTS.DEFINITIONS.VALIDATE("definition-id")).toBe(
-      "/api/v2/automation-orchestration/definitions/definition-id/validate/",
+      "/api/v2/automation-orchestration/definitions/definition-id/validate/"
     );
     expect(ENDPOINTS.DEFINITIONS.SNAPSHOT("definition-id")).toContain("/snapshot/");
     expect(ENDPOINTS.SCHEDULES.RETIRE("schedule-id")).toContain("/retire/");

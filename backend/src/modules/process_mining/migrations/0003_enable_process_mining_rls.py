@@ -3,10 +3,17 @@
 from django.db import migrations
 
 TABLES = (
-    "process_mining_events", "process_mining_export_jobs", "process_mining_discovery_jobs",
-    "process_mining_models", "process_mining_model_versions", "process_mining_conformance_checks",
-    "process_mining_conformance_deviations", "process_mining_conformance_case_metrics",
-    "process_mining_bottleneck_analyses", "process_mining_bottleneck_findings", "process_mining_variants",
+    "process_mining_events",
+    "process_mining_export_jobs",
+    "process_mining_discovery_jobs",
+    "process_mining_models",
+    "process_mining_model_versions",
+    "process_mining_conformance_checks",
+    "process_mining_conformance_deviations",
+    "process_mining_conformance_case_metrics",
+    "process_mining_bottleneck_analyses",
+    "process_mining_bottleneck_findings",
+    "process_mining_variants",
 )
 
 

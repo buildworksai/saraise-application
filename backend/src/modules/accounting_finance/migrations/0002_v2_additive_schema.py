@@ -9,7 +9,6 @@ from decimal import Decimal
 import django.db.models.deletion
 from django.db import migrations, models
 
-
 LEGACY_ACTOR = "legacy:migration"
 
 
@@ -77,14 +76,14 @@ def backfill_v2_fields(apps, schema_editor) -> None:
     for entry in JournalEntry.objects.all().iterator():
         entry.currency = "USD"
         entry.save(update_fields=("currency",))
-        for number, line in enumerate(JournalLine.objects.filter(journal_entry_id=entry.id).order_by("created_at", "id"), 1):
+        for number, line in enumerate(
+            JournalLine.objects.filter(journal_entry_id=entry.id).order_by("created_at", "id"), 1
+        ):
             line.line_number = number
             line.currency = entry.currency
             line.base_debit_amount = line.debit_amount
             line.base_credit_amount = line.credit_amount
-            line.save(
-                update_fields=("line_number", "currency", "base_debit_amount", "base_credit_amount")
-            )
+            line.save(update_fields=("line_number", "currency", "base_debit_amount", "base_credit_amount"))
     APInvoice.objects.update(legacy_without_lines=True)
     ARInvoice.objects.update(legacy_without_lines=True)
     for payment in Payment.objects.all().iterator():
@@ -141,59 +140,165 @@ class Migration(migrations.Migration):
             for name, field in SOFT_DELETE_FIELDS
         ],
         *[
-            migrations.AddField(model_name=model, name="transition_history", field=models.JSONField(blank=True, default=list, editable=False))
+            migrations.AddField(
+                model_name=model,
+                name="transition_history",
+                field=models.JSONField(blank=True, default=list, editable=False),
+            )
             for model in ("postingperiod", "journalentry", "apinvoice", "arinvoice")
         ],
-        migrations.AddField("account", "normal_balance", models.CharField(blank=True, choices=(("debit", "Debit"), ("credit", "Credit")), max_length=10)),
+        migrations.AddField(
+            "account",
+            "normal_balance",
+            models.CharField(blank=True, choices=(("debit", "Debit"), ("credit", "Credit")), max_length=10),
+        ),
         migrations.AddField("account", "is_group", models.BooleanField(default=False)),
         migrations.AddField("account", "currency", models.CharField(default="USD", max_length=3)),
         migrations.AddField("account", "allow_multi_currency", models.BooleanField(default=False)),
-        migrations.AddField("account", "cash_flow_category", models.CharField(blank=True, choices=(("operating", "Operating"), ("investing", "Investing"), ("financing", "Financing")), max_length=12, null=True)),
+        migrations.AddField(
+            "account",
+            "cash_flow_category",
+            models.CharField(
+                blank=True,
+                choices=(("operating", "Operating"), ("investing", "Investing"), ("financing", "Financing")),
+                max_length=12,
+                null=True,
+            ),
+        ),
         migrations.AddField("postingperiod", "fiscal_year", models.PositiveIntegerField(null=True)),
         migrations.AddField("postingperiod", "closed_at", models.DateTimeField(blank=True, null=True)),
         migrations.AddField("postingperiod", "closed_by", models.CharField(blank=True, max_length=255, null=True)),
         migrations.AddField("postingperiod", "locked_at", models.DateTimeField(blank=True, null=True)),
         migrations.AddField("postingperiod", "locked_by", models.CharField(blank=True, max_length=255, null=True)),
-        migrations.AlterField("postingperiod", "status", models.CharField(choices=(("open", "Open"), ("closed", "Closed"), ("locked", "Locked")), default="open", max_length=20)),
+        migrations.AlterField(
+            "postingperiod",
+            "status",
+            models.CharField(
+                choices=(("open", "Open"), ("closed", "Closed"), ("locked", "Locked")), default="open", max_length=20
+            ),
+        ),
         migrations.AddField("journalentry", "reference", models.CharField(blank=True, max_length=255)),
         migrations.AddField("journalentry", "currency", models.CharField(blank=True, max_length=3)),
         migrations.AddField("journalentry", "reversed_at", models.DateTimeField(blank=True, null=True)),
         migrations.AddField("journalentry", "reversed_by", models.CharField(blank=True, max_length=255, null=True)),
-        migrations.AddField("journalentry", "reversed_entry", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name="reversal_entries", to="accounting_finance.journalentry")),
+        migrations.AddField(
+            "journalentry",
+            "reversed_entry",
+            models.ForeignKey(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="reversal_entries",
+                to="accounting_finance.journalentry",
+            ),
+        ),
         migrations.AddField("journalentry", "source_module", models.CharField(blank=True, max_length=100)),
         migrations.AddField("journalentry", "source_reference", models.CharField(blank=True, max_length=255)),
-        migrations.AddField("journalentry", "source_idempotency_key", models.CharField(blank=True, max_length=255, null=True)),
+        migrations.AddField(
+            "journalentry", "source_idempotency_key", models.CharField(blank=True, max_length=255, null=True)
+        ),
         migrations.AlterField("journalentry", "posted_by", models.CharField(blank=True, max_length=255, null=True)),
         migrations.AddField("journalline", "line_number", models.PositiveIntegerField(null=True)),
         migrations.AddField("journalline", "currency", models.CharField(blank=True, max_length=3)),
-        migrations.AddField("journalline", "exchange_rate", models.DecimalField(decimal_places=8, default=Decimal("1.00000000"), max_digits=18)),
-        migrations.AddField("journalline", "base_debit_amount", models.DecimalField(decimal_places=2, default=Decimal("0.00"), max_digits=15)),
-        migrations.AddField("journalline", "base_credit_amount", models.DecimalField(decimal_places=2, default=Decimal("0.00"), max_digits=15)),
+        migrations.AddField(
+            "journalline",
+            "exchange_rate",
+            models.DecimalField(decimal_places=8, default=Decimal("1.00000000"), max_digits=18),
+        ),
+        migrations.AddField(
+            "journalline",
+            "base_debit_amount",
+            models.DecimalField(decimal_places=2, default=Decimal("0.00"), max_digits=15),
+        ),
+        migrations.AddField(
+            "journalline",
+            "base_credit_amount",
+            models.DecimalField(decimal_places=2, default=Decimal("0.00"), max_digits=15),
+        ),
         migrations.AddField("journalline", "dimension_values", models.JSONField(blank=True, default=dict)),
-        migrations.AddField("apinvoice", "exchange_rate", models.DecimalField(decimal_places=8, default=Decimal("1.00000000"), max_digits=18)),
+        migrations.AddField(
+            "apinvoice",
+            "exchange_rate",
+            models.DecimalField(decimal_places=8, default=Decimal("1.00000000"), max_digits=18),
+        ),
         migrations.AddField("apinvoice", "approved_at", models.DateTimeField(blank=True, null=True)),
         migrations.AddField("apinvoice", "approved_by", models.CharField(blank=True, max_length=255, null=True)),
         migrations.AddField("apinvoice", "posted_at", models.DateTimeField(blank=True, null=True)),
         migrations.AddField("apinvoice", "posted_by", models.CharField(blank=True, max_length=255, null=True)),
         migrations.AddField("apinvoice", "cancelled_at", models.DateTimeField(blank=True, null=True)),
         migrations.AddField("apinvoice", "cancelled_by", models.CharField(blank=True, max_length=255, null=True)),
-        migrations.AddField("apinvoice", "journal_entry", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, to="accounting_finance.journalentry")),
+        migrations.AddField(
+            "apinvoice",
+            "journal_entry",
+            models.ForeignKey(
+                blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, to="accounting_finance.journalentry"
+            ),
+        ),
         migrations.AddField("apinvoice", "legacy_without_lines", models.BooleanField(default=False)),
-        migrations.AlterField("apinvoice", "status", models.CharField(choices=(("draft", "Draft"), ("submitted", "Submitted"), ("approved", "Approved"), ("posted", "Posted"), ("partially_paid", "Partially paid"), ("paid", "Paid"), ("cancelled", "Cancelled")), default="draft", max_length=20)),
-        migrations.AddField("arinvoice", "exchange_rate", models.DecimalField(decimal_places=8, default=Decimal("1.00000000"), max_digits=18)),
+        migrations.AlterField(
+            "apinvoice",
+            "status",
+            models.CharField(
+                choices=(
+                    ("draft", "Draft"),
+                    ("submitted", "Submitted"),
+                    ("approved", "Approved"),
+                    ("posted", "Posted"),
+                    ("partially_paid", "Partially paid"),
+                    ("paid", "Paid"),
+                    ("cancelled", "Cancelled"),
+                ),
+                default="draft",
+                max_length=20,
+            ),
+        ),
+        migrations.AddField(
+            "arinvoice",
+            "exchange_rate",
+            models.DecimalField(decimal_places=8, default=Decimal("1.00000000"), max_digits=18),
+        ),
         migrations.AddField("arinvoice", "posted_at", models.DateTimeField(blank=True, null=True)),
         migrations.AddField("arinvoice", "posted_by", models.CharField(blank=True, max_length=255, null=True)),
         migrations.AddField("arinvoice", "cancelled_at", models.DateTimeField(blank=True, null=True)),
         migrations.AddField("arinvoice", "cancelled_by", models.CharField(blank=True, max_length=255, null=True)),
-        migrations.AddField("arinvoice", "journal_entry", models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, to="accounting_finance.journalentry")),
+        migrations.AddField(
+            "arinvoice",
+            "journal_entry",
+            models.ForeignKey(
+                blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, to="accounting_finance.journalentry"
+            ),
+        ),
         migrations.AddField("arinvoice", "legacy_without_lines", models.BooleanField(default=False)),
-        migrations.AlterField("arinvoice", "status", models.CharField(choices=(("draft", "Draft"), ("posted", "Posted"), ("partially_paid", "Partially paid"), ("paid", "Paid"), ("overdue", "Overdue"), ("cancelled", "Cancelled")), default="draft", max_length=20)),
+        migrations.AlterField(
+            "arinvoice",
+            "status",
+            models.CharField(
+                choices=(
+                    ("draft", "Draft"),
+                    ("posted", "Posted"),
+                    ("partially_paid", "Partially paid"),
+                    ("paid", "Paid"),
+                    ("overdue", "Overdue"),
+                    ("cancelled", "Cancelled"),
+                ),
+                default="draft",
+                max_length=20,
+            ),
+        ),
         migrations.AddField("payment", "created_by", models.CharField(default=LEGACY_ACTOR, max_length=255)),
-        migrations.AddField("payment", "status", models.CharField(choices=(("recorded", "Recorded"), ("voided", "Voided")), default="recorded", max_length=20)),
+        migrations.AddField(
+            "payment",
+            "status",
+            models.CharField(
+                choices=(("recorded", "Recorded"), ("voided", "Voided")), default="recorded", max_length=20
+            ),
+        ),
         migrations.AddField("payment", "voided_at", models.DateTimeField(blank=True, null=True)),
         migrations.AddField("payment", "voided_by", models.CharField(blank=True, max_length=255, null=True)),
         migrations.AddField("payment", "void_reason", models.TextField(blank=True)),
-        migrations.AddField("payment", "transition_history", models.JSONField(blank=True, default=list, editable=False)),
+        migrations.AddField(
+            "payment", "transition_history", models.JSONField(blank=True, default=list, editable=False)
+        ),
         migrations.AddField("payment", "idempotency_key", models.CharField(blank=True, max_length=255, null=True)),
         migrations.AddField("payment", "request_fingerprint", models.CharField(blank=True, max_length=64, null=True)),
         migrations.RunPython(backfill_v2_fields, noop_reverse),
@@ -203,7 +308,11 @@ class Migration(migrations.Migration):
             for name in ("created_by", "updated_by")
         ],
         migrations.AlterField("payment", "created_by", models.CharField(max_length=255)),
-        migrations.AlterField("account", "normal_balance", models.CharField(choices=(("debit", "Debit"), ("credit", "Credit")), default="debit", max_length=10)),
+        migrations.AlterField(
+            "account",
+            "normal_balance",
+            models.CharField(choices=(("debit", "Debit"), ("credit", "Credit")), default="debit", max_length=10),
+        ),
         migrations.AlterField("postingperiod", "fiscal_year", models.PositiveIntegerField()),
         migrations.AlterField("journalentry", "currency", models.CharField(default="USD", max_length=3)),
         migrations.AlterField("journalline", "line_number", models.PositiveIntegerField()),
@@ -225,8 +334,18 @@ class Migration(migrations.Migration):
                 ("cost_center", models.CharField(blank=True, max_length=100)),
                 ("dimension_values", models.JSONField(blank=True, default=dict)),
                 ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ("account", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to="accounting_finance.account")),
-                ("invoice", models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name="lines", to="accounting_finance.apinvoice")),
+                (
+                    "account",
+                    models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to="accounting_finance.account"),
+                ),
+                (
+                    "invoice",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="lines",
+                        to="accounting_finance.apinvoice",
+                    ),
+                ),
             ],
             options={"db_table": "accounting_ap_invoice_lines"},
         ),
@@ -245,8 +364,18 @@ class Migration(migrations.Migration):
                 ("cost_center", models.CharField(blank=True, max_length=100)),
                 ("dimension_values", models.JSONField(blank=True, default=dict)),
                 ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ("account", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to="accounting_finance.account")),
-                ("invoice", models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name="lines", to="accounting_finance.arinvoice")),
+                (
+                    "account",
+                    models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to="accounting_finance.account"),
+                ),
+                (
+                    "invoice",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="lines",
+                        to="accounting_finance.arinvoice",
+                    ),
+                ),
             ],
             options={"db_table": "accounting_ar_invoice_lines"},
         ),

@@ -1,8 +1,9 @@
 # Generated for the additive email-marketing v2 persistence contract.
 
+import uuid
+
 import django.db.models.deletion
 import django.utils.timezone
-import uuid
 from django.db import migrations, models
 
 import src.modules.email_marketing.models

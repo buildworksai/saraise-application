@@ -1,10 +1,87 @@
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
-import { ConfirmDialog } from '@/components/ui/Dialog';
-import { DetailGrid, GovernedError, SalesPage, StatusPill } from '../components/SalesUi';
-import { SALES_PATHS } from '../contracts';
-import { salesQueryKeys, salesService } from '../services/sales-service';
-export function CustomerDetailPage(){const {id}=useParams();const navigate=useNavigate();const cache=useQueryClient();const [confirm,setConfirm]=useState(false);const query=useQuery({queryKey:salesQueryKeys.customer(id??''),queryFn:()=>salesService.getCustomer(id??''),enabled:Boolean(id)});const archive=useMutation({mutationFn:()=>salesService.deleteCustomer(query.data?.id??'',query.data?.lock_version??0),onSuccess:()=>{void cache.invalidateQueries({queryKey:salesQueryKeys.all});navigate(SALES_PATHS.CUSTOMERS);}});if(query.isLoading)return <SalesPage title="Customer" description="Loading profile…"><div className="h-72 animate-pulse rounded-lg bg-muted"/></SalesPage>;if(query.error||!query.data)return <SalesPage title="Customer" description="Customer profile"><GovernedError error={query.error} onRetry={()=>void query.refetch()}/></SalesPage>;const customer=query.data;return <SalesPage title={`${customer.customer_code} · ${customer.customer_name}`} description="Customer sales profile and concurrency evidence." actions={<><Link to={`${SALES_PATHS.CUSTOMERS}/${encodeURIComponent(customer.id)}/edit`}><Button variant="outline">Edit</Button></Link><Button variant="danger" onClick={()=>setConfirm(true)}>Archive</Button></>}><Card><CardHeader><CardTitle className="flex items-center gap-3">Customer information <StatusPill status={customer.is_active?'active':'archived'}/></CardTitle></CardHeader><CardContent><DetailGrid entries={[["Email",customer.email],["Phone",customer.phone],["Currency",customer.currency],["Credit limit",customer.credit_limit??'Not set'],["Address",customer.address],["Record version",customer.lock_version]]}/></CardContent></Card>{archive.error&&<GovernedError error={archive.error}/>}<ConfirmDialog open={confirm} onOpenChange={setConfirm} title="Archive customer?" description="The profile becomes inactive and cannot be archived while referenced by active sales documents." confirmLabel={archive.isPending?'Archiving…':'Archive'} variant="danger" onConfirm={()=>archive.mutate()}/></SalesPage>;}
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
+import { ConfirmDialog } from "@/components/ui/Dialog";
+import { DetailGrid, GovernedError, SalesPage, StatusPill } from "../components/SalesUi";
+import { SALES_PATHS } from "../contracts";
+import { salesQueryKeys, salesService } from "../services/sales-service";
+export function CustomerDetailPage() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const cache = useQueryClient();
+  const [confirm, setConfirm] = useState(false);
+  const query = useQuery({
+    queryKey: salesQueryKeys.customer(id ?? ""),
+    queryFn: () => salesService.getCustomer(id ?? ""),
+    enabled: Boolean(id),
+  });
+  const archive = useMutation({
+    mutationFn: () =>
+      salesService.deleteCustomer(query.data?.id ?? "", query.data?.lock_version ?? 0),
+    onSuccess: () => {
+      void cache.invalidateQueries({ queryKey: salesQueryKeys.all });
+      navigate(SALES_PATHS.CUSTOMERS);
+    },
+  });
+  if (query.isLoading)
+    return (
+      <SalesPage title="Customer" description="Loading profile…">
+        <div className="h-72 animate-pulse rounded-lg bg-muted" />
+      </SalesPage>
+    );
+  if (query.error || !query.data)
+    return (
+      <SalesPage title="Customer" description="Customer profile">
+        <GovernedError error={query.error} onRetry={() => void query.refetch()} />
+      </SalesPage>
+    );
+  const customer = query.data;
+  return (
+    <SalesPage
+      title={`${customer.customer_code} · ${customer.customer_name}`}
+      description="Customer sales profile and concurrency evidence."
+      actions={
+        <>
+          <Link to={`${SALES_PATHS.CUSTOMERS}/${encodeURIComponent(customer.id)}/edit`}>
+            <Button variant="outline">Edit</Button>
+          </Link>
+          <Button variant="danger" onClick={() => setConfirm(true)}>
+            Archive
+          </Button>
+        </>
+      }
+    >
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-3">
+            Customer information <StatusPill status={customer.is_active ? "active" : "archived"} />
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <DetailGrid
+            entries={[
+              ["Email", customer.email],
+              ["Phone", customer.phone],
+              ["Currency", customer.currency],
+              ["Credit limit", customer.credit_limit ?? "Not set"],
+              ["Address", customer.address],
+              ["Record version", customer.lock_version],
+            ]}
+          />
+        </CardContent>
+      </Card>
+      {archive.error && <GovernedError error={archive.error} />}
+      <ConfirmDialog
+        open={confirm}
+        onOpenChange={setConfirm}
+        title="Archive customer?"
+        description="The profile becomes inactive and cannot be archived while referenced by active sales documents."
+        confirmLabel={archive.isPending ? "Archiving…" : "Archive"}
+        variant="danger"
+        onConfirm={() => archive.mutate()}
+      />
+    </SalesPage>
+  );
+}

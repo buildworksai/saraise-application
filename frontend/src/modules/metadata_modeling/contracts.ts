@@ -2,7 +2,9 @@
 
 export type JSONPrimitive = string | number | boolean | null;
 export type JSONValue = JSONPrimitive | JSONObject | readonly JSONValue[];
-export interface JSONObject { [key: string]: JSONValue }
+export interface JSONObject {
+  [key: string]: JSONValue;
+}
 
 export interface PaginationMeta {
   readonly page: number;
@@ -135,7 +137,9 @@ export interface EntityDefinitionCreate {
   readonly naming_config: NamingConfiguration;
 }
 
-export type EntityDefinitionUpdate = Omit<EntityDefinitionCreate, "code"> & { readonly code?: string };
+export type EntityDefinitionUpdate = Omit<EntityDefinitionCreate, "code"> & {
+  readonly code?: string;
+};
 
 export interface SchemaValidationReport {
   readonly valid: boolean;
@@ -214,9 +218,19 @@ export interface DynamicResourceDetail extends DynamicResourceSummary {
   readonly cancelled_by: string | null;
 }
 
-export interface DynamicResourceCreate { readonly entity_id: string; readonly data: JSONObject; readonly display_name?: string }
-export interface DynamicResourceReplace { readonly data: JSONObject; readonly display_name?: string }
-export interface DynamicResourcePatch { readonly changes: JSONObject; readonly display_name?: string }
+export interface DynamicResourceCreate {
+  readonly entity_id: string;
+  readonly data: JSONObject;
+  readonly display_name?: string;
+}
+export interface DynamicResourceReplace {
+  readonly data: JSONObject;
+  readonly display_name?: string;
+}
+export interface DynamicResourcePatch {
+  readonly changes: JSONObject;
+  readonly display_name?: string;
+}
 
 export interface DynamicResourceVersion {
   readonly id: string;
@@ -253,15 +267,79 @@ export interface ExportDocument extends JSONObject {
   readonly schema: JSONObject;
   readonly checksum: string;
 }
-export interface ImportRequest { readonly document: ExportDocument; readonly mode: "create" | "new_version" | "validate_only"; readonly definition_id?: string }
-export interface ImportValidationResult { readonly valid: boolean; readonly checksum_valid: boolean; readonly normalized_document: ExportDocument; readonly report: SchemaValidationReport }
-export interface OperationResult { readonly operation: string; readonly status: "completed" | "accepted"; readonly id: string; readonly version?: number }
-export interface PreviewResult { readonly normalized_schema: JSONObject; readonly form_descriptor: readonly FieldDefinitionInput[]; readonly sample_validation: SchemaValidationReport; readonly impact: SchemaValidationReport; readonly naming_preview?: string }
+export interface ImportRequest {
+  readonly document: ExportDocument;
+  readonly mode: "create" | "new_version" | "validate_only";
+  readonly definition_id?: string;
+}
+export interface ImportValidationResult {
+  readonly valid: boolean;
+  readonly checksum_valid: boolean;
+  readonly normalized_document: ExportDocument;
+  readonly report: SchemaValidationReport;
+}
+export interface OperationResult {
+  readonly operation: string;
+  readonly status: "completed" | "accepted";
+  readonly id: string;
+  readonly version?: number;
+}
+export interface PreviewResult {
+  readonly normalized_schema: JSONObject;
+  readonly form_descriptor: readonly FieldDefinitionInput[];
+  readonly sample_validation: SchemaValidationReport;
+  readonly impact: SchemaValidationReport;
+  readonly naming_preview?: string;
+}
 
-export interface EntityDefinitionFilters { readonly [key: string]: string | number | boolean | undefined; readonly status?: EntityStatus; readonly owner_module?: string; readonly origin?: EntityOrigin; readonly search?: string; readonly ordering?: "name" | "-name" | "created_at" | "-created_at" | "updated_at" | "-updated_at"; readonly page?: number; readonly page_size?: number }
-export interface DynamicResourceFilters { readonly [key: string]: string | number | boolean | undefined; readonly entity_id?: string; readonly entity_code?: string; readonly state?: DynamicResourceState; readonly search?: string; readonly created_after?: string; readonly created_before?: string; readonly ordering?: "record_key" | "-record_key" | "display_name" | "-display_name" | "created_at" | "-created_at" | "updated_at" | "-updated_at"; readonly page?: number; readonly page_size?: number }
-export interface NamingSequenceFilters { readonly [key: string]: string | number | boolean | undefined; readonly entity_id?: string; readonly is_active?: boolean; readonly page?: number; readonly page_size?: number }
-export interface PaginatedResult<T> { readonly items: readonly T[]; readonly pagination: PaginationMeta; readonly correlationId: string }
+export interface EntityDefinitionFilters {
+  readonly [key: string]: string | number | boolean | undefined;
+  readonly status?: EntityStatus;
+  readonly owner_module?: string;
+  readonly origin?: EntityOrigin;
+  readonly search?: string;
+  readonly ordering?:
+    | "name"
+    | "-name"
+    | "created_at"
+    | "-created_at"
+    | "updated_at"
+    | "-updated_at";
+  readonly page?: number;
+  readonly page_size?: number;
+}
+export interface DynamicResourceFilters {
+  readonly [key: string]: string | number | boolean | undefined;
+  readonly entity_id?: string;
+  readonly entity_code?: string;
+  readonly state?: DynamicResourceState;
+  readonly search?: string;
+  readonly created_after?: string;
+  readonly created_before?: string;
+  readonly ordering?:
+    | "record_key"
+    | "-record_key"
+    | "display_name"
+    | "-display_name"
+    | "created_at"
+    | "-created_at"
+    | "updated_at"
+    | "-updated_at";
+  readonly page?: number;
+  readonly page_size?: number;
+}
+export interface NamingSequenceFilters {
+  readonly [key: string]: string | number | boolean | undefined;
+  readonly entity_id?: string;
+  readonly is_active?: boolean;
+  readonly page?: number;
+  readonly page_size?: number;
+}
+export interface PaginatedResult<T> {
+  readonly items: readonly T[];
+  readonly pagination: PaginationMeta;
+  readonly correlationId: string;
+}
 
 export type MetadataEnvironment = "development" | "staging" | "production";
 export interface FeatureRollout {
@@ -291,8 +369,18 @@ export interface MetadataModelingConfiguration extends MetadataModelingConfigura
   readonly updated_at: string;
   readonly updated_by: string;
 }
-export interface ConfigurationDiffEntry { readonly path: string; readonly before: JSONValue; readonly after: JSONValue }
-export interface ConfigurationPreview { readonly valid: boolean; readonly errors: readonly GovernedFieldError[]; readonly warnings: readonly GovernedFieldError[]; readonly diff: readonly ConfigurationDiffEntry[]; readonly effective_values: MetadataModelingConfigurationValues }
+export interface ConfigurationDiffEntry {
+  readonly path: string;
+  readonly before: JSONValue;
+  readonly after: JSONValue;
+}
+export interface ConfigurationPreview {
+  readonly valid: boolean;
+  readonly errors: readonly GovernedFieldError[];
+  readonly warnings: readonly GovernedFieldError[];
+  readonly diff: readonly ConfigurationDiffEntry[];
+  readonly effective_values: MetadataModelingConfigurationValues;
+}
 export interface ConfigurationVersion {
   readonly id: string;
   readonly version: number;
@@ -304,12 +392,23 @@ export interface ConfigurationVersion {
   readonly changes: readonly ConfigurationDiffEntry[];
   readonly operation: "create" | "update" | "rollback" | "import";
 }
-export interface ConfigurationExportDocument { readonly format_version: string; readonly environment: MetadataEnvironment; readonly values: MetadataModelingConfigurationValues; readonly checksum: string }
-export interface ConfigurationImportRequest { readonly environment: MetadataEnvironment; readonly document: ConfigurationExportDocument; readonly validate_only: boolean }
+export interface ConfigurationExportDocument {
+  readonly format_version: string;
+  readonly environment: MetadataEnvironment;
+  readonly values: MetadataModelingConfigurationValues;
+  readonly checksum: string;
+}
+export interface ConfigurationImportRequest {
+  readonly environment: MetadataEnvironment;
+  readonly document: ConfigurationExportDocument;
+  readonly validate_only: boolean;
+}
 
 const API_ROOT = "/api/v2/metadata-modeling";
-const detail = (collection: string, id: string) => `${API_ROOT}/${collection}/${encodeURIComponent(id)}/`;
-const versionDetail = (definitionId: string, versionId: string) => `${detail("entity-definitions", definitionId)}versions/${encodeURIComponent(versionId)}/`;
+const detail = (collection: string, id: string) =>
+  `${API_ROOT}/${collection}/${encodeURIComponent(id)}/`;
+const versionDetail = (definitionId: string, versionId: string) =>
+  `${detail("entity-definitions", definitionId)}versions/${encodeURIComponent(versionId)}/`;
 
 export const ENDPOINTS = Object.freeze({
   entityDefinitions: `${API_ROOT}/entity-definitions/`,
@@ -323,10 +422,13 @@ export const ENDPOINTS = Object.freeze({
   importEntityDefinition: `${API_ROOT}/entity-definitions/import/`,
   schemaVersions: (id: string) => `${detail("entity-definitions", id)}versions/`,
   schemaVersion: versionDetail,
-  validateSchemaVersion: (id: string, versionId: string) => `${versionDetail(id, versionId)}validate/`,
-  publishSchemaVersion: (id: string, versionId: string) => `${versionDetail(id, versionId)}publish/`,
+  validateSchemaVersion: (id: string, versionId: string) =>
+    `${versionDetail(id, versionId)}validate/`,
+  publishSchemaVersion: (id: string, versionId: string) =>
+    `${versionDetail(id, versionId)}publish/`,
   rejectSchemaVersion: (id: string, versionId: string) => `${versionDetail(id, versionId)}reject/`,
-  rollbackSchemaVersion: (id: string, versionId: string) => `${versionDetail(id, versionId)}rollback/`,
+  rollbackSchemaVersion: (id: string, versionId: string) =>
+    `${versionDetail(id, versionId)}rollback/`,
   diffSchemaVersions: (id: string) => `${detail("entity-definitions", id)}versions/diff/`,
   resources: `${API_ROOT}/resources/`,
   resource: (id: string) => detail("resources", id),
@@ -335,7 +437,8 @@ export const ENDPOINTS = Object.freeze({
   submitResource: (id: string) => `${detail("resources", id)}submit/`,
   cancelResource: (id: string) => `${detail("resources", id)}cancel/`,
   resourceVersions: (id: string) => `${detail("resources", id)}versions/`,
-  resourceVersion: (id: string, version: number) => `${detail("resources", id)}versions/${version}/`,
+  resourceVersion: (id: string, version: number) =>
+    `${detail("resources", id)}versions/${version}/`,
   namingSequences: `${API_ROOT}/naming-sequences/`,
   namingSequence: (id: string) => detail("naming-sequences", id),
   resetNamingSequence: (id: string) => `${detail("naming-sequences", id)}reset/`,
@@ -344,7 +447,8 @@ export const ENDPOINTS = Object.freeze({
   configuration: `${API_ROOT}/configuration/`,
   previewConfiguration: `${API_ROOT}/configuration/preview/`,
   configurationVersions: `${API_ROOT}/configuration/versions/`,
-  rollbackConfiguration: (version: number) => `${API_ROOT}/configuration/versions/${version}/rollback/`,
+  rollbackConfiguration: (version: number) =>
+    `${API_ROOT}/configuration/versions/${version}/rollback/`,
   importConfiguration: `${API_ROOT}/configuration/import/`,
   exportConfiguration: `${API_ROOT}/configuration/export/`,
 } as const);
@@ -356,7 +460,8 @@ export const ROUTES = Object.freeze({
   schemaEdit: (id: string) => `/metadata-modeling/schemas/${encodeURIComponent(id)}/edit`,
   records: "/metadata-modeling/records",
   recordCreate: "/metadata-modeling/records/new",
-  recordCreateFor: (entityId: string) => `/metadata-modeling/records/new?entity=${encodeURIComponent(entityId)}`,
+  recordCreateFor: (entityId: string) =>
+    `/metadata-modeling/records/new?entity=${encodeURIComponent(entityId)}`,
   recordDetail: (id: string) => `/metadata-modeling/records/${encodeURIComponent(id)}`,
   recordEdit: (id: string) => `/metadata-modeling/records/${encodeURIComponent(id)}/edit`,
   settings: "/metadata-modeling/settings",

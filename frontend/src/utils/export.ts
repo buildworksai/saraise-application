@@ -28,40 +28,46 @@ export function exportToCSV<T extends Record<string, unknown>>(
 
   // Create CSV content
   const csvContent = [
-    csvHeaders.join(','), // Header row
+    csvHeaders.join(","), // Header row
     ...data.map((row) =>
-      csvHeaders.map((header) => {
-        const value = row[header];
-        // Handle null/undefined
-        if (value === null || value === undefined) {
-          return '';
-        }
-        if (typeof value === 'string') {
-          // Handle strings with commas/quotes
-          if (value.includes(',') || value.includes('"')) {
-            return `"${value.replace(/"/g, '""')}"`;
+      csvHeaders
+        .map((header) => {
+          const value = row[header];
+          // Handle null/undefined
+          if (value === null || value === undefined) {
+            return "";
           }
-          return value;
-        }
-        if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
-          return String(value);
-        }
-        if (typeof value === 'symbol' || typeof value === 'function') {
-          return '';
-        }
-        // Handle objects/arrays (stringify)
-        return `"${JSON.stringify(value).replace(/"/g, '""')}"`;
-      }).join(',')
+          if (typeof value === "string") {
+            // Handle strings with commas/quotes
+            if (value.includes(",") || value.includes('"')) {
+              return `"${value.replace(/"/g, '""')}"`;
+            }
+            return value;
+          }
+          if (
+            typeof value === "number" ||
+            typeof value === "boolean" ||
+            typeof value === "bigint"
+          ) {
+            return String(value);
+          }
+          if (typeof value === "symbol" || typeof value === "function") {
+            return "";
+          }
+          // Handle objects/arrays (stringify)
+          return `"${JSON.stringify(value).replace(/"/g, '""')}"`;
+        })
+        .join(",")
     ),
-  ].join('\n');
+  ].join("\n");
 
   // Create blob and download
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
   const url = URL.createObjectURL(blob);
-  link.setAttribute('href', url);
-  link.setAttribute('download', `${filename}.csv`);
-  link.style.visibility = 'hidden';
+  link.setAttribute("href", url);
+  link.setAttribute("download", `${filename}.csv`);
+  link.style.visibility = "hidden";
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -79,12 +85,12 @@ export function exportTimeseriesToCSV(
   const csvData = data.map((point) => ({
     Date: point.date,
     Timestamp: point.timestamp,
-    Value: point.value ?? '',
+    Value: point.value ?? "",
   }));
 
   exportToCSV(
     csvData,
-    filename ?? `${metricName}_timeseries_${new Date().toISOString().split('T')[0]}`,
-    ['Date', 'Timestamp', 'Value']
+    filename ?? `${metricName}_timeseries_${new Date().toISOString().split("T")[0]}`,
+    ["Date", "Timestamp", "Value"]
   );
 }

@@ -25,6 +25,16 @@ class _SchemaEditor:
         self.statements.append(sql)
 
 
+def _skip_without_automation_migration_graph() -> None:
+    executor = MigrationExecutor(connection)
+    required_nodes = {
+        ("automation_orchestration", "0001_initial"),
+        ("automation_orchestration", "0002_create_orchestration_domain"),
+    }
+    if not required_nodes <= set(executor.loader.graph.nodes):
+        pytest.skip("Migration graph is unavailable when pytest runs with --nomigrations.")
+
+
 def test_rls_migration_is_postgresql_only_typed_and_reversible() -> None:
     migration = importlib.import_module("src.modules.automation_orchestration.migrations.0003_enable_orchestration_rls")
     postgres = _SchemaEditor("postgresql")
@@ -48,6 +58,7 @@ def test_rls_migration_is_postgresql_only_typed_and_reversible() -> None:
 
 @pytest.mark.django_db
 def test_migration_state_removes_runtime_scaffold_without_dropping_legacy_table() -> None:
+    _skip_without_automation_migration_graph()
     executor = MigrationExecutor(connection)
     state_0001 = executor.loader.project_state([("automation_orchestration", "0001_initial")])
     state_0002 = executor.loader.project_state([("automation_orchestration", "0002_create_orchestration_domain")])
@@ -77,6 +88,8 @@ def test_migration_state_removes_runtime_scaffold_without_dropping_legacy_table(
 
 @pytest.mark.django_db
 def test_domain_tables_and_legacy_table_physically_coexist() -> None:
+    _skip_without_automation_migration_graph()
+
     tables = set(connection.introspection.table_names())
     assert {
         "automation_orchestration_resources",
@@ -135,11 +148,13 @@ def test_postgresql_17_forward_reverse_forward_preserves_legacy_and_schema() -> 
                 [legacy_id],
             )
             assert cursor.fetchone() == original
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT relname, relrowsecurity, relforcerowsecurity
                 FROM pg_class
                 WHERE relname LIKE 'automation_orchestration_%'
-                """)
+                """
+            )
             rls = {name: (enabled, forced) for name, enabled, forced in cursor.fetchall()}
             rls_migration = importlib.import_module(
                 "src.modules.automation_orchestration.migrations.0003_enable_orchestration_rls"

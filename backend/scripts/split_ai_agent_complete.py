@@ -8,6 +8,7 @@ Strategy:
 3. Group them together in the same migration
 4. Skip AddIndex (they'll be added later or embedded in options)
 """
+
 import re
 from pathlib import Path
 

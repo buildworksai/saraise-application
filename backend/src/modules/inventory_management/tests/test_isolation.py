@@ -7,11 +7,10 @@ from typing import Any, Mapping
 from uuid import UUID, uuid4
 
 import pytest
+from django.utils import timezone
 
 from src.core.access.decision import AccessDecision, AccessReasonCode
 from src.core.testing import TenantIsolationContract
-from django.utils import timezone
-
 from src.modules.inventory_management.models import (
     Batch,
     CycleCount,
@@ -137,16 +136,27 @@ class TestStorageLocationIsolation(V2InventoryIsolationContract):
         warehouse_a = make_warehouse(tenant_a.id, "LOC-WH-A")
         warehouse_b = make_warehouse(tenant_b.id, "LOC-WH-B")
         self.tenant_a_row = StorageLocation.objects.create(
-            tenant_id=tenant_a.id, warehouse=warehouse_a, location_code="BIN-A",
-            location_name="Bin A", zone_type="storage", location_type="bin",
+            tenant_id=tenant_a.id,
+            warehouse=warehouse_a,
+            location_code="BIN-A",
+            location_name="Bin A",
+            zone_type="storage",
+            location_type="bin",
         )
         self.tenant_b_row = StorageLocation.objects.create(
-            tenant_id=tenant_b.id, warehouse=warehouse_b, location_code="BIN-B",
-            location_name="Bin B", zone_type="storage", location_type="bin",
+            tenant_id=tenant_b.id,
+            warehouse=warehouse_b,
+            location_code="BIN-B",
+            location_name="Bin B",
+            zone_type="storage",
+            location_type="bin",
         )
         self.create_payload = {
-            "warehouse_id": str(warehouse_a.id), "location_code": "BIN-SPOOF",
-            "location_name": "Spoof bin", "zone_type": "storage", "location_type": "bin",
+            "warehouse_id": str(warehouse_a.id),
+            "location_code": "BIN-SPOOF",
+            "location_name": "Spoof bin",
+            "zone_type": "storage",
+            "location_type": "bin",
         }
 
 
@@ -200,18 +210,28 @@ class TestStockEntryIsolation(V2InventoryIsolationContract):
         warehouse_a = make_warehouse(tenant_a.id, "ENTRY-WH-A")
         warehouse_b = make_warehouse(tenant_b.id, "ENTRY-WH-B")
         self.tenant_a_row = StockEntry.objects.create(
-            tenant_id=tenant_a.id, entry_number="ENT-A", entry_type="receipt",
-            posting_at=timezone.now(), destination_warehouse=warehouse_a,
-            idempotency_key="entry-a", created_by_id=uuid4(),
+            tenant_id=tenant_a.id,
+            entry_number="ENT-A",
+            entry_type="receipt",
+            posting_at=timezone.now(),
+            destination_warehouse=warehouse_a,
+            idempotency_key="entry-a",
+            created_by_id=uuid4(),
         )
         self.tenant_b_row = StockEntry.objects.create(
-            tenant_id=tenant_b.id, entry_number="ENT-B", entry_type="receipt",
-            posting_at=timezone.now(), destination_warehouse=warehouse_b,
-            idempotency_key="entry-b", created_by_id=uuid4(),
+            tenant_id=tenant_b.id,
+            entry_number="ENT-B",
+            entry_type="receipt",
+            posting_at=timezone.now(),
+            destination_warehouse=warehouse_b,
+            idempotency_key="entry-b",
+            created_by_id=uuid4(),
         )
         self.create_payload = {
-            "entry_number": "ENT-SPOOF", "entry_type": "receipt",
-            "posting_at": timezone.now().isoformat(), "destination_warehouse_id": str(warehouse_a.id),
+            "entry_number": "ENT-SPOOF",
+            "entry_type": "receipt",
+            "posting_at": timezone.now().isoformat(),
+            "destination_warehouse_id": str(warehouse_a.id),
             "lines": [],
         }
 
@@ -227,10 +247,38 @@ class TestReservationIsolation(CommandOwnedIsolationContract):
         self.client = authenticated_tenant_a_client
         warehouse_a, warehouse_b = make_warehouse(tenant_a.id, "RES-WH-A"), make_warehouse(tenant_b.id, "RES-WH-B")
         item_a, item_b = make_item(tenant_a.id, "RES-ITEM-A"), make_item(tenant_b.id, "RES-ITEM-B")
-        base = {"reference_module": "sales", "reference_type": "order", "reference_id": uuid4(), "quantity": "1", "status": "active"}
-        self.tenant_a_row = StockReservation.objects.create(tenant_id=tenant_a.id, reservation_number="RES-A", item=item_a, warehouse=warehouse_a, idempotency_key="res-a", **base)
-        self.tenant_b_row = StockReservation.objects.create(tenant_id=tenant_b.id, reservation_number="RES-B", item=item_b, warehouse=warehouse_b, idempotency_key="res-b", **{**base, "reference_id": uuid4()})
-        self.create_payload = {"reservation_number": "RES-SPOOF", "reference_module": "sales", "reference_type": "order", "reference_id": str(uuid4()), "item_id": str(item_a.id), "warehouse_id": str(warehouse_a.id), "quantity": "1"}
+        base = {
+            "reference_module": "sales",
+            "reference_type": "order",
+            "reference_id": uuid4(),
+            "quantity": "1",
+            "status": "active",
+        }
+        self.tenant_a_row = StockReservation.objects.create(
+            tenant_id=tenant_a.id,
+            reservation_number="RES-A",
+            item=item_a,
+            warehouse=warehouse_a,
+            idempotency_key="res-a",
+            **base,
+        )
+        self.tenant_b_row = StockReservation.objects.create(
+            tenant_id=tenant_b.id,
+            reservation_number="RES-B",
+            item=item_b,
+            warehouse=warehouse_b,
+            idempotency_key="res-b",
+            **{**base, "reference_id": uuid4()},
+        )
+        self.create_payload = {
+            "reservation_number": "RES-SPOOF",
+            "reference_module": "sales",
+            "reference_type": "order",
+            "reference_id": str(uuid4()),
+            "item_id": str(item_a.id),
+            "warehouse_id": str(warehouse_a.id),
+            "quantity": "1",
+        }
 
 
 class TestCycleCountIsolation(CommandOwnedIsolationContract):
@@ -243,9 +291,27 @@ class TestCycleCountIsolation(CommandOwnedIsolationContract):
     def isolation_context(self, authenticated_tenant_a_client, tenant_a, tenant_b):
         self.client = authenticated_tenant_a_client
         warehouse_a, warehouse_b = make_warehouse(tenant_a.id, "COUNT-WH-A"), make_warehouse(tenant_b.id, "COUNT-WH-B")
-        self.tenant_a_row = CycleCount.objects.create(tenant_id=tenant_a.id, count_number="COUNT-A", warehouse=warehouse_a, count_type="full", scheduled_for=date(2030, 1, 1))
-        self.tenant_b_row = CycleCount.objects.create(tenant_id=tenant_b.id, count_number="COUNT-B", warehouse=warehouse_b, count_type="full", scheduled_for=date(2030, 1, 1))
-        self.create_payload = {"count_number": "COUNT-SPOOF", "warehouse_id": str(warehouse_a.id), "count_type": "full", "scheduled_for": "2030-01-01", "lines": []}
+        self.tenant_a_row = CycleCount.objects.create(
+            tenant_id=tenant_a.id,
+            count_number="COUNT-A",
+            warehouse=warehouse_a,
+            count_type="full",
+            scheduled_for=date(2030, 1, 1),
+        )
+        self.tenant_b_row = CycleCount.objects.create(
+            tenant_id=tenant_b.id,
+            count_number="COUNT-B",
+            warehouse=warehouse_b,
+            count_type="full",
+            scheduled_for=date(2030, 1, 1),
+        )
+        self.create_payload = {
+            "count_number": "COUNT-SPOOF",
+            "warehouse_id": str(warehouse_a.id),
+            "count_type": "full",
+            "scheduled_for": "2030-01-01",
+            "lines": [],
+        }
 
 
 class TestConfigurationIsolation(CommandOwnedIsolationContract):
@@ -260,5 +326,9 @@ class TestConfigurationIsolation(CommandOwnedIsolationContract):
     @pytest.fixture(autouse=True)
     def isolation_context(self, authenticated_tenant_a_client, tenant_a, tenant_b):
         self.client = authenticated_tenant_a_client
-        self.tenant_a_row = InventoryConfiguration.objects.create(tenant_id=tenant_a.id, environment="development", status="active")
-        self.tenant_b_row = InventoryConfiguration.objects.create(tenant_id=tenant_b.id, environment="staging", status="active")
+        self.tenant_a_row = InventoryConfiguration.objects.create(
+            tenant_id=tenant_a.id, environment="development", status="active"
+        )
+        self.tenant_b_row = InventoryConfiguration.objects.create(
+            tenant_id=tenant_b.id, environment="staging", status="active"
+        )

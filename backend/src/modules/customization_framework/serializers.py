@@ -22,13 +22,7 @@ from .models import (
     RuleExecution,
     RuntimeConfigurationVersion,
 )
-from .services import (
-    PLATFORM_CEILINGS,
-    CustomFieldService,
-    CustomizationRegistry,
-    FormService,
-    ResourceContract,
-)
+from .services import PLATFORM_CEILINGS, CustomFieldService, CustomizationRegistry, FormService, ResourceContract
 
 
 class StrictSerializerMixin:

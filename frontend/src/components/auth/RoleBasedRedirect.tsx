@@ -6,8 +6,8 @@
  * ⚠️ ARCHITECTURAL ENFORCEMENT: Application repo is tenant-only.
  * Platform management UI MUST be in saraise-platform/frontend/.
  */
-import { Navigate } from 'react-router-dom';
-import { useAuthStore } from '@/stores/auth-store';
+import { Navigate } from "react-router-dom";
+import { useAuthStore } from "@/stores/auth-store";
 
 export const RoleBasedRedirect = () => {
   const { user } = useAuthStore();

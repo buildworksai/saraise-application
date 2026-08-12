@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 TABLES = (
     "fixed_asset_categories",
     "fixed_assets",

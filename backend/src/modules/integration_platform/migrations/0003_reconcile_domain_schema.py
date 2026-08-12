@@ -9,6 +9,7 @@ import uuid
 import django.db.models.deletion
 from django.db import migrations, models
 from django.utils import timezone
+
 from src.core.encryption.service import EncryptionService
 
 
@@ -50,8 +51,12 @@ def backfill_domain(apps, schema_editor) -> None:
 
     from django.db.models import Count
 
-    duplicate_integrations = Integration.objects.values("tenant_id", "name").annotate(total=Count("id")).filter(total__gt=1).count()
-    duplicate_webhooks = Webhook.objects.values("tenant_id", "name").annotate(total=Count("id")).filter(total__gt=1).count()
+    duplicate_integrations = (
+        Integration.objects.values("tenant_id", "name").annotate(total=Count("id")).filter(total__gt=1).count()
+    )
+    duplicate_webhooks = (
+        Webhook.objects.values("tenant_id", "name").annotate(total=Count("id")).filter(total__gt=1).count()
+    )
     if duplicate_integrations or duplicate_webhooks:
         raise RuntimeError(
             "Integration-platform migration found duplicate live names "
@@ -117,7 +122,18 @@ def backfill_domain(apps, schema_editor) -> None:
         delivery.payload = redact(delivery.payload)
         delivery.response_body_excerpt = safe_excerpt(delivery.response_body_excerpt)
         delivery.error_message = safe_excerpt(delivery.error_message)
-        delivery.save(update_fields=("tenant_id", "payload_hash", "idempotency_key", "job_id", "correlation_id", "payload", "response_body_excerpt", "error_message"))
+        delivery.save(
+            update_fields=(
+                "tenant_id",
+                "payload_hash",
+                "idempotency_key",
+                "job_id",
+                "correlation_id",
+                "payload",
+                "response_body_excerpt",
+                "error_message",
+            )
+        )
 
     for mapping in Mapping.objects.select_related("integration").all():
         mapping.name = f"{mapping.source_field} to {mapping.target_field}"[:255]
@@ -136,7 +152,10 @@ SECRET_KEYS = {"password", "secret", "token", "authorization", "api_key", "apike
 
 def redact(value: object) -> object:
     if isinstance(value, dict):
-        return {str(key): "[REDACTED]" if str(key).lower().replace("-", "_") in SECRET_KEYS else redact(child) for key, child in value.items()}
+        return {
+            str(key): "[REDACTED]" if str(key).lower().replace("-", "_") in SECRET_KEYS else redact(child)
+            for key, child in value.items()
+        }
     if isinstance(value, list):
         return [redact(child) for child in value]
     return value
@@ -173,7 +192,9 @@ def stage_legacy_values(apps, schema_editor) -> None:
         rows.append(("connector", str(connector.pk), "config", EncryptionService.encrypt(json_text(connector.config))))
     for delivery in Delivery.objects.all():
         for field in ("payload", "response_body_excerpt", "error_message"):
-            rows.append(("delivery", str(delivery.pk), field, EncryptionService.encrypt(json_text(getattr(delivery, field)))))
+            rows.append(
+                ("delivery", str(delivery.pk), field, EncryptionService.encrypt(json_text(getattr(delivery, field))))
+            )
     if rows:
         with schema_editor.connection.cursor() as cursor:
             cursor.executemany(
@@ -190,8 +211,7 @@ def restore_legacy_values(apps, schema_editor) -> None:
     Delivery = apps.get_model("integration_platform", "WebhookDelivery")
     with schema_editor.connection.cursor() as cursor:
         cursor.execute(
-            "SELECT record_type, record_id, field_name, encrypted_value "
-            "FROM integration_platform_legacy_rollback"
+            "SELECT record_type, record_id, field_name, encrypted_value " "FROM integration_platform_legacy_rollback"
         )
         rows = cursor.fetchall()
     for record_type, record_id, field_name, encrypted_value in rows:
@@ -216,18 +236,33 @@ class Migration(migrations.Migration):
             database_operations=[],
             state_operations=[migrations.DeleteModel(name="IntegrationPlatformResource")],
         ),
-        migrations.AlterField("connector", "id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-        migrations.AlterField("integration", "id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+        migrations.AlterField(
+            "connector", "id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)
+        ),
+        migrations.AlterField(
+            "integration", "id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)
+        ),
         migrations.AlterField("integration", "tenant_id", models.UUIDField(db_index=True)),
         migrations.AlterField("integration", "created_by", models.UUIDField()),
-        migrations.AlterField("integrationcredential", "id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-        migrations.AlterField("webhook", "id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+        migrations.AlterField(
+            "integrationcredential",
+            "id",
+            models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False),
+        ),
+        migrations.AlterField(
+            "webhook", "id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)
+        ),
         migrations.AlterField("webhook", "tenant_id", models.UUIDField(db_index=True)),
         migrations.AlterField("webhook", "created_by", models.UUIDField()),
-        migrations.AlterField("webhookdelivery", "id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-        migrations.AlterField("datamapping", "id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+        migrations.AlterField(
+            "webhookdelivery",
+            "id",
+            models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False),
+        ),
+        migrations.AlterField(
+            "datamapping", "id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)
+        ),
         migrations.AlterField("datamapping", "tenant_id", models.UUIDField(db_index=True)),
-
         migrations.AlterField("connector", "name", models.CharField(max_length=255)),
         migrations.AddField("connector", "key", models.SlugField(max_length=100, null=True, db_index=False)),
         migrations.AddField("connector", "adapter_key", models.CharField(max_length=200, null=True)),
@@ -238,8 +273,16 @@ class Migration(migrations.Migration):
         migrations.AddField("connector", "required_entitlement", models.CharField(blank=True, max_length=200)),
         migrations.RunPython(stage_legacy_values, restore_legacy_values),
         migrations.RemoveField("connector", "config"),
-
-        migrations.AddField("integration", "connector", models.ForeignKey(null=True, on_delete=django.db.models.deletion.PROTECT, related_name="integrations", to="integration_platform.connector")),
+        migrations.AddField(
+            "integration",
+            "connector",
+            models.ForeignKey(
+                null=True,
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="integrations",
+                to="integration_platform.connector",
+            ),
+        ),
         migrations.AddField("integration", "description", models.TextField(blank=True)),
         migrations.AddField("integration", "updated_by", models.UUIDField(blank=True, null=True)),
         migrations.AddField("integration", "is_deleted", models.BooleanField(db_index=True, default=False)),
@@ -250,13 +293,11 @@ class Migration(migrations.Migration):
         migrations.AddField("integration", "last_sync_job_id", models.UUIDField(blank=True, null=True)),
         migrations.AddField("integration", "last_error_code", models.CharField(blank=True, max_length=100)),
         migrations.AddField("integration", "last_error_message", models.TextField(blank=True)),
-
         migrations.AddField("integrationcredential", "tenant_id", models.UUIDField(db_index=True, null=True)),
         migrations.AddField("integrationcredential", "display_hint", models.CharField(blank=True, max_length=100)),
         migrations.AddField("integrationcredential", "version", models.PositiveIntegerField(default=1)),
         migrations.AddField("integrationcredential", "expires_at", models.DateTimeField(blank=True, null=True)),
         migrations.AddField("integrationcredential", "created_by", models.UUIDField(null=True)),
-
         migrations.AddField("webhook", "direction", models.CharField(default="outbound", max_length=20)),
         migrations.AlterField("webhook", "url", models.URLField(blank=True, max_length=2000)),
         migrations.AddField("webhook", "public_id", models.UUIDField(editable=False, null=True)),
@@ -270,7 +311,6 @@ class Migration(migrations.Migration):
         migrations.AddField("webhook", "last_received_at", models.DateTimeField(blank=True, null=True)),
         migrations.AddField("webhook", "last_delivered_at", models.DateTimeField(blank=True, null=True)),
         migrations.AddField("webhook", "last_error_code", models.CharField(blank=True, max_length=100)),
-
         migrations.AddField("webhookdelivery", "tenant_id", models.UUIDField(db_index=True, null=True)),
         migrations.AddField("webhookdelivery", "updated_at", models.DateTimeField(default=timezone.now)),
         migrations.AddField("webhookdelivery", "payload_hash", models.CharField(default="", max_length=64)),
@@ -281,11 +321,22 @@ class Migration(migrations.Migration):
         migrations.AddField("webhookdelivery", "error_code", models.CharField(blank=True, max_length=100)),
         migrations.AddField("webhookdelivery", "duration_ms", models.PositiveIntegerField(blank=True, null=True)),
         migrations.AddField("webhookdelivery", "job_id", models.UUIDField(db_index=True, null=True)),
-        migrations.AddField("webhookdelivery", "correlation_id", models.CharField(db_index=True, default="", max_length=64)),
+        migrations.AddField(
+            "webhookdelivery", "correlation_id", models.CharField(db_index=True, default="", max_length=64)
+        ),
         migrations.RenameField("webhookdelivery", "response_body", "response_body_excerpt"),
-        migrations.AlterField("webhookdelivery", "response_code", models.PositiveSmallIntegerField(blank=True, null=True)),
-        migrations.AlterField("webhookdelivery", "webhook", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="deliveries", to="integration_platform.webhook")),
-
+        migrations.AlterField(
+            "webhookdelivery", "response_code", models.PositiveSmallIntegerField(blank=True, null=True)
+        ),
+        migrations.AlterField(
+            "webhookdelivery",
+            "webhook",
+            models.ForeignKey(
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="deliveries",
+                to="integration_platform.webhook",
+            ),
+        ),
         migrations.AddField("datamapping", "name", models.CharField(default="", max_length=255)),
         migrations.AddField("datamapping", "position", models.PositiveIntegerField(default=0)),
         migrations.AddField("datamapping", "is_required", models.BooleanField(default=False)),
@@ -296,37 +347,114 @@ class Migration(migrations.Migration):
         migrations.AddField("datamapping", "deleted_at", models.DateTimeField(blank=True, null=True)),
         migrations.AddField("datamapping", "deleted_by", models.UUIDField(blank=True, null=True)),
         migrations.AlterUniqueTogether("datamapping", set()),
-
         migrations.RunPython(backfill_domain, reverse_backfill),
-
         migrations.AlterField("connector", "key", models.SlugField(max_length=100, unique=True)),
         migrations.AlterField("connector", "adapter_key", models.CharField(max_length=200, unique=True)),
-        migrations.AlterField("integration", "connector", models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name="integrations", to="integration_platform.connector")),
+        migrations.AlterField(
+            "integration",
+            "connector",
+            models.ForeignKey(
+                on_delete=django.db.models.deletion.PROTECT,
+                related_name="integrations",
+                to="integration_platform.connector",
+            ),
+        ),
         migrations.AlterField("integrationcredential", "tenant_id", models.UUIDField(db_index=True)),
         migrations.AlterField("integrationcredential", "created_by", models.UUIDField()),
-        migrations.AlterField("webhook", "public_id", models.UUIDField(default=uuid.uuid4, editable=False, unique=True)),
+        migrations.AlterField(
+            "webhook", "public_id", models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
+        ),
         migrations.AlterField("webhookdelivery", "tenant_id", models.UUIDField(db_index=True)),
         migrations.AlterField("webhookdelivery", "job_id", models.UUIDField(db_index=True)),
         migrations.AlterField("webhookdelivery", "correlation_id", models.CharField(db_index=True, max_length=64)),
         migrations.AlterField("datamapping", "name", models.CharField(max_length=255)),
         migrations.AlterField("datamapping", "created_by", models.UUIDField()),
-
-        migrations.AddConstraint("connector", models.UniqueConstraint(fields=("key", "version"), name="intplat_conn_key_ver_uniq")),
-        migrations.AddConstraint("integration", models.UniqueConstraint(condition=models.Q(("is_deleted", False)), fields=("tenant_id", "name"), name="intplat_integ_tenant_name_live_uniq")),
-        migrations.AddConstraint("webhook", models.UniqueConstraint(condition=models.Q(("is_deleted", False)), fields=("tenant_id", "name"), name="intplat_hook_tenant_name_live_uniq")),
-        migrations.AddConstraint("webhook", models.CheckConstraint(condition=models.Q(("timeout_seconds__gte", 1), ("timeout_seconds__lte", 30)), name="intplat_hook_timeout_range")),
-        migrations.AddConstraint("webhook", models.CheckConstraint(condition=models.Q(("max_attempts__gte", 1), ("max_attempts__lte", 10)), name="intplat_hook_attempt_range")),
-        migrations.AddConstraint("webhookdelivery", models.UniqueConstraint(fields=("tenant_id", "webhook", "idempotency_key"), name="intplat_delivery_idem_uniq")),
-        migrations.AddConstraint("datamapping", models.UniqueConstraint(condition=models.Q(("is_deleted", False)), fields=("tenant_id", "integration", "source_field", "target_field"), name="intplat_map_fields_live_uniq")),
-        migrations.AddConstraint("datamapping", models.UniqueConstraint(condition=models.Q(("is_deleted", False)), fields=("tenant_id", "integration", "name"), name="intplat_map_name_live_uniq")),
-
-        migrations.AddIndex("connector", models.Index(fields=("connector_type", "is_active"), name="intplat_conn_type_active_idx")),
-        migrations.AddIndex("integration", models.Index(fields=("tenant_id", "status", "created_at"), name="intplat_integ_tenant_status_idx")),
-        migrations.AddIndex("integration", models.Index(fields=("tenant_id", "connector", "status"), name="intplat_integ_tenant_conn_idx")),
-        migrations.AddIndex("integration", models.Index(fields=("tenant_id", "integration_type", "is_deleted"), name="intplat_integ_tenant_type_idx")),
-        migrations.AddIndex("integrationcredential", models.Index(fields=("tenant_id", "integration"), name="intplat_cred_tenant_int_pre_idx")),
-        migrations.AddIndex("webhook", models.Index(fields=("tenant_id", "direction"), name="intplat_hook_tenant_dir_pre_idx")),
-        migrations.AddIndex("webhook", models.Index(fields=("tenant_id", "public_id"), name="intplat_hook_tenant_pub_idx")),
-        migrations.AddIndex("webhookdelivery", models.Index(fields=("tenant_id", "webhook", "created_at"), name="intplat_deliv_tenant_hook_pre_idx")),
-        migrations.AddIndex("datamapping", models.Index(fields=("tenant_id", "integration", "position"), name="intplat_map_tenant_pos_idx")),
+        migrations.AddConstraint(
+            "connector", models.UniqueConstraint(fields=("key", "version"), name="intplat_conn_key_ver_uniq")
+        ),
+        migrations.AddConstraint(
+            "integration",
+            models.UniqueConstraint(
+                condition=models.Q(("is_deleted", False)),
+                fields=("tenant_id", "name"),
+                name="intplat_integ_tenant_name_live_uniq",
+            ),
+        ),
+        migrations.AddConstraint(
+            "webhook",
+            models.UniqueConstraint(
+                condition=models.Q(("is_deleted", False)),
+                fields=("tenant_id", "name"),
+                name="intplat_hook_tenant_name_live_uniq",
+            ),
+        ),
+        migrations.AddConstraint(
+            "webhook",
+            models.CheckConstraint(
+                condition=models.Q(("timeout_seconds__gte", 1), ("timeout_seconds__lte", 30)),
+                name="intplat_hook_timeout_range",
+            ),
+        ),
+        migrations.AddConstraint(
+            "webhook",
+            models.CheckConstraint(
+                condition=models.Q(("max_attempts__gte", 1), ("max_attempts__lte", 10)),
+                name="intplat_hook_attempt_range",
+            ),
+        ),
+        migrations.AddConstraint(
+            "webhookdelivery",
+            models.UniqueConstraint(
+                fields=("tenant_id", "webhook", "idempotency_key"), name="intplat_delivery_idem_uniq"
+            ),
+        ),
+        migrations.AddConstraint(
+            "datamapping",
+            models.UniqueConstraint(
+                condition=models.Q(("is_deleted", False)),
+                fields=("tenant_id", "integration", "source_field", "target_field"),
+                name="intplat_map_fields_live_uniq",
+            ),
+        ),
+        migrations.AddConstraint(
+            "datamapping",
+            models.UniqueConstraint(
+                condition=models.Q(("is_deleted", False)),
+                fields=("tenant_id", "integration", "name"),
+                name="intplat_map_name_live_uniq",
+            ),
+        ),
+        migrations.AddIndex(
+            "connector", models.Index(fields=("connector_type", "is_active"), name="intplat_conn_type_active_idx")
+        ),
+        migrations.AddIndex(
+            "integration",
+            models.Index(fields=("tenant_id", "status", "created_at"), name="intplat_integ_tenant_status_idx"),
+        ),
+        migrations.AddIndex(
+            "integration",
+            models.Index(fields=("tenant_id", "connector", "status"), name="intplat_integ_tenant_conn_idx"),
+        ),
+        migrations.AddIndex(
+            "integration",
+            models.Index(fields=("tenant_id", "integration_type", "is_deleted"), name="intplat_integ_tenant_type_idx"),
+        ),
+        migrations.AddIndex(
+            "integrationcredential",
+            models.Index(fields=("tenant_id", "integration"), name="intplat_cred_tenant_int_pre_idx"),
+        ),
+        migrations.AddIndex(
+            "webhook", models.Index(fields=("tenant_id", "direction"), name="intplat_hook_tenant_dir_pre_idx")
+        ),
+        migrations.AddIndex(
+            "webhook", models.Index(fields=("tenant_id", "public_id"), name="intplat_hook_tenant_pub_idx")
+        ),
+        migrations.AddIndex(
+            "webhookdelivery",
+            models.Index(fields=("tenant_id", "webhook", "created_at"), name="intplat_deliv_tenant_hook_pre_idx"),
+        ),
+        migrations.AddIndex(
+            "datamapping",
+            models.Index(fields=("tenant_id", "integration", "position"), name="intplat_map_tenant_pos_idx"),
+        ),
     ]

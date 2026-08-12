@@ -12,7 +12,8 @@ class MasterDataManagementConfig(AppConfig):
     def ready(self) -> None:
         # Importing the module performs idempotent handler registration.  This
         # hook is reached by every Django process, unlike the HTTP URL module.
+        from .accounting import register_accounting_party_directory
         from .jobs import register_handlers
 
         register_handlers()
-
+        register_accounting_party_directory()

@@ -1,8 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
-import { blockchainTraceabilityService } from '../services/blockchain_traceability-service';
+import { useQuery } from "@tanstack/react-query";
+import { blockchainTraceabilityService } from "../services/blockchain_traceability-service";
 
-export const traceabilityConfigurationKey = ['blockchain-traceability', 'configuration'] as const;
-export const traceabilityCapabilitiesKey = ['blockchain-traceability', 'capabilities'] as const;
+export const traceabilityConfigurationKey = ["blockchain-traceability", "configuration"] as const;
+export const traceabilityCapabilitiesKey = ["blockchain-traceability", "capabilities"] as const;
 
 export function useTraceabilityConfiguration(environment?: string) {
   return useQuery({

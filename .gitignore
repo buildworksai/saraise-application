@@ -52,11 +52,15 @@ htmlcov/
 *.cover
 *.py,cover
 .hypothesis/
+.mutmut-cache/
+backend/.mutmut-cache/
+backend/.mutmut-cache
 nosetests.xml
 coverage.xml
 coverage.json
 test_output*.txt
 backend/migration-backups-*/
+backend/bank_reconciliation/
 *.mo
 *.pot
 

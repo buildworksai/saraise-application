@@ -27,6 +27,7 @@ from ..services import (
     HRConflictError,
     HRNotFoundError,
     HRValidationError,
+    HumanResourcesMutationCommandService,
     LeaveBalanceService,
     LeaveRequestService,
 )
@@ -45,6 +46,82 @@ def event_exists(tenant_id: object, event_type: str, aggregate_id: object) -> bo
         )
         .exists()
     )
+
+
+def test_mutation_command_service_reserves_completes_replays_and_rejects_conflicts() -> None:
+    tenant_id = uuid4()
+    fingerprint = HumanResourcesMutationCommandService.fingerprint(
+        method="post",
+        path="/api/v2/human-resources/departments/",
+        action="create",
+        query=[],
+        body={"department_code": "OPS"},
+    )
+    command, replay = HumanResourcesMutationCommandService.begin(
+        tenant_id,
+        idempotency_key=" hr-command-1 ",
+        request_fingerprint=fingerprint,
+        method="post",
+        path="/api/v2/human-resources/departments/",
+        actor_id=ACTOR,
+        correlation_id="corr-hr-command",
+    )
+
+    assert replay is False
+    assert command.method == "POST"
+    assert command.idempotency_key == "hr-command-1"
+    assert command.actor_id == ACTOR
+    assert command.correlation_id == "corr-hr-command"
+
+    with pytest.raises(HRConflictError) as in_progress:
+        HumanResourcesMutationCommandService.begin(
+            tenant_id,
+            idempotency_key="hr-command-1",
+            request_fingerprint=fingerprint,
+            method="POST",
+            path="/api/v2/human-resources/departments/",
+            actor_id=ACTOR,
+            correlation_id="corr-hr-command",
+        )
+    assert in_progress.value.error_code == "HR_IDEMPOTENCY_IN_PROGRESS"
+
+    HumanResourcesMutationCommandService.complete(
+        command,
+        response_status=201,
+        response_body={"id": uuid4(), "created_on": date(2026, 8, 3)},
+    )
+
+    completed, replay = HumanResourcesMutationCommandService.begin(
+        tenant_id,
+        idempotency_key="hr-command-1",
+        request_fingerprint=fingerprint,
+        method="POST",
+        path="/api/v2/human-resources/departments/",
+        actor_id=ACTOR,
+        correlation_id="corr-hr-command",
+    )
+    assert replay is True
+    assert completed.response_status == 201
+    assert completed.response_body["created_on"] == "2026-08-03"
+
+    different = HumanResourcesMutationCommandService.fingerprint(
+        method="POST",
+        path="/api/v2/human-resources/departments/",
+        action="create",
+        query=[],
+        body={"department_code": "FIN"},
+    )
+    with pytest.raises(HRConflictError) as conflict:
+        HumanResourcesMutationCommandService.begin(
+            tenant_id,
+            idempotency_key="hr-command-1",
+            request_fingerprint=different,
+            method="POST",
+            path="/api/v2/human-resources/departments/",
+            actor_id=ACTOR,
+            correlation_id="corr-hr-command",
+        )
+    assert conflict.value.error_code == "HR_IDEMPOTENCY_CONFLICT"
 
 
 def test_department_service_normalizes_validates_hierarchy_and_emits_outbox() -> None:

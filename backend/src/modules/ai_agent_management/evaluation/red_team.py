@@ -160,8 +160,10 @@ class RedTeamResult:
 
     @property
     def passed(self) -> bool:
-        return self.total_attacks > 0 and self.attacks_succeeded == 0 and all(
-            item.status == EvaluationStatus.PASS for item in self.results
+        return (
+            self.total_attacks > 0
+            and self.attacks_succeeded == 0
+            and all(item.status == EvaluationStatus.PASS for item in self.results)
         )
 
 

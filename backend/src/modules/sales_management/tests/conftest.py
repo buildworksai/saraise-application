@@ -9,8 +9,6 @@ import pytest
 from src.core.access import AccessDecision, AccessDecisionPipeline, AccessReasonCode
 from src.modules.sales_management.models import Customer, SalesOrder, SalesOrderLine
 
-pytest_plugins = ["src.core.testing"]
-
 API = "/api/v2/sales-management"
 
 

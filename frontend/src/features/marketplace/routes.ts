@@ -9,6 +9,7 @@ export const tenantRoutes = [
     module: "marketplace",
     path: ENDPOINTS.MARKETPLACE.LIST,
     sourceFile: "features/marketplace/pages/MarketplacePage.tsx",
+    title: "Capability marketplace",
     Page: lazy(() =>
       import("./pages/MarketplacePage").then(({ MarketplacePage }) => ({
         default: MarketplacePage,
@@ -21,6 +22,7 @@ export const tenantRoutes = [
     module: "marketplace",
     path: ENDPOINTS.MARKETPLACE.COMPARE,
     sourceFile: "features/marketplace/pages/MarketplaceComparisonPage.tsx",
+    title: "Capability comparison",
     Page: lazy(() =>
       import("./pages/MarketplaceComparisonPage").then(({ MarketplaceComparisonPage }) => ({
         default: MarketplaceComparisonPage,
@@ -33,6 +35,7 @@ export const tenantRoutes = [
     module: "marketplace",
     path: ENDPOINTS.MARKETPLACE.DETAIL_PATTERN,
     sourceFile: "features/marketplace/pages/CapabilityDetailPage.tsx",
+    title: "Capability detail",
     Page: lazy(() =>
       import("./pages/CapabilityDetailPage").then(({ CapabilityDetailPage }) => ({
         default: CapabilityDetailPage,

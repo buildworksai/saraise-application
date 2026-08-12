@@ -9,11 +9,7 @@ from uuid import UUID
 from django.utils import timezone
 
 from src.core.async_jobs.models import AsyncJob
-from src.core.async_jobs.services import (
-    HandlerAlreadyRegistered,
-    get_handler,
-    register_handler,
-)
+from src.core.async_jobs.services import HandlerAlreadyRegistered, get_handler, register_handler
 from src.core.observability.correlation import TaskContext, bind_task_context
 from src.core.tenancy import tenant_context_worker
 
@@ -108,19 +104,15 @@ def _register_command(command: str, handler: Any) -> None:
             if get_handler(command) is not handler:
                 raise
     else:
-        same_contract = (
-            getattr(existing, "__module__", None) == getattr(handler, "__module__", None)
-            and getattr(existing, "__name__", None) == getattr(handler, "__name__", None)
-        )
+        same_contract = getattr(existing, "__module__", None) == getattr(handler, "__module__", None) and getattr(
+            existing, "__name__", None
+        ) == getattr(handler, "__name__", None)
         if existing is not handler and not same_contract:
             raise HandlerAlreadyRegistered(f"A different handler is registered for {command!r}")
 
 
 def _register_orchestration_adapter() -> None:
-    from src.modules.automation_orchestration.workflow_adapter import (
-        get_workflow_adapter,
-        register_workflow_adapter,
-    )
+    from src.modules.automation_orchestration.workflow_adapter import get_workflow_adapter, register_workflow_adapter
 
     try:
         existing = get_workflow_adapter()

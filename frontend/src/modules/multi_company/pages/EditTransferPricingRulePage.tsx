@@ -1,1 +1,1 @@
-export { EditTransferPricingRulePage } from './workspaces';
+export { EditTransferPricingRulePage } from "./workspaces";

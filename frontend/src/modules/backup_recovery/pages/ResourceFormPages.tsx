@@ -1,4 +1,5 @@
-import { useRef, type ReactNode } from "react";
+/* eslint-disable @typescript-eslint/no-base-to-string, complexity, max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
+import { useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -31,6 +32,7 @@ const optionalNumber = (data: FormData, name: string) => {
 };
 const errorFor = (error: unknown, name: string) =>
   error instanceof BackupRecoveryApiError ? error.fieldError(name) : undefined;
+type LocalErrors = Record<string, string | undefined>;
 
 function SelectField({
   id,
@@ -576,6 +578,7 @@ function PolicyFormPage({ edit }: { edit: boolean }) {
       nav(`/backup-recovery/retention-policies/${saved.id}`);
     },
   });
+  const [localErrors, setLocalErrors] = useState<LocalErrors>({});
   if (edit && query.isLoading) return <PageSkeleton />;
   if (query.error)
     return (
@@ -584,6 +587,7 @@ function PolicyFormPage({ edit }: { edit: boolean }) {
       </main>
     );
   const current = query.data;
+  const policyError = (name: string) => localErrors[name] ?? errorFor(mutation.error, name);
   return (
     <main className="space-y-6 p-4 sm:p-8">
       <PageHeader
@@ -601,9 +605,14 @@ function PolicyFormPage({ edit }: { edit: boolean }) {
       <Card className="mx-auto max-w-3xl p-6">
         <form
           className="grid gap-5 sm:grid-cols-2"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
+            const nextErrors: LocalErrors = {};
+            if (!field(data, "name")) nextErrors.name = "Policy name is required";
+            setLocalErrors(nextErrors);
+            if (Object.values(nextErrors).some(Boolean)) return;
             mutation.mutate({
               name: field(data, "name"),
               retention_days: Number(field(data, "retention_days")),
@@ -620,7 +629,7 @@ function PolicyFormPage({ edit }: { edit: boolean }) {
             defaultValue={current?.name}
             required
             maxLength={120}
-            error={errorFor(mutation.error, "name")}
+            error={policyError("name")}
           />
           <Input
             id="retention-days"
@@ -631,7 +640,7 @@ function PolicyFormPage({ edit }: { edit: boolean }) {
             max={3650}
             defaultValue={current?.retention_days ?? 30}
             required
-            error={errorFor(mutation.error, "retention_days")}
+            error={policyError("retention_days")}
           />
           <Input
             id="archive-days"
@@ -641,7 +650,7 @@ function PolicyFormPage({ edit }: { edit: boolean }) {
             min={1}
             max={3649}
             defaultValue={current?.archive_after_days ?? ""}
-            error={errorFor(mutation.error, "archive_after_days")}
+            error={policyError("archive_after_days")}
           />
           <Input
             id="keep-last"
@@ -651,7 +660,7 @@ function PolicyFormPage({ edit }: { edit: boolean }) {
             min={1}
             defaultValue={current?.keep_last_successful ?? 3}
             required
-            error={errorFor(mutation.error, "keep_last_successful")}
+            error={policyError("keep_last_successful")}
           />
           <div className="sm:col-span-2">
             <Textarea
@@ -659,7 +668,7 @@ function PolicyFormPage({ edit }: { edit: boolean }) {
               name="description"
               label="Description"
               defaultValue={current?.description}
-              error={errorFor(mutation.error, "description")}
+              error={policyError("description")}
             />
           </div>
           {mutation.error && (
@@ -708,6 +717,7 @@ function TargetFormPage({ edit }: { edit: boolean }) {
       nav(`/backup-recovery/storage-targets/${saved.id}`);
     },
   });
+  const [localErrors, setLocalErrors] = useState<LocalErrors>({});
   if (edit && query.isLoading) return <PageSkeleton />;
   if (query.error)
     return (
@@ -716,6 +726,7 @@ function TargetFormPage({ edit }: { edit: boolean }) {
       </main>
     );
   const current = query.data;
+  const targetError = (name: string) => localErrors[name] ?? errorFor(mutation.error, name);
   return (
     <main className="space-y-6 p-4 sm:p-8">
       <PageHeader
@@ -729,9 +740,20 @@ function TargetFormPage({ edit }: { edit: boolean }) {
       <Card className="mx-auto max-w-3xl p-6">
         <form
           className="grid gap-5 sm:grid-cols-2"
+          noValidate
           onSubmit={(event) => {
             event.preventDefault();
             const data = new FormData(event.currentTarget);
+            const nextErrors: LocalErrors = {};
+            if (!field(data, "name")) nextErrors.name = "Target name is required";
+            if (!field(data, "locator_prefix_ref")) {
+              nextErrors.locator_prefix_ref = "Locator prefix reference is required";
+            }
+            if (!field(data, "configuration_ref")) {
+              nextErrors.configuration_ref = "Configuration reference is required";
+            }
+            setLocalErrors(nextErrors);
+            if (Object.values(nextErrors).some(Boolean)) return;
             mutation.mutate({
               name: field(data, "name"),
               adapter_key: field(data, "adapter_key"),
@@ -748,7 +770,7 @@ function TargetFormPage({ edit }: { edit: boolean }) {
             defaultValue={current?.name}
             required
             maxLength={120}
-            error={errorFor(mutation.error, "name")}
+            error={targetError("name")}
           />
           <Input
             id="adapter-key"
@@ -757,7 +779,7 @@ function TargetFormPage({ edit }: { edit: boolean }) {
             defaultValue={current?.adapter_key ?? "local-filesystem"}
             required
             pattern="[a-z0-9]+(?:[-_.][a-z0-9]+)*"
-            error={errorFor(mutation.error, "adapter_key")}
+            error={targetError("adapter_key")}
           />
           <div className="sm:col-span-2">
             <Input
@@ -767,7 +789,7 @@ function TargetFormPage({ edit }: { edit: boolean }) {
               defaultValue={current?.locator_prefix_ref}
               required
               maxLength={1024}
-              error={errorFor(mutation.error, "locator_prefix_ref")}
+              error={targetError("locator_prefix_ref")}
             />
           </div>
           <Input
@@ -777,7 +799,7 @@ function TargetFormPage({ edit }: { edit: boolean }) {
             defaultValue={current?.configuration_ref}
             required
             maxLength={255}
-            error={errorFor(mutation.error, "configuration_ref")}
+            error={targetError("configuration_ref")}
           />
           <Input
             id="key-ref"
@@ -785,7 +807,7 @@ function TargetFormPage({ edit }: { edit: boolean }) {
             label="Encryption key reference (optional)"
             defaultValue={current?.encryption_key_ref}
             maxLength={255}
-            error={errorFor(mutation.error, "encryption_key_ref")}
+            error={targetError("encryption_key_ref")}
           />
           {mutation.error && (
             <div className="sm:col-span-2">

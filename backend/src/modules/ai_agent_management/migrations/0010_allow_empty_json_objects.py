@@ -6,38 +6,38 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('ai_agent_management', '0009_contract_legacy_columns'),
+        ("ai_agent_management", "0009_contract_legacy_columns"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='agentexecution',
-            name='task_definition',
+            model_name="agentexecution",
+            name="task_definition",
             field=models.JSONField(blank=True, default=dict),
         ),
         migrations.AlterField(
-            model_name='agentschedulertask',
-            name='task_data',
+            model_name="agentschedulertask",
+            name="task_data",
             field=models.JSONField(blank=True, default=dict),
         ),
         migrations.AlterField(
-            model_name='approvalrequest',
-            name='tool_input',
+            model_name="approvalrequest",
+            name="tool_input",
             field=models.JSONField(blank=True, default=dict),
         ),
         migrations.AlterField(
-            model_name='tool',
-            name='input_schema',
+            model_name="tool",
+            name="input_schema",
             field=models.JSONField(blank=True, default=dict),
         ),
         migrations.AlterField(
-            model_name='tool',
-            name='output_schema',
+            model_name="tool",
+            name="output_schema",
             field=models.JSONField(blank=True, default=dict),
         ),
         migrations.AlterField(
-            model_name='toolinvocation',
-            name='input_data',
+            model_name="toolinvocation",
+            name="input_data",
             field=models.JSONField(blank=True, default=dict),
         ),
     ]

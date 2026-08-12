@@ -47,19 +47,23 @@ def _handlers_registered() -> bool:
 
 
 def _outbox_fresh(tenant_id: uuid.UUID | None) -> bool:
-    if tenant_id is None:
-        return False
-    from .services import WorkflowConfigurationService
+    from .services import WorkflowConfigurationService, default_configuration_document
 
-    stale_seconds = int(
-        WorkflowConfigurationService.value(tenant_id, "operational.outbox_stale_seconds")
-    )
+    if tenant_id is None:
+        stale_seconds = int(default_configuration_document()["operational"]["outbox_stale_seconds"])
+    else:
+        stale_seconds = int(WorkflowConfigurationService.value(tenant_id, "operational.outbox_stale_seconds"))
     threshold = timezone.now() - timedelta(seconds=stale_seconds)
     try:
-        return not OutboxEvent.objects.for_tenant(tenant_id).filter(
+        # Process-level readiness intentionally checks all tenant outbox rows without exposing tenant data.
+        queryset = OutboxEvent.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
+            tenant_id__isnull=False,
             status=OutboxStatus.PENDING,
             created_at__lt=threshold,
-        ).exists()
+        )
+        if tenant_id is not None:
+            queryset = queryset.for_tenant(tenant_id)
+        return not queryset.exists()
     except Exception:
         return False
 
@@ -71,15 +75,19 @@ def _required_extensions_ready(tenant_id: uuid.UUID | None) -> bool:
             return False
         if tenant_id is None:
             return True
-        workflow_ids = Workflow.objects.for_tenant(tenant_id).filter(
-            status="published",
-            deleted_at__isnull=True,
-        ).values_list("id", flat=True)
+        workflow_ids = (
+            Workflow.objects.for_tenant(tenant_id)
+            .filter(
+                status="published",
+                deleted_at__isnull=True,
+            )
+            .values_list("id", flat=True)
+        )
         for step in WorkflowStep.objects.for_tenant(tenant_id).filter(
             workflow_id__in=workflow_ids,
             step_type__in=("action", "notification"),
         ):
-            handler_key, _ = _handler_key_for_step(step)
+            handler_key, _ = _handler_key_for_step(tenant_id, step)
             handler = action_registry.get(handler_key)
             descriptor = handler.descriptor
             if step.handler_contract_version != descriptor.contract_version:

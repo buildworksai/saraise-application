@@ -297,6 +297,7 @@ export function CreateBankAccountPage() {
             <Input
               id="account-number"
               autoComplete="off"
+              required
               value={form.account_number}
               onChange={(e) => setForm({ ...form, account_number: e.target.value })}
             />
@@ -304,6 +305,7 @@ export function CreateBankAccountPage() {
           <Field label="Account display name" htmlFor="account-name" error={errors.account_name}>
             <Input
               id="account-name"
+              required
               value={form.account_name}
               onChange={(e) => setForm({ ...form, account_name: e.target.value })}
             />
@@ -311,6 +313,7 @@ export function CreateBankAccountPage() {
           <Field label="Bank name" htmlFor="bank-name" error={errors.bank_name}>
             <Input
               id="bank-name"
+              required
               value={form.bank_name}
               onChange={(e) => setForm({ ...form, bank_name: e.target.value })}
             />
@@ -331,6 +334,8 @@ export function CreateBankAccountPage() {
             <Input
               id="currency"
               maxLength={3}
+              pattern="[A-Z]{3}"
+              required
               value={form.currency}
               onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })}
             />
@@ -762,6 +767,7 @@ export function CreateManualStatementPage() {
           <Field label="Bank account ID" htmlFor="manual-account">
             <Input
               id="manual-account"
+              required
               value={form.bank_account}
               onChange={(e) => setForm({ ...form, bank_account: e.target.value })}
             />
@@ -769,6 +775,7 @@ export function CreateManualStatementPage() {
           <Field label="Statement reference" htmlFor="manual-reference">
             <Input
               id="manual-reference"
+              required
               value={form.statement_reference}
               onChange={(e) => setForm({ ...form, statement_reference: e.target.value })}
             />
@@ -777,6 +784,7 @@ export function CreateManualStatementPage() {
             <Input
               id="period-start"
               type="date"
+              required
               value={form.period_start}
               onChange={(e) => setForm({ ...form, period_start: e.target.value })}
             />
@@ -785,6 +793,7 @@ export function CreateManualStatementPage() {
             <Input
               id="period-end"
               type="date"
+              required
               value={form.period_end}
               onChange={(e) => setForm({ ...form, period_end: e.target.value })}
             />
@@ -835,12 +844,14 @@ export function CreateManualStatementPage() {
               <Input
                 aria-label={`Transaction ${index + 1} date`}
                 type="date"
+                required
                 value={row.transaction_date}
                 onChange={(e) => updateRow(index, { transaction_date: e.target.value })}
               />
               <Input
                 aria-label={`Transaction ${index + 1} description`}
                 placeholder="Description"
+                required
                 value={row.description}
                 onChange={(e) => updateRow(index, { description: e.target.value })}
               />
@@ -946,7 +957,12 @@ export function ImportStatementPage() {
         }}
       >
         <Field label="Bank account ID" htmlFor="import-account">
-          <Input id="import-account" value={account} onChange={(e) => setAccount(e.target.value)} />
+          <Input
+            id="import-account"
+            required
+            value={account}
+            onChange={(e) => setAccount(e.target.value)}
+          />
         </Field>
         <div
           role="button"
@@ -967,6 +983,7 @@ export function ImportStatementPage() {
           </p>
           <Input
             id="statement-file"
+            aria-label="Bank statement file"
             className="mx-auto max-w-sm"
             type="file"
             accept=".csv,.ofx,.qif,.bai,.bai2,.sta,.xml"
@@ -1557,6 +1574,9 @@ export function CreateReconciliationPage() {
     notes: "",
     idempotency_key: idempotencyKey(),
   });
+  const [errors, setErrors] = useState<Partial<Record<"bank_account" | "bank_statement", string>>>(
+    {}
+  );
   const mutation = useMutation({
     mutationFn: service.createReconciliation,
     onSuccess: (session) => {
@@ -1577,21 +1597,36 @@ export function CreateReconciliationPage() {
         submitLabel="Create draft"
         onSubmit={(e) => {
           e.preventDefault();
+          const nextErrors: Partial<Record<"bank_account" | "bank_statement", string>> = {};
+          if (!form.bank_account.trim()) nextErrors.bank_account = "Bank account ID is required";
+          if (!form.bank_statement.trim()) nextErrors.bank_statement = "Statement ID is required";
+          setErrors(nextErrors);
+          if (Object.values(nextErrors).some(Boolean)) return;
           mutation.mutate(form);
         }}
       >
         <Field label="Bank account ID" htmlFor="recon-account">
           <Input
             id="recon-account"
+            required
             value={form.bank_account}
-            onChange={(e) => setForm({ ...form, bank_account: e.target.value })}
+            error={errors.bank_account}
+            onChange={(e) => {
+              setForm({ ...form, bank_account: e.target.value });
+              if (errors.bank_account) setErrors({ ...errors, bank_account: undefined });
+            }}
           />
         </Field>
         <Field label="Statement ID" htmlFor="recon-statement">
           <Input
             id="recon-statement"
+            required
             value={form.bank_statement}
-            onChange={(e) => setForm({ ...form, bank_statement: e.target.value })}
+            error={errors.bank_statement}
+            onChange={(e) => {
+              setForm({ ...form, bank_statement: e.target.value });
+              if (errors.bank_statement) setErrors({ ...errors, bank_statement: undefined });
+            }}
           />
         </Field>
         <div className="grid gap-4 sm:grid-cols-3">
@@ -1599,6 +1634,7 @@ export function CreateReconciliationPage() {
             <Input
               id="recon-date"
               type="date"
+              required
               value={form.reconciliation_date}
               onChange={(e) => setForm({ ...form, reconciliation_date: e.target.value })}
             />
@@ -1611,6 +1647,7 @@ export function CreateReconciliationPage() {
             <Input
               id="ledger-balance"
               inputMode="decimal"
+              required
               value={form.ledger_balance}
               onChange={(e) => setForm({ ...form, ledger_balance: e.target.value })}
             />
@@ -2109,6 +2146,7 @@ function RuleForm({
       <Field label="Rule name" htmlFor="rule-name">
         <Input
           id="rule-name"
+          required
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
         />
@@ -2140,6 +2178,7 @@ function RuleForm({
             id="rule-priority"
             type="number"
             min="1"
+            required
             value={form.priority}
             onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
           />
@@ -2148,6 +2187,7 @@ function RuleForm({
           <Input
             id="minimum-score"
             inputMode="decimal"
+            required
             value={form.minimum_score}
             onChange={(e) => setForm({ ...form, minimum_score: e.target.value })}
           />
@@ -2230,6 +2270,8 @@ function RuleForm({
       )}
       <label className="flex items-center gap-2">
         <input
+          id="rule-auto-confirm"
+          aria-label="Automatically confirm perfect deterministic matches"
           type="checkbox"
           checked={form.auto_confirm}
           onChange={(e) =>

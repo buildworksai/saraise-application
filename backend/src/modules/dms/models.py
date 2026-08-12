@@ -11,8 +11,9 @@ from __future__ import annotations
 import json
 import unicodedata
 import uuid
+from collections.abc import Mapping, Sequence
 from datetime import timedelta
-from typing import Any
+from typing import Any, ClassVar, cast
 
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVector
@@ -34,6 +35,23 @@ SAFE_MAX_SHARE_ACCESS_COUNT = 10_000
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 
 
+def _postgres_document_indexes() -> list[models.Index]:
+    """Declare PostgreSQL search indexes only for PostgreSQL-backed schemas."""
+
+    from django.conf import settings
+
+    if settings.DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3":
+        return []
+
+    return [
+        GinIndex(fields=["tags"], name="dms_doc_tags_gin"),
+        GinIndex(
+            SearchVector("name", "description", "metadata", config="simple"),
+            name="dms_doc_search_gin",
+        ),
+    ]
+
+
 def generate_uuid() -> str:
     """Retain the callable imported by deployed migrations ``0001``/``0002``."""
 
@@ -53,7 +71,7 @@ def _relation_belongs_to_tenant(instance: TenantScopedModel, relation_name: str)
     relation_id = getattr(instance, f"{relation_name}_id", None)
     if relation_id is None or instance.tenant_id is None:
         return
-    field = instance._meta.get_field(relation_name)
+    field = cast(Any, instance._meta.get_field(relation_name))
     related_model = field.remote_field.model
     if not related_model.objects.for_tenant(instance.tenant_id).filter(pk=relation_id).exists():
         raise ValidationError(
@@ -70,7 +88,7 @@ class MutableDmsModel(TenantScopedModel, TimestampedModel):
     is_deleted = models.BooleanField(default=False, db_index=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    objects = DmsManager()
+    objects: ClassVar[Any] = DmsManager()
 
     class Meta:
         abstract = True
@@ -135,7 +153,7 @@ class Folder(MutableDmsModel):
             raise ValidationError({"parent": "A folder cannot parent itself."}, code="self_parent")
         from .services import DmsConfigurationService
 
-        maximum_depth = DmsConfigurationService.runtime_values(self.tenant_id)["max_folder_depth"]
+        maximum_depth = cast(int, DmsConfigurationService.runtime_values(self.tenant_id)["max_folder_depth"])
         if not 0 <= self.depth <= maximum_depth:
             raise ValidationError(
                 {"depth": f"Folder depth must be between 0 and {maximum_depth}."},
@@ -191,11 +209,7 @@ class Document(MutableDmsModel):
                 name="dms_doc_owner_alive_idx",
             ),
             models.Index(fields=["tenant_id", "name"], name="dms_doc_name_idx"),
-            GinIndex(fields=["tags"], name="dms_doc_tags_gin"),
-            GinIndex(
-                SearchVector("name", "description", "metadata", config="simple"),
-                name="dms_doc_search_gin",
-            ),
+            *_postgres_document_indexes(),
         ]
         ordering = ("-updated_at", "name", "id")
 
@@ -207,22 +221,25 @@ class Document(MutableDmsModel):
             raise ValidationError({"folder": "The target folder has been deleted."}, code="deleted_folder")
 
         if not isinstance(self.tags, list):
-            raise ValidationError({"tags": "Tags must be an array."}, code="invalid_tags")
+            raise ValidationError({"tags": ValidationError("Tags must be an array.", code="invalid_tags")})
         from .services import DmsConfigurationService
 
         policy = DmsConfigurationService.runtime_values(self.tenant_id)
-        if len(self.tags) > policy["max_document_tags"]:
+        max_document_tags = cast(int, policy["max_document_tags"])
+        max_tag_length = cast(int, policy["max_tag_length"])
+        max_metadata_bytes = cast(int, policy["max_metadata_bytes"])
+        if len(self.tags) > max_document_tags:
             raise ValidationError(
-                {"tags": f"At most {policy['max_document_tags']} tags are allowed."},
+                {"tags": f"At most {max_document_tags} tags are allowed."},
                 code="too_many_tags",
             )
         normalized_tags: list[str] = []
         seen: set[str] = set()
         for tag in self.tags:
             normalized = _normalized_text(tag, field="tags")
-            if len(normalized) > policy["max_tag_length"]:
+            if len(normalized) > max_tag_length:
                 raise ValidationError(
-                    {"tags": f"Each tag must be at most {policy['max_tag_length']} characters."},
+                    {"tags": f"Each tag must be at most {max_tag_length} characters."},
                     code="tag_too_long",
                 )
             key = normalized.casefold()
@@ -233,7 +250,9 @@ class Document(MutableDmsModel):
         self.tags = normalized_tags
 
         if not isinstance(self.metadata, dict):
-            raise ValidationError({"metadata": "Metadata must be a JSON object."}, code="invalid_metadata")
+            raise ValidationError(
+                {"metadata": ValidationError("Metadata must be a JSON object.", code="invalid_metadata")}
+            )
         try:
             encoded_metadata = json.dumps(
                 self.metadata,
@@ -246,14 +265,15 @@ class Document(MutableDmsModel):
                 {"metadata": "Metadata must contain JSON-compatible values only."},
                 code="invalid_metadata",
             ) from exc
-        if len(encoded_metadata) > policy["max_metadata_bytes"]:
+        if len(encoded_metadata) > max_metadata_bytes:
             raise ValidationError(
-                {"metadata": f"Metadata must not exceed {policy['max_metadata_bytes']} UTF-8 bytes."},
+                {"metadata": f"Metadata must not exceed {max_metadata_bytes} UTF-8 bytes."},
                 code="metadata_too_large",
             )
 
         _relation_belongs_to_tenant(self, "current_version")
-        if self.current_version_id and self.current_version.document_id != self.id:
+        current_version = self.current_version
+        if self.current_version_id and current_version is not None and current_version.document_id != self.id:
             raise ValidationError(
                 {"current_version": "The current version must belong to this document."},
                 code="version_document_mismatch",
@@ -264,7 +284,9 @@ class Document(MutableDmsModel):
         if not self._state.adding:
             previous_owner = type(self)._base_manager.filter(pk=self.pk).values_list("created_by", flat=True).first()
             if previous_owner is not None and previous_owner != self.created_by:
-                raise ValidationError({"created_by": "Document ownership is immutable."}, code="immutable_owner")
+                raise ValidationError(
+                    {"created_by": ValidationError("Document ownership is immutable.", code="immutable_owner")}
+                )
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
@@ -297,7 +319,7 @@ class DocumentVersion(TenantScopedModel):
     created_by = models.UUIDField(editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    objects = DocumentVersionManager()
+    objects: ClassVar[Any] = DocumentVersionManager()
 
     class Meta:
         db_table = "dms_document_versions"
@@ -338,7 +360,8 @@ class DocumentVersion(TenantScopedModel):
             raise ValidationError({"version_number": "Version number must be at least 1."})
         if self.size_bytes < 1:
             raise ValidationError({"size_bytes": "Stored content must not be empty."})
-        if self.source_version_id and self.source_version.document_id != self.document_id:
+        source_version = self.source_version
+        if self.source_version_id and source_version is not None and source_version.document_id != self.document_id:
             raise ValidationError(
                 {"source_version": "A restore source must belong to the same document."},
                 code="source_document_mismatch",
@@ -418,7 +441,10 @@ class DocumentPermission(MutableDmsModel):
     def implied_permissions(self) -> frozenset[str]:
         from .services import DmsConfigurationService
 
-        implications = DmsConfigurationService.runtime_values(self.tenant_id)["permission_implications"]
+        implications = cast(
+            Mapping[str, Sequence[str]],
+            DmsConfigurationService.runtime_values(self.tenant_id)["permission_implications"],
+        )
         return frozenset(implications.get(self.permission, ()))
 
     def grants(self, permission: str) -> bool:
@@ -500,19 +526,22 @@ class DocumentShare(MutableDmsModel):
         from .services import DmsConfigurationService
 
         policy = DmsConfigurationService.runtime_values(self.tenant_id)
-        if len(self.token_prefix) != policy["share_token_prefix_length"]:
+        share_token_prefix_length = cast(int, policy["share_token_prefix_length"])
+        max_share_lifetime_days = cast(int, policy["max_share_lifetime_days"])
+        max_share_access_count = cast(int, policy["max_share_access_count"])
+        if len(self.token_prefix) != share_token_prefix_length:
             raise ValidationError({"token_prefix": "Token prefix length does not match tenant policy."})
         baseline = self.created_at if self.created_at else timezone.now()
         if self.expires_at <= baseline:
             raise ValidationError({"expires_at": "Share expiry must be in the future."}, code="expired_share")
-        if self.expires_at > baseline + timedelta(days=policy["max_share_lifetime_days"]):
+        if self.expires_at > baseline + timedelta(days=max_share_lifetime_days):
             raise ValidationError(
                 {"expires_at": "Share expiry exceeds the tenant policy."},
                 code="share_expiry_too_long",
             )
-        if self.max_access_count is not None and not 1 <= self.max_access_count <= policy["max_share_access_count"]:
+        if self.max_access_count is not None and not 1 <= self.max_access_count <= max_share_access_count:
             raise ValidationError(
-                {"max_access_count": f"Access limit must be between 1 and {policy['max_share_access_count']}."},
+                {"max_access_count": f"Access limit must be between 1 and {max_share_access_count}."},
                 code="share_access_limit",
             )
         if self.max_access_count is not None and self.access_count > self.max_access_count:
@@ -571,7 +600,7 @@ class ImmutableDmsEvidence(TenantScopedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    objects = DocumentVersionManager()
+    objects: ClassVar[Any] = DocumentVersionManager()
 
     class Meta:
         abstract = True

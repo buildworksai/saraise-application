@@ -9,7 +9,6 @@ import pytest
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 
-
 MIGRATION_0001 = ("compliance_management", "0001_initial")
 MIGRATION_0005 = ("compliance_management", "0005_enforce_append_only_records")
 
@@ -118,7 +117,9 @@ def test_append_only_trigger_sql_and_reverse_are_complete():
 
 
 def test_ambiguous_reverse_is_rejected_before_data_loss():
-    migration = importlib.import_module("src.modules.compliance_management.migrations.0003_migrate_legacy_compliance_data")
+    migration = importlib.import_module(
+        "src.modules.compliance_management.migrations.0003_migrate_legacy_compliance_data"
+    )
 
     class Manager:
         def order_by(self, *fields):

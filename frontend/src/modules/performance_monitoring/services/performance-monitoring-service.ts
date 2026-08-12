@@ -1,4 +1,4 @@
-import { ApiError, apiClient } from '@/services/api-client';
+import { ApiError, apiClient } from "@/services/api-client";
 import {
   ENDPOINTS,
   type ActionResult,
@@ -47,7 +47,7 @@ import {
   type Trace,
   type TraceQuery,
   type UUID,
-} from '../contracts';
+} from "../contracts";
 
 type QueryValue = string | number | boolean | undefined;
 
@@ -56,24 +56,29 @@ export class PerformanceMonitoringApiError extends Error {
     message: string,
     readonly status: number,
     readonly code: string,
-    readonly correlationId: string | null,
+    readonly correlationId: string | null
   ) {
     super(message);
-    this.name = 'PerformanceMonitoringApiError';
+    this.name = "PerformanceMonitoringApiError";
   }
 }
 
 function withQuery(path: string, query: Record<string, QueryValue>): string {
   const search = new URLSearchParams();
   Object.entries(query).forEach(([key, value]) => {
-    if (value !== undefined && value !== '') search.set(key, String(value));
+    if (value !== undefined && value !== "") search.set(key, String(value));
   });
   const encoded = search.toString();
   return encoded ? `${path}?${encoded}` : path;
 }
 
 function queryValues(query: ListQuery = {}): Record<string, QueryValue> {
-  return { page: query.page, page_size: query.page_size, search: query.search, ordering: query.ordering };
+  return {
+    page: query.page,
+    page_size: query.page_size,
+    search: query.search,
+    ordering: query.ordering,
+  };
 }
 
 async function call<T>(request: () => Promise<ApiEnvelope<T>>): Promise<ApiEnvelope<T>> {
@@ -84,8 +89,8 @@ async function call<T>(request: () => Promise<ApiEnvelope<T>>): Promise<ApiEnvel
     throw new PerformanceMonitoringApiError(
       error.message,
       error.status,
-      error.code ?? 'request_failed',
-      error.correlationId ?? null,
+      error.code ?? "request_failed",
+      error.correlationId ?? null
     );
   }
 }
@@ -97,7 +102,7 @@ async function data<T>(request: () => Promise<ApiEnvelope<T>>): Promise<T> {
 async function page<T>(request: () => Promise<ApiEnvelope<readonly T[]>>): Promise<PageResult<T>> {
   const envelope = await call(request);
   if (!envelope.meta.pagination) {
-    throw new Error('The monitoring API returned a list without pagination metadata.');
+    throw new Error("The monitoring API returned a list without pagination metadata.");
   }
   return {
     items: envelope.data,
@@ -109,41 +114,57 @@ async function page<T>(request: () => Promise<ApiEnvelope<readonly T[]>>): Promi
 
 export const performanceMonitoringService = {
   listTelemetrySources(query: ListQuery = {}) {
-    return page(() => apiClient.get<ApiEnvelope<readonly TelemetrySource[]>>(
-      withQuery(ENDPOINTS.TELEMETRY_SOURCES.LIST, queryValues(query)),
-    ));
+    return page(() =>
+      apiClient.get<ApiEnvelope<readonly TelemetrySource[]>>(
+        withQuery(ENDPOINTS.TELEMETRY_SOURCES.LIST, queryValues(query))
+      )
+    );
   },
   createTelemetrySource(payload: TelemetrySourceCreate) {
-    return data(() => apiClient.post<ApiEnvelope<TelemetrySource>>(ENDPOINTS.TELEMETRY_SOURCES.LIST, payload));
+    return data(() =>
+      apiClient.post<ApiEnvelope<TelemetrySource>>(ENDPOINTS.TELEMETRY_SOURCES.LIST, payload)
+    );
   },
   listEnvironments(query: ListQuery = {}) {
-    return page(() => apiClient.get<ApiEnvelope<readonly MonitoringEnvironment[]>>(
-      withQuery(ENDPOINTS.ENVIRONMENTS.LIST, queryValues(query)),
-    ));
+    return page(() =>
+      apiClient.get<ApiEnvelope<readonly MonitoringEnvironment[]>>(
+        withQuery(ENDPOINTS.ENVIRONMENTS.LIST, queryValues(query))
+      )
+    );
   },
   createEnvironment(payload: MonitoringEnvironmentCreate) {
-    return data(() => apiClient.post<ApiEnvelope<MonitoringEnvironment>>(ENDPOINTS.ENVIRONMENTS.LIST, payload));
+    return data(() =>
+      apiClient.post<ApiEnvelope<MonitoringEnvironment>>(ENDPOINTS.ENVIRONMENTS.LIST, payload)
+    );
   },
   listServices(query: ListQuery = {}) {
-    return page(() => apiClient.get<ApiEnvelope<readonly MonitoredService[]>>(
-      withQuery(ENDPOINTS.SERVICES.LIST, queryValues(query)),
-    ));
+    return page(() =>
+      apiClient.get<ApiEnvelope<readonly MonitoredService[]>>(
+        withQuery(ENDPOINTS.SERVICES.LIST, queryValues(query))
+      )
+    );
   },
   getService(id: UUID) {
     return data(() => apiClient.get<ApiEnvelope<MonitoredService>>(ENDPOINTS.SERVICES.DETAIL(id)));
   },
   listDashboards(query: ListQuery = {}) {
-    return page(() => apiClient.get<ApiEnvelope<readonly MonitoringDashboard[]>>(
-      withQuery(ENDPOINTS.DASHBOARDS.LIST, queryValues(query)),
-    ));
+    return page(() =>
+      apiClient.get<ApiEnvelope<readonly MonitoringDashboard[]>>(
+        withQuery(ENDPOINTS.DASHBOARDS.LIST, queryValues(query))
+      )
+    );
   },
   createDashboard(payload: MonitoringDashboardCreate) {
-    return data(() => apiClient.post<ApiEnvelope<MonitoringDashboard>>(ENDPOINTS.DASHBOARDS.LIST, payload));
+    return data(() =>
+      apiClient.post<ApiEnvelope<MonitoringDashboard>>(ENDPOINTS.DASHBOARDS.LIST, payload)
+    );
   },
   listMetrics(query: ListQuery = {}) {
-    return page(() => apiClient.get<ApiEnvelope<readonly Metric[]>>(
-      withQuery(ENDPOINTS.METRICS.LIST, queryValues(query)),
-    ));
+    return page(() =>
+      apiClient.get<ApiEnvelope<readonly Metric[]>>(
+        withQuery(ENDPOINTS.METRICS.LIST, queryValues(query))
+      )
+    );
   },
   getMetric(id: UUID) {
     return data(() => apiClient.get<ApiEnvelope<Metric>>(ENDPOINTS.METRICS.DETAIL(id)));
@@ -152,58 +173,81 @@ export const performanceMonitoringService = {
     return data(() => apiClient.post<ApiEnvelope<Metric>>(ENDPOINTS.METRICS.LIST, payload));
   },
   ingestMetricBatch(payload: readonly MetricIngest[]) {
-    return data(() => apiClient.post<ApiEnvelope<MetricBatchResult>>(ENDPOINTS.METRICS.BATCH, { data_points: payload }));
+    return data(() =>
+      apiClient.post<ApiEnvelope<MetricBatchResult>>(ENDPOINTS.METRICS.BATCH, {
+        data_points: payload,
+      })
+    );
   },
   queryMetric(query: MetricQuery) {
-    return data(() => apiClient.get<ApiEnvelope<MetricSeries>>(
-      withQuery(ENDPOINTS.METRICS.QUERY, {
-        metric_name: query.metric_name,
-        start: query.start,
-        end: query.end,
-        aggregation: query.aggregation,
-        interval: query.interval,
-        tags: query.tags ? Object.entries(query.tags).map(([key, value]) => `${key}=${value}`).join(',') : undefined,
-      }),
-    ));
+    return data(() =>
+      apiClient.get<ApiEnvelope<MetricSeries>>(
+        withQuery(ENDPOINTS.METRICS.QUERY, {
+          metric_name: query.metric_name,
+          start: query.start,
+          end: query.end,
+          aggregation: query.aggregation,
+          interval: query.interval,
+          tags: query.tags
+            ? Object.entries(query.tags)
+                .map(([key, value]) => `${key}=${value}`)
+                .join(",")
+            : undefined,
+        })
+      )
+    );
   },
-  summarizeMetrics(metricNames: readonly string[], period = '1h') {
-    return data(() => apiClient.get<ApiEnvelope<{ summaries: readonly MetricSummary[] }>>(
-      withQuery(ENDPOINTS.METRICS.SUMMARY, { metric_names: metricNames.join(','), period }),
-    ));
+  summarizeMetrics(metricNames: readonly string[], period = "1h") {
+    return data(() =>
+      apiClient.get<ApiEnvelope<{ summaries: readonly MetricSummary[] }>>(
+        withQuery(ENDPOINTS.METRICS.SUMMARY, { metric_names: metricNames.join(","), period })
+      )
+    );
   },
   listMetricDataPoints(query: MetricDataPointQuery = {}) {
-    return page(() => apiClient.get<ApiEnvelope<readonly MetricDataPoint[]>>(
-      withQuery(ENDPOINTS.DATA_POINTS.LIST, { ...queryValues(query), metric_name: query.metric_name, start: query.start, end: query.end }),
-    ));
+    return page(() =>
+      apiClient.get<ApiEnvelope<readonly MetricDataPoint[]>>(
+        withQuery(ENDPOINTS.DATA_POINTS.LIST, {
+          ...queryValues(query),
+          metric_name: query.metric_name,
+          start: query.start,
+          end: query.end,
+        })
+      )
+    );
   },
   listLogs(query: LogQuery = {}) {
-    return page(() => apiClient.get<ApiEnvelope<readonly LogEntry[]>>(
-      withQuery(ENDPOINTS.LOGS.LIST, {
-        ...queryValues(query),
-        from: query.from,
-        to: query.to,
-        level: query.level,
-        service_id: query.service_id,
-        environment_id: query.environment_id,
-        trace_id: query.trace_id,
-      }),
-    ));
+    return page(() =>
+      apiClient.get<ApiEnvelope<readonly LogEntry[]>>(
+        withQuery(ENDPOINTS.LOGS.LIST, {
+          ...queryValues(query),
+          from: query.from,
+          to: query.to,
+          level: query.level,
+          service_id: query.service_id,
+          environment_id: query.environment_id,
+          trace_id: query.trace_id,
+        })
+      )
+    );
   },
   getLog(id: UUID) {
     return data(() => apiClient.get<ApiEnvelope<LogEntry>>(ENDPOINTS.LOGS.DETAIL(id)));
   },
   listTraces(query: TraceQuery = {}) {
-    return page(() => apiClient.get<ApiEnvelope<readonly Trace[]>>(
-      withQuery(ENDPOINTS.TRACES.LIST, {
-        ...queryValues(query),
-        from: query.from,
-        to: query.to,
-        service_id: query.service_id,
-        environment_id: query.environment_id,
-        status: query.status,
-        min_duration_ms: query.min_duration_ms,
-      }),
-    ));
+    return page(() =>
+      apiClient.get<ApiEnvelope<readonly Trace[]>>(
+        withQuery(ENDPOINTS.TRACES.LIST, {
+          ...queryValues(query),
+          from: query.from,
+          to: query.to,
+          service_id: query.service_id,
+          environment_id: query.environment_id,
+          status: query.status,
+          min_duration_ms: query.min_duration_ms,
+        })
+      )
+    );
   },
   getTrace(id: UUID) {
     return data(() => apiClient.get<ApiEnvelope<Trace>>(ENDPOINTS.TRACES.DETAIL(id)));
@@ -212,13 +256,14 @@ export const performanceMonitoringService = {
     return data(() => apiClient.get<ApiEnvelope<readonly Span[]>>(ENDPOINTS.SPANS.FOR_TRACE(id)));
   },
   listAlertRules(query: ListQuery = {}) {
-    return page(() => apiClient.get<ApiEnvelope<readonly AlertRule[]>>(
-      withQuery(ENDPOINTS.ALERT_RULES.LIST, queryValues(query)),
-    ));
+    return page(() =>
+      apiClient.get<ApiEnvelope<readonly AlertRule[]>>(
+        withQuery(ENDPOINTS.ALERT_RULES.LIST, queryValues(query))
+      )
+    );
   },
   createAlertRule(payload: AlertRuleCreate) {
-    const { name, metric_name, condition, threshold, evaluation_window_minutes, cooldown_minutes, severity, action } = payload;
-    return data(() => apiClient.post<ApiEnvelope<AlertRule>>(ENDPOINTS.ALERT_RULES.LIST, {
+    const {
       name,
       metric_name,
       condition,
@@ -227,93 +272,150 @@ export const performanceMonitoringService = {
       cooldown_minutes,
       severity,
       action,
-    }));
+    } = payload;
+    return data(() =>
+      apiClient.post<ApiEnvelope<AlertRule>>(ENDPOINTS.ALERT_RULES.LIST, {
+        name,
+        metric_name,
+        condition,
+        threshold,
+        evaluation_window_minutes,
+        cooldown_minutes,
+        severity,
+        action,
+      })
+    );
   },
   evaluateAlertRule(id: UUID) {
-    return data(() => apiClient.post<ApiEnvelope<ActionResult>>(ENDPOINTS.ALERT_RULES.EVALUATE(id), {}));
+    return data(() =>
+      apiClient.post<ApiEnvelope<ActionResult>>(ENDPOINTS.ALERT_RULES.EVALUATE(id), {})
+    );
   },
   evaluateAllAlertRules() {
     return data(() => apiClient.post<ApiEnvelope<ActionResult>>(ENDPOINTS.ALERTS.EVALUATE, {}));
   },
-  listAlerts(query: ListQuery & { status?: Alert['status']; severity?: Severity } = {}) {
-    return page(() => apiClient.get<ApiEnvelope<readonly Alert[]>>(
-      withQuery(ENDPOINTS.ALERTS.LIST, { ...queryValues(query), status: query.status, severity: query.severity }),
-    ));
+  listAlerts(query: ListQuery & { status?: Alert["status"]; severity?: Severity } = {}) {
+    return page(() =>
+      apiClient.get<ApiEnvelope<readonly Alert[]>>(
+        withQuery(ENDPOINTS.ALERTS.LIST, {
+          ...queryValues(query),
+          status: query.status,
+          severity: query.severity,
+        })
+      )
+    );
   },
   acknowledgeAlert(id: UUID, payload: AlertTransition = {}) {
-    return data(() => apiClient.post<ApiEnvelope<Alert>>(ENDPOINTS.ALERTS.ACKNOWLEDGE(id), payload));
+    return data(() =>
+      apiClient.post<ApiEnvelope<Alert>>(ENDPOINTS.ALERTS.ACKNOWLEDGE(id), payload)
+    );
   },
   resolveAlert(id: UUID, payload: AlertTransition = {}) {
     return data(() => apiClient.post<ApiEnvelope<Alert>>(ENDPOINTS.ALERTS.RESOLVE(id), payload));
   },
   listSLAs(query: ListQuery = {}) {
-    return page(() => apiClient.get<ApiEnvelope<readonly SLADefinition[]>>(
-      withQuery(ENDPOINTS.SLA.LIST, queryValues(query)),
-    ));
+    return page(() =>
+      apiClient.get<ApiEnvelope<readonly SLADefinition[]>>(
+        withQuery(ENDPOINTS.SLA.LIST, queryValues(query))
+      )
+    );
   },
   createSLA(payload: SLADefinitionCreate) {
     return data(() => apiClient.post<ApiEnvelope<SLADefinition>>(ENDPOINTS.SLA.LIST, payload));
   },
   evaluateSLA(id: UUID) {
-    return data(() => apiClient.get<ApiEnvelope<SLAComplianceRecord>>(ENDPOINTS.SLA.COMPLIANCE(id)));
+    return data(() =>
+      apiClient.get<ApiEnvelope<SLAComplianceRecord>>(ENDPOINTS.SLA.COMPLIANCE(id))
+    );
   },
   generateSLAReport(payload: SLAReportRequest) {
     return data(() => apiClient.post<ApiEnvelope<ActionResult>>(ENDPOINTS.SLA.REPORTS, payload));
   },
   listSLOs(query: ListQuery = {}) {
-    return page(() => apiClient.get<ApiEnvelope<readonly SLODefinition[]>>(
-      withQuery(ENDPOINTS.SLOS.LIST, queryValues(query)),
-    ));
+    return page(() =>
+      apiClient.get<ApiEnvelope<readonly SLODefinition[]>>(
+        withQuery(ENDPOINTS.SLOS.LIST, queryValues(query))
+      )
+    );
   },
   createSLO(payload: SLOCreate) {
     return data(() => apiClient.post<ApiEnvelope<SLODefinition>>(ENDPOINTS.SLOS.LIST, payload));
   },
   evaluateSLO(id: UUID) {
-    return data(() => apiClient.post<ApiEnvelope<ErrorBudgetSnapshot>>(ENDPOINTS.SLOS.EVALUATE(id), {}));
+    return data(() =>
+      apiClient.post<ApiEnvelope<ErrorBudgetSnapshot>>(ENDPOINTS.SLOS.EVALUATE(id), {})
+    );
   },
   getSLOBudget(id: UUID) {
     return data(() => apiClient.get<ApiEnvelope<ErrorBudgetSnapshot>>(ENDPOINTS.SLOS.BUDGET(id)));
   },
   listComplianceRecords(query: ListQuery = {}) {
-    return page(() => apiClient.get<ApiEnvelope<readonly SLAComplianceRecord[]>>(
-      withQuery(ENDPOINTS.COMPLIANCE_RECORDS.LIST, queryValues(query)),
-    ));
+    return page(() =>
+      apiClient.get<ApiEnvelope<readonly SLAComplianceRecord[]>>(
+        withQuery(ENDPOINTS.COMPLIANCE_RECORDS.LIST, queryValues(query))
+      )
+    );
   },
   getHealth() {
     return data(() => apiClient.get<ApiEnvelope<HealthCheck>>(ENDPOINTS.HEALTH));
   },
-  getConfiguration(environment: MonitoringConfigurationEnvironment = 'default') {
-    return data(() => apiClient.get<ApiEnvelope<MonitoringConfiguration>>(
-      withQuery(ENDPOINTS.CONFIGURATION.CURRENT, { environment }),
-    ));
+  getConfiguration(environment: MonitoringConfigurationEnvironment = "default") {
+    return data(() =>
+      apiClient.get<ApiEnvelope<MonitoringConfiguration>>(
+        withQuery(ENDPOINTS.CONFIGURATION.CURRENT, { environment })
+      )
+    );
   },
   previewConfiguration(request: MonitoringConfigurationWriteRequest) {
-    return data(() => apiClient.post<ApiEnvelope<MonitoringConfigurationPreview>>(ENDPOINTS.CONFIGURATION.PREVIEW, request));
+    return data(() =>
+      apiClient.post<ApiEnvelope<MonitoringConfigurationPreview>>(
+        ENDPOINTS.CONFIGURATION.PREVIEW,
+        request
+      )
+    );
   },
   updateConfiguration(request: MonitoringConfigurationWriteRequest) {
-    return data(() => apiClient.patch<ApiEnvelope<MonitoringConfiguration>>(ENDPOINTS.CONFIGURATION.CURRENT, request));
+    return data(() =>
+      apiClient.patch<ApiEnvelope<MonitoringConfiguration>>(
+        ENDPOINTS.CONFIGURATION.CURRENT,
+        request
+      )
+    );
   },
-  listConfigurationHistory(environment: MonitoringConfigurationEnvironment = 'default') {
-    return data(() => apiClient.get<ApiEnvelope<readonly MonitoringConfigurationVersion[]>>(
-      withQuery(ENDPOINTS.CONFIGURATION.HISTORY, { environment }),
-    ));
+  listConfigurationHistory(environment: MonitoringConfigurationEnvironment = "default") {
+    return data(() =>
+      apiClient.get<ApiEnvelope<readonly MonitoringConfigurationVersion[]>>(
+        withQuery(ENDPOINTS.CONFIGURATION.HISTORY, { environment })
+      )
+    );
   },
-  listConfigurationAudit(environment: MonitoringConfigurationEnvironment = 'default') {
-    return data(() => apiClient.get<ApiEnvelope<readonly MonitoringConfigurationAudit[]>>(
-      withQuery(ENDPOINTS.CONFIGURATION.AUDIT, { environment }),
-    ));
+  listConfigurationAudit(environment: MonitoringConfigurationEnvironment = "default") {
+    return data(() =>
+      apiClient.get<ApiEnvelope<readonly MonitoringConfigurationAudit[]>>(
+        withQuery(ENDPOINTS.CONFIGURATION.AUDIT, { environment })
+      )
+    );
   },
   rollbackConfiguration(request: MonitoringConfigurationRollbackRequest) {
-    return data(() => apiClient.post<ApiEnvelope<MonitoringConfiguration>>(ENDPOINTS.CONFIGURATION.ROLLBACK, request));
+    return data(() =>
+      apiClient.post<ApiEnvelope<MonitoringConfiguration>>(
+        ENDPOINTS.CONFIGURATION.ROLLBACK,
+        request
+      )
+    );
   },
   importConfiguration(request: MonitoringConfigurationWriteRequest) {
-    return data(() => apiClient.post<ApiEnvelope<MonitoringConfiguration>>(ENDPOINTS.CONFIGURATION.IMPORT, request));
+    return data(() =>
+      apiClient.post<ApiEnvelope<MonitoringConfiguration>>(ENDPOINTS.CONFIGURATION.IMPORT, request)
+    );
   },
-  exportConfiguration(environment: MonitoringConfigurationEnvironment = 'default') {
-    return data(() => apiClient.get<ApiEnvelope<MonitoringConfigurationExport>>(
-      withQuery(ENDPOINTS.CONFIGURATION.EXPORT, { environment }),
-    ));
+  exportConfiguration(environment: MonitoringConfigurationEnvironment = "default") {
+    return data(() =>
+      apiClient.get<ApiEnvelope<MonitoringConfigurationExport>>(
+        withQuery(ENDPOINTS.CONFIGURATION.EXPORT, { environment })
+      )
+    );
   },
 };
 
-type Severity = Alert['severity'];
+type Severity = Alert["severity"];

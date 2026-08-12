@@ -39,11 +39,7 @@ export type RetryAttemptStatus =
   | "timed_out"
   | "cancelled";
 export type ValidationSeverity = "error" | "warning";
-export type CapabilityAvailability =
-  | "available"
-  | "locked"
-  | "setup_required"
-  | "unavailable";
+export type CapabilityAvailability = "available" | "locked" | "setup_required" | "unavailable";
 
 export interface TransitionEvidence {
   readonly transition: string;

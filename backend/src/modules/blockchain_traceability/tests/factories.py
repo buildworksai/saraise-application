@@ -8,13 +8,7 @@ from typing import Any
 
 from django.utils import timezone
 
-from ..models import (
-    AuthenticityCredential,
-    ComplianceEvidence,
-    LedgerAnchor,
-    LedgerNetwork,
-    TraceabilityAsset,
-)
+from ..models import AuthenticityCredential, ComplianceEvidence, LedgerAnchor, LedgerNetwork, TraceabilityAsset
 
 
 def tenant_id() -> uuid.UUID:

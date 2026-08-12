@@ -104,17 +104,84 @@ def test_configuration_rejects_unsafe_limits_and_baseline(tenant_a, actor_id, co
         ConfigurationService.preview(current, document=fail_open)
 
 
+@pytest.mark.parametrize(
+    ("mutator", "expected_detail"),
+    [
+        (
+            lambda document: document["limits"].update({"correlation_id_pattern": "(capture)"}),
+            "limits.correlation_id_pattern",
+        ),
+        (
+            lambda document: document["defaults"].update({"allowed_mfa_methods": ["totp", "totp"]}),
+            "defaults.allowed_mfa_methods",
+        ),
+        (lambda document: document.update({"remote_context_keys": ["record_id", "bad key"]}), "remote_context_keys"),
+        (
+            lambda document: document.update({"commercial_controls": {"entitlement": "optional", "quota": "required"}}),
+            "commercial_controls",
+        ),
+        (lambda document: document["ordering"].update({"roles": ["name", "unsafe"]}), "ordering.roles"),
+        (lambda document: document.update({"ui": []}), "ui"),
+        (lambda document: document.update({"semantic_tokens": {"success": "ok"}}), "semantic_tokens"),
+        (
+            lambda document: document.update(
+                {
+                    "feature_flags": {
+                        "configuration ui": {"enabled": True, "percentage": 100, "roles": [], "cohorts": []}
+                    }
+                }
+            ),
+            "feature_flags",
+        ),
+        (
+            lambda document: document.update(
+                {
+                    "feature_flags": {
+                        "configuration_ui": {"enabled": True, "percentage": True, "roles": [], "cohorts": []}
+                    }
+                }
+            ),
+            "feature_flags.configuration_ui",
+        ),
+        (
+            lambda document: document["defaults"]["security_profile"].update({"session_timeout_minutes": 1}),
+            "defaults.security_profile.session_timeout_minutes",
+        ),
+    ],
+)
+def test_configuration_validation_rejects_malformed_policy_branches(mutator, expected_detail) -> None:
+    document = default_security_configuration()
+    mutator(document)
+
+    with pytest.raises(SecurityValidationError) as exc_info:
+        ConfigurationService.validate_document(document)
+
+    assert expected_detail in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    ("rollout", "expected_detail"),
+    [
+        ({"enabled": True, "percentage": 100, "role_ids": []}, "rollout"),
+        ({"enabled": True, "percentage": True, "role_ids": [], "cohorts": []}, "rollout.percentage"),
+        ({"enabled": True, "percentage": 100, "role_ids": [""], "cohorts": []}, "rollout.role_ids"),
+        ({"enabled": True, "percentage": 100, "role_ids": [], "cohorts": [""]}, "rollout.cohorts"),
+    ],
+)
+def test_rollout_validation_rejects_malformed_targets(rollout, expected_detail) -> None:
+    with pytest.raises(SecurityValidationError) as exc_info:
+        ConfigurationService.validate_rollout(rollout)
+
+    assert expected_detail in exc_info.value.detail
+
+
 def test_configuration_api_preview_update_replay_export_versions_and_rollback(
     authenticated_tenant_a_client,
 ) -> None:
     current = _data(authenticated_tenant_a_client.get(f"{BASE}/"))
     document = current["document"]
     document["ui"]["loading_skeleton_rows"] = 8
-    preview = _data(
-        authenticated_tenant_a_client.post(
-            f"{BASE}/preview/", {"document": document}, format="json"
-        )
-    )
+    preview = _data(authenticated_tenant_a_client.post(f"{BASE}/preview/", {"document": document}, format="json"))
     assert preview["valid"] is True and any(item["path"] == "ui.loading_skeleton_rows" for item in preview["diff"])
     body = {
         "environment": "development",
@@ -122,12 +189,8 @@ def test_configuration_api_preview_update_replay_export_versions_and_rollback(
         "rollout": current["rollout"],
         "reason": "Tune loading feedback",
     }
-    first = authenticated_tenant_a_client.put(
-        f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="config-update-1"
-    )
-    second = authenticated_tenant_a_client.put(
-        f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="config-update-1"
-    )
+    first = authenticated_tenant_a_client.put(f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="config-update-1")
+    second = authenticated_tenant_a_client.put(f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="config-update-1")
     assert _data(first)["version"] == 2
     assert _data(second)["version"] == 2
     assert MutationReplay.objects.count() == 1
@@ -156,11 +219,10 @@ def test_idempotency_key_cannot_be_reused_for_different_configuration_request(
         "rollout": current["rollout"],
         "reason": "First request",
     }
-    assert authenticated_tenant_a_client.put(
-        f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="same-key"
-    ).status_code == 200
-    body["reason"] = "Different request"
-    conflict = authenticated_tenant_a_client.put(
-        f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="same-key"
+    assert (
+        authenticated_tenant_a_client.put(f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="same-key").status_code
+        == 200
     )
+    body["reason"] = "Different request"
+    conflict = authenticated_tenant_a_client.put(f"{BASE}/", body, format="json", HTTP_IDEMPOTENCY_KEY="same-key")
     assert conflict.status_code == 409

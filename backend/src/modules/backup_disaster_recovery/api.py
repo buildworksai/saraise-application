@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from django.db.models import Q, QuerySet
@@ -24,15 +24,7 @@ from src.core.api.results import OperationFailed
 from src.core.async_jobs.models import AsyncJob
 from src.core.views.tenant_scoped import TenantScopedModelViewSet
 
-from .models import (
-    BDRConfiguration,
-    DRExercise,
-    DRRunbook,
-    DRStepExecution,
-    RecoveryPoint,
-    RestoreRun,
-    RunbookStep,
-)
+from .models import BDRConfiguration, DRExercise, DRRunbook, DRStepExecution, RecoveryPoint, RestoreRun, RunbookStep
 from .permissions import (
     BACKUP_EXECUTE,
     BACKUP_READ,
@@ -160,8 +152,9 @@ class GovernedBDRViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def check_permissions(self, request: Request) -> None:
-        if request.method.lower() not in self.http_method_names:
-            raise MethodNotAllowed(request.method)
+        method = request.method or ""
+        if method.lower() not in self.http_method_names:
+            raise MethodNotAllowed(method)
         tenant_id = self._get_tenant_id()
         if tenant_id is not None:
             request.tenant_id = tenant_id  # type: ignore[attr-defined]
@@ -199,7 +192,7 @@ class GovernedBDRViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):
 
 class BackupExecutionViewSet(GovernedBDRViewSet):
     queryset = RecoveryPoint.objects.all()
-    serializer_class = BackupExecutionStatusSerializer
+    serializer_class: type[Any] = BackupExecutionStatusSerializer
     http_method_names = ["get", "post", "head", "options"]
     access_map = {"create": BACKUP_EXECUTE, "retrieve": BACKUP_READ}
 
@@ -245,7 +238,7 @@ class BackupExecutionViewSet(GovernedBDRViewSet):
 
 class RecoveryPointViewSet(GovernedBDRViewSet):
     queryset = RecoveryPoint.objects.all()
-    serializer_class = RecoveryPointDetailSerializer
+    serializer_class: type[Any] = RecoveryPointDetailSerializer
     http_method_names = ["get", "post", "head", "options"]
     access_map = {"list": READ, "retrieve": READ, "verify": VERIFY_POINT, "expire": VERIFY_POINT}
 
@@ -310,7 +303,7 @@ class RecoveryPointViewSet(GovernedBDRViewSet):
 
 class RestoreRunViewSet(GovernedBDRViewSet):
     queryset = RestoreRun.objects.all()
-    serializer_class = RestoreRunDetailSerializer
+    serializer_class: type[Any] = RestoreRunDetailSerializer
     access_map = {
         "list": READ,
         "retrieve": READ,
@@ -397,7 +390,7 @@ class RestoreRunViewSet(GovernedBDRViewSet):
 
 class DRRunbookViewSet(GovernedBDRViewSet):
     queryset = DRRunbook.objects.all()
-    serializer_class = DRRunbookDetailSerializer
+    serializer_class: type[Any] = DRRunbookDetailSerializer
     access_map = {
         "list": READ,
         "retrieve": READ,
@@ -517,7 +510,7 @@ class DRRunbookViewSet(GovernedBDRViewSet):
 
 class RunbookStepViewSet(GovernedBDRViewSet):
     queryset = RunbookStep.objects.all()
-    serializer_class = RunbookStepDetailSerializer
+    serializer_class: type[Any] = RunbookStepDetailSerializer
     access_map = {
         "list": READ,
         "retrieve": READ,
@@ -575,8 +568,8 @@ class RunbookStepViewSet(GovernedBDRViewSet):
         return Response(RunbookStepDetailSerializer(step).data, status=status.HTTP_201_CREATED)
 
     def partial_update(self, request: Request, pk: str | None = None) -> Response:
-        current = self.get_object()
-        serializer = RunbookStepUpdateSerializer(current, data=request.data, partial=True)
+        current = cast(RunbookStep, self.get_object())
+        serializer = RunbookStepUpdateSerializer(instance=cast(Any, current), data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         step = RunbookService().update_step(
             self.tenant_id(), _actor_id(request), _parse_uuid(pk, "id"), serializer.validated_data
@@ -590,7 +583,7 @@ class RunbookStepViewSet(GovernedBDRViewSet):
 
 class DRExerciseViewSet(GovernedBDRViewSet):
     queryset = DRExercise.objects.all()
-    serializer_class = DRExerciseDetailSerializer
+    serializer_class: type[Any] = DRExerciseDetailSerializer
     access_map = {
         "list": READ,
         "retrieve": READ,
@@ -671,7 +664,7 @@ class DRExerciseViewSet(GovernedBDRViewSet):
 
 class DRStepExecutionViewSet(GovernedBDRViewSet):
     queryset = DRStepExecution.objects.all()
-    serializer_class = DRStepExecutionDetailSerializer
+    serializer_class: type[Any] = DRStepExecutionDetailSerializer
     http_method_names = ["get", "head", "options"]
     access_map = {"list": READ, "retrieve": READ}
 
@@ -697,7 +690,7 @@ class BDRConfigurationViewSet(GovernedBDRViewSet):
     """RBAC-gated configuration-as-code surface; all mutations delegate."""
 
     queryset = BDRConfiguration.objects.all()
-    serializer_class = BDRConfigurationSerializer
+    serializer_class: type[Any] = BDRConfigurationSerializer
     http_method_names = ["get", "post", "patch", "head", "options"]
     access_map = {
         "current": CONFIG_READ,
@@ -788,7 +781,7 @@ class BDRConfigurationViewSet(GovernedBDRViewSet):
 
 class ObjectiveReportViewSet(GovernedBDRViewSet):
     queryset = RestoreRun.objects.all()
-    serializer_class = ObjectiveReportSerializer
+    serializer_class: type[Any] = ObjectiveReportSerializer
     http_method_names = ["get", "head", "options"]
     access_map = {"list": REPORT_READ}
 
@@ -796,7 +789,10 @@ class ObjectiveReportViewSet(GovernedBDRViewSet):
         self._validate_query({"runbook_id", "from", "to", "bucket"})
         data = request.query_params.copy()
         if "from" in data:
-            data["from_at"] = data.pop("from")
+            from_value = data.get("from")
+            if from_value is not None:
+                data["from_at"] = from_value
+            data.pop("from", None)
         serializer = ObjectiveReportQuerySerializer(data=data)
         serializer.is_valid(raise_exception=True)
         report = RecoveryObjectiveService().report_objectives(self.tenant_id(), serializer.validated_data)
@@ -805,7 +801,7 @@ class ObjectiveReportViewSet(GovernedBDRViewSet):
 
 class ReadinessViewSet(GovernedBDRViewSet):
     queryset = RecoveryPoint.objects.all()
-    serializer_class = ReadinessSummarySerializer
+    serializer_class: type[Any] = ReadinessSummarySerializer
     http_method_names = ["get", "head", "options"]
     access_map = {"list": REPORT_READ}
 

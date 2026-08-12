@@ -27,13 +27,23 @@ def test_forward_reverse_forward_preserves_legacy_identity_and_variance() -> Non
         Budget = legacy.get_model("budget_management", "Budget")
         BudgetLine = legacy.get_model("budget_management", "BudgetLine")
         budget = Budget.objects.create(
-            id=budget_id, tenant_id=tenant_id, budget_code="LEG-001", budget_name="Legacy",
-            fiscal_year=2025, start_date="2025-01-01", end_date="2025-12-31",
+            id=budget_id,
+            tenant_id=tenant_id,
+            budget_code="LEG-001",
+            budget_name="Legacy",
+            fiscal_year=2025,
+            start_date="2025-01-01",
+            end_date="2025-12-31",
         )
         BudgetLine.objects.create(
-            id=line_id, tenant_id=tenant_id, budget=budget, account_id=uuid.uuid4(),
-            account_code="6000", budget_amount=Decimal("100.00"),
-            actual_amount=Decimal("125.00"), variance=Decimal("25.00"),
+            id=line_id,
+            tenant_id=tenant_id,
+            budget=budget,
+            account_id=uuid.uuid4(),
+            account_code="6000",
+            budget_amount=Decimal("100.00"),
+            actual_amount=Decimal("125.00"),
+            variance=Decimal("25.00"),
         )
 
         current = _migrate(LATEST)
@@ -49,7 +59,9 @@ def test_forward_reverse_forward_preserves_legacy_identity_and_variance() -> Non
         assert RestoredLine.objects.get(pk=line_id).budget_id == budget_id
 
         current_again = _migrate(LATEST)
-        assert current_again.get_model("budget_management", "BudgetLine").objects.get(pk=line_id).variance == Decimal("-25.00")
+        assert current_again.get_model("budget_management", "BudgetLine").objects.get(pk=line_id).variance == Decimal(
+            "-25.00"
+        )
     finally:
         _migrate(LATEST)
 
@@ -66,7 +78,8 @@ def test_all_domain_tables_have_forced_rls_and_tenant_policies() -> None:
         "budget_approvals",
         "budget_approval_decisions",
         "budget_transitions",
-        "budget_variance_alerts", "budget_commitments",
+        "budget_variance_alerts",
+        "budget_commitments",
     }
     with connection.cursor() as cursor:
         cursor.execute(

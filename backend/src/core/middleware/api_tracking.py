@@ -9,11 +9,18 @@ This middleware records request counts, response times, and error rates.
 
 import logging
 import time
+from typing import Final
 
 from django.core.cache import cache
 from django.utils.deprecation import MiddlewareMixin
 
 logger = logging.getLogger(__name__)
+
+EXCLUDED_API_SUFFIXES: Final = ("/health/", "/metrics/")
+
+
+def _tracks_api_path(path: str) -> bool:
+    return path.startswith("/api/") and not path.endswith(EXCLUDED_API_SUFFIXES)
 
 
 class APITrackingMiddleware(MiddlewareMixin):
@@ -42,8 +49,9 @@ class APITrackingMiddleware(MiddlewareMixin):
         # Calculate response time
         response_time_ms = (time.time() - request._api_start_time) * 1000
 
-        # Skip non-API requests
-        if not request.path.startswith("/api/"):
+        # Skip non-API requests and operational endpoints. Health and metrics
+        # routes must remain observable even when the analytics cache is down.
+        if not _tracks_api_path(request.path):
             return response
 
         try:
@@ -103,6 +111,6 @@ class APITrackingMiddleware(MiddlewareMixin):
 
         except Exception as e:
             # Don't break requests if tracking fails
-            logger.warning(f"Failed to track API metrics: {e}")
+            logger.warning("Failed to track API metrics: %s", type(e).__name__)
 
         return response

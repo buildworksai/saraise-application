@@ -131,7 +131,9 @@ def test_descriptor_rejects_invalid_keys(key):
 
 def test_in_app_adapter_requires_durable_evidence():
     expected_id = uuid.uuid4()
-    value = InAppAdapter(lambda sent: {"delivery_id": str(sent.delivery_id), "notification_id": str(expected_id)}).send(command())
+    value = InAppAdapter(lambda sent: {"delivery_id": str(sent.delivery_id), "notification_id": str(expected_id)}).send(
+        command()
+    )
     assert value.accepted is True
     assert value.provider_message_id == str(expected_id)
     assert value.confirmation_supported is False

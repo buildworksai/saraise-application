@@ -344,9 +344,18 @@ class AccessDecisionPipeline:
         if entitlement_service is None or quota_service is None:
             from .entitlements import EntitlementService, QuotaService
 
-        self.policy_evaluator = policy_evaluator or HttpPolicyEvaluator()
+        self.policy_evaluator = policy_evaluator or self._default_policy_evaluator()
         self.entitlement_service = entitlement_service or EntitlementService()
         self.quota_service = quota_service or QuotaService()
+
+    @staticmethod
+    def _default_policy_evaluator() -> PolicyEvaluator:
+        mode = str(getattr(settings, "SARAISE_MODE", "")).lower()
+        if mode in {"development", "self-hosted"}:
+            from src.modules.security_access_control.services import SecurityPolicyEvaluator
+
+            return SecurityPolicyEvaluator()
+        return HttpPolicyEvaluator()
 
     def decide(
         self,

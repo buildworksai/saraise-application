@@ -1,12 +1,12 @@
-import { ENDPOINTS, MODULE_API_PREFIX } from './contracts';
+import { ENDPOINTS, MODULE_API_PREFIX } from "./contracts";
 
-describe('compliance risk governed contracts', () => {
-  it('uses only the governed v2 prefix', () => {
-    expect(MODULE_API_PREFIX).toBe('/api/v2/compliance-risk-management');
-    expect(JSON.stringify(ENDPOINTS)).not.toContain('/api/v1/');
+describe("compliance risk governed contracts", () => {
+  it("uses only the governed v2 prefix", () => {
+    expect(MODULE_API_PREFIX).toBe("/api/v2/compliance-risk-management");
+    expect(JSON.stringify(ENDPOINTS)).not.toContain("/api/v1/");
   });
 
-  it('publishes every required static collection and action path', () => {
+  it("publishes every required static collection and action path", () => {
     expect(ENDPOINTS.RISKS.LIST).toBe(`${MODULE_API_PREFIX}/risks/`);
     expect(ENDPOINTS.RISKS.SCORE_PREVIEW).toBe(`${MODULE_API_PREFIX}/risks/score-preview/`);
     expect(ENDPOINTS.CONTROLS.LIST).toBe(`${MODULE_API_PREFIX}/controls/`);
@@ -20,9 +20,13 @@ describe('compliance risk governed contracts', () => {
     expect(ENDPOINTS.HEALTH.READY).toBe(`${MODULE_API_PREFIX}/health/ready/`);
   });
 
-  it('encodes identifiers and emits exact nested resource paths', () => {
-    expect(ENDPOINTS.RISKS.DETAIL('risk id')).toBe(`${MODULE_API_PREFIX}/risks/risk%20id/`);
-    expect(ENDPOINTS.RISKS.CONTROLS('risk id')).toBe(`${MODULE_API_PREFIX}/risks/risk%20id/controls/`);
-    expect(ENDPOINTS.CONTROLS.TESTS('control/id')).toBe(`${MODULE_API_PREFIX}/controls/control%2Fid/tests/`);
+  it("encodes identifiers and emits exact nested resource paths", () => {
+    expect(ENDPOINTS.RISKS.DETAIL("risk id")).toBe(`${MODULE_API_PREFIX}/risks/risk%20id/`);
+    expect(ENDPOINTS.RISKS.CONTROLS("risk id")).toBe(
+      `${MODULE_API_PREFIX}/risks/risk%20id/controls/`
+    );
+    expect(ENDPOINTS.CONTROLS.TESTS("control/id")).toBe(
+      `${MODULE_API_PREFIX}/controls/control%2Fid/tests/`
+    );
   });
 });

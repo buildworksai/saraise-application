@@ -4,7 +4,6 @@ from django.db import migrations, models
 from django.db.models import F, Q
 from django.db.models.functions import Lower
 
-
 BUDGET_TYPES = [
     ("operating", "Operating"),
     ("capital", "Capital"),
@@ -227,7 +226,9 @@ class Migration(migrations.Migration):
         ),
         migrations.AddIndex(
             model_name="budget",
-            index=models.Index(fields=["tenant_id", "department_id", "fiscal_year"], name="budget_tenant_dept_year_idx"),
+            index=models.Index(
+                fields=["tenant_id", "department_id", "fiscal_year"], name="budget_tenant_dept_year_idx"
+            ),
         ),
         migrations.AddIndex(
             model_name="budget",
@@ -327,10 +328,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="budgetapproval",
             constraint=models.CheckConstraint(
-                condition=(
-                    ~Q(status__in=["approved", "rejected"])
-                    | Q(decision_at__isnull=False)
-                ),
+                condition=(~Q(status__in=["approved", "rejected"]) | Q(decision_at__isnull=False)),
                 name="budget_approval_decision_at_ck",
             ),
         ),

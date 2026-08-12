@@ -6,10 +6,7 @@ import uuid
 
 import pytest
 
-from src.modules.customization_framework.models import (
-    ConfigurationAuditRecord,
-    RuntimeConfigurationVersion,
-)
+from src.modules.customization_framework.models import ConfigurationAuditRecord, RuntimeConfigurationVersion
 from src.modules.customization_framework.services import (
     CustomizationConfigurationService,
     CustomizationValidationError,

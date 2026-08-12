@@ -2,35 +2,58 @@
 
 from __future__ import annotations
 
-from typing import Final
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 from uuid import UUID
 
-from rest_framework.authentication import SessionAuthentication
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import BaseAuthentication, SessionAuthentication
+from rest_framework.permissions import BasePermission, IsAuthenticated
 
 from src.core.access.permissions import RequiresAccess
 from src.core.auth_utils import get_user_tenant_id
 
+if TYPE_CHECKING:
+    from rest_framework.permissions import _PermissionClass
+
 PERMISSIONS: Final[tuple[str, ...]] = (
-    "multi_company.company:read", "multi_company.company:create",
-    "multi_company.company:update", "multi_company.company:deactivate",
-    "multi_company.company:delete", "multi_company.company:read_sensitive",
-    "multi_company.company_access:read", "multi_company.company_access:grant",
-    "multi_company.company_access:revoke", "multi_company.transaction:read",
-    "multi_company.transaction:create", "multi_company.transaction:update",
-    "multi_company.transaction:submit", "multi_company.transaction:approve",
-    "multi_company.transaction:post", "multi_company.transaction:dispute",
-    "multi_company.transaction:cancel", "multi_company.transaction:reverse",
-    "multi_company.consolidation:read", "multi_company.consolidation:create",
-    "multi_company.consolidation:update", "multi_company.consolidation:execute",
-    "multi_company.consolidation:approve", "multi_company.consolidation:publish",
-    "multi_company.elimination:read", "multi_company.elimination:create",
-    "multi_company.transfer_pricing:read", "multi_company.transfer_pricing:create",
-    "multi_company.transfer_pricing:update", "multi_company.transfer_pricing:delete",
-    "multi_company.transfer_pricing:calculate", "multi_company.configuration:read",
-    "multi_company.configuration:write", "multi_company.configuration:activate",
-    "multi_company.configuration:rollback", "multi_company.configuration:import",
-    "multi_company.configuration:export", "multi_company.extension:read",
+    "multi_company.company:read",
+    "multi_company.company:create",
+    "multi_company.company:update",
+    "multi_company.company:deactivate",
+    "multi_company.company:delete",
+    "multi_company.company:read_sensitive",
+    "multi_company.company_access:read",
+    "multi_company.company_access:grant",
+    "multi_company.company_access:revoke",
+    "multi_company.transaction:read",
+    "multi_company.transaction:create",
+    "multi_company.transaction:update",
+    "multi_company.transaction:submit",
+    "multi_company.transaction:approve",
+    "multi_company.transaction:post",
+    "multi_company.transaction:dispute",
+    "multi_company.transaction:cancel",
+    "multi_company.transaction:reverse",
+    "multi_company.consolidation:read",
+    "multi_company.consolidation:create",
+    "multi_company.consolidation:update",
+    "multi_company.consolidation:execute",
+    "multi_company.consolidation:approve",
+    "multi_company.consolidation:publish",
+    "multi_company.elimination:read",
+    "multi_company.elimination:create",
+    "multi_company.transfer_pricing:read",
+    "multi_company.transfer_pricing:create",
+    "multi_company.transfer_pricing:update",
+    "multi_company.transfer_pricing:delete",
+    "multi_company.transfer_pricing:calculate",
+    "multi_company.configuration:read",
+    "multi_company.configuration:write",
+    "multi_company.configuration:activate",
+    "multi_company.configuration:rollback",
+    "multi_company.configuration:import",
+    "multi_company.configuration:export",
+    "multi_company.extension:read",
     "multi_company.health:read",
 )
 
@@ -59,13 +82,14 @@ class MultiCompanyAccessMixin:
     unset; :class:`RequiresAccess` then denies it by default.
     """
 
-    authentication_classes = (SessionAuthentication401,)
-    permission_classes = (IsAuthenticated, RequiresAccess)
+    authentication_classes: ClassVar[Sequence[type[BaseAuthentication]]] = (SessionAuthentication401,)
+    permission_classes: ClassVar[Sequence[_PermissionClass]] = (IsAuthenticated, RequiresAccess)
     action_permissions: dict[str, str] = {}
     action_quotas: dict[str, str] = {}
-    required_entitlement = "module.multi_company"
+    required_entitlement: str = "module.multi_company"
+    request: Any
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         raw_tenant = get_user_tenant_id(getattr(self.request, "user", None))
         try:
             self.request.tenant_id = UUID(str(raw_tenant)) if raw_tenant else None
@@ -80,5 +104,8 @@ class MultiCompanyAccessMixin:
 
 
 __all__ = [
-    "MultiCompanyAccessMixin", "PERMISSIONS", "SOD_ACTIONS", "SessionAuthentication401",
+    "MultiCompanyAccessMixin",
+    "PERMISSIONS",
+    "SOD_ACTIONS",
+    "SessionAuthentication401",
 ]

@@ -1,1 +1,1 @@
-export {MyWorkPage} from './ModulePages';
+export { MyWorkPage } from "./ModulePages";

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import logging
 import hashlib
 import json
+import logging
 from collections.abc import Mapping
 from copy import deepcopy
 from datetime import date
@@ -74,7 +74,14 @@ DEFAULT_CONFIGURATION: dict[str, object] = {
     "asset_list_default_ordering": "asset_code",
     "asset_detail_history_page_size": 12,
     "asset_search_fields": ["asset_code", "asset_name", "location"],
-    "asset_ordering_fields": ["asset_code", "asset_name", "purchase_date", "purchase_cost", "current_value", "created_at"],
+    "asset_ordering_fields": [
+        "asset_code",
+        "asset_name",
+        "purchase_date",
+        "purchase_cost",
+        "current_value",
+        "created_at",
+    ],
     "tenant_throttle_rate": "240/minute",
     "health_interval_seconds": 60,
 }
@@ -196,31 +203,74 @@ def _validate_asset(asset: Asset, tenant_id: UUID, configuration: Mapping[str, o
 
     minimum_purchase_cost = Decimal(str(configuration["minimum_purchase_cost"]))
     if len(asset.asset_code.strip()) > int(configuration["asset_code_max_length"]):
-        raise AssetManagementError("Asset code exceeds configured length.", code="ASSET_CODE_TOO_LONG", field="asset_code")
+        raise AssetManagementError(
+            "Asset code exceeds configured length.", code="ASSET_CODE_TOO_LONG", field="asset_code"
+        )
     if len(asset.asset_name.strip()) > int(configuration["asset_name_max_length"]):
-        raise AssetManagementError("Asset name exceeds configured length.", code="ASSET_NAME_TOO_LONG", field="asset_name")
+        raise AssetManagementError(
+            "Asset name exceeds configured length.", code="ASSET_NAME_TOO_LONG", field="asset_name"
+        )
     if len(asset.location.strip()) > int(configuration["location_max_length"]):
         raise AssetManagementError("Location exceeds configured length.", code="LOCATION_TOO_LONG", field="location")
     if asset.category not in configuration["allowed_categories"]:
         raise AssetManagementError("Unsupported asset category.", code="UNSUPPORTED_CATEGORY", field="category")
     if asset.depreciation_method not in configuration["allowed_depreciation_methods"]:
-        raise AssetManagementError("Unsupported depreciation method.", code="UNSUPPORTED_DEPRECIATION_METHOD", field="depreciation_method")
+        raise AssetManagementError(
+            "Unsupported depreciation method.", code="UNSUPPORTED_DEPRECIATION_METHOD", field="depreciation_method"
+        )
     if asset.purchase_cost < minimum_purchase_cost:
-        raise AssetManagementError("Purchase cost is below the configured minimum.", code="PURCHASE_COST_TOO_LOW", field="purchase_cost")
+        raise AssetManagementError(
+            "Purchase cost is below the configured minimum.", code="PURCHASE_COST_TOO_LOW", field="purchase_cost"
+        )
     if asset.residual_value < Decimal("0") or asset.residual_value > asset.purchase_cost:
-        raise AssetManagementError("Residual value must stay between zero and purchase cost.", code="INVALID_RESIDUAL_VALUE", field="residual_value")
-    if asset.category in configuration["non_depreciable_categories"] and asset.depreciation_method != DepreciationMethod.NONE:
-        raise AssetManagementError("This category is not depreciable.", code="CATEGORY_NOT_DEPRECIABLE", field="depreciation_method")
+        raise AssetManagementError(
+            "Residual value must stay between zero and purchase cost.",
+            code="INVALID_RESIDUAL_VALUE",
+            field="residual_value",
+        )
+    if (
+        asset.category in configuration["non_depreciable_categories"]
+        and asset.depreciation_method != DepreciationMethod.NONE
+    ):
+        raise AssetManagementError(
+            "This category is not depreciable.", code="CATEGORY_NOT_DEPRECIABLE", field="depreciation_method"
+        )
     if configuration["require_useful_life_for_depreciation"] and asset.depreciation_method != DepreciationMethod.NONE:
         if not asset.useful_life_years:
-            raise AssetManagementError("A useful life is required for depreciable assets.", code="USEFUL_LIFE_REQUIRED", field="useful_life_years")
-        if not int(configuration["useful_life_min_years"]) <= asset.useful_life_years <= int(configuration["useful_life_max_years"]):
-            raise AssetManagementError("Useful life is outside configured bounds.", code="USEFUL_LIFE_OUT_OF_RANGE", field="useful_life_years")
-    if configuration["declining_rate_requires_declining_method"] and asset.depreciation_method != DepreciationMethod.DECLINING_BALANCE and asset.declining_balance_rate is not None:
-        raise AssetManagementError("A declining-balance rate is only valid with declining balance.", code="INVALID_DECLINING_RATE", field="declining_balance_rate")
+            raise AssetManagementError(
+                "A useful life is required for depreciable assets.",
+                code="USEFUL_LIFE_REQUIRED",
+                field="useful_life_years",
+            )
+        if (
+            not int(configuration["useful_life_min_years"])
+            <= asset.useful_life_years
+            <= int(configuration["useful_life_max_years"])
+        ):
+            raise AssetManagementError(
+                "Useful life is outside configured bounds.", code="USEFUL_LIFE_OUT_OF_RANGE", field="useful_life_years"
+            )
+    if (
+        configuration["declining_rate_requires_declining_method"]
+        and asset.depreciation_method != DepreciationMethod.DECLINING_BALANCE
+        and asset.declining_balance_rate is not None
+    ):
+        raise AssetManagementError(
+            "A declining-balance rate is only valid with declining balance.",
+            code="INVALID_DECLINING_RATE",
+            field="declining_balance_rate",
+        )
     if asset.declining_balance_rate is not None:
-        if not Decimal(str(configuration["declining_rate_min"])) <= asset.declining_balance_rate <= Decimal(str(configuration["declining_rate_max"])):
-            raise AssetManagementError("Declining-balance rate is outside configured bounds.", code="DECLINING_RATE_OUT_OF_RANGE", field="declining_balance_rate")
+        if (
+            not Decimal(str(configuration["declining_rate_min"]))
+            <= asset.declining_balance_rate
+            <= Decimal(str(configuration["declining_rate_max"]))
+        ):
+            raise AssetManagementError(
+                "Declining-balance rate is outside configured bounds.",
+                code="DECLINING_RATE_OUT_OF_RANGE",
+                field="declining_balance_rate",
+            )
     try:
         asset.full_clean()
     except ValidationError as exc:
@@ -267,7 +317,11 @@ class AssetConfigurationService:
             normalized[field] = str(value)
         if normalized["useful_life_min_years"] > normalized["useful_life_max_years"]:
             raise ValidationError({"useful_life_max_years": "Must be at least useful_life_min_years."})
-        if not normalized["useful_life_min_years"] <= normalized["default_useful_life_years"] <= normalized["useful_life_max_years"]:
+        if (
+            not normalized["useful_life_min_years"]
+            <= normalized["default_useful_life_years"]
+            <= normalized["useful_life_max_years"]
+        ):
             raise ValidationError({"default_useful_life_years": "Must be inside useful-life bounds."})
         if normalized["asset_list_page_size"] > normalized["asset_list_max_page_size"]:
             raise ValidationError({"asset_list_page_size": "Must not exceed asset_list_max_page_size."})
@@ -286,7 +340,17 @@ class AssetConfigurationService:
             raise ValidationError({"non_depreciable_categories": "Must use allowed categories."})
         if Decimal(normalized["declining_rate_min"]) > Decimal(normalized["declining_rate_max"]):
             raise ValidationError({"declining_rate_max": "Must be at least declining_rate_min."})
-        for field in ("enabled", "new_asset_active_default", "require_chronological_depreciation", "require_useful_life_for_depreciation", "declining_rate_requires_declining_method", "inactive_assets_depreciable", "allow_depreciation_before_purchase", "lock_financial_fields_after_history", "archive_sets_inactive"):
+        for field in (
+            "enabled",
+            "new_asset_active_default",
+            "require_chronological_depreciation",
+            "require_useful_life_for_depreciation",
+            "declining_rate_requires_declining_method",
+            "inactive_assets_depreciable",
+            "allow_depreciation_before_purchase",
+            "lock_financial_fields_after_history",
+            "archive_sets_inactive",
+        ):
             if not isinstance(normalized[field], bool):
                 raise ValidationError({field: "Must be a boolean."})
         for field in ("asset_search_fields", "asset_ordering_fields", "rollout_roles", "rollout_cohorts"):
@@ -303,7 +367,9 @@ class AssetConfigurationService:
             raise ValidationError({"tenant_throttle_rate": "Use DRF rate syntax, for example 240/minute."})
         return normalized
 
-    def get_configuration(self, tenant_id: UUID | str, actor_id: object | None = None, correlation_id: str | None = None) -> AssetManagementConfiguration:
+    def get_configuration(
+        self, tenant_id: UUID | str, actor_id: object | None = None, correlation_id: str | None = None
+    ) -> AssetManagementConfiguration:
         tenant = _tenant_id(tenant_id)
         existing = AssetManagementConfiguration.objects.for_tenant(tenant).first()
         if existing is not None:
@@ -327,10 +393,23 @@ class AssetConfigurationService:
     def preview(self, tenant_id: UUID | str, document: object) -> dict[str, object]:
         current = self.get_configuration(tenant_id)
         normalized = self.validate_document(document)
-        changes = {key: {"from": current.document[key], "to": normalized[key]} for key in normalized if current.document[key] != normalized[key]}
+        changes = {
+            key: {"from": current.document[key], "to": normalized[key]}
+            for key in normalized
+            if current.document[key] != normalized[key]
+        }
         return {"valid": True, "current_version": current.version, "changes": changes, "document": normalized}
 
-    def update(self, tenant_id: UUID | str, actor_id: object, correlation_id: str, document: object, *, source: str = "api", action: str = "update") -> AssetManagementConfiguration:
+    def update(
+        self,
+        tenant_id: UUID | str,
+        actor_id: object,
+        correlation_id: str,
+        document: object,
+        *,
+        source: str = "api",
+        action: str = "update",
+    ) -> AssetManagementConfiguration:
         tenant = _tenant_id(tenant_id)
         actor = _actor_id(actor_id)
         correlation = _correlation_id(correlation_id)
@@ -351,29 +430,72 @@ class AssetConfigurationService:
 
     def history(self, tenant_id: UUID | str) -> QuerySet[AssetManagementConfigurationVersion]:
         configuration = self.get_configuration(tenant_id)
-        return AssetManagementConfigurationVersion.objects.for_tenant(configuration.tenant_id).filter(configuration=configuration).order_by("-version", "-created_at")
+        return (
+            AssetManagementConfigurationVersion.objects.for_tenant(configuration.tenant_id)
+            .filter(configuration=configuration)
+            .order_by("-version", "-created_at")
+        )
 
-    def rollback(self, tenant_id: UUID | str, actor_id: object, correlation_id: str, version: int) -> AssetManagementConfiguration:
+    def rollback(
+        self, tenant_id: UUID | str, actor_id: object, correlation_id: str, version: int
+    ) -> AssetManagementConfiguration:
         configuration = self.get_configuration(tenant_id, actor_id, correlation_id)
-        snapshot = AssetManagementConfigurationVersion.objects.for_tenant(configuration.tenant_id).filter(configuration=configuration, version=version).first()
+        snapshot = (
+            AssetManagementConfigurationVersion.objects.for_tenant(configuration.tenant_id)
+            .filter(configuration=configuration, version=version)
+            .first()
+        )
         if snapshot is None:
             raise NotFound("Configuration version was not found.")
-        return self.update(tenant_id, actor_id, correlation_id, snapshot.document, source=f"rollback:{version}", action="rollback")
+        return self.update(
+            tenant_id, actor_id, correlation_id, snapshot.document, source=f"rollback:{version}", action="rollback"
+        )
 
     def export_document(self, tenant_id: UUID | str) -> dict[str, object]:
         configuration = self.get_configuration(tenant_id)
-        return {"schema_version": "1.0", "module": "asset_management", "version": configuration.version, "document": deepcopy(configuration.document)}
+        return {
+            "schema_version": "1.0",
+            "module": "asset_management",
+            "version": configuration.version,
+            "document": deepcopy(configuration.document),
+        }
 
-    def import_document(self, tenant_id: UUID | str, actor_id: object, correlation_id: str, payload: object) -> AssetManagementConfiguration:
-        if not isinstance(payload, dict) or payload.get("schema_version") != "1.0" or payload.get("module") != "asset_management":
-            raise ValidationError({"configuration": "Expected an asset_management configuration document with schema_version 1.0."})
-        return self.update(tenant_id, actor_id, correlation_id, payload.get("document"), source="import", action="import")
+    def import_document(
+        self, tenant_id: UUID | str, actor_id: object, correlation_id: str, payload: object
+    ) -> AssetManagementConfiguration:
+        if (
+            not isinstance(payload, dict)
+            or payload.get("schema_version") != "1.0"
+            or payload.get("module") != "asset_management"
+        ):
+            raise ValidationError(
+                {"configuration": "Expected an asset_management configuration document with schema_version 1.0."}
+            )
+        return self.update(
+            tenant_id, actor_id, correlation_id, payload.get("document"), source="import", action="import"
+        )
 
     @staticmethod
-    def _record(configuration: AssetManagementConfiguration, actor_id: UUID, correlation_id: str, previous: dict[str, object], current: dict[str, object], action: str, source: str) -> None:
-        common = {"tenant_id": configuration.tenant_id, "created_by": actor_id, "configuration": configuration, "version": configuration.version, "correlation_id": correlation_id}
+    def _record(
+        configuration: AssetManagementConfiguration,
+        actor_id: UUID,
+        correlation_id: str,
+        previous: dict[str, object],
+        current: dict[str, object],
+        action: str,
+        source: str,
+    ) -> None:
+        common = {
+            "tenant_id": configuration.tenant_id,
+            "created_by": actor_id,
+            "configuration": configuration,
+            "version": configuration.version,
+            "correlation_id": correlation_id,
+        }
         AssetManagementConfigurationVersion.objects.create(**common, document=deepcopy(current), source=source)
-        AssetManagementConfigurationAudit.objects.create(**common, action=action, previous_document=deepcopy(previous), current_document=deepcopy(current))
+        AssetManagementConfigurationAudit.objects.create(
+            **common, action=action, previous_document=deepcopy(previous), current_document=deepcopy(current)
+        )
 
 
 def _fingerprint(operation: str, data: Mapping[str, object]) -> str:
@@ -415,7 +537,9 @@ class AssetService:
         tenant = _tenant_id(tenant_id)
         correlation = _correlation_id(correlation_id)
         if not idempotency_key:
-            raise AssetManagementError("idempotency_key is required for asset creation.", code="IDEMPOTENCY_KEY_REQUIRED")
+            raise AssetManagementError(
+                "idempotency_key is required for asset creation.", code="IDEMPOTENCY_KEY_REQUIRED"
+            )
         configuration = _configuration(tenant)
         data: dict[str, object] = {
             **kwargs,
@@ -426,9 +550,18 @@ class AssetService:
         }
         values = _asset_values(data, configuration)
         values.setdefault("category", configuration["default_category"])
-        values.setdefault("residual_value", _money(configuration["default_residual_value"], "residual_value", configuration))
+        values.setdefault(
+            "residual_value", _money(configuration["default_residual_value"], "residual_value", configuration)
+        )
         values.setdefault("depreciation_method", configuration["default_depreciation_method"])
-        values.setdefault("useful_life_years", configuration["default_useful_life_years"] if values["depreciation_method"] != DepreciationMethod.NONE else None)
+        values.setdefault(
+            "useful_life_years",
+            (
+                configuration["default_useful_life_years"]
+                if values["depreciation_method"] != DepreciationMethod.NONE
+                else None
+            ),
+        )
         values.setdefault("location", "")
         values["is_active"] = bool(configuration["new_asset_active_default"])
         values["current_value"] = values["purchase_cost"]
@@ -436,7 +569,9 @@ class AssetService:
         existing = AssetIdempotencyRecord.objects.for_tenant(tenant).filter(key=idempotency_key).first()
         if existing is not None:
             if existing.fingerprint != fingerprint or existing.operation != "asset.create":
-                raise AssetManagementError("Idempotency key was reused with a different request.", code="IDEMPOTENCY_CONFLICT")
+                raise AssetManagementError(
+                    "Idempotency key was reused with a different request.", code="IDEMPOTENCY_CONFLICT"
+                )
             return Asset.objects.for_tenant(tenant).get(pk=existing.result_id)
         asset = Asset(tenant_id=tenant, **values)
         _validate_asset(asset, tenant, configuration)
@@ -476,13 +611,17 @@ class AssetService:
         tenant = _tenant_id(tenant_id)
         correlation = _correlation_id(correlation_id)
         if not idempotency_key:
-            raise AssetManagementError("idempotency_key is required for asset updates.", code="IDEMPOTENCY_KEY_REQUIRED")
+            raise AssetManagementError(
+                "idempotency_key is required for asset updates.", code="IDEMPOTENCY_KEY_REQUIRED"
+            )
         configuration = _configuration(tenant)
         fingerprint = _fingerprint("asset.update", {"asset_id": asset_id, "data": data})
         existing = AssetIdempotencyRecord.objects.for_tenant(tenant).filter(key=idempotency_key).first()
         if existing is not None:
             if existing.fingerprint != fingerprint or existing.operation != "asset.update":
-                raise AssetManagementError("Idempotency key was reused with a different request.", code="IDEMPOTENCY_CONFLICT")
+                raise AssetManagementError(
+                    "Idempotency key was reused with a different request.", code="IDEMPOTENCY_CONFLICT"
+                )
             return Asset.objects.for_tenant(tenant).get(pk=existing.result_id)
         asset = Asset.objects.select_for_update().for_tenant(tenant).filter(is_deleted=False).get(pk=asset_id)
         values = _asset_values(data, configuration)
@@ -495,7 +634,11 @@ class AssetService:
             "declining_balance_rate",
         }
         has_history = DepreciationEntry.objects.for_tenant(tenant).filter(asset=asset).exists()
-        if configuration["lock_financial_fields_after_history"] and financial_fields.intersection(values) and has_history:
+        if (
+            configuration["lock_financial_fields_after_history"]
+            and financial_fields.intersection(values)
+            and has_history
+        ):
             raise AssetManagementError(
                 "Depreciation settings cannot change after history has been recorded.",
                 code="ASSET_HAS_DEPRECIATION_HISTORY",
@@ -540,13 +683,17 @@ class AssetService:
         tenant = _tenant_id(tenant_id)
         correlation = _correlation_id(correlation_id)
         if not idempotency_key:
-            raise AssetManagementError("idempotency_key is required for asset archive.", code="IDEMPOTENCY_KEY_REQUIRED")
+            raise AssetManagementError(
+                "idempotency_key is required for asset archive.", code="IDEMPOTENCY_KEY_REQUIRED"
+            )
         configuration = _configuration(tenant)
         existing = AssetIdempotencyRecord.objects.for_tenant(tenant).filter(key=idempotency_key).first()
         if existing is not None:
             requested_asset_id = asset_id if isinstance(asset_id, UUID) else UUID(str(asset_id))
             if existing.operation != "asset.archive" or existing.result_id != requested_asset_id:
-                raise AssetManagementError("Idempotency key was reused with a different request.", code="IDEMPOTENCY_CONFLICT")
+                raise AssetManagementError(
+                    "Idempotency key was reused with a different request.", code="IDEMPOTENCY_CONFLICT"
+                )
             return Asset.objects.for_tenant(tenant).get(pk=existing.result_id)
         asset = Asset.objects.select_for_update().for_tenant(tenant).filter(pk=asset_id).first()
         if asset is None:
@@ -587,12 +734,16 @@ class AssetService:
         tenant = _tenant_id(tenant_id)
         correlation = _correlation_id(correlation_id)
         if not idempotency_key:
-            raise AssetManagementError("idempotency_key is required for lifecycle transitions.", code="IDEMPOTENCY_KEY_REQUIRED")
+            raise AssetManagementError(
+                "idempotency_key is required for lifecycle transitions.", code="IDEMPOTENCY_KEY_REQUIRED"
+            )
         fingerprint = _fingerprint("asset.active_state", {"asset_id": asset_id, "is_active": is_active})
         existing = AssetIdempotencyRecord.objects.for_tenant(tenant).filter(key=idempotency_key).first()
         if existing is not None:
             if existing.fingerprint != fingerprint or existing.operation != "asset.active_state":
-                raise AssetManagementError("Idempotency key was reused with a different request.", code="IDEMPOTENCY_CONFLICT")
+                raise AssetManagementError(
+                    "Idempotency key was reused with a different request.", code="IDEMPOTENCY_CONFLICT"
+                )
             return Asset.objects.for_tenant(tenant).get(pk=existing.result_id)
         asset = Asset.objects.select_for_update().for_tenant(tenant).filter(is_deleted=False).get(pk=asset_id)
         if asset.is_active == is_active:
@@ -678,7 +829,10 @@ class DepreciationService:
         existing = entries.filter(entry_date=entry_date).first()
         if existing is not None:
             return existing
-        if configuration["posting_frequency"] == "monthly" and entries.filter(entry_date__year=entry_date.year, entry_date__month=entry_date.month).exists():
+        if (
+            configuration["posting_frequency"] == "monthly"
+            and entries.filter(entry_date__year=entry_date.year, entry_date__month=entry_date.month).exists()
+        ):
             raise AssetManagementError(
                 "Depreciation has already been recorded for this accounting month.",
                 code="DUPLICATE_DEPRECIATION_PERIOD",
@@ -698,18 +852,28 @@ class DepreciationService:
             raise AssetManagementError("The asset is already fully depreciated.", code="FULLY_DEPRECIATED")
 
         if asset.depreciation_method == DepreciationMethod.STRAIGHT_LINE:
-            raw_amount = (asset.purchase_cost - asset.residual_value) / Decimal(asset.useful_life_years * int(configuration["accounting_periods_per_year"]))
+            raw_amount = (asset.purchase_cost - asset.residual_value) / Decimal(
+                asset.useful_life_years * int(configuration["accounting_periods_per_year"])
+            )
         elif asset.depreciation_method == DepreciationMethod.DECLINING_BALANCE:
             annual_rate = (
                 asset.declining_balance_rate / Decimal(str(configuration["percentage_divisor"]))
                 if asset.declining_balance_rate is not None
-                else min(Decimal(str(configuration["annual_cap"])), Decimal(str(configuration["double_declining_factor"])) / Decimal(asset.useful_life_years))
+                else min(
+                    Decimal(str(configuration["annual_cap"])),
+                    Decimal(str(configuration["double_declining_factor"])) / Decimal(asset.useful_life_years),
+                )
             )
             raw_amount = opening_value * annual_rate / Decimal(int(configuration["accounting_periods_per_year"]))
         else:
             raise AssetManagementError("Unsupported depreciation method.", code="UNSUPPORTED_DEPRECIATION_METHOD")
 
-        amount = min(remaining, raw_amount.quantize(Decimal("1").scaleb(-int(configuration["monetary_decimal_places"])), rounding=ROUND_HALF_UP))
+        amount = min(
+            remaining,
+            raw_amount.quantize(
+                Decimal("1").scaleb(-int(configuration["monetary_decimal_places"])), rounding=ROUND_HALF_UP
+            ),
+        )
         if amount <= 0:
             raise AssetManagementError(
                 "The calculated depreciation is below the supported currency precision.",
@@ -752,4 +916,12 @@ class DepreciationService:
         return entry
 
 
-__all__ = ["AssetConfigurationService", "AssetManagementError", "AssetService", "DepreciationService", "DEFAULT_CONFIGURATION", "INTEGER_LIMITS", "DECIMAL_LIMITS"]
+__all__ = [
+    "AssetConfigurationService",
+    "AssetManagementError",
+    "AssetService",
+    "DepreciationService",
+    "DEFAULT_CONFIGURATION",
+    "INTEGER_LIMITS",
+    "DECIMAL_LIMITS",
+]

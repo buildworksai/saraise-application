@@ -539,7 +539,7 @@ Mode-conditional behavior belongs in the policy layer, never inside a security p
 | Gate | Status | Command / Evidence |
 |------|--------|--------------------|
 | Pre-commit hooks | **WIRED** | `pre-commit run --all-files` |
-| Backend tests + coverage ≥ 90% | **WIRED** | `pytest tests/ -v --cov=src --cov-fail-under=90` |
+| Backend tests + coverage ≥ 90% | **WIRED** | `pytest src tests -v --cov=src --cov-fail-under=90` |
 | Backend type checking | **WIRED** | `mypy src/` (must not exceed baseline) |
 | Backend format / lint | **WIRED** | `black`, `isort`, `flake8 --max-line-length=120` |
 | Frontend type checking | **WIRED** | `npm run typecheck` — ZERO errors |
@@ -556,8 +556,8 @@ Mode-conditional behavior belongs in the policy layer, never inside a security p
 # Backend
 cd backend
 pip install -e .[dev]
-python manage.py runserver 0.0.0.0:8000
-pytest tests/ -v --cov=src --cov-fail-under=90
+python manage.py runserver 0.0.0.0:28000
+pytest src tests -v --cov=src --cov-fail-under=90
 mypy src/
 black --check . && isort --check-only . && flake8 . --max-line-length=120
 

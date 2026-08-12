@@ -110,15 +110,9 @@ class BusinessRuleVersionFactory(factory.django.DjangoModelFactory):
     rule = factory.SubFactory(BusinessRuleFactory)
     tenant_id = factory.SelfAttribute("rule.tenant_id")
     version = 1
-    condition_ast = factory.LazyFunction(
-        lambda: {"operator": "equals", "field": "status", "value": "active"}
-    )
+    condition_ast = factory.LazyFunction(lambda: {"operator": "equals", "field": "status", "value": "active"})
     action_ast = factory.LazyFunction(
-        lambda: {
-            "actions": [
-                {"type": "emit-field-diagnostic", "field": "status", "message": "Status is active"}
-            ]
-        }
+        lambda: {"actions": [{"type": "emit-field-diagnostic", "field": "status", "message": "Status is active"}]}
     )
     dependencies = factory.LazyFunction(list)
     content_hash = factory.LazyFunction(lambda: "b" * 64)

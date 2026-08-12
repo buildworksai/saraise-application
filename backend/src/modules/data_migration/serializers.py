@@ -186,25 +186,38 @@ class MigrationJobListSerializer(serializers.ModelSerializer):
     def get_readiness(self, obj: MigrationJob) -> dict[str, Any]:
         blockers: list[dict[str, str]] = []
         if not obj.mappings.exists():
-            blockers.append({"code": "MAPPINGS_REQUIRED", "message": "Map at least one source field.", "section": "mappings"})
+            blockers.append(
+                {"code": "MAPPINGS_REQUIRED", "message": "Map at least one source field.", "section": "mappings"}
+            )
         if not obj.validation_rules.filter(is_active=True).exists():
             blockers.append({"code": "RULE_REQUIRED", "message": "Add an active validation rule.", "section": "rules"})
         if obj.source_type in {"csv", "excel", "json", "xml"} and not obj.source_artifact_id:
-            blockers.append({"code": "SOURCE_REQUIRED", "message": "Attach an immutable source artifact.", "section": "source"})
+            blockers.append(
+                {"code": "SOURCE_REQUIRED", "message": "Attach an immutable source artifact.", "section": "source"}
+            )
         return {"ready": obj.status == "ready" and not blockers, "blockers": blockers}
 
     def get_allowed_actions(self, obj: MigrationJob) -> list[str]:
         request = self.context.get("request")
         permissions = set(getattr(getattr(request, "user", None), "permissions", ()) or ())
         candidates = {
-            "open": "data_migration.job:read", "edit": "data_migration.job:update", "archive": "data_migration.job:update",
-            "delete": "data_migration.job:delete", "export": "data_migration.job:export", "clone": "data_migration.job:import",
-            "dry_run": "data_migration.run:execute", "run": "data_migration.run:execute",
+            "open": "data_migration.job:read",
+            "edit": "data_migration.job:update",
+            "archive": "data_migration.job:update",
+            "delete": "data_migration.job:delete",
+            "export": "data_migration.job:export",
+            "clone": "data_migration.job:import",
+            "dry_run": "data_migration.run:execute",
+            "run": "data_migration.run:execute",
         }
         state_allowed = {"open", "export", "clone"}
-        if obj.status != "archived": state_allowed |= {"edit", "archive", "delete"}
-        if obj.status == "ready": state_allowed |= {"dry_run", "run"}
-        return sorted(action for action, permission in candidates.items() if action in state_allowed and permission in permissions)
+        if obj.status != "archived":
+            state_allowed |= {"edit", "archive", "delete"}
+        if obj.status == "ready":
+            state_allowed |= {"dry_run", "run"}
+        return sorted(
+            action for action, permission in candidates.items() if action in state_allowed and permission in permissions
+        )
 
 
 class MigrationJobDetailSerializer(MigrationJobListSerializer):
@@ -307,7 +320,9 @@ class MappingSuggestionRequestSerializer(StrictSerializer):
 
 
 class MappingSuggestionApplySerializer(StrictSerializer):
-    suggestion_ids = serializers.ListField(child=serializers.CharField(max_length=255), allow_empty=False, max_length=500)
+    suggestion_ids = serializers.ListField(
+        child=serializers.CharField(max_length=255), allow_empty=False, max_length=500
+    )
 
 
 class MigrationRunRequestSerializer(StrictSerializer):
@@ -321,6 +336,7 @@ class CancelRunSerializer(TransitionSerializer):
 class MigrationRunSerializer(serializers.ModelSerializer):
     rollback_eligible = serializers.SerializerMethodField()
     allowed_actions = serializers.SerializerMethodField()
+
     class Meta:
         model = MigrationRun
         fields = (
@@ -349,22 +365,40 @@ class MigrationRunSerializer(serializers.ModelSerializer):
         )
 
     def get_rollback_eligible(self, obj: MigrationRun) -> bool:
-        return obj.mode == "commit" and obj.status in {"succeeded", "partial"} and obj.changes.filter(reversed_at__isnull=True).exists()
+        return (
+            obj.mode == "commit"
+            and obj.status in {"succeeded", "partial"}
+            and obj.changes.filter(reversed_at__isnull=True).exists()
+        )
 
     def get_allowed_actions(self, obj: MigrationRun) -> list[str]:
         request = self.context.get("request")
         permissions = set(getattr(getattr(request, "user", None), "permissions", ()) or ())
         actions = []
-        if "data_migration.job:read" in permissions: actions.append("export_issues")
-        if obj.status in {"queued", "running"} and "data_migration.run:cancel" in permissions: actions.append("cancel")
-        if self.get_rollback_eligible(obj) and "data_migration.rollback:execute" in permissions: actions.append("rollback")
+        if "data_migration.job:read" in permissions:
+            actions.append("export_issues")
+        if obj.status in {"queued", "running"} and "data_migration.run:cancel" in permissions:
+            actions.append("cancel")
+        if self.get_rollback_eligible(obj) and "data_migration.rollback:execute" in permissions:
+            actions.append("rollback")
         return actions
 
 
 class MigrationRunIssueSerializer(serializers.ModelSerializer):
     class Meta:
         model = MigrationRunIssue
-        fields = ("id", "run", "row_number", "field_name", "stage", "severity", "code", "message", "redacted_sample", "created_at")
+        fields = (
+            "id",
+            "run",
+            "row_number",
+            "field_name",
+            "stage",
+            "severity",
+            "code",
+            "message",
+            "redacted_sample",
+            "created_at",
+        )
 
 
 class RollbackRequestSerializer(StrictSerializer):
@@ -497,7 +531,9 @@ class DataMigrationConfigurationUpdateSerializer(StrictSerializer):
     preview_row_limit = serializers.IntegerField(min_value=1, max_value=100, required=False)
     retention_days = serializers.IntegerField(min_value=1, max_value=3650, required=False)
     enabled_roles = serializers.ListField(child=serializers.CharField(max_length=100), max_length=100, required=False)
-    allowed_target_adapters = serializers.ListField(child=serializers.CharField(max_length=100), max_length=100, required=False)
+    allowed_target_adapters = serializers.ListField(
+        child=serializers.CharField(max_length=100), max_length=100, required=False
+    )
     rollout_percentage = serializers.IntegerField(min_value=0, max_value=100, required=False)
     enabled = serializers.BooleanField(required=False)
 
@@ -517,7 +553,18 @@ class DataMigrationConfigurationAuditSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = DataMigrationConfigurationAudit
-        fields = ("id", "configuration", "version", "before", "after", "snapshot", "change_summary", "changed_by", "correlation_id", "created_at")
+        fields = (
+            "id",
+            "configuration",
+            "version",
+            "before",
+            "after",
+            "snapshot",
+            "change_summary",
+            "changed_by",
+            "correlation_id",
+            "created_at",
+        )
         read_only_fields = fields
 
     def get_change_summary(self, obj: DataMigrationConfigurationAudit) -> str:

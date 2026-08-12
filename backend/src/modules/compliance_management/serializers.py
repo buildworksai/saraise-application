@@ -54,7 +54,19 @@ class FrameworkDetailSerializer(StrictModelSerializer):
 
     class Meta:
         model = ComplianceFramework
-        fields = COMMON + ("code", "name", "version", "category", "description", "source_kind", "source_package", "source_version", "status", "transition_history", "requirement_count")
+        fields = COMMON + (
+            "code",
+            "name",
+            "version",
+            "category",
+            "description",
+            "source_kind",
+            "source_package",
+            "source_version",
+            "status",
+            "transition_history",
+            "requirement_count",
+        )
         read_only_fields = fields
 
     def get_requirement_count(self, obj):
@@ -81,7 +93,19 @@ class RequirementListSerializer(StrictModelSerializer):
 
     class Meta:
         model = ComplianceRequirement
-        fields = ("id", "framework", "framework_name", "code", "title", "section", "applicability", "status", "sort_order", "tags", "updated_at")
+        fields = (
+            "id",
+            "framework",
+            "framework_name",
+            "code",
+            "title",
+            "section",
+            "applicability",
+            "status",
+            "sort_order",
+            "tags",
+            "updated_at",
+        )
         read_only_fields = fields
 
 
@@ -91,11 +115,28 @@ class RequirementDetailSerializer(StrictModelSerializer):
 
     class Meta:
         model = ComplianceRequirement
-        fields = COMMON + ("framework", "framework_name", "code", "title", "description", "section", "guidance", "applicability", "applicability_rationale", "status", "sort_order", "tags", "transition_history", "latest_assessment")
+        fields = COMMON + (
+            "framework",
+            "framework_name",
+            "code",
+            "title",
+            "description",
+            "section",
+            "guidance",
+            "applicability",
+            "applicability_rationale",
+            "status",
+            "sort_order",
+            "tags",
+            "transition_history",
+            "latest_assessment",
+        )
         read_only_fields = fields
 
     def get_latest_assessment(self, obj):
-        assessment = obj.assessments.filter(tenant_id=obj.tenant_id).order_by("-assessed_at", "-created_at", "-id").first()
+        assessment = (
+            obj.assessments.filter(tenant_id=obj.tenant_id).order_by("-assessed_at", "-created_at", "-id").first()
+        )
         return AssessmentSerializer(assessment).data if assessment else None
 
 
@@ -122,7 +163,22 @@ class PolicyListSerializer(StrictModelSerializer):
 
     class Meta:
         model = CompliancePolicy
-        fields = ("id", "code", "title", "category", "owner", "owner_name", "review_frequency_days", "effective_date", "expiry_date", "next_review_date", "status", "current_version", "created_at", "updated_at")
+        fields = (
+            "id",
+            "code",
+            "title",
+            "category",
+            "owner",
+            "owner_name",
+            "review_frequency_days",
+            "effective_date",
+            "expiry_date",
+            "next_review_date",
+            "status",
+            "current_version",
+            "created_at",
+            "updated_at",
+        )
         read_only_fields = fields
 
     def get_owner_name(self, obj):
@@ -132,7 +188,20 @@ class PolicyListSerializer(StrictModelSerializer):
 class PolicyVersionSerializer(StrictModelSerializer):
     class Meta:
         model = CompliancePolicyVersion
-        fields = ("id", "policy", "version", "content", "content_sha256", "change_summary", "created_by", "created_at", "approved_by", "approved_at", "published_by", "published_at")
+        fields = (
+            "id",
+            "policy",
+            "version",
+            "content",
+            "content_sha256",
+            "change_summary",
+            "created_by",
+            "created_at",
+            "approved_by",
+            "approved_at",
+            "published_by",
+            "published_at",
+        )
         read_only_fields = fields
 
 
@@ -142,7 +211,22 @@ class PolicyDetailSerializer(StrictModelSerializer):
 
     class Meta:
         model = CompliancePolicy
-        fields = COMMON + ("code", "title", "summary", "category", "owner", "review_frequency_days", "effective_date", "expiry_date", "next_review_date", "status", "current_version", "transition_history", "versions", "mapping_count")
+        fields = COMMON + (
+            "code",
+            "title",
+            "summary",
+            "category",
+            "owner",
+            "review_frequency_days",
+            "effective_date",
+            "expiry_date",
+            "next_review_date",
+            "status",
+            "current_version",
+            "transition_history",
+            "versions",
+            "mapping_count",
+        )
         read_only_fields = fields
 
     def get_mapping_count(self, obj):
@@ -178,7 +262,16 @@ class MappingSerializer(StrictModelSerializer):
 
     class Meta:
         model = RequirementPolicyMapping
-        fields = COMMON + ("requirement", "requirement_code", "policy", "policy_code", "policy_version", "coverage", "rationale", "mapped_at")
+        fields = COMMON + (
+            "requirement",
+            "requirement_code",
+            "policy",
+            "policy_code",
+            "policy_version",
+            "coverage",
+            "rationale",
+            "mapped_at",
+        )
         read_only_fields = fields
 
 
@@ -199,14 +292,28 @@ class AssessmentSerializer(StrictModelSerializer):
 
     class Meta:
         model = ComplianceAssessment
-        fields = ("id", "requirement", "requirement_code", "mapping", "status", "assessor", "assessed_at", "due_date", "notes", "source", "created_at")
+        fields = (
+            "id",
+            "requirement",
+            "requirement_code",
+            "mapping",
+            "status",
+            "assessor",
+            "assessed_at",
+            "due_date",
+            "notes",
+            "source",
+            "created_at",
+        )
         read_only_fields = fields
 
 
 class AssessmentCreateSerializer(StrictSerializer):
     requirement_id = serializers.UUIDField()
     mapping_id = serializers.UUIDField(required=False, allow_null=True)
-    status = serializers.ChoiceField(choices=("not_assessed", "in_progress", "compliant", "partial", "non_compliant", "not_applicable"))
+    status = serializers.ChoiceField(
+        choices=("not_assessed", "in_progress", "compliant", "partial", "non_compliant", "not_applicable")
+    )
     assessed_at = serializers.DateTimeField(required=False)
     due_date = serializers.DateField(required=False, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True)
@@ -216,7 +323,19 @@ class AssessmentCreateSerializer(StrictSerializer):
 class EvidenceListSerializer(StrictModelSerializer):
     class Meta:
         model = ComplianceEvidence
-        fields = ("id", "name", "evidence_type", "reference_kind", "classification", "collection_method", "valid_from", "valid_until", "collected_at", "created_at", "updated_at")
+        fields = (
+            "id",
+            "name",
+            "evidence_type",
+            "reference_kind",
+            "classification",
+            "collection_method",
+            "valid_from",
+            "valid_until",
+            "collected_at",
+            "created_at",
+            "updated_at",
+        )
         read_only_fields = fields
 
 
@@ -234,14 +353,32 @@ class EvidenceDetailSerializer(StrictModelSerializer):
 
     class Meta:
         model = ComplianceEvidence
-        fields = COMMON + ("name", "description", "evidence_type", "reference_kind", "document_id", "external_uri", "text_reference", "sha256", "classification", "collection_method", "valid_from", "valid_until", "collected_by", "collected_at", "requirement_links")
+        fields = COMMON + (
+            "name",
+            "description",
+            "evidence_type",
+            "reference_kind",
+            "document_id",
+            "external_uri",
+            "text_reference",
+            "sha256",
+            "classification",
+            "collection_method",
+            "valid_from",
+            "valid_until",
+            "collected_by",
+            "collected_at",
+            "requirement_links",
+        )
         read_only_fields = fields
 
 
 class EvidenceWriteSerializer(StrictSerializer):
     name = serializers.CharField(max_length=500)
     description = serializers.CharField(required=False, allow_blank=True)
-    evidence_type = serializers.ChoiceField(choices=("document", "report", "screenshot", "log", "attestation", "external_reference"))
+    evidence_type = serializers.ChoiceField(
+        choices=("document", "report", "screenshot", "log", "attestation", "external_reference")
+    )
     reference_kind = serializers.ChoiceField(choices=("dms_document", "external_url", "text_reference"))
     document_id = serializers.UUIDField(required=False, allow_null=True)
     external_uri = serializers.URLField(required=False, allow_blank=True)
@@ -263,7 +400,26 @@ class EvidenceLinkWriteSerializer(StrictSerializer):
 class ConfigurationRevisionSerializer(StrictModelSerializer):
     class Meta:
         model = ComplianceConfigurationRevision
-        fields = ("id", "environment", "version", "status", "policy_code_prefix", "default_review_frequency_days", "expiry_warning_days", "evidence_warning_days", "minimum_assessment_note_length", "allow_external_evidence_urls", "bulk_import_row_limit", "regulation_categories", "rollout", "created_by", "created_at", "activated_by", "activated_at", "transition_history")
+        fields = (
+            "id",
+            "environment",
+            "version",
+            "status",
+            "policy_code_prefix",
+            "default_review_frequency_days",
+            "expiry_warning_days",
+            "evidence_warning_days",
+            "minimum_assessment_note_length",
+            "allow_external_evidence_urls",
+            "bulk_import_row_limit",
+            "regulation_categories",
+            "rollout",
+            "created_by",
+            "created_at",
+            "activated_by",
+            "activated_at",
+            "transition_history",
+        )
         read_only_fields = fields
 
 
@@ -276,7 +432,9 @@ class ConfigurationWriteSerializer(StrictSerializer):
     minimum_assessment_note_length = serializers.IntegerField(min_value=0, max_value=2000, required=False)
     allow_external_evidence_urls = serializers.BooleanField(required=False)
     bulk_import_row_limit = serializers.IntegerField(min_value=1, max_value=10000, required=False)
-    regulation_categories = serializers.ListField(child=serializers.CharField(max_length=50), min_length=1, max_length=100, required=False)
+    regulation_categories = serializers.ListField(
+        child=serializers.CharField(max_length=50), min_length=1, max_length=100, required=False
+    )
     rollout = serializers.DictField(required=False)
 
 
@@ -294,7 +452,18 @@ class ConfigurationPreviewSerializer(StrictSerializer):
 class ActivitySerializer(StrictModelSerializer):
     class Meta:
         model = ComplianceActivity
-        fields = ("id", "entity_type", "entity_id", "action", "actor", "correlation_id", "before", "after", "reason", "occurred_at")
+        fields = (
+            "id",
+            "entity_type",
+            "entity_id",
+            "action",
+            "actor",
+            "correlation_id",
+            "before",
+            "after",
+            "reason",
+            "occurred_at",
+        )
         read_only_fields = fields
 
 

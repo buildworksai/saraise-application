@@ -73,7 +73,7 @@ class PlatformFeatureFlagService:
             else:
                 query &= models.Q(tenant_id__isnull=True)
 
-            flag = FeatureFlag.objects.filter(query).first()
+            flag = FeatureFlag.objects.filter(query).first()  # nosemgrep: semgrep.tenant-id-required-in-queries
             if not flag:
                 return default
 
@@ -169,7 +169,7 @@ class PlatformFeatureFlagService:
             else:
                 query &= models.Q(tenant_id__isnull=True)
 
-            setting = PlatformSetting.objects.filter(query).first()
+            setting = PlatformSetting.objects.filter(query).first()  # nosemgrep: semgrep.tenant-id-required-in-queries
             if not setting:
                 return default
 

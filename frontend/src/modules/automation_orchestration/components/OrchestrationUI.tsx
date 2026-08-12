@@ -55,15 +55,22 @@ export function PermissionDenied() {
   );
 }
 
-export function LoadError({ error, retry }: { error: Error; retry: () => void }) {
+export function LoadError({ error, retry }: { error: Error; retry?: () => void }) {
   if (error instanceof ApiError && error.status === 403) return <PermissionDenied />;
+  const notFound = error instanceof ApiError && error.status === 404;
   return (
     <Card role="alert" className="border-destructive/40">
       <CardContent className="flex min-h-72 flex-col items-center justify-center text-center">
         <AlertTriangle className="mb-4 h-10 w-10 text-destructive" aria-hidden="true" />
-        <h2 className="text-xl font-semibold">Orchestration data is unavailable</h2>
+        <h2 className="text-xl font-semibold">
+          {notFound ? "Record not found" : "Orchestration data is unavailable"}
+        </h2>
         <p className="mt-2 max-w-lg text-sm text-muted-foreground">{error.message}</p>
-        <Button className="mt-5" variant="outline" onClick={retry}>Try again</Button>
+        {!notFound && retry ? (
+          <Button className="mt-5" variant="outline" onClick={retry}>
+            Try again
+          </Button>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -81,7 +88,9 @@ export function EmptyPanel({
   return (
     <Card>
       <CardContent className="flex min-h-72 flex-col items-center justify-center text-center">
-        <span className="mb-4 rounded-2xl bg-primary/10 p-3 text-primary"><Workflow aria-hidden="true" /></span>
+        <span className="mb-4 rounded-2xl bg-primary/10 p-3 text-primary">
+          <Workflow aria-hidden="true" />
+        </span>
         <h2 className="text-xl font-semibold">{title}</h2>
         <p className="mt-2 max-w-lg text-sm text-muted-foreground">{description}</p>
         {action ? <div className="mt-5">{action}</div> : null}
@@ -109,7 +118,11 @@ const STATUS_TOKENS: Readonly<Record<string, string>> = {
 
 export function StatusPill({ status }: { status: string }) {
   const color = STATUS_TOKENS[status] ?? "bg-muted text-muted-foreground";
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${color}`}>{status.replace("_", " ")}</span>;
+  return (
+    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${color}`}>
+      {status.replace("_", " ")}
+    </span>
+  );
 }
 
 // Formatting helpers are colocated so every orchestration state uses identical evidence labels.
@@ -117,13 +130,22 @@ export function StatusPill({ status }: { status: string }) {
 export function formatDate(value: string | null): string {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+  return Number.isNaN(date.getTime())
+    ? "—"
+    : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export function formatDuration(start: string | null, end: string | null, minuteThresholdMs: number): string {
+export function formatDuration(
+  start: string | null,
+  end: string | null,
+  minuteThresholdMs: number
+): string {
   if (!start) return "—";
-  const milliseconds = Math.max(0, new Date(end ?? Date.now()).getTime() - new Date(start).getTime());
+  const milliseconds = Math.max(
+    0,
+    new Date(end ?? Date.now()).getTime() - new Date(start).getTime()
+  );
   if (milliseconds < minuteThresholdMs) return `${Math.round(milliseconds / 1_000)}s`;
   return `${Math.floor(milliseconds / minuteThresholdMs)}m ${Math.round((milliseconds % minuteThresholdMs) / 1_000)}s`;
 }
@@ -139,9 +161,20 @@ export function Pagination({
 }) {
   return (
     <nav aria-label="Pagination" className="flex items-center justify-end gap-3 pt-4">
-      <span className="text-sm text-muted-foreground">Page {page} of {Math.max(1, totalPages)}</span>
-      <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>Previous</Button>
-      <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => onPage(page + 1)}>Next</Button>
+      <span className="text-sm text-muted-foreground">
+        Page {page} of {Math.max(1, totalPages)}
+      </span>
+      <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+        Previous
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={page >= totalPages}
+        onClick={() => onPage(page + 1)}
+      >
+        Next
+      </Button>
     </nav>
   );
 }

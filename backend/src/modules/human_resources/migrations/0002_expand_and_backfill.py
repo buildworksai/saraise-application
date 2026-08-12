@@ -8,7 +8,6 @@ from decimal import Decimal
 import django.db.models.deletion
 from django.db import migrations, models
 
-
 AUDITED_MODELS = ("department", "employee", "attendance", "leaverequest")
 
 

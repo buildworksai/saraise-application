@@ -6,20 +6,14 @@ import uuid
 from datetime import timedelta
 
 import pytest
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from src.core.tenancy import TenantScopedModel, TimestampedModel
-from src.modules.dms.managers import ImmutableVersionError
-from src.modules.dms.models import (
-    Document,
-    DocumentPermission,
-    DocumentShare,
-    DocumentVersion,
-    Folder,
-    PermissionLevel,
-)
+from src.modules.dms.managers import DmsQuerySet, DocumentVersionQuerySet, ImmutableVersionError
+from src.modules.dms.models import Document, DocumentPermission, DocumentShare, DocumentVersion, Folder, PermissionLevel
 from src.modules.dms.tests.factories import make_document_graph, make_folder, make_share
 
 pytest_plugins = ["src.core.testing"]
@@ -35,12 +29,18 @@ def test_domain_uses_uuid_identity_canonical_tenancy_and_soft_delete_manager(ide
     tenant_id, actor_id, _ = identities
     folder = make_folder(tenant_id=tenant_id, actor_id=actor_id)
 
+    tenant_folders = Folder.objects.for_tenant(tenant_id)
+    live_tenant_folders = tenant_folders.alive()
+    assert isinstance(Folder.objects.all(), DmsQuerySet)
+    assert isinstance(tenant_folders, DmsQuerySet)
+    assert isinstance(live_tenant_folders, DmsQuerySet)
     assert isinstance(folder, TenantScopedModel)
     assert isinstance(folder, TimestampedModel)
     assert isinstance(folder.id, uuid.UUID)
-    assert Folder._meta.get_field("tenant_id").get_internal_type() == "UUIDField"
-    assert Folder._meta.get_field("tenant_id").db_index is True
-    assert Folder.objects.for_tenant(tenant_id).alive().get() == folder
+    tenant_field = Folder._meta.get_field("tenant_id")
+    assert tenant_field.get_internal_type() == "UUIDField"
+    assert getattr(tenant_field, "db_index") is True
+    assert live_tenant_folders.get() == folder
 
     folder.is_deleted = True
     folder.deleted_at = timezone.now()
@@ -142,8 +142,29 @@ def test_document_tags_metadata_and_owner_are_guarded(identities) -> None:
         document.save()
     document.metadata = {}
     document.created_by = replacement_owner
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as owner_error:
         document.save()
+    assert owner_error.value.error_dict["created_by"][0].code == "immutable_owner"
+    assert owner_error.value.message_dict == {"created_by": ["Document ownership is immutable."]}
+
+
+@pytest.mark.django_db
+def test_document_clean_reports_exact_tag_and_metadata_state_errors(identities) -> None:
+    tenant_id, actor_id, _ = identities
+    document = Document.objects.create(tenant_id=tenant_id, created_by=actor_id, name="Evidence")
+
+    document.tags = "legal"  # type: ignore[assignment]
+    with pytest.raises(ValidationError) as invalid_tags:
+        document.save()
+    assert invalid_tags.value.error_dict["tags"][0].code == "invalid_tags"
+    assert invalid_tags.value.message_dict == {"tags": ["Tags must be an array."]}
+
+    document.tags = []
+    document.metadata = []  # type: ignore[assignment]
+    with pytest.raises(ValidationError) as invalid_metadata:
+        document.save()
+    assert invalid_metadata.value.error_dict["metadata"][0].code == "invalid_metadata"
+    assert invalid_metadata.value.message_dict == {"metadata": ["Metadata must be a JSON object."]}
 
 
 @pytest.mark.django_db
@@ -151,6 +172,8 @@ def test_version_is_tenant_scoped_unique_and_append_only(identities) -> None:
     tenant_id, actor_id, _ = identities
     graph = make_document_graph(tenant_id=tenant_id, actor_id=actor_id)
     version = graph.version
+    assert isinstance(DocumentVersion.objects.all(), DocumentVersionQuerySet)
+    assert isinstance(DocumentVersion.objects.for_tenant(tenant_id), DocumentVersionQuerySet)
     assert version.storage_backend == "django"
     assert DocumentVersion.objects.for_tenant(tenant_id).get() == version
 
@@ -168,14 +191,22 @@ def test_version_is_tenant_scoped_unique_and_append_only(identities) -> None:
         )
 
     version.change_note = "rewrite"
-    with pytest.raises(ImmutableVersionError):
+    with pytest.raises(ImmutableVersionError) as instance_save_error:
         version.save()
-    with pytest.raises(ImmutableVersionError):
+    assert instance_save_error.value.code == "immutable_version"
+    assert instance_save_error.value.messages == ["Document versions are append-only and cannot be updated."]
+    with pytest.raises(ImmutableVersionError) as queryset_update_error:
         DocumentVersion.objects.filter(pk=version.pk).update(change_note="rewrite")
-    with pytest.raises(ImmutableVersionError):
+    assert queryset_update_error.value.code == "immutable_version"
+    assert queryset_update_error.value.messages == ["Document versions are append-only and cannot be updated."]
+    with pytest.raises(ImmutableVersionError) as instance_delete_error:
         version.delete()
-    with pytest.raises(ImmutableVersionError):
+    assert instance_delete_error.value.code == "immutable_version"
+    assert instance_delete_error.value.messages == ["Document versions are retained and cannot be deleted."]
+    with pytest.raises(ImmutableVersionError) as queryset_delete_error:
         DocumentVersion.objects.filter(pk=version.pk).delete()
+    assert queryset_delete_error.value.code == "immutable_version"
+    assert queryset_delete_error.value.messages == ["Document versions are retained and cannot be deleted."]
 
 
 @pytest.mark.django_db
@@ -291,13 +322,17 @@ def test_required_indexes_and_constraints_are_declared() -> None:
         "dms_folder_depth_range",
         "dms_folder_not_self_parent",
     }
-    assert {index.name for index in Document._meta.indexes} >= {
+    document_indexes = {index.name for index in Document._meta.indexes}
+    assert document_indexes >= {
         "dms_doc_folder_updated_idx",
         "dms_doc_owner_alive_idx",
         "dms_doc_name_idx",
-        "dms_doc_tags_gin",
-        "dms_doc_search_gin",
     }
+    if settings.DATABASES["default"]["ENGINE"] != "django.db.backends.sqlite3":
+        assert document_indexes >= {
+            "dms_doc_tags_gin",
+            "dms_doc_search_gin",
+        }
     assert {constraint.name for constraint in DocumentVersion._meta.constraints} >= {
         "dms_version_tenant_doc_no_uq",
         "dms_version_number_gte1",

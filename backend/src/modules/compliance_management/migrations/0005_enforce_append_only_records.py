@@ -2,7 +2,6 @@
 
 from django.db import migrations
 
-
 APPEND_ONLY_TABLES = (
     "compliance_policy_versions",
     "compliance_assessments",

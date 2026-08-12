@@ -1,2 +1,4 @@
-import { CommercialDocumentForm } from '../components/DocumentForms';
-export function CreateQuotationPage(){return <CommercialDocumentForm kind="quotation"/>;}
+import { CommercialDocumentForm } from "../components/DocumentForms";
+export function CreateQuotationPage() {
+  return <CommercialDocumentForm kind="quotation" />;
+}

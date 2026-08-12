@@ -80,21 +80,15 @@ def test_user_cannot_list_other_tenant_data_mappings(tenant_a_client, tenant_a, 
 
 
 @pytest.mark.parametrize("resource", ("integrations", "webhooks", "data-mappings"))
-def test_user_cannot_update_or_delete_other_tenant_mutable_resources(
-    tenant_a_client, tenant_b, resource
-) -> None:
+def test_user_cannot_update_or_delete_other_tenant_mutable_resources(tenant_a_client, tenant_b, resource) -> None:
     if resource == "integrations":
         record = IntegrationFactory(tenant_id=tenant_b.id)
     elif resource == "webhooks":
         record = WebhookFactory(tenant_id=tenant_b.id)
     else:
-        record = DataMappingFactory(
-            integration=IntegrationFactory(tenant_id=tenant_b.id)
-        )
+        record = DataMappingFactory(integration=IntegrationFactory(tenant_id=tenant_b.id))
 
-    update = tenant_a_client.patch(
-        f"{BASE}/{resource}/{record.id}/", {"name": "ownership takeover"}, format="json"
-    )
+    update = tenant_a_client.patch(f"{BASE}/{resource}/{record.id}/", {"name": "ownership takeover"}, format="json")
     delete = tenant_a_client.delete(f"{BASE}/{resource}/{record.id}/")
 
     assert update.status_code == status.HTTP_404_NOT_FOUND
@@ -136,9 +130,7 @@ def test_user_cannot_update_or_delete_other_tenant_mutable_resources(
         ),
     ),
 )
-def test_create_rejects_tenant_ownership_injection(
-    tenant_a_client, tenant_b, path, payload
-) -> None:
+def test_create_rejects_tenant_ownership_injection(tenant_a_client, tenant_b, path, payload) -> None:
     payload["tenant_id"] = str(tenant_b.id)
     response = tenant_a_client.post(f"{BASE}/{path}/", payload, format="json")
     assert response.status_code == status.HTTP_400_BAD_REQUEST

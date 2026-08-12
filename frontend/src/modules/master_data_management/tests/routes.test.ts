@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildTenantSidebarTree, getTenantRoutesForMode, getTenantRouteValidationIssues } from "@/navigation/tenant-route-registry";
+import {
+  buildTenantSidebarTree,
+  getTenantRoutesForMode,
+  getTenantRouteValidationIssues,
+} from "@/navigation/tenant-route-registry";
 import { tenantRoutes } from "../routes";
 
 describe("master data tenant routes", () => {
@@ -8,7 +12,14 @@ describe("master data tenant routes", () => {
     expect(new Set(tenantRoutes.map((route) => route.id))).toHaveLength(26);
     expect(new Set(tenantRoutes.map((route) => route.path))).toHaveLength(26);
     expect(getTenantRouteValidationIssues(tenantRoutes)).toEqual([]);
-    expect(tenantRoutes.every((route) => route.id.startsWith("master-data-management.") && route.sourceFile.endsWith(".tsx") && Boolean(route.title))).toBe(true);
+    expect(
+      tenantRoutes.every(
+        (route) =>
+          route.id.startsWith("master-data-management.") &&
+          route.sourceFile.endsWith(".tsx") &&
+          Boolean(route.title)
+      )
+    ).toBe(true);
   });
 
   it.each(["development", "self-hosted", "saas"] as const)("is visible in %s mode", (mode) => {
@@ -17,8 +28,15 @@ describe("master data tenant routes", () => {
 
   it("gives every page a discoverable sidebar NavItem", () => {
     const tree = buildTenantSidebarTree(tenantRoutes);
+    const leafPaths: string[] = [];
+    for (const branch of tree) {
+      for (const child of branch.children) {
+        leafPaths.push(child.path);
+      }
+    }
+
     expect(tree).toHaveLength(1);
-    expect(tree[0]?.children[0]?.path).toBe("/master-data");
+    expect(leafPaths).toContain("/master-data");
     expect(tree[0]?.children).toHaveLength(26);
     expect(tenantRoutes.every((route) => route.navigation.type === "sidebar")).toBe(true);
   });

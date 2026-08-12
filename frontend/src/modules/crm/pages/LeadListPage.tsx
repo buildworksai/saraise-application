@@ -1,4 +1,99 @@
 /* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
-import { useQuery } from '@tanstack/react-query';import { Link,useSearchParams } from 'react-router-dom';
-import { EntityList } from '../components/EntityList';import { CrmPage,GovernedError,PageSkeleton } from '../components/CrmPage';import { useCrmConfiguration } from '../hooks/use-crm-configuration';import { crmKeys,crmService } from '../services/crm-service';import type { LeadFilters } from '../contracts';
-export function LeadListPage(){const[p]=useSearchParams(),configuration=useCrmConfiguration(),document=configuration.data?.document;const filters:LeadFilters={search:p.get('search')||undefined,status:(p.get('status') as LeadFilters['status'])||undefined,source:p.get('source')||undefined,score_min:p.get('score_min')?Number(p.get('score_min')):undefined,page:Number(p.get('page')||1),page_size:document?Number(p.get('page_size')||document.ui.saved_page_size):undefined,ordering:p.get('ordering')||undefined};const q=useQuery({queryKey:crmKeys.leads(filters),queryFn:()=>crmService.listLeads(filters),enabled:!!document});if(configuration.isLoading)return <CrmPage title="Leads"><PageSkeleton label="Loading lead configuration"/></CrmPage>;if(configuration.error||!document)return <CrmPage title="Leads"><GovernedError error={configuration.error} onRetry={()=>void configuration.refetch()} subject="Lead configuration"/></CrmPage>;const scoreChoices=document.ui.score_bands.filter(band=>band.minimum>document.lead.score_min).map(band=>({value:String(band.minimum),label:`${band.minimum}+`}));return <EntityList title="Leads" description="Qualify demand with transparent scoring and a guided conversion path." createPath="/crm/leads/new" emptyTitle="Create your first lead" emptyDescription="Capture a prospect using the tenant's governed CRM configuration." selectable query={q.data} isLoading={q.isLoading} error={q.error} refetch={()=>void q.refetch()} filters={[{key:'status',label:'Status',choices:['new','contacted','qualified','converted','lost'].map(value=>({value,label:value}))},{key:'score_min',label:'Minimum score',choices:scoreChoices},{key:'source',label:'Source'}]} columns={[{key:'last_name',label:'Name',sortable:true,render:lead=><Link className="font-medium text-primary hover:underline" to={`/crm/leads/${lead.id}`}>{lead.first_name} {lead.last_name}</Link>},{key:'company',label:'Company',render:lead=>lead.company||'—'},{key:'email',label:'Email',render:lead=>lead.email||'—'},{key:'score',label:'Score',sortable:true,render:lead=><span>{lead.score} · {lead.grade} <small className="text-muted-foreground">({lead.score_source})</small></span>},{key:'status',label:'Status',render:lead=>lead.status},{key:'source',label:'Source',render:lead=>lead.source||'—'}]}/>}
+import { useQuery } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router-dom";
+import { EntityList } from "../components/EntityList";
+import { CrmPage, GovernedError, PageSkeleton } from "../components/CrmPage";
+import { useCrmConfiguration } from "../hooks/use-crm-configuration";
+import { crmKeys, crmService } from "../services/crm-service";
+import type { LeadFilters } from "../contracts";
+export function LeadListPage() {
+  const [p] = useSearchParams(),
+    configuration = useCrmConfiguration(),
+    document = configuration.data?.document;
+  const filters: LeadFilters = {
+    search: p.get("search") || undefined,
+    status: (p.get("status") as LeadFilters["status"]) || undefined,
+    source: p.get("source") || undefined,
+    score_min: p.get("score_min") ? Number(p.get("score_min")) : undefined,
+    page: Number(p.get("page") || 1),
+    page_size: document ? Number(p.get("page_size") || document.ui.saved_page_size) : undefined,
+    ordering: p.get("ordering") || undefined,
+  };
+  const q = useQuery({
+    queryKey: crmKeys.leads(filters),
+    queryFn: () => crmService.listLeads(filters),
+    enabled: !!document,
+  });
+  if (configuration.isLoading)
+    return (
+      <CrmPage title="Leads">
+        <PageSkeleton label="Loading lead configuration" />
+      </CrmPage>
+    );
+  if (configuration.error || !document)
+    return (
+      <CrmPage title="Leads">
+        <GovernedError
+          error={configuration.error}
+          onRetry={() => void configuration.refetch()}
+          subject="Lead configuration"
+        />
+      </CrmPage>
+    );
+  const scoreChoices = document.ui.score_bands
+    .filter((band) => band.minimum > document.lead.score_min)
+    .map((band) => ({ value: String(band.minimum), label: `${band.minimum}+` }));
+  return (
+    <EntityList
+      title="Leads"
+      description="Qualify demand with transparent scoring and a guided conversion path."
+      createPath="/crm/leads/new"
+      emptyTitle="Create your first lead"
+      emptyDescription="Capture a prospect using the tenant's governed CRM configuration."
+      selectable
+      query={q.data}
+      isLoading={q.isLoading}
+      error={q.error}
+      refetch={() => void q.refetch()}
+      filters={[
+        {
+          key: "status",
+          label: "Status",
+          choices: ["new", "contacted", "qualified", "converted", "lost"].map((value) => ({
+            value,
+            label: value,
+          })),
+        },
+        { key: "score_min", label: "Minimum score", choices: scoreChoices },
+        { key: "source", label: "Source" },
+      ]}
+      columns={[
+        {
+          key: "last_name",
+          label: "Name",
+          sortable: true,
+          render: (lead) => (
+            <Link className="font-medium text-primary hover:underline" to={`/crm/leads/${lead.id}`}>
+              {lead.first_name} {lead.last_name}
+            </Link>
+          ),
+        },
+        { key: "company", label: "Company", render: (lead) => lead.company || "—" },
+        { key: "email", label: "Email", render: (lead) => lead.email || "—" },
+        {
+          key: "score",
+          label: "Score",
+          sortable: true,
+          render: (lead) => (
+            <span>
+              {lead.score} · {lead.grade}{" "}
+              <small className="text-muted-foreground">({lead.score_source})</small>
+            </span>
+          ),
+        },
+        { key: "status", label: "Status", render: (lead) => lead.status },
+        { key: "source", label: "Source", render: (lead) => lead.source || "—" },
+      ]}
+    />
+  );
+}

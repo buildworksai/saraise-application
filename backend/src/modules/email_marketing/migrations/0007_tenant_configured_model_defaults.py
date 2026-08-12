@@ -57,9 +57,7 @@ class Migration(migrations.Migration):
             name="timezone",
             field=models.CharField(
                 max_length=63,
-                validators=[
-                    src.modules.email_marketing.models.validate_timezone_name
-                ],
+                validators=[src.modules.email_marketing.models.validate_timezone_name],
             ),
         ),
         migrations.AlterField(

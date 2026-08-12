@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import ClassVar, Optional
 
 from django.db import models
 from django.utils import timezone
@@ -56,7 +56,8 @@ class LicenseInfo:
     Complete license information for an organization.
 
     Attributes:
-        organization_id: Immutable organization identifier (bound to license key)
+        organization_id: Immutable organization identifier bound to the
+            license key.
         organization_name: Display name of the organization
         tier: Current license tier
         status: Current validation status
@@ -82,7 +83,10 @@ class LicenseInfo:
     @property
     def is_valid(self) -> bool:
         """Check if license is currently valid (includes grace period)."""
-        return self.status in (LicenseValidationStatus.VALID, LicenseValidationStatus.GRACE_PERIOD)
+        return self.status in (
+            LicenseValidationStatus.VALID,
+            LicenseValidationStatus.GRACE_PERIOD,
+        )
 
     @property
     def is_expired(self) -> bool:
@@ -99,7 +103,12 @@ class LicenseInfo:
 
     def has_module(self, module_id: str) -> bool:
         """Check if a specific module is licensed."""
-        return any(m.module_id == module_id and m.is_licensed for m in self.licensed_modules)
+        # fmt: off
+        return any(
+            m.module_id == module_id and m.is_licensed
+            for m in self.licensed_modules
+        )
+        # fmt: on
 
 
 @dataclass
@@ -113,14 +122,23 @@ class TrialInfo:
     days_remaining: int
 
     @classmethod
-    def calculate(cls, organization_id: str, started_at: datetime, trial_days: int = 14) -> "TrialInfo":
+    def calculate(
+        cls,
+        organization_id: str,
+        started_at: datetime,
+        trial_days: int = 14,
+    ) -> "TrialInfo":
         """Calculate trial info from start date."""
         from datetime import timedelta
 
         expires_at = started_at + timedelta(days=trial_days)
         now = datetime.utcnow()
         is_expired = now > expires_at
-        days_remaining = max(0, (expires_at - now).days) if not is_expired else 0
+        # fmt: off
+        days_remaining = (
+            max(0, (expires_at - now).days) if not is_expired else 0
+        )
+        # fmt: on
 
         return cls(
             organization_id=organization_id,
@@ -149,7 +167,8 @@ class LicenseStatus(models.TextChoices):
 class Organization(models.Model):
     """Organization bound to license key.
 
-    CRITICAL: In self-hosted mode, there is only ONE organization per deployment.
+    CRITICAL: In self-hosted mode, there is only ONE organization per
+    deployment.
     This model stores the organization information for the license.
     """
 
@@ -157,13 +176,14 @@ class Organization(models.Model):
     name = models.CharField(max_length=255)
     domain = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    objects: ClassVar[models.Manager["Organization"]]
 
     class Meta:
         db_table = "licensing_organization"
         verbose_name = "Organization"
         verbose_name_plural = "Organizations"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.name
 
 
@@ -176,18 +196,23 @@ class License(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE)
+    organization_id: uuid.UUID
 
     # License details
     license_key = models.TextField(blank=True)  # Encrypted JWT-like structure
-    status = models.CharField(max_length=20, choices=LicenseStatus.choices, default=LicenseStatus.TRIAL)
+    status = models.CharField(
+        max_length=20,
+        choices=LicenseStatus.choices,
+        default=LicenseStatus.TRIAL,
+    )
 
     # Tier and limits
-    core_tier = models.CharField(max_length=20, default="free")  # free, professional, enterprise
+    core_tier = models.CharField(max_length=20, default="free")
     max_companies = models.IntegerField(default=1)
     max_users = models.IntegerField(default=-1)  # -1 = unlimited
 
     # Industry modules
-    industry_modules = models.JSONField(default=list)  # ["manufacturing", "retail"]
+    industry_modules = models.JSONField(default=list)
 
     # Validity
     trial_started_at = models.DateTimeField(null=True, blank=True)
@@ -202,6 +227,7 @@ class License(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects: ClassVar[models.Manager["License"]]
 
     class Meta:
         db_table = "licensing_license"
@@ -223,9 +249,18 @@ class License(models.Model):
         if self.status in [LicenseStatus.EXPIRED, LicenseStatus.LOCKED]:
             return False
         if self.status == LicenseStatus.GRACE:
-            return self.grace_ends_at and timezone.now() < self.grace_ends_at
+            # fmt: off
+            return bool(
+                self.grace_ends_at and timezone.now() < self.grace_ends_at
+            )
+            # fmt: on
         if self.status == LicenseStatus.ACTIVE:
-            return self.license_expires_at and timezone.now() < self.license_expires_at
+            # fmt: off
+            return bool(
+                self.license_expires_at
+                and timezone.now() < self.license_expires_at
+            )
+            # fmt: on
         return False
 
     def can_write(self) -> bool:
@@ -233,13 +268,17 @@ class License(models.Model):
 
         In soft lock (expired/grace), only reads are allowed.
         """
-        return self.status not in [LicenseStatus.EXPIRED, LicenseStatus.LOCKED, LicenseStatus.GRACE]
+        return self.status not in [
+            LicenseStatus.EXPIRED,
+            LicenseStatus.LOCKED,
+            LicenseStatus.GRACE,
+        ]
 
     def has_module(self, module_name: str) -> bool:
         """Check if license includes a specific industry module."""
         return module_name in self.industry_modules
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"{self.organization.name} - {self.status}"
 
 
@@ -252,12 +291,13 @@ class LicenseValidationLog(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     license = models.ForeignKey(License, on_delete=models.CASCADE)
 
-    validation_type = models.CharField(max_length=20)  # startup, periodic, module_access
+    validation_type = models.CharField(max_length=20)
     success = models.BooleanField()
     error_message = models.TextField(blank=True)
     server_response = models.JSONField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
+    objects: ClassVar[models.Manager["LicenseValidationLog"]]
 
     class Meta:
         db_table = "licensing_validation_log"
@@ -269,6 +309,7 @@ class LicenseValidationLog(models.Model):
             models.Index(fields=["validation_type", "success"]),
         ]
 
-    def __str__(self):
+    def __str__(self) -> str:
         status = "SUCCESS" if self.success else "FAILED"
-        return f"{self.license.organization.name} - {self.validation_type} - {status}"
+        organization_name = self.license.organization.name
+        return f"{organization_name} - {self.validation_type} - {status}"

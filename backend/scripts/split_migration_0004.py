@@ -8,6 +8,7 @@ Each migration file will be ≤200 lines per SARAISE standards.
 Usage:
     python scripts/split_migration_0004.py
 """
+
 import re
 from pathlib import Path
 

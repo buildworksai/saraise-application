@@ -10,7 +10,6 @@ from django.utils import timezone
 from src.core.health import HealthCheckResult, HealthRegistry
 from src.modules.compliance_management import health
 
-
 pytestmark = pytest.mark.django_db
 
 

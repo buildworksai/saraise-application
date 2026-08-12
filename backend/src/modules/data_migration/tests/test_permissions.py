@@ -20,19 +20,33 @@ from src.modules.data_migration.permissions import (
 
 def test_permission_catalog_is_exact_and_has_no_generic_resource_shortcut() -> None:
     assert set(PERMISSIONS) == {
-        "data_migration.job:read", "data_migration.job:create", "data_migration.job:update",
-        "data_migration.job:delete", "data_migration.job:export", "data_migration.job:import",
-        "data_migration.mapping:manage", "data_migration.rule:manage", "data_migration.source:preview",
-        "data_migration.run:execute", "data_migration.run:cancel", "data_migration.rollback:execute",
-        "data_migration.connection:read", "data_migration.connection:manage", "data_migration.connection:test",
+        "data_migration.job:read",
+        "data_migration.job:create",
+        "data_migration.job:update",
+        "data_migration.job:delete",
+        "data_migration.job:export",
+        "data_migration.job:import",
+        "data_migration.mapping:manage",
+        "data_migration.rule:manage",
+        "data_migration.source:preview",
+        "data_migration.run:execute",
+        "data_migration.run:cancel",
+        "data_migration.rollback:execute",
+        "data_migration.connection:read",
+        "data_migration.connection:manage",
+        "data_migration.connection:test",
     }
     assert not any("resource:" in permission for permission in PERMISSIONS)
 
 
 def test_every_declared_action_maps_to_catalog_permission() -> None:
     for mapping in (
-        JOB_ACTION_PERMISSIONS, MAPPING_ACTION_PERMISSIONS, RULE_ACTION_PERMISSIONS,
-        RUN_ACTION_PERMISSIONS, ROLLBACK_ACTION_PERMISSIONS, CONNECTION_ACTION_PERMISSIONS,
+        JOB_ACTION_PERMISSIONS,
+        MAPPING_ACTION_PERMISSIONS,
+        RULE_ACTION_PERMISSIONS,
+        RUN_ACTION_PERMISSIONS,
+        ROLLBACK_ACTION_PERMISSIONS,
+        CONNECTION_ACTION_PERMISSIONS,
     ):
         assert set(mapping.values()) <= set(PERMISSIONS)
 

@@ -422,7 +422,7 @@ class ScheduleDetailSerializer(ScheduleListSerializer):
         from rest_framework.reverse import reverse
 
         request = self.context.get("request")
-        base_url = reverse("depreciation-line-list", request=request)
+        base_url = reverse("fixed_assets_v2:depreciation-line-list", request=request)
         return f"{base_url}?schedule_id={getattr(obj, 'id')}"
 
     def get_reconciliation(self, obj: object) -> dict[str, object]:

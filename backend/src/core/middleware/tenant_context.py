@@ -6,6 +6,7 @@ from typing import Callable
 
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
+
 from src.core.tenancy.rls import InvalidTenantContext, tenant_context
 
 

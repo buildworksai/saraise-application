@@ -14,13 +14,13 @@ from src.core.auth.saas import delegate_login, get_platform_url, validate_sessio
 class TestSaaSDelegation(TestCase):
     """Test SaaS authentication delegation."""
 
-    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18000")
+    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18001")
     def test_get_platform_url(self):
         """Test platform URL retrieval."""
         url = get_platform_url()
-        assert url == "http://localhost:18000"
+        assert url == "http://localhost:18001"
 
-    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18000")
+    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18001")
     @patch("src.core.auth.saas.requests.post")
     def test_validate_session_success(self, mock_post):
         """Test successful session validation."""
@@ -38,7 +38,7 @@ class TestSaaSDelegation(TestCase):
         assert result["valid"] is True
         mock_post.assert_called_once()
 
-    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18000")
+    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18001")
     @patch("src.core.auth.saas.requests.post")
     def test_validate_session_failure(self, mock_post):
         """Test failed session validation."""
@@ -51,7 +51,7 @@ class TestSaaSDelegation(TestCase):
         assert result is None
         mock_post.assert_called_once()
 
-    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18000")
+    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18001")
     @patch("src.core.auth.saas.requests.post")
     def test_validate_session_network_error(self, mock_post):
         """Test session validation with network error."""
@@ -63,7 +63,7 @@ class TestSaaSDelegation(TestCase):
         result = validate_session("session-123")
         assert result is None
 
-    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18000")
+    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18001")
     @patch("src.core.auth.saas.requests.post")
     def test_delegate_login_success(self, mock_post):
         """Test successful login delegation."""
@@ -82,7 +82,7 @@ class TestSaaSDelegation(TestCase):
         assert "session_id" in result
         mock_post.assert_called_once()
 
-    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18000")
+    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18001")
     @patch("src.core.auth.saas.requests.post")
     def test_delegate_login_failure(self, mock_post):
         """Test failed login delegation."""
@@ -95,7 +95,7 @@ class TestSaaSDelegation(TestCase):
         assert result is None
         mock_post.assert_called_once()
 
-    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18000")
+    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18001")
     @patch("src.core.auth.saas.requests.post")
     def test_delegate_login_network_error(self, mock_post):
         """Test login delegation with network error."""

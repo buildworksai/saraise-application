@@ -1,11 +1,17 @@
 /* eslint-disable max-lines-per-function */
-import { useMemo, useState, type FormEvent } from 'react';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
-import type { Asset, AssetConfigurationDocument, AssetCreate, AssetUpdate, DepreciationMethod } from '../contracts';
-import { AssetManagementApiError } from '../services/asset-service';
-import { ProblemState, titleCase } from './AssetManagementUI';
+import { useMemo, useState, type FormEvent } from "react";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
+import type {
+  Asset,
+  AssetConfigurationDocument,
+  AssetCreate,
+  AssetUpdate,
+  DepreciationMethod,
+} from "../contracts";
+import { AssetManagementApiError } from "../services/asset-service";
+import { ProblemState, titleCase } from "./AssetManagementUI";
 
 type FormErrors = Partial<Record<keyof AssetCreate, string>>;
 
@@ -15,36 +21,38 @@ function today(): string {
 
 function initialForm(configuration: AssetConfigurationDocument, asset?: Asset): AssetCreate {
   return {
-    asset_code: asset?.asset_code ?? '',
-    asset_name: asset?.asset_name ?? '',
+    asset_code: asset?.asset_code ?? "",
+    asset_name: asset?.asset_name ?? "",
     category: asset?.category ?? configuration.default_category,
     purchase_date: asset?.purchase_date ?? today(),
-    purchase_cost: asset?.purchase_cost ?? '',
+    purchase_cost: asset?.purchase_cost ?? "",
     residual_value: asset?.residual_value ?? configuration.default_residual_value,
     depreciation_method: asset?.depreciation_method ?? configuration.default_depreciation_method,
     useful_life_years: asset?.useful_life_years ?? configuration.default_useful_life_years,
     declining_balance_rate: asset?.declining_balance_rate ?? null,
-    location: asset?.location ?? '',
+    location: asset?.location ?? "",
   };
 }
 
-function validateIdentity(form: AssetCreate, configuration: AssetConfigurationDocument): FormErrors {
+function validateIdentity(
+  form: AssetCreate,
+  configuration: AssetConfigurationDocument
+): FormErrors {
   const errors: FormErrors = {};
-  if (!form.asset_code.trim()) errors.asset_code = 'Asset code is required.';
+  if (!form.asset_code.trim()) errors.asset_code = "Asset code is required.";
   else if (form.asset_code.trim().length > configuration.asset_code_max_length) {
     errors.asset_code = `Asset code cannot exceed ${configuration.asset_code_max_length} characters.`;
+  } else if (!/^[A-Za-z0-9._-]+$/u.test(form.asset_code)) {
+    errors.asset_code = "Use letters, numbers, periods, underscores, or hyphens.";
   }
-  else if (!/^[A-Za-z0-9._-]+$/u.test(form.asset_code)) {
-    errors.asset_code = 'Use letters, numbers, periods, underscores, or hyphens.';
-  }
-  if (!form.asset_name.trim()) errors.asset_name = 'Asset name is required.';
+  if (!form.asset_name.trim()) errors.asset_name = "Asset name is required.";
   else if (form.asset_name.trim().length > configuration.asset_name_max_length) {
     errors.asset_name = `Asset name cannot exceed ${configuration.asset_name_max_length} characters.`;
   }
   if (form.location.length > configuration.location_max_length) {
     errors.location = `Location cannot exceed ${configuration.location_max_length} characters.`;
   }
-  if (!form.purchase_date) errors.purchase_date = 'Purchase date is required.';
+  if (!form.purchase_date) errors.purchase_date = "Purchase date is required.";
   return errors;
 }
 
@@ -55,25 +63,35 @@ function validateMoney(form: AssetCreate, configuration: AssetConfigurationDocum
   if (!Number.isFinite(cost) || cost < Number(configuration.minimum_purchase_cost)) {
     errors.purchase_cost = `Enter at least ${configuration.minimum_purchase_cost}.`;
   }
-  if (!Number.isFinite(residual) || residual < 0) errors.residual_value = 'Enter a non-negative amount.';
+  if (!Number.isFinite(residual) || residual < 0)
+    errors.residual_value = "Enter a non-negative amount.";
   else if (Number.isFinite(cost) && residual > cost) {
-    errors.residual_value = 'Residual value cannot exceed purchase cost.';
+    errors.residual_value = "Residual value cannot exceed purchase cost.";
   }
   return errors;
 }
 
-function validateDepreciation(form: AssetCreate, configuration: AssetConfigurationDocument): FormErrors {
+function validateDepreciation(
+  form: AssetCreate,
+  configuration: AssetConfigurationDocument
+): FormErrors {
   const errors: FormErrors = {};
   const rate = form.declining_balance_rate === null ? null : Number(form.declining_balance_rate);
-  if (form.depreciation_method !== 'none'
-    && (!form.useful_life_years
-      || form.useful_life_years < configuration.useful_life_min_years
-      || form.useful_life_years > configuration.useful_life_max_years)) {
+  if (
+    form.depreciation_method !== "none" &&
+    (!form.useful_life_years ||
+      form.useful_life_years < configuration.useful_life_min_years ||
+      form.useful_life_years > configuration.useful_life_max_years)
+  ) {
     errors.useful_life_years = `Useful life must be ${configuration.useful_life_min_years}-${configuration.useful_life_max_years} years.`;
   }
-  if (form.depreciation_method === 'declining_balance'
-    && rate !== null
-    && (!Number.isFinite(rate) || rate < Number(configuration.declining_rate_min) || rate > Number(configuration.declining_rate_max))) {
+  if (
+    form.depreciation_method === "declining_balance" &&
+    rate !== null &&
+    (!Number.isFinite(rate) ||
+      rate < Number(configuration.declining_rate_min) ||
+      rate > Number(configuration.declining_rate_max))
+  ) {
     errors.declining_balance_rate = `Enter an annual rate from ${configuration.declining_rate_min} to ${configuration.declining_rate_max}.`;
   }
   return errors;
@@ -93,23 +111,22 @@ function normalizedForm(form: AssetCreate): AssetCreate {
     asset_code: form.asset_code.trim().toUpperCase(),
     asset_name: form.asset_name.trim(),
     location: form.location.trim(),
-    useful_life_years: form.depreciation_method === 'none' ? null : form.useful_life_years,
-    declining_balance_rate: form.depreciation_method === 'declining_balance'
-      ? form.declining_balance_rate
-      : null,
+    useful_life_years: form.depreciation_method === "none" ? null : form.useful_life_years,
+    declining_balance_rate:
+      form.depreciation_method === "declining_balance" ? form.declining_balance_rate : null,
   };
 }
 
 const decimalFields = new Set<keyof AssetCreate>([
-  'purchase_cost',
-  'residual_value',
-  'declining_balance_rate',
+  "purchase_cost",
+  "residual_value",
+  "declining_balance_rate",
 ]);
 
 function equalField<K extends keyof AssetCreate>(
   key: K,
   left: AssetCreate[K],
-  right: AssetCreate[K],
+  right: AssetCreate[K]
 ): boolean {
   if (!decimalFields.has(key) || left === null || right === null) return left === right;
   const leftNumber = Number(left);
@@ -120,7 +137,11 @@ function equalField<K extends keyof AssetCreate>(
 }
 
 /** Emit only changed fields so descriptive edits do not rewrite locked financial policy. */
-function changedFields(form: AssetCreate, asset: Asset, configuration: AssetConfigurationDocument): AssetUpdate {
+function changedFields(
+  form: AssetCreate,
+  asset: Asset,
+  configuration: AssetConfigurationDocument
+): AssetUpdate {
   const initial = initialForm(configuration, asset);
   return (Object.keys(form) as (keyof AssetCreate)[]).reduce<AssetUpdate>((changes, key) => {
     if (!equalField(key, form[key], initial[key])) {
@@ -147,16 +168,20 @@ export function AssetForm({
 }) {
   const [form, setForm] = useState<AssetCreate>(() => initialForm(configuration, asset));
   const [submitted, setSubmitted] = useState(false);
-  const clientErrors = useMemo(() => submitted ? validate(form, configuration) : {}, [configuration, form, submitted]);
+  const clientErrors = useMemo(
+    () => (submitted ? validate(form, configuration) : {}),
+    [configuration, form, submitted]
+  );
   const serverErrors = error instanceof AssetManagementApiError ? error.fieldErrors : {};
   const preparedForm = useMemo(() => normalizedForm(form), [form]);
   const updatePayload = useMemo(
-    () => asset ? changedFields(preparedForm, asset, configuration) : preparedForm,
-    [asset, configuration, preparedForm],
+    () => (asset ? changedFields(preparedForm, asset, configuration) : preparedForm),
+    [asset, configuration, preparedForm]
   );
   const isDirty = !asset || Object.keys(updatePayload).length > 0;
-  const hasMappedServerError = (Object.keys(serverErrors) as (keyof AssetCreate)[])
-    .some((field) => field in form);
+  const hasMappedServerError = (Object.keys(serverErrors) as (keyof AssetCreate)[]).some(
+    (field) => field in form
+  );
 
   const update = <K extends keyof AssetCreate>(key: K, value: AssetCreate[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -171,10 +196,16 @@ export function AssetForm({
   };
 
   return (
-    <form className="space-y-6" onSubmit={submit} noValidate aria-busy={pending}>
-      {error && !hasMappedServerError
-        ? <ProblemState error={error} compact />
-        : null}
+    <form
+      className="space-y-6"
+      onInvalid={(event) => {
+        event.preventDefault();
+        setSubmitted(true);
+      }}
+      onSubmit={submit}
+      aria-busy={pending}
+    >
+      {error && !hasMappedServerError ? <ProblemState error={error} compact /> : null}
       <Card className="grid gap-5 p-5 sm:p-6 md:grid-cols-2">
         <Input
           id="asset-code"
@@ -183,8 +214,8 @@ export function AssetForm({
           maxLength={configuration.asset_code_max_length}
           autoComplete="off"
           value={form.asset_code}
-          error={fieldError('asset_code')}
-          onChange={(event) => update('asset_code', event.target.value.toUpperCase())}
+          error={fieldError("asset_code")}
+          onChange={(event) => update("asset_code", event.target.value.toUpperCase())}
         />
         <Input
           id="asset-name"
@@ -192,31 +223,38 @@ export function AssetForm({
           required
           maxLength={configuration.asset_name_max_length}
           value={form.asset_name}
-          error={fieldError('asset_name')}
-          onChange={(event) => update('asset_name', event.target.value)}
+          error={fieldError("asset_name")}
+          onChange={(event) => update("asset_name", event.target.value)}
         />
         <div>
-          <label htmlFor="asset-category" className="mb-1 block text-sm font-medium">Category</label>
+          <label htmlFor="asset-category" className="mb-1 block text-sm font-medium">
+            Category
+          </label>
           <select
             id="asset-category"
+            required
             className="h-10 w-full rounded-md border border-input bg-background px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             value={form.category}
             onChange={(event) => {
-              const category = event.target.value as AssetCreate['category'];
+              const category = event.target.value as AssetCreate["category"];
               const nonDepreciable = configuration.non_depreciable_categories.includes(category);
-              setForm((current) => nonDepreciable
-                ? {
-                    ...current,
-                    category,
-                    depreciation_method: 'none',
-                    useful_life_years: null,
-                    declining_balance_rate: null,
-                  }
-                : { ...current, category });
+              setForm((current) =>
+                nonDepreciable
+                  ? {
+                      ...current,
+                      category,
+                      depreciation_method: "none",
+                      useful_life_years: null,
+                      declining_balance_rate: null,
+                    }
+                  : { ...current, category }
+              );
             }}
           >
             {configuration.allowed_categories.map((category) => (
-              <option key={category} value={category}>{titleCase(category)}</option>
+              <option key={category} value={category}>
+                {titleCase(category)}
+              </option>
             ))}
           </select>
         </div>
@@ -226,8 +264,8 @@ export function AssetForm({
           type="date"
           required
           value={form.purchase_date}
-          error={fieldError('purchase_date')}
-          onChange={(event) => update('purchase_date', event.target.value)}
+          error={fieldError("purchase_date")}
+          onChange={(event) => update("purchase_date", event.target.value)}
         />
         <Input
           id="purchase-cost"
@@ -236,8 +274,8 @@ export function AssetForm({
           required
           placeholder="0.00"
           value={form.purchase_cost}
-          error={fieldError('purchase_cost')}
-          onChange={(event) => update('purchase_cost', event.target.value)}
+          error={fieldError("purchase_cost")}
+          onChange={(event) => update("purchase_cost", event.target.value)}
         />
         <Input
           id="residual-value"
@@ -246,8 +284,8 @@ export function AssetForm({
           required
           placeholder="0.00"
           value={form.residual_value}
-          error={fieldError('residual_value')}
-          onChange={(event) => update('residual_value', event.target.value)}
+          error={fieldError("residual_value")}
+          onChange={(event) => update("residual_value", event.target.value)}
         />
         <div>
           <label htmlFor="depreciation-method" className="mb-1 block text-sm font-medium">
@@ -255,6 +293,7 @@ export function AssetForm({
           </label>
           <select
             id="depreciation-method"
+            required
             className="h-10 w-full rounded-md border border-input bg-background px-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             value={form.depreciation_method}
             disabled={configuration.non_depreciable_categories.includes(form.category)}
@@ -263,14 +302,20 @@ export function AssetForm({
               setForm((current) => ({
                 ...current,
                 depreciation_method: method,
-                useful_life_years: method === 'none' ? null : current.useful_life_years ?? configuration.default_useful_life_years,
-                declining_balance_rate: method === 'declining_balance'
-                  ? current.declining_balance_rate
-                  : null,
+                useful_life_years:
+                  method === "none"
+                    ? null
+                    : current.useful_life_years ?? configuration.default_useful_life_years,
+                declining_balance_rate:
+                  method === "declining_balance" ? current.declining_balance_rate : null,
               }));
             }}
           >
-            {configuration.allowed_depreciation_methods.map((method) => <option key={method} value={method}>{titleCase(method)}</option>)}
+            {configuration.allowed_depreciation_methods.map((method) => (
+              <option key={method} value={method}>
+                {titleCase(method)}
+              </option>
+            ))}
           </select>
         </div>
         {configuration.non_depreciable_categories.includes(form.category) && (
@@ -278,7 +323,7 @@ export function AssetForm({
             Current assets are not depreciated. The depreciation method is fixed to “None”.
           </p>
         )}
-        {form.depreciation_method !== 'none' && (
+        {form.depreciation_method !== "none" && (
           <Input
             id="useful-life"
             label="Useful life (years)"
@@ -287,20 +332,22 @@ export function AssetForm({
             max={configuration.useful_life_max_years}
             step={1}
             required
-            value={form.useful_life_years ?? ''}
-            error={fieldError('useful_life_years')}
-            onChange={(event) => update('useful_life_years', event.target.value ? Number(event.target.value) : null)}
+            value={form.useful_life_years ?? ""}
+            error={fieldError("useful_life_years")}
+            onChange={(event) =>
+              update("useful_life_years", event.target.value ? Number(event.target.value) : null)
+            }
           />
         )}
-        {form.depreciation_method === 'declining_balance' && (
+        {form.depreciation_method === "declining_balance" && (
           <Input
             id="declining-rate"
             label="Annual declining balance rate (%)"
             inputMode="decimal"
             placeholder="Optional — blank uses double declining balance"
-            value={form.declining_balance_rate ?? ''}
-            error={fieldError('declining_balance_rate')}
-            onChange={(event) => update('declining_balance_rate', event.target.value || null)}
+            value={form.declining_balance_rate ?? ""}
+            error={fieldError("declining_balance_rate")}
+            onChange={(event) => update("declining_balance_rate", event.target.value || null)}
           />
         )}
         <Input
@@ -309,17 +356,20 @@ export function AssetForm({
           maxLength={configuration.location_max_length}
           placeholder="Optional physical or logical location"
           value={form.location}
-          error={fieldError('location')}
-          onChange={(event) => update('location', event.target.value)}
+          error={fieldError("location")}
+          onChange={(event) => update("location", event.target.value)}
         />
       </Card>
       <p className="text-sm text-muted-foreground">
-        Current value is calculated by the server from immutable depreciation history and cannot be edited here.
+        Current value is calculated by the server from immutable depreciation history and cannot be
+        edited here.
       </p>
       <div className="flex flex-col-reverse justify-end gap-3 sm:flex-row">
-        <Button type="button" variant="secondary" onClick={onCancel}>Cancel</Button>
+        <Button type="button" variant="secondary" onClick={onCancel}>
+          Cancel
+        </Button>
         <Button type="submit" disabled={pending || !isDirty}>
-          {pending ? 'Saving…' : asset ? isDirty ? 'Save changes' : 'No changes' : 'Create asset'}
+          {pending ? "Saving…" : asset ? (isDirty ? "Save changes" : "No changes") : "Create asset"}
         </Button>
       </div>
     </form>

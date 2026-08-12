@@ -225,7 +225,7 @@ class DomainModel(TenantScopedModel, TimestampedModel):
     def _stored_values(self, fields: Sequence[str]) -> dict[str, Any] | None:
         if self._state.adding or self.pk is None:
             return None
-        return type(self).objects.filter(pk=self.pk).values(*fields).first()
+        return type(self).objects.filter(pk=self.pk, tenant_id=self.tenant_id).values(*fields).first()
 
     def _validate_immutable_fields(self, fields: Sequence[str] | None = None) -> None:
         names = tuple(fields or self._immutable_fields)

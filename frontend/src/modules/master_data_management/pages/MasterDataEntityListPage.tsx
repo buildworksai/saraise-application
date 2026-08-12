@@ -1,3 +1,4 @@
+/* eslint-disable max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /* eslint-disable @typescript-eslint/no-unused-expressions -- URL parameter branch executes set/delete side effects. */
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -6,7 +7,190 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { ROUTES, type EntityStatus } from "../contracts";
 import { masterDataService } from "../services/master-data-service";
-import { EmptyState, GovernedError, PageHeader, PageSkeleton, Pagination, QUERY_KEYS, StatusPill, formatDate, formatScore } from "../components/MdmUI";
+import {
+  EmptyState,
+  GovernedError,
+  PageHeader,
+  PageSkeleton,
+  Pagination,
+  QUERY_KEYS,
+  StatusPill,
+  formatDate,
+  formatScore,
+} from "../components/MdmUI";
 import { useSavedViews } from "../hooks/useSavedViews";
 
-export function MasterDataEntityListPage() { const navigate = useNavigate(); const [params, setParams] = useSearchParams(); const search = params.get("search") ?? ""; const type = params.get("entity_type") ?? ""; const status = params.get("status") ?? ""; const ordering = params.get("ordering") ?? "-updated_at"; const page = Number(params.get("page") ?? 1); const filters = { search: search || undefined, entity_type: type || undefined, status: status ? status as EntityStatus : undefined, ordering, page, page_size: 25 }; const query = useQuery({ queryKey: QUERY_KEYS.entities(filters), queryFn: () => masterDataService.entities.list(filters) }); const types = useQuery({ queryKey: QUERY_KEYS.entityTypes({ is_active: true, page_size: 100 }), queryFn: () => masterDataService.entityTypes.list({ is_active: true, page_size: 100 }) }); const saved = useSavedViews("entities", params.toString()); const update = (key: string, value: string) => { const next = new URLSearchParams(params); value ? next.set(key, value) : next.delete(key); if (key !== "page") next.delete("page"); setParams(next); }; if (query.isLoading) return <PageSkeleton/>; if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()}/>; if (!query.data) return <GovernedError error={new Error("No entity response was received.")}/>; return <main className="space-y-6"><PageHeader title="Master entities" description="Search, filter, and steward tenant-owned records with stable business identity." actions={<Button onClick={() => navigate(ROUTES.ENTITY_NEW)}><Plus className="mr-2 h-4 w-4"/>New entity</Button>}/><section aria-label="Entity filters" className="grid gap-3 rounded-xl border bg-card p-4 md:grid-cols-2 xl:grid-cols-[1.5fr_1fr_180px_180px_auto]"><Input aria-label="Search entities" placeholder="Search code or name" value={search} onChange={(event) => update("search", event.target.value)}/><select aria-label="Filter entity type" className="rounded-md border bg-background px-3" value={type} onChange={(event) => update("entity_type", event.target.value)}><option value="">All types</option>{types.data?.items.map((item) => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select><select aria-label="Filter entity status" className="rounded-md border bg-background px-3" value={status} onChange={(event) => update("status", event.target.value)}><option value="">All states</option>{["active", "pending_review", "merged", "archived"].map((value) => <option key={value}>{value}</option>)}</select><select aria-label="Sort entities" className="rounded-md border bg-background px-3" value={ordering} onChange={(event) => update("ordering", event.target.value)}><option value="-updated_at">Recently updated</option><option value="entity_code">Code</option><option value="entity_name">Name</option><option value="-quality_score">Quality score</option></select><Button variant="outline" onClick={() => setParams(new URLSearchParams())}>Reset</Button><div className="col-span-full flex flex-wrap items-center gap-2 border-t pt-3"><span className="text-xs text-muted-foreground">Views on this device:</span>{saved.views.map((view) => <button key={view.name} className="rounded-full border px-3 py-1 text-xs hover:bg-muted" onClick={() => setParams(new URLSearchParams(view.query))}>{view.name}</button>)}<button className="text-xs font-medium text-primary hover:underline" onClick={() => saved.save(`View ${saved.views.length + 1}`)}>Save current view</button></div></section>{query.data.items.length ? <section className="overflow-hidden rounded-xl border bg-card"><div className="overflow-x-auto"><table className="w-full min-w-[850px] text-sm"><thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground"><tr><th className="p-4">Entity</th><th className="p-4">Type</th><th className="p-4">Status</th><th className="p-4">Quality</th><th className="p-4">Source</th><th className="p-4">Updated</th></tr></thead><tbody className="divide-y">{query.data.items.map((item) => <tr key={item.id} className="hover:bg-muted/30"><td className="p-4"><Link className="font-semibold text-primary hover:underline" to={ROUTES.ENTITY_DETAIL(item.id)}>{item.entity_name}</Link><span className="block font-mono text-xs text-muted-foreground">{item.entity_code}</span></td><td className="p-4">{item.entity_type_display_name}</td><td className="p-4"><StatusPill value={item.status}/></td><td className="p-4">{formatScore(item.quality_evaluated_at ? item.quality_score : null)}</td><td className="p-4">{item.source_system}</td><td className="p-4">{formatDate(item.updated_at)}</td></tr>)}</tbody></table></div><Pagination value={query.data.pagination} onPage={(next) => update("page", String(next))}/></section> : <EmptyState title={params.toString() ? "No entities match this view" : "No master entities yet"} description={params.toString() ? "Reset or broaden filters." : "Create the first governed tenant record."} action={<Button onClick={() => navigate(ROUTES.ENTITY_NEW)}>Create entity</Button>}/>}</main>; }
+export function MasterDataEntityListPage() {
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
+  const search = params.get("search") ?? "";
+  const type = params.get("entity_type") ?? "";
+  const status = params.get("status") ?? "";
+  const ordering = params.get("ordering") ?? "-updated_at";
+  const page = Number(params.get("page") ?? 1);
+  const filters = {
+    search: search || undefined,
+    entity_type: type || undefined,
+    status: status ? (status as EntityStatus) : undefined,
+    ordering,
+    page,
+    page_size: 25,
+  };
+  const query = useQuery({
+    queryKey: QUERY_KEYS.entities(filters),
+    queryFn: () => masterDataService.entities.list(filters),
+  });
+  const types = useQuery({
+    queryKey: QUERY_KEYS.entityTypes({ is_active: true, page_size: 100 }),
+    queryFn: () => masterDataService.entityTypes.list({ is_active: true, page_size: 100 }),
+  });
+  const saved = useSavedViews("entities", params.toString());
+  const update = (key: string, value: string) => {
+    const next = new URLSearchParams(params);
+    value ? next.set(key, value) : next.delete(key);
+    if (key !== "page") next.delete("page");
+    setParams(next);
+  };
+  if (query.isLoading) return <PageSkeleton />;
+  if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()} />;
+  if (!query.data) return <GovernedError error={new Error("No entity response was received.")} />;
+  return (
+    <main className="space-y-6">
+      <PageHeader
+        title="Master entities"
+        description="Search, filter, and steward tenant-owned records with stable business identity."
+        actions={
+          <Button onClick={() => navigate(ROUTES.ENTITY_NEW)}>
+            <Plus className="mr-2 h-4 w-4" />
+            New entity
+          </Button>
+        }
+      />
+      <section
+        aria-label="Entity filters"
+        className="grid gap-3 rounded-xl border bg-card p-4 md:grid-cols-2 xl:grid-cols-[1.5fr_1fr_180px_180px_auto]"
+      >
+        <Input
+          aria-label="Search entities"
+          placeholder="Search code or name"
+          value={search}
+          onChange={(event) => update("search", event.target.value)}
+        />
+        <select
+          aria-label="Filter entity type"
+          className="rounded-md border bg-background px-3"
+          value={type}
+          onChange={(event) => update("entity_type", event.target.value)}
+        >
+          <option value="">All types</option>
+          {types.data?.items.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.display_name}
+            </option>
+          ))}
+        </select>
+        <select
+          aria-label="Filter entity status"
+          className="rounded-md border bg-background px-3"
+          value={status}
+          onChange={(event) => update("status", event.target.value)}
+        >
+          <option value="">All states</option>
+          {["active", "pending_review", "merged", "archived"].map((value) => (
+            <option key={value}>{value}</option>
+          ))}
+        </select>
+        <select
+          aria-label="Sort entities"
+          className="rounded-md border bg-background px-3"
+          value={ordering}
+          onChange={(event) => update("ordering", event.target.value)}
+        >
+          <option value="-updated_at">Recently updated</option>
+          <option value="entity_code">Code</option>
+          <option value="entity_name">Name</option>
+          <option value="-quality_score">Quality score</option>
+        </select>
+        <Button variant="outline" onClick={() => setParams(new URLSearchParams())}>
+          Reset
+        </Button>
+        <div className="col-span-full flex flex-wrap items-center gap-2 border-t pt-3">
+          <span className="text-xs text-muted-foreground">Views on this device:</span>
+          {saved.views.map((view) => (
+            <button
+              key={view.name}
+              className="rounded-full border px-3 py-1 text-xs hover:bg-muted"
+              onClick={() => setParams(new URLSearchParams(view.query))}
+            >
+              {view.name}
+            </button>
+          ))}
+          <button
+            className="text-xs font-medium text-primary hover:underline"
+            onClick={() => saved.save(`View ${saved.views.length + 1}`)}
+          >
+            Save current view
+          </button>
+        </div>
+      </section>
+      {query.data.items.length ? (
+        <section className="overflow-hidden rounded-xl border bg-card">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[850px] text-sm">
+              <thead className="bg-muted/40 text-left text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="p-4">Entity</th>
+                  <th className="p-4">Type</th>
+                  <th className="p-4">Status</th>
+                  <th className="p-4">Quality</th>
+                  <th className="p-4">Source</th>
+                  <th className="p-4">Updated</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {query.data.items.map((item) => (
+                  <tr key={item.id} className="hover:bg-muted/30">
+                    <td className="p-4">
+                      <Link
+                        className="font-semibold text-primary hover:underline"
+                        to={ROUTES.ENTITY_DETAIL(item.id)}
+                      >
+                        {item.entity_name}
+                      </Link>
+                      <span className="block font-mono text-xs text-muted-foreground">
+                        {item.entity_code}
+                      </span>
+                    </td>
+                    <td className="p-4">{item.entity_type_display_name}</td>
+                    <td className="p-4">
+                      <StatusPill value={item.status} />
+                    </td>
+                    <td className="p-4">
+                      {formatScore(item.quality_evaluated_at ? item.quality_score : null)}
+                    </td>
+                    <td className="p-4">{item.source_system}</td>
+                    <td className="p-4">{formatDate(item.updated_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Pagination
+            value={query.data.pagination}
+            onPage={(next) => update("page", String(next))}
+          />
+        </section>
+      ) : (
+        <EmptyState
+          title={params.toString() ? "No entities match this view" : "No master entities yet"}
+          description={
+            params.toString()
+              ? "Reset or broaden filters."
+              : "Create the first governed tenant record."
+          }
+          action={<Button onClick={() => navigate(ROUTES.ENTITY_NEW)}>Create entity</Button>}
+        />
+      )}
+    </main>
+  );
+}

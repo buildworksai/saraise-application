@@ -1,1 +1,1 @@
-export { EditTransactionPage } from './workspaces';
+export { EditTransactionPage } from "./workspaces";

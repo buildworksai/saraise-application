@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Mapping
+from collections.abc import Callable
+from typing import Any, Mapping, cast
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Q
+from django.db.models import Q, QuerySet
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from src.core.api import GovernedAPIViewMixin, GovernedPageNumberPagination, OperationFailed
@@ -80,7 +82,15 @@ def _actor(user: Any) -> uuid.UUID:
         return uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:user:{value}")
 
 
-class PurchaseViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
+def _route_value(value: str | None) -> str:
+    return cast(str, value)
+
+
+def _text_value(value: Any) -> str:
+    return cast(str, value)
+
+
+class PurchaseViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet[Any]):
     permission_classes = (IsAuthenticated, PurchaseRequiresAccess)
     authentication_classes = (RelaxedCsrfSessionAuthentication,)
     pagination_class = GovernedPageNumberPagination
@@ -90,7 +100,7 @@ class PurchaseViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
     filter_fields: tuple[str, ...] = ()
     search_fields: tuple[str, ...] = ()
 
-    def get_permissions(self):
+    def get_permissions(self) -> Any:
         verb = ACTION_ACCESS.get(getattr(self, "action", ""))
         if not verb:
             verb = "read"
@@ -123,7 +133,7 @@ class PurchaseViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
             or f"req_{uuid.uuid4().hex[:24]}"
         )
 
-    def handle_exception(self, exc):
+    def handle_exception(self, exc: Exception) -> Response:
         # Tenant-filtered service lookups intentionally make a foreign-tenant
         # identifier indistinguishable from an absent record.
         if isinstance(exc, ObjectDoesNotExist):
@@ -139,7 +149,7 @@ class PurchaseViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
         if unknown:
             raise ValidationError({key: "Unknown query parameter." for key in sorted(unknown)})
 
-    def _filter(self, queryset):
+    def _filter(self, queryset: QuerySet[Any]) -> QuerySet[Any]:
         self._validate_query()
         for name in self.filter_fields:
             value = self.request.query_params.get(name)
@@ -156,14 +166,14 @@ class PurchaseViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         return queryset.order_by(ordering)
 
-    def _list(self, queryset, serializer):
+    def _list(self, queryset: QuerySet[Any], serializer: type[Any]) -> Response:
         page = self.paginate_queryset(self._filter(queryset))
         return self.get_paginated_response(serializer(page, many=True).data)
 
-    def _validate(self, serializer_class, *, partial=False):
+    def _validate(self, serializer_class: type[Any], *, partial: bool = False) -> dict[str, Any]:
         serializer = serializer_class(data=self.request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
-        return serializer.validated_data
+        return cast(dict[str, Any], serializer.validated_data)
 
     def _lock_version(self, data: Mapping[str, Any] | None = None) -> int:
         raw = self.request.headers.get("If-Match") or (data or {}).get("lock_version")
@@ -189,16 +199,16 @@ class SupplierViewSet(PurchaseViewSet):
     filter_fields = ("status", "currency")
     search_fields = ("supplier_code", "supplier_name", "email")
 
-    def get_queryset(self):
-        return Supplier.objects.for_tenant(self.tenant_id)
+    def get_queryset(self) -> QuerySet[Any]:
+        return cast(QuerySet[Any], Supplier.objects.for_tenant(self.tenant_id))
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self._list(self.get_queryset(), SupplierListSerializer)
 
-    def retrieve(self, request, pk=None):
-        return Response(SupplierDetailSerializer(SupplierService.get_supplier(self.tenant_id, pk)).data)
+    def retrieve(self, request: Request, pk: str | None = None) -> Response:
+        return Response(SupplierDetailSerializer(SupplierService.get_supplier(self.tenant_id, _route_value(pk))).data)
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         data = self._validate(SupplierWriteSerializer)
         return Response(
             SupplierDetailSerializer(
@@ -207,49 +217,56 @@ class SupplierViewSet(PurchaseViewSet):
             status=status.HTTP_201_CREATED,
         )
 
-    def _update(self, request, pk, partial):
+    def _update(self, request: Request, pk: str | None, partial: bool) -> Response:
         data = self._validate(SupplierWriteSerializer, partial=partial)
         lock = self._lock_version(data)
         data.pop("lock_version", None)
         return Response(
             SupplierDetailSerializer(
-                SupplierService.update_supplier(self.tenant_id, self.actor_id, pk, data, lock, self.correlation_id)
+                SupplierService.update_supplier(
+                    self.tenant_id, self.actor_id, _route_value(pk), data, lock, self.correlation_id
+                )
             ).data
         )
 
-    def update(self, request, pk=None):
+    def update(self, request: Request, pk: str | None = None) -> Response:
         return self._update(request, pk, False)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
         return self._update(request, pk, True)
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: str | None = None) -> Response:
         data = self._validate(SupplierStatusSerializer)
         supplier = SupplierService.archive_supplier(
-            self.tenant_id, self.actor_id, pk, data["reason"], self._idempotency(), self.correlation_id
+            self.tenant_id, self.actor_id, _route_value(pk), data["reason"], self._idempotency(), self.correlation_id
         )
         return Response(SupplierDetailSerializer(supplier).data)
 
     @action(detail=True, methods=("post",))
-    def activate(self, request, pk=None):
+    def activate(self, request: Request, pk: str | None = None) -> Response:
         data = self._validate(SupplierStatusSerializer)
         return Response(
             SupplierDetailSerializer(
                 SupplierService.restore_supplier(
-                    self.tenant_id, self.actor_id, pk, data["reason"], self._idempotency(), self.correlation_id
+                    self.tenant_id,
+                    self.actor_id,
+                    _route_value(pk),
+                    data["reason"],
+                    self._idempotency(),
+                    self.correlation_id,
                 )
             ).data
         )
 
     @action(detail=True, methods=("post",))
-    def deactivate(self, request, pk=None):
+    def deactivate(self, request: Request, pk: str | None = None) -> Response:
         data = self._validate(SupplierStatusSerializer)
         return Response(
             SupplierDetailSerializer(
                 SupplierService.set_supplier_status(
                     self.tenant_id,
                     self.actor_id,
-                    pk,
+                    _route_value(pk),
                     "inactive",
                     data["reason"],
                     self._idempotency(),
@@ -267,16 +284,20 @@ class RequisitionViewSet(PurchaseViewSet):
     filter_fields = ("status", "requested_by", "requisition_date__gte", "requisition_date__lte")
     search_fields = ("requisition_number", "purpose")
 
-    def get_queryset(self):
-        return PurchaseRequisition.objects.for_tenant(self.tenant_id).filter(deleted_at__isnull=True)
+    def get_queryset(self) -> QuerySet[Any]:
+        return cast(
+            QuerySet[Any], PurchaseRequisition.objects.for_tenant(self.tenant_id).filter(deleted_at__isnull=True)
+        )
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self._list(self.get_queryset(), RequisitionListSerializer)
 
-    def retrieve(self, request, pk=None):
-        return Response(RequisitionDetailSerializer(RequisitionService.get_requisition(self.tenant_id, pk)).data)
+    def retrieve(self, request: Request, pk: str | None = None) -> Response:
+        return Response(
+            RequisitionDetailSerializer(RequisitionService.get_requisition(self.tenant_id, _route_value(pk))).data
+        )
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         data = self._validate(RequisitionWriteSerializer)
         return Response(
             RequisitionDetailSerializer(
@@ -285,39 +306,39 @@ class RequisitionViewSet(PurchaseViewSet):
             status=201,
         )
 
-    def _update(self, request, pk, partial):
+    def _update(self, request: Request, pk: str | None, partial: bool) -> Response:
         data = self._validate(RequisitionWriteSerializer, partial=partial)
         lock = self._lock_version(data)
         data.pop("lock_version", None)
         return Response(
             RequisitionDetailSerializer(
                 RequisitionService.update_requisition(
-                    self.tenant_id, self.actor_id, pk, data, lock, self.correlation_id
+                    self.tenant_id, self.actor_id, _route_value(pk), data, lock, self.correlation_id
                 )
             ).data
         )
 
-    def update(self, request, pk=None):
+    def update(self, request: Request, pk: str | None = None) -> Response:
         return self._update(request, pk, False)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
         return self._update(request, pk, True)
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: str | None = None) -> Response:
         return Response(
             RequisitionDetailSerializer(
                 RequisitionService.delete_draft_requisition(
-                    self.tenant_id, self.actor_id, pk, self._lock_version(), self.correlation_id
+                    self.tenant_id, self.actor_id, _route_value(pk), self._lock_version(), self.correlation_id
                 )
             ).data
         )
 
-    def _transition(self, serializer, service, pk):
+    def _transition(self, serializer: type[Any], service: Callable[..., Any], pk: str | None) -> Response:
         data = self._validate(serializer)
         result = service(
             self.tenant_id,
             self.actor_id,
-            pk,
+            _route_value(pk),
             correlation_id=self.correlation_id,
             idempotency_key=self._idempotency(),
             **data,
@@ -325,32 +346,32 @@ class RequisitionViewSet(PurchaseViewSet):
         return Response(RequisitionDetailSerializer(result).data)
 
     @action(detail=True, methods=("post",))
-    def submit(self, request, pk=None):
+    def submit(self, request: Request, pk: str | None = None) -> Response:
         return self._transition(EmptyTransitionSerializer, RequisitionService.submit_requisition, pk)
 
     @action(detail=True, methods=("post",))
-    def approve(self, request, pk=None):
+    def approve(self, request: Request, pk: str | None = None) -> Response:
         return self._transition(EmptyTransitionSerializer, RequisitionService.approve_requisition, pk)
 
     @action(detail=True, methods=("post",))
-    def reject(self, request, pk=None):
+    def reject(self, request: Request, pk: str | None = None) -> Response:
         return self._transition(ReasonTransitionSerializer, RequisitionService.reject_requisition, pk)
 
     @action(detail=True, methods=("post",))
-    def revise(self, request, pk=None):
+    def revise(self, request: Request, pk: str | None = None) -> Response:
         return self._transition(EmptyTransitionSerializer, RequisitionService.revise_requisition, pk)
 
     @action(detail=True, methods=("post",))
-    def cancel(self, request, pk=None):
+    def cancel(self, request: Request, pk: str | None = None) -> Response:
         return self._transition(EmptyTransitionSerializer, RequisitionService.cancel_requisition, pk)
 
     @action(detail=True, methods=("post",), url_path="convert-to-order")
-    def convert_to_order(self, request, pk=None):
+    def convert_to_order(self, request: Request, pk: str | None = None) -> Response:
         data = self._validate(RequisitionConvertSerializer)
         order = RequisitionService.convert_to_purchase_order(
             self.tenant_id,
             self.actor_id,
-            pk,
+            _route_value(pk),
             data["supplier_id"],
             data["line_selections"],
             self.correlation_id,
@@ -367,16 +388,18 @@ class RFQViewSet(PurchaseViewSet):
     filter_fields = ("status", "submission_deadline__gte", "submission_deadline__lte")
     search_fields = ("rfq_number", "title")
 
-    def get_queryset(self):
-        return RequestForQuotation.objects.for_tenant(self.tenant_id).filter(deleted_at__isnull=True)
+    def get_queryset(self) -> QuerySet[Any]:
+        return cast(
+            QuerySet[Any], RequestForQuotation.objects.for_tenant(self.tenant_id).filter(deleted_at__isnull=True)
+        )
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self._list(self.get_queryset(), RFQListSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: str | None = None) -> Response:
         return Response(RFQDetailSerializer(RFQService.get_rfq(self.tenant_id, pk)).data)
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         return Response(
             RFQDetailSerializer(
                 RFQService.create_rfq(
@@ -386,62 +409,67 @@ class RFQViewSet(PurchaseViewSet):
             status=201,
         )
 
-    def _update(self, request, pk, partial):
+    def _update(self, request: Request, pk: str | None, partial: bool) -> Response:
         data = self._validate(RFQWriteSerializer, partial=partial)
         lock = self._lock_version(data)
         data.pop("lock_version", None)
         return Response(
             RFQDetailSerializer(
-                RFQService.update_rfq(self.tenant_id, self.actor_id, pk, data, lock, self.correlation_id)
+                RFQService.update_rfq(self.tenant_id, self.actor_id, _route_value(pk), data, lock, self.correlation_id)
             ).data
         )
 
-    def update(self, request, pk=None):
+    def update(self, request: Request, pk: str | None = None) -> Response:
         return self._update(request, pk, False)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
         return self._update(request, pk, True)
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: str | None = None) -> Response:
         return Response(
             RFQDetailSerializer(
                 RFQService.delete_draft_rfq(
-                    self.tenant_id, self.actor_id, pk, self._lock_version(), self.correlation_id
+                    self.tenant_id, self.actor_id, _route_value(pk), self._lock_version(), self.correlation_id
                 )
             ).data
         )
 
     @action(detail=True, methods=("post",))
-    def publish(self, request, pk=None):
+    def publish(self, request: Request, pk: str | None = None) -> Response:
         data = self._validate(RFQPublishSerializer)
         rfq, job = RFQService.publish_rfq(
-            self.tenant_id, self.actor_id, pk, data["supplier_ids"], self._idempotency(), self.correlation_id
+            self.tenant_id,
+            self.actor_id,
+            _route_value(pk),
+            data["supplier_ids"],
+            self._idempotency(),
+            self.correlation_id,
         )
         return Response({"rfq": RFQDetailSerializer(rfq).data, "job_id": str(job.id)}, status=202)
 
     @action(detail=True, methods=("post",))
-    def close(self, request, pk=None):
+    def close(self, request: Request, pk: str | None = None) -> Response:
         return Response(
             RFQDetailSerializer(RFQService.close_rfq(self.tenant_id, self.actor_id, pk, self.correlation_id)).data
         )
 
     @action(detail=True, methods=("post",))
-    def cancel(self, request, pk=None):
+    def cancel(self, request: Request, pk: str | None = None) -> Response:
         return Response(
             RFQDetailSerializer(RFQService.cancel_rfq(self.tenant_id, self.actor_id, pk, self.correlation_id)).data
         )
 
     @action(detail=True, methods=("get",), url_path="compare-quotes")
-    def compare_quotes(self, request, pk=None):
-        return Response(RFQService.compare_quotes(self.tenant_id, pk))
+    def compare_quotes(self, request: Request, pk: str | None = None) -> Response:
+        return Response(RFQService.compare_quotes(self.tenant_id, _route_value(pk)))
 
     @action(detail=True, methods=("post",))
-    def award(self, request, pk=None):
+    def award(self, request: Request, pk: str | None = None) -> Response:
         data = self._validate(RFQAwardSerializer)
         quote, order = RFQService.award_quote(
             self.tenant_id,
             self.actor_id,
-            pk,
+            _route_value(pk),
             data["quote_id"],
             data["create_purchase_order"],
             self._idempotency(),
@@ -463,16 +491,16 @@ class QuoteViewSet(PurchaseViewSet):
     filter_fields = ("rfq_id", "supplier_id", "status")
     search_fields = ("quote_number",)
 
-    def get_queryset(self):
-        return SupplierQuote.objects.for_tenant(self.tenant_id)
+    def get_queryset(self) -> QuerySet[Any]:
+        return cast(QuerySet[Any], SupplierQuote.objects.for_tenant(self.tenant_id))
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self._list(self.get_queryset(), QuoteListSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: str | None = None) -> Response:
         return Response(QuoteDetailSerializer(QuoteService.get_quote(self.tenant_id, pk)).data)
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         return Response(
             QuoteDetailSerializer(
                 QuoteService.create_quote(
@@ -482,28 +510,32 @@ class QuoteViewSet(PurchaseViewSet):
             status=201,
         )
 
-    def _update(self, request, pk, partial):
+    def _update(self, request: Request, pk: str | None, partial: bool) -> Response:
         data = self._validate(QuoteWriteSerializer, partial=partial)
         lock = self._lock_version(data)
         data.pop("lock_version", None)
         return Response(
             QuoteDetailSerializer(
-                QuoteService.update_quote(self.tenant_id, self.actor_id, pk, data, lock, self.correlation_id)
+                QuoteService.update_quote(
+                    self.tenant_id, self.actor_id, _route_value(pk), data, lock, self.correlation_id
+                )
             ).data
         )
 
-    def update(self, request, pk=None):
+    def update(self, request: Request, pk: str | None = None) -> Response:
         return self._update(request, pk, False)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
         return self._update(request, pk, True)
 
-    def destroy(self, request, pk=None):
-        QuoteService.delete_draft_quote(self.tenant_id, self.actor_id, pk, self._lock_version(), self.correlation_id)
+    def destroy(self, request: Request, pk: str | None = None) -> Response:
+        QuoteService.delete_draft_quote(
+            self.tenant_id, self.actor_id, _route_value(pk), self._lock_version(), self.correlation_id
+        )
         return Response({"status": "deleted"})
 
     @action(detail=True, methods=("post",))
-    def submit(self, request, pk=None):
+    def submit(self, request: Request, pk: str | None = None) -> Response:
         return Response(
             QuoteDetailSerializer(
                 QuoteService.submit_quote(
@@ -513,7 +545,7 @@ class QuoteViewSet(PurchaseViewSet):
         )
 
     @action(detail=True, methods=("post",))
-    def withdraw(self, request, pk=None):
+    def withdraw(self, request: Request, pk: str | None = None) -> Response:
         return Response(
             QuoteDetailSerializer(
                 QuoteService.withdraw_quote(
@@ -531,16 +563,16 @@ class PurchaseOrderViewSet(PurchaseViewSet):
     filter_fields = ("status", "supplier_id", "requisition_id", "po_date__gte", "po_date__lte")
     search_fields = ("po_number", "supplier__supplier_name")
 
-    def get_queryset(self):
-        return PurchaseOrder.objects.for_tenant(self.tenant_id).filter(deleted_at__isnull=True)
+    def get_queryset(self) -> QuerySet[Any]:
+        return cast(QuerySet[Any], PurchaseOrder.objects.for_tenant(self.tenant_id).filter(deleted_at__isnull=True))
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self._list(self.get_queryset(), PurchaseOrderListSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: str | None = None) -> Response:
         return Response(PurchaseOrderDetailSerializer(PurchaseOrderService.get_purchase_order(self.tenant_id, pk)).data)
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         return Response(
             PurchaseOrderDetailSerializer(
                 PurchaseOrderService.create_purchase_order(
@@ -550,34 +582,34 @@ class PurchaseOrderViewSet(PurchaseViewSet):
             status=201,
         )
 
-    def _update(self, request, pk, partial):
+    def _update(self, request: Request, pk: str | None, partial: bool) -> Response:
         data = self._validate(PurchaseOrderWriteSerializer, partial=partial)
         lock = self._lock_version(data)
         data.pop("lock_version", None)
         return Response(
             PurchaseOrderDetailSerializer(
                 PurchaseOrderService.update_purchase_order(
-                    self.tenant_id, self.actor_id, pk, data, lock, self.correlation_id
+                    self.tenant_id, self.actor_id, _route_value(pk), data, lock, self.correlation_id
                 )
             ).data
         )
 
-    def update(self, request, pk=None):
+    def update(self, request: Request, pk: str | None = None) -> Response:
         return self._update(request, pk, False)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
         return self._update(request, pk, True)
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: str | None = None) -> Response:
         return Response(
             PurchaseOrderDetailSerializer(
                 PurchaseOrderService.delete_draft_purchase_order(
-                    self.tenant_id, self.actor_id, pk, self._lock_version(), self.correlation_id
+                    self.tenant_id, self.actor_id, _route_value(pk), self._lock_version(), self.correlation_id
                 )
             ).data
         )
 
-    def _transition(self, service, pk):
+    def _transition(self, service: Callable[..., Any], pk: str | None) -> Response:
         return Response(
             PurchaseOrderDetailSerializer(
                 service(self.tenant_id, self.actor_id, pk, self.correlation_id, idempotency_key=self._idempotency())
@@ -585,29 +617,29 @@ class PurchaseOrderViewSet(PurchaseViewSet):
         )
 
     @action(detail=True, methods=("post",))
-    def submit(self, request, pk=None):
+    def submit(self, request: Request, pk: str | None = None) -> Response:
         return self._transition(PurchaseOrderService.submit_purchase_order, pk)
 
     @action(detail=True, methods=("post",))
-    def approve(self, request, pk=None):
+    def approve(self, request: Request, pk: str | None = None) -> Response:
         return self._transition(PurchaseOrderService.approve_purchase_order, pk)
 
     @action(detail=True, methods=("post",))
-    def reject(self, request, pk=None):
+    def reject(self, request: Request, pk: str | None = None) -> Response:
         return self._transition(PurchaseOrderService.reject_purchase_order, pk)
 
     @action(detail=True, methods=("post",))
-    def acknowledge(self, request, pk=None):
+    def acknowledge(self, request: Request, pk: str | None = None) -> Response:
         return self._transition(PurchaseOrderService.acknowledge_purchase_order, pk)
 
     @action(detail=True, methods=("post",))
-    def cancel(self, request, pk=None):
+    def cancel(self, request: Request, pk: str | None = None) -> Response:
         return self._transition(PurchaseOrderService.cancel_purchase_order, pk)
 
-    @action(detail=True, methods=("post",))
-    def dispatch(self, request, pk=None):
+    @action(detail=True, methods=("post",), url_path="dispatch")
+    def dispatch_order(self, request: Request, pk: str | None = None) -> Response:
         order, job = PurchaseOrderService.dispatch_purchase_order(
-            self.tenant_id, self.actor_id, pk, self._idempotency(), self.correlation_id
+            self.tenant_id, self.actor_id, _route_value(pk), self._idempotency(), self.correlation_id
         )
         return Response(
             {"purchase_order": PurchaseOrderDetailSerializer(order).data, "job_id": str(job.id)}, status=202
@@ -622,16 +654,16 @@ class ReceiptViewSet(PurchaseViewSet):
     filter_fields = ("status", "purchase_order_id", "warehouse_id", "receipt_date__gte", "receipt_date__lte")
     search_fields = ("receipt_number", "purchase_order__po_number")
 
-    def get_queryset(self):
-        return PurchaseReceipt.objects.for_tenant(self.tenant_id)
+    def get_queryset(self) -> QuerySet[Any]:
+        return cast(QuerySet[Any], PurchaseReceipt.objects.for_tenant(self.tenant_id))
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self._list(self.get_queryset(), ReceiptListSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: str | None = None) -> Response:
         return Response(ReceiptDetailSerializer(PurchaseReceiptService.get_receipt(self.tenant_id, pk)).data)
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         return Response(
             ReceiptDetailSerializer(
                 PurchaseReceiptService.create_receipt(
@@ -641,46 +673,48 @@ class ReceiptViewSet(PurchaseViewSet):
             status=201,
         )
 
-    def _update(self, request, pk, partial):
+    def _update(self, request: Request, pk: str | None, partial: bool) -> Response:
         data = self._validate(ReceiptWriteSerializer, partial=partial)
         lock = self._lock_version(data)
         data.pop("lock_version", None)
         return Response(
             ReceiptDetailSerializer(
                 PurchaseReceiptService.update_receipt(
-                    self.tenant_id, self.actor_id, pk, data, lock, self.correlation_id
+                    self.tenant_id, self.actor_id, _route_value(pk), data, lock, self.correlation_id
                 )
             ).data
         )
 
-    def update(self, request, pk=None):
+    def update(self, request: Request, pk: str | None = None) -> Response:
         return self._update(request, pk, False)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: str | None = None) -> Response:
         return self._update(request, pk, True)
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: str | None = None) -> Response:
         PurchaseReceiptService.delete_draft_receipt(
-            self.tenant_id, self.actor_id, pk, self._lock_version(), self.correlation_id
+            self.tenant_id, self.actor_id, _route_value(pk), self._lock_version(), self.correlation_id
         )
         return Response({"status": "deleted"})
 
     @action(detail=True, methods=("post",))
-    def complete(self, request, pk=None):
+    def complete(self, request: Request, pk: str | None = None) -> Response:
         self._validate(ReceiptCompleteSerializer)
         return Response(
             ReceiptDetailSerializer(
                 PurchaseReceiptService.complete_receipt(
-                    self.tenant_id, self.actor_id, pk, self._idempotency(), self.correlation_id
+                    self.tenant_id, self.actor_id, _route_value(pk), self._idempotency(), self.correlation_id
                 )
             ).data
         )
 
     @action(detail=True, methods=("post",))
-    def cancel(self, request, pk=None):
+    def cancel(self, request: Request, pk: str | None = None) -> Response:
         return Response(
             ReceiptDetailSerializer(
-                PurchaseReceiptService.cancel_receipt(self.tenant_id, self.actor_id, pk, self.correlation_id)
+                PurchaseReceiptService.cancel_receipt(
+                    self.tenant_id, self.actor_id, _route_value(pk), self.correlation_id
+                )
             ).data
         )
 
@@ -692,36 +726,39 @@ class ConfigurationViewSet(PurchaseViewSet):
     default_ordering = "-version"
     filter_fields = ("environment", "status")
 
-    def get_queryset(self):
-        return ProcurementConfiguration.objects.for_tenant(self.tenant_id)
+    def get_queryset(self) -> QuerySet[Any]:
+        return cast(QuerySet[Any], ProcurementConfiguration.objects.for_tenant(self.tenant_id))
 
     @action(detail=False, methods=("get",))
-    def active(self, request):
+    def active(self, request: Request) -> Response:
         environment = request.query_params.get("environment")
         return Response(
             ConfigurationSerializer(
-                ProcurementConfigurationService.get_active_configuration(self.tenant_id, environment)
+                ProcurementConfigurationService.get_active_configuration(self.tenant_id, _text_value(environment))
             ).data
         )
 
     @action(detail=False, methods=("get", "post"), url_path="versions")
-    def versions(self, request):
+    def versions(self, request: Request) -> Response:
         environment = request.query_params.get("environment") or request.data.get("environment")
         if request.method == "GET":
             return self._list(
-                ProcurementConfigurationService.list_versions(self.tenant_id, environment), ConfigurationSerializer
+                ProcurementConfigurationService.list_versions(self.tenant_id, _text_value(environment)),
+                ConfigurationSerializer,
             )
         data = self._validate(ConfigurationWriteSerializer)
         config = ProcurementConfigurationService.create_draft(
-            self.tenant_id, self.actor_id, environment, data, self.correlation_id
+            self.tenant_id, self.actor_id, _text_value(environment), data, self.correlation_id
         )
         return Response(ConfigurationSerializer(config).data, status=201)
 
     @action(detail=False, methods=("get", "patch"), url_path=r"versions/(?P<version_id>[0-9a-f-]+)")
-    def version_detail(self, request, version_id=None):
+    def version_detail(self, request: Request, version_id: str | None = None) -> Response:
         if request.method == "GET":
             return Response(
-                ConfigurationSerializer(ProcurementConfigurationService.get_version(self.tenant_id, version_id)).data
+                ConfigurationSerializer(
+                    ProcurementConfigurationService.get_version(self.tenant_id, _route_value(version_id))
+                ).data
             )
         data = self._validate(ConfigurationWriteSerializer, partial=True)
         lock = self._lock_version(data)
@@ -729,13 +766,13 @@ class ConfigurationViewSet(PurchaseViewSet):
         return Response(
             ConfigurationSerializer(
                 ProcurementConfigurationService.update_draft(
-                    self.tenant_id, self.actor_id, version_id, data, lock, self.correlation_id
+                    self.tenant_id, self.actor_id, _route_value(version_id), data, lock, self.correlation_id
                 )
             ).data
         )
 
     @action(detail=False, methods=("post",))
-    def preview(self, request):
+    def preview(self, request: Request) -> Response:
         data = self._validate(ConfigurationPreviewSerializer)
         environment = data.pop("environment")
         simulations = data.pop("simulations", [])
@@ -744,38 +781,38 @@ class ConfigurationViewSet(PurchaseViewSet):
         )
 
     @action(detail=False, methods=("post",), url_path=r"versions/(?P<version_id>[0-9a-f-]+)/activate")
-    def activate_version(self, request, version_id=None):
+    def activate_version(self, request: Request, version_id: str | None = None) -> Response:
         data = self._validate(ConfigurationRollbackSerializer)
         return Response(
             ConfigurationSerializer(
                 ProcurementConfigurationService.activate_configuration(
-                    self.tenant_id, self.actor_id, version_id, data["reason"], self.correlation_id
+                    self.tenant_id, self.actor_id, _route_value(version_id), data["reason"], self.correlation_id
                 )
             ).data
         )
 
     @action(detail=False, methods=("post",), url_path=r"versions/(?P<version_id>[0-9a-f-]+)/rollback")
-    def rollback(self, request, version_id=None):
+    def rollback(self, request: Request, version_id: str | None = None) -> Response:
         data = self._validate(ConfigurationRollbackSerializer)
         return Response(
             ConfigurationSerializer(
                 ProcurementConfigurationService.rollback_configuration(
-                    self.tenant_id, self.actor_id, version_id, data["reason"], self.correlation_id
+                    self.tenant_id, self.actor_id, _route_value(version_id), data["reason"], self.correlation_id
                 )
             ).data
         )
 
     @action(detail=False, methods=("get",), url_path="export")
-    def export_configuration(self, request):
+    def export_configuration(self, request: Request) -> Response:
         version = request.query_params.get("version")
         return Response(
             ProcurementConfigurationService.export_configuration(
-                self.tenant_id, request.query_params.get("environment"), int(version) if version else None
+                self.tenant_id, _text_value(request.query_params.get("environment")), int(version) if version else None
             )
         )
 
     @action(detail=False, methods=("post",), url_path="import")
-    def import_configuration(self, request):
+    def import_configuration(self, request: Request) -> Response:
         data = self._validate(ConfigurationImportSerializer)
         return Response(
             ConfigurationSerializer(
@@ -791,9 +828,9 @@ class JobViewSet(PurchaseViewSet):
     resource = "job"
     queryset = AsyncJob.objects.none()
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: str | None = None) -> Response:
         try:
-            job = AsyncJob.objects.for_tenant(self.tenant_id).get(pk=pk, command__startswith="purchase.")
+            job = AsyncJob.objects.for_tenant(self.tenant_id).get(pk=_route_value(pk), command__startswith="purchase.")
         except AsyncJob.DoesNotExist as exc:
             raise NotFound() from exc
         return Response(

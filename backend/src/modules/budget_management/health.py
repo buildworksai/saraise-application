@@ -95,8 +95,7 @@ def check_health(tenant_id: UUID) -> HealthResult:
     dependencies["workflow"] = _adapter_state(adapters.workflow)
     dependencies["notification"] = _adapter_state(adapters.notification)
     optional_degraded = any(
-        dependencies[name] not in {"closed", "configured"}
-        for name in ("accounting", "workflow", "notification")
+        dependencies[name] not in {"closed", "configured"} for name in ("accounting", "workflow", "notification")
     )
     status = "unhealthy" if critical_failure else "degraded" if optional_degraded else "healthy"
     return HealthResult(status, "budget_management", timezone.now().isoformat(), dependencies)

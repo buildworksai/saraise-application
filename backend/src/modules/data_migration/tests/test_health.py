@@ -16,7 +16,11 @@ def test_health_views_are_governed_and_public_internal() -> None:
 def test_readiness_healthy() -> None:
     payload, status_code = readiness({"database": lambda: True, "cache": lambda: True})
     assert status_code == 200
-    assert payload == {"status": "ready", "module": "data_migration", "components": {"database": "READY", "cache": "READY"}}
+    assert payload == {
+        "status": "ready",
+        "module": "data_migration",
+        "components": {"database": "READY", "cache": "READY"},
+    }
 
 
 def test_readiness_false_result_is_degraded() -> None:

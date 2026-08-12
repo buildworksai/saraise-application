@@ -291,6 +291,7 @@ def test_configuration_migration_is_reversible_and_covers_all_new_tables() -> No
 
 def test_contract_registration_reverse_restores_only_owned_metadata() -> None:
     migration = importlib.import_module("src.modules.customization_framework.migrations.0004_configuration_evidence")
+    migration.register_configuration_resource_contract(django_apps, None)
     entry = ModuleRegistryEntry.objects.get(name="customization-framework", version="2.0.0")
     previous_contract = {
         "module": "crm",

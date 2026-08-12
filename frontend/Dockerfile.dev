@@ -1,16 +1,15 @@
 # Development Dockerfile for Frontend
 # Uses Vite dev server with hot reload
 
-FROM node:18.19.1-alpine
+FROM node:20.17.0-alpine
 
 WORKDIR /app
 
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install dependencies
-# Using npm install for development to handle lock file updates
-RUN npm install
+# Install dependencies from the lockfile; security audit is run by npm run security:audit.
+RUN npm ci --ignore-scripts --audit=false --fund=false
 
 # Copy source code
 COPY . .

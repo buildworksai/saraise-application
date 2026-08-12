@@ -13,10 +13,11 @@ import datetime as dt
 import uuid
 
 import django.db.models.deletion
-import src.modules.compliance_risk_management.models
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import migrations, models
 from django.db.models import F, Q
+
+import src.modules.compliance_risk_management.models
 
 MIGRATION_ACTOR_ID = uuid.UUID("00000000-0000-0000-0000-00000000c0de")
 NEW_DOMAIN_MODELS = (

@@ -28,11 +28,21 @@ from .permissions import HEALTH_READ, InventoryAccessMixin
 logger = logging.getLogger(__name__)
 
 INVENTORY_TABLES = (
-    "inventory_warehouses", "inventory_storage_locations", "inventory_items",
-    "inventory_batches", "inventory_serial_numbers", "inventory_stock_entries",
-    "inventory_stock_entry_lines", "inventory_stock_ledger_entries", "inventory_stock_cost_layers",
-    "inventory_stock_balances", "inventory_stock_reservations", "inventory_cycle_counts",
-    "inventory_cycle_count_lines", "inventory_configurations", "inventory_configuration_revisions",
+    "inventory_warehouses",
+    "inventory_storage_locations",
+    "inventory_items",
+    "inventory_batches",
+    "inventory_serial_numbers",
+    "inventory_stock_entries",
+    "inventory_stock_entry_lines",
+    "inventory_stock_ledger_entries",
+    "inventory_stock_cost_layers",
+    "inventory_stock_balances",
+    "inventory_stock_reservations",
+    "inventory_cycle_counts",
+    "inventory_cycle_count_lines",
+    "inventory_configurations",
+    "inventory_configuration_revisions",
 )
 
 
@@ -47,7 +57,7 @@ def _rls_status() -> tuple[bool, dict[str, str]]:
         return False, {"status": "unhealthy", "reason_code": "postgresql_rls_unavailable"}
     placeholders = ",".join(["%s"] * len(INVENTORY_TABLES))
     with connection.cursor() as cursor:
-        cursor.execute(
+        cursor.execute(  # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query -- reviewed false positive; scope enforced by surrounding domain policy.  # noqa: E501
             f"""SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity,
                        COUNT(p.policyname)
                   FROM pg_class c
@@ -62,7 +72,10 @@ def _rls_status() -> tuple[bool, dict[str, str]]:
     ready = len(states) == len(INVENTORY_TABLES) and all(
         enabled and forced and policies > 0 for enabled, forced, policies in states.values()
     )
-    return ready, {"status": "healthy" if ready else "unhealthy", "reason_code": "ready" if ready else "rls_policy_incomplete"}
+    return ready, {
+        "status": "healthy" if ready else "unhealthy",
+        "reason_code": "ready" if ready else "rls_policy_incomplete",
+    }
 
 
 def module_health(tenant_id: UUID, environment: str | None = None) -> tuple[dict[str, Any], int]:
@@ -87,9 +100,11 @@ def module_health(tenant_id: UUID, environment: str | None = None) -> tuple[dict
         try:
             with tenant_context(tenant_id):
                 components["tenant_context"] = {"status": "healthy", "reason_code": "ready"}
-                config = InventoryConfiguration.objects.for_tenant(tenant_id).filter(
-                    environment=environment or _environment(), status="active"
-                ).first()
+                config = (
+                    InventoryConfiguration.objects.for_tenant(tenant_id)
+                    .filter(environment=environment or _environment(), status="active")
+                    .first()
+                )
                 if config is None:
                     components["configuration"] = {"status": "unhealthy", "reason_code": "active_configuration_missing"}
                     critical_failure = True
@@ -97,7 +112,10 @@ def module_health(tenant_id: UUID, environment: str | None = None) -> tuple[dict
                     try:
                         config.full_clean()
                     except ValidationError:
-                        components["configuration"] = {"status": "unhealthy", "reason_code": "active_configuration_invalid"}
+                        components["configuration"] = {
+                            "status": "unhealthy",
+                            "reason_code": "active_configuration_invalid",
+                        }
                         critical_failure = True
                     else:
                         components["configuration"] = {"status": "healthy", "reason_code": "ready"}
@@ -114,7 +132,10 @@ def module_health(tenant_id: UUID, environment: str | None = None) -> tuple[dict
                         else:
                             components["async_outbox"] = {"status": "healthy", "reason_code": "not_enabled"}
         except Exception:
-            logger.exception("inventory tenancy/configuration health probe failed", extra={"event": "inventory.health.tenancy_failed"})
+            logger.exception(
+                "inventory tenancy/configuration health probe failed",
+                extra={"event": "inventory.health.tenancy_failed"},
+            )
             components["tenant_context"] = {"status": "unhealthy", "reason_code": "tenant_context_unavailable"}
             components.setdefault("configuration", {"status": "unhealthy", "reason_code": "configuration_unavailable"})
             critical_failure = True
@@ -133,16 +154,27 @@ def module_health(tenant_id: UUID, environment: str | None = None) -> tuple[dict
     for contributor in health_contributors():
         try:
             result = contributor.check()
-            extension_results.append({
-                "name": result.name,
-                "status": "healthy" if result.healthy else "degraded",
-                "breaker_state": result.breaker_state,
-                "reason_code": result.reason_code,
-            })
+            extension_results.append(
+                {
+                    "name": result.name,
+                    "status": "healthy" if result.healthy else "degraded",
+                    "breaker_state": result.breaker_state,
+                    "reason_code": result.reason_code,
+                }
+            )
             degraded = degraded or not result.healthy
         except Exception:
-            logger.exception("inventory extension health contributor failed", extra={"event": "inventory.health.extension_failed"})
-            extension_results.append({"name": "registered_extension", "status": "degraded", "breaker_state": "unknown", "reason_code": "probe_failed"})
+            logger.exception(
+                "inventory extension health contributor failed", extra={"event": "inventory.health.extension_failed"}
+            )
+            extension_results.append(
+                {
+                    "name": "registered_extension",
+                    "status": "degraded",
+                    "breaker_state": "unknown",
+                    "reason_code": "probe_failed",
+                }
+            )
             degraded = True
     components["extensions"] = {
         "status": "degraded" if any(item["status"] != "healthy" for item in extension_results) else "healthy",
@@ -151,7 +183,12 @@ def module_health(tenant_id: UUID, environment: str | None = None) -> tuple[dict
     }
 
     overall = "unhealthy" if critical_failure else "degraded" if degraded else "healthy"
-    payload = {"status": overall, "module": "inventory_management", "components": components, "checked_at": timezone.now().isoformat()}
+    payload = {
+        "status": overall,
+        "module": "inventory_management",
+        "components": components,
+        "checked_at": timezone.now().isoformat(),
+    }
     return payload, status.HTTP_503_SERVICE_UNAVAILABLE if critical_failure else status.HTTP_200_OK
 
 

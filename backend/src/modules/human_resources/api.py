@@ -127,6 +127,12 @@ def _parse_choice(value: str | None, field: str, choices: set[str]) -> str | Non
     return value
 
 
+def _string_set(value: object) -> set[str]:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return {str(item) for item in value}
+    return set()
+
+
 def _idempotency_key(request: Request, body_key: object | None = None) -> str:
     header_key = request.headers.get("Idempotency-Key", "").strip()
     normalized_body = str(body_key).strip() if body_key is not None else ""
@@ -143,6 +149,18 @@ def _idempotency_key(request: Request, body_key: object | None = None) -> str:
     if len(key) > maximum:
         raise ValidationError({"idempotency_key": [f"Must contain at most {maximum} characters."]})
     return key
+
+
+def _idempotency_key_candidate(request: Request) -> str:
+    header_key = request.headers.get("Idempotency-Key", "").strip()
+    if header_key:
+        return header_key
+    data = request.data if isinstance(request.data, Mapping) else {}
+    for field in ("idempotency_key", "transition_key"):
+        value = data.get(field)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
 
 
 class HumanResourcesMutationReplay(Exception):
@@ -173,8 +191,9 @@ class HumanResourcesViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):  # 
         if request.method in {"GET", "HEAD", "OPTIONS"} or self.action in self.non_mutating_actions:
             return
         key = _idempotency_key(request)
+        method = request.method or ""
         fingerprint = HumanResourcesMutationCommandService.fingerprint(
-            method=request.method,
+            method=method,
             path=request.path,
             action=self.action,
             query=list(request.query_params.lists()),
@@ -184,7 +203,7 @@ class HumanResourcesViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):  # 
             self.tenant_id(),
             idempotency_key=key,
             request_fingerprint=fingerprint,
-            method=request.method,
+            method=method,
             path=request.path,
             actor_id=_actor(request),
             correlation_id=self.correlation_id(),
@@ -229,6 +248,9 @@ class HumanResourcesViewSet(GovernedAPIViewMixin, TenantScopedModelViewSet):  # 
         method = request.method or ""
         if method.lower() not in self.http_method_names:
             raise MethodNotAllowed(method)
+        if method not in {"GET", "HEAD", "OPTIONS"} and self.action not in self.non_mutating_actions:
+            if not _idempotency_key_candidate(request):
+                raise ValidationError({"idempotency_key": ["An idempotency key is required."]})
         super().check_permissions(request)
 
     def tenant_id(self) -> UUID:
@@ -606,12 +628,12 @@ class EmployeeViewSet(HumanResourcesViewSet):
         employment_type = _parse_choice(
             params.get("employment_type"),
             "employment_type",
-            set(allowed["employment_types"]),
+            _string_set(allowed["employment_types"]),
         )
         employment_status = _parse_choice(
             params.get("employment_status"),
             "employment_status",
-            set(allowed["employment_statuses"]),
+            _string_set(allowed["employment_statuses"]),
         )
         if employment_type:
             queryset = queryset.filter(employment_type=employment_type)
@@ -777,8 +799,8 @@ class AttendanceViewSet(HumanResourcesViewSet):
         employee = _parse_uuid(params.get("employee"), "employee")
         if employee:
             queryset = queryset.filter(employee_id=employee)
-        attendance_status = _parse_choice(params.get("status"), "status", set(allowed["attendance_statuses"]))
-        source = _parse_choice(params.get("source"), "source", set(allowed["attendance_sources"]))
+        attendance_status = _parse_choice(params.get("status"), "status", _string_set(allowed["attendance_statuses"]))
+        source = _parse_choice(params.get("source"), "source", _string_set(allowed["attendance_sources"]))
         if attendance_status:
             queryset = queryset.filter(status=attendance_status)
         if source:
@@ -906,7 +928,7 @@ class LeaveBalanceViewSet(HumanResourcesViewSet):
         leave_type = _parse_choice(
             params.get("leave_type"),
             "leave_type",
-            set(allowed["leave_types"]),
+            _string_set(allowed["leave_types"]),
         )
         if leave_type:
             queryset = queryset.filter(leave_type=leave_type)
@@ -1007,7 +1029,7 @@ class LeaveRequestViewSet(HumanResourcesViewSet):
         allowed = cast(Mapping[str, object], document["allowed_values"])
         defaults = cast(Mapping[str, object], document["defaults"])
         scope = params.get("scope", str(defaults["leave_scope"]))
-        if scope not in set(allowed["leave_scopes"]):
+        if scope not in _string_set(allowed["leave_scopes"]):
             raise ValidationError({"scope": ["Unsupported leave scope."]})
         if scope in {"self", "team"}:
             raise CapabilityUnavailable(
@@ -1022,9 +1044,9 @@ class LeaveRequestViewSet(HumanResourcesViewSet):
         leave_type = _parse_choice(
             params.get("leave_type"),
             "leave_type",
-            set(allowed["leave_types"]),
+            _string_set(allowed["leave_types"]),
         )
-        request_status = _parse_choice(params.get("status"), "status", set(allowed["leave_states"]))
+        request_status = _parse_choice(params.get("status"), "status", _string_set(allowed["leave_states"]))
         if leave_type:
             queryset = queryset.filter(leave_type=leave_type)
         if request_status:

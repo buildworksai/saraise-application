@@ -12,8 +12,8 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-} from 'recharts';
-import { useTheme } from '@/lib/theme-context';
+} from "recharts";
+import { useTheme } from "@/lib/theme-context";
 
 interface PieChartProps {
   data: { name: string; value: number }[];
@@ -24,11 +24,11 @@ interface PieChartProps {
 }
 
 const DEFAULT_COLORS = [
-  'hsl(var(--primary))',
-  'hsl(var(--secondary))',
-  'hsl(var(--accent))',
-  'hsl(var(--muted))',
-  'hsl(var(--destructive))',
+  "hsl(var(--primary))",
+  "hsl(var(--secondary))",
+  "hsl(var(--accent))",
+  "hsl(var(--muted))",
+  "hsl(var(--destructive))",
 ];
 
 export const PieChart = ({
@@ -39,11 +39,11 @@ export const PieChart = ({
   colors = DEFAULT_COLORS,
 }: PieChartProps) => {
   const { theme } = useTheme();
-  const isDark = theme === 'dark';
+  const isDark = theme === "dark";
 
-  const textColor = isDark ? 'hsl(210, 40%, 98%)' : 'hsl(222.2, 47.4%, 11.2%)';
-  const tooltipBg = isDark ? 'hsl(222.2, 84%, 4.9%)' : 'hsl(0, 0%, 100%)';
-  const tooltipBorder = isDark ? 'hsl(217.2, 32.6%, 17.5%)' : 'hsl(214.3, 31.8%, 91.4%)';
+  const textColor = isDark ? "hsl(210, 40%, 98%)" : "hsl(222.2, 47.4%, 11.2%)";
+  const tooltipBg = isDark ? "hsl(222.2, 84%, 4.9%)" : "hsl(0, 0%, 100%)";
+  const tooltipBorder = isDark ? "hsl(217.2, 32.6%, 17.5%)" : "hsl(214.3, 31.8%, 91.4%)";
 
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -67,18 +67,14 @@ export const PieChart = ({
           contentStyle={{
             backgroundColor: tooltipBg,
             border: `1px solid ${tooltipBorder}`,
-            borderRadius: '8px',
+            borderRadius: "8px",
             color: textColor,
-            padding: '8px 12px',
-            boxShadow: isDark ? '0 4px 6px rgba(0, 0, 0, 0.3)' : '0 4px 6px rgba(0, 0, 0, 0.1)',
+            padding: "8px 12px",
+            boxShadow: isDark ? "0 4px 6px rgba(0, 0, 0, 0.3)" : "0 4px 6px rgba(0, 0, 0, 0.1)",
           }}
           itemStyle={{ color: textColor }}
         />
-        {showLegend && (
-          <Legend
-            wrapperStyle={{ color: textColor }}
-          />
-        )}
+        {showLegend && <Legend wrapperStyle={{ color: textColor }} />}
       </RechartsPieChart>
     </ResponsiveContainer>
   );

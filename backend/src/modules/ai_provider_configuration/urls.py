@@ -9,8 +9,8 @@ from .api import (
     AIModelDeploymentViewSet,
     AIModelViewSet,
     AIProviderConfigurationResourceViewSet,
-    AIProviderRuntimeConfigurationViewSet,
     AIProviderCredentialViewSet,
+    AIProviderRuntimeConfigurationViewSet,
     AIProviderViewSet,
     AIUsageLogViewSet,
     SecretManagementViewSet,
@@ -26,7 +26,9 @@ router.register(r"models", AIModelViewSet, basename="ai-model")
 router.register(r"deployments", AIModelDeploymentViewSet, basename="ai-model-deployment")
 router.register(r"usage-logs", AIUsageLogViewSet, basename="ai-usage-log")
 router.register(r"secrets", SecretManagementViewSet, basename="secret-management")
-router.register(r"runtime-configuration", AIProviderRuntimeConfigurationViewSet, basename="ai-provider-runtime-configuration")
+router.register(
+    r"runtime-configuration", AIProviderRuntimeConfigurationViewSet, basename="ai-provider-runtime-configuration"
+)
 
 # URL patterns
 urlpatterns = [

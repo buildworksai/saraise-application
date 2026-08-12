@@ -22,6 +22,7 @@ from uuid import UUID
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 
 TENANT_SETTING = "app.tenant_id"
+LEGACY_TENANT_SETTING = "app.current_tenant_id"
 
 _tenant_id: contextvars.ContextVar[UUID | None] = contextvars.ContextVar(
     "saraise_tenant_id",
@@ -69,10 +70,11 @@ def _set_database_context(tenant_id: UUID, *, using: str) -> None:
         raise RuntimeError("PostgreSQL tenant context requires an active transaction")
 
     with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT set_config(%s, %s, true)",
-            [TENANT_SETTING, str(tenant_id)],
-        )
+        for setting in (TENANT_SETTING, LEGACY_TENANT_SETTING):
+            cursor.execute(
+                "SELECT set_config(%s, %s, true)",
+                [setting, str(tenant_id)],
+            )
 
 
 @contextmanager

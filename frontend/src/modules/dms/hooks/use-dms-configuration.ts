@@ -1,6 +1,6 @@
-import { useQuery } from '@tanstack/react-query';
-import type { DmsConfigurationValues, DmsUploadTransportPolicy } from '../contracts';
-import { DMS_QUERY_KEYS, dmsService } from '../services/dms-service';
+import { useQuery } from "@tanstack/react-query";
+import type { DmsConfigurationValues, DmsUploadTransportPolicy } from "../contracts";
+import { DMS_QUERY_KEYS, dmsService } from "../services/dms-service";
 
 /** Tenant configuration is mandatory; callers must render query failures and never invent defaults. */
 export function useDmsConfiguration() {

@@ -10,11 +10,18 @@ from src.core.state_machine import StateMachine, Transition
 
 from .models import ConsolidationRun, IntercompanyTransaction
 
-
 TRANSACTION_STATES = frozenset(
     {
-        "draft", "pending_approval", "approved", "posting", "posted",
-        "posting_failed", "disputed", "eliminated", "cancelled", "expired",
+        "draft",
+        "pending_approval",
+        "approved",
+        "posting",
+        "posted",
+        "posting_failed",
+        "disputed",
+        "eliminated",
+        "cancelled",
+        "expired",
     }
 )
 
@@ -74,6 +81,10 @@ consolidation_state_machine: StateMachine[ConsolidationRun] = StateMachine(
 
 
 __all__ = [
-    "CONSOLIDATION_STATES", "CONSOLIDATION_TRANSITIONS", "TRANSACTION_STATES",
-    "TRANSACTION_TRANSITIONS", "consolidation_state_machine", "transaction_state_machine",
+    "CONSOLIDATION_STATES",
+    "CONSOLIDATION_TRANSITIONS",
+    "TRANSACTION_STATES",
+    "TRANSACTION_TRANSITIONS",
+    "consolidation_state_machine",
+    "transaction_state_machine",
 ]

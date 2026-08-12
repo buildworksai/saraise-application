@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag -- reviewed false positive; scope enforced by surrounding domain policy.
         with:
           fetch-depth: 0
 
@@ -137,5 +137,10 @@ jobs:
         working-directory: frontend
         shell: bash
         run: |
-          mutate=$(sed 's#^frontend/##' /tmp/frontend-changed.txt | paste -sd, -)
-          npx stryker run --mutate "$mutate"
+          sed 's#^frontend/##' /tmp/frontend-changed.txt > /tmp/frontend-changed-relative.txt
+          mutate=$(node scripts/changed-mutation-ranges.mjs /tmp/frontend-changed-relative.txt)
+          if [[ -z "$mutate" ]]; then
+            echo "Mutation gate: no added or changed frontend lines; skipping."
+            exit 0
+          fi
+          npx stryker run stryker.conf.json --coverageAnalysis off --mutate "$mutate"

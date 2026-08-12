@@ -1,29 +1,31 @@
 """Persistence invariants for the normalized compliance domain."""
 
 import hashlib
-import uuid
 
 import pytest
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
-from django.utils import timezone
 
-from ..models import ComplianceActivity, CompliancePolicyVersion
+from ..models import ComplianceActivity
 from .factories import (
-    ComplianceActivityFactory, ComplianceConfigurationRevisionFactory,
-    ComplianceFrameworkFactory, CompliancePolicyFactory,
-    CompliancePolicyVersionFactory, ComplianceRequirementFactory,
+    ComplianceActivityFactory,
+    ComplianceConfigurationRevisionFactory,
+    ComplianceFrameworkFactory,
+    CompliancePolicyFactory,
+    CompliancePolicyVersionFactory,
+    ComplianceRequirementFactory,
     RequirementPolicyMappingFactory,
 )
-
 
 pytestmark = pytest.mark.django_db
 
 
 def test_models_use_indexed_uuid_tenant_field():
     for factory_class in (
-        ComplianceFrameworkFactory, ComplianceRequirementFactory,
-        CompliancePolicyFactory, RequirementPolicyMappingFactory,
+        ComplianceFrameworkFactory,
+        ComplianceRequirementFactory,
+        CompliancePolicyFactory,
+        RequirementPolicyMappingFactory,
         ComplianceConfigurationRevisionFactory,
     ):
         field = factory_class._meta.model._meta.get_field("tenant_id")

@@ -22,10 +22,7 @@ from src.modules.email_marketing.models import (
     EmailCampaign,
     EmailTemplate,
 )
-from src.modules.email_marketing.services import (
-    ComplianceService,
-    DeliveryService,
-)
+from src.modules.email_marketing.services import ComplianceService, DeliveryService
 
 pytestmark = pytest.mark.django_db
 User = get_user_model()

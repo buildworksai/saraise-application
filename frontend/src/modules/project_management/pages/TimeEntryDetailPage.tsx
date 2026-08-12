@@ -1,1 +1,1 @@
-export {TimeEntryDetailPage} from './ModulePages';
+export { TimeEntryDetailPage } from "./ModulePages";

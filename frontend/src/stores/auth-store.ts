@@ -4,8 +4,8 @@
  * Manages authentication state and session management.
  * Sessions establish identity only - no authorization state cached.
  */
-import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { create } from "zustand";
+import { persist, createJSONStorage, type StateStorage } from "zustand/middleware";
 
 export interface User {
   id: string;
@@ -29,21 +29,61 @@ interface AuthState {
   setLoading: (loading: boolean) => void;
 }
 
+type PersistedAuthState = Pick<AuthState, "user" | "isAuthenticated">;
+type AuthActions = Pick<
+  AuthState,
+  "login" | "logout" | "setUser" | "setAuthenticated" | "setLoading"
+>;
+type AuthStatePatch = Partial<Pick<AuthState, "user" | "isAuthenticated" | "isLoading">>;
+type AuthSet = (state: AuthStatePatch) => void;
+
+export const createAuthMemoryStorage = (): StateStorage => {
+  const values = new Map<string, string>();
+  return {
+    getItem: (name) => values.get(name) ?? null,
+    setItem: (name, value) => {
+      values.set(name, value);
+    },
+    removeItem: (name) => {
+      values.delete(name);
+    },
+  };
+};
+
+const authStorage = (() => {
+  const fallback = createAuthMemoryStorage();
+  return createJSONStorage<PersistedAuthState>(() => {
+    try {
+      const storage = globalThis.localStorage;
+      const probeKey = "auth-storage:probe";
+      storage.setItem(probeKey, probeKey);
+      storage.removeItem(probeKey);
+      return storage;
+    } catch {
+      return fallback;
+    }
+  });
+})();
+
+export const createAuthActions = (set: AuthSet): AuthActions => ({
+  login: (user) => set({ user, isAuthenticated: true }),
+  logout: () => set({ user: null, isAuthenticated: false }),
+  setUser: (user) => set({ user, isAuthenticated: !!user }),
+  setAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
+  setLoading: (isLoading) => set({ isLoading }),
+});
+
 export const useAuthStore = create<AuthState>()(
-    persist(
+  persist(
     (set) => ({
       user: null,
       isAuthenticated: false,
       isLoading: false,
-      login: (user) => set({ user, isAuthenticated: true }),
-      logout: () => set({ user: null, isAuthenticated: false }),
-      setUser: (user) => set({ user, isAuthenticated: !!user }),
-      setAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
-      setLoading: (isLoading) => set({ isLoading }),
+      ...createAuthActions(set),
     }),
     {
-      name: 'auth-storage',
-      storage: createJSONStorage(() => localStorage),
+      name: "auth-storage",
+      storage: authStorage,
       partialize: (state) => ({ user: state.user, isAuthenticated: state.isAuthenticated }),
     }
   )

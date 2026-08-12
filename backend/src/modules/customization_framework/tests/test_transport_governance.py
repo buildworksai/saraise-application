@@ -23,10 +23,7 @@ from src.modules.customization_framework.models import (
     RuleExecution,
 )
 from src.modules.customization_framework.permissions import ACTION_ACCESS, PERMISSIONS, SOD_ACTIONS
-from src.modules.customization_framework.serializers import (
-    RuleExecutionDetailSerializer,
-    RuleExecutionListSerializer,
-)
+from src.modules.customization_framework.serializers import RuleExecutionDetailSerializer, RuleExecutionListSerializer
 from src.modules.customization_framework.services import (
     BusinessRuleService,
     CustomFieldService,

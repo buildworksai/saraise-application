@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from typing import TypeGuard
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
@@ -18,8 +19,21 @@ _LEAF = frozenset({"eq", "in", "is_null", "owner", "tenant"})
 _COMPOUND = frozenset({"and", "or", "not"})
 
 
-def _sequence(value: object) -> bool:
+def _sequence(value: object) -> TypeGuard[Sequence[object]]:
     return isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray))
+
+
+def _mapping(value: object) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise ValidationError("Every predicate node must be an object.")
+    return value
+
+
+def _node_sequence(node: Mapping[str, object], key: str) -> Sequence[object]:
+    values = node.get(key)
+    if not _sequence(values):
+        raise ValidationError(f"Predicate '{key}' must be an array.")
+    return values
 
 
 def _field(value: object, *, allowed_fields: frozenset[str] | None) -> str:
@@ -72,20 +86,20 @@ def validate_predicate(
     fields = frozenset(allowed_fields) if allowed_fields is not None else None
     count = 0
 
-    def walk(node: object, depth: int) -> None:
+    def walk(raw_node: object, depth: int) -> None:
         nonlocal count
         count += 1
         if count > max_nodes or depth > max_depth:
             raise ValidationError("Predicate exceeds the safe complexity limit.")
-        if not isinstance(node, Mapping):
-            raise ValidationError("Every predicate node must be an object.")
+        node = _mapping(raw_node)
         operation = node.get("op")
         if operation not in _LEAF | _COMPOUND:
             raise ValidationError("Predicate operator is not supported.")
         if operation in {"and", "or"}:
-            if set(node) != {"op", "args"} or not _sequence(node.get("args")) or not node["args"]:
+            args = _node_sequence(node, "args")
+            if set(node) != {"op", "args"} or not args:
                 raise ValidationError(f"'{operation}' requires a non-empty args array.")
-            for child in node["args"]:
+            for child in args:
                 walk(child, depth + 1)
             return
         if operation == "not":
@@ -101,8 +115,8 @@ def validate_predicate(
         if set(node) != expected:
             raise ValidationError(f"'{operation}' predicate has unexpected or missing keys.")
         if operation == "in":
-            values = node.get("value")
-            if not _sequence(values) or not values or len(values) > max_in_values:
+            values = _node_sequence(node, "value")
+            if not values or len(values) > max_in_values:
                 raise ValidationError(f"'in' requires 1 to {max_in_values} literal values.")
             for value in values:
                 _literal(value, subject_attributes={}) if not isinstance(value, Mapping) else None
@@ -110,7 +124,7 @@ def validate_predicate(
             _literal(node.get("value"), subject_attributes={})
 
     walk(predicate, 1)
-    return dict(predicate)  # type: ignore[arg-type]
+    return dict(_mapping(predicate))
 
 
 def compile_predicate(
@@ -129,16 +143,16 @@ def compile_predicate(
         operation = str(node["op"])
         if operation == "and":
             result = Q()
-            for child in node["args"]:  # type: ignore[union-attr]
-                result &= compile_node(child)
+            for child in _node_sequence(node, "args"):
+                result &= compile_node(_mapping(child))
             return result
         if operation == "or":
             result = Q(pk__in=[])
-            for child in node["args"]:  # type: ignore[union-attr]
-                result |= compile_node(child)
+            for child in _node_sequence(node, "args"):
+                result |= compile_node(_mapping(child))
             return result
         if operation == "not":
-            return ~compile_node(node["arg"])  # type: ignore[arg-type]
+            return ~compile_node(_mapping(node["arg"]))
         field = _field(node["field"], allowed_fields=fields)
         if operation == "tenant":
             return Q(**{field: tenant_id})
@@ -150,12 +164,10 @@ def compile_predicate(
             return Q(**{f"{field}__isnull": True})
         if operation == "eq":
             return Q(**{field: _literal(node["value"], subject_attributes=subject_attributes)})
-        values = [
-            _literal(item, subject_attributes=subject_attributes) for item in node["value"]  # type: ignore[union-attr]
-        ]
+        values = [_literal(item, subject_attributes=subject_attributes) for item in _node_sequence(node, "value")]
         return Q(**{f"{field}__in": values})
 
-    return compile_node(predicate)  # type: ignore[arg-type]
+    return compile_node(_mapping(predicate))
 
 
 def predicate_matches(
@@ -173,11 +185,11 @@ def predicate_matches(
     def evaluate(node: Mapping[str, object]) -> bool:
         operation = str(node["op"])
         if operation == "and":
-            return all(evaluate(item) for item in node["args"])  # type: ignore[union-attr]
+            return all(evaluate(_mapping(item)) for item in _node_sequence(node, "args"))
         if operation == "or":
-            return any(evaluate(item) for item in node["args"])  # type: ignore[union-attr]
+            return any(evaluate(_mapping(item)) for item in _node_sequence(node, "args"))
         if operation == "not":
-            return not evaluate(node["arg"])  # type: ignore[arg-type]
+            return not evaluate(_mapping(node["arg"]))
         field = str(node["field"])
         actual = record.get(field)
         if operation == "tenant":
@@ -189,10 +201,10 @@ def predicate_matches(
         if operation == "eq":
             return actual == _literal(node["value"], subject_attributes=subject_attributes)
         return actual in [
-            _literal(item, subject_attributes=subject_attributes) for item in node["value"]  # type: ignore[union-attr]
+            _literal(item, subject_attributes=subject_attributes) for item in _node_sequence(node, "value")
         ]
 
-    return evaluate(predicate)  # type: ignore[arg-type]
+    return evaluate(_mapping(predicate))
 
 
 __all__ = ["compile_predicate", "predicate_matches", "validate_predicate"]

@@ -7,8 +7,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type AssetCategory = 'fixed' | 'intangible' | 'current';
-export type DepreciationMethod = 'straight_line' | 'declining_balance' | 'none';
+export type AssetCategory = "fixed" | "intangible" | "current";
+export type DepreciationMethod = "straight_line" | "declining_balance" | "none";
 
 export interface Asset {
   id: string;
@@ -80,7 +80,7 @@ export interface DepreciationFilters {
 }
 
 export interface AssetConfigurationDocument {
-  environment: 'default' | 'development' | 'self-hosted' | 'saas';
+  environment: "default" | "development" | "self-hosted" | "saas";
   enabled: boolean;
   rollout_roles: string[];
   rollout_cohorts: string[];
@@ -107,7 +107,7 @@ export interface AssetConfigurationDocument {
   double_declining_factor: string;
   annual_cap: string;
   accounting_periods_per_year: number;
-  posting_frequency: 'monthly' | 'exact_date';
+  posting_frequency: "monthly" | "exact_date";
   require_chronological_depreciation: boolean;
   require_useful_life_for_depreciation: boolean;
   declining_rate_requires_declining_method: boolean;
@@ -115,7 +115,7 @@ export interface AssetConfigurationDocument {
   allow_depreciation_before_purchase: boolean;
   lock_financial_fields_after_history: boolean;
   archive_sets_inactive: boolean;
-  archive_confirmation: 'asset_code' | 'asset_name';
+  archive_confirmation: "asset_code" | "asset_name";
   asset_list_page_size: number;
   asset_list_max_page_size: number;
   asset_list_default_ordering: string;
@@ -144,8 +144,8 @@ export interface AssetConfigurationVersion {
 }
 
 export interface AssetConfigurationExport {
-  schema_version: '1.0';
-  module: 'asset_management';
+  schema_version: "1.0";
+  module: "asset_management";
   version: number;
   document: AssetConfigurationDocument;
 }
@@ -180,16 +180,16 @@ export interface ApiEnvelope<T> {
   };
 }
 
-export const MODULE_API_PREFIX = '/api/v1/asset-management';
+export const MODULE_API_PREFIX = "/api/v1/asset-management";
 
 /** Browser paths are owned beside the API contract to prevent route drift. */
 export const ROUTES = {
   ASSETS: {
-    LIST: '/asset-management/assets',
-    CREATE: '/asset-management/assets/new',
-    DETAIL_PATTERN: '/asset-management/assets/:id',
-    EDIT_PATTERN: '/asset-management/assets/:id/edit',
-    CONFIGURATION: '/asset-management/configuration',
+    LIST: "/asset-management/assets",
+    CREATE: "/asset-management/assets/new",
+    DETAIL_PATTERN: "/asset-management/assets/:id",
+    EDIT_PATTERN: "/asset-management/assets/:id/edit",
+    CONFIGURATION: "/asset-management/configuration",
     DETAIL: (id: string) => `/asset-management/assets/${id}` as const,
     EDIT: (id: string) => `/asset-management/assets/${id}/edit` as const,
   },

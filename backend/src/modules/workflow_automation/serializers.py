@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 from rest_framework import serializers
 
@@ -229,7 +229,7 @@ class WorkflowStepWriteSerializer(StrictSerializer):
 class WorkflowStepReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = WorkflowStep
-        fields = (
+        fields: Any = (
             "id",
             "key",
             "name",
@@ -246,7 +246,7 @@ class WorkflowStepReadSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = fields
+        read_only_fields: Any = fields
 
 
 class WorkflowListSerializer(serializers.ModelSerializer):
@@ -297,8 +297,8 @@ class WorkflowListSerializer(serializers.ModelSerializer):
 
 class WorkflowDetailSerializer(WorkflowListSerializer):
     steps = WorkflowStepReadSerializer(many=True, read_only=True)
-    created_by = serializers.PrimaryKeyRelatedField(read_only=True)
-    published_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    created_by: serializers.PrimaryKeyRelatedField[Any] = serializers.PrimaryKeyRelatedField(read_only=True)
+    published_by: serializers.PrimaryKeyRelatedField[Any] = serializers.PrimaryKeyRelatedField(read_only=True)
     transition_history = serializers.SerializerMethodField()
     versions = serializers.SerializerMethodField()
     execution_statistics = serializers.SerializerMethodField()
@@ -310,7 +310,8 @@ class WorkflowDetailSerializer(WorkflowListSerializer):
         correlation_id = ""
         for item in obj.transition_history:
             record = dict(item)
-            metadata = record.get("metadata") if isinstance(record.get("metadata"), Mapping) else {}
+            raw_metadata = record.get("metadata")
+            metadata = cast(Mapping[str, Any], raw_metadata) if isinstance(raw_metadata, Mapping) else {}
             record["actor_id"] = metadata.get("actor_id")
             record["correlation_id"] = metadata.get("correlation_id", correlation_id)
             values.append(record)
@@ -322,10 +323,13 @@ class WorkflowDetailSerializer(WorkflowListSerializer):
     @staticmethod
     def get_versions(obj: Workflow) -> list[dict[str, Any]]:
         return list(
-            Workflow.objects.for_tenant(obj.tenant_id)
-            .filter(key=obj.key, deleted_at__isnull=True)
-            .order_by("-version")
-            .values("id", "version", "status", "updated_at")
+            cast(
+                Any,
+                Workflow.objects.for_tenant(obj.tenant_id)
+                .filter(key=obj.key, deleted_at__isnull=True)
+                .order_by("-version")
+                .values("id", "version", "status", "updated_at"),
+            )
         )
 
     @staticmethod
@@ -334,11 +338,15 @@ class WorkflowDetailSerializer(WorkflowListSerializer):
 
         from .models import WorkflowInstance
 
-        totals = WorkflowInstance.objects.for_tenant(obj.tenant_id).filter(workflow=obj).aggregate(
-            total=Count("id"),
-            active=Count("id", filter=Q(state__in=("pending", "running", "waiting"))),
-            completed=Count("id", filter=Q(state="completed")),
-            failed=Count("id", filter=Q(state="failed")),
+        totals = (
+            WorkflowInstance.objects.for_tenant(obj.tenant_id)
+            .filter(workflow=obj)
+            .aggregate(
+                total=Count("id"),
+                active=Count("id", filter=Q(state__in=("pending", "running", "waiting"))),
+                completed=Count("id", filter=Q(state="completed")),
+                failed=Count("id", filter=Q(state="failed")),
+            )
         )
         total = int(totals["total"] or 0)
         completed = int(totals["completed"] or 0)
@@ -359,16 +367,12 @@ class WorkflowDetailSerializer(WorkflowListSerializer):
         )
         for step in WorkflowStep.objects.for_tenant(obj.tenant_id).filter(workflow=obj):
             key = ""
-            registry = action_registry
+            registry: Any = action_registry
             if step.step_type == "action":
                 key = str(step.config.get("handler", ""))
             elif step.step_type == "notification":
                 channel = str(step.config.get("channel", ""))
-                configured = (
-                    notification_handlers.get(channel)
-                    if isinstance(notification_handlers, Mapping)
-                    else None
-                )
+                configured = notification_handlers.get(channel) if isinstance(notification_handlers, Mapping) else None
                 key = str(configured.get("handler", "")) if isinstance(configured, Mapping) else ""
             elif step.step_type == "decision":
                 condition = step.config.get("condition", {})
@@ -389,8 +393,9 @@ class WorkflowDetailSerializer(WorkflowListSerializer):
             results.append({"key": key, "availability": availability, "reason": reason})
         return results
 
-    class Meta(WorkflowListSerializer.Meta):
-        fields = WorkflowListSerializer.Meta.fields + (
+    class Meta:
+        model = Workflow
+        fields = cast(tuple[str, ...], WorkflowListSerializer.Meta.fields) + (
             "required_context_schema",
             "transition_history",
             "created_by",
@@ -475,7 +480,7 @@ class WorkflowTaskSummarySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = WorkflowTask
-        fields = (
+        fields: Any = (
             "id",
             "instance_id",
             "workflow_id",
@@ -493,7 +498,7 @@ class WorkflowTaskSummarySerializer(serializers.ModelSerializer):
             "correlation_id",
             "allowed_actions",
         )
-        read_only_fields = fields
+        read_only_fields: Any = fields
 
 
 class WorkflowInstanceListSerializer(serializers.ModelSerializer):
@@ -580,14 +585,16 @@ class WorkflowInstanceDetailSerializer(WorkflowInstanceListSerializer):
         values: list[dict[str, Any]] = []
         for item in obj.transition_history:
             record = dict(item)
-            metadata = record.get("metadata") if isinstance(record.get("metadata"), Mapping) else {}
+            raw_metadata = record.get("metadata")
+            metadata = cast(Mapping[str, Any], raw_metadata) if isinstance(raw_metadata, Mapping) else {}
             record["actor_id"] = metadata.get("actor_id")
             record["correlation_id"] = metadata.get("correlation_id", obj.correlation_id)
             values.append(record)
         return values
 
-    class Meta(WorkflowInstanceListSerializer.Meta):
-        fields = WorkflowInstanceListSerializer.Meta.fields + (
+    class Meta:
+        model = WorkflowInstance
+        fields = cast(tuple[str, ...], WorkflowInstanceListSerializer.Meta.fields) + (
             "context_data",
             "result_data",
             "transition_history",
@@ -627,7 +634,9 @@ class WorkflowTaskListSerializer(serializers.ModelSerializer):
     def get_assignment_label(obj: WorkflowTask) -> str:
         if obj.assignee is not None:
             full_name = obj.assignee.get_full_name().strip() if hasattr(obj.assignee, "get_full_name") else ""
-            return full_name or str(obj.assignee.get_username() if hasattr(obj.assignee, "get_username") else obj.assignee)
+            return full_name or str(
+                obj.assignee.get_username() if hasattr(obj.assignee, "get_username") else obj.assignee
+            )
         return obj.assignment_key
 
     @staticmethod
@@ -649,7 +658,7 @@ class WorkflowTaskListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = WorkflowTask
-        fields = (
+        fields: tuple[str, ...] = (
             "id",
             "instance_id",
             "workflow_id",
@@ -670,11 +679,11 @@ class WorkflowTaskListSerializer(serializers.ModelSerializer):
             "completed_at",
             "allowed_actions",
         )
-        read_only_fields = fields
+        read_only_fields: tuple[str, ...] = fields
 
 
 class WorkflowTaskDetailSerializer(WorkflowTaskListSerializer):
-    completed_by = serializers.PrimaryKeyRelatedField(read_only=True)
+    completed_by: serializers.PrimaryKeyRelatedField[Any] = serializers.PrimaryKeyRelatedField(read_only=True)
     completed_by_name = serializers.SerializerMethodField()
     safe_context = serializers.SerializerMethodField()
     transition_history = serializers.SerializerMethodField()
@@ -692,21 +701,26 @@ class WorkflowTaskDetailSerializer(WorkflowTaskListSerializer):
         allowed = obj.step.config.get("display_context_keys", [])
         if not isinstance(allowed, list):
             return {}
-        return {key: obj.instance.context_data[key] for key in allowed if isinstance(key, str) and key in obj.instance.context_data}
+        return {
+            key: obj.instance.context_data[key]
+            for key in allowed
+            if isinstance(key, str) and key in obj.instance.context_data
+        }
 
     @staticmethod
     def get_transition_history(obj: WorkflowTask) -> list[dict[str, Any]]:
         values: list[dict[str, Any]] = []
         for item in obj.transition_history:
             record = dict(item)
-            metadata = record.get("metadata") if isinstance(record.get("metadata"), Mapping) else {}
+            raw_metadata = record.get("metadata")
+            metadata = cast(Mapping[str, Any], raw_metadata) if isinstance(raw_metadata, Mapping) else {}
             record["actor_id"] = metadata.get("actor_id")
             record["correlation_id"] = metadata.get("correlation_id", obj.correlation_id)
             values.append(record)
         return values
 
     class Meta(WorkflowTaskListSerializer.Meta):
-        fields = WorkflowTaskListSerializer.Meta.fields + (
+        fields = cast(tuple[str, ...], WorkflowTaskListSerializer.Meta.fields) + (
             "assignee",
             "assignee_role_id",
             "completed_by",

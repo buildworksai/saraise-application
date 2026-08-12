@@ -1,1 +1,1 @@
-export { CompanyHierarchyPage } from './workspaces';
+export { CompanyHierarchyPage } from "./workspaces";

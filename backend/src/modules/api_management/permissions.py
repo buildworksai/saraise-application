@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Final
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 from uuid import UUID
 
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import BaseAuthentication
+from rest_framework.permissions import BasePermission, IsAuthenticated
 
 from src.core.access.permissions import RequiresAccess
 from src.core.auth_utils import get_user_tenant_id
 from src.core.authentication import RelaxedCsrfSessionAuthentication
+
+if TYPE_CHECKING:
+    from rest_framework.permissions import _PermissionClass
 
 RESOURCE_CREATE: Final = "api_management.resource:create"
 RESOURCE_READ: Final = "api_management.resource:read"
@@ -49,11 +54,12 @@ SOD_ACTIONS: Final = (RESOURCE_CREATE, RESOURCE_DELETE, CONFIG_UPDATE, CONFIG_RO
 class ActionAccessMixin:
     """Map every action to a permission; missing metadata denies by default."""
 
-    authentication_classes = (RelaxedCsrfSessionAuthentication,)
-    permission_classes = (IsAuthenticated, RequiresAccess)
-    action_permissions: dict[str, str] = {}
+    authentication_classes: ClassVar[Sequence[type[BaseAuthentication]]] = (RelaxedCsrfSessionAuthentication,)
+    permission_classes: ClassVar[Sequence[_PermissionClass]] = (IsAuthenticated, RequiresAccess)
+    action_permissions: ClassVar[dict[str, str]] = {}
+    request: Any
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         raw_tenant = get_user_tenant_id(getattr(self.request, "user", None))
         try:
             self.request.tenant_id = UUID(str(raw_tenant)) if raw_tenant else None

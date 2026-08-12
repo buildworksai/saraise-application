@@ -9,9 +9,10 @@ SPDX-License-Identifier: Apache-2.0
 
 import base64
 import binascii
+import json
 import logging
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import ClassVar, cast
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
@@ -28,10 +29,10 @@ class EncryptionConfigurationError(ImproperlyConfigured):
 class EncryptionService:
     """Encrypt and decrypt text with an ordered Fernet key ring.
 
-    ``SARAISE_ENCRYPTION_KEYS`` is a comma-separated key ring whose first key
-    is the primary encryption key.  Remaining keys are decrypt-only rotation
-    keys.  ``SARAISE_ENCRYPTION_KEY`` remains supported as the single-key
-    configuration for existing deployments.
+    ``SARAISE_ENCRYPTION_KEYS`` is the authoritative key-id map configured in
+    Django settings.  A comma-separated key ring remains supported for existing
+    deployments, and ``SARAISE_ENCRYPTION_KEY`` remains supported as the
+    single-key configuration.
 
     Environment variables take precedence over same-named Django settings.
     This lets a secret manager inject settings while preserving a simple,
@@ -46,7 +47,7 @@ class EncryptionService:
     _cached_keys: ClassVar[tuple[bytes, ...] | None] = None
 
     @classmethod
-    def _read_configuration(cls) -> str | Sequence[str] | None:
+    def _read_configuration(cls) -> str | Sequence[str] | Mapping[str, str] | None:
         """Read the configured key material without applying mode-specific logic."""
         for name in (cls.KEY_RING_SETTING, cls.SINGLE_KEY_SETTING):
             environment_value = os.getenv(name)
@@ -56,9 +57,46 @@ class EncryptionService:
         for name in (cls.KEY_RING_SETTING, cls.SINGLE_KEY_SETTING):
             setting_value = getattr(settings, name, None)
             if setting_value is not None:
-                return cast(str | Sequence[str], setting_value)
+                return cast(str | Sequence[str] | Mapping[str, str], setting_value)
 
         return None
+
+    @classmethod
+    def _configured_key_id(cls) -> str:
+        """Return the active key id supplied by env or Django settings."""
+        return str(
+            os.getenv("SARAISE_ACTIVE_ENCRYPTION_KEY_ID")
+            or getattr(settings, "SARAISE_ACTIVE_ENCRYPTION_KEY_ID", "")
+            or ""
+        ).strip()
+
+    @classmethod
+    def _keys_from_mapping(cls, configured: Mapping[str, str]) -> list[str]:
+        """Return key-ring values with the active key first."""
+        if not configured:
+            return []
+        active_key_id = cls._configured_key_id()
+        if not active_key_id:
+            raise EncryptionConfigurationError("Active encryption key id is required for mapped key rings.")
+        if active_key_id not in configured:
+            raise EncryptionConfigurationError("Active encryption key id is not present in the encryption key ring.")
+        return [configured[active_key_id], *(value for key_id, value in configured.items() if key_id != active_key_id)]
+
+    @classmethod
+    def _keys_from_text(cls, configured: str) -> list[str]:
+        """Read legacy comma key rings and authoritative JSON key-id maps."""
+        stripped = configured.strip()
+        if stripped.startswith("{"):
+            try:
+                parsed = json.loads(stripped)
+            except json.JSONDecodeError as exc:
+                raise EncryptionConfigurationError("Encryption key map is not valid JSON.") from exc
+            if not isinstance(parsed, Mapping) or not all(
+                isinstance(key_id, str) and isinstance(key, str) for key_id, key in parsed.items()
+            ):
+                raise EncryptionConfigurationError("Encryption key map must map string key IDs to Fernet keys.")
+            return cls._keys_from_mapping(parsed)
+        return configured.split(",")
 
     @classmethod
     def _get_encryption_keys(cls) -> tuple[bytes, ...]:
@@ -75,12 +113,14 @@ class EncryptionService:
             )
 
         if isinstance(configured, str):
-            key_values = configured.split(",")
+            key_values = cls._keys_from_text(configured)
+        elif isinstance(configured, Mapping):
+            key_values = cls._keys_from_mapping(configured)
         elif isinstance(configured, Sequence):
             key_values = list(configured)
         else:
             raise EncryptionConfigurationError(
-                "Encryption key configuration must be a Fernet key or an ordered key sequence."
+                "Encryption key configuration must be a Fernet key, key-id map, or ordered key sequence."
             )
 
         normalized: list[bytes] = []

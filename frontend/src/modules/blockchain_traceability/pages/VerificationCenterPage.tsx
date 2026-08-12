@@ -1,1 +1,1 @@
-export { VerificationCenterPage } from './domain-pages';
+export { VerificationCenterPage } from "./domain-pages";

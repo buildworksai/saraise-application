@@ -5,18 +5,18 @@ export type ISODateTime = string;
 export type DecimalString = string;
 
 export type ProviderType =
-  | 'openai'
-  | 'anthropic'
-  | 'google'
-  | 'groq'
-  | 'mistral'
-  | 'huggingface'
-  | 'azure'
-  | 'custom'
+  | "openai"
+  | "anthropic"
+  | "google"
+  | "groq"
+  | "mistral"
+  | "huggingface"
+  | "azure"
+  | "custom"
   | (string & {});
 
-export type DeploymentStatus = 'active' | 'inactive' | 'error';
-export type CredentialStatus = 'unverified' | 'valid' | 'invalid';
+export type DeploymentStatus = "active" | "inactive" | "error";
+export type CredentialStatus = "unverified" | "valid" | "invalid";
 
 export interface AIProvider {
   id: UUID;
@@ -112,7 +112,9 @@ export interface AIModelDeploymentCreate {
   config: AIModelDeploymentConfig;
 }
 
-export type AIModelDeploymentUpdate = Partial<Pick<AIModelDeployment, 'credential' | 'deployment_name' | 'config'>>;
+export type AIModelDeploymentUpdate = Partial<
+  Pick<AIModelDeployment, "credential" | "deployment_name" | "config">
+>;
 
 export interface AIUsageLog {
   id: UUID;
@@ -130,7 +132,7 @@ export interface AIUsageLog {
 }
 
 export interface ModuleHealth {
-  status: 'healthy' | 'degraded' | 'unhealthy';
+  status: "healthy" | "degraded" | "unhealthy";
   module?: string;
   message?: string;
   timestamp?: ISODateTime;
@@ -230,13 +232,13 @@ export interface RuntimeConfigurationPreview {
 }
 
 export interface RuntimeConfigurationDocument {
-  module: 'ai_provider_configuration';
+  module: "ai_provider_configuration";
   environment: string;
   version: number;
   values: RuntimeConfigurationValues;
 }
 
-export const MODULE_API_PREFIX = '/api/v1/ai-provider-configuration';
+export const MODULE_API_PREFIX = "/api/v1/ai-provider-configuration";
 
 export const ENDPOINTS = {
   PROVIDERS: {
@@ -293,9 +295,9 @@ export const ENDPOINTS = {
 
 /** Application paths live beside the API contract to keep navigation consistent. */
 export const AI_PROVIDER_ROUTES = {
-  HOME: '/ai-provider-configuration',
-  CONNECT: '/ai-provider-configuration/create',
-  CONFIGURATION: '/ai-provider-configuration/runtime-configuration',
+  HOME: "/ai-provider-configuration",
+  CONNECT: "/ai-provider-configuration/create",
+  CONFIGURATION: "/ai-provider-configuration/runtime-configuration",
   PROVIDER: (id: UUID) => `/ai-provider-configuration/${id}` as const,
-  SECRETS: '/ai-providers/secrets',
+  SECRETS: "/ai-providers/secrets",
 } as const;

@@ -3,10 +3,11 @@
 import uuid
 
 import django.db.models.deletion
-import src.modules.metadata_modeling.models
 from django.conf import settings
 from django.db import migrations, models
 from django.db.models import Q
+
+import src.modules.metadata_modeling.models
 
 UNKNOWN_ACTOR_ID = uuid.UUID(int=0)
 

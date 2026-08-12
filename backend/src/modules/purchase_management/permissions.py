@@ -34,6 +34,7 @@ ACTION_ACCESS = {
     "award": "award",
     "withdraw": "submit",
     "dispatch": "dispatch",
+    "dispatch_order": "dispatch",
     "acknowledge": "acknowledge",
     "complete": "complete",
     "preview": "preview",

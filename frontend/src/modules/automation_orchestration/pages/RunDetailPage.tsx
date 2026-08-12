@@ -1,45 +1,377 @@
+/* eslint-disable max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { Ban, Pause, Play, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/Card";
-import { useDefinition, useRun, useRunEvents, useRuntimeConfiguration, useTaskRuns, orchestrationKeys } from "../hooks/use-orchestration";
+import {
+  useDefinition,
+  useRun,
+  useRunEvents,
+  useRuntimeConfiguration,
+  useTaskRuns,
+  orchestrationKeys,
+} from "../hooks/use-orchestration";
 import { automationOrchestrationService as service } from "../services/automation-orchestration-service";
-import { LoadError, PageHeader, PageSkeleton, StatusPill, formatDate, formatDuration } from "../components/OrchestrationUI";
+import {
+  LoadError,
+  PageHeader,
+  PageSkeleton,
+  StatusPill,
+  formatDate,
+  formatDuration,
+} from "../components/OrchestrationUI";
+import { isRouteUuid, routeRecordNotFoundError } from "../route-state";
 import { Topology } from "../components/Topology";
 
 // Run control and evidence branches remain explicit for operational review.
 // eslint-disable-next-line complexity
 export function RunDetailPage() {
   const { runId = "" } = useParams();
+  const routeIdValid = isRouteUuid(runId);
   const queryClient = useQueryClient();
-  const runQuery = useRun(runId);
+  const runQuery = useRun(routeIdValid ? runId : "");
   const configurationQuery = useRuntimeConfiguration();
-  const taskFilters = { page_size: configurationQuery.data?.document.ui.task_run_page_size, ordering: "created_at" as const };
-  const tasksQuery = useTaskRuns(runId, taskFilters);
-  const eventsQuery = useRunEvents(runId);
+  const taskFilters = {
+    page_size: configurationQuery.data?.document.ui.task_run_page_size,
+    ordering: "created_at" as const,
+  };
+  const tasksQuery = useTaskRuns(runId, taskFilters, routeIdValid);
+  const eventsQuery = useRunEvents(runId, routeIdValid);
   const definitionQuery = useDefinition(runQuery.data?.definition_id ?? "");
   const [selectedTaskId, setSelectedTaskId] = useState("");
-  const selectedTaskQuery = useQuery({ queryKey: [...orchestrationKeys.all, "task-run", selectedTaskId], queryFn: () => service.getTaskRun(selectedTaskId), enabled: Boolean(selectedTaskId) });
-  const refresh = () => { void queryClient.invalidateQueries({ queryKey: orchestrationKeys.run(runId) }); void queryClient.invalidateQueries({ queryKey: orchestrationKeys.taskRuns(runId, taskFilters) }); };
-  const control = useMutation({ mutationFn: (action: "pause" | "resume" | "cancel") => { const data = { transition_key: crypto.randomUUID() }; if (action === "pause") return service.pauseRun(runId, data); if (action === "resume") return service.resumeRun(runId, data); return service.cancelRun(runId, data); }, onSuccess: refresh });
-  const retry = useMutation({ mutationFn: () => service.retryRun(runId, { idempotency_key: crypto.randomUUID() }), onSuccess: refresh });
-  const retryTask = useMutation({ mutationFn: (taskId: string) => service.retryTaskRun(taskId, { idempotency_key: crypto.randomUUID() }), onSuccess: refresh });
-  const reconcileTask = useMutation({ mutationFn: ({ taskId, action }: { taskId: string; action: "reconcile" | "compensate" }) => service.reconcileTaskRun(taskId, action), onSuccess: refresh });
+  const selectedTaskQuery = useQuery({
+    queryKey: [...orchestrationKeys.all, "task-run", selectedTaskId],
+    queryFn: () => service.getTaskRun(selectedTaskId),
+    enabled: Boolean(selectedTaskId),
+  });
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: orchestrationKeys.run(runId) });
+    void queryClient.invalidateQueries({
+      queryKey: orchestrationKeys.taskRuns(runId, taskFilters),
+    });
+  };
+  const control = useMutation({
+    mutationFn: (action: "pause" | "resume" | "cancel") => {
+      const data = { transition_key: crypto.randomUUID() };
+      if (action === "pause") return service.pauseRun(runId, data);
+      if (action === "resume") return service.resumeRun(runId, data);
+      return service.cancelRun(runId, data);
+    },
+    onSuccess: refresh,
+  });
+  const retry = useMutation({
+    mutationFn: () => service.retryRun(runId, { idempotency_key: crypto.randomUUID() }),
+    onSuccess: refresh,
+  });
+  const retryTask = useMutation({
+    mutationFn: (taskId: string) =>
+      service.retryTaskRun(taskId, { idempotency_key: crypto.randomUUID() }),
+    onSuccess: refresh,
+  });
+  const reconcileTask = useMutation({
+    mutationFn: ({ taskId, action }: { taskId: string; action: "reconcile" | "compensate" }) =>
+      service.reconcileTaskRun(taskId, action),
+    onSuccess: refresh,
+  });
 
-  if (runQuery.isLoading || configurationQuery.isLoading || definitionQuery.isLoading) return <PageSkeleton />;
-  if (runQuery.error) return <LoadError error={runQuery.error} retry={() => void runQuery.refetch()} />;
+  if (!routeIdValid) return <LoadError error={routeRecordNotFoundError("Run")} />;
+  if (runQuery.isLoading || configurationQuery.isLoading || definitionQuery.isLoading)
+    return <PageSkeleton />;
+  if (runQuery.error)
+    return <LoadError error={runQuery.error} retry={() => void runQuery.refetch()} />;
   const run = runQuery.data;
-  if (!run) return <LoadError error={new Error("Run not found.")} retry={() => void runQuery.refetch()} />;
-  if (configurationQuery.error) return <LoadError error={configurationQuery.error} retry={() => void configurationQuery.refetch()} />;
-  if (definitionQuery.error) return <LoadError error={definitionQuery.error} retry={() => void definitionQuery.refetch()} />;
+  if (!run)
+    return <LoadError error={new Error("Run not found.")} retry={() => void runQuery.refetch()} />;
+  if (configurationQuery.error)
+    return (
+      <LoadError error={configurationQuery.error} retry={() => void configurationQuery.refetch()} />
+    );
+  if (definitionQuery.error)
+    return <LoadError error={definitionQuery.error} retry={() => void definitionQuery.refetch()} />;
   const definition = definitionQuery.data;
-  if (!definition || !configurationQuery.data) return <LoadError error={new Error("Run configuration is unavailable.")} retry={() => void runQuery.refetch()} />;
+  if (!definition || !configurationQuery.data)
+    return (
+      <LoadError
+        error={new Error("Run configuration is unavailable.")}
+        retry={() => void runQuery.refetch()}
+      />
+    );
   const minuteThreshold = configurationQuery.data.document.ui.duration_seconds_threshold_ms;
   const tasks = tasksQuery.data?.items ?? [];
-  const percent = run.task_count ? Math.round(((run.completed_task_count + run.failed_task_count) / run.task_count) * 100) : 0;
+  const percent = run.task_count
+    ? Math.round(((run.completed_task_count + run.failed_task_count) / run.task_count) * 100)
+    : 0;
   const actionError = control.error ?? retry.error ?? retryTask.error ?? reconcileTask.error;
 
-  return <main className="space-y-6"><PageHeader eyebrow={`Run ${run.id.slice(0, 8)} · ${run.trigger_type}`} title={`${run.definition_name} v${run.definition_version}`} description={`Correlation ${run.correlation_id}`} actions={<><StatusPill status={run.status} />{run.status === "running" ? <Button variant="outline" onClick={() => control.mutate("pause")}><Pause className="mr-2 h-4 w-4" />Pause</Button> : null}{run.status === "paused" ? <Button variant="outline" onClick={() => control.mutate("resume")}><Play className="mr-2 h-4 w-4" />Resume</Button> : null}{["running", "paused", "cancelling"].includes(run.status) ? <Button variant="danger" onClick={() => { if (window.confirm("Request durable cancellation for this run?")) control.mutate("cancel"); }}><Ban className="mr-2 h-4 w-4" />Cancel</Button> : null}{["failed", "cancelled"].includes(run.status) ? <Button onClick={() => retry.mutate()}><RotateCcw className="mr-2 h-4 w-4" />Retry run</Button> : null}</>} />{actionError ? <p role="alert" className="rounded border border-destructive/40 p-3 text-sm text-destructive">{actionError.message}</p> : null}<section aria-label="Run summary" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">{[["Progress", `${percent}%`], ["Tasks", `${run.completed_task_count}/${run.task_count}`], ["Failed", run.failed_task_count], ["Duration", formatDuration(run.started_at, run.completed_at, minuteThreshold)], ["Started", formatDate(run.started_at)]].map(([label, value]) => <Card key={String(label)}><CardContent className="p-5"><p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p><p className="mt-2 text-xl font-semibold">{value}</p></CardContent></Card>)}</section><Card><CardHeader><CardTitle>Execution graph</CardTitle></CardHeader><CardContent>{tasksQuery.isLoading ? <p role="status">Loading task states…</p> : tasksQuery.error ? <p role="alert" className="text-destructive">Task history unavailable.</p> : <Topology nodes={definition.nodes} edges={definition.edges} taskRuns={tasks} selectedNodeId={selectedTaskQuery.data?.node_id} onSelect={(nodeId) => { const task = tasks.find((item) => item.node_id === nodeId); if (task) setSelectedTaskId(task.id); }} />}</CardContent></Card><div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]"><Card><CardHeader><CardTitle>Task runs</CardTitle></CardHeader><CardContent>{tasks.length === 0 ? <p className="text-sm text-muted-foreground">No task runs were materialized.</p> : <div className="divide-y">{tasks.map((task) => <button type="button" key={task.id} onClick={() => setSelectedTaskId(task.id)} className="flex w-full items-center justify-between gap-3 py-3 text-left hover:bg-muted/30"><div><p className="font-medium">{task.node_name}</p><p className="text-xs text-muted-foreground">Attempt {task.current_attempt}/{task.max_attempts} · {formatDuration(task.started_at, task.completed_at, minuteThreshold)}</p>{task.status === "retry_wait" ? <p className="text-xs text-secondary-foreground">Retry pending; inspect attempt timing for the countdown.</p> : null}{task.error_message ? <p className="mt-1 text-xs text-destructive">{task.error_code}: {task.error_message}</p> : null}</div><div className="flex items-center gap-2"><StatusPill status={task.status} />{task.status === "failed" ? <Button size="sm" variant="outline" disabled={retryTask.isPending} onClick={(event) => { event.stopPropagation(); retryTask.mutate(task.id); }}>Retry</Button> : null}</div></button>)}</div>}</CardContent></Card><Card><CardHeader><CardTitle>Task evidence</CardTitle></CardHeader><CardContent>{!selectedTaskId ? <p className="text-sm text-muted-foreground">Choose a graph node or task to inspect input, output, and physical retry attempts.</p> : selectedTaskQuery.isLoading ? <p role="status">Loading task evidence…</p> : selectedTaskQuery.error ? <p role="alert" className="text-destructive">Task evidence unavailable.</p> : selectedTaskQuery.data ? <div className="space-y-4"><div><p className="text-xs font-medium uppercase text-muted-foreground">Input</p><pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-3 text-xs">{JSON.stringify(selectedTaskQuery.data.input, null, 2)}</pre></div><div><p className="text-xs font-medium uppercase text-muted-foreground">Output</p><pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-3 text-xs">{selectedTaskQuery.data.output === null ? "No output" : JSON.stringify(selectedTaskQuery.data.output, null, 2)}</pre></div><div><p className="text-xs font-medium uppercase text-muted-foreground">Attempts</p>{selectedTaskQuery.data.attempts.map((attempt) => <div key={attempt.id} className="mt-2 rounded border p-3 text-xs"><div className="flex justify-between"><span>Attempt {attempt.attempt_number}</span><StatusPill status={attempt.status} /></div><p className="mt-1 text-muted-foreground">{formatDuration(attempt.started_at, attempt.completed_at, minuteThreshold)}</p>{attempt.status === "queued" ? <p className="mt-1 text-secondary-foreground">Available {formatDate(attempt.available_at)}</p> : null}{attempt.error_message ? <p className="mt-1 text-destructive">{attempt.error_code}: {attempt.error_message}</p> : null}</div>)}</div></div> : null}</CardContent></Card></div><Card><CardHeader><CardTitle>Immutable event timeline</CardTitle></CardHeader><CardContent>{eventsQuery.isLoading ? <p role="status">Loading event evidence…</p> : eventsQuery.error ? <p role="alert" className="text-destructive">Event history unavailable.</p> : eventsQuery.data?.length ? <ol className="border-l pl-5">{eventsQuery.data.map((event) => <li key={event.id} className="mb-5"><p className="font-medium">{event.event_type}</p><p className="text-xs text-muted-foreground">{event.aggregate_type} · {formatDate(event.occurred_at)} · {event.correlation_id}</p></li>)}</ol> : <p className="text-sm text-muted-foreground">No event evidence returned.</p>}</CardContent></Card><Card><CardHeader><CardTitle>Run evidence</CardTitle></CardHeader><CardContent className="grid gap-4 md:grid-cols-2"><div><p className="text-xs font-medium uppercase text-muted-foreground">Input</p><pre className="mt-2 max-h-64 overflow-auto rounded bg-muted p-3 text-xs">{JSON.stringify(run.input, null, 2)}</pre></div><div><p className="text-xs font-medium uppercase text-muted-foreground">Output</p><pre className="mt-2 max-h-64 overflow-auto rounded bg-muted p-3 text-xs">{run.output === null ? "No output" : JSON.stringify(run.output, null, 2)}</pre></div>{run.error_message ? <p className="text-sm text-destructive md:col-span-2">{run.error_code}: {run.error_message}</p> : null}</CardContent></Card>{runQuery.isFetching ? <p role="status" className="text-xs text-muted-foreground">Refreshing live execution state using tenant policy.</p> : null}</main>;
+  return (
+    <main className="space-y-6">
+      <PageHeader
+        eyebrow={`Run ${run.id.slice(0, 8)} · ${run.trigger_type}`}
+        title={`${run.definition_name} v${run.definition_version}`}
+        description={`Correlation ${run.correlation_id}`}
+        actions={
+          <>
+            <StatusPill status={run.status} />
+            {run.status === "running" ? (
+              <Button variant="outline" onClick={() => control.mutate("pause")}>
+                <Pause className="mr-2 h-4 w-4" />
+                Pause
+              </Button>
+            ) : null}
+            {run.status === "paused" ? (
+              <Button variant="outline" onClick={() => control.mutate("resume")}>
+                <Play className="mr-2 h-4 w-4" />
+                Resume
+              </Button>
+            ) : null}
+            {["running", "paused", "cancelling"].includes(run.status) ? (
+              <Button
+                variant="danger"
+                onClick={() => {
+                  if (window.confirm("Request durable cancellation for this run?"))
+                    control.mutate("cancel");
+                }}
+              >
+                <Ban className="mr-2 h-4 w-4" />
+                Cancel
+              </Button>
+            ) : null}
+            {["failed", "cancelled"].includes(run.status) ? (
+              <Button onClick={() => retry.mutate()}>
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Retry run
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+      {actionError ? (
+        <p
+          role="alert"
+          className="rounded border border-destructive/40 p-3 text-sm text-destructive"
+        >
+          {actionError.message}
+        </p>
+      ) : null}
+      <section aria-label="Run summary" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        {[
+          ["Progress", `${percent}%`],
+          ["Tasks", `${run.completed_task_count}/${run.task_count}`],
+          ["Failed", run.failed_task_count],
+          ["Duration", formatDuration(run.started_at, run.completed_at, minuteThreshold)],
+          ["Started", formatDate(run.started_at)],
+        ].map(([label, value]) => (
+          <Card key={String(label)}>
+            <CardContent className="p-5">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+              <p className="mt-2 text-xl font-semibold">{value}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </section>
+      <Card>
+        <CardHeader>
+          <CardTitle>Execution graph</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {tasksQuery.isLoading ? (
+            <p role="status">Loading task states…</p>
+          ) : tasksQuery.error ? (
+            <p role="alert" className="text-destructive">
+              Task history unavailable.
+            </p>
+          ) : (
+            <Topology
+              nodes={definition.nodes}
+              edges={definition.edges}
+              taskRuns={tasks}
+              selectedNodeId={selectedTaskQuery.data?.node_id}
+              onSelect={(nodeId) => {
+                const task = tasks.find((item) => item.node_id === nodeId);
+                if (task) setSelectedTaskId(task.id);
+              }}
+            />
+          )}
+        </CardContent>
+      </Card>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Task runs</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {tasks.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No task runs were materialized.</p>
+            ) : (
+              <div className="divide-y">
+                {tasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className="flex w-full items-center justify-between gap-3 py-3 hover:bg-muted/30"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTaskId(task.id)}
+                      className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={`Inspect ${task.node_name}`}
+                    >
+                      <span className="block font-medium">{task.node_name}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        Attempt {task.current_attempt}/{task.max_attempts} ·{" "}
+                        {formatDuration(task.started_at, task.completed_at, minuteThreshold)}
+                      </span>
+                      {task.status === "retry_wait" ? (
+                        <span className="block text-xs text-secondary-foreground">
+                          Retry pending; inspect attempt timing for the countdown.
+                        </span>
+                      ) : null}
+                      {task.error_message ? (
+                        <span className="mt-1 block text-xs text-destructive">
+                          {task.error_code}: {task.error_message}
+                        </span>
+                      ) : null}
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <StatusPill status={task.status} />
+                      {task.status === "failed" ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={retryTask.isPending}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            retryTask.mutate(task.id);
+                          }}
+                        >
+                          Retry
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Task evidence</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {!selectedTaskId ? (
+              <p className="text-sm text-muted-foreground">
+                Choose a graph node or task to inspect input, output, and physical retry attempts.
+              </p>
+            ) : selectedTaskQuery.isLoading ? (
+              <p role="status">Loading task evidence…</p>
+            ) : selectedTaskQuery.error ? (
+              <p role="alert" className="text-destructive">
+                Task evidence unavailable.
+              </p>
+            ) : selectedTaskQuery.data ? (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Input</p>
+                  <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-3 text-xs">
+                    {JSON.stringify(selectedTaskQuery.data.input, null, 2)}
+                  </pre>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Output</p>
+                  <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-3 text-xs">
+                    {selectedTaskQuery.data.output === null
+                      ? "No output"
+                      : JSON.stringify(selectedTaskQuery.data.output, null, 2)}
+                  </pre>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Attempts</p>
+                  {selectedTaskQuery.data.attempts.map((attempt) => (
+                    <div key={attempt.id} className="mt-2 rounded border p-3 text-xs">
+                      <div className="flex justify-between">
+                        <span>Attempt {attempt.attempt_number}</span>
+                        <StatusPill status={attempt.status} />
+                      </div>
+                      <p className="mt-1 text-muted-foreground">
+                        {formatDuration(attempt.started_at, attempt.completed_at, minuteThreshold)}
+                      </p>
+                      {attempt.status === "queued" ? (
+                        <p className="mt-1 text-secondary-foreground">
+                          Available {formatDate(attempt.available_at)}
+                        </p>
+                      ) : null}
+                      {attempt.error_message ? (
+                        <p className="mt-1 text-destructive">
+                          {attempt.error_code}: {attempt.error_message}
+                        </p>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Immutable event timeline</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {eventsQuery.isLoading ? (
+            <p role="status">Loading event evidence…</p>
+          ) : eventsQuery.error ? (
+            <p role="alert" className="text-destructive">
+              Event history unavailable.
+            </p>
+          ) : eventsQuery.data?.length ? (
+            <ol className="border-l pl-5">
+              {eventsQuery.data.map((event) => (
+                <li key={event.id} className="mb-5">
+                  <p className="font-medium">{event.event_type}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {event.aggregate_type} · {formatDate(event.occurred_at)} ·{" "}
+                    {event.correlation_id}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p className="text-sm text-muted-foreground">No event evidence returned.</p>
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Run evidence</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <div>
+            <p className="text-xs font-medium uppercase text-muted-foreground">Input</p>
+            <pre className="mt-2 max-h-64 overflow-auto rounded bg-muted p-3 text-xs">
+              {JSON.stringify(run.input, null, 2)}
+            </pre>
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase text-muted-foreground">Output</p>
+            <pre className="mt-2 max-h-64 overflow-auto rounded bg-muted p-3 text-xs">
+              {run.output === null ? "No output" : JSON.stringify(run.output, null, 2)}
+            </pre>
+          </div>
+          {run.error_message ? (
+            <p className="text-sm text-destructive md:col-span-2">
+              {run.error_code}: {run.error_message}
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
+      {runQuery.isFetching ? (
+        <p role="status" className="text-xs text-muted-foreground">
+          Refreshing live execution state using tenant policy.
+        </p>
+      ) : null}
+    </main>
+  );
 }

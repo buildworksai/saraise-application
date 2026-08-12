@@ -10,8 +10,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from .harness import EvaluationStatus, MetricResult, TestCase
 from ..services import DEFAULT_CONFIGURATION
+from .harness import EvaluationStatus, MetricResult, TestCase
 
 
 class CorrectnessMetric:
@@ -60,9 +60,11 @@ class CorrectnessMetric:
         status = (
             EvaluationStatus.PASS
             if score >= float(self.configuration["quality_pass_threshold"])
-            else EvaluationStatus.WARN
-            if score >= float(self.configuration["quality_warn_threshold"])
-            else EvaluationStatus.FAIL
+            else (
+                EvaluationStatus.WARN
+                if score >= float(self.configuration["quality_warn_threshold"])
+                else EvaluationStatus.FAIL
+            )
         )
 
         return MetricResult(
@@ -113,9 +115,11 @@ class HallucinationMetric:
         status = (
             EvaluationStatus.PASS
             if score >= float(self.configuration["hallucination_pass_threshold"])
-            else EvaluationStatus.WARN
-            if score >= float(self.configuration["hallucination_warn_threshold"])
-            else EvaluationStatus.FAIL
+            else (
+                EvaluationStatus.WARN
+                if score >= float(self.configuration["hallucination_warn_threshold"])
+                else EvaluationStatus.FAIL
+            )
         )
 
         details = ""
@@ -196,9 +200,11 @@ class TokenEfficiencyMetric:
         status = (
             EvaluationStatus.PASS
             if efficiency >= float(self.configuration["efficiency_pass_threshold"])
-            else EvaluationStatus.WARN
-            if efficiency >= float(self.configuration["efficiency_warn_threshold"])
-            else EvaluationStatus.FAIL
+            else (
+                EvaluationStatus.WARN
+                if efficiency >= float(self.configuration["efficiency_warn_threshold"])
+                else EvaluationStatus.FAIL
+            )
         )
 
         return MetricResult(

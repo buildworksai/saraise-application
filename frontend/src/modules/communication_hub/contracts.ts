@@ -7,66 +7,108 @@
  * Read this file FIRST when working on this module.
  * All types and endpoints for Communication Hub are defined here.
  *
- * TODO: This is a scaffold. API endpoints and types must be defined when:
- * 1. Backend API is implemented
- * 2. OpenAPI schema is generated
- * 3. Types are available in @/types/api
- *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { components } from '@/types/api';
+export type ChannelType = string;
+export type MessageType = string;
+export type MessageStatus = string;
 
-// =============================================================================
-// EXPORTED TYPES - Import these in your components
-// =============================================================================
+export interface CommunicationChannel {
+  readonly id: string;
+  readonly tenant_id: string;
+  readonly channel_code: string;
+  readonly channel_name: string;
+  readonly channel_type: ChannelType;
+  readonly is_active: boolean;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
 
-// TODO: Define types when backend API is implemented
-// Example:
-// export type Entity = components['schemas']['Entity'];
-// export type EntityCreate = components['schemas']['EntityCreate'];
-// export type EntityUpdate = components['schemas']['PatchedEntityRequest'];
+export interface CommunicationMessage {
+  readonly id: string;
+  readonly tenant_id: string;
+  readonly channel: string;
+  readonly channel_code: string;
+  readonly channel_name: string;
+  readonly sender_id: string;
+  readonly recipient_id: string | null;
+  readonly subject: string;
+  readonly body: string;
+  readonly message_type: MessageType;
+  readonly status: MessageStatus;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
 
-// =============================================================================
-// ENDPOINT REGISTRY - Use these for all API calls
-// =============================================================================
+export interface ListEnvelope<T> {
+  readonly count?: number;
+  readonly next?: string | null;
+  readonly previous?: string | null;
+  readonly results?: readonly T[];
+}
 
-/**
- * Communication Hub API Endpoints
- *
- * TODO: Define actual endpoints when backend API is implemented.
- * All endpoints should be prefixed with /api/v1/communication-hub/
- *
- * Usage:
- * ```typescript
- * import { ENDPOINTS } from './contracts';
- * apiClient.get(ENDPOINTS.ENTITIES.LIST);
- * ```
- */
-export const MODULE_API_PREFIX = '/api/v1/communication-hub';
+export const MODULE_API_PREFIX = "/api/v1/communication-hub";
 
 export const ENDPOINTS = {
-  // TODO: Define actual endpoints when backend API is implemented
-  // Example structure:
-  // ENTITIES: {
-  //   LIST: `${MODULE_API_PREFIX}/entities/`,
-  //   DETAIL: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   CREATE: `${MODULE_API_PREFIX}/entities/`,
-  //   UPDATE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  //   DELETE: (id: string) => `${MODULE_API_PREFIX}/entities/${id}/`,
-  // },
+  CHANNELS: {
+    LIST: `${MODULE_API_PREFIX}/channels/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/channels/${id}/`,
+  },
+  MESSAGES: {
+    LIST: `${MODULE_API_PREFIX}/messages/`,
+    DETAIL: (id: string) => `${MODULE_API_PREFIX}/messages/${id}/`,
+  },
+  HEALTH: `${MODULE_API_PREFIX}/health/`,
 } as const;
 
-// =============================================================================
-// TYPE GUARDS - Use for runtime type checking
-// =============================================================================
+export const ROUTES = {
+  CHANNELS: "/communication-hub",
+  MESSAGES: "/communication-hub/messages",
+  TEMPLATES: "/communication-hub/templates",
+  CONFIGURATION: "/communication-hub/configuration",
+} as const;
 
-// TODO: Add type guards when types are defined
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
 
-// =============================================================================
-// EXAMPLES - Reference for agents writing new code
-// =============================================================================
+export function isCommunicationChannel(value: unknown): value is CommunicationChannel {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.tenant_id === "string" &&
+    typeof value.channel_code === "string" &&
+    typeof value.channel_name === "string" &&
+    typeof value.channel_type === "string" &&
+    typeof value.is_active === "boolean" &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string"
+  );
+}
+
+export function isCommunicationMessage(value: unknown): value is CommunicationMessage {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.tenant_id === "string" &&
+    typeof value.channel === "string" &&
+    typeof value.channel_code === "string" &&
+    typeof value.channel_name === "string" &&
+    typeof value.sender_id === "string" &&
+    (typeof value.recipient_id === "string" || value.recipient_id === null) &&
+    typeof value.subject === "string" &&
+    typeof value.body === "string" &&
+    typeof value.message_type === "string" &&
+    typeof value.status === "string" &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string"
+  );
+}
 
 /**
- * TODO: Add usage examples when backend API is implemented
+ * Backend limitation, July 2026:
+ * communication_hub exposes channels, messages, and health only. Templates and
+ * configuration routes render governed unavailable pages until matching
+ * backend endpoints are implemented.
  */

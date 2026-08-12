@@ -12,12 +12,7 @@ from rest_framework import status
 from src.core.access.decision import AccessDecision, AccessDecisionPipeline, AccessReasonCode
 
 from ..models import BDRConfiguration, BDRConfigurationVersion
-from ..services import (
-    BDRDomainError,
-    ConfigurationService,
-    ResourceNotFound,
-    get_configuration,
-)
+from ..services import BDRDomainError, ConfigurationService, ResourceNotFound, get_configuration
 
 pytest_plugins = ["src.core.testing"]
 
@@ -95,8 +90,16 @@ def test_preview_validates_and_never_mutates() -> None:
     "mutate",
     [
         lambda document: document["steps"].update({"min_timeout_seconds": 500, "default_timeout_seconds": 300}),
+        lambda document: document["steps"].update({"default_retry_limit": 3, "max_retry_limit": 2}),
+        lambda document: document["steps"].update({"default_on_failure": "ignore"}),
+        lambda document: document["runbooks"].update({"objective_min_seconds": 7200, "objective_max_seconds": 3600}),
         lambda document: document["reports"].update({"default_bucket": "year"}),
         lambda document: document["providers"].update({"storage_adapter_key": ""}),
+        lambda document: document["providers"].update({"local_filesystem_restore_modes": ["full", "full"]}),
+        lambda document: document["resilience"].update({"initial_backoff_seconds": 60.0, "max_backoff_seconds": 30.0}),
+        lambda document: document["health"].update({"probe_timeout_seconds": 30.0, "probe_timeout_max_seconds": 10.0}),
+        lambda document: document["presentation"].update({"duration_minute_seconds": 3600}),
+        lambda document: document["reports"].update({"compliant_percent": 101.0}),
         lambda document: document["quota_costs"].update({"restore_execution": 0}),
     ],
 )
@@ -105,7 +108,9 @@ def test_invalid_configuration_is_unsavable(mutate) -> None:
     document = _document(tenant_id)
     mutate(document)
 
-    with pytest.raises(BDRDomainError, match="configuration|limits|allowed|empty|positive"):
+    with pytest.raises(
+        BDRDomainError, match="configuration|limits|allowed|empty|positive|invalid|inconsistent|between"
+    ):
         ConfigurationService().update(
             tenant_id,
             uuid.uuid4(),
@@ -115,6 +120,61 @@ def test_invalid_configuration_is_unsavable(mutate) -> None:
 
     assert not BDRConfiguration.objects.for_tenant(tenant_id).exists()
     assert not BDRConfigurationVersion.objects.for_tenant(tenant_id).exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "mutate,expected",
+    [
+        (
+            lambda document: document["workflows"]["recovery_point"].update(
+                {"terminal_states": document["workflows"]["recovery_point"]["terminal_states"] + ["missing"]}
+            ),
+            "unknown terminal states",
+        ),
+        (
+            lambda document: document["workflows"]["recovery_point"]["transitions"].append(
+                {"command": "begin_verification", "from_state": "discovered", "to_state": "available"}
+            ),
+            "duplicate command edge",
+        ),
+        (
+            lambda document: document["workflows"]["recovery_point"]["transitions"].append(
+                {"command": "bad", "from_state": "deleted", "to_state": "available"}
+            ),
+            "transitions from a terminal state",
+        ),
+        (
+            lambda document: document["workflows"]["recovery_point"].update({"retention_guard_commands": ["missing"]}),
+            "invalid guard commands",
+        ),
+        (
+            lambda document: document["workflows"]["restore_run"].update({"retention_guard_commands": ["execute"]}),
+            "invalid guard commands",
+        ),
+        (
+            lambda document: document["workflows"]["restore_run"].update(
+                {"retention_guard_commands": ["begin_validation"]}
+            ),
+            "cannot use retention guards",
+        ),
+        (
+            lambda document: document["workflows"]["restore_run"]["transitions"].append(
+                {"command": "bad", "from_state": "missing", "to_state": "succeeded"}
+            ),
+            "unknown state",
+        ),
+    ],
+)
+def test_invalid_workflow_configuration_is_unsavable(mutate, expected: str) -> None:
+    tenant_id = uuid.uuid4()
+    document = _document(tenant_id)
+    mutate(document)
+
+    with pytest.raises(BDRDomainError, match=expected):
+        ConfigurationService().update(tenant_id, uuid.uuid4(), uuid.uuid4(), document)
+
+    assert not BDRConfiguration.objects.for_tenant(tenant_id).exists()
 
 
 @pytest.mark.django_db

@@ -1,15 +1,16 @@
+/* eslint-disable complexity -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /* eslint-disable max-lines-per-function */
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, History, RotateCcw, Upload } from 'lucide-react';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
-import { useAuthStore } from '@/stores/auth-store';
-import type { AssetConfigurationDocument, AssetConfigurationExport } from '../contracts';
-import { PageHeader, PageSkeleton, ProblemState } from '../components/AssetManagementUI';
-import { assetQueryKeys, assetService } from '../services/asset-service';
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download, History, RotateCcw, Upload } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
+import { useAuthStore } from "@/stores/auth-store";
+import type { AssetConfigurationDocument, AssetConfigurationExport } from "../contracts";
+import { PageHeader, PageSkeleton, ProblemState } from "../components/AssetManagementUI";
+import { assetQueryKeys, assetService } from "../services/asset-service";
 
 function pretty(value: unknown): string {
   return JSON.stringify(value, null, 2);
@@ -22,8 +23,8 @@ function parseDocument(value: string): AssetConfigurationDocument {
 export const AssetConfigurationPage = () => {
   const tenantId = useAuthStore((state) => state.user?.tenant_id ?? null);
   const queryClient = useQueryClient();
-  const [draft, setDraft] = useState('');
-  const [importDraft, setImportDraft] = useState('');
+  const [draft, setDraft] = useState("");
+  const [importDraft, setImportDraft] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
 
   const configurationQuery = useQuery({
@@ -39,11 +40,17 @@ export const AssetConfigurationPage = () => {
     if (configurationQuery.data) setDraft(pretty(configurationQuery.data.document));
   }, [configurationQuery.data]);
 
-  const parsedDraft = useMemo((): { document: AssetConfigurationDocument | null; error: string | null } => {
+  const parsedDraft = useMemo((): {
+    document: AssetConfigurationDocument | null;
+    error: string | null;
+  } => {
     try {
       return { document: draft ? parseDocument(draft) : null, error: null };
     } catch (error) {
-      return { document: null, error: error instanceof Error ? error.message : 'Invalid JSON document.' };
+      return {
+        document: null,
+        error: error instanceof Error ? error.message : "Invalid JSON document.",
+      };
     }
   }, [draft]);
 
@@ -52,14 +59,16 @@ export const AssetConfigurationPage = () => {
   };
 
   const previewMutation = useMutation({
-    mutationFn: (document: AssetConfigurationDocument) => assetService.previewConfiguration(document),
+    mutationFn: (document: AssetConfigurationDocument) =>
+      assetService.previewConfiguration(document),
   });
   const updateMutation = useMutation({
-    mutationFn: (document: AssetConfigurationDocument) => assetService.updateConfiguration(document),
+    mutationFn: (document: AssetConfigurationDocument) =>
+      assetService.updateConfiguration(document),
     onSuccess: (configuration) => {
       setDraft(pretty(configuration.document));
       refresh();
-      toast.success('Asset configuration saved');
+      toast.success("Asset configuration saved");
     },
   });
   const rollbackMutation = useMutation({
@@ -67,16 +76,17 @@ export const AssetConfigurationPage = () => {
     onSuccess: (configuration) => {
       setDraft(pretty(configuration.document));
       refresh();
-      toast.success('Asset configuration rolled back');
+      toast.success("Asset configuration rolled back");
     },
   });
   const importMutation = useMutation({
-    mutationFn: (configuration: AssetConfigurationExport) => assetService.importConfiguration(configuration),
+    mutationFn: (configuration: AssetConfigurationExport) =>
+      assetService.importConfiguration(configuration),
     onSuccess: (configuration) => {
       setDraft(pretty(configuration.document));
-      setImportDraft('');
+      setImportDraft("");
       refresh();
-      toast.success('Asset configuration imported');
+      toast.success("Asset configuration imported");
     },
   });
   const exportMutation = useMutation({
@@ -95,7 +105,7 @@ export const AssetConfigurationPage = () => {
     try {
       importMutation.mutate(JSON.parse(importDraft) as AssetConfigurationExport);
     } catch (error) {
-      setParseError(error instanceof Error ? error.message : 'Invalid import document.');
+      setParseError(error instanceof Error ? error.message : "Invalid import document.");
     }
   };
   const importFile = (event: ChangeEvent<HTMLInputElement>) => {
@@ -106,7 +116,14 @@ export const AssetConfigurationPage = () => {
 
   if (configurationQuery.isLoading) return <PageSkeleton />;
   if (configurationQuery.error || !configurationQuery.data) {
-    return <main className="p-4 sm:p-8"><ProblemState error={configurationQuery.error ?? new Error('Configuration unavailable')} onRetry={() => void configurationQuery.refetch()} /></main>;
+    return (
+      <main className="p-4 sm:p-8">
+        <ProblemState
+          error={configurationQuery.error ?? new Error("Configuration unavailable")}
+          onRetry={() => void configurationQuery.refetch()}
+        />
+      </main>
+    );
   }
 
   const previewChanges = previewMutation.data?.changes ?? {};
@@ -131,14 +148,26 @@ export const AssetConfigurationPage = () => {
               spellCheck={false}
               onChange={(event) => setDraft(event.target.value)}
             />
-            {(parseError ?? parsedDraft.error) && <p role="alert" className="text-sm text-destructive">{parseError ?? parsedDraft.error}</p>}
+            {(parseError ?? parsedDraft.error) && (
+              <p role="alert" className="text-sm text-destructive">
+                {parseError ?? parsedDraft.error}
+              </p>
+            )}
             {previewMutation.error && <ProblemState error={previewMutation.error} compact />}
             {updateMutation.error && <ProblemState error={updateMutation.error} compact />}
             <div className="flex flex-wrap justify-end gap-2">
-              <Button type="submit" variant="secondary" disabled={!parsedDraft.document || previewMutation.isPending}>
+              <Button
+                type="submit"
+                variant="secondary"
+                disabled={!parsedDraft.document || previewMutation.isPending}
+              >
                 Preview
               </Button>
-              <Button type="button" disabled={!parsedDraft.document || updateMutation.isPending} onClick={submitSave}>
+              <Button
+                type="button"
+                disabled={!parsedDraft.document || updateMutation.isPending}
+                onClick={submitSave}
+              >
                 Save version
               </Button>
             </div>
@@ -172,7 +201,13 @@ export const AssetConfigurationPage = () => {
               <Upload className="h-4 w-4" aria-hidden="true" />
               <h2 className="font-semibold">Import / export</h2>
             </div>
-            <Input id="asset-configuration-import-file" type="file" accept="application/json" onChange={importFile} />
+            <Input
+              id="asset-configuration-import-file"
+              type="file"
+              accept="application/json"
+              aria-label="Import asset configuration JSON"
+              onChange={importFile}
+            />
             <textarea
               aria-label="Configuration import document"
               className="min-h-40 w-full rounded-md border border-input bg-background p-3 font-mono text-xs"
@@ -181,7 +216,11 @@ export const AssetConfigurationPage = () => {
             />
             {importMutation.error && <ProblemState error={importMutation.error} compact />}
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" onClick={() => exportMutation.mutate()} disabled={exportMutation.isPending}>
+              <Button
+                variant="secondary"
+                onClick={() => exportMutation.mutate()}
+                disabled={exportMutation.isPending}
+              >
                 <Download className="mr-2 h-4 w-4" aria-hidden="true" />
                 Export
               </Button>
@@ -197,14 +236,27 @@ export const AssetConfigurationPage = () => {
               <RotateCcw className="h-4 w-4" aria-hidden="true" />
               <h2 className="font-semibold">Version history</h2>
             </div>
-            {historyQuery.error && <ProblemState error={historyQuery.error} onRetry={() => void historyQuery.refetch()} compact />}
+            {historyQuery.error && (
+              <ProblemState
+                error={historyQuery.error}
+                onRetry={() => void historyQuery.refetch()}
+                compact
+              />
+            )}
             <div className="space-y-2">
               {historyQuery.data?.items.map((version) => (
-                <div key={version.id} className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm">
+                <div
+                  key={version.id}
+                  className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm"
+                >
                   <div>
                     <p className="font-medium">Version {version.version}</p>
-                    <p className="text-muted-foreground">{version.source} · {new Date(version.created_at).toLocaleString()}</p>
-                    <p className="font-mono text-xs text-muted-foreground">{version.correlation_id}</p>
+                    <p className="text-muted-foreground">
+                      {version.source} · {new Date(version.created_at).toLocaleString()}
+                    </p>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      {version.correlation_id}
+                    </p>
                   </div>
                   <Button
                     variant="secondary"

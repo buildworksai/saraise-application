@@ -4,14 +4,13 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from . import jobs as _jobs  # noqa: F401 - importing performs explicit handler registration
-
 from .api import (
     AsyncJobViewSet,
     DashboardViewSet,
     DataQualityIssueViewSet,
     DataQualityRuleViewSet,
-    MasterDataEntityViewSet,
     MasterDataConfigurationViewSet,
+    MasterDataEntityViewSet,
     MasterEntityTypeViewSet,
     MatchCandidateViewSet,
     MatchingOperationsViewSet,

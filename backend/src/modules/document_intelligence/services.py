@@ -21,7 +21,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, TypeVar
+from typing import Any, TypedDict, TypeVar, cast
 from uuid import UUID
 
 from django.conf import settings
@@ -104,7 +104,20 @@ class AcceptedWork:
     job: AsyncJob
 
 
-def _uuid(value: UUID | str, name: str) -> UUID:
+class ZonePayload(TypedDict):
+    zone_name: str
+    extraction_key: str
+    zone_type: str
+    x: Decimal
+    y: Decimal
+    width: Decimal
+    height: Decimal
+    page_number: int
+    expected_data_type: str
+    is_required: bool
+
+
+def _uuid(value: object, name: str) -> UUID:
     try:
         return value if isinstance(value, UUID) else UUID(str(value))
     except (TypeError, ValueError, AttributeError) as exc:
@@ -249,6 +262,12 @@ class _ServiceBase:
                 "Document storage is unavailable.",
                 status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             ) from exc
+        except ValueError as exc:
+            raise DocumentIntelligenceError(
+                "invalid_document_metadata",
+                "Document storage returned invalid metadata.",
+                status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            ) from exc
         if not isinstance(descriptor, DocumentDescriptor):
             raise DocumentIntelligenceError(
                 "invalid_document_metadata",
@@ -319,7 +338,9 @@ class _ServiceBase:
                 "Validated tenant resilience configuration is unavailable.",
                 status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
             ) from exc
-        return self.resilience.execute(f"{tenant_id}:{key}", operation, policy)
+        return self.resilience.execute(  # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query  # noqa: E501
+            f"{tenant_id}:{key}", operation, policy
+        )
 
     def _provider_ready(self, tenant_id: UUID, adapter: object) -> None:
         try:
@@ -647,12 +668,13 @@ class DocumentExtractionService(_ServiceBase):
             for page in pages:
                 page.full_clean()
             DocumentExtractionPage.objects.bulk_create(pages)
-            output = {
+            output_by_type: dict[str, str | Mapping[str, object] | tuple[object, ...] | None] = {
                 ExtractionType.TEXT: result.raw_text,
                 ExtractionType.STRUCTURED: result.structured_data,
                 ExtractionType.ZONE: result.structured_data,
                 ExtractionType.TABLE: result.table_data,
-            }[extraction.extraction_type]
+            }
+            output = output_by_type[extraction.extraction_type]
             if output is None:
                 raise InvalidProviderOutput("OCR result omitted output required by extraction type")
             extraction.raw_text = result.raw_text
@@ -824,6 +846,7 @@ class DocumentExtractionService(_ServiceBase):
 
     def get_extraction(self, tenant_id: UUID, extraction_id: UUID) -> DocumentExtraction:
         tenant_id = self._tenant(tenant_id)
+        extraction_id = _uuid(extraction_id, "extraction_id")
         extraction = (
             DocumentExtraction.objects.for_tenant(tenant_id)
             .select_related("template")
@@ -1056,6 +1079,7 @@ class DocumentClassificationService(_ServiceBase):
 
     def get_classification(self, tenant_id: UUID, classification_id: UUID) -> DocumentClassification:
         tenant_id = self._tenant(tenant_id)
+        classification_id = _uuid(classification_id, "classification_id")
         value = (
             DocumentClassification.objects.for_tenant(tenant_id)
             .select_related("model_version")
@@ -1550,12 +1574,14 @@ class DocumentClassificationService(_ServiceBase):
                 raise DocumentIntelligenceError(
                     "accuracy_threshold", f"Model accuracy must be greater than {accuracy_threshold}."
                 )
+            artifact_ref = target.artifact_ref
+            artifact_checksum = target.artifact_checksum
             try:
                 adapter = self.providers.resolve_classifier(tenant_id, target.provider_key)
                 ready = self._execute_dependency(
                     tenant_id,
                     f"classifier.{target.provider_key}.validate_artifact",
-                    lambda: adapter.validate_artifact(target.artifact_ref, target.artifact_checksum),
+                    lambda: adapter.validate_artifact(artifact_ref, artifact_checksum),
                 )
             except ProviderUnavailable as exc:
                 raise DocumentIntelligenceError(
@@ -1916,7 +1942,7 @@ class TemplateMatchingService(_ServiceBase):
         zones: Sequence[Mapping[str, object]],
         *,
         _locked_template: ExtractionTemplate | None = None,
-    ) -> list[dict[str, object]]:
+    ) -> list[ZonePayload]:
         tenant_id = self._tenant(tenant_id)
         with transaction.atomic():
             template = (
@@ -1925,7 +1951,7 @@ class TemplateMatchingService(_ServiceBase):
             )
             if template is None:
                 raise DocumentIntelligenceError("resource_not_found", "Template not found.", status_code=404)
-            normalized: list[dict[str, object]] = []
+            normalized: list[ZonePayload] = []
             names: set[str] = set()
             keys: set[str] = set()
             for item in zones:
@@ -1940,14 +1966,14 @@ class TemplateMatchingService(_ServiceBase):
                 try:
                     x, y = Decimal(str(item.get("x"))), Decimal(str(item.get("y")))
                     width, height = Decimal(str(item.get("width"))), Decimal(str(item.get("height")))
-                    page_number = int(item.get("page_number", 1))
+                    page_number = int(cast(Any, item.get("page_number", 1)))
                 except (ValueError, TypeError) as exc:
                     raise DocumentIntelligenceError("validation_error", "Zone coordinates are invalid.") from exc
                 if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1 or y + height > 1 or page_number <= 0:
                     raise DocumentIntelligenceError(
                         "zone_bounds", "Zone coordinates must be normalized within the page."
                     )
-                candidate = {
+                candidate: ZonePayload = {
                     "zone_name": zone_name,
                     "extraction_key": extraction_key,
                     "zone_type": str(item.get("zone_type", "")),
@@ -2050,8 +2076,10 @@ class TemplateMatchingService(_ServiceBase):
         ).extract_by_template(tenant_id, actor_id, document_id, version_id, template_id, idempotency_key)
 
     def get_template(self, tenant_id: UUID, template_id: UUID) -> ExtractionTemplate:
+        tenant_id = self._tenant(tenant_id)
+        template_id = _uuid(template_id, "template_id")
         value = (
-            ExtractionTemplate.objects.for_tenant(self._tenant(tenant_id))
+            ExtractionTemplate.objects.for_tenant(tenant_id)
             .prefetch_related("zones")
             .filter(pk=template_id, is_deleted=False)
             .first()
@@ -2068,22 +2096,25 @@ class TemplateMatchingService(_ServiceBase):
         self, tenant_id: UUID, template_id: UUID, actor_id: UUID, data: Mapping[str, object]
     ) -> ExtractionTemplateZone:
         template = self.get_template(tenant_id, template_id)
-        zones = list(
-            ExtractionTemplateZone.objects.for_tenant(self._tenant(tenant_id))
-            .filter(template=template, is_deleted=False)
-            .values(
-                "zone_name",
-                "extraction_key",
-                "zone_type",
-                "x",
-                "y",
-                "width",
-                "height",
-                "page_number",
-                "expected_data_type",
-                "is_required",
+        zones: list[dict[str, object]] = [
+            dict(row)
+            for row in (
+                ExtractionTemplateZone.objects.for_tenant(self._tenant(tenant_id))
+                .filter(template=template, is_deleted=False)
+                .values(
+                    "zone_name",
+                    "extraction_key",
+                    "zone_type",
+                    "x",
+                    "y",
+                    "width",
+                    "height",
+                    "page_number",
+                    "expected_data_type",
+                    "is_required",
+                )
             )
-        )
+        ]
         zones.append(dict(data))
         result = self.replace_zones(tenant_id, template.id, actor_id, zones)
         return result[-1]
@@ -2095,23 +2126,26 @@ class TemplateMatchingService(_ServiceBase):
         zone = ExtractionTemplateZone.objects.for_tenant(tenant_id).filter(pk=zone_id, is_deleted=False).first()
         if zone is None:
             raise DocumentIntelligenceError("resource_not_found", "Template zone not found.", status_code=404)
-        zones = list(
-            ExtractionTemplateZone.objects.for_tenant(tenant_id)
-            .filter(template_id=zone.template_id, is_deleted=False)
-            .values(
-                "id",
-                "zone_name",
-                "extraction_key",
-                "zone_type",
-                "x",
-                "y",
-                "width",
-                "height",
-                "page_number",
-                "expected_data_type",
-                "is_required",
+        zones: list[dict[str, object]] = [
+            dict(row)
+            for row in (
+                ExtractionTemplateZone.objects.for_tenant(tenant_id)
+                .filter(template_id=zone.template_id, is_deleted=False)
+                .values(
+                    "id",
+                    "zone_name",
+                    "extraction_key",
+                    "zone_type",
+                    "x",
+                    "y",
+                    "width",
+                    "height",
+                    "page_number",
+                    "expected_data_type",
+                    "is_required",
+                )
             )
-        )
+        ]
         payload: list[dict[str, object]] = []
         for current in zones:
             current_id = current.pop("id")

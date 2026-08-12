@@ -143,7 +143,12 @@ def test_append_only_resources_are_tenant_scoped_and_immutable(
     assert str(foreign.id) not in identities
     detail = f"{BASE}/{collection}/{foreign.id}/"
     assert authenticated_tenant_a_client.get(detail).status_code == 404
-    assert authenticated_tenant_a_client.post(f"{BASE}/{collection}/", {"tenant_id": str(foreign.tenant_id)}, format="json").status_code == 405
+    assert (
+        authenticated_tenant_a_client.post(
+            f"{BASE}/{collection}/", {"tenant_id": str(foreign.tenant_id)}, format="json"
+        ).status_code
+        == 405
+    )
     assert authenticated_tenant_a_client.patch(detail, {}, format="json").status_code == 405
     assert authenticated_tenant_a_client.delete(detail).status_code == 405
 
@@ -171,7 +176,11 @@ def test_cross_tenant_domain_actions_are_invisible_and_leave_rows_unchanged(
     )
     for row, path, payload in cases:
         before = tuple((field.attname, getattr(row, field.attname)) for field in row._meta.concrete_fields)
-        response = authenticated_tenant_a_client.get(path) if payload is None else authenticated_tenant_a_client.post(path, payload, format="json")
+        response = (
+            authenticated_tenant_a_client.get(path)
+            if payload is None
+            else authenticated_tenant_a_client.post(path, payload, format="json")
+        )
         assert response.status_code == 404, response.content
         row.refresh_from_db()
         after = tuple((field.attname, getattr(row, field.attname)) for field in row._meta.concrete_fields)

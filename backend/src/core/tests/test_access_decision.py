@@ -161,6 +161,29 @@ def decide(
 
 
 class TestAccessDecisionPipeline:
+    @pytest.mark.parametrize("mode", ("development", "self-hosted"))
+    def test_default_policy_evaluator_uses_local_security_evaluator_in_local_modes(self, settings, mode: str) -> None:
+        settings.SARAISE_MODE = mode
+
+        pipeline = AccessDecisionPipeline(
+            entitlement_service=StubEntitlementService(),
+            quota_service=StubQuotaService(),
+        )
+
+        from src.modules.security_access_control.services import SecurityPolicyEvaluator
+
+        assert isinstance(pipeline.policy_evaluator, SecurityPolicyEvaluator)
+
+    def test_default_policy_evaluator_uses_http_policy_engine_in_saas(self, settings) -> None:
+        settings.SARAISE_MODE = "saas"
+
+        pipeline = AccessDecisionPipeline(
+            entitlement_service=StubEntitlementService(),
+            quota_service=StubQuotaService(),
+        )
+
+        assert isinstance(pipeline.policy_evaluator, HttpPolicyEvaluator)
+
     def test_unauthenticated_identity_denies_before_dependencies(self, tenant_id: uuid.UUID) -> None:
         pipeline, policy, entitlement, quota = build_pipeline()
         anonymous = SimpleNamespace(id=uuid.uuid4(), is_authenticated=False, tenant_id=tenant_id)
@@ -588,6 +611,7 @@ class TestHttpPolicyEvaluator:
         pipeline = AccessDecisionPipeline(
             entitlement_service=StubEntitlementService(),
             quota_service=StubQuotaService(),
+            policy_evaluator=HttpPolicyEvaluator(),
         )
 
         result = decide(pipeline, tenant_id, identity)

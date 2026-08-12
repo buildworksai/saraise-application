@@ -1,1 +1,2 @@
-import { ResourceFormPage } from './ResourceWorkspace'; export const EditRFQPage = () => <ResourceFormPage kind="rfqs" edit />;
+import { ResourceFormPage } from "./ResourceWorkspace";
+export const EditRFQPage = () => <ResourceFormPage kind="rfqs" edit />;

@@ -26,7 +26,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import BinaryIO, Callable, Mapping, Protocol, Sequence, TypeVar, runtime_checkable
+from typing import BinaryIO, Callable, Mapping, NoReturn, Protocol, Sequence, TypeVar, cast, runtime_checkable
 from uuid import UUID
 
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
@@ -453,7 +453,7 @@ class LocalTesseractOCRAdapter:
         # service calls replace them with the validated tenant policy before
         # health or extraction is attempted.
         self.chunk_size = self.CHUNK_SIZE
-        self.timeout_seconds = self.TIMEOUT_SECONDS
+        self.timeout_seconds: float = float(self.TIMEOUT_SECONDS)
         self.max_document_bytes = MAX_DOCUMENT_BYTES
         self.max_text_characters = MAX_TEXT_CHARACTERS
 
@@ -464,7 +464,10 @@ class LocalTesseractOCRAdapter:
         if not isinstance(limits, Mapping) or not isinstance(resilience, Mapping):
             raise ValueError("validated adapter configuration is required")
         self.chunk_size = int(resilience["stream_chunk_size_bytes"])
-        self.timeout_seconds = float(resilience["timeout_seconds"])
+        timeout_seconds = resilience["timeout_seconds"]
+        if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int | float):
+            raise ValueError("validated adapter timeout is required")
+        self.timeout_seconds = float(timeout_seconds)
         self.max_document_bytes = int(limits["max_document_bytes"])
         self.max_text_characters = int(limits["max_text_characters"])
 
@@ -570,8 +573,8 @@ class LocalTesseractOCRAdapter:
                 raise InvalidProviderOutput("local OCR returned malformed confidence evidence") from exc
             if token and confidence_percent >= 0:
                 confidence = _decimal_confidence(confidence_percent / Decimal("100"))
-                state["tokens"].append(token)  # type: ignore[union-attr]
-                state["confidence"].append(confidence)  # type: ignore[union-attr]
+                cast(list[str], state["tokens"]).append(token)
+                cast(list[Decimal], state["confidence"]).append(confidence)
                 all_confidences.append(confidence)
 
         if not pages:
@@ -589,8 +592,8 @@ class LocalTesseractOCRAdapter:
             result_pages.append(
                 OCRPageResult(
                     page_number=page_number,
-                    width=int(state["width"]),
-                    height=int(state["height"]),
+                    width=cast(int, state["width"]),
+                    height=cast(int, state["height"]),
                     raw_text=" ".join(str(token) for token in tokens),
                     confidence=page_confidence,
                     provider_metadata={"provider": "tesseract", "evidence": "tsv"},
@@ -645,11 +648,15 @@ class LocalNaiveBayesClassifierAdapter:
         resilience = configuration["resilience"]
         if not all(isinstance(value, Mapping) for value in (limits, providers, classifier, resilience)):
             raise ValueError("validated adapter configuration is required")
-        self.feature_buckets = int(classifier["feature_buckets"])
-        self.max_categories = int(classifier["provider_max_categories"])
-        self.chunk_size = int(resilience["stream_chunk_size_bytes"])
-        self.max_document_bytes = int(limits["max_document_bytes"])
-        self.max_structured_bytes = int(limits["max_structured_bytes"])
+        limits = cast(Mapping[str, object], limits)
+        providers = cast(Mapping[str, object], providers)
+        classifier = cast(Mapping[str, object], classifier)
+        resilience = cast(Mapping[str, object], resilience)
+        self.feature_buckets = _required_int(classifier["feature_buckets"], "feature_buckets")
+        self.max_categories = _required_int(classifier["provider_max_categories"], "provider_max_categories")
+        self.chunk_size = _required_int(resilience["stream_chunk_size_bytes"], "stream_chunk_size_bytes")
+        self.max_document_bytes = _required_int(limits["max_document_bytes"], "max_document_bytes")
+        self.max_structured_bytes = _required_int(limits["max_structured_bytes"], "max_structured_bytes")
         if self.artifact_root is None:
             environment_variable = str(providers["artifact_root_environment_variable"])
             configured_root = os.environ.get(environment_variable)
@@ -888,22 +895,22 @@ class LocalNaiveBayesClassifierAdapter:
         self, features: Counter[int], model: Mapping[str, object]
     ) -> tuple[str, tuple[tuple[str, Decimal], ...]]:
         categories = model.get("categories")
-        document_total = int(model.get("document_total", 0))
+        document_total = _required_int(model.get("document_total", 0), "document_total")
         if not isinstance(categories, Mapping) or not categories or document_total <= 0:
             raise InvalidProviderOutput("local classifier artifact contains no categories")
         log_scores: dict[str, float] = {}
         for category, raw in categories.items():
             if not isinstance(category, str) or not isinstance(raw, Mapping):
                 raise InvalidProviderOutput("local classifier category evidence is invalid")
-            documents = int(raw.get("documents", 0))
-            total_features = int(raw.get("total_features", 0))
+            documents = _required_int(raw.get("documents", 0), "documents")
+            total_features = _required_int(raw.get("total_features", 0), "total_features")
             saved = raw.get("features")
             if documents <= 0 or total_features < 0 or not isinstance(saved, Mapping):
                 raise InvalidProviderOutput("local classifier category evidence is invalid")
             score = math.log(documents / document_total)
             denominator = total_features + self.feature_buckets
             for bucket, count in features.items():
-                score += count * math.log((int(saved.get(str(bucket), 0)) + 1) / denominator)
+                score += count * math.log((_required_int(saved.get(str(bucket), 0), "feature_count") + 1) / denominator)
             log_scores[category] = score
         maximum = max(log_scores.values())
         weights = {category: math.exp(score - maximum) for category, score in log_scores.items()}
@@ -928,6 +935,12 @@ class closing_binary:
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         self.stream.close()
+
+
+def _required_int(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise InvalidProviderOutput(f"{field} must be an integer")
+    return value
 
 
 class RegisteredProviderResolver:
@@ -986,7 +999,7 @@ class RegisteredProviderResolver:
 
 
 class _UnavailableGateway:
-    def _raise(self) -> None:
+    def _raise(self) -> NoReturn:
         raise ProviderUnavailable("DMS gateway is not configured")
 
     def get_document(self, tenant_id: UUID, document_id: UUID, document_version_id: UUID) -> DocumentDescriptor:

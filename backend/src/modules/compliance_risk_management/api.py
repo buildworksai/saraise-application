@@ -5,30 +5,21 @@ from __future__ import annotations
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from django.utils import timezone
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, NotFound, PermissionDenied, ValidationError
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
 
 from src.core.access import RequiresAccess
 from src.core.api.profile import GovernedAPIViewMixin
 from src.core.async_jobs.models import AsyncJob
 from src.core.auth_utils import get_user_tenant_id
 
-from .models import (
-    ComplianceCalendarEntry,
-    ComplianceRequirement,
-    Control,
-    ControlTest,
-    RemediationAction,
-    RiskAssessment,
-)
-from .health import get_module_health
 from .filters import (
     ComplianceRequirementFilterSet,
     ControlFilterSet,
@@ -38,7 +29,22 @@ from .filters import (
     RemediationActionFilterSet,
     RiskAssessmentFilterSet,
 )
-from .permissions import ActionAccessMixin, GovernedSessionAuthentication
+from .health import get_module_health
+from .models import ComplianceCalendarEntry, RiskAssessment
+from .permissions import (
+    CALENDAR_ACTIONS,
+    CONFIGURATION_ACTIONS,
+    CONTROL_ACTIONS,
+    DASHBOARD_ACTIONS,
+    HEATMAP_ACTIONS,
+    JOB_ACTIONS,
+    REMEDIATION_ACTIONS,
+    REQUIREMENT_ACTIONS,
+    RISK_ACTIONS,
+    TEST_ACTIONS,
+    ActionAccessMixin,
+    GovernedSessionAuthentication,
+)
 from .serializers import (
     CalendarEntryCreateSerializer,
     CalendarEntryDetailSerializer,
@@ -103,7 +109,7 @@ class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.Ge
             tenant = UUID(str(raw))
         except (TypeError, ValueError, AttributeError) as exc:
             raise PermissionDenied("Authenticated identity has no valid tenant.") from exc
-        self.request.tenant_id = tenant
+        setattr(self.request, "tenant_id", tenant)
         return tenant
 
     def actor_id(self) -> UUID:
@@ -160,6 +166,7 @@ class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.Ge
 
 
 class RiskAssessmentViewSet(TenantGovernedViewSet):
+    action_access = RISK_ACTIONS
     action_permissions = {
         "list": "compliance_risk.risk:read",
         "retrieve": "compliance_risk.risk:read",
@@ -229,14 +236,11 @@ class RiskAssessmentViewSet(TenantGovernedViewSet):
         result = RiskAssessmentService.preview_score(self.tenant_id(), serializer.validated_data)
         return Response(RiskScoreResultSerializer(result).data)
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> Any:
         if getattr(self, "action", "") == "controls" and self.request.method == "POST":
-            self.action_permissions = {**type(self).action_permissions, "controls": "compliance_risk.control:create"}
+            self.action_access = {**type(self).action_access, "controls": CONTROL_ACTIONS["create"]}
         if getattr(self, "action", "") == "remediations" and self.request.method == "POST":
-            self.action_permissions = {
-                **type(self).action_permissions,
-                "remediations": "compliance_risk.remediation:create",
-            }
+            self.action_access = {**type(self).action_access, "remediations": REMEDIATION_ACTIONS["create"]}
         return super().get_permissions()
 
     @action(detail=True, methods=["get", "post"])
@@ -269,6 +273,7 @@ class RiskAssessmentViewSet(TenantGovernedViewSet):
 
 
 class ControlViewSet(TenantGovernedViewSet):
+    action_access = CONTROL_ACTIONS
     action_permissions = {
         "list": "compliance_risk.control:read",
         "retrieve": "compliance_risk.control:read",
@@ -333,9 +338,9 @@ class ControlViewSet(TenantGovernedViewSet):
             ).data
         )
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> Any:
         if getattr(self, "action", "") == "tests" and self.request.method == "POST":
-            self.action_permissions = {**type(self).action_permissions, "tests": "compliance_risk.test:schedule"}
+            self.action_access = {**type(self).action_access, "tests": TEST_ACTIONS["create"]}
         return super().get_permissions()
 
     @action(detail=True, methods=["get", "post"])
@@ -355,6 +360,7 @@ class ControlViewSet(TenantGovernedViewSet):
 
 
 class ControlTestViewSet(TenantGovernedViewSet):
+    action_access = TEST_ACTIONS
     action_permissions = {
         "list": "compliance_risk.test:read",
         "retrieve": "compliance_risk.test:read",
@@ -430,6 +436,7 @@ class ControlTestViewSet(TenantGovernedViewSet):
 
 
 class RequirementViewSet(TenantGovernedViewSet):
+    action_access = REQUIREMENT_ACTIONS
     action_permissions = {
         "list": "compliance_risk.requirement:read",
         "retrieve": "compliance_risk.requirement:read",
@@ -496,6 +503,7 @@ class RequirementViewSet(TenantGovernedViewSet):
 
 
 class CalendarViewSet(TenantGovernedViewSet):
+    action_access = CALENDAR_ACTIONS
     action_permissions = {
         "list": "compliance_risk.calendar:read",
         "retrieve": "compliance_risk.calendar:read",
@@ -607,6 +615,7 @@ class CalendarViewSet(TenantGovernedViewSet):
 
 
 class RemediationViewSet(TenantGovernedViewSet):
+    action_access = REMEDIATION_ACTIONS
     action_permissions = {
         "list": "compliance_risk.remediation:read",
         "retrieve": "compliance_risk.remediation:read",
@@ -672,6 +681,7 @@ class RemediationViewSet(TenantGovernedViewSet):
 
 
 class DashboardViewSet(TenantGovernedViewSet):
+    action_access = DASHBOARD_ACTIONS
     action_permissions = {"list": "compliance_risk.dashboard:read"}
 
     def get_queryset(self):
@@ -692,6 +702,7 @@ class DashboardViewSet(TenantGovernedViewSet):
 
 
 class HeatmapViewSet(TenantGovernedViewSet):
+    action_access = HEATMAP_ACTIONS
     action_permissions = {"list": "compliance_risk.dashboard:read"}
 
     def get_queryset(self):
@@ -709,6 +720,7 @@ class HeatmapViewSet(TenantGovernedViewSet):
 
 
 class ConfigurationViewSet(TenantGovernedViewSet):
+    action_access = CONFIGURATION_ACTIONS
     action_permissions = {
         "list": "compliance_risk.configuration:read",
         "update": "compliance_risk.configuration:manage",
@@ -806,6 +818,7 @@ class ConfigurationViewSet(TenantGovernedViewSet):
 
 
 class JobViewSet(TenantGovernedViewSet):
+    action_access = JOB_ACTIONS
     action_permissions = {"retrieve": "compliance_risk.dashboard:read"}
 
     def get_queryset(self):

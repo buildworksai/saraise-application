@@ -5,6 +5,7 @@ SPDX-License-Identifier: Apache-2.0
 
 import base64
 import inspect
+import json
 
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
@@ -17,6 +18,7 @@ def reset_encryption_service(monkeypatch):
     """Keep configuration and the process-local cipher cache isolated per test."""
     monkeypatch.delenv(EncryptionService.KEY_RING_SETTING, raising=False)
     monkeypatch.delenv(EncryptionService.SINGLE_KEY_SETTING, raising=False)
+    monkeypatch.delenv("SARAISE_ACTIVE_ENCRYPTION_KEY_ID", raising=False)
     EncryptionService._fernet = None
     EncryptionService._cached_keys = None
     yield
@@ -98,6 +100,38 @@ def test_secret_manager_can_supply_an_ordered_settings_key_ring(settings):
     assert Fernet(primary.encode("ascii")).decrypt(ciphertext.encode("ascii")) == b"settings-backed"
 
 
+def test_settings_key_id_map_uses_active_key_as_primary(settings):
+    """Django settings expose the authoritative encryption key ring as a key-id map."""
+    primary = Fernet.generate_key().decode("ascii")
+    secondary = Fernet.generate_key().decode("ascii")
+    settings.SARAISE_ENCRYPTION_KEYS = {"old": secondary, "primary": primary}
+    settings.SARAISE_ACTIVE_ENCRYPTION_KEY_ID = "primary"
+    settings.SARAISE_ENCRYPTION_KEY = None
+
+    old_ciphertext = Fernet(secondary.encode("ascii")).encrypt(b"old-token").decode("ascii")
+
+    assert EncryptionService.decrypt(old_ciphertext) == "old-token"
+    ciphertext = EncryptionService.encrypt("settings-map-backed")
+    assert Fernet(primary.encode("ascii")).decrypt(ciphertext.encode("ascii")) == b"settings-map-backed"
+
+
+def test_environment_json_key_id_map_uses_active_key_as_primary(monkeypatch):
+    """Container env can pass the same JSON key-id map that settings validates."""
+    primary = Fernet.generate_key().decode("ascii")
+    secondary = Fernet.generate_key().decode("ascii")
+    monkeypatch.setenv(
+        EncryptionService.KEY_RING_SETTING,
+        json.dumps({"old": secondary, "primary": primary}),
+    )
+    monkeypatch.setenv("SARAISE_ACTIVE_ENCRYPTION_KEY_ID", "primary")
+
+    old_ciphertext = Fernet(secondary.encode("ascii")).encrypt(b"old-token").decode("ascii")
+
+    assert EncryptionService.decrypt(old_ciphertext) == "old-token"
+    ciphertext = EncryptionService.encrypt("environment-map-backed")
+    assert Fernet(primary.encode("ascii")).decrypt(ciphertext.encode("ascii")) == b"environment-map-backed"
+
+
 def test_environment_configuration_takes_precedence_over_secret_manager_settings(monkeypatch, settings):
     environment_key = Fernet.generate_key()
     settings.SARAISE_ENCRYPTION_KEYS = [Fernet.generate_key().decode("ascii")]
@@ -116,6 +150,7 @@ def test_environment_configuration_takes_precedence_over_secret_manager_settings
         "key-one,,key-three",
         "clé-non-ascii",
         [Fernet.generate_key().decode("ascii"), ""],
+        {"primary": Fernet.generate_key().decode("ascii")},
     ],
 )
 def test_malformed_key_ring_fails_closed(configured, monkeypatch, settings):
@@ -123,9 +158,10 @@ def test_malformed_key_ring_fails_closed(configured, monkeypatch, settings):
         monkeypatch.setenv(EncryptionService.KEY_RING_SETTING, configured)
     else:
         settings.SARAISE_ENCRYPTION_KEYS = configured
+        settings.SARAISE_ACTIVE_ENCRYPTION_KEY_ID = "missing"
         settings.SARAISE_ENCRYPTION_KEY = None
 
-    with pytest.raises(EncryptionConfigurationError, match="Encryption key"):
+    with pytest.raises(EncryptionConfigurationError, match="Encryption key|Active encryption key"):
         EncryptionService.encrypt("secret")
 
 

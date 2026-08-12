@@ -8,14 +8,9 @@ from django.utils import timezone
 
 from src.core.health import HealthCheckResult
 
+from .. import services as service_module
 from ..adapter_registry import register_backup_catalog, register_storage_adapter
-from ..models import (
-    RecoveryPointStatus,
-    RestoreRunStatus,
-    RunbookActionType,
-    RunbookStatus,
-    ScopeType,
-)
+from ..models import RecoveryPointStatus, RestoreRunStatus, RunbookActionType, RunbookStatus, ScopeType
 from ..ports import (
     ArtifactValidationResult,
     BackupArtifactDescriptor,
@@ -33,6 +28,8 @@ from ..ports import ScopeType as PortScopeType
 from ..services import (
     BackupExecutionFacade,
     BackupRequestCommand,
+    BDRDomainError,
+    DependencyUnavailable,
     DomainConflict,
     RecoveryObjectiveService,
     RecoveryPointService,
@@ -41,6 +38,8 @@ from ..services import (
     RunbookCommand,
     RunbookService,
     RunbookStepCommand,
+    dataclass_payload,
+    validate_configuration_document,
 )
 from .factories import recovery_point_factory
 
@@ -299,3 +298,149 @@ def test_objective_threshold_equality_is_compliant(domain_ports):
     measurement = RecoveryObjectiveService().calculate_restore_objectives(tenant_id, run.id)
     assert measurement.rpo_seconds == 60
     assert measurement.rto_seconds == 60
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda document: document["health"].update({"registry_staleness_seconds": 0}),
+            "document.health.registry_staleness_seconds must be positive",
+        ),
+        (
+            lambda document: document["workflows"]["recovery_point"].update(
+                {"terminal_states": document["workflows"]["recovery_point"]["terminal_states"] + ["missing"]}
+            ),
+            "recovery_point has unknown terminal states",
+        ),
+        (
+            lambda document: document["workflows"]["recovery_point"]["transitions"].append(
+                {"command": "begin_verification", "from_state": "discovered", "to_state": "available"}
+            ),
+            "recovery_point has a duplicate command edge",
+        ),
+        (
+            lambda document: document["workflows"]["recovery_point"]["transitions"].append(
+                {"command": "invalid", "from_state": "deleted", "to_state": "available"}
+            ),
+            "recovery_point transitions from a terminal state",
+        ),
+        (
+            lambda document: document["workflows"]["recovery_point"].update(
+                {"retention_guard_commands": ["missing-command"]}
+            ),
+            "recovery_point has invalid guard commands",
+        ),
+        (
+            lambda document: document["workflows"]["restore_run"].update(
+                {"retention_guard_commands": ["begin_validation"]}
+            ),
+            "restore_run cannot use retention guards",
+        ),
+        (
+            lambda document: document["workflows"]["restore_run"]["transitions"][0].update({"to_state": "missing"}),
+            "restore_run transition references an unknown state",
+        ),
+    ],
+)
+def test_configuration_validator_rejects_unsafe_workflow_and_limit_boundaries(mutate, message: str) -> None:
+    document = service_module.copy.deepcopy(service_module._DEFAULT_CONFIGURATION_DOCUMENT)
+    mutate(document)
+
+    with pytest.raises(BDRDomainError, match=message) as caught:
+        validate_configuration_document(document)
+
+    assert caught.value.code == "INVALID_CONFIGURATION"
+
+
+@pytest.mark.parametrize(
+    ("build_candidate", "message"),
+    [
+        (lambda: [], "document must be an object"),
+        (
+            lambda: {**service_module.copy.deepcopy(service_module._DEFAULT_CONFIGURATION_DOCUMENT), "unknown": True},
+            "document has invalid keys",
+        ),
+        (
+            lambda: _bdr_document_with(
+                "providers",
+                {"local_filesystem_restore_modes": ["full", 1]},
+            ),
+            "document.providers.local_filesystem_restore_modes contains an invalid value type",
+        ),
+        (
+            lambda: _bdr_document_with("resilience", {"max_attempts": True}),
+            "document.resilience.max_attempts has an invalid value type",
+        ),
+    ],
+)
+def test_configuration_shape_validation_is_strict(build_candidate, message: str) -> None:
+    with pytest.raises(BDRDomainError, match=message) as caught:
+        validate_configuration_document(build_candidate())
+
+    assert caught.value.code == "INVALID_CONFIGURATION"
+
+
+def _bdr_document_with(section: str, changes: dict[str, object]) -> dict[str, object]:
+    document = service_module.copy.deepcopy(service_module._DEFAULT_CONFIGURATION_DOCUMENT)
+    document[section] = {**document[section], **changes}
+    return document
+
+
+@pytest.mark.parametrize(
+    ("rollout", "message"),
+    [
+        ({}, "rollout must contain enabled, roles, and cohorts"),
+        ({"enabled": 1, "roles": [], "cohorts": []}, "rollout.enabled must be boolean"),
+        ({"enabled": True, "roles": [""], "cohorts": []}, "rollout.roles must contain non-empty strings"),
+        (
+            {"enabled": True, "roles": [], "cohorts": ["pilot", "pilot"]},
+            "rollout.cohorts must contain unique values",
+        ),
+    ],
+)
+def test_rollout_validation_fails_closed_for_invalid_operator_scope(rollout: object, message: str) -> None:
+    with pytest.raises(BDRDomainError, match=message) as caught:
+        service_module._validate_rollout(rollout)
+
+    assert caught.value.code == "INVALID_CONFIGURATION"
+
+
+def test_provider_helper_failures_are_sanitized_and_deterministic(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert service_module._required_text("  value  ", "environment") == "value"
+    with pytest.raises(BDRDomainError, match="environment must not be empty") as required:
+        service_module._required_text(" ", "environment")
+    assert required.value.code == "VALIDATION_ERROR"
+
+    assert service_module._safe_error_code(service_module.AdapterNotRegistered("secret-provider")) == (
+        "ADAPTER_UNAVAILABLE"
+    )
+    assert service_module._safe_error_code(TimeoutError("secret-provider")) == "PROVIDER_TIMEOUT"
+    assert service_module._safe_error_code(RuntimeError("secret-provider")) == "PROVIDER_FAILURE"
+
+    fallback = service_module._audit_uuid("not-a-uuid", "actor")
+    assert fallback == service_module._audit_uuid("not-a-uuid", "actor")
+    assert fallback != service_module._audit_uuid("not-a-uuid", "correlation")
+
+    monkeypatch.setattr(
+        service_module,
+        "get_backup_catalog",
+        lambda: (_ for _ in ()).throw(service_module.AdapterNotRegistered("secret-catalog")),
+    )
+    with pytest.raises(DependencyUnavailable, match="backup catalog") as catalog:
+        service_module._catalog()
+    assert catalog.value.code == "CAPABILITY_UNAVAILABLE"
+
+    with pytest.raises(DependencyUnavailable, match="storage adapter 'missing-storage'") as adapter:
+        service_module._adapter("missing-storage")
+    assert adapter.value.code == "CAPABILITY_UNAVAILABLE"
+
+
+@pytest.mark.django_db
+def test_dataclass_payload_exports_public_service_result_without_private_state() -> None:
+    summary = RecoveryObjectiveService().get_readiness_summary(uuid.uuid4())
+
+    payload = dataclass_payload(summary)
+
+    assert payload["provider_state"] in {"operational", "degraded"}
+    assert "provider_message" in payload

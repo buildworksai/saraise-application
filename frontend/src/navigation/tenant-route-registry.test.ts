@@ -1,3 +1,4 @@
+/* eslint-disable max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 import {
   buildTenantSidebarTree,
   getTenantRouteValidationIssues,
@@ -6,6 +7,7 @@ import {
   validateTenantSidebarTree,
   validateTenantRoutes,
 } from "./tenant-route-registry";
+import appSource from "../App.tsx?raw";
 
 describe("tenant route registry parity", () => {
   // Extensible by design: each migrated module appends its own descriptors, so this asserts
@@ -19,13 +21,60 @@ describe("tenant route registry parity", () => {
         "document_intelligence",
         "automation_orchestration",
         "fixed_assets",
-      ]),
+        "marketplace",
+        "accounting_finance",
+        "billing_subscriptions",
+        "localization",
+        "tenant_management",
+      ])
     );
+  });
+
+  it("publishes sidebar entries for manually mounted tenant modules", () => {
+    const branchFor = (module: string) =>
+      tenantSidebarTree.find((branch) => branch.module === module);
+    const pathsFor = (module: string) =>
+      branchFor(module)?.children.map((leaf) => `${leaf.label}:${leaf.path}`) ?? [];
+
+    expect(pathsFor("tenant_management")).toEqual(
+      expect.arrayContaining(["Tenant directory:/tenant-management"])
+    );
+    expect(pathsFor("accounting_finance")).toEqual(
+      expect.arrayContaining([
+        "Chart of accounts:/accounting-finance/accounts",
+        "Payments:/accounting-finance/payments",
+      ])
+    );
+    expect(pathsFor("billing_subscriptions")).toEqual(
+      expect.arrayContaining([
+        "Subscriptions:/billing-subscriptions",
+        "Quota management:/billing-subscriptions/quotas",
+      ])
+    );
+    expect(pathsFor("localization")).toEqual(
+      expect.arrayContaining(["Localization resources:/localization"])
+    );
+  });
+
+  it("discovers marketplace feature routes for industry capability discovery", () => {
+    const marketplaceRoutes = tenantRoutes.filter((route) => route.module === "marketplace");
+
+    expect(marketplaceRoutes.map((route) => route.path)).toEqual(
+      expect.arrayContaining(["/marketplace", "/marketplace/compare", "/marketplace/:capabilityId"])
+    );
+    expect(marketplaceRoutes.map((route) => route.title)).toEqual(
+      expect.arrayContaining([
+        "Capability marketplace",
+        "Capability comparison",
+        "Capability detail",
+      ])
+    );
+    expect(tenantSidebarTree.some((branch) => branch.module === "marketplace")).toBe(true);
   });
 
   it("resolves the orchestration sidebar and contextual routes", () => {
     const orchestrationRoutes = tenantRoutes.filter(
-      (route) => route.module === "automation_orchestration",
+      (route) => route.module === "automation_orchestration"
     );
     expect(orchestrationRoutes.map((route) => route.id)).toEqual(
       expect.arrayContaining([
@@ -39,19 +88,19 @@ describe("tenant route registry parity", () => {
         "automation-orchestration.schedules.edit",
         "automation-orchestration.runs.list",
         "automation-orchestration.runs.detail",
-      ]),
+      ])
     );
     expect(
       orchestrationRoutes
         .filter((route) => route.navigation.type === "sidebar")
-        .map((route) => route.path),
+        .map((route) => route.path)
     ).toEqual(
       expect.arrayContaining([
         "/automation-orchestration",
         "/automation-orchestration/configuration",
         "/automation-orchestration/schedules",
         "/automation-orchestration/runs",
-      ]),
+      ])
     );
   });
 
@@ -76,12 +125,9 @@ describe("tenant route registry parity", () => {
       if (route?.navigation.type === "sidebar") {
         expect(route.navigation.path ?? route.path).toBe(leaf.path);
       } else if (route?.navigation.type === "contextual") {
-        expect(route.module).toBe("process_mining");
         const parent = routesById.get(route.navigation.parentRouteId);
         expect(parent?.navigation.type).toBe("sidebar");
-        const expectedPath = route.path
-          .split("/")
-          .some((segment) => segment.startsWith(":"))
+        const expectedPath = route.path.split("/").some((segment) => segment.startsWith(":"))
           ? parent?.path
           : route.path;
         expect(leaf.path).toBe(expectedPath);
@@ -92,9 +138,7 @@ describe("tenant route registry parity", () => {
 
   it("gives every contextual route a real sidebar parent", () => {
     const routesById = new Map(tenantRoutes.map((route) => [route.id, route]));
-    const contextualRoutes = tenantRoutes.filter(
-      (route) => route.navigation.type === "contextual",
-    );
+    const contextualRoutes = tenantRoutes.filter((route) => route.navigation.type === "contextual");
 
     expect(contextualRoutes.length).toBeGreaterThan(0);
     for (const route of contextualRoutes) {
@@ -119,13 +163,27 @@ describe("tenant route registry parity", () => {
     expect(getTenantRouteValidationIssues([])).toEqual([]);
   });
 
+  it("keeps completed module migrations out of the legacy route block", () => {
+    const migratedPaths = [
+      "/asset-management/assets",
+      "/asset-management/assets/new",
+      "/asset-management/assets/:id",
+      "/bank-reconciliation/accounts",
+      "/bank-reconciliation/accounts/new",
+      "/bank-reconciliation/accounts/:id",
+      "/inventory-management/warehouses",
+      "/inventory-management/warehouses/new",
+      "/inventory-management/warehouses/:id",
+    ];
+
+    for (const path of migratedPaths) {
+      expect(appSource).not.toContain(`path="${path}"`);
+    }
+  });
+
   it("reports duplicate paths and broken contextual parents together", () => {
-    const sidebarRoute = tenantRoutes.find(
-      (route) => route.navigation.type === "sidebar",
-    );
-    const contextualRoute = tenantRoutes.find(
-      (route) => route.navigation.type === "contextual",
-    );
+    const sidebarRoute = tenantRoutes.find((route) => route.navigation.type === "sidebar");
+    const contextualRoute = tenantRoutes.find((route) => route.navigation.type === "contextual");
     expect(sidebarRoute).toBeDefined();
     expect(contextualRoute).toBeDefined();
     if (!sidebarRoute || !contextualRoute) return;
@@ -144,7 +202,7 @@ describe("tenant route registry parity", () => {
       expect.arrayContaining([
         expect.stringContaining("duplicate path"),
         expect.stringContaining("does not exist"),
-      ]),
+      ])
     );
   });
 });

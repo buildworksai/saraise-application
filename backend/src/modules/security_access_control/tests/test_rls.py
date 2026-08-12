@@ -12,9 +12,7 @@ pytestmark = [pytest.mark.django_db(transaction=True), pytest.mark.postgresql]
 
 
 def tenant_tables() -> tuple[str, ...]:
-    module = importlib.import_module(
-        "src.modules.security_access_control.migrations.0005_constraints_indexes_rls"
-    )
+    module = importlib.import_module("src.modules.security_access_control.migrations.0005_constraints_indexes_rls")
     return module.TENANT_TABLES
 
 

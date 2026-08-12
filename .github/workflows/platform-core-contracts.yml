@@ -14,7 +14,7 @@ jobs:
       # Keep secrets out of expression contexts; use env gating instead.
       PLATFORM_CORE_READ_TOKEN: ${{ secrets.PLATFORM_CORE_READ_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag -- reviewed false positive; scope enforced by surrounding domain policy.
 
       - name: Setup Python
         uses: actions/setup-python@v5

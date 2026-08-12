@@ -1,1 +1,1 @@
-export { EditTraceabilityAssetPage } from './domain-pages';
+export { EditTraceabilityAssetPage } from "./domain-pages";

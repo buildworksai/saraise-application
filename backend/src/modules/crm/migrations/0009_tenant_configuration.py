@@ -6,7 +6,6 @@ from django.db import migrations, models
 
 import src.modules.crm.models
 
-
 EVIDENCE_TABLES = ("crm_configuration_versions", "crm_configuration_audits")
 CONFIGURATION_TABLES = ("crm_configurations", *EVIDENCE_TABLES, "crm_idempotency_records")
 

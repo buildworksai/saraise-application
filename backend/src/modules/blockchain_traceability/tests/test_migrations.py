@@ -40,7 +40,7 @@ def _tables() -> set[str]:
 def _legacy_snapshot(identifier: str) -> tuple[object, ...]:
     with connection.cursor() as cursor:
         cursor.execute(
-            f'SELECT id, tenant_id, name, description, is_active, config, created_by FROM "{LEGACY_TABLE}" WHERE id = %s',
+            f'SELECT id, tenant_id, name, description, is_active, config, created_by FROM "{LEGACY_TABLE}" WHERE id = %s',  # noqa: E501
             [identifier],
         )
         row = cursor.fetchone()

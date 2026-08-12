@@ -669,13 +669,15 @@ def test_read_only_evidence_is_tenant_hidden_and_has_no_mutation_route(
     assert str(foreign.pk) not in identities
     foreign_url = f"{BASE}/{resource}/{foreign.pk}/"
     assert authenticated_tenant_a_client.get(foreign_url).status_code == status.HTTP_404_NOT_FOUND
-    assert authenticated_tenant_a_client.patch(
-        foreign_url, {}, format="json"
-    ).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert (
+        authenticated_tenant_a_client.patch(foreign_url, {}, format="json").status_code
+        == status.HTTP_405_METHOD_NOT_ALLOWED
+    )
     assert authenticated_tenant_a_client.delete(foreign_url).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
-    assert authenticated_tenant_a_client.post(
-        f"{BASE}/{resource}/", {}, format="json"
-    ).status_code == status.HTTP_405_METHOD_NOT_ALLOWED
+    assert (
+        authenticated_tenant_a_client.post(f"{BASE}/{resource}/", {}, format="json").status_code
+        == status.HTTP_405_METHOD_NOT_ALLOWED
+    )
     own_url = f"{BASE}/{resource}/{own.pk}/"
     patch_response = authenticated_tenant_a_client.patch(own_url, {}, format="json")
     assert patch_response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED

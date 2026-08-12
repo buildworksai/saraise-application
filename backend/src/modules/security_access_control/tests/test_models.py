@@ -25,7 +25,6 @@ from src.modules.security_access_control.models import (
     UserPermissionSet,
     UserRole,
 )
-from src.modules.tenant_management.models import Tenant
 
 pytest_plugins = ["src.core.testing.factories"]
 pytestmark = pytest.mark.django_db
@@ -50,9 +49,7 @@ def role(tenant_a, actor_id) -> Role:
 
 @pytest.fixture
 def permission() -> Permission:
-    return Permission.objects.create(
-        module="finance", resource="journals", action="read", name="Read journals"
-    )
+    return Permission.objects.create(module="finance", resource="journals", action="read", name="Read journals")
 
 
 def test_permission_catalog_defaults_code_enums_uniqueness_and_string(permission: Permission) -> None:
@@ -61,9 +58,7 @@ def test_permission_catalog_defaults_code_enums_uniqueness_and_string(permission
     assert str(permission) == permission.code
     assert set(Permission.RiskLevel.values) == {"low", "medium", "high", "critical"}
     with pytest.raises(IntegrityError), transaction.atomic():
-        Permission.objects.create(
-            module="finance", resource="journals", action="read", name="Duplicate"
-        )
+        Permission.objects.create(module="finance", resource="journals", action="read", name="Duplicate")
 
 
 def test_role_defaults_string_soft_delete_uniqueness_and_relationship_validation(
@@ -112,14 +107,10 @@ def test_role_cycle_self_parent_and_depth_are_rejected(tenant_a) -> None:
 def test_explicit_role_decision_defaults_string_uniqueness_and_tenant_match(
     tenant_a, tenant_b, role: Role, permission: Permission
 ) -> None:
-    decision = RolePermission.objects.create(
-        tenant_id=tenant_a.id, role=role, permission=permission
-    )
+    decision = RolePermission.objects.create(tenant_id=tenant_a.id, role=role, permission=permission)
     assert decision.is_granted is True and "allow" in str(decision)
     with pytest.raises(IntegrityError), transaction.atomic():
-        RolePermission.objects.create(
-            tenant_id=tenant_a.id, role=role, permission=permission, is_granted=False
-        )
+        RolePermission.objects.create(tenant_id=tenant_a.id, role=role, permission=permission, is_granted=False)
     cross = RolePermission(tenant_id=tenant_b.id, role=role, permission=permission)
     with pytest.raises(ValidationError, match="Role must belong"):
         cross.full_clean()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from .models import (
@@ -86,8 +88,10 @@ class RequisitionLineWriteSerializer(StrictSerializer):
     item_id = serializers.UUIDField(required=False, allow_null=True)
     item_code = serializers.CharField(max_length=100)
     description = serializers.CharField(max_length=500)
-    quantity = serializers.DecimalField(max_digits=19, decimal_places=6, min_value=0.000001)
-    estimated_unit_price = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=0, default=0)
+    quantity = serializers.DecimalField(max_digits=19, decimal_places=6, min_value=Decimal("0.000001"))
+    estimated_unit_price = serializers.DecimalField(
+        max_digits=19, decimal_places=4, min_value=Decimal("0"), default=Decimal("0")
+    )
     preferred_supplier_id = serializers.UUIDField(required=False, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True)
 
@@ -167,7 +171,7 @@ class RFQLineWriteSerializer(StrictSerializer):
     item_id = serializers.UUIDField(required=False, allow_null=True)
     item_code = serializers.CharField(max_length=100)
     description = serializers.CharField(max_length=500)
-    quantity = serializers.DecimalField(max_digits=19, decimal_places=6, min_value=0.000001)
+    quantity = serializers.DecimalField(max_digits=19, decimal_places=6, min_value=Decimal("0.000001"))
     required_date = serializers.DateField()
     specification = serializers.CharField(required=False, allow_blank=True)
 
@@ -228,9 +232,9 @@ class QuoteLineSerializer(ReadModelSerializer):
 
 class QuoteLineWriteSerializer(StrictSerializer):
     rfq_line_id = serializers.UUIDField()
-    quantity = serializers.DecimalField(max_digits=19, decimal_places=6, min_value=0.000001)
-    unit_price = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=0)
-    tax_amount = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=0, default=0)
+    quantity = serializers.DecimalField(max_digits=19, decimal_places=6, min_value=Decimal("0.000001"))
+    unit_price = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=Decimal("0"))
+    tax_amount = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=Decimal("0"), default=Decimal("0"))
     lead_time_days = serializers.IntegerField(min_value=0, required=False, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True)
 
@@ -275,7 +279,9 @@ class QuoteWriteSerializer(StrictSerializer):
     currency = serializers.RegexField(r"^[A-Z]{3}$")
     delivery_date = serializers.DateField(required=False, allow_null=True)
     payment_terms = serializers.CharField(max_length=50)
-    shipping_amount = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=0, default=0)
+    shipping_amount = serializers.DecimalField(
+        max_digits=19, decimal_places=4, min_value=Decimal("0"), default=Decimal("0")
+    )
     supplier_notes = serializers.CharField(required=False, allow_blank=True)
     lines = QuoteLineWriteSerializer(many=True, allow_empty=False)
     lock_version = serializers.IntegerField(min_value=1, required=False, write_only=True)
@@ -294,9 +300,9 @@ class PurchaseOrderLineWriteSerializer(StrictSerializer):
     item_id = serializers.UUIDField(required=False, allow_null=True)
     item_code = serializers.CharField(max_length=100)
     item_name = serializers.CharField(max_length=255)
-    quantity = serializers.DecimalField(max_digits=19, decimal_places=6, min_value=0.000001)
-    unit_price = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=0)
-    tax_amount = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=0, default=0)
+    quantity = serializers.DecimalField(max_digits=19, decimal_places=6, min_value=Decimal("0.000001"))
+    unit_price = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=Decimal("0"))
+    tax_amount = serializers.DecimalField(max_digits=19, decimal_places=4, min_value=Decimal("0"), default=Decimal("0"))
 
 
 class PurchaseOrderListSerializer(ReadModelSerializer):
@@ -356,7 +362,7 @@ class ReceiptLineSerializer(ReadModelSerializer):
 class ReceiptLineWriteSerializer(StrictSerializer):
     line_number = serializers.IntegerField(min_value=1, required=False)
     purchase_order_line_id = serializers.UUIDField()
-    quantity_received = serializers.DecimalField(max_digits=19, decimal_places=6, min_value=0.000001)
+    quantity_received = serializers.DecimalField(max_digits=19, decimal_places=6, min_value=Decimal("0.000001"))
     condition = serializers.ChoiceField(choices=("accepted", "damaged", "rejected"), default="accepted")
     batch_no = serializers.CharField(max_length=100, required=False, allow_blank=True)
     serial_no = serializers.CharField(max_length=100, required=False, allow_blank=True)
@@ -420,7 +426,9 @@ class ConfigurationWriteSerializer(StrictSerializer):
     po_prefix = serializers.CharField(max_length=20)
     receipt_prefix = serializers.CharField(max_length=20)
     approval_rules = serializers.ListField(child=serializers.DictField(), max_length=50)
-    receipt_tolerance_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=100)
+    receipt_tolerance_percent = serializers.DecimalField(
+        max_digits=5, decimal_places=2, min_value=Decimal("0"), max_value=Decimal("100")
+    )
     minimum_rfq_suppliers = serializers.IntegerField(min_value=2, max_value=20)
     quote_scoring_weights = serializers.DictField()
     inventory_integration_enabled = serializers.BooleanField()

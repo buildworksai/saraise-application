@@ -176,8 +176,16 @@ AP_INVOICE_MACHINE: Final[StateMachine[APInvoice]] = StateMachine(
         {"command": "reject", "from": APInvoiceStatus.SUBMITTED, "to": APInvoiceStatus.DRAFT},
         {"command": "post", "from": APInvoiceStatus.APPROVED, "to": APInvoiceStatus.POSTED},
         {"command": "record_partial_payment", "from": APInvoiceStatus.POSTED, "to": APInvoiceStatus.PARTIALLY_PAID},
-        {"command": "record_full_payment", "from": (APInvoiceStatus.POSTED, APInvoiceStatus.PARTIALLY_PAID), "to": APInvoiceStatus.PAID},
-        {"command": "cancel", "from": (APInvoiceStatus.DRAFT, APInvoiceStatus.SUBMITTED, APInvoiceStatus.APPROVED), "to": APInvoiceStatus.CANCELLED},
+        {
+            "command": "record_full_payment",
+            "from": (APInvoiceStatus.POSTED, APInvoiceStatus.PARTIALLY_PAID),
+            "to": APInvoiceStatus.PAID,
+        },
+        {
+            "command": "cancel",
+            "from": (APInvoiceStatus.DRAFT, APInvoiceStatus.SUBMITTED, APInvoiceStatus.APPROVED),
+            "to": APInvoiceStatus.CANCELLED,
+        },
     ),
 )
 
@@ -190,8 +198,16 @@ AR_INVOICE_MACHINE: Final[StateMachine[ARInvoice]] = StateMachine(
     transitions=(
         {"command": "post", "from": ARInvoiceStatus.DRAFT, "to": ARInvoiceStatus.POSTED},
         {"command": "record_partial_payment", "from": ARInvoiceStatus.POSTED, "to": ARInvoiceStatus.PARTIALLY_PAID},
-        {"command": "record_full_payment", "from": (ARInvoiceStatus.POSTED, ARInvoiceStatus.PARTIALLY_PAID, ARInvoiceStatus.OVERDUE), "to": ARInvoiceStatus.PAID},
-        {"command": "mark_overdue", "from": (ARInvoiceStatus.POSTED, ARInvoiceStatus.PARTIALLY_PAID), "to": ARInvoiceStatus.OVERDUE},
+        {
+            "command": "record_full_payment",
+            "from": (ARInvoiceStatus.POSTED, ARInvoiceStatus.PARTIALLY_PAID, ARInvoiceStatus.OVERDUE),
+            "to": ARInvoiceStatus.PAID,
+        },
+        {
+            "command": "mark_overdue",
+            "from": (ARInvoiceStatus.POSTED, ARInvoiceStatus.PARTIALLY_PAID),
+            "to": ARInvoiceStatus.OVERDUE,
+        },
         {"command": "cancel", "from": ARInvoiceStatus.DRAFT, "to": ARInvoiceStatus.CANCELLED},
     ),
 )
@@ -227,6 +243,10 @@ def register_state_machines() -> None:
 
 
 __all__ = [
-    "AP_INVOICE_MACHINE", "AR_INVOICE_MACHINE", "JOURNAL_ENTRY_MACHINE", "PAYMENT_MACHINE",
-    "POSTING_PERIOD_MACHINE", "register_state_machines",
+    "AP_INVOICE_MACHINE",
+    "AR_INVOICE_MACHINE",
+    "JOURNAL_ENTRY_MACHINE",
+    "PAYMENT_MACHINE",
+    "POSTING_PERIOD_MACHINE",
+    "register_state_machines",
 ]

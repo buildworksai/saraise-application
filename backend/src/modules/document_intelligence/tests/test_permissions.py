@@ -10,11 +10,7 @@ from rest_framework.test import APIRequestFactory
 
 from src.core.access.decision import AccessDecision, AccessReasonCode
 from src.core.access.permissions import RequiresAccess
-from src.modules.document_intelligence.permissions import (
-    PERMISSIONS,
-    ActionAccessMixin,
-    SessionAuthentication401,
-)
+from src.modules.document_intelligence.permissions import PERMISSIONS, ActionAccessMixin, SessionAuthentication401
 
 EXPECTED_PERMISSIONS = {
     "document_intelligence.extraction:read",

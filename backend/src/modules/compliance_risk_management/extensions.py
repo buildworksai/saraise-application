@@ -12,7 +12,7 @@ import re
 import threading
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Callable, Mapping, Protocol
+from typing import Mapping, Protocol
 
 _KEY = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 EXTENSION_API_VERSION = "1.0"

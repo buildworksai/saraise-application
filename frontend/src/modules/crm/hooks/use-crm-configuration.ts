@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { crmKeys, crmService } from '../services/crm-service';
+import { useQuery } from "@tanstack/react-query";
+import { crmKeys, crmService } from "../services/crm-service";
 
 /** Tenant configuration is required runtime data; callers must render errors, never local defaults. */
 export function useCrmConfiguration() {

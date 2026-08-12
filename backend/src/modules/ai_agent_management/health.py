@@ -24,7 +24,7 @@ from .authentication import GovernedSessionAuthentication
 from .providers.factory import get_provider_factory
 from .providers.registry import get_registry as get_provider_registry
 from .registries import runner_registry
-from .services import ConfigurationService, EXECUTE_COMMAND
+from .services import EXECUTE_COMMAND, ConfigurationService
 
 
 def _probe(operation) -> dict[str, object]:
@@ -35,6 +35,14 @@ def _probe(operation) -> dict[str, object]:
     except Exception:
         state = "unavailable"
     return {"status": state, "latency_ms": round((monotonic() - started) * 1000, 2)}
+
+
+def _cache_set(key: str, value: object, *, timeout: int) -> None:
+    cache.set(key, value, timeout=timeout)
+
+
+def _cache_get(key: str) -> object:
+    return cache.get(key)
 
 
 class ModuleHealthView(GovernedAPIViewMixin, APIView):
@@ -63,8 +71,8 @@ class ModuleHealthView(GovernedAPIViewMixin, APIView):
 
         def cache_probe() -> None:
             key = f"ai-agent-management:health:{tenant}"
-            cache.set(key, "ok", timeout=int(configuration["cache_probe_timeout_seconds"]))
-            if cache.get(key) != "ok":
+            _cache_set(key, "ok", timeout=int(configuration["cache_probe_timeout_seconds"]))
+            if _cache_get(key) != "ok":
                 raise RuntimeError
 
         def rls() -> None:
@@ -83,9 +91,7 @@ class ModuleHealthView(GovernedAPIViewMixin, APIView):
 
         def outbox() -> None:
             cutoff = timezone.now() - timedelta(minutes=int(configuration["outbox_stale_minutes"]))
-            if OutboxEvent.objects.filter(
-                tenant_id=tenant, status="pending", available_at__lte=cutoff
-            ).exists():
+            if OutboxEvent.objects.filter(tenant_id=tenant, status="pending", available_at__lte=cutoff).exists():
                 raise RuntimeError
 
         def extensions() -> None:

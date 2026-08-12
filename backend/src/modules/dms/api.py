@@ -14,13 +14,14 @@ from django.utils.http import content_disposition_header
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from src.core.api.profile import GovernedAPIViewMixin, GovernedMultipartAPIViewMixin
 from src.core.api.results import OperationFailed
 from src.core.auth_utils import get_user_tenant_id
+from src.core.tenancy.rls import tenant_context
 
 from .filters import (
     DocumentFilterSet,
@@ -31,24 +32,24 @@ from .filters import (
 )
 from .health import get_module_health
 from .models import DmsConfiguration, Document, DocumentPermission, DocumentShare, DocumentVersion, Folder
-from .permissions import ActionAccessMixin
 from .permissions import (
+    CONFIGURATION_ACTION_PERMISSIONS,
     DOCUMENT_ACTION_PERMISSIONS,
     DOCUMENT_PERMISSION_ACTION_PERMISSIONS,
-    CONFIGURATION_ACTION_PERMISSIONS,
     FOLDER_ACTION_PERMISSIONS,
     HEALTH_ACTION_PERMISSIONS,
     PRINCIPAL_ACTION_PERMISSIONS,
     SHARE_ACTION_PERMISSIONS,
     VERSION_ACTION_PERMISSIONS,
+    ActionAccessMixin,
 )
 from .serializers import (
-    DocumentDetailSerializer,
     DmsConfigurationAuditSerializer,
     DmsConfigurationRollbackSerializer,
     DmsConfigurationSerializer,
     DmsConfigurationVersionSerializer,
     DmsConfigurationWriteSerializer,
+    DocumentDetailSerializer,
     DocumentListSerializer,
     DocumentMoveSerializer,
     DocumentPermissionCreateSerializer,
@@ -72,8 +73,8 @@ from .serializers import (
     ShareCreatedSerializer,
 )
 from .services import (
-    DmsConflict,
     DmsConfigurationService,
+    DmsConflict,
     DmsDependencyUnavailable,
     DmsIntegrityFailure,
     DmsNotFound,
@@ -643,7 +644,7 @@ class DmsConfigurationViewSet(TenantGovernedViewSet):
     service_class = DmsConfigurationService
     action_permissions = CONFIGURATION_ACTION_PERMISSIONS
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         if getattr(self, "action", "") == "current" and self.request.method == "PUT":
             self.action = "update_current"
         return super().get_permissions()
@@ -693,28 +694,30 @@ class DmsConfigurationViewSet(TenantGovernedViewSet):
     @action(detail=False, methods=("get",))
     def history(self, request: object) -> Response:
         del request
-        return self.paginated(
-            _call(
-                self.service_class.history,
-                self.tenant_id,
-                self.actor_id,
-                self.request.query_params.get("environment", "default"),
-            ),
-            DmsConfigurationVersionSerializer,
-        )
+        with tenant_context(self.tenant_id):
+            return self.paginated(
+                _call(
+                    self.service_class.history,
+                    self.tenant_id,
+                    self.actor_id,
+                    self.request.query_params.get("environment", "default"),
+                ),
+                DmsConfigurationVersionSerializer,
+            )
 
     @action(detail=False, methods=("get",))
     def audit(self, request: object) -> Response:
         del request
-        return self.paginated(
-            _call(
-                self.service_class.audit,
-                self.tenant_id,
-                self.actor_id,
-                self.request.query_params.get("environment", "default"),
-            ),
-            DmsConfigurationAuditSerializer,
-        )
+        with tenant_context(self.tenant_id):
+            return self.paginated(
+                _call(
+                    self.service_class.audit,
+                    self.tenant_id,
+                    self.actor_id,
+                    self.request.query_params.get("environment", "default"),
+                ),
+                DmsConfigurationAuditSerializer,
+            )
 
     @action(detail=False, methods=("post",))
     def rollback(self, request: object) -> Response:

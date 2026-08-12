@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from collections.abc import Sequence
+from typing import Any, cast
 
-from django.db.models import Q
+from django.db.models import Q, QuerySet
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny
+from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.serializers import BaseSerializer
 from rest_framework.views import APIView
 
 from src.core.api import GovernedAPIViewMixin
@@ -56,12 +59,17 @@ from .services import DashboardService, DatasetCatalogService, ExecutionService,
 
 
 class _BIViewMixin(GovernedAPIViewMixin):
-    authentication_classes = (StrictSessionAuthentication,)
-    permission_classes = (BIActionPermission,)
+    authentication_classes: Any = (StrictSessionAuthentication,)
+    permission_classes: Any = (BIActionPermission,)
+
+    @property
+    def drf_request(self) -> Request:
+        return cast(Request, getattr(self, "request"))
 
     @property
     def tenant_id(self) -> uuid.UUID:
-        raw = getattr(self.request, "tenant_id", None) or get_user_tenant_id(self.request.user)
+        request = self.drf_request
+        raw = getattr(request, "tenant_id", None) or get_user_tenant_id(request.user)
         try:
             return raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw))
         except (ValueError, TypeError, AttributeError) as exc:
@@ -69,27 +77,29 @@ class _BIViewMixin(GovernedAPIViewMixin):
 
     @property
     def actor_id(self) -> str:
-        return str(getattr(self.request.user, "pk", getattr(self.request.user, "id", "")))
+        request = self.drf_request
+        return str(getattr(request.user, "pk", getattr(request.user, "id", "")))
 
     @property
     def correlation_id(self) -> str:
-        return str(getattr(self.request, "correlation_id", ""))
+        return str(getattr(self.drf_request, "correlation_id", ""))
 
     def idempotency_key(self) -> str:
-        value = self.request.headers.get("Idempotency-Key", "").strip()
+        value = self.drf_request.headers.get("Idempotency-Key", "").strip()
         if not value or len(value) > 255:
             raise ValidationError({"Idempotency-Key": "A key between 1 and 255 characters is required."})
         return value
 
-    def update(self, request: object, *args: Any, **kwargs: Any) -> Response:
+    def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         raise MethodNotAllowed("PUT")
 
 
-class DatasetViewSet(_BIViewMixin, viewsets.GenericViewSet):
+class DatasetViewSet(_BIViewMixin, viewsets.GenericViewSet[Any]):
     permission_map = {"list": "bi.dataset:read", "retrieve": "bi.dataset:read"}
     lookup_field = "pk"
+    lookup_value_regex = r"[-A-Za-z0-9_.:]+"
 
-    def list(self, request: object) -> Response:
+    def list(self, request: Request) -> Response:
         locked_value = request.query_params.get("locked", request.query_params.get("include_locked"))
         if locked_value not in {None, "", "true", "false", "1", "0"}:
             raise ValidationError({"locked": "Use true or false."})
@@ -109,17 +119,17 @@ class DatasetViewSet(_BIViewMixin, viewsets.GenericViewSet):
         if field not in {"label", "key"}:
             raise ValidationError({"ordering": "Use label or key."})
         values.sort(key=lambda item: str(item.get(field, "")).lower(), reverse=descending)
-        page = self.paginate_queryset(values)
+        page = self.paginate_queryset(cast(Any, values))
         serializer = DatasetListSerializer(page, many=True)  # noqa: F405
         return self.get_paginated_response(serializer.data)
 
-    def retrieve(self, request: object, pk: str | None = None) -> Response:
+    def retrieve(self, request: Request, pk: str | None = None) -> Response:
         return Response(
             DatasetDetailSerializer(DatasetCatalogService.get_dataset(self.tenant_id, request.user, str(pk))).data
         )  # noqa: F405
 
 
-class _DefinitionViewSet(_BIViewMixin, viewsets.GenericViewSet):
+class _DefinitionViewSet(_BIViewMixin, viewsets.GenericViewSet[Any]):
     service: Any
     model: Any
     list_serializer: Any
@@ -129,43 +139,44 @@ class _DefinitionViewSet(_BIViewMixin, viewsets.GenericViewSet):
     search_fields: tuple[str, ...]
     ordering_fields: tuple[str, ...]
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Any]:
         queryset = self.model.objects.for_tenant(self.tenant_id).filter(deleted_at__isnull=True)
-        search = self.request.query_params.get("search")
+        request = self.drf_request
+        search = request.query_params.get("search")
         if search:
             query = Q()
             for field in self.search_fields:
                 query |= Q(**{f"{field}__icontains": search})
             queryset = queryset.filter(query)
         for field in ("state", "dataset_key", "created_by_id", "report_type"):
-            if field in self.request.query_params and any(item.name == field for item in self.model._meta.fields):
-                if field == "state" and self.request.query_params[field] not in {"draft", "published", "archived"}:
+            if field in request.query_params and any(item.name == field for item in self.model._meta.fields):
+                if field == "state" and request.query_params[field] not in {"draft", "published", "archived"}:
                     raise ValidationError({field: "Use draft, published, or archived."})
-                if field == "report_type" and self.request.query_params[field] not in {
+                if field == "report_type" and request.query_params[field] not in {
                     "table",
                     "pivot",
                     "chart",
                     "kpi",
                 }:
                     raise ValidationError({field: "Use table, pivot, chart, or kpi."})
-                queryset = queryset.filter(**{field: self.request.query_params[field]})
-        ordering = self.request.query_params.get("ordering", "-updated_at")
+                queryset = queryset.filter(**{field: request.query_params[field]})
+        ordering = request.query_params.get("ordering", "-updated_at")
         if ordering.lstrip("-") not in self.ordering_fields:
             raise ValidationError({"ordering": "Unsupported ordering field."})
-        return queryset.order_by(ordering, "id")
+        return cast(QuerySet[Any], queryset.order_by(ordering, "id"))
 
-    def list(self, request: object) -> Response:
+    def list(self, request: Request) -> Response:
         page = self.paginate_queryset(self.get_queryset())
         return self.get_paginated_response(self.list_serializer(page, many=True).data)
 
-    def retrieve(self, request: object, pk: object = None) -> Response:
+    def retrieve(self, request: Request, pk: object = None) -> Response:
         obj = self.get_queryset().filter(pk=pk).first()
         if obj is None:
             raise NotFound()
         self.check_object_permissions(request, obj)
         return Response(self.detail_serializer(obj).data)
 
-    def create(self, request: object) -> Response:
+    def create(self, request: Request) -> Response:
         serializer = self.create_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         obj = self.service.create(
@@ -173,7 +184,7 @@ class _DefinitionViewSet(_BIViewMixin, viewsets.GenericViewSet):
         )
         return Response(self.detail_serializer(obj).data, status=status.HTTP_201_CREATED)
 
-    def partial_update(self, request: object, pk: object = None) -> Response:
+    def partial_update(self, request: Request, pk: object = None) -> Response:
         serializer = self.update_serializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         version = serializer.validated_data.pop("version", None)
@@ -190,9 +201,12 @@ class _DefinitionViewSet(_BIViewMixin, viewsets.GenericViewSet):
         )
         return Response(self.detail_serializer(obj).data)
 
-    def destroy(self, request: object, pk: object = None) -> Response:
+    def destroy(self, request: Request, pk: object = None) -> Response:
+        raw_version = request.query_params.get("version", request.data.get("version"))
+        if raw_version is None:
+            raise ValidationError({"version": "A positive version is required."})
         try:
-            version = int(request.query_params.get("version", request.data.get("version")))
+            version = int(raw_version)
         except (TypeError, ValueError):
             raise ValidationError({"version": "A positive version is required."})
         self.service.soft_delete(
@@ -200,7 +214,7 @@ class _DefinitionViewSet(_BIViewMixin, viewsets.GenericViewSet):
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    def _transition(self, request: object, pk: object, command: str) -> Response:
+    def _transition(self, request: Request, pk: object, command: str) -> Response:
         serializer = QueryTransitionSerializer(data=request.data)  # noqa: F405
         serializer.is_valid(raise_exception=True)
         obj = getattr(self.service, command)(
@@ -215,19 +229,21 @@ class _DefinitionViewSet(_BIViewMixin, viewsets.GenericViewSet):
         return Response(self.detail_serializer(obj).data)
 
     @action(detail=True, methods=("post",))
-    def publish(self, request: object, pk: object = None) -> Response:
+    def publish(self, request: Request, pk: object = None) -> Response:
         return self._transition(request, pk, "publish")
 
     @action(detail=True, methods=("post",))
-    def archive(self, request: object, pk: object = None) -> Response:
+    def archive(self, request: Request, pk: object = None) -> Response:
         return self._transition(request, pk, "archive")
 
     @action(detail=True, methods=("post",))
-    def restore(self, request: object, pk: object = None) -> Response:
+    def restore(self, request: Request, pk: object = None) -> Response:
         return self._transition(request, pk, "restore")
 
     @action(detail=True, methods=("post",))
-    def execute(self, request: object, pk: object = None) -> Response:
+    def execute(self, request: Request, pk: object = None) -> Response:
+        if not self.get_queryset().filter(pk=pk).exists():
+            raise NotFound()
         serializer = ExecutionRequestSerializer(data=request.data)  # noqa: F405
         serializer.is_valid(raise_exception=True)
         result = self.service.enqueue_execution(
@@ -278,7 +294,7 @@ class QueryViewSet(_DefinitionViewSet):
     permission_map["validate"] = "bi.query:read"
 
     @action(detail=True, methods=("post",))
-    def validate(self, request: object, pk: object = None) -> Response:
+    def validate(self, request: Request, pk: object = None) -> Response:
         serializer = QueryValidateSerializer(data=request.data)  # noqa: F405
         serializer.is_valid(raise_exception=True)
         QueryService.validate(self.tenant_id, pk, serializer.validated_data["parameters"])
@@ -299,9 +315,9 @@ class ReportViewSet(_DefinitionViewSet):
     )
     permission_map = {key: f"bi.report:{value}" for key, value in COMMON_PERMISSIONS.items()}
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Any]:
         queryset = super().get_queryset()
-        dataset_key = self.request.query_params.get("dataset_key")
+        dataset_key = self.drf_request.query_params.get("dataset_key")
         return queryset.filter(query_definition__dataset_key=dataset_key) if dataset_key else queryset
 
 
@@ -319,7 +335,7 @@ class DashboardViewSet(_DefinitionViewSet):
     permission_map = {key: f"bi.dashboard:{value}" for key, value in COMMON_PERMISSIONS.items()}
 
     def _role_subjects(self) -> list[str]:
-        groups = getattr(self.request.user, "groups", None)
+        groups = getattr(self.drf_request.user, "groups", None)
         if groups is None:
             return []
         return [str(value) for value in groups.values_list("name", flat=True)]
@@ -347,24 +363,19 @@ class DashboardViewSet(_DefinitionViewSet):
             return
         raise PermissionDenied("Dashboard edit access is required.")
 
-    def partial_update(self, request: object, pk: object = None) -> Response:
+    def partial_update(self, request: Request, pk: object = None) -> Response:
         self._require_access(pk)
         return super().partial_update(request, pk)
 
-    def destroy(self, request: object, pk: object = None) -> Response:
+    def destroy(self, request: Request, pk: object = None) -> Response:
         self._require_access(pk, owner_only=True)
         return super().destroy(request, pk)
 
-    def _transition(self, request: object, pk: object, command: str) -> Response:
+    def _transition(self, request: Request, pk: object, command: str) -> Response:
         self._require_access(pk, owner_only=True)
         return super()._transition(request, pk, command)
 
-    def execute(self, request: object, pk: object = None) -> Response:
-        if not self.get_queryset().filter(pk=pk).exists():
-            raise NotFound()
-        return super().execute(request, pk)
-
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Any]:
         queryset = super().get_queryset()
         subject = Q(shares__subject_type="user", shares__subject_id=self.actor_id)
         roles = self._role_subjects()
@@ -380,7 +391,7 @@ class DashboardViewSet(_DefinitionViewSet):
         if self.action == "partial_update":
             editable_share = active_share & Q(shares__access_level="edit")
             return queryset.filter(Q(created_by_id=self.actor_id) | editable_share).distinct()
-        access = self.request.query_params.get("access")
+        access = self.drf_request.query_params.get("access")
         if access == "owned":
             return queryset.filter(created_by_id=self.actor_id)
         if access == "shared":
@@ -390,7 +401,7 @@ class DashboardViewSet(_DefinitionViewSet):
         return queryset.filter(Q(created_by_id=self.actor_id) | active_share).distinct()
 
 
-class ExecutionViewSet(_BIViewMixin, viewsets.GenericViewSet):
+class ExecutionViewSet(_BIViewMixin, viewsets.GenericViewSet[Any]):
     permission_map = {
         "list": "bi.execution:read",
         "retrieve": "bi.execution:read",
@@ -398,9 +409,10 @@ class ExecutionViewSet(_BIViewMixin, viewsets.GenericViewSet):
         "cancel": "bi.execution:cancel",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[QueryExecution]:
         queryset = QueryExecution.objects.for_tenant(self.tenant_id)
-        status_value = self.request.query_params.get("status")
+        request = self.drf_request
+        status_value = request.query_params.get("status")
         if status_value and status_value not in {
             "queued",
             "running",
@@ -414,38 +426,39 @@ class ExecutionViewSet(_BIViewMixin, viewsets.GenericViewSet):
             parameter = {"query_definition_id": "query", "report_id": "report", "dashboard_id": "dashboard"}.get(
                 field, field
             )
-            if self.request.query_params.get(parameter):
-                value = self.request.query_params[parameter]
+            if request.query_params.get(parameter):
+                raw_value = request.query_params[parameter]
+                value: object = raw_value
                 if field.endswith("_id"):
                     try:
-                        value = uuid.UUID(value)
+                        value = uuid.UUID(raw_value)
                     except (TypeError, ValueError, AttributeError) as exc:
                         raise ValidationError({parameter: "A valid UUID is required."}) from exc
                 queryset = queryset.filter(**{field: value})
         for parameter, lookup in (("created_from", "created_at__gte"), ("created_to", "created_at__lte")):
-            raw = self.request.query_params.get(parameter)
+            raw = request.query_params.get(parameter)
             if raw:
                 parsed = parse_datetime(raw)
                 if parsed is None:
                     raise ValidationError({parameter: "A valid ISO 8601 date-time is required."})
                 queryset = queryset.filter(**{lookup: parsed})
-        ordering = self.request.query_params.get("ordering", "-created_at")
+        ordering = request.query_params.get("ordering", "-created_at")
         if ordering.lstrip("-") not in {"created_at", "completed_at", "status", "duration_ms"}:
             raise ValidationError({"ordering": "Unsupported ordering field."})
         return queryset.order_by(ordering, "id")
 
-    def list(self, request: object) -> Response:
+    def list(self, request: Request) -> Response:
         page = self.paginate_queryset(self.get_queryset())
         return self.get_paginated_response(ExecutionListSerializer(page, many=True).data)  # noqa: F405
 
-    def retrieve(self, request: object, pk: object = None) -> Response:
-        obj = self.get_queryset().filter(pk=pk).first()
+    def retrieve(self, request: Request, pk: object = None) -> Response:
+        obj = self.get_queryset().filter(pk=str(pk) if pk is not None else "").first()
         if obj is None:
             raise NotFound()
         return Response(ExecutionDetailSerializer(obj).data)  # noqa: F405
 
     @action(detail=True, methods=("get",))
-    def result(self, request: object, pk: object = None) -> Response:
+    def result(self, request: Request, pk: object = None) -> Response:
         execution = ExecutionService.get_result(self.tenant_id, pk)
         page = self.paginate_queryset(execution.result_rows)
         response = self.get_paginated_response(page)
@@ -455,7 +468,7 @@ class ExecutionViewSet(_BIViewMixin, viewsets.GenericViewSet):
         return response
 
     @action(detail=True, methods=("post",))
-    def cancel(self, request: object, pk: object = None) -> Response:
+    def cancel(self, request: Request, pk: object = None) -> Response:
         obj = ExecutionService.cancel(self.tenant_id, pk, self.actor_id, self.correlation_id, self.idempotency_key())
         return Response(ExecutionDetailSerializer(obj).data)  # noqa: F405
 
@@ -469,11 +482,11 @@ class _NestedDashboardView(_BIViewMixin, APIView):
     }
     owner_only = False
 
-    def get_permissions(self):
+    def get_permissions(self) -> Sequence[Any]:
         self.permission_action = self.request.method
         return super().get_permissions()
 
-    def initial(self, request: object, *args: Any, **kwargs: Any) -> None:
+    def initial(self, request: Request, *args: Any, **kwargs: Any) -> None:
         super().initial(request, *args, **kwargs)
         dashboard_id = kwargs.get("dashboard_id")
         dashboard = (
@@ -485,7 +498,7 @@ class _NestedDashboardView(_BIViewMixin, APIView):
             return
         if self.owner_only:
             raise PermissionDenied("Only the dashboard owner may manage sharing.")
-        groups = getattr(self.request.user, "groups", None)
+        groups = getattr(self.drf_request.user, "groups", None)
         roles = [str(value) for value in groups.values_list("name", flat=True)] if groups is not None else []
         shares = DashboardShare.objects.for_tenant(self.tenant_id).active().filter(dashboard=dashboard)
         if self.request.method != "GET":
@@ -496,14 +509,14 @@ class _NestedDashboardView(_BIViewMixin, APIView):
         if not allowed:
             raise PermissionDenied("Dashboard access is required.")
 
-    def paginated(self, request: object, rows: object, serializer_class: object) -> Response:
+    def paginated(self, request: Request, rows: Any, serializer_class: type[BaseSerializer[Any]]) -> Response:
         paginator = self.pagination_class()
         page = paginator.paginate_queryset(rows, request, view=self)
-        return paginator.get_paginated_response(serializer_class(page, many=True).data)
+        return cast(Response, paginator.get_paginated_response(serializer_class(page, many=True).data))
 
 
 class WidgetCollectionView(_NestedDashboardView):
-    def get(self, request: object, dashboard_id: object) -> Response:
+    def get(self, request: Request, dashboard_id: object) -> Response:
         dashboard = (
             Dashboard.objects.for_tenant(self.tenant_id).filter(pk=dashboard_id, deleted_at__isnull=True).first()
         )
@@ -516,7 +529,7 @@ class WidgetCollectionView(_NestedDashboardView):
         )
         return self.paginated(request, rows, WidgetListSerializer)  # noqa: F405
 
-    def post(self, request: object, dashboard_id: object) -> Response:
+    def post(self, request: Request, dashboard_id: object) -> Response:
         serializer = WidgetCreateSerializer(data=request.data)  # noqa: F405
         serializer.is_valid(raise_exception=True)
         obj = DashboardService.add_widget(
@@ -539,12 +552,12 @@ class WidgetDetailView(_NestedDashboardView):
         )
         if obj is None:
             raise NotFound()
-        return obj
+        return cast(DashboardWidget, obj)
 
-    def get(self, request: object, dashboard_id: object, widget_id: object) -> Response:
+    def get(self, request: Request, dashboard_id: object, widget_id: object) -> Response:
         return Response(WidgetDetailSerializer(self._get(dashboard_id, widget_id)).data)  # noqa: F405
 
-    def patch(self, request: object, dashboard_id: object, widget_id: object) -> Response:
+    def patch(self, request: Request, dashboard_id: object, widget_id: object) -> Response:
         serializer = WidgetUpdateSerializer(data=request.data, partial=True)  # noqa: F405
         serializer.is_valid(raise_exception=True)
         version = serializer.validated_data.pop("version", None)
@@ -562,7 +575,7 @@ class WidgetDetailView(_NestedDashboardView):
         )
         return Response(WidgetDetailSerializer(obj).data)  # noqa: F405
 
-    def delete(self, request: object, dashboard_id: object, widget_id: object) -> Response:
+    def delete(self, request: Request, dashboard_id: object, widget_id: object) -> Response:
         DashboardService.remove_widget(
             self.tenant_id, dashboard_id, widget_id, self.actor_id, self.correlation_id, self.idempotency_key()
         )
@@ -572,7 +585,7 @@ class WidgetDetailView(_NestedDashboardView):
 class WidgetReorderView(_NestedDashboardView):
     permission_map = {"POST": "bi.dashboard:update"}
 
-    def post(self, request: object, dashboard_id: object) -> Response:
+    def post(self, request: Request, dashboard_id: object) -> Response:
         serializer = WidgetReorderSerializer(data=request.data)  # noqa: F405
         serializer.is_valid(raise_exception=True)
         obj = DashboardService.reorder_widgets(
@@ -591,7 +604,7 @@ class ShareCollectionView(_NestedDashboardView):
     owner_only = True
     permission_map = {"GET": "bi.dashboard:share", "POST": "bi.dashboard:share"}
 
-    def get(self, request: object, dashboard_id: object) -> Response:
+    def get(self, request: Request, dashboard_id: object) -> Response:
         if not Dashboard.objects.for_tenant(self.tenant_id).filter(pk=dashboard_id, deleted_at__isnull=True).exists():
             raise NotFound()
         rows = (
@@ -599,7 +612,7 @@ class ShareCollectionView(_NestedDashboardView):
         )
         return self.paginated(request, rows, ShareListSerializer)  # noqa: F405
 
-    def post(self, request: object, dashboard_id: object) -> Response:
+    def post(self, request: Request, dashboard_id: object) -> Response:
         serializer = ShareCreateSerializer(data=request.data)  # noqa: F405
         serializer.is_valid(raise_exception=True)
         obj = DashboardService.share(
@@ -617,7 +630,7 @@ class ShareDetailView(_NestedDashboardView):
     owner_only = True
     permission_map = {"PATCH": "bi.dashboard:share", "DELETE": "bi.dashboard:share"}
 
-    def patch(self, request: object, dashboard_id: object, share_id: object) -> Response:
+    def patch(self, request: Request, dashboard_id: object, share_id: object) -> Response:
         serializer = ShareUpdateSerializer(data=request.data, partial=True)  # noqa: F405
         serializer.is_valid(raise_exception=True)
         obj = DashboardService.update_share(
@@ -631,7 +644,7 @@ class ShareDetailView(_NestedDashboardView):
         )
         return Response(ShareListSerializer(obj).data)  # noqa: F405
 
-    def delete(self, request: object, dashboard_id: object, share_id: object) -> Response:
+    def delete(self, request: Request, dashboard_id: object, share_id: object) -> Response:
         DashboardService.revoke_share(
             self.tenant_id, dashboard_id, share_id, self.actor_id, self.correlation_id, self.idempotency_key()
         )
@@ -639,10 +652,10 @@ class ShareDetailView(_NestedDashboardView):
 
 
 class HealthView(GovernedAPIViewMixin, APIView):
-    authentication_classes: tuple = ()
-    permission_classes = (AllowAny,)
+    authentication_classes: Any = ()
+    permission_classes: Any = (AllowAny,)
 
-    def get(self, request: object) -> Response:
+    def get(self, request: Request) -> Response:
         result = module_health()
         serializer = HealthResponseSerializer(result)  # noqa: F405
         return Response(serializer.data, status=200 if result["ready"] else 503)

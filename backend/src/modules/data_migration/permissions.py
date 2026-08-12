@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Final
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 from uuid import UUID
 
-from rest_framework.authentication import SessionAuthentication
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import BaseAuthentication, SessionAuthentication
+from rest_framework.permissions import BasePermission, IsAuthenticated
 
 from src.core.access.permissions import RequiresAccess
 from src.core.auth_utils import get_user_platform_role, get_user_tenant_id
+
+if TYPE_CHECKING:
+    from rest_framework.permissions import _PermissionClass
 
 CORE_ENTITLEMENT: Final = "data_migration.core"
 
@@ -142,14 +146,15 @@ class ActionAccessMixin:
     profile; a header, query parameter, or body value can never select it.
     """
 
-    authentication_classes = (SessionAuthentication401,)
-    permission_classes = (IsAuthenticated, RequiresAccess)
-    action_permissions: dict[str, str] = {}
-    method_permissions: dict[str, dict[str, str]] = {}
-    action_quotas: dict[str, str] = {}
-    quota_cost = 1
+    authentication_classes: ClassVar[Sequence[type[BaseAuthentication]]] = (SessionAuthentication401,)
+    permission_classes: ClassVar[Sequence[_PermissionClass]] = (IsAuthenticated, RequiresAccess)
+    action_permissions: ClassVar[dict[str, str]] = {}
+    method_permissions: ClassVar[dict[str, dict[str, str]]] = {}
+    action_quotas: ClassVar[dict[str, str]] = {}
+    quota_cost: ClassVar[int] = 1
+    request: Any
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         request = self.request
         request.tenant_id = None
         raw_tenant = get_user_tenant_id(getattr(request, "user", None))
@@ -160,7 +165,9 @@ class ActionAccessMixin:
                 request.tenant_id = None
 
         action = getattr(self, "action", "")
-        permission = self.method_permissions.get(action, {}).get(request.method.upper()) or self.action_permissions.get(action)
+        permission = self.method_permissions.get(action, {}).get(request.method.upper()) or self.action_permissions.get(
+            action
+        )
         self.required_permission = permission
         self.required_entitlement = CORE_ENTITLEMENT if permission else None
         self.quota_resource = self.action_quotas.get(getattr(self, "action", ""))

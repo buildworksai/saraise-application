@@ -15,4 +15,3 @@ class TenantManagementConfig(AppConfig):
 
     def ready(self):
         """App ready hook."""
-        pass

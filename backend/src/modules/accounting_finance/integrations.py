@@ -15,9 +15,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
-from typing import Literal, Protocol, runtime_checkable
+from typing import Literal, Protocol, cast, runtime_checkable
 from uuid import UUID
-
 
 SPI_VERSION = "1.0"
 _CURRENCY = re.compile(r"^[A-Z]{3}$")
@@ -441,7 +440,9 @@ class AccountingExtensionRegistry:
             raise TypeError("dimension provider namespace and validate() contract are required.")
         with self._lock:
             existing = self._dimensions.get(key)
-            self._dimensions[key] = self._single(existing, provider, f"dimension namespace {key!r}")  # type: ignore[assignment]
+            self._dimensions[key] = self._single(  # type: ignore[assignment]
+                existing, provider, f"dimension namespace {key!r}"
+            )
 
     def validate_dimensions(self, tenant_id: UUID, dimension_values: Mapping[str, str]) -> dict[str, str]:
         tenant = _uuid(tenant_id, "tenant_id")
@@ -495,7 +496,9 @@ class AccountingExtensionRegistry:
             raise TypeError("period evidence provider and check() contract are required.")
         with self._lock:
             existing = self._period_evidence.get(key)
-            self._period_evidence[key] = self._single(existing, port, f"period evidence provider {key!r}")  # type: ignore[assignment]
+            self._period_evidence[key] = self._single(  # type: ignore[assignment]
+                existing, port, f"period evidence provider {key!r}"
+            )
 
     def period_close_evidence(self) -> tuple[PeriodCloseEvidencePortV1, ...]:
         with self._lock:
@@ -556,7 +559,9 @@ class FixedAssetAccountingFacade:
             raise ExtensionValidationError("account_ids must not be empty.")
         from .services import AccountService
 
-        AccountService.validate_posting_accounts(_uuid(tenant_id, "tenant_id"), tuple(_uuid(v, "account_id") for v in account_ids))
+        AccountService.validate_posting_accounts(
+            _uuid(tenant_id, "tenant_id"), tuple(_uuid(v, "account_id") for v in account_ids)
+        )
         return True
 
     @staticmethod
@@ -571,7 +576,7 @@ class FixedAssetAccountingFacade:
         legs = tuple(
             JournalLegV1(
                 account_id=leg.account_id,
-                direction=leg.direction,
+                direction=cast(Literal["debit", "credit"], leg.direction),
                 amount=leg.amount,
                 currency=leg.currency,
                 cost_center=leg.cost_center,

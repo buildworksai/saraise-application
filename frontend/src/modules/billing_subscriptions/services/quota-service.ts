@@ -2,8 +2,8 @@
  * Quota Service
  */
 
-import { apiClient } from '@/services/api-client';
-import { ENDPOINTS } from '../contracts';
+import { apiClient } from "@/services/api-client";
+import { ENDPOINTS } from "../contracts";
 
 export interface QuotaInfo {
   used: number;

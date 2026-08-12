@@ -53,9 +53,7 @@ def override_saraise_mode(settings):
 
 @pytest.mark.django_db
 class TestRegionalTenantIsolation:
-    def test_list_detail_update_delete_are_tenant_isolated(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_list_detail_update_delete_are_tenant_isolated(self, api_client, tenant_a_user, tenant_b_user):
         tenant_a = get_user_tenant_id(tenant_a_user)
         tenant_b = get_user_tenant_id(tenant_b_user)
         resource_a = RegionalResource.objects.create(
@@ -77,24 +75,21 @@ class TestRegionalTenantIsolation:
         ids = {item["id"] for item in listed.data["results"]}
         assert str(resource_a.id) in ids
         assert str(resource_b.id) not in ids
-        assert api_client.get(
-            f"{PREFIX}/resources/{resource_b.id}/"
-        ).status_code == status.HTTP_404_NOT_FOUND
-        assert api_client.patch(
-            f"{PREFIX}/resources/{resource_b.id}/",
-            {"name": "Hacked"},
-            format="json",
-        ).status_code == status.HTTP_404_NOT_FOUND
-        assert api_client.delete(
-            f"{PREFIX}/resources/{resource_b.id}/"
-        ).status_code == status.HTTP_404_NOT_FOUND
+        assert api_client.get(f"{PREFIX}/resources/{resource_b.id}/").status_code == status.HTTP_404_NOT_FOUND
+        assert (
+            api_client.patch(
+                f"{PREFIX}/resources/{resource_b.id}/",
+                {"name": "Hacked"},
+                format="json",
+            ).status_code
+            == status.HTTP_404_NOT_FOUND
+        )
+        assert api_client.delete(f"{PREFIX}/resources/{resource_b.id}/").status_code == status.HTTP_404_NOT_FOUND
         resource_b.refresh_from_db()
         assert resource_b.name == "Tenant B"
         assert resource_b.deleted_at is None
 
-    def test_create_cannot_bind_foreign_tenant(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_create_cannot_bind_foreign_tenant(self, api_client, tenant_a_user, tenant_b_user):
         foreign_tenant = get_user_tenant_id(tenant_b_user)
         api_client.force_authenticate(user=tenant_a_user)
         response = api_client.post(
@@ -108,24 +103,16 @@ class TestRegionalTenantIsolation:
             HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
         )
         assert response.status_code == status.HTTP_400_BAD_REQUEST
-        assert not RegionalResource.objects.filter(
-            tenant_id=foreign_tenant, name="Injected"
-        ).exists()
+        assert not RegionalResource.objects.filter(tenant_id=foreign_tenant, name="Injected").exists()
 
-    def test_configuration_history_and_rollback_are_tenant_isolated(
-        self, api_client, tenant_a_user, tenant_b_user
-    ):
+    def test_configuration_history_and_rollback_are_tenant_isolated(self, api_client, tenant_a_user, tenant_b_user):
         api_client.force_authenticate(user=tenant_b_user)
-        assert api_client.get(
-            f"{PREFIX}/configuration/current/"
-        ).status_code == status.HTTP_200_OK
+        assert api_client.get(f"{PREFIX}/configuration/current/").status_code == status.HTTP_200_OK
         tenant_b = get_user_tenant_id(tenant_b_user)
         assert RegionalConfiguration.objects.filter(tenant_id=tenant_b).exists()
 
         api_client.force_authenticate(user=tenant_a_user)
-        history = api_client.get(
-            f"{PREFIX}/configuration/history/?environment=development"
-        )
+        history = api_client.get(f"{PREFIX}/configuration/history/?environment=development")
         assert history.status_code == status.HTTP_200_OK
         assert all(item["environment"] == "development" for item in history.data)
         rollback = api_client.post(

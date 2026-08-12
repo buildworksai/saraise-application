@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Final
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Final, cast
 from uuid import UUID
 
-from rest_framework.authentication import SessionAuthentication
+from rest_framework.authentication import BaseAuthentication, SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 
 from src.core.access.permissions import RequiresAccess
 from src.core.auth_utils import get_user_tenant_id
+
+if TYPE_CHECKING:
+    from rest_framework.permissions import _PermissionClass, _SupportsHasPermission
 
 PERMISSIONS: Final[tuple[str, ...]] = (
     "bank_reconciliation.account:read",
@@ -59,19 +63,20 @@ class SessionAuthentication401(SessionAuthentication):
 class ActionAccessMixin:
     """Map the selected DRF action to permission, entitlement and quota."""
 
-    authentication_classes = (SessionAuthentication401,)
-    permission_classes = (IsAuthenticated, RequiresAccess)
+    authentication_classes: Sequence[type[BaseAuthentication]] = (SessionAuthentication401,)
+    permission_classes: Sequence[_PermissionClass] = (IsAuthenticated, RequiresAccess)
     action_permissions: dict[str, str] = {}
     action_quotas: dict[str, str] = {}
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> Sequence[_SupportsHasPermission]:
         action = getattr(self, "action", "")
-        tenant_id = get_user_tenant_id(getattr(self.request, "user", None))
+        request = cast(Any, getattr(self, "request"))
+        tenant_id = get_user_tenant_id(getattr(request, "user", None))
         if tenant_id is not None:
             try:
-                self.request.tenant_id = UUID(str(tenant_id))
+                setattr(request, "tenant_id", UUID(str(tenant_id)))
             except (TypeError, ValueError, AttributeError):
-                self.request.tenant_id = None
+                setattr(request, "tenant_id", None)
         self.required_permission = self.action_permissions.get(action)
         self.required_entitlement = self.required_permission
         self.quota_resource = self.action_quotas.get(

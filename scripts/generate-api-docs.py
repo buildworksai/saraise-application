@@ -24,7 +24,7 @@ MODULE_BATCHES = {
 
 class ViewSetParser(ast.NodeVisitor):
     """Parse ViewSet class to extract endpoint information."""
-    
+
     def __init__(self):
         self.viewset_name = None
         self.docstring = None
@@ -37,7 +37,7 @@ class ViewSetParser(ast.NodeVisitor):
         self.custom_actions = []
         self.serializer_class = None
         self.base_name = None
-    
+
     def visit_ClassDef(self, node):
         """Visit class definition."""
         # Check if class inherits from ViewSet (directly or indirectly)
@@ -52,11 +52,11 @@ class ViewSetParser(ast.NodeVisitor):
                 if base.attr and 'ViewSet' in base.attr:
                     is_viewset = True
                     break
-        
+
         if is_viewset:
             self.viewset_name = node.name
             self.docstring = ast.get_docstring(node)
-            
+
             # Check for standard methods
             for item in node.body:
                 if isinstance(item, ast.FunctionDef):
@@ -81,7 +81,7 @@ class ViewSetParser(ast.NodeVisitor):
                                     detail = True
                                     methods = ['post']
                                     url_path = item.name.replace('_', '-')
-                                    
+
                                     for keyword in decorator.keywords:
                                         if keyword.arg == 'detail':
                                             detail = keyword.value.value if isinstance(keyword.value, ast.Constant) else True
@@ -89,7 +89,7 @@ class ViewSetParser(ast.NodeVisitor):
                                             methods = [m.value if isinstance(m, ast.Constant) else str(m) for m in keyword.value.elts] if isinstance(keyword.value, ast.List) else ['post']
                                         elif keyword.arg == 'url_path':
                                             url_path = keyword.value.value if isinstance(keyword.value, ast.Constant) else item.name.replace('_', '-')
-                                    
+
                                     self.custom_actions.append({
                                         'name': item.name,
                                         'url_path': url_path,
@@ -97,7 +97,7 @@ class ViewSetParser(ast.NodeVisitor):
                                         'methods': methods,
                                         'docstring': ast.get_docstring(item)
                                     })
-            
+
             # Extract serializer_class
             for item in node.body:
                 if isinstance(item, ast.Assign):
@@ -107,10 +107,10 @@ class ViewSetParser(ast.NodeVisitor):
                                 self.serializer_class = item.value.id
                             elif isinstance(item.value, ast.Attribute):
                                 self.serializer_class = item.value.attr
-            
+
             # Extract basename from router registration (if present in urls.py)
             # This would require parsing urls.py separately
-        
+
         self.generic_visit(node)
 
 
@@ -119,15 +119,15 @@ def parse_viewset(api_file: Path) -> Optional[ViewSetParser]:
     try:
         content = api_file.read_text()
         tree = ast.parse(content)
-        
+
         parser = ViewSetParser()
         parser.visit(tree)
-        
+
         if parser.viewset_name:
             return parser
     except Exception as e:
         print(f"   ⚠️  Error parsing {api_file}: {e}")
-    
+
     return None
 
 
@@ -148,10 +148,10 @@ def generate_api_doc(module_name: str, viewset_parser: ViewSetParser, basename: 
     """Generate API.md content from ViewSet parser."""
     module_name_kebab = module_name.replace('_', '-')
     module_name_pascal = ''.join(word.capitalize() for word in module_name.split('_'))
-    
+
     from datetime import date
     current_date = date.today().isoformat()
-    
+
     content = f'''<!-- SPDX-License-Identifier: Apache-2.0 -->
 # {module_name_pascal} - API Documentation
 
@@ -180,10 +180,10 @@ All endpoints require authentication. See [Authentication Documentation](../../.
 ### {viewset_parser.viewset_name}
 
 '''
-    
+
     if viewset_parser.docstring:
         content += f'{viewset_parser.docstring}\n\n'
-    
+
     # Document standard CRUD operations
     if viewset_parser.has_list:
         content += f'''#### GET /api/v1/{module_name_kebab}/{basename}/
@@ -209,7 +209,7 @@ List all resources for the authenticated user's tenant.
 ```
 
 '''
-    
+
     if viewset_parser.has_create:
         content += f'''#### POST /api/v1/{module_name_kebab}/{basename}/
 
@@ -242,7 +242,7 @@ Create a new resource.
 ```
 
 '''
-    
+
     if viewset_parser.has_retrieve:
         content += f'''#### GET /api/v1/{module_name_kebab}/{basename}/{{id}}/
 
@@ -265,7 +265,7 @@ Get resource detail by ID.
 ```
 
 '''
-    
+
     if viewset_parser.has_update:
         content += f'''#### PUT /api/v1/{module_name_kebab}/{basename}/{{id}}/
 
@@ -284,7 +284,7 @@ Update resource (full update).
 **Response:** `200 OK`
 
 '''
-    
+
     if viewset_parser.has_partial_update:
         content += f'''#### PATCH /api/v1/{module_name_kebab}/{basename}/{{id}}/
 
@@ -301,7 +301,7 @@ Update resource (partial update).
 **Response:** `200 OK`
 
 '''
-    
+
     if viewset_parser.has_destroy:
         content += f'''#### DELETE /api/v1/{module_name_kebab}/{basename}/{{id}}/
 
@@ -310,15 +310,15 @@ Delete resource.
 **Response:** `204 No Content`
 
 '''
-    
+
     # Document custom actions
     for action in viewset_parser.custom_actions:
         for method in action['methods']:
             if method.upper() == 'OPTIONS':
                 continue
-            
+
             url = f'/api/v1/{module_name_kebab}/{basename}/{{id}}/{action["url_path"]}/' if action['detail'] else f'/api/v1/{module_name_kebab}/{basename}/{action["url_path"]}/'
-            
+
             content += f'''#### {method.upper()} {url}
 
 {action['docstring'] or f'Custom action: {action["name"]}'}
@@ -332,7 +332,7 @@ Delete resource.
 ```
 
 '''
-    
+
     content += '''
 ### Health Check
 
@@ -381,44 +381,44 @@ All endpoints are subject to rate limiting. See [Rate Limiting](../../../archite
 
 All endpoints automatically filter data by the authenticated user's tenant. Cross-tenant data access is not possible.
 '''
-    
+
     return content
 
 
 def main():
     """Generate API documentation for all modules."""
     print("📚 Generating API documentation from ViewSets...\n")
-    
+
     all_modules = []
     for batch_modules in MODULE_BATCHES.values():
         all_modules.extend(batch_modules)
-    
+
     for module_name in all_modules:
         print(f"Processing {module_name}...")
-        
+
         api_file = BACKEND_BASE / module_name / 'api.py'
         urls_file = BACKEND_BASE / module_name / 'urls.py'
-        
+
         if not api_file.exists():
             print(f"   ⚠️  {api_file} not found")
             continue
-        
+
         viewset_parser = parse_viewset(api_file)
         if not viewset_parser:
             print(f"   ⚠️  Could not parse ViewSet from {api_file}")
             continue
-        
+
         basename = get_basename_from_urls(urls_file) if urls_file.exists() else 'resource'
-        
+
         doc_content = generate_api_doc(module_name, viewset_parser, basename)
-        
+
         # Write to documentation repo
         output_path = DOCS_BASE / module_name.replace('_', '-') / 'API.md'
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(doc_content)
-        
+
         print(f"   ✅ Generated {output_path}")
-    
+
     print("\n✅ All API documentation generated!")
 
 

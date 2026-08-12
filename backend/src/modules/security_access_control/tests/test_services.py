@@ -21,30 +21,31 @@ from src.modules.security_access_control.extensions import (
     unregister_security_extension,
 )
 from src.modules.security_access_control.models import (
-    FieldSecurity,
     Permission,
     PermissionSetPermission,
     Role,
     RolePermission,
-    RowSecurityRule,
     SecurityAuditLog,
     SecurityProfileAssignment,
-    UserPermissionSet,
-    UserRole,
 )
 from src.modules.security_access_control.services import (
     AccessEvaluationService,
     AuditService,
+    ConfigurationService,
     FieldSecurityService,
+    MutationReplayService,
     PermissionCatalogService,
     PermissionSetService,
+    PolicyEvaluatorComposition,
     RoleService,
     RowSecurityService,
     SecurityConflict,
     SecurityNotFound,
     SecurityProfileService,
     SecurityValidationError,
+    default_security_configuration,
 )
+from src.modules.security_access_control.validators import redact_sensitive, validate_security_profile
 
 pytest_plugins = ["src.core.testing.factories"]
 pytestmark = pytest.mark.django_db
@@ -256,9 +257,7 @@ def test_permission_catalog_filters_resolves_registers_idempotently_and_rejects_
     manifest = {
         "name": "inventory",
         "permission_namespace": "inventory",
-        "permissions": [
-            {"code": "inventory.items:read", "name": "Read items", "risk_level": "low"}
-        ],
+        "permissions": [{"code": "inventory.items:read", "name": "Read items", "risk_level": "low"}],
     }
     first = PermissionCatalogService.register_manifest_permissions(
         tenant_a.id,
@@ -358,6 +357,73 @@ def test_permission_set_membership_grant_update_revoke_and_protection(
     )
 
 
+def test_mutation_replay_service_replays_same_payload_and_rejects_drift(tenant_a, correlation_id) -> None:
+    callback_calls = 0
+    resource_id = uuid.uuid4()
+
+    def callback() -> tuple[dict[str, object], int, uuid.UUID]:
+        nonlocal callback_calls
+        callback_calls += 1
+        return {"id": str(resource_id), "state": "created"}, 201, resource_id
+
+    first_document, first_status, first_replay = MutationReplayService.execute(
+        tenant_a.id,
+        idempotency_key="permission-set:create:1",
+        operation="permission-set.create",
+        request_document={"name": "Emergency access"},
+        correlation_id=correlation_id,
+        callback=callback,
+    )
+    replay_document, replay_status, replayed = MutationReplayService.execute(
+        tenant_a.id,
+        idempotency_key="permission-set:create:1",
+        operation="permission-set.create",
+        request_document={"name": "Emergency access"},
+        correlation_id=correlation_id,
+        callback=callback,
+    )
+
+    assert callback_calls == 1
+    assert first_status == replay_status == 201
+    assert first_replay is False and replayed is True
+    assert first_document == replay_document == {"id": str(resource_id), "state": "created"}
+    with pytest.raises(SecurityConflict):
+        MutationReplayService.execute(
+            tenant_a.id,
+            idempotency_key="permission-set:create:1",
+            operation="permission-set.create",
+            request_document={"name": "Different access"},
+            correlation_id=correlation_id,
+            callback=callback,
+        )
+    with pytest.raises(SecurityConflict):
+        MutationReplayService.execute(
+            tenant_a.id,
+            idempotency_key="permission-set:create:1",
+            operation="permission-set.update",
+            request_document={"name": "Emergency access"},
+            correlation_id=correlation_id,
+            callback=callback,
+        )
+
+
+@pytest.mark.parametrize("idempotency_key", ["", "bad key", "x" * 129])
+def test_mutation_replay_service_rejects_unsafe_idempotency_keys(tenant_a, correlation_id, idempotency_key) -> None:
+    callback = Mock(return_value=({}, 200, uuid.uuid4()))
+
+    with pytest.raises(SecurityValidationError):
+        MutationReplayService.execute(
+            tenant_a.id,
+            idempotency_key=idempotency_key,
+            operation="permission-set.create",
+            request_document={"name": "Emergency access"},
+            correlation_id=correlation_id,
+            callback=callback,
+        )
+
+    callback.assert_not_called()
+
+
 def test_field_and_row_rules_use_registered_metadata_resolve_and_version(
     tenant_a, tenant_a_user, actor_id, correlation_id, resource_extension
 ) -> None:
@@ -453,9 +519,7 @@ def test_field_and_row_rules_use_registered_metadata_resolve_and_version(
     )
 
 
-def test_profile_assignment_merge_update_revoke_and_delete(
-    tenant_a, tenant_a_user, actor_id, correlation_id
-) -> None:
+def test_profile_assignment_merge_update_revoke_and_delete(tenant_a, tenant_a_user, actor_id, correlation_id) -> None:
     profile = SecurityProfileService.create_profile(
         tenant_a.id,
         name="Restricted",
@@ -589,12 +653,8 @@ def test_effective_permissions_expand_parent_explicit_deny_and_permission_set(
     effective = AccessEvaluationService.get_effective_permissions(tenant_a.id, tenant_a_user.id)
     assert catalog[0].code in effective.denied and catalog[0].code not in effective.allowed
     assert catalog[1].code in effective.allowed
-    assert not AccessEvaluationService.evaluate_local(
-        tenant_a.id, tenant_a_user, catalog[0].code
-    ).allowed
-    assert AccessEvaluationService.evaluate_local(
-        tenant_a.id, tenant_a_user, catalog[1].code
-    ).allowed
+    assert not AccessEvaluationService.evaluate_local(tenant_a.id, tenant_a_user, catalog[0].code).allowed
+    assert AccessEvaluationService.evaluate_local(tenant_a.id, tenant_a_user, catalog[1].code).allowed
 
 
 @pytest.mark.parametrize(
@@ -620,9 +680,7 @@ def test_remote_evaluation_fail_closed_for_dependency_and_invalid_payload(
     client.post.assert_called_once()
 
 
-def test_remote_evaluation_never_reuses_previous_allow_after_timeout(
-    tenant_a, tenant_a_user, monkeypatch
-) -> None:
+def test_remote_evaluation_never_reuses_previous_allow_after_timeout(tenant_a, tenant_a_user, monkeypatch) -> None:
     client = Mock()
     client.post.side_effect = [
         SimpleNamespace(
@@ -636,6 +694,70 @@ def test_remote_evaluation_never_reuses_previous_allow_after_timeout(
     second = AccessEvaluationService.evaluate_remote(tenant_a.id, tenant_a_user, "finance.journals:read")
     assert first.allowed
     assert not second.allowed and second.reason_codes == ("ENGINE_UNAVAILABLE",)
+
+
+def test_authoritative_policy_composition_fails_closed_for_unknown_mode(settings) -> None:
+    settings.SARAISE_MODE = "unconfigured"
+
+    decision = PolicyEvaluatorComposition.authoritative()(
+        uuid.uuid4(),
+        SimpleNamespace(id=uuid.uuid4()),
+        "security.roles:read",
+    )
+
+    assert not decision.allowed
+    assert decision.reason_codes == ("EVALUATOR_CONFIGURATION_INVALID",)
+
+
+def test_remote_evaluation_rejects_unconfigured_or_nested_resource_context(
+    tenant_a, tenant_a_user, monkeypatch
+) -> None:
+    client = Mock()
+    monkeypatch.setattr("src.modules.security_access_control.services.get_policy_http_client", lambda: client)
+
+    unapproved_key = AccessEvaluationService.evaluate_remote(
+        tenant_a.id,
+        tenant_a_user,
+        "finance.journals:read",
+        resource_context={"not-allowed": "value"},
+        correlation_id="corr-context-key",
+    )
+    nested_value = AccessEvaluationService.evaluate_remote(
+        tenant_a.id,
+        tenant_a_user,
+        "finance.journals:read",
+        resource_context={"module": {"nested": "finance"}},
+        correlation_id="corr-nested-context",
+    )
+
+    assert unapproved_key.reason_codes == ("INVALID_RESOURCE_CONTEXT",)
+    assert nested_value.reason_codes == ("INVALID_RESOURCE_CONTEXT",)
+    client.post.assert_not_called()
+
+
+def test_remote_evaluation_rejects_malformed_reason_or_policy_sequences(tenant_a, tenant_a_user, monkeypatch) -> None:
+    client = Mock()
+    client.post.side_effect = [
+        SimpleNamespace(status_code=200, json=lambda: {"decision": "allow", "reason_codes": "ALLOW"}),
+        SimpleNamespace(status_code=200, json=lambda: {"decision": "allow", "applied_policies": "policy-1"}),
+    ]
+    monkeypatch.setattr("src.modules.security_access_control.services.get_policy_http_client", lambda: client)
+
+    bad_reasons = AccessEvaluationService.evaluate_remote(
+        tenant_a.id,
+        tenant_a_user,
+        "finance.journals:read",
+        correlation_id="corr-bad-reasons",
+    )
+    bad_policies = AccessEvaluationService.evaluate_remote(
+        tenant_a.id,
+        tenant_a_user,
+        "finance.journals:read",
+        correlation_id="corr-bad-policies",
+    )
+
+    assert bad_reasons.reason_codes == ("INVALID_POLICY_RESPONSE",)
+    assert bad_policies.reason_codes == ("INVALID_POLICY_RESPONSE",)
 
 
 def test_audit_redacts_secrets_bounds_payload_and_links_outbox(tenant_a, actor_id, correlation_id) -> None:
@@ -671,3 +793,127 @@ def test_audit_redacts_secrets_bounds_payload_and_links_outbox(tenant_a, actor_i
             user_agent="",
             correlation_id=correlation_id,
         )
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_detail"),
+    [
+        (lambda document: document.pop("limits"), "document"),
+        (lambda document: document.update({"limits": []}), "document"),
+        (
+            lambda document: document["limits"].update({"rate_requests_per_minute": True}),
+            "limits.rate_requests_per_minute",
+        ),
+        (
+            lambda document: document["limits"].update(
+                {"permission_set_duration_min_days": 30, "permission_set_duration_max_days": 7}
+            ),
+            "limits.permission_set_duration_min_days",
+        ),
+        (
+            lambda document: document["limits"].update({"correlation_id_pattern": r"^(capture)$"}),
+            "limits.correlation_id_pattern",
+        ),
+        (lambda document: document["defaults"].update({"allowed_mfa_methods": []}), "defaults.allowed_mfa_methods"),
+        (
+            lambda document: document["defaults"].update({"allowed_mfa_methods": ["totp", "totp"]}),
+            "defaults.allowed_mfa_methods",
+        ),
+        (lambda document: document["defaults"].update({"security_profile": []}), "defaults.security_profile"),
+        (lambda document: document["baseline_profile"].update({"download_allowed": True}), "baseline_profile"),
+        (lambda document: document.update({"remote_context_keys": ["bad key"]}), "remote_context_keys"),
+        (
+            lambda document: document.update({"commercial_controls": {"entitlement": "skip", "quota": "not_required"}}),
+            "commercial_controls",
+        ),
+        (lambda document: document["ordering"].update({"roles": ["tenant_id"]}), "ordering.roles"),
+        (lambda document: document.update({"ui": []}), "ui"),
+        (lambda document: document.update({"semantic_tokens": {"success": "ok"}}), "semantic_tokens"),
+        (lambda document: document.update({"feature_flags": {}}), "feature_flags"),
+        (
+            lambda document: document.update(
+                {"feature_flags": {"bad flag": {"enabled": True, "percentage": 100, "roles": [], "cohorts": []}}}
+            ),
+            "feature_flags",
+        ),
+        (
+            lambda document: document["feature_flags"]["configuration_ui"].update({"percentage": True}),
+            "feature_flags.configuration_ui",
+        ),
+        (
+            lambda document: document["feature_flags"]["configuration_ui"].update({"roles": ["r"] * 101}),
+            "feature_flags.configuration_ui",
+        ),
+    ],
+)
+def test_configuration_validation_rejects_unsafe_document_edges(mutate, expected_detail) -> None:
+    document = default_security_configuration()
+    mutate(document)
+
+    with pytest.raises(SecurityValidationError) as exc:
+        ConfigurationService.validate_document(document)
+
+    assert expected_detail in exc.value.detail
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        ("ip_whitelist", "10.0.0.0/24", "ip_whitelist"),
+        ("ip_whitelist", ["not-cidr"], "ip_whitelist"),
+        ("ip_blacklist", ["10.0.0.0/24"], "allowlist and blocklist"),
+        ("allowed_countries", ["USA"], "allowed_countries"),
+        ("blocked_countries", ["US"], "Allowed and blocked countries"),
+        ("allowed_mfa_methods", ["magic-link"], "allowed_mfa_methods"),
+        ("password_policy", [], "password_policy"),
+        ("time_restrictions", [], "time_restrictions"),
+        ("time_restrictions", {"timezone": "UTC", "extra": True}, "time_restrictions"),
+        ("time_restrictions", {"timezone": "Not/AZone", "weekdays": [], "windows": []}, "time_restrictions"),
+        ("time_restrictions", {"timezone": "UTC", "weekdays": [0], "windows": []}, "time_restrictions"),
+        ("time_restrictions", {"timezone": "UTC", "weekdays": [1], "windows": {}}, "time_restrictions"),
+        (
+            "time_restrictions",
+            {"timezone": "UTC", "weekdays": [1], "windows": [{"start": "17:00", "end": "09:00"}]},
+            "time_restrictions",
+        ),
+        ("session_timeout_minutes", True, "session_timeout_minutes"),
+    ],
+)
+def test_security_profile_validator_rejects_policy_edges(tenant_a, field, value, expected) -> None:
+    profile = SimpleNamespace(
+        tenant_id=tenant_a.id,
+        ip_whitelist=["10.0.0.0/24"],
+        ip_blacklist=[],
+        allowed_countries=["US"],
+        blocked_countries=[],
+        allowed_mfa_methods=["totp"],
+        password_policy={},
+        time_restrictions={"timezone": "UTC", "weekdays": [1], "windows": [{"start": "09:00", "end": "17:00"}]},
+        session_timeout_minutes=60,
+        absolute_session_timeout_hours=8,
+        max_concurrent_sessions=5,
+    )
+    setattr(profile, field, value)
+
+    with pytest.raises(Exception) as exc:
+        validate_security_profile(profile)
+
+    assert expected in str(exc.value)
+
+
+def test_redaction_covers_identity_pii_depth_collection_and_scalar_fallbacks() -> None:
+    redacted = redact_sensitive(
+        {
+            "actor_email": "ada@example.com",
+            "safe": [{"token": "secret"}, {"visible": "kept"}, {"ignored": True}],
+            "object": object(),
+        },
+        max_depth=1,
+        max_collection=2,
+        max_string=12,
+    )
+
+    assert redacted["actor_email"] == "[REDACTED]"
+    assert redacted["safe"] == ["[TRUNCATED]", "[TRUNCATED]"]
+    assert "object" not in redacted
+    assert redact_sensitive("x" * 20, max_depth=1, max_collection=5, max_string=4) == "xxxx"

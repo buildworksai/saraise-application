@@ -1,1 +1,1 @@
-export { ConfigurationVersionListPage } from './workspaces';
+export { ConfigurationVersionListPage } from "./workspaces";

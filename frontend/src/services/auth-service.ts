@@ -6,7 +6,7 @@
  * MIGRATED: Now uses auth-contracts.ts for types and endpoints.
  * Reference: saraise-documentation/rules/agent-rules/27-contracts-architecture.md
  */
-import { apiClient } from './api-client';
+import { apiClient } from "./api-client";
 import type {
   LoginRequest,
   LoginResponse,
@@ -15,8 +15,8 @@ import type {
   ForgotPasswordRequest,
   ResetPasswordRequest,
   User,
-} from './auth-contracts';
-import { ENDPOINTS } from './auth-contracts';
+} from "./auth-contracts";
+import { ENDPOINTS } from "./auth-contracts";
 
 // Re-export types for backward compatibility
 export type {

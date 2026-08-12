@@ -106,16 +106,22 @@ def _configuration(tenant_id: UUID) -> tuple[ComponentStatus, Mapping[str, objec
 
         errors = NotificationConfigurationService.validate_document(tenant_id, document)
         if errors:
-            return ComponentStatus(
-                False,
-                "configuration_invalid",
-                details={"validation_error_count": len(errors)},
-            ), None
-        return ComponentStatus(
-            True,
-            "ready",
-            details={"environment": environment, "active_version": configuration.active_version},
-        ), document
+            return (
+                ComponentStatus(
+                    False,
+                    "configuration_invalid",
+                    details={"validation_error_count": len(errors)},
+                ),
+                None,
+            )
+        return (
+            ComponentStatus(
+                True,
+                "ready",
+                details={"environment": environment, "active_version": configuration.active_version},
+            ),
+            document,
+        )
     except Exception:
         return ComponentStatus(False, "configuration_unavailable"), None
 
@@ -131,7 +137,7 @@ def _adapter_statuses(
         return ComponentStatus(False, "channel_configuration_missing"), {}
     output: dict[str, object] = {}
     healthy = True
-    for channel in sorted(channels):
+    for channel in sorted(channels, key=str):
         raw = channels[channel]
         if not isinstance(channel, str) or not isinstance(raw, Mapping):
             healthy = False
@@ -155,11 +161,15 @@ def _adapter_statuses(
             if adapter.channel != channel:
                 raise ValueError("adapter channel mismatch")
             result = adapter.health(tenant_id, raw)
-            output[channel] = result.__dict__ if hasattr(result, "__dict__") else {
-                "status": result.status,
-                "code": result.code,
-                "details": dict(result.details),
-            }
+            output[channel] = (
+                result.__dict__
+                if hasattr(result, "__dict__")
+                else {
+                    "status": result.status,
+                    "code": result.code,
+                    "details": dict(result.details),
+                }
+            )
             healthy = healthy and result.healthy
         except AdapterNotRegistered:
             healthy = False
@@ -213,7 +223,13 @@ def readiness(tenant_id: UUID | str | None) -> tuple[dict[str, object], int]:
     }
     try:
         delivery_model = apps.get_model("notifications", "NotificationDelivery")
-        last_success = delivery_model.objects.for_tenant(canonical_tenant).filter(status__in=("sent", "delivered")).order_by("-sent_at").values_list("sent_at", flat=True).first()
+        last_success = (
+            delivery_model.objects.for_tenant(canonical_tenant)
+            .filter(status__in=("sent", "delivered"))
+            .order_by("-sent_at")
+            .values_list("sent_at", flat=True)
+            .first()
+        )
         payload["last_successful_delivery_at"] = last_success.isoformat() if last_success else None
     except Exception:
         payload["last_successful_delivery_at"] = None

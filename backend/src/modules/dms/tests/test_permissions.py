@@ -12,17 +12,17 @@ from src.core.access.decision import AccessDecision, AccessReasonCode
 from src.core.access.permissions import RequiresAccess
 from src.modules.dms import permissions as permission_contract
 from src.modules.dms.permissions import (
-    ActionAccessMixin,
     CONFIGURATION_ACTION_PERMISSIONS,
     DOCUMENT_ACTION_PERMISSIONS,
     DOCUMENT_PERMISSION_ACTION_PERMISSIONS,
     FOLDER_ACTION_PERMISSIONS,
     HEALTH_ACTION_PERMISSIONS,
-    PERMISSIONS,
     PERMISSION_QUOTAS,
+    PERMISSIONS,
     PRINCIPAL_ACTION_PERMISSIONS,
     SHARE_ACTION_PERMISSIONS,
     VERSION_ACTION_PERMISSIONS,
+    ActionAccessMixin,
     SessionAuthentication401,
 )
 
@@ -78,6 +78,37 @@ def test_all_declared_actions_map_to_manifest_permissions_and_explicit_quotas() 
     assert declared == set(PERMISSIONS)
     assert set(PERMISSION_QUOTAS) == set(PERMISSIONS)
     assert set(PERMISSION_QUOTAS.values()) == {"dms.api_reads", "dms.api_writes"}
+
+
+def test_permission_quota_catalog_classifies_each_permission_exactly() -> None:
+    assert PERMISSION_QUOTAS == {
+        "dms.folder:read": "dms.api_reads",
+        "dms.folder:create": "dms.api_writes",
+        "dms.folder:update": "dms.api_writes",
+        "dms.folder:delete": "dms.api_writes",
+        "dms.document:read": "dms.api_reads",
+        "dms.document:create": "dms.api_writes",
+        "dms.document:update": "dms.api_writes",
+        "dms.document:move": "dms.api_writes",
+        "dms.document:download": "dms.api_reads",
+        "dms.document:delete": "dms.api_writes",
+        "dms.version:read": "dms.api_reads",
+        "dms.version:create": "dms.api_writes",
+        "dms.version:restore": "dms.api_writes",
+        "dms.permission:read": "dms.api_reads",
+        "dms.permission:grant": "dms.api_writes",
+        "dms.permission:update": "dms.api_writes",
+        "dms.permission:revoke": "dms.api_writes",
+        "dms.share:read": "dms.api_reads",
+        "dms.share:create": "dms.api_writes",
+        "dms.share:revoke": "dms.api_writes",
+        "dms.health:read": "dms.api_reads",
+        "dms.configuration:read": "dms.api_reads",
+        "dms.configuration:write": "dms.api_writes",
+        "dms.configuration:rollback": "dms.api_writes",
+        "dms.configuration:import": "dms.api_writes",
+        "dms.configuration:export": "dms.api_reads",
+    }
 
 
 def test_strict_session_authentication_never_uses_relaxed_csrf() -> None:

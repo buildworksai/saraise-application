@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from copy import deepcopy
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -18,28 +19,24 @@ from src.modules.master_data_management.extension_registry import (
 )
 from src.modules.master_data_management.models import (
     DataQualityIssue,
+    MasterDataConfigurationVersion,
     MasterDataEntity,
     MasterDataVersion,
     MergeParticipant,
 )
 from src.modules.master_data_management.services import (
+    ConfigurationService,
     DashboardService,
     DataQualityService,
     EntityTypeService,
-    MDMDomainError,
     MasterEntityService,
     MatchingService,
+    MDMDomainError,
     MergeService,
     QualityRuleService,
 )
 
-from .factories import (
-    actor_id,
-    make_candidate,
-    make_entity,
-    make_entity_type,
-    make_matching_rule,
-)
+from .factories import actor_id, make_candidate, make_entity, make_entity_type, make_matching_rule
 
 pytestmark = pytest.mark.django_db
 
@@ -108,6 +105,313 @@ def assert_domain_error(error_code: str, callable_: object, *args: object, **kwa
         callable_(*args, **kwargs)  # type: ignore[operator]
     assert caught.value.error_code == error_code
     return caught.value
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    [
+        (lambda document: document.pop("limits"), "INVALID_CONFIGURATION"),
+        (lambda document: document["schema_policy"].update({"entity_type_key_pattern": "["}), "INVALID_CONFIGURATION"),
+        (
+            lambda document: document["schema_policy"].update({"allowed_json_schema_keywords": ["type", "x-hook"]}),
+            "INVALID_CONFIGURATION",
+        ),
+        (
+            lambda document: document["matching"].update({"threshold_min": "0.9", "threshold_max": "0.8"}),
+            "INVALID_CONFIGURATION",
+        ),
+        (lambda document: document["dashboard"].update({"score_buckets": []}), "INVALID_CONFIGURATION"),
+        (lambda document: document["workflows"]["entity"]["transitions"].append("bad"), "INVALID_CONFIGURATION"),
+        (lambda document: document["ui"]["status_tokens"].update({"danger": "Invalid Token"}), "INVALID_CONFIGURATION"),
+        (
+            lambda document: document["merge"].update({"survivorship_order": ["quality_score:desc"]}),
+            "INVALID_CONFIGURATION",
+        ),
+    ],
+)
+def test_configuration_document_rejects_unsafe_operator_policy(mutation, expected_code: str) -> None:
+    document = ConfigurationService.defaults()
+    mutation(document)
+
+    with pytest.raises(MDMDomainError) as caught:
+        ConfigurationService.validate_document(document)
+
+    assert caught.value.error_code == expected_code
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_message"),
+    [
+        (
+            lambda document: document["dashboard"].update(
+                {"score_buckets": [{"label": "flat", "minimum": "10", "maximum": "10"}]}
+            ),
+            "Dashboard score bucket bounds are invalid.",
+        ),
+        (
+            lambda document: document["dashboard"].update(
+                {"score_buckets": [{"label": "negative", "minimum": "-1", "maximum": "10"}]}
+            ),
+            "Dashboard score bucket bounds are invalid.",
+        ),
+        (
+            lambda document: document["dashboard"].update(
+                {"score_buckets": [{"label": "too-high", "minimum": "10", "maximum": "101"}]}
+            ),
+            "Dashboard score bucket bounds are invalid.",
+        ),
+        (
+            lambda document: document["dashboard"].update(
+                {
+                    "score_buckets": [
+                        {"label": "high", "minimum": "90", "maximum": "100"},
+                        {"label": "low", "minimum": "0", "maximum": "80"},
+                    ]
+                }
+            ),
+            "Dashboard score buckets must be contiguous.",
+        ),
+        (
+            lambda document: document["operational"].update({"job_poll_statuses": "queued"}),
+            "operational.job_poll_statuses must be an array.",
+        ),
+        (
+            lambda document: document["operational"].update({"job_poll_statuses": ["queued", "unknown"]}),
+            "operational.job_poll_statuses contains an invalid status.",
+        ),
+        (
+            lambda document: document["feature_rollout"].update({"modes": "production"}),
+            "feature_rollout.modes must be a string list.",
+        ),
+        (
+            lambda document: document["feature_rollout"].update({"roles": ["operator", 7]}),
+            "feature_rollout.roles must be a string list.",
+        ),
+        (
+            lambda document: document["entity_defaults"].update({"source_system": "   "}),
+            "entity_defaults.source_system is invalid.",
+        ),
+    ],
+)
+def test_configuration_document_rejects_boundary_and_type_contracts(mutation, expected_message: str) -> None:
+    document = ConfigurationService.defaults()
+    mutation(document)
+
+    with pytest.raises(MDMDomainError) as caught:
+        ConfigurationService.validate_document(document)
+
+    assert caught.value.error_code == "INVALID_CONFIGURATION"
+    assert caught.value.public_message == expected_message
+
+
+def test_configuration_document_accepts_source_system_at_exact_configured_limit() -> None:
+    document = ConfigurationService.defaults()
+    maximum = int(document["limits"]["source_system_max"])  # type: ignore[index]
+    document["entity_defaults"]["source_system"] = "s" * maximum  # type: ignore[index]
+
+    assert ConfigurationService.validate_document(document)["entity_defaults"]["source_system"] == "s" * maximum
+
+
+def test_object_default_payload_limit_is_enforced_at_the_exact_boundary() -> None:
+    payload = {"x": "a" * (10_485_761 - len('{"x":""}'))}
+
+    with pytest.raises(MDMDomainError) as caught:
+        services._object(payload, "payload")
+
+    assert caught.value.error_code == "PAYLOAD_TOO_LARGE"
+    assert caught.value.status_code == 413
+
+
+def test_configuration_write_replay_conflict_and_optimistic_version_contract() -> None:
+    tenant = uuid.uuid4()
+    actor = actor_id()
+    original = ConfigurationService.defaults()
+    first = ConfigurationService.write(
+        tenant,
+        actor,
+        document=original,
+        expected_version=0,
+        idempotency_key="mdm-config-create",
+        reason="Install tenant policy",
+    )
+    replay = ConfigurationService.write(
+        tenant,
+        actor,
+        document=deepcopy(original),
+        expected_version=0,
+        idempotency_key="mdm-config-create",
+        reason="Replay install tenant policy",
+    )
+    assert replay.id == first.id
+    assert replay.version == 1
+    assert MasterDataConfigurationVersion.objects.for_tenant(tenant).count() == 1
+
+    changed = deepcopy(original)
+    changed["dashboard"]["trend_window_days"] = 45  # type: ignore[index]
+    assert_domain_error(
+        "IDEMPOTENCY_CONFLICT",
+        ConfigurationService.write,
+        tenant,
+        actor,
+        document=changed,
+        expected_version=1,
+        idempotency_key="mdm-config-create",
+        reason="Conflicting replay",
+    )
+    assert_domain_error(
+        "CONFIGURATION_VERSION_CONFLICT",
+        ConfigurationService.write,
+        tenant,
+        actor,
+        document=changed,
+        expected_version=99,
+        idempotency_key="mdm-config-stale",
+        reason="Stale operator save",
+    )
+    first.refresh_from_db()
+    assert first.version == 1
+    assert first.document == original
+
+
+def test_configuration_preview_ensure_defaults_rollback_and_section_fail_closed() -> None:
+    tenant = uuid.uuid4()
+    actor = actor_id()
+    defaulted = ConfigurationService.ensure_defaults(tenant, actor)
+    replay = ConfigurationService.ensure_defaults(tenant, actor)
+    assert replay.id == defaulted.id
+    assert MasterDataConfigurationVersion.objects.for_tenant(tenant).count() == 1
+
+    changed = deepcopy(defaulted.document)
+    changed["matching"]["strategy_version"] = 2  # type: ignore[index]
+    preview = ConfigurationService.preview(tenant, changed)
+    assert preview["valid"] is True
+    assert {item["path"]: item["after"] for item in preview["changes"]} == {  # type: ignore[union-attr]
+        "matching.strategy_version": 2
+    }
+
+    updated = ConfigurationService.write(
+        tenant,
+        actor,
+        document=changed,
+        expected_version=1,
+        idempotency_key="mdm-config-strategy-v2",
+        reason="Advance matching strategy",
+    )
+    restored = ConfigurationService.rollback(
+        tenant,
+        actor,
+        version=1,
+        idempotency_key="mdm-config-rollback-v1",
+        reason="Rollback matching strategy",
+    )
+    assert updated.version == 2
+    assert restored.version == 3
+    assert restored.document == defaulted.document
+    assert [
+        audit.change_type for audit in MasterDataConfigurationVersion.objects.for_tenant(tenant).order_by("version")
+    ] == [
+        "initialize",
+        "update",
+        "rollback",
+    ]
+
+    with patch.object(ConfigurationService, "get_effective", return_value={"limits": []}):
+        assert_domain_error(
+            "CONFIGURATION_UNAVAILABLE",
+            services._configuration_section,
+            tenant,
+            "limits",
+        )
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"schema": "saraise.master-data-management.quality_rule", "document_version": 1, "rule_id": str(uuid.uuid4())},
+        {
+            "schema": "saraise.master-data-management.wrong",
+            "document_version": 1,
+            "rule_id": str(uuid.uuid4()),
+            "version_number": 1,
+            "snapshot": {},
+        },
+        {
+            "schema": "saraise.master-data-management.quality_rule",
+            "document_version": 1,
+            "rule_id": str(uuid.uuid4()),
+            "version_number": 0,
+            "snapshot": {},
+        },
+    ],
+)
+def test_imported_rule_snapshot_rejects_non_portable_documents(document: dict[str, object]) -> None:
+    tenant = uuid.uuid4()
+    expected_rule_id = uuid.uuid4()
+    if "rule_id" in document and document.get("version_number") != 0:
+        document["rule_id"] = str(expected_rule_id)
+
+    with pytest.raises(MDMDomainError) as caught:
+        services._imported_rule_snapshot(
+            tenant,
+            document,
+            kind="quality_rule",
+            expected_rule_id=expected_rule_id,
+        )
+
+    assert caught.value.error_code == "INVALID_RULE_DOCUMENT"
+
+
+@pytest.mark.parametrize(
+    ("callable_", "args", "expected_code"),
+    [
+        (services._uuid, ("not-a-uuid", "record_id"), "INVALID_UUID"),
+        (services._text, (123, "name"), "VALIDATION_ERROR"),
+        (services._text, ("   ", "name"), "VALIDATION_ERROR"),
+        (services._text, ("x" * 4, "name"), "VALIDATION_ERROR"),
+        (services._object, ("not-object", "payload"), "VALIDATION_ERROR"),
+        (services._object, ({"value": float("nan")}, "payload"), "VALIDATION_ERROR"),
+        (services._object, ({"value": "xx"}, "payload"), "PAYLOAD_TOO_LARGE"),
+        (services._paths, ("email", "searchable_fields"), "VALIDATION_ERROR"),
+        (services._paths, (["email", "bad path"], "searchable_fields"), "VALIDATION_ERROR"),
+        (services._paths, (["email", "email"], "searchable_fields"), "VALIDATION_ERROR"),
+    ],
+)
+def test_low_level_validation_helpers_fail_closed(callable_, args: tuple[object, ...], expected_code: str) -> None:
+    kwargs = {}
+    if callable_ is services._text:
+        kwargs["maximum"] = 3
+    if callable_ is services._object and args[1] == "payload":
+        kwargs["maximum_bytes"] = 8
+
+    with pytest.raises(MDMDomainError) as caught:
+        callable_(*args, **kwargs)
+
+    assert caught.value.error_code == expected_code
+
+
+@pytest.mark.parametrize(
+    "schema_document",
+    [
+        "not-object",
+        {"type": "object", "x-unsafe": True},
+        {"type": "object", "properties": []},
+        {"type": "object", "properties": {"": {"type": "string"}}},
+        {"type": "object", "items": "not-object"},
+        {"type": "object", "anyOf": "not-array"},
+        {"type": "object", "oneOf": ["not-object"]},
+        {"type": "array", "items": {"type": "string"}},
+        {"type": "object", "properties": {"age": {"type": 12}}},
+    ],
+)
+def test_schema_validation_rejects_unsupported_or_invalid_schema_shapes(schema_document: object) -> None:
+    with pytest.raises(MDMDomainError) as caught:
+        services._validate_schema(
+            schema_document,
+            allowed_keywords=services.ALLOWED_SCHEMA_KEYS,
+            maximum_bytes=4096,
+        )
+
+    assert caught.value.error_code in {"INVALID_SCHEMA", "UNSUPPORTED_SCHEMA_KEYWORD", "VALIDATION_ERROR"}
 
 
 def test_entity_type_create_update_deactivate_and_outbox_contract() -> None:
@@ -239,10 +543,14 @@ def test_create_entity_is_schema_validated_versioned_scoped_scored_and_evented()
     version = MasterDataVersion.objects.for_tenant(tenant).get(entity=entity, version_number=1)
     assert version.data_snapshot == entity.data
     assert version.changed_by == actor
-    assert OutboxEvent.objects.for_tenant(tenant).filter(
-        event_type="mdm.entity.created",
-        aggregate_id=entity.id,
-    ).exists()
+    assert (
+        OutboxEvent.objects.for_tenant(tenant)
+        .filter(
+            event_type="mdm.entity.created",
+            aggregate_id=entity.id,
+        )
+        .exists()
+    )
     # With no configured quality rules the record is explicitly unevaluated,
     # never silently awarded a perfect score.
     report = DataQualityService.evaluate_entity(
@@ -252,11 +560,16 @@ def test_create_entity_is_schema_validated_versioned_scoped_scored_and_evented()
         idempotency_key="no-rules-evaluation",
     )
     assert report.evaluated is False and report.score is None
-    assert OutboxEvent.objects.for_tenant(tenant).filter(
-        event_type="mdm.entity.quality_scored",
-        aggregate_id=entity.id,
-        payload__causation_id="no-rules-evaluation",
-    ).count() == 1
+    assert (
+        OutboxEvent.objects.for_tenant(tenant)
+        .filter(
+            event_type="mdm.entity.quality_scored",
+            aggregate_id=entity.id,
+            payload__causation_id="no-rules-evaluation",
+        )
+        .count()
+        == 1
+    )
 
     # A retry returns the durable original outcome even when rule configuration
     # changes between attempts; an idempotency key cannot become a fresh command.
@@ -444,7 +757,12 @@ def test_entity_update_archive_restore_rollback_and_version_conflicts() -> None:
         .filter(event_type="mdm.entity.quality_scored", aggregate_id=entity.id)
         .values_list("payload__causation_id", flat=True)
     )
-    assert {"entity-update-v2:quality", "archive-v3:quality", "restore-v4:quality", "rollback-v5:quality"} <= quality_causes
+    assert {
+        "entity-update-v2:quality",
+        "archive-v3:quality",
+        "restore-v4:quality",
+        "rollback-v5:quality",
+    } <= quality_causes
 
 
 def test_resolve_by_code_returns_tenant_record_and_excludes_merged_source() -> None:
@@ -551,10 +869,62 @@ def test_quality_validation_rules_scoring_issue_reconciliation_and_transitions()
     entity.refresh_from_db()
     assert replay == manual
     assert entity.quality_evaluated_at == evaluated_at
-    assert OutboxEvent.objects.for_tenant(tenant).filter(
-        event_type="mdm.entity.quality_scored",
-        payload__causation_id="manual-quality-replay",
-    ).count() == 1
+    assert (
+        OutboxEvent.objects.for_tenant(tenant)
+        .filter(
+            event_type="mdm.entity.quality_scored",
+            payload__causation_id="manual-quality-replay",
+        )
+        .count()
+        == 1
+    )
+
+
+def test_quality_required_checks_reject_present_configured_missing_values() -> None:
+    tenant = uuid.uuid4()
+    actor = actor_id()
+    entity_type = create_type(tenant, actor, require_email=True, key="customer_missing_value")
+
+    report = DataQualityService.validate_payload(tenant, entity_type.id, {"email": ""})
+
+    assert report.valid is False
+    assert any(finding.field_path == "email" and finding.code == "REQUIRED" for finding in report.findings)
+
+    rule = QualityRuleService.create_rule(
+        tenant,
+        actor,
+        entity_type_id=entity_type.id,
+        name="Email required when present",
+        field_path="email",
+        rule_type="required",
+        configuration={},
+        dimension="completeness",
+        severity="error",
+        weight="1.0000",
+        idempotency_key="quality-rule-present-missing",
+    )
+    entity = MasterDataEntity(tenant_id=tenant, entity_type=entity_type, data={"email": ""})
+
+    finding = DataQualityService._rule_finding(tenant, entity, rule)
+
+    assert finding is not None
+    assert finding.field_path == "email"
+    assert finding.code == "QUALITY_REQUIRED"
+
+
+def test_soundex_contract_rejects_invalid_configuration_and_preserves_exact_codes() -> None:
+    policy = ConfigurationService.defaults()["matching"]
+
+    assert services._soundex("Robert", policy) == "R163"
+    assert services._soundex("A", policy) == "A000"
+
+    for bad_length in (True, "4"):
+        invalid_policy = {**policy, "soundex_output_length": bad_length}
+        with pytest.raises(MDMDomainError) as caught:
+            services._soundex("Robert", invalid_policy)
+        assert caught.value.error_code == "CONFIGURATION_UNAVAILABLE"
+        assert caught.value.public_message == "Soundex output length is unavailable."
+        assert caught.value.status_code == 503
 
 
 def test_quality_rule_configuration_update_soft_delete_and_tenant_scope() -> None:
@@ -775,9 +1145,7 @@ def test_merge_preview_survivorship_merge_idempotency_and_reverse() -> None:
     assert MergeParticipant.objects.for_tenant(tenant).filter(merge_history=merge).count() == 2
     assert MergeParticipant.objects.for_tenant(tenant).filter(merge_history=merge, role="survivor").count() == 1
     assert (
-        MasterDataEntity.objects.for_tenant(tenant)
-        .filter(status="merged", golden_record=merge.golden_record)
-        .count()
+        MasterDataEntity.objects.for_tenant(tenant).filter(status="merged", golden_record=merge.golden_record).count()
         == 1
     )
     replay = MergeService.merge_entities(
@@ -839,10 +1207,15 @@ def test_merge_rejects_cross_tenant_type_mismatch_and_reversal_conflict() -> Non
         reason="Initially considered duplicates",
         idempotency_key="merge-conflict",
     )
-    source = MergeParticipant.objects.for_tenant(tenant_a).filter(
-        merge_history=merge,
-        role="merged_source",
-    ).get().source_entity
+    source = (
+        MergeParticipant.objects.for_tenant(tenant_a)
+        .filter(
+            merge_history=merge,
+            role="merged_source",
+        )
+        .get()
+        .source_entity
+    )
     MasterDataEntity.objects.filter(pk=source.id).update(version=source.version + 1)
     assert_domain_error(
         "MERGE_REVERSAL_CONFLICT",
@@ -872,8 +1245,7 @@ def test_dashboard_aggregates_are_bounded_to_tenant_and_optional_type() -> None:
     assert summary["entity_status_counts"] == {"active": 2}
     assert summary["quality_distribution"]["not_evaluated"] == 2  # type: ignore[index]
     assert all(
-        item["entity_name"].startswith("Customer A-")
-        for item in summary["recent_activity"]  # type: ignore[union-attr]
+        item["entity_name"].startswith("Customer A-") for item in summary["recent_activity"]  # type: ignore[union-attr]
     )
     filtered = DashboardService.get_summary(tenant_a, entity_type_id=type_a.id)
     assert filtered["entity_count"] == 2

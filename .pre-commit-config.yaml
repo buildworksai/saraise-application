@@ -41,14 +41,14 @@ repos:
     hooks:
       - id: mypy
         name: "Python: Type Checking (MyPy)"
-        entry: bash -c 'cd backend && python3 scripts/mypy_baseline.py check'
+        entry: bash -c 'cd backend && interpreter="${MYPY_RATCHET_PYTHON:-.venv/bin/python}"; if [ ! -x "$interpreter" ]; then interpreter=python3.11; fi; "$interpreter" scripts/mypy_baseline.py check'
         language: system
         files: ^backend/src/
         pass_filenames: false
 
       - id: mypy-baseline-mutation-test
         name: "Python: MyPy Baseline Mutation Test"
-        entry: bash -c 'cd backend && python3 scripts/test_mypy_baseline.py'
+        entry: bash -c 'cd backend && interpreter="${MYPY_RATCHET_PYTHON:-.venv/bin/python}"; if [ ! -x "$interpreter" ]; then interpreter=python3.11; fi; "$interpreter" scripts/test_mypy_baseline.py'
         language: system
         files: ^backend/(mypy-baseline\.txt|mypy-precommit\.ini|scripts/(mypy_baseline|test_mypy_baseline)\.py)$
         pass_filenames: false
@@ -136,7 +136,28 @@ repos:
     hooks:
       - id: semgrep
         name: "Security: SAST (Semgrep)"
-        args: ['--config', 'auto', '--config', '.semgrep/custom-rules.yaml', '--error', '--no-git-ignore']
+        args:
+          - '--config'
+          - 'auto'
+          - '--config'
+          - '.semgrep/custom-rules.yaml'
+          - '--error'
+          - '--exclude'
+          - 'backend/**/migrations/**'
+          - '--exclude'
+          - 'backend/**/tests/**'
+          - '--exclude'
+          - 'frontend/src/**/__tests__/**'
+          - '--exclude'
+          - 'frontend/src/**/*.test.ts'
+          - '--exclude'
+          - 'frontend/src/**/*.test.tsx'
+          - 'backend/src'
+          - 'frontend/src'
+          - 'frontend/Dockerfile'
+          - 'frontend/nginx.conf'
+          - 'scripts'
+        pass_filenames: false
         additional_dependencies: []
         exclude: |
           (?x)^(
@@ -144,7 +165,11 @@ repos:
             \.venv/|
             venv/|
             __pycache__/|
-            \.git/
+            \.git/|
+            backend/.*/migrations/|
+            backend/.*/tests/|
+            frontend/src/.*/__tests__/|
+            frontend/src/.*\.test\.(ts|tsx)$
           )
 
   # ===================================

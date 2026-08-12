@@ -1,13 +1,13 @@
 /* eslint-disable complexity, max-lines-per-function */
-import { useState, type FormEvent } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Plus, Search, X } from 'lucide-react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
-import { Input } from '@/components/ui/Input';
-import { useAuthStore } from '@/stores/auth-store';
-import { ROUTES, type AssetCategory, type AssetFilters } from '../contracts';
+import { useState, type FormEvent } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Plus, Search, X } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
+import { useAuthStore } from "@/stores/auth-store";
+import { ROUTES, type AssetCategory, type AssetFilters } from "../contracts";
 import {
   EmptyPanel,
   formatAmount,
@@ -17,8 +17,8 @@ import {
   ProblemState,
   StatusPill,
   titleCase,
-} from '../components/AssetManagementUI';
-import { assetQueryKeys, assetService } from '../services/asset-service';
+} from "../components/AssetManagementUI";
+import { assetQueryKeys, assetService } from "../services/asset-service";
 
 function positivePage(value: string | null): number {
   const parsed = Number(value);
@@ -27,20 +27,24 @@ function positivePage(value: string | null): number {
 
 function optionalParam(params: URLSearchParams, key: string): string | undefined {
   const value = params.get(key);
-  return value === null || value === '' ? undefined : value;
+  return value === null || value === "" ? undefined : value;
 }
 
-function parseFilters(params: URLSearchParams, pageSize: number, defaultOrdering: string): AssetFilters {
-  const active = params.get('is_active');
+function parseFilters(
+  params: URLSearchParams,
+  pageSize: number,
+  defaultOrdering: string
+): AssetFilters {
+  const active = params.get("is_active");
   return {
-    page: positivePage(params.get('page')),
+    page: positivePage(params.get("page")),
     page_size: pageSize,
-    search: optionalParam(params, 'search'),
-    category: (params.get('category') as AssetCategory | null) ?? undefined,
-    is_active: active === null ? undefined : active === 'true',
-    purchase_date_after: optionalParam(params, 'purchase_date_after'),
-    purchase_date_before: optionalParam(params, 'purchase_date_before'),
-    ordering: optionalParam(params, 'ordering') ?? defaultOrdering,
+    search: optionalParam(params, "search"),
+    category: (params.get("category") as AssetCategory | null) ?? undefined,
+    is_active: active === null ? undefined : active === "true",
+    purchase_date_after: optionalParam(params, "purchase_date_after"),
+    purchase_date_before: optionalParam(params, "purchase_date_before"),
+    ordering: optionalParam(params, "ordering") ?? defaultOrdering,
   };
 }
 
@@ -56,9 +60,9 @@ export const AssetListPage = () => {
   const filters = parseFilters(
     params,
     configuration?.asset_list_page_size ?? 1,
-    configuration?.asset_list_default_ordering ?? 'asset_code',
+    configuration?.asset_list_default_ordering ?? "asset_code"
   );
-  const [search, setSearch] = useState(filters.search ?? '');
+  const [search, setSearch] = useState(filters.search ?? "");
   const query = useQuery({
     queryKey: assetQueryKeys.assets(tenantId, filters),
     queryFn: () => assetService.listAssets(filters),
@@ -69,15 +73,15 @@ export const AssetListPage = () => {
     const next = new URLSearchParams(params);
     if (value) next.set(key, value);
     else next.delete(key);
-    if (key !== 'page') next.set('page', '1');
+    if (key !== "page") next.set("page", "1");
     setParams(next);
   };
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
-    update('search', search.trim());
+    update("search", search.trim());
   };
   const clearFilters = () => {
-    setSearch('');
+    setSearch("");
     setParams(new URLSearchParams());
   };
   const hasFilters = [
@@ -90,10 +94,21 @@ export const AssetListPage = () => {
 
   if (query.isLoading || configurationQuery.isLoading) return <PageSkeleton table />;
   if (configurationQuery.error || !configuration) {
-    return <main className="p-4 sm:p-8"><ProblemState error={configurationQuery.error ?? new Error('Configuration unavailable')} onRetry={() => void configurationQuery.refetch()} /></main>;
+    return (
+      <main className="p-4 sm:p-8">
+        <ProblemState
+          error={configurationQuery.error ?? new Error("Configuration unavailable")}
+          onRetry={() => void configurationQuery.refetch()}
+        />
+      </main>
+    );
   }
   if (query.error) {
-    return <main className="p-4 sm:p-8"><ProblemState error={query.error} onRetry={() => void query.refetch()} /></main>;
+    return (
+      <main className="p-4 sm:p-8">
+        <ProblemState error={query.error} onRetry={() => void query.refetch()} />
+      </main>
+    );
   }
 
   const result = query.data;
@@ -102,12 +117,12 @@ export const AssetListPage = () => {
       <PageHeader
         title="Asset register"
         description="Track acquisition value, location, and verified depreciation history for tenant-owned assets."
-        actions={(
+        actions={
           <Button onClick={() => navigate(ROUTES.ASSETS.CREATE)}>
             <Plus className="mr-2 h-4 w-4" aria-hidden="true" />
             Create asset
           </Button>
-        )}
+        }
       />
 
       <Card className="space-y-4 p-4">
@@ -127,19 +142,21 @@ export const AssetListPage = () => {
           <select
             aria-label="Category filter"
             className="h-10 rounded-md border border-input bg-background px-3"
-            value={filters.category ?? ''}
-            onChange={(event) => update('category', event.target.value)}
+            value={filters.category ?? ""}
+            onChange={(event) => update("category", event.target.value)}
           >
             <option value="">All categories</option>
             {configuration.allowed_categories.map((category) => (
-              <option key={category} value={category}>{titleCase(category)}</option>
+              <option key={category} value={category}>
+                {titleCase(category)}
+              </option>
             ))}
           </select>
           <select
             aria-label="Status filter"
             className="h-10 rounded-md border border-input bg-background px-3"
-            value={filters.is_active === undefined ? '' : String(filters.is_active)}
-            onChange={(event) => update('is_active', event.target.value)}
+            value={filters.is_active === undefined ? "" : String(filters.is_active)}
+            onChange={(event) => update("is_active", event.target.value)}
           >
             <option value="">All statuses</option>
             <option value="true">Active</option>
@@ -149,24 +166,26 @@ export const AssetListPage = () => {
             aria-label="Purchased on or after"
             title="Purchased on or after"
             type="date"
-            value={filters.purchase_date_after ?? ''}
-            onChange={(event) => update('purchase_date_after', event.target.value)}
+            value={filters.purchase_date_after ?? ""}
+            onChange={(event) => update("purchase_date_after", event.target.value)}
           />
           <Input
             aria-label="Purchased on or before"
             title="Purchased on or before"
             type="date"
-            value={filters.purchase_date_before ?? ''}
-            onChange={(event) => update('purchase_date_before', event.target.value)}
+            value={filters.purchase_date_before ?? ""}
+            onChange={(event) => update("purchase_date_before", event.target.value)}
           />
           <select
             aria-label="Sort assets"
             className="h-10 rounded-md border border-input bg-background px-3"
             value={filters.ordering}
-            onChange={(event) => update('ordering', event.target.value)}
+            onChange={(event) => update("ordering", event.target.value)}
           >
             {configuration.asset_ordering_fields.map((field) => (
-              <option key={field} value={field}>{titleCase(field)}</option>
+              <option key={field} value={field}>
+                {titleCase(field)}
+              </option>
             ))}
           </select>
         </div>
@@ -180,13 +199,17 @@ export const AssetListPage = () => {
 
       {!result || result.items.length === 0 ? (
         <EmptyPanel
-          title={hasFilters ? 'No assets match this view' : 'No assets yet'}
-          description={hasFilters
-            ? 'Clear one or more filters to broaden the register.'
-            : 'Create the first asset to begin tracking its lifecycle and depreciation.'}
-          action={hasFilters
-            ? { label: 'Clear filters', onClick: clearFilters }
-            : { label: 'Create asset', onClick: () => navigate(ROUTES.ASSETS.CREATE) }}
+          title={hasFilters ? "No assets match this view" : "No assets yet"}
+          description={
+            hasFilters
+              ? "Clear one or more filters to broaden the register."
+              : "Create the first asset to begin tracking its lifecycle and depreciation."
+          }
+          action={
+            hasFilters
+              ? { label: "Clear filters", onClick: clearFilters }
+              : { label: "Create asset", onClick: () => navigate(ROUTES.ASSETS.CREATE) }
+          }
         />
       ) : (
         <Card className="overflow-hidden">
@@ -195,8 +218,19 @@ export const AssetListPage = () => {
               <caption className="sr-only">Assets in the current register view</caption>
               <thead className="bg-muted text-left">
                 <tr>
-                  {['Code', 'Name', 'Category', 'Purchase date', 'Purchase cost', 'Current value', 'Method', 'Status'].map((heading) => (
-                    <th key={heading} scope="col" className="px-4 py-3 font-medium">{heading}</th>
+                  {[
+                    "Code",
+                    "Name",
+                    "Category",
+                    "Purchase date",
+                    "Purchase cost",
+                    "Current value",
+                    "Method",
+                    "Status",
+                  ].map((heading) => (
+                    <th key={heading} scope="col" className="px-4 py-3 font-medium">
+                      {heading}
+                    </th>
                   ))}
                 </tr>
               </thead>
@@ -214,31 +248,40 @@ export const AssetListPage = () => {
                     <td className="px-4 py-3">{asset.asset_name}</td>
                     <td className="px-4 py-3">{titleCase(asset.category)}</td>
                     <td className="px-4 py-3">{formatDate(asset.purchase_date)}</td>
-                    <td className="px-4 py-3 tabular-nums">{formatAmount(asset.purchase_cost, configuration.monetary_decimal_places)}</td>
-                    <td className="px-4 py-3 font-medium tabular-nums">{formatAmount(asset.current_value, configuration.monetary_decimal_places)}</td>
+                    <td className="px-4 py-3 tabular-nums">
+                      {formatAmount(asset.purchase_cost, configuration.monetary_decimal_places)}
+                    </td>
+                    <td className="px-4 py-3 font-medium tabular-nums">
+                      {formatAmount(asset.current_value, configuration.monetary_decimal_places)}
+                    </td>
                     <td className="px-4 py-3">{titleCase(asset.depreciation_method)}</td>
-                    <td className="px-4 py-3"><StatusPill active={asset.is_active} /></td>
+                    <td className="px-4 py-3">
+                      <StatusPill active={asset.is_active} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          <nav className="flex flex-col gap-3 border-t p-4 sm:flex-row sm:items-center sm:justify-between" aria-label="Asset register pagination">
+          <nav
+            className="flex flex-col gap-3 border-t p-4 sm:flex-row sm:items-center sm:justify-between"
+            aria-label="Asset register pagination"
+          >
             <p className="text-sm text-muted-foreground">
-              {result.count} {result.count === 1 ? 'asset' : 'assets'} · Page {filters.page ?? 1}
+              {result.count} {result.count === 1 ? "asset" : "assets"} · Page {filters.page ?? 1}
             </p>
             <div className="flex gap-2">
               <Button
                 variant="secondary"
                 disabled={!result.previous}
-                onClick={() => update('page', String(Math.max((filters.page ?? 1) - 1, 1)))}
+                onClick={() => update("page", String(Math.max((filters.page ?? 1) - 1, 1)))}
               >
                 Previous
               </Button>
               <Button
                 variant="secondary"
                 disabled={!result.next}
-                onClick={() => update('page', String((filters.page ?? 1) + 1))}
+                onClick={() => update("page", String((filters.page ?? 1) + 1))}
               >
                 Next
               </Button>

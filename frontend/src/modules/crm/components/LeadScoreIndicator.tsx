@@ -3,11 +3,11 @@
  *
  * Visual display of lead score with grade badge.
  */
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
-import { Card } from '@/components/ui/Card';
-import type { CrmSemanticToken, Lead } from '../contracts';
-import { useCrmConfiguration } from '../hooks/use-crm-configuration';
-import { GovernedError, PageSkeleton } from './CrmPage';
+import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Card } from "@/components/ui/Card";
+import type { CrmSemanticToken, Lead } from "../contracts";
+import { useCrmConfiguration } from "../hooks/use-crm-configuration";
+import { GovernedError, PageSkeleton } from "./CrmPage";
 
 interface LeadScoreIndicatorProps {
   lead: Lead;
@@ -15,16 +15,60 @@ interface LeadScoreIndicatorProps {
 }
 
 export const LeadScoreIndicator = ({ lead, showTrend = false }: LeadScoreIndicatorProps) => {
-  const configuration=useCrmConfiguration();
-  if(configuration.isLoading)return <PageSkeleton label="Loading score presentation configuration"/>;
-  if(configuration.error||!configuration.data)return <GovernedError error={configuration.error} onRetry={()=>void configuration.refetch()} subject="Lead score presentation"/>;
-  const tokenClass:Record<CrmSemanticToken,{text:string;badge:string;bar:string}>={success:{text:'text-primary',badge:'bg-primary/10 text-primary',bar:'bg-primary'},positive:{text:'text-primary',badge:'bg-primary/10 text-primary',bar:'bg-primary'},info:{text:'text-foreground',badge:'bg-secondary text-secondary-foreground',bar:'bg-secondary-foreground'},warning:{text:'text-foreground',badge:'bg-accent text-accent-foreground',bar:'bg-accent-foreground'},danger:{text:'text-destructive',badge:'bg-destructive/10 text-destructive',bar:'bg-destructive'},muted:{text:'text-muted-foreground',badge:'bg-muted text-muted-foreground',bar:'bg-muted-foreground'},accent:{text:'text-accent-foreground',badge:'bg-accent text-accent-foreground',bar:'bg-accent-foreground'}};
-  const bands=[...configuration.data.document.ui.score_bands].sort((left,right)=>right.minimum-left.minimum);
-  const band=bands.find(candidate=>lead.score>=candidate.minimum);
-  if(!band)return <GovernedError error={new Error('Tenant score bands do not cover this lead score.')} subject="Lead score presentation"/>;
-  const style=tokenClass[band.semantic_token];
-  const {score_min:minimum,score_max:maximum}=configuration.data.document.lead;
-  const progress=Math.min(100,Math.max(0,(lead.score-minimum)/(maximum-minimum)*100));
+  const configuration = useCrmConfiguration();
+  if (configuration.isLoading)
+    return <PageSkeleton label="Loading score presentation configuration" />;
+  if (configuration.error || !configuration.data)
+    return (
+      <GovernedError
+        error={configuration.error}
+        onRetry={() => void configuration.refetch()}
+        subject="Lead score presentation"
+      />
+    );
+  const tokenClass: Record<CrmSemanticToken, { text: string; badge: string; bar: string }> = {
+    success: { text: "text-primary", badge: "bg-primary/10 text-primary", bar: "bg-primary" },
+    positive: { text: "text-primary", badge: "bg-primary/10 text-primary", bar: "bg-primary" },
+    info: {
+      text: "text-foreground",
+      badge: "bg-secondary text-secondary-foreground",
+      bar: "bg-secondary-foreground",
+    },
+    warning: {
+      text: "text-foreground",
+      badge: "bg-accent text-accent-foreground",
+      bar: "bg-accent-foreground",
+    },
+    danger: {
+      text: "text-destructive",
+      badge: "bg-destructive/10 text-destructive",
+      bar: "bg-destructive",
+    },
+    muted: {
+      text: "text-muted-foreground",
+      badge: "bg-muted text-muted-foreground",
+      bar: "bg-muted-foreground",
+    },
+    accent: {
+      text: "text-accent-foreground",
+      badge: "bg-accent text-accent-foreground",
+      bar: "bg-accent-foreground",
+    },
+  };
+  const bands = [...configuration.data.document.ui.score_bands].sort(
+    (left, right) => right.minimum - left.minimum
+  );
+  const band = bands.find((candidate) => lead.score >= candidate.minimum);
+  if (!band)
+    return (
+      <GovernedError
+        error={new Error("Tenant score bands do not cover this lead score.")}
+        subject="Lead score presentation"
+      />
+    );
+  const style = tokenClass[band.semantic_token];
+  const { score_min: minimum, score_max: maximum } = configuration.data.document.lead;
+  const progress = Math.min(100, Math.max(0, ((lead.score - minimum) / (maximum - minimum)) * 100));
 
   return (
     <Card className="p-4">
@@ -51,10 +95,7 @@ export const LeadScoreIndicator = ({ lead, showTrend = false }: LeadScoreIndicat
         )}
       </div>
       <div className="mt-2 w-full bg-muted rounded-full h-2">
-        <div
-          className={`h-2 rounded-full ${style.bar}`}
-          style={{ width: `${progress}%` }}
-        />
+        <div className={`h-2 rounded-full ${style.bar}`} style={{ width: `${progress}%` }} />
       </div>
     </Card>
   );

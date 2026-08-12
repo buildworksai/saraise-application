@@ -1,13 +1,9 @@
 #!/bin/bash
 # Start all SARAISE services (Phase 1-6) in consolidated docker-compose
 # All services use single saraise-network
-# External ports start with "1" prefix
+# Application external ports use the 2xxxx range to avoid local platform/Aptivra conflicts.
 
 set -e
-
-echo "🚀 Starting SARAISE Consolidated Development Environment..."
-echo "📋 Using single network: saraise-network"
-echo "🔌 External ports start with '1' prefix"
 
 # Check if Docker is running
 if ! docker info > /dev/null 2>&1; then
@@ -26,6 +22,24 @@ SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 PROJECT_ROOT=$(dirname "$(dirname "$SCRIPT_DIR")")
 cd "$PROJECT_ROOT" || { echo "Error: Could not navigate to project root."; exit 1; }
 
+if [ -f .env ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
+: "${POSTGRES_PORT:=25432}"
+: "${REDIS_PORT:=26379}"
+: "${BACKEND_PORT:=28000}"
+: "${FRONTEND_PORT:=25173}"
+: "${PROMETHEUS_PORT:=29090}"
+: "${GRAFANA_PORT:=23000}"
+: "${JAEGER_UI_PORT:=26686}"
+
+echo "🚀 Starting SARAISE Consolidated Development Environment..."
+echo "📋 Using single network: saraise-network"
+echo "🔌 Application ports: ${BACKEND_PORT} (backend), ${FRONTEND_PORT} (frontend), ${POSTGRES_PORT} (PostgreSQL), ${REDIS_PORT} (Redis)"
+
 # Ensure saraise-network exists
 if ! docker network ls | grep -q 'saraise-network'; then
     echo "📡 Creating saraise-network..."
@@ -37,17 +51,17 @@ if [ ! -f .env ]; then
     echo "📝 Creating .env file from template..."
     cat > .env << EOF
 # Database
-POSTGRES_PORT=15432
+POSTGRES_PORT=${POSTGRES_PORT}
 
 # Redis
-REDIS_PORT=16379
+REDIS_PORT=${REDIS_PORT}
 
-# Backend (external port starts with 1)
-BACKEND_PORT=18000
+# Backend (application external port)
+BACKEND_PORT=${BACKEND_PORT}
 SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
 
-# Frontend (external port starts with 1)
-FRONTEND_PORT=15173
+# Frontend (application external port)
+FRONTEND_PORT=${FRONTEND_PORT}
 EOF
     echo "✅ Created .env file"
 fi
@@ -68,8 +82,8 @@ echo "✅ SARAISE Consolidated Development Environment started successfully!"
 echo ""
 echo "📋 Services:"
 echo "   Infrastructure:"
-echo "   - PostgreSQL: localhost:15432 (saraise-db)"
-echo "   - Redis: localhost:16379 (saraise-redis)"
+echo "   - PostgreSQL: localhost:${POSTGRES_PORT} (saraise-db)"
+echo "   - Redis: localhost:${REDIS_PORT} (saraise-redis)"
 echo ""
 echo "   Phase 2 Services:"
 echo "   - Auth Service: http://localhost:18001"
@@ -77,17 +91,17 @@ echo "   - Runtime Service: http://localhost:18002"
 echo "   - Policy Engine: http://localhost:18003"
 echo "   - Control Plane: http://localhost:18004"
 echo ""
-echo "      Phase 4/5 Services:"
-   echo "   - Backend (Legacy): http://localhost:18005"
-   echo ""
-   echo "   Phase 6 Services:"
-   echo "   - Platform API: http://localhost:18000"
-echo "   - Frontend UI: http://localhost:15173"
+echo "   Phase 4/5 Services:"
+echo "   - Backend (Legacy): removed; use Application API"
+echo ""
+echo "   Phase 6 Services:"
+echo "   - Application API: http://localhost:${BACKEND_PORT}"
+echo "   - Frontend UI: http://localhost:${FRONTEND_PORT}"
 echo ""
 echo "   Observability:"
-echo "   - Prometheus: http://localhost:19090"
-echo "   - Grafana: http://localhost:13000"
-echo "   - Jaeger UI: http://localhost:116686"
+echo "   - Prometheus: http://localhost:${PROMETHEUS_PORT}"
+echo "   - Grafana: http://localhost:${GRAFANA_PORT}"
+echo "   - Jaeger UI: http://localhost:${JAEGER_UI_PORT}"
 echo ""
 echo "🌐 Network: saraise-network (all services)"
 echo ""

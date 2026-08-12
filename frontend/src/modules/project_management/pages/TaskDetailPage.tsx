@@ -1,1 +1,1 @@
-export {TaskDetailPage} from './ModulePages';
+export { TaskDetailPage } from "./ModulePages";

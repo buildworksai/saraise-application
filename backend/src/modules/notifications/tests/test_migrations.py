@@ -15,4 +15,3 @@ def test_legacy_import_and_contract_migrations_have_reverse_paths():
     contract = import_module("src.modules.notifications.migrations.0004_module_contract_and_v1_adapter")
     assert legacy.Migration.operations[0].reverse_code is legacy.reverse_import
     assert contract.Migration.operations[0].reverse_code is contract.unregister_contract
-

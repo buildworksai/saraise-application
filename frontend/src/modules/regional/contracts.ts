@@ -5,13 +5,13 @@
  * endpoints, request payloads, and response representations.
  */
 
-export type RegionalResourceConfiguration = {
+export interface RegionalResourceConfiguration {
   country_code?: string;
   jurisdiction_type?: string;
   compliance_tags?: string[];
-};
+}
 
-export type RegionalResource = {
+export interface RegionalResource {
   id: string;
   name: string;
   description: string;
@@ -20,24 +20,24 @@ export type RegionalResource = {
   created_at: string;
   updated_at: string;
   deleted_at?: string | null;
-};
+}
 
-export type RegionalResourceCreate = {
+export interface RegionalResourceCreate {
   name: string;
   description?: string;
   config?: RegionalResourceConfiguration;
-};
+}
 
 export type RegionalResourceUpdate = Partial<RegionalResourceCreate>;
 
-export type PaginatedRegionalResources = {
+export interface PaginatedRegionalResources {
   count: number;
   next: string | null;
   previous: string | null;
   results: RegionalResource[];
-};
+}
 
-export type RegionalResourceRules = {
+export interface RegionalResourceRules {
   name_min_length: number;
   name_max_length: number;
   name_default: string;
@@ -49,67 +49,72 @@ export type RegionalResourceRules = {
   allowed_jurisdiction_types: string[];
   max_compliance_tags: number;
   max_config_bytes: number;
-  search_fields: Array<'name' | 'description'>;
-};
+  search_fields: ("name" | "description")[];
+}
 
-export type RegionalWorkflowRules = {
+export interface RegionalWorkflowRules {
   activation_state: boolean;
   deactivation_state: boolean;
   require_delete_confirmation: boolean;
-};
+}
 
-export type RegionalApiRules = {
+export interface RegionalApiRules {
   default_page_size: number;
   max_page_size: number;
-  allowed_filters: Array<'is_active' | 'name'>;
-  allowed_ordering: Array<
-    'name' | '-name' | 'created_at' | '-created_at' | 'updated_at' | '-updated_at'
-  >;
-};
+  allowed_filters: ("is_active" | "name")[];
+  allowed_ordering: (
+    | "name"
+    | "-name"
+    | "created_at"
+    | "-created_at"
+    | "updated_at"
+    | "-updated_at"
+  )[];
+}
 
-export type RegionalHealthRules = {
+export interface RegionalHealthRules {
   cache_probe_ttl_seconds: number;
-};
+}
 
-export type RegionalRolloutRules = {
+export interface RegionalRolloutRules {
   enabled: boolean;
   roles: string[];
   cohorts: string[];
-};
+}
 
-export type RegionalConfigurationDocument = {
+export interface RegionalConfigurationDocument {
   resource: RegionalResourceRules;
   workflow: RegionalWorkflowRules;
   api: RegionalApiRules;
   health: RegionalHealthRules;
   rollout: RegionalRolloutRules;
-};
+}
 
-export type RegionalConfigurationEnvironment = 'development' | 'self-hosted' | 'saas';
+export type RegionalConfigurationEnvironment = "development" | "self-hosted" | "saas";
 
-export type RegionalConfiguration = {
+export interface RegionalConfiguration {
   environment: RegionalConfigurationEnvironment;
   version: number;
   document: RegionalConfigurationDocument;
   updated_at: string;
-};
+}
 
-export type RegionalConfigurationWrite = {
+export interface RegionalConfigurationWrite {
   environment?: RegionalConfigurationEnvironment;
   document: RegionalConfigurationDocument;
-};
+}
 
-export type RegionalConfigurationPreview = {
+export interface RegionalConfigurationPreview {
   valid: boolean;
   document: RegionalConfigurationDocument;
-  changes: Array<{
+  changes: {
     path: string;
     before: unknown;
     after: unknown;
-  }>;
-};
+  }[];
+}
 
-export type RegionalConfigurationHistoryItem = {
+export interface RegionalConfigurationHistoryItem {
   id: string;
   environment: RegionalConfigurationEnvironment;
   version: number;
@@ -119,27 +124,27 @@ export type RegionalConfigurationHistoryItem = {
   correlation_id: string;
   previous_version: number | null;
   created_at: string;
-};
+}
 
-export type RegionalConfigurationExport = {
-  schema_version: '1.0';
+export interface RegionalConfigurationExport {
+  schema_version: "1.0";
   environment: RegionalConfigurationEnvironment;
   version: number;
   document: RegionalConfigurationDocument;
   exported_at: string;
-};
+}
 
 export const ROUTES = {
-  ROOT: '/regional',
-  CREATE: '/regional/create',
-  CONFIGURATION: '/regional/configuration',
-  DETAIL_PATTERN: '/regional/:id',
-  EDIT_PATTERN: '/regional/:id/edit',
+  ROOT: "/regional",
+  CREATE: "/regional/create",
+  CONFIGURATION: "/regional/configuration",
+  DETAIL_PATTERN: "/regional/:id",
+  EDIT_PATTERN: "/regional/:id/edit",
   DETAIL: (id: string) => `/regional/${encodeURIComponent(id)}` as const,
   EDIT: (id: string) => `/regional/${encodeURIComponent(id)}/edit` as const,
 } as const;
 
-export const MODULE_API_PREFIX = '/api/v1/regional';
+export const MODULE_API_PREFIX = "/api/v1/regional";
 
 export const ENDPOINTS = {
   RESOURCES: {
@@ -165,10 +170,9 @@ export const ENDPOINTS = {
 } as const;
 
 export const REGIONAL_QUERY_KEYS = {
-  resources: ['regional', 'resources'] as const,
-  resource: (id: string) => ['regional', 'resources', id] as const,
-  configuration: (environment: string) =>
-    ['regional', 'configuration', environment] as const,
+  resources: ["regional", "resources"] as const,
+  resource: (id: string) => ["regional", "resources", id] as const,
+  configuration: (environment: string) => ["regional", "configuration", environment] as const,
   configurationHistory: (environment: string) =>
-    ['regional', 'configuration', environment, 'history'] as const,
+    ["regional", "configuration", environment, "history"] as const,
 } as const;

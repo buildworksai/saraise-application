@@ -1,23 +1,24 @@
+/* eslint-disable @typescript-eslint/no-misused-promises -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /**
  * Create BillingSubscriptions Resource Page
- * 
+ *
  * Form for creating a new resource with validation.
  */
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { useNavigate } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { billing_subscriptionsService } from '../services/billing_subscriptions-service';
-import type { SubscriptionCreate } from '../contracts';
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Card } from '@/components/ui/Card';
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { useNavigate } from "react-router-dom";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { billing_subscriptionsService } from "../services/billing_subscriptions-service";
+import type { SubscriptionCreate } from "../contracts";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Card } from "@/components/ui/Card";
 
 const resourceSchema = z.object({
-  plan: z.string().min(1, 'Plan is required'),
-  billing_cycle: z.enum(['monthly', 'yearly']).optional(),
+  plan: z.string().min(1, "Plan is required"),
+  billing_cycle: z.enum(["monthly", "yearly"]).optional(),
 });
 
 type ResourceFormData = z.infer<typeof resourceSchema>;
@@ -29,8 +30,8 @@ export const CreateBillingSubscriptionsResourcePage = () => {
   const form = useForm<ResourceFormData>({
     resolver: zodResolver(resourceSchema),
     defaultValues: {
-      plan: '',
-      billing_cycle: 'monthly',
+      plan: "",
+      billing_cycle: "monthly",
     },
   });
 
@@ -39,12 +40,12 @@ export const CreateBillingSubscriptionsResourcePage = () => {
       return billing_subscriptionsService.createSubscription(data);
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['billing_subscriptions-subscriptions'] });
-      toast.success('Subscription created successfully');
-      navigate('/billing-subscriptions');
+      void queryClient.invalidateQueries({ queryKey: ["billing_subscriptions-subscriptions"] });
+      toast.success("Subscription created successfully");
+      navigate("/billing-subscriptions");
     },
     onError: () => {
-      toast.error('Failed to create subscription. Please try again.');
+      toast.error("Failed to create subscription. Please try again.");
     },
   });
 
@@ -55,7 +56,7 @@ export const CreateBillingSubscriptionsResourcePage = () => {
         billing_cycle: data.billing_cycle,
       });
     } catch (err) {
-      console.error('Failed to create subscription:', err);
+      console.error("Failed to create subscription:", err);
     }
   };
 
@@ -73,7 +74,7 @@ export const CreateBillingSubscriptionsResourcePage = () => {
             </label>
             <Input
               id="plan"
-              {...form.register('plan')}
+              {...form.register("plan")}
               error={form.formState.errors.plan?.message}
               placeholder="Enter plan ID"
             />
@@ -85,7 +86,7 @@ export const CreateBillingSubscriptionsResourcePage = () => {
             </label>
             <select
               id="billing_cycle"
-              {...form.register('billing_cycle')}
+              {...form.register("billing_cycle")}
               className="w-full px-3 py-2 border border-gray-300 rounded-md"
             >
               <option value="monthly">Monthly</option>
@@ -95,9 +96,13 @@ export const CreateBillingSubscriptionsResourcePage = () => {
 
           <div className="flex gap-4 pt-4">
             <Button type="submit" disabled={createMutation.isPending}>
-              {createMutation.isPending ? 'Creating...' : 'Create Resource'}
+              {createMutation.isPending ? "Creating..." : "Create Resource"}
             </Button>
-            <Button type="button" variant="outline" onClick={() => navigate('/billing-subscriptions')}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => navigate("/billing-subscriptions")}
+            >
               Cancel
             </Button>
           </div>

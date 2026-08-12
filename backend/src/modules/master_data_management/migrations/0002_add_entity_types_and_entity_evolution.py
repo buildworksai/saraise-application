@@ -27,9 +27,11 @@ class Migration(migrations.Migration):
                     "key",
                     models.CharField(
                         max_length=64,
-                        validators=[django.core.validators.RegexValidator(
-                            "^[a-z][a-z0-9_]{1,63}$", "Use a lowercase snake-case key."
-                        )],
+                        validators=[
+                            django.core.validators.RegexValidator(
+                                "^[a-z][a-z0-9_]{1,63}$", "Use a lowercase snake-case key."
+                            )
+                        ],
                     ),
                 ),
                 ("display_name", models.CharField(max_length=120)),

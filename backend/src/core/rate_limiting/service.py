@@ -35,7 +35,7 @@ class RateLimitService:
             remaining_quota: Remaining quota for the day, or None if unlimited.
         """
         try:
-            tenant = Tenant.objects.get(id=tenant_id)
+            tenant = Tenant.objects.get(id=tenant_id)  # nosemgrep: semgrep.tenant-id-required-in-queries
         except Tenant.DoesNotExist:
             logger.error(f"Tenant {tenant_id} not found for rate limiting")
             return False, None
@@ -101,7 +101,7 @@ class RateLimitService:
             Rate limit (0 for unlimited).
         """
         try:
-            tenant = Tenant.objects.get(id=tenant_id)
+            tenant = Tenant.objects.get(id=tenant_id)  # nosemgrep: semgrep.tenant-id-required-in-queries
             if resource_type == "api_calls":
                 return tenant.max_api_calls_per_day
             elif resource_type == "storage":

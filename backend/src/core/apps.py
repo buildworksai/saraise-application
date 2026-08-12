@@ -14,5 +14,6 @@ class CoreConfig(AppConfig):
 
     def ready(self) -> None:
         """Register core model checks and observability signal handlers."""
-        from .tenancy import registry  # noqa: F401
         from src.core.observability import correlation  # noqa: F401
+
+        from .tenancy import registry  # noqa: F401

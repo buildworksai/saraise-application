@@ -6,12 +6,7 @@ from datetime import date
 from uuid import UUID
 
 from src.core.async_jobs.models import AsyncJob
-from src.core.async_jobs.services import (
-    HandlerAlreadyRegistered,
-    HandlerNotRegistered,
-    get_handler,
-    register_handler,
-)
+from src.core.async_jobs.services import HandlerAlreadyRegistered, HandlerNotRegistered, get_handler, register_handler
 from src.core.tenancy import tenant_context_worker
 
 from .services import DepreciationService
@@ -33,9 +28,7 @@ def post_line_worker(*, tenant_id: UUID, line_id: UUID, actor_id: str, job_id: U
 
 
 @tenant_context_worker
-def post_due_worker(
-    *, tenant_id: UUID, through_date: date, actor_id: str, job_id: UUID
-) -> dict[str, list[str]]:
+def post_due_worker(*, tenant_id: UUID, through_date: date, actor_id: str, job_id: UUID) -> dict[str, list[str]]:
     return DepreciationService.post_due_lines(tenant_id, through_date, actor_id, job_id)
 
 

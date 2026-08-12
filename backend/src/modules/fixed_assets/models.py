@@ -77,9 +77,12 @@ class StatefulTenantModel(TenantScopedModel, TimestampedModel):
     def _validate_state_write(self) -> None:
         if self._state.adding or self.pk is None:
             return
-        prior = type(self)._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id).values(
-            "status", "transition_history"
-        ).first()
+        prior = (
+            type(self)
+            ._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id)
+            .values("status", "transition_history")
+            .first()
+        )
         if prior and prior["status"] != self.status and prior["transition_history"] == self.transition_history:
             raise ValidationError("Status changes must use the fixed-assets state machine.", code="state_machine")
 
@@ -130,7 +133,10 @@ class AssetCategory(TenantScopedModel, TimestampedModel):
                         default_depreciation_method=DepreciationMethod.DECLINING_BALANCE,
                         default_declining_balance_rate__gt=0,
                     )
-                    | (~Q(default_depreciation_method=DepreciationMethod.DECLINING_BALANCE) & Q(default_declining_balance_rate__isnull=True))
+                    | (
+                        ~Q(default_depreciation_method=DepreciationMethod.DECLINING_BALANCE)
+                        & Q(default_declining_balance_rate__isnull=True)
+                    )
                 ),
                 name="fa_cat_declining_rate_valid",
             ),
@@ -150,9 +156,11 @@ class AssetCategory(TenantScopedModel, TimestampedModel):
             raise ValidationError({"default_declining_balance_rate": "A rate is only valid for declining balance."})
         if not self._state.adding and self.pk:
             previous = type(self)._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id).values("code").first()
-            if previous and previous["code"] != self.code and FixedAsset.objects.filter(
-                tenant_id=self.tenant_id, category_id=self.pk
-            ).exists():
+            if (
+                previous
+                and previous["code"] != self.code
+                and FixedAsset.objects.filter(tenant_id=self.tenant_id, category_id=self.pk).exists()
+            ):
                 raise ValidationError({"code": "Category code is immutable after first asset use."})
 
     def save(self, *args: Any, **kwargs: Any) -> None:
@@ -212,7 +220,10 @@ class FixedAsset(StatefulTenantModel):
                 name="fa_asset_create_idem_uniq",
             ),
             models.CheckConstraint(condition=Q(purchase_cost__gt=0), name="fa_asset_cost_positive"),
-            models.CheckConstraint(condition=Q(residual_value__gte=0) & Q(residual_value__lte=F("purchase_cost")), name="fa_asset_residual_valid"),
+            models.CheckConstraint(
+                condition=Q(residual_value__gte=0) & Q(residual_value__lte=F("purchase_cost")),
+                name="fa_asset_residual_valid",
+            ),
             models.CheckConstraint(condition=Q(useful_life_months__gt=0), name="fa_asset_life_positive"),
             models.CheckConstraint(condition=Q(accumulated_depreciation__gte=0), name="fa_asset_depr_nonnegative"),
             models.CheckConstraint(condition=Q(accumulated_impairment__gte=0), name="fa_asset_impair_nonnegative"),
@@ -222,14 +233,33 @@ class FixedAsset(StatefulTenantModel):
                 | Q(net_book_value=F("purchase_cost") - F("accumulated_depreciation") - F("accumulated_impairment")),
                 name="fa_asset_balance_reconciled",
             ),
-            models.CheckConstraint(condition=Q(capitalization_date__isnull=True) | Q(purchase_date__lte=F("capitalization_date")), name="fa_asset_purchase_cap_order"),
-            models.CheckConstraint(condition=Q(depreciation_start_date__isnull=True) | Q(capitalization_date__lte=F("depreciation_start_date")), name="fa_asset_cap_depr_order"),
             models.CheckConstraint(
-                condition=(Q(depreciation_method=DepreciationMethod.DECLINING_BALANCE, declining_balance_rate__gt=0) | (~Q(depreciation_method=DepreciationMethod.DECLINING_BALANCE) & Q(declining_balance_rate__isnull=True))),
+                condition=Q(capitalization_date__isnull=True) | Q(purchase_date__lte=F("capitalization_date")),
+                name="fa_asset_purchase_cap_order",
+            ),
+            models.CheckConstraint(
+                condition=Q(depreciation_start_date__isnull=True)
+                | Q(capitalization_date__lte=F("depreciation_start_date")),
+                name="fa_asset_cap_depr_order",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(depreciation_method=DepreciationMethod.DECLINING_BALANCE, declining_balance_rate__gt=0)
+                    | (
+                        ~Q(depreciation_method=DepreciationMethod.DECLINING_BALANCE)
+                        & Q(declining_balance_rate__isnull=True)
+                    )
+                ),
                 name="fa_asset_declining_rate_valid",
             ),
             models.CheckConstraint(
-                condition=(Q(depreciation_method=DepreciationMethod.UNITS_OF_PRODUCTION, expected_total_units__gt=0) | (~Q(depreciation_method=DepreciationMethod.UNITS_OF_PRODUCTION) & Q(expected_total_units__isnull=True))),
+                condition=(
+                    Q(depreciation_method=DepreciationMethod.UNITS_OF_PRODUCTION, expected_total_units__gt=0)
+                    | (
+                        ~Q(depreciation_method=DepreciationMethod.UNITS_OF_PRODUCTION)
+                        & Q(expected_total_units__isnull=True)
+                    )
+                ),
                 name="fa_asset_units_valid",
             ),
             models.CheckConstraint(
@@ -252,12 +282,24 @@ class FixedAsset(StatefulTenantModel):
         self.asset_code = self.asset_code.strip().upper()
         self.currency = self.currency.strip().upper()
         self.primary_book_code = self.primary_book_code.strip().lower()
-        for field in ("purchase_cost", "residual_value", "accumulated_depreciation", "accumulated_impairment", "net_book_value"):
+        for field in (
+            "purchase_cost",
+            "residual_value",
+            "accumulated_depreciation",
+            "accumulated_impairment",
+            "net_book_value",
+        ):
             value = getattr(self, field, None)
             if value is not None:
                 setattr(self, field, money(value))
-        if self.category_id and self.tenant_id and not AssetCategory.objects.for_tenant(self.tenant_id).filter(pk=self.category_id).exists():
-            raise ValidationError({"category": "Category was not found for this tenant."}, code="cross_tenant_reference")
+        if (
+            self.category_id
+            and self.tenant_id
+            and not AssetCategory.objects.for_tenant(self.tenant_id).filter(pk=self.category_id).exists()
+        ):
+            raise ValidationError(
+                {"category": "Category was not found for this tenant."}, code="cross_tenant_reference"
+            )
         if self.currency and (len(self.currency) != 3 or not self.currency.isalpha()):
             raise ValidationError({"currency": "Use a three-letter ISO-4217 currency code."})
 
@@ -286,7 +328,9 @@ class DepreciationSchedule(StatefulTenantModel):
     calculated_at = models.DateTimeField(null=True, blank=True)
     activated_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
-    superseded_by = models.ForeignKey("self", on_delete=models.SET_NULL, null=True, blank=True, related_name="superseded_revisions")
+    superseded_by = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="superseded_revisions"
+    )
     transition_history = models.JSONField(default=list, editable=False)
     created_by = models.CharField(max_length=255)
     updated_by = models.CharField(max_length=255)
@@ -298,13 +342,29 @@ class DepreciationSchedule(StatefulTenantModel):
         db_table = "fixed_asset_depreciation_schedules"
         constraints = [
             models.UniqueConstraint(fields=("tenant_id", "schedule_number"), name="fa_sched_number_uniq"),
-            models.UniqueConstraint(fields=("tenant_id", "asset", "book_code", "revision"), name="fa_sched_revision_uniq"),
-            models.UniqueConstraint(fields=("tenant_id", "creation_idempotency_key"), condition=Q(creation_idempotency_key__isnull=False), name="fa_sched_create_idem_uniq"),
-            models.UniqueConstraint(fields=("tenant_id", "asset", "book_code"), condition=Q(status=ScheduleStatus.ACTIVE), name="fa_sched_one_active_uniq"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "asset", "book_code", "revision"), name="fa_sched_revision_uniq"
+            ),
+            models.UniqueConstraint(
+                fields=("tenant_id", "creation_idempotency_key"),
+                condition=Q(creation_idempotency_key__isnull=False),
+                name="fa_sched_create_idem_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=("tenant_id", "asset", "book_code"),
+                condition=Q(status=ScheduleStatus.ACTIVE),
+                name="fa_sched_one_active_uniq",
+            ),
             models.CheckConstraint(condition=Q(start_date__lte=F("end_date")), name="fa_sched_date_order"),
             models.CheckConstraint(condition=Q(cost_basis__gt=0), name="fa_sched_cost_positive"),
-            models.CheckConstraint(condition=Q(residual_value__gte=0) & Q(residual_value__lte=F("cost_basis")), name="fa_sched_residual_valid"),
-            models.CheckConstraint(condition=Q(depreciable_amount=F("cost_basis") - F("residual_value")), name="fa_sched_depreciable_reconciled"),
+            models.CheckConstraint(
+                condition=Q(residual_value__gte=0) & Q(residual_value__lte=F("cost_basis")),
+                name="fa_sched_residual_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(depreciable_amount=F("cost_basis") - F("residual_value")),
+                name="fa_sched_depreciable_reconciled",
+            ),
         ]
         indexes = [
             models.Index(fields=("tenant_id", "asset", "status"), name="fa_sched_asset_status_idx"),
@@ -318,14 +378,37 @@ class DepreciationSchedule(StatefulTenantModel):
             value = getattr(self, field, None)
             if value is not None:
                 setattr(self, field, money(value))
-        if self.asset_id and self.tenant_id and not FixedAsset.objects.for_tenant(self.tenant_id).filter(pk=self.asset_id).exists():
+        if (
+            self.asset_id
+            and self.tenant_id
+            and not FixedAsset.objects.for_tenant(self.tenant_id).filter(pk=self.asset_id).exists()
+        ):
             raise ValidationError({"asset": "Asset was not found for this tenant."}, code="cross_tenant_reference")
-        if self.superseded_by_id and self.tenant_id and not type(self).objects.for_tenant(self.tenant_id).filter(pk=self.superseded_by_id).exists():
+        if (
+            self.superseded_by_id
+            and self.tenant_id
+            and not type(self).objects.for_tenant(self.tenant_id).filter(pk=self.superseded_by_id).exists()
+        ):
             raise ValidationError({"superseded_by": "Replacement schedule was not found for this tenant."})
-        if not self._state.adding and self.pk and DepreciationLine.objects.filter(
-            tenant_id=self.tenant_id, schedule_id=self.pk, status=LineStatus.POSTED
-        ).exists():
-            immutable = ("asset_id", "book_code", "method", "frequency", "start_date", "end_date", "cost_basis", "residual_value", "declining_balance_rate", "expected_total_units")
+        if (
+            not self._state.adding
+            and self.pk
+            and DepreciationLine.objects.filter(
+                tenant_id=self.tenant_id, schedule_id=self.pk, status=LineStatus.POSTED
+            ).exists()
+        ):
+            immutable = (
+                "asset_id",
+                "book_code",
+                "method",
+                "frequency",
+                "start_date",
+                "end_date",
+                "cost_basis",
+                "residual_value",
+                "declining_balance_rate",
+                "expected_total_units",
+            )
             prior = type(self)._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id).values(*immutable).first()
             if prior and any(prior[field] != getattr(self, field) for field in immutable):
                 raise ValidationError("Posted schedules cannot change assumptions.", code="posted_history_immutable")
@@ -385,10 +468,24 @@ class DepreciationLine(StatefulTenantModel):
         db_table = "fixed_asset_depreciation_lines"
         constraints = [
             models.UniqueConstraint(fields=("tenant_id", "schedule", "sequence"), name="fa_line_sequence_uniq"),
-            models.UniqueConstraint(fields=("tenant_id", "asset", "period_start", "period_end", "schedule"), name="fa_line_period_uniq"),
-            models.UniqueConstraint(fields=("tenant_id", "journal_entry_id"), condition=Q(journal_entry_id__isnull=False), name="fa_line_journal_uniq"),
+            models.UniqueConstraint(
+                fields=("tenant_id", "asset", "period_start", "period_end", "schedule"), name="fa_line_period_uniq"
+            ),
+            models.UniqueConstraint(
+                fields=("tenant_id", "journal_entry_id"),
+                condition=Q(journal_entry_id__isnull=False),
+                name="fa_line_journal_uniq",
+            ),
             models.CheckConstraint(condition=Q(period_start__lte=F("period_end")), name="fa_line_period_order"),
-            models.CheckConstraint(condition=Q(opening_net_book_value__gte=0, depreciation_amount__gte=0, accumulated_depreciation__gte=0, closing_net_book_value__gte=0), name="fa_line_money_nonnegative"),
+            models.CheckConstraint(
+                condition=Q(
+                    opening_net_book_value__gte=0,
+                    depreciation_amount__gte=0,
+                    accumulated_depreciation__gte=0,
+                    closing_net_book_value__gte=0,
+                ),
+                name="fa_line_money_nonnegative",
+            ),
         ]
         indexes = [
             models.Index(fields=("tenant_id", "asset", "period_end", "status"), name="fa_line_asset_period_idx"),
@@ -399,16 +496,35 @@ class DepreciationLine(StatefulTenantModel):
 
     def clean(self) -> None:
         self.book_code = self.book_code.strip().lower()
-        for field in ("opening_net_book_value", "depreciation_amount", "accumulated_depreciation", "closing_net_book_value"):
+        for field in (
+            "opening_net_book_value",
+            "depreciation_amount",
+            "accumulated_depreciation",
+            "closing_net_book_value",
+        ):
             value = getattr(self, field, None)
             if value is not None:
                 setattr(self, field, money(value))
-        if self.schedule_id and self.tenant_id and not DepreciationSchedule.objects.for_tenant(self.tenant_id).filter(pk=self.schedule_id).exists():
-            raise ValidationError({"schedule": "Schedule was not found for this tenant."}, code="cross_tenant_reference")
-        if self.asset_id and self.tenant_id and not FixedAsset.objects.for_tenant(self.tenant_id).filter(pk=self.asset_id).exists():
+        if (
+            self.schedule_id
+            and self.tenant_id
+            and not DepreciationSchedule.objects.for_tenant(self.tenant_id).filter(pk=self.schedule_id).exists()
+        ):
+            raise ValidationError(
+                {"schedule": "Schedule was not found for this tenant."}, code="cross_tenant_reference"
+            )
+        if (
+            self.asset_id
+            and self.tenant_id
+            and not FixedAsset.objects.for_tenant(self.tenant_id).filter(pk=self.asset_id).exists()
+        ):
             raise ValidationError({"asset": "Asset was not found for this tenant."}, code="cross_tenant_reference")
         if self.schedule_id and self.asset_id:
-            schedule = DepreciationSchedule.objects.filter(pk=self.schedule_id, tenant_id=self.tenant_id).only("asset_id", "residual_value", "book_code").first()
+            schedule = (
+                DepreciationSchedule.objects.filter(pk=self.schedule_id, tenant_id=self.tenant_id)
+                .only("asset_id", "residual_value", "book_code")
+                .first()
+            )
             if schedule and (schedule.asset_id != self.asset_id or schedule.book_code != self.book_code):
                 raise ValidationError("Line, schedule, asset, and book must match.", code="cross_tenant_reference")
             if schedule and self.closing_net_book_value < schedule.residual_value:
@@ -469,7 +585,10 @@ class AssetTransaction(TenantScopedModel, TimestampedModel):
         db_table = "fixed_asset_transactions"
         constraints = [
             models.UniqueConstraint(fields=("tenant_id", "idempotency_key"), name="fa_txn_idempotency_uniq"),
-            models.CheckConstraint(condition=Q(amount__gte=0, opening_net_book_value__gte=0, closing_net_book_value__gte=0), name="fa_txn_money_nonnegative"),
+            models.CheckConstraint(
+                condition=Q(amount__gte=0, opening_net_book_value__gte=0, closing_net_book_value__gte=0),
+                name="fa_txn_money_nonnegative",
+            ),
         ]
         indexes = [
             models.Index(fields=("tenant_id", "asset", "effective_date", "created_at"), name="fa_txn_asset_date_idx"),
@@ -486,7 +605,11 @@ class AssetTransaction(TenantScopedModel, TimestampedModel):
             value = getattr(self, field, None)
             if value is not None:
                 setattr(self, field, money(value))
-        if self.asset_id and self.tenant_id and not FixedAsset.objects.for_tenant(self.tenant_id).filter(pk=self.asset_id).exists():
+        if (
+            self.asset_id
+            and self.tenant_id
+            and not FixedAsset.objects.for_tenant(self.tenant_id).filter(pk=self.asset_id).exists()
+        ):
             raise ValidationError({"asset": "Asset was not found for this tenant."}, code="cross_tenant_reference")
 
     def save(self, *args: Any, **kwargs: Any) -> None:

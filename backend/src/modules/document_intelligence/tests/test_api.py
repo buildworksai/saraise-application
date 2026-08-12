@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 
 from src.modules.document_intelligence import api, urls
@@ -333,6 +334,26 @@ def test_all_read_only_detail_and_child_endpoints_return_enveloped_evidence(
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"{BASE}/extractions/__uat_invalid_id__/",
+        f"{BASE}/classifications/__uat_invalid_id__/",
+        f"{BASE}/templates/__uat_invalid_id__/",
+    ],
+)
+def test_invalid_detail_identifiers_are_client_errors_not_500(
+    authenticated_tenant_a_client: object,
+    path: str,
+) -> None:
+    response = authenticated_tenant_a_client.get(path)
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["error"]["code"] == "invalid_uuid"
+    assert payload["error"]["correlation_id"]
+
+
+@pytest.mark.django_db
 def test_extraction_filters_search_ordering_and_invalid_queries_are_server_side(
     authenticated_tenant_a_client: object,
     api_graph: dict[str, object],
@@ -640,3 +661,97 @@ def test_template_and_zone_mutations_delegate_with_explicit_domain_actions(
         service.archive_template,
     ):
         method.assert_called_once()
+
+
+def test_tenant_governed_viewset_helpers_fail_closed_and_keep_pagination_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant_id = uuid.uuid4()
+    view = api.DocumentExtractionViewSet()
+    user = SimpleNamespace(id=42)
+    view.request = SimpleNamespace(user=user, query_params={})
+    view.filterset_class = None
+
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: str(tenant_id))
+    assert view.resolved_tenant_id() == tenant_id
+    assert view.request.tenant_id == tenant_id
+    assert view.tenant_id() == tenant_id
+    assert view.actor_id() == uuid.uuid5(uuid.NAMESPACE_URL, "saraise:user:42")
+    assert view.filtered_queryset(object()) is not None
+
+    view.paginate_queryset = Mock(return_value=None)
+    with pytest.raises(RuntimeError, match="pagination"):
+        view.paginated([], api.DocumentExtractionListSerializer)
+
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: None)
+    with pytest.raises(PermissionDenied):
+        view.tenant_id()
+
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: "not-a-uuid")
+    assert view.resolved_tenant_id() is None
+
+    view.request = SimpleNamespace(user=SimpleNamespace(id=None), query_params={})
+    with pytest.raises(PermissionDenied):
+        view.actor_id()
+
+
+@pytest.mark.django_db
+def test_configuration_viewset_read_actions_delegate_environment_and_correlation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant_id = uuid.uuid4()
+    actor_id = uuid.uuid4()
+    service = Mock()
+    service.versions.return_value = []
+    service.audits.return_value = []
+    service.export_document.return_value = {"schema_version": 1, "module": "document_intelligence"}
+    service.simulate.return_value = {"valid": True, "changes": []}
+
+    view = api.DocumentIntelligenceConfigurationViewSet()
+    view.request = SimpleNamespace(
+        user=SimpleNamespace(id=actor_id),
+        query_params={"environment": "development"},
+        correlation_id="corr-config-api",
+        data={"document": api.default_configuration_document(), "environment": "development"},
+        method="POST",
+    )
+
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: str(tenant_id))
+    monkeypatch.setattr(view, "service_class", Mock(return_value=service))
+
+    assert view._environment() == "development"
+    assert view._correlation_id() == "corr-config-api"
+    assert view.get_queryset().count() == 0
+    assert view.defaults(SimpleNamespace()).data["providers"]["default_ocr_engine"] == "tesseract"
+    assert view.versions(SimpleNamespace()).data == []
+    assert view.audit(SimpleNamespace()).data == []
+    assert view.export_configuration(SimpleNamespace()).data["module"] == "document_intelligence"
+    assert view.simulate(SimpleNamespace()).data == {"valid": True, "changes": []}
+
+    service.versions.assert_called_once_with(tenant_id, "development")
+    service.audits.assert_called_once_with(tenant_id, "development")
+    service.export_document.assert_called_once_with(tenant_id, "development")
+    service.simulate.assert_called_once()
+
+
+def test_configuration_and_health_views_fail_closed_on_tenant_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_view = api.DocumentIntelligenceConfigurationViewSet()
+    config_view.action = "current"
+    config_view.request = SimpleNamespace(
+        method="PUT",
+        user=SimpleNamespace(id=uuid.uuid4()),
+        query_params={},
+    )
+    monkeypatch.setattr(api.ActionAccessMixin, "get_permissions", lambda self: [])
+    assert config_view.get_permissions() == []
+    assert config_view.action_permissions["current"] == "document_intelligence.configuration:update"
+
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: None)
+    assert config_view.get_queryset().count() == 0
+
+    health_view = api.ModuleHealthAPIView()
+    health_view.request = SimpleNamespace(user=SimpleNamespace(id=uuid.uuid4()))
+    with pytest.raises(PermissionDenied):
+        health_view.get(SimpleNamespace())

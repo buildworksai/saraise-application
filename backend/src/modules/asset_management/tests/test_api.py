@@ -64,7 +64,12 @@ def test_authenticated_user_without_manifest_permission_gets_403(api_client, use
 def test_create_persists_server_derived_current_value(api_client, tenant_a_user, tenant_a):
     api_client.force_authenticate(user=tenant_a_user)
 
-    response = api_client.post(ASSETS_URL, valid_asset_payload(purchase_cost="2500.00"), format="json", HTTP_IDEMPOTENCY_KEY="api-create-success")
+    response = api_client.post(
+        ASSETS_URL,
+        valid_asset_payload(purchase_cost="2500.00"),
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="api-create-success",
+    )
 
     assert response.status_code == status.HTTP_201_CREATED
     assert response.data["current_value"] == "2500.00"
@@ -85,7 +90,12 @@ def test_create_rejects_server_owned_field_spoofing(api_client, tenant_a_user, s
         "is_active": False,
     }[server_field]
 
-    response = api_client.post(ASSETS_URL, valid_asset_payload(**{server_field: value}), format="json", HTTP_IDEMPOTENCY_KEY=f"api-spoof-{server_field}")
+    response = api_client.post(
+        ASSETS_URL,
+        valid_asset_payload(**{server_field: value}),
+        format="json",
+        HTTP_IDEMPOTENCY_KEY=f"api-spoof-{server_field}",
+    )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert server_field in response.data
@@ -122,7 +132,9 @@ def test_create_rejects_unknown_fields_instead_of_silently_ignoring_them(api_cli
 def test_create_rejects_malformed_or_invalid_payloads(api_client, tenant_a_user, changes, field):
     api_client.force_authenticate(user=tenant_a_user)
 
-    response = api_client.post(ASSETS_URL, valid_asset_payload(**changes), format="json", HTTP_IDEMPOTENCY_KEY=f"api-invalid-{field}")
+    response = api_client.post(
+        ASSETS_URL, valid_asset_payload(**changes), format="json", HTTP_IDEMPOTENCY_KEY=f"api-invalid-{field}"
+    )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert field in response.data
@@ -132,7 +144,12 @@ def test_duplicate_code_returns_validation_error_without_overwrite(api_client, t
     existing = asset_factory(tenant_a, asset_code="AST-001", asset_name="Existing")
     api_client.force_authenticate(user=tenant_a_user)
 
-    response = api_client.post(ASSETS_URL, valid_asset_payload(asset_name="Replacement"), format="json", HTTP_IDEMPOTENCY_KEY="api-duplicate-code")
+    response = api_client.post(
+        ASSETS_URL,
+        valid_asset_payload(asset_name="Replacement"),
+        format="json",
+        HTTP_IDEMPOTENCY_KEY="api-duplicate-code",
+    )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert "asset_code" in response.data
@@ -179,7 +196,9 @@ def test_update_rejects_ownership_spoof_and_updates_through_domain(
     asset = asset_factory(tenant_a)
     api_client.force_authenticate(user=tenant_a_user)
 
-    spoof = api_client.patch(f"{ASSETS_URL}{asset.id}/", {"tenant_id": str(tenant_b)}, format="json", HTTP_IDEMPOTENCY_KEY="api-update-spoof")
+    spoof = api_client.patch(
+        f"{ASSETS_URL}{asset.id}/", {"tenant_id": str(tenant_b)}, format="json", HTTP_IDEMPOTENCY_KEY="api-update-spoof"
+    )
     updated = api_client.patch(
         f"{ASSETS_URL}{asset.id}/",
         {"asset_name": "Updated press", "location": "Plant 2"},
@@ -315,7 +334,9 @@ def test_configuration_api_preview_update_history_export_import_and_rollback(api
     document = dict(current.data["document"])
     document["asset_list_page_size"] = 31
     preview = api_client.post(f"{CONFIG_URL}preview/", {"document": document}, format="json")
-    updated = api_client.patch(f"{CONFIG_URL}update/", {"document": document}, format="json", HTTP_X_CORRELATION_ID="corr-config-api")
+    updated = api_client.patch(
+        f"{CONFIG_URL}update/", {"document": document}, format="json", HTTP_X_CORRELATION_ID="corr-config-api"
+    )
     history = api_client.get(f"{CONFIG_URL}history/")
     exported = api_client.get(f"{CONFIG_URL}export/")
     imported_document = dict(DEFAULT_CONFIGURATION)

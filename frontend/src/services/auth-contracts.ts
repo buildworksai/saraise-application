@@ -10,7 +10,7 @@
  * Reference: saraise-documentation/rules/agent-rules/27-contracts-architecture.md
  */
 
-import type { User } from '../stores/auth-store';
+import type { User } from "../stores/auth-store";
 
 // =============================================================================
 // EXPORTED TYPES
@@ -66,21 +66,21 @@ export interface ResetPasswordRequest {
  */
 export const ENDPOINTS = {
   /** POST - Login with credentials */
-  LOGIN: '/api/v1/auth/login/',
+  LOGIN: "/api/v1/auth/login/",
   /** POST - Logout current session */
-  LOGOUT: '/api/v1/auth/logout/',
+  LOGOUT: "/api/v1/auth/logout/",
   /** GET - Get current authenticated user */
-  ME: '/api/v1/auth/me/',
+  ME: "/api/v1/auth/me/",
   /** POST - Refresh session validity */
-  REFRESH: '/api/v1/auth/refresh/',
+  REFRESH: "/api/v1/auth/refresh/",
   /** POST - Register new user account */
-  REGISTER: '/api/v1/auth/register/',
+  REGISTER: "/api/v1/auth/register/",
   /** POST - Request password reset email */
-  FORGOT_PASSWORD: '/api/v1/auth/forgot-password/',
+  FORGOT_PASSWORD: "/api/v1/auth/forgot-password/",
   /** POST - Reset password with token */
-  RESET_PASSWORD: '/api/v1/auth/reset-password/',
+  RESET_PASSWORD: "/api/v1/auth/reset-password/",
   /** PATCH - Update user profile */
-  PROFILE: '/api/v1/auth/profile/',
+  PROFILE: "/api/v1/auth/profile/",
 } as const;
 
 // =============================================================================
@@ -95,42 +95,42 @@ export const ENDPOINTS = {
 export const EXAMPLES = {
   login: {
     request: {
-      email: 'user@example.com',
-      password: 'securePassword123',
+      email: "user@example.com",
+      password: "securePassword123",
     } satisfies LoginRequest,
     response: {
       user: {
-        id: 'user-uuid-123',
-        email: 'user@example.com',
-        username: 'johndoe',
+        id: "user-uuid-123",
+        email: "user@example.com",
+        username: "johndoe",
         is_staff: false,
         is_superuser: false,
-        tenant_id: 'tenant-uuid-456',
+        tenant_id: "tenant-uuid-456",
         platform_role: null,
-        tenant_role: 'user',
+        tenant_role: "user",
       },
-      session_id: 'session-uuid-789',
+      session_id: "session-uuid-789",
     } as LoginResponse,
   },
   register: {
     request: {
-      name: 'Jane Doe',
-      email: 'jane@example.com',
-      password: 'securePassword123',
-      company_name: 'Acme Corp',
+      name: "Jane Doe",
+      email: "jane@example.com",
+      password: "securePassword123",
+      company_name: "Acme Corp",
     } satisfies RegisterRequest,
     response: {
       user: {
-        id: 'user-uuid-456',
-        email: 'jane@example.com',
-        username: 'janedoe',
+        id: "user-uuid-456",
+        email: "jane@example.com",
+        username: "janedoe",
         is_staff: false,
         is_superuser: false,
-        tenant_id: 'tenant-uuid-789',
+        tenant_id: "tenant-uuid-789",
         platform_role: null,
-        tenant_role: 'user',
+        tenant_role: "user",
       },
-      session_id: 'session-uuid-012',
+      session_id: "session-uuid-012",
     } as LoginResponse,
   },
 } as const;

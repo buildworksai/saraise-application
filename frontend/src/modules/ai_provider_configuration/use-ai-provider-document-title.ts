@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect } from "react";
 
 export function useAiProviderDocumentTitle(title: string) {
   useEffect(() => {

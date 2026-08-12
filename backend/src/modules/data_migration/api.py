@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import io
 import json
 import re
 import uuid
@@ -12,7 +11,8 @@ from dataclasses import asdict, is_dataclass
 from typing import Any
 from uuid import UUID
 
-from django.core.exceptions import ObjectDoesNotExist, ValidationError as DjangoValidationError
+from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import QuerySet
 from django.http import StreamingHttpResponse
 from rest_framework import status, viewsets
@@ -38,8 +38,8 @@ from .models import (
     ValidationRule,
 )
 from .permissions import (
-    CONNECTION_ACTION_PERMISSIONS,
     CONFIGURATION_ACTION_PERMISSIONS,
+    CONNECTION_ACTION_PERMISSIONS,
     JOB_ACTION_PERMISSIONS,
     MAPPING_ACTION_PERMISSIONS,
     ROLLBACK_ACTION_PERMISSIONS,
@@ -52,13 +52,13 @@ from .serializers import (
     CancelRunSerializer,
     ConnectionTestResultSerializer,
     CredentialRotationSerializer,
-    DefinitionImportSerializer,
     DataMigrationConfigurationAuditSerializer,
     DataMigrationConfigurationImportSerializer,
     DataMigrationConfigurationPreviewSerializer,
     DataMigrationConfigurationRestoreSerializer,
     DataMigrationConfigurationSerializer,
     DataMigrationConfigurationUpdateSerializer,
+    DefinitionImportSerializer,
     ExpectedVersionSerializer,
     ExternalConnectionManagementSerializer,
     ExternalConnectionReferenceSerializer,
@@ -205,7 +205,9 @@ class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.Ge
         page = self.paginate_queryset(queryset)
         if page is None:
             raise RuntimeError("Governed pagination is mandatory for collections")
-        return self.get_paginated_response(serializer(page, many=True, context={"request": self.request, **context}).data)
+        return self.get_paginated_response(
+            serializer(page, many=True, context={"request": self.request, **context}).data
+        )
 
     def filtered(self, filter_type: type, queryset: QuerySet[Any]) -> QuerySet[Any]:
         filters = filter_type(self.request.query_params, queryset)
@@ -233,7 +235,11 @@ class MigrationJobViewSet(TenantGovernedViewSet):
         "validation_rules": {"GET": "data_migration.job:read", "POST": "data_migration.rule:manage"},
         "runs": {"GET": "data_migration.job:read", "POST": "data_migration.run:execute"},
     }
-    action_quotas = {"inspect": "data_migration.inspections", "runs": "data_migration.jobs", "request_dry_run": "data_migration.jobs"}
+    action_quotas = {
+        "inspect": "data_migration.inspections",
+        "runs": "data_migration.jobs",
+        "request_dry_run": "data_migration.jobs",
+    }
 
     def get_queryset(self) -> QuerySet[MigrationJob]:
         return MigrationJob.objects.filter(tenant_id=self.tenant_id, is_deleted=False)
@@ -266,7 +272,9 @@ class MigrationJobViewSet(TenantGovernedViewSet):
         serializer.is_valid(raise_exception=True)
         values = dict(serializer.validated_data)
         expected_version = values.pop("expected_version")
-        job = _call(MigrationJobService.update, self.tenant_id, self.kwargs["pk"], self.actor_id, values, expected_version)
+        job = _call(
+            MigrationJobService.update, self.tenant_id, self.kwargs["pk"], self.actor_id, values, expected_version
+        )
         return Response(MigrationJobDetailSerializer(job).data)
 
     def destroy(self, request: Request, pk: str | None = None) -> Response:
@@ -288,7 +296,13 @@ class MigrationJobViewSet(TenantGovernedViewSet):
         body = TransitionSerializer(data=request.data)
         body.is_valid(raise_exception=True)
         self.get_object()
-        job = _call(MigrationJobService.archive, self.tenant_id, self.kwargs["pk"], self.actor_id, body.validated_data["transition_key"])
+        job = _call(
+            MigrationJobService.archive,
+            self.tenant_id,
+            self.kwargs["pk"],
+            self.actor_id,
+            body.validated_data["transition_key"],
+        )
         return Response(MigrationJobDetailSerializer(job).data)
 
     @action(detail=True, methods=("post",))
@@ -331,7 +345,9 @@ class MigrationJobViewSet(TenantGovernedViewSet):
             self.actor_id,
             _idempotency_key(request),
         )
-        return Response({"async_job_id": str(async_job.id), "status": async_job.status}, status=status.HTTP_202_ACCEPTED)
+        return Response(
+            {"async_job_id": str(async_job.id), "status": async_job.status}, status=status.HTTP_202_ACCEPTED
+        )
 
     @action(detail=True, methods=("get",))
     def preview(self, request: Request, pk: str | None = None) -> Response:
@@ -361,15 +377,40 @@ class MigrationJobViewSet(TenantGovernedViewSet):
         serializer.is_valid(raise_exception=True)
         document = serializer.validated_data["document"]
         if serializer.validated_data["preview_only"]:
-            return Response({"job": None, "diff": {"from_version": None, "to_version": 1, "entries": [{"path": "job", "operation": "add"}], "warnings": []}, "checksum_valid": True})
+            return Response(
+                {
+                    "job": None,
+                    "diff": {
+                        "from_version": None,
+                        "to_version": 1,
+                        "entries": [{"path": "job", "operation": "add"}],
+                        "warnings": [],
+                    },
+                    "checksum_valid": True,
+                }
+            )
         job = _call(MigrationJobService.import_definition, self.tenant_id, self.actor_id, document)
-        return Response({"job": MigrationJobDetailSerializer(job).data, "diff": {"from_version": None, "to_version": 1, "entries": [{"path": "job", "operation": "add"}], "warnings": []}, "checksum_valid": True}, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "job": MigrationJobDetailSerializer(job).data,
+                "diff": {
+                    "from_version": None,
+                    "to_version": 1,
+                    "entries": [{"path": "job", "operation": "add"}],
+                    "warnings": [],
+                },
+                "checksum_valid": True,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=("get",))
     def versions(self, request: Request, pk: str | None = None) -> Response:
         del request, pk
         self.get_object()
-        queryset = MigrationJobVersion.objects.filter(tenant_id=self.tenant_id, job_id=self.kwargs["pk"]).order_by("-version")
+        queryset = MigrationJobVersion.objects.filter(tenant_id=self.tenant_id, job_id=self.kwargs["pk"]).order_by(
+            "-version"
+        )
         return self.paginated(queryset, MigrationJobVersionSerializer)
 
     @action(detail=True, methods=("post",), url_path=r"versions/(?P<version>[0-9]+)/restore")
@@ -394,12 +435,16 @@ class MigrationJobViewSet(TenantGovernedViewSet):
         self.get_object()
         if request.method == "GET":
             return self.paginated(
-                MigrationMapping.objects.filter(tenant_id=self.tenant_id, job_id=self.kwargs["pk"]).order_by("position", "id"),
+                MigrationMapping.objects.filter(tenant_id=self.tenant_id, job_id=self.kwargs["pk"]).order_by(
+                    "position", "id"
+                ),
                 MigrationMappingReadSerializer,
             )
         body = MigrationMappingWriteSerializer(data=request.data)
         body.is_valid(raise_exception=True)
-        mapping = _call(MigrationMappingService.create, self.tenant_id, self.kwargs["pk"], self.actor_id, body.validated_data)
+        mapping = _call(
+            MigrationMappingService.create, self.tenant_id, self.kwargs["pk"], self.actor_id, body.validated_data
+        )
         return Response(MigrationMappingReadSerializer(mapping).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=("post",), url_path="mappings/suggest")
@@ -409,7 +454,11 @@ class MigrationJobViewSet(TenantGovernedViewSet):
         body.is_valid(raise_exception=True)
         self.get_object()
         if body.validated_data["provider"] != "deterministic":
-            raise OperationFailed(error_code="CAPABILITY_UNAVAILABLE", message="No mapping suggestion extension is registered.", http_status=503)
+            raise OperationFailed(
+                error_code="CAPABILITY_UNAVAILABLE",
+                message="No mapping suggestion extension is registered.",
+                http_status=503,
+            )
         return Response(_call(MigrationMappingService.suggest_deterministic, self.tenant_id, self.kwargs["pk"]))
 
     @action(detail=True, methods=("post",), url_path="mappings/apply")
@@ -432,11 +481,15 @@ class MigrationJobViewSet(TenantGovernedViewSet):
         del pk
         self.get_object()
         if request.method == "GET":
-            queryset = ValidationRule.objects.filter(tenant_id=self.tenant_id, job_id=self.kwargs["pk"]).order_by("position", "id")
+            queryset = ValidationRule.objects.filter(tenant_id=self.tenant_id, job_id=self.kwargs["pk"]).order_by(
+                "position", "id"
+            )
             return self.paginated(queryset, ValidationRuleReadSerializer)
         body = ValidationRuleWriteSerializer(data=request.data)
         body.is_valid(raise_exception=True)
-        rule = _call(ValidationRuleService.create, self.tenant_id, self.kwargs["pk"], self.actor_id, body.validated_data)
+        rule = _call(
+            ValidationRuleService.create, self.tenant_id, self.kwargs["pk"], self.actor_id, body.validated_data
+        )
         return Response(ValidationRuleReadSerializer(rule).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=("get", "post"))
@@ -500,7 +553,9 @@ class MigrationMappingViewSet(TenantGovernedViewSet):
         self.get_object()
         body = MigrationMappingWriteSerializer(data=request.data, partial=True)
         body.is_valid(raise_exception=True)
-        mapping = _call(MigrationMappingService.update, self.tenant_id, self.kwargs["pk"], self.actor_id, body.validated_data)
+        mapping = _call(
+            MigrationMappingService.update, self.tenant_id, self.kwargs["pk"], self.actor_id, body.validated_data
+        )
         return Response(MigrationMappingReadSerializer(mapping).data)
 
     def destroy(self, request: Request, pk: str | None = None) -> Response:
@@ -532,7 +587,9 @@ class ValidationRuleViewSet(TenantGovernedViewSet):
         self.get_object()
         body = ValidationRuleWriteSerializer(data=request.data, partial=True)
         body.is_valid(raise_exception=True)
-        rule = _call(ValidationRuleService.update, self.tenant_id, self.kwargs["pk"], self.actor_id, body.validated_data)
+        rule = _call(
+            ValidationRuleService.update, self.tenant_id, self.kwargs["pk"], self.actor_id, body.validated_data
+        )
         return Response(ValidationRuleReadSerializer(rule).data)
 
     def destroy(self, request: Request, pk: str | None = None) -> Response:
@@ -603,7 +660,11 @@ class MigrationRunViewSet(TenantGovernedViewSet):
     def export_issues(self, request: Request, pk: str | None = None) -> StreamingHttpResponse:
         del request, pk
         self.get_object()
-        issues = MigrationRunIssue.objects.filter(tenant_id=self.tenant_id, run_id=self.kwargs["pk"]).order_by("row_number", "id").iterator(chunk_size=500)
+        issues = (
+            MigrationRunIssue.objects.filter(tenant_id=self.tenant_id, run_id=self.kwargs["pk"])
+            .order_by("row_number", "id")
+            .iterator(chunk_size=500)
+        )
         response = StreamingHttpResponse(_issue_csv_rows(issues), content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = f'attachment; filename="migration-run-{self.kwargs["pk"]}-issues.csv"'
         response["X-Content-Type-Options"] = "nosniff"
@@ -628,7 +689,9 @@ class MigrationRunViewSet(TenantGovernedViewSet):
     def rollback(self, request: Request, pk: str | None = None) -> Response:
         del pk
         self.get_object()
-        rollback = _call(RollbackService.request, self.tenant_id, self.kwargs["pk"], self.actor_id, _idempotency_key(request))
+        rollback = _call(
+            RollbackService.request, self.tenant_id, self.kwargs["pk"], self.actor_id, _idempotency_key(request)
+        )
         return Response(MigrationRollbackSerializer(rollback).data, status=status.HTTP_202_ACCEPTED)
 
 
@@ -684,7 +747,11 @@ class ExternalConnectionViewSet(TenantGovernedViewSet):
     def retrieve(self, request: Request, pk: str | None = None) -> Response:
         del request, pk
         connection = self.get_object()
-        serializer = ExternalConnectionManagementSerializer if is_platform_operator(self.request.user) else ExternalConnectionReferenceSerializer
+        serializer = (
+            ExternalConnectionManagementSerializer
+            if is_platform_operator(self.request.user)
+            else ExternalConnectionReferenceSerializer
+        )
         return Response(serializer(connection).data)
 
     def create(self, request: Request) -> Response:
@@ -700,7 +767,9 @@ class ExternalConnectionViewSet(TenantGovernedViewSet):
         current = self.get_object()
         body = ExternalConnectionManagementSerializer(data=request.data, partial=True)
         body.is_valid(raise_exception=True)
-        connection = _call(ExternalConnectionService.update, current.tenant_id, self.kwargs["pk"], self.actor_id, body.validated_data)
+        connection = _call(
+            ExternalConnectionService.update, current.tenant_id, self.kwargs["pk"], self.actor_id, body.validated_data
+        )
         return Response(ExternalConnectionManagementSerializer(connection).data)
 
     @action(detail=True, methods=("post",))
@@ -732,7 +801,9 @@ class ExternalConnectionViewSet(TenantGovernedViewSet):
         del request, pk
         self._require_operator()
         current = self.get_object()
-        result = _result_data(_call(ExternalConnectionService.test, current.tenant_id, self.kwargs["pk"], self.actor_id))
+        result = _result_data(
+            _call(ExternalConnectionService.test, current.tenant_id, self.kwargs["pk"], self.actor_id)
+        )
         return Response(ConnectionTestResultSerializer(result).data)
 
 
@@ -755,7 +826,7 @@ class DataMigrationConfigurationViewSet(TenantGovernedViewSet):
             DataMigrationConfigurationService.update,
             self.tenant_id,
             self.actor_id,
-            values["document"],
+            values,
             expected_version,
             self.correlation_id,
         )
@@ -768,7 +839,9 @@ class DataMigrationConfigurationViewSet(TenantGovernedViewSet):
 
     def configuration_versions(self, request: Request) -> Response:
         del request
-        queryset = DataMigrationConfigurationAudit.objects.filter(tenant_id=self.tenant_id).order_by("-version", "-created_at")
+        queryset = DataMigrationConfigurationAudit.objects.filter(tenant_id=self.tenant_id).order_by(
+            "-version", "-created_at"
+        )
         return self.paginated(queryset, DataMigrationConfigurationAuditSerializer)
 
     def restore_configuration(self, request: Request, version: str) -> Response:
@@ -792,11 +865,12 @@ class DataMigrationConfigurationViewSet(TenantGovernedViewSet):
         body.is_valid(raise_exception=True)
         values = dict(body.validated_data)
         expected_version = values.pop("expected_version")
+        document = values.pop("document")
         config = _call(
             DataMigrationConfigurationService.import_document,
             self.tenant_id,
             self.actor_id,
-            values,
+            document,
             expected_version,
         )
         return Response(DataMigrationConfigurationSerializer(config).data)

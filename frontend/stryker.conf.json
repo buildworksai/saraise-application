@@ -2,6 +2,7 @@
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "vitest",
   "coverageAnalysis": "perTest",
+  "ignorePatterns": [".stryker-tmp*/**", "coverage/**", "dist/**", "reports/**"],
   "mutate": [
     "src/**/*.{ts,tsx}",
     "!src/**/*.test.{ts,tsx}",
@@ -16,6 +17,9 @@
     "high": 90,
     "low": 90,
     "break": 90
+  },
+  "vitest": {
+    "related": false
   },
   "cleanTempDir": "always",
   "reporters": ["clear-text", "progress"]
