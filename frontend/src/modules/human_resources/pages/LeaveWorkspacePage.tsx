@@ -104,7 +104,9 @@ export function LeaveWorkspacePage() {
           onChange={(event) => set("scope", event.target.value)}
         >
           {document.allowed_values.leave_scopes.map((item) => (
-            <option key={item}>{item.replaceAll("_", " ")}</option>
+            <option key={item} value={item}>
+              {item.replaceAll("_", " ")}
+            </option>
           ))}
         </select>
         <select

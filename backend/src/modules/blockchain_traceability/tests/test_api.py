@@ -2,26 +2,38 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime
 from datetime import timezone as datetime_timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
+from django.db import IntegrityError
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.exceptions import NotFound, ValidationError
 
 from src.core.access.decision import AccessDecision, AccessReasonCode
+from src.core.api import OperationFailed
 from src.core.api.results import OperationResult
 from src.modules.blockchain_traceability import serializers
 from src.modules.blockchain_traceability.api import (
     AuthenticityCredentialViewSet,
+    BlockchainTraceabilityConfigurationViewSet,
     ComplianceEvidenceViewSet,
     LedgerAnchorViewSet,
     LedgerNetworkViewSet,
     TraceabilityAssetViewSet,
     TraceabilityEventViewSet,
     VerificationAttemptViewSet,
+    _operation_payload,
+    _parse_date,
+    _parse_uuid,
+    _serialize_value,
+    _service_call,
+    _unwrap_result,
 )
 from src.modules.blockchain_traceability.models import (
     AuthenticityCredential,
@@ -31,8 +43,14 @@ from src.modules.blockchain_traceability.models import (
     TraceabilityEvent,
 )
 from src.modules.blockchain_traceability.permissions import PERMISSIONS
-from src.modules.blockchain_traceability.providers import ProviderHealth
-from src.modules.blockchain_traceability.services import AssetHistory, AssetHistoryItem
+from src.modules.blockchain_traceability.providers import ProviderHealth, ProviderUnavailableError
+from src.modules.blockchain_traceability.services import (
+    DEFAULT_CONFIGURATION,
+    AssetHistory,
+    AssetHistoryItem,
+    DomainNotFoundError,
+    IdempotencyConflictError,
+)
 
 pytest_plugins = ["src.core.testing"]
 pytestmark = pytest.mark.django_db
@@ -92,6 +110,54 @@ def _credential(tenant_id, asset: TraceabilityAsset) -> AuthenticityCredential:
         issued_at=timezone.now(),
         created_by="api-test",
     )
+
+
+def _success_data(response):
+    return response.json()["data"]
+
+
+@dataclass(frozen=True)
+class PayloadDTO:
+    status: str
+    count: int
+
+
+def test_api_boundary_helpers_map_domain_results_and_failures() -> None:
+    assert _service_call(lambda: "ok") == "ok"
+    with pytest.raises(NotFound):
+        _service_call(lambda: (_ for _ in ()).throw(DomainNotFoundError("asset")))
+    with pytest.raises(OperationFailed) as unavailable:
+        _service_call(lambda: (_ for _ in ()).throw(ProviderUnavailableError("down")))
+    assert unavailable.value.error_code == "CAPABILITY_UNAVAILABLE"
+    with pytest.raises(OperationFailed) as conflict:
+        _service_call(lambda: (_ for _ in ()).throw(IntegrityError("duplicate")))
+    assert conflict.value.error_code == "RESOURCE_CONFLICT"
+    with pytest.raises(OperationFailed) as state_conflict:
+        _service_call(lambda: (_ for _ in ()).throw(IdempotencyConflictError()))
+    assert state_conflict.value.error_code == "idempotency_conflict"
+    with pytest.raises(ValidationError):
+        _service_call(lambda: (_ for _ in ()).throw(ValueError("bad input")))
+
+    succeeded = OperationResult.succeeded(PayloadDTO(status="ready", count=2), evidence={"source": "unit"})
+    assert _unwrap_result(succeeded).status == "ready"
+    assert _unwrap_result("plain") == "plain"
+    assert _serialize_value(PayloadDTO(status="ready", count=2)) == {"status": "ready", "count": 2}
+    assert _serialize_value({"status": "ready"}) == {"status": "ready"}
+    assert _operation_payload({"id": "1"}, code="created", message="Created") == {
+        "ok": True,
+        "code": "created",
+        "message": "Created",
+        "value": {"id": "1"},
+    }
+
+    identifier = uuid4()
+    assert _parse_uuid(identifier, "asset_id") == identifier
+    assert _parse_uuid(str(identifier), "asset_id") == identifier
+    with pytest.raises(ValidationError):
+        _parse_uuid("not-a-uuid", "asset_id")
+    assert _parse_date("2026-01-02T03:04:05Z", "occurred_at").year == 2026
+    with pytest.raises(ValidationError):
+        _parse_date("not-a-date", "occurred_at")
 
 
 REQUIRED_SERIALIZERS = {
@@ -198,6 +264,72 @@ def test_unauthenticated_routes_return_exact_governed_401(api_client) -> None:
         assert set(payload["error"]) == {"code", "message", "detail", "correlation_id"}
 
 
+def test_configuration_api_current_preview_history_export_import_rollback_and_capabilities(
+    authenticated_tenant_a_client,
+    tenant_a,
+) -> None:
+    base_url = "/api/v2/blockchain-traceability/configuration/"
+    current = authenticated_tenant_a_client.get(base_url)
+    assert current.status_code == status.HTTP_200_OK
+    current_data = _success_data(current)
+    assert current_data["tenant_id"] == str(tenant_a.id)
+    assert current_data["environment"] == "default"
+    assert current_data["version"] == 1
+    assert current_data["document"] == DEFAULT_CONFIGURATION
+
+    updated_document = deepcopy(current_data["document"])
+    updated_document["list_policy"]["default_page_size"] = 30
+    updated = authenticated_tenant_a_client.put(
+        f"{base_url}current/",
+        {"environment": "default", "document": updated_document},
+        format="json",
+    )
+    assert updated.status_code == status.HTTP_200_OK
+    assert _success_data(updated)["version"] == 2
+    assert _success_data(updated)["document"]["list_policy"]["default_page_size"] == 30
+
+    preview_document = deepcopy(updated_document)
+    preview_document["list_policy"]["default_page_size"] = 35
+    preview = authenticated_tenant_a_client.post(
+        f"{base_url}preview/",
+        {"environment": "default", "document": preview_document},
+        format="json",
+    )
+    assert preview.status_code == status.HTTP_200_OK
+    assert _success_data(preview)["changes"] == [{"path": "list_policy.default_page_size", "before": 30, "after": 35}]
+
+    history = authenticated_tenant_a_client.get(f"{base_url}history/")
+    assert history.status_code == status.HTTP_200_OK
+    assert [row["change_type"] for row in _success_data(history)] == ["update", "initialize"]
+
+    exported = authenticated_tenant_a_client.get(f"{base_url}export-document/")
+    assert exported.status_code == status.HTTP_200_OK
+    import_payload = _success_data(exported)
+    import_payload["environment"] = "staging"
+    import_payload["document"]["list_policy"]["default_page_size"] = 40
+    imported = authenticated_tenant_a_client.post(f"{base_url}import-document/", import_payload, format="json")
+    assert imported.status_code == status.HTTP_200_OK
+    assert _success_data(imported)["environment"] == "staging"
+    assert _success_data(imported)["version"] == 2
+
+    rollback = authenticated_tenant_a_client.post(
+        f"{base_url}rollback/",
+        {"environment": "staging", "version": 1},
+        format="json",
+    )
+    assert rollback.status_code == status.HTTP_200_OK
+    assert _success_data(rollback)["version"] == 3
+    assert _success_data(rollback)["document"] == DEFAULT_CONFIGURATION
+
+    capabilities = authenticated_tenant_a_client.get(f"{base_url}capabilities/?environment=staging")
+    assert capabilities.status_code == status.HTTP_200_OK
+    capability_data = _success_data(capabilities)
+    assert capability_data["can_read"] is True
+    assert capability_data["can_update"] is True
+    assert capability_data["can_import"] is True
+    assert capability_data["document"] == DEFAULT_CONFIGURATION
+
+
 def test_network_list_envelope_filter_search_order_and_pagination(authenticated_tenant_a_client, tenant_a) -> None:
     LedgerNetwork.objects.bulk_create(
         [
@@ -239,6 +371,85 @@ def test_invalid_ordering_and_date_filters_return_validation_envelopes(authentic
     date_filter = authenticated_tenant_a_client.get("/api/v2/blockchain-traceability/events/?occurred_after=not-a-date")
     assert date_filter.status_code == status.HTTP_400_BAD_REQUEST
     assert date_filter.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_asset_api_create_update_lifecycle_and_history_are_service_backed(
+    authenticated_tenant_a_client,
+    tenant_a,
+) -> None:
+    created = authenticated_tenant_a_client.post(
+        "/api/v2/blockchain-traceability/assets/",
+        {
+            "asset_key": "api-asset-lifecycle",
+            "name": "API Asset",
+            "serial_number": "SERIAL-API-1",
+            "asset_type": "serialized_product",
+            "attributes": {"temperature_controlled": True},
+        },
+        format="json",
+    )
+    assert created.status_code == status.HTTP_201_CREATED
+    asset = _success_data(created)
+    assert asset["tenant_id"] == str(tenant_a.id)
+    assert asset["status"] == "draft"
+
+    patched = authenticated_tenant_a_client.patch(
+        f"/api/v2/blockchain-traceability/assets/{asset['id']}/",
+        {"name": "API Asset Updated", "description": "Updated through governed API"},
+        format="json",
+    )
+    assert patched.status_code == status.HTTP_200_OK
+    assert _success_data(patched)["name"] == "API Asset Updated"
+
+    activated = authenticated_tenant_a_client.post(
+        f"/api/v2/blockchain-traceability/assets/{asset['id']}/activate/",
+        {"transition_key": "api-asset-activate"},
+        format="json",
+    )
+    assert activated.status_code == status.HTTP_200_OK
+    assert _success_data(activated)["status"] == "active"
+
+    recalled = authenticated_tenant_a_client.post(
+        f"/api/v2/blockchain-traceability/assets/{asset['id']}/recall/",
+        {"reason": "Traceability issue confirmed", "transition_key": "api-asset-recall"},
+        format="json",
+    )
+    assert recalled.status_code == status.HTTP_200_OK
+    assert _success_data(recalled)["status"] == "recalled"
+
+    released = authenticated_tenant_a_client.post(
+        f"/api/v2/blockchain-traceability/assets/{asset['id']}/release-recall/",
+        {"transition_key": "api-asset-release-recall"},
+        format="json",
+    )
+    assert released.status_code == status.HTTP_200_OK
+    assert _success_data(released)["status"] == "active"
+
+    event = authenticated_tenant_a_client.post(
+        "/api/v2/blockchain-traceability/events/",
+        {
+            "asset_id": asset["id"],
+            "idempotency_key": "api-asset-event-1",
+            "event_type": "quality_release",
+            "occurred_at": timezone.now().isoformat(),
+            "actor_ref": "operator:api",
+            "location": {"site": "plant-a"},
+            "payload": {"inspection": "passed"},
+        },
+        format="json",
+    )
+    assert event.status_code == status.HTTP_201_CREATED
+    assert _success_data(event)["sequence"] == 1
+
+    history = authenticated_tenant_a_client.get(
+        f"/api/v2/blockchain-traceability/assets/{asset['id']}/history/?page_size=2"
+    )
+    assert history.status_code == status.HTTP_200_OK
+    history_payload = _success_data(history)
+    assert history_payload["asset"]["id"] == asset["id"]
+    assert history_payload["proof_status"] in {"locally_consistent", "verified", "inconclusive"}
+    assert history_payload["pagination"]["page_size"] == 2
+    assert [item["kind"] for item in history_payload["items"]]
 
 
 def test_policy_denial_is_403_and_names_the_governed_error(
@@ -332,6 +543,7 @@ def test_every_endpoint_fails_closed_with_its_action_capability(
 
 def test_every_router_action_has_an_explicit_declared_capability() -> None:
     viewsets = (
+        BlockchainTraceabilityConfigurationViewSet,
         LedgerNetworkViewSet,
         TraceabilityAssetViewSet,
         TraceabilityEventViewSet,
@@ -520,8 +732,13 @@ def test_raw_token_appears_only_once_in_issue_response(monkeypatch, authenticate
 
     detail = authenticated_tenant_a_client.get(f"/api/v2/blockchain-traceability/credentials/{credential.id}/")
     listing = authenticated_tenant_a_client.get("/api/v2/blockchain-traceability/credentials/")
+    issued_ordering = authenticated_tenant_a_client.get(
+        "/api/v2/blockchain-traceability/credentials/?ordering=-issued_at"
+    )
     assert raw_token not in detail.content.decode()
     assert raw_token not in listing.content.decode()
+    assert issued_ordering.status_code == status.HTTP_200_OK
+    assert raw_token not in issued_ordering.content.decode()
     assert "token_digest" not in detail.content.decode()
 
 

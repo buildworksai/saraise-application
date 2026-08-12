@@ -87,7 +87,7 @@ from .permissions import (
     ActionAccessMixin,
     SessionAuthentication401,
 )
-from .providers import ProviderHealth, ProviderUnavailableError
+from .providers import ProviderUnavailableError
 from .serializers import (
     AuthenticityCredentialDetailSerializer,
     AuthenticityCredentialIssueSerializer,
@@ -563,7 +563,7 @@ class LedgerNetworkViewSet(GovernedTenantModelViewSet):
         del request
         network = cast(LedgerNetwork, self.get_object())
         result = _service_call(lambda: self.service.probe_network(self.tenant_id, _parse_uuid(pk, "id"), self.actor_id))
-        health = cast(ProviderHealth, result.unwrap() if isinstance(result, OperationResult) else result)
+        health = result.unwrap() if isinstance(result, OperationResult) else result
         checked_at = getattr(health, "checked_at", None) or timezone.now()
         provider_health = {
             "status": "healthy" if bool(getattr(health, "available", False)) else "unavailable",
@@ -874,7 +874,7 @@ class LedgerAnchorViewSet(GovernedTenantModelViewSet):
         result = _service_call(
             lambda: self.service.refresh_receipt(self.tenant_id, _parse_uuid(pk, "id"), self.actor_id)
         )
-        anchor = cast(LedgerAnchor, result.unwrap() if isinstance(result, OperationResult) else result)
+        anchor = result.unwrap() if isinstance(result, OperationResult) else result
         return Response(
             _operation_payload(
                 LedgerAnchorDetailSerializer(anchor).data,
@@ -925,7 +925,12 @@ class AuthenticityCredentialViewSet(GovernedTenantModelViewSet):
             )
             queryset = self._ordering(
                 queryset,
-                allowed={"created_at": "created_at", "expires_at": "expires_at", "status": "status"},
+                allowed={
+                    "created_at": "created_at",
+                    "expires_at": "expires_at",
+                    "issued_at": "issued_at",
+                    "status": "status",
+                },
                 default="-created_at",
             )
         return queryset

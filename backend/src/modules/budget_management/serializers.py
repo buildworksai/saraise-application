@@ -7,7 +7,7 @@ are executed by :mod:`services` under transaction locks.
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from rest_framework import serializers
 
@@ -57,7 +57,8 @@ class ServiceRequestSerializer(serializers.Serializer):
     allowed_server_fields: frozenset[str] = frozenset()
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        submitted = set(self.initial_data) if isinstance(self.initial_data, Mapping) else set()
+        initial_data = getattr(self, "initial_data", None)
+        submitted = set(initial_data) if isinstance(initial_data, Mapping) else set()
         forbidden = sorted(submitted & (SERVER_OWNED_FIELDS - self.allowed_server_fields))
         if forbidden:
             raise serializers.ValidationError({field: "This field is controlled by the server." for field in forbidden})
@@ -74,7 +75,7 @@ class ServiceRequestSerializer(serializers.Serializer):
 
 class TrimmedCharField(serializers.CharField):
     def to_internal_value(self, data: object) -> str:
-        return super().to_internal_value(data).strip()
+        return super().to_internal_value(cast(str, data)).strip()
 
 
 class UppercaseCharField(TrimmedCharField):
@@ -88,9 +89,13 @@ class StrictDecimalField(serializers.DecimalField):
     def to_internal_value(self, data: object) -> Decimal:
         if isinstance(data, (float, bool)):
             self.fail("invalid")
-        value = super().to_internal_value(data)
-        if value.as_tuple().exponent < -self.decimal_places:
-            self.fail("max_decimal_places", max_decimal_places=self.decimal_places)
+        value = super().to_internal_value(cast(Decimal | int | str, data))
+        decimal_places = self.decimal_places
+        if decimal_places is None:
+            raise AssertionError("StrictDecimalField requires decimal_places.")
+        exponent = value.as_tuple().exponent
+        if isinstance(exponent, str) or exponent < -decimal_places:
+            self.fail("max_decimal_places", max_decimal_places=decimal_places)
         return value.quantize(Decimal("0.01"))
 
 
@@ -257,7 +262,9 @@ class BudgetListSerializer(serializers.ModelSerializer):
         return "on_budget"
 
 
-class BudgetDetailSerializer(BudgetListSerializer):
+class BudgetDetailSerializer(serializers.ModelSerializer):
+    total_budget = MoneyField(read_only=True)
+    variance_indicator = serializers.SerializerMethodField()
     lines = BudgetLineReadSerializer(many=True, read_only=True)
     approvals = BudgetApprovalSerializer(many=True, read_only=True)
     transitions = BudgetTransitionSerializer(many=True, read_only=True)
@@ -265,8 +272,25 @@ class BudgetDetailSerializer(BudgetListSerializer):
     allowed_commands = serializers.SerializerMethodField()
     variance_summary = serializers.SerializerMethodField()
 
-    class Meta(BudgetListSerializer.Meta):
-        fields = BudgetListSerializer.Meta.fields + (
+    class Meta:
+        model = Budget
+        fields = (
+            "id",
+            "budget_code",
+            "budget_name",
+            "fiscal_year",
+            "start_date",
+            "end_date",
+            "budget_type",
+            "department_id",
+            "project_id",
+            "status",
+            "currency",
+            "budget_ceiling",
+            "total_budget",
+            "variance_indicator",
+            "created_at",
+            "updated_at",
             "submitted_at",
             "submitted_by",
             "approved_at",
@@ -281,6 +305,9 @@ class BudgetDetailSerializer(BudgetListSerializer):
             "allowed_commands",
             "variance_summary",
         )
+
+    def get_variance_indicator(self, obj: Budget) -> str:
+        return BudgetListSerializer().get_variance_indicator(obj)
 
     def get_allowed_commands(self, obj: Budget) -> list[str]:
         return {

@@ -2,6 +2,9 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
+const devServerPort = Number(process.env.VITE_DEV_SERVER_PORT ?? '25173');
+const apiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? 'http://localhost:28000';
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -11,15 +14,13 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0', // Allow external connections (Docker)
-    port: 5173,
+    port: devServerPort,
     watch: {
       ignored: ['**/.stryker-tmp/**', '**/coverage/**', '**/dist/**'],
     },
     proxy: {
       '^/api(?:/|$)': {
-        // In Docker, use service name 'backend' on internal port 8000
-        // Vite proxy runs inside Docker container, so it must use Docker network service name
-        target: 'http://backend:8000',
+        target: apiProxyTarget,
         changeOrigin: true,
         secure: false,
         // CRITICAL: Preserve cookies for session authentication

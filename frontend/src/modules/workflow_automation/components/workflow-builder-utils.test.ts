@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowConfigurationDocument, WorkflowCreateDTO } from "../contracts";
 import {
+  actionConfigForSelection,
   moveStepByOffset,
   removeStepAt,
   WORKFLOW_CATALOG_ACTIONS_QUERY_KEY,
@@ -9,6 +10,7 @@ import {
   WORKFLOW_CATALOG_CONDITIONS_QUERY_KEY,
   workflowBuilderIssues,
   workflowBuilderPayload,
+  workflowStepCardKey,
   localIssues,
   newStep,
   recipientPath,
@@ -76,6 +78,13 @@ describe("workflow builder utilities", () => {
     expect(WORKFLOW_CATALOG_ASSIGNEES_QUERY_KEY).toEqual(["workflow-catalog-assignees"]);
   });
 
+  it("derives stable render keys from immutable step identity and position", () => {
+    expect(workflowStepCardKey(basePayload.steps[0]!, 0)).toBe("action-0");
+    expect(workflowStepCardKey({ ...basePayload.steps[0]!, key: "approval" }, 2)).toBe(
+      "approval-2"
+    );
+  });
+
   it("normalizes slugs using lowercase, separator collapse, edge trimming, and maximum length", () => {
     expect(slug("  Emergency PO Approval!!!  ", 64)).toBe("emergency_po_approval");
     expect(slug("__Manual Key / 2026__", 64)).toBe("manual_key_2026");
@@ -124,6 +133,84 @@ describe("workflow builder utilities", () => {
         template_key: "t",
       })
     ).toBe("");
+  });
+
+  it("builds action configs only for available selected descriptors", () => {
+    expect(
+      actionConfigForSelection(
+        [
+          {
+            key: "core.locked",
+            display_name: "Locked",
+            description: "",
+            category: "Core",
+            owning_module: "workflow_automation",
+            schema_version: "1.0",
+            descriptor_fingerprint: "sha256:locked",
+            required_permission: "workflow_automation.workflow:create",
+            required_entitlement: "module.workflow_automation",
+            availability: "locked",
+            reason: "Missing entitlement",
+            input_schema: {},
+            output_schema: {},
+            idempotent: true,
+            network_access: false,
+            ui_schema: [],
+          },
+          {
+            key: "core.available",
+            display_name: "Available",
+            description: "",
+            category: "Core",
+            owning_module: "workflow_automation",
+            schema_version: "2.0",
+            descriptor_fingerprint: "sha256:available",
+            required_permission: "workflow_automation.workflow:create",
+            required_entitlement: "module.workflow_automation",
+            availability: "available",
+            reason: null,
+            input_schema: {},
+            output_schema: {},
+            idempotent: true,
+            network_access: false,
+            ui_schema: [],
+          },
+        ],
+        "core.available"
+      )
+    ).toEqual({
+      handler: "core.available",
+      schema_version: "2.0",
+      input_mapping: {},
+      configuration: {},
+    });
+    expect(actionConfigForSelection(undefined, "core.available")).toBeNull();
+    expect(actionConfigForSelection([], "core.available")).toBeNull();
+    expect(
+      actionConfigForSelection(
+        [
+          {
+            key: "core.locked",
+            display_name: "Locked",
+            description: "",
+            category: "Core",
+            owning_module: "workflow_automation",
+            schema_version: "1.0",
+            descriptor_fingerprint: "sha256:locked",
+            required_permission: "workflow_automation.workflow:create",
+            required_entitlement: "module.workflow_automation",
+            availability: "locked",
+            reason: "Missing entitlement",
+            input_schema: {},
+            output_schema: {},
+            idempotent: true,
+            network_access: false,
+            ui_schema: [],
+          },
+        ],
+        "core.locked"
+      )
+    ).toBeNull();
   });
 
   it("creates governed default steps for every supported step type", () => {

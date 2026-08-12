@@ -192,13 +192,11 @@ cd saraise
 docker compose -f docker-compose.dev.yml up -d
 ```
 
-This starts:
-- PostgreSQL on port `15432`
-- Redis on port `16379`
-- Auth service on port `18001`
-- Policy Engine on port `18002`
-- Control Plane on port `18003`
-- Platform Core on port `18004`
+This starts the application-local runtime services:
+- PostgreSQL on port `25432`
+- Redis on port `26379`
+- Backend API on port `28000`
+- Frontend UI on port `25173`
 
 ### 3. Setup Backend
 
@@ -216,7 +214,7 @@ pip install -e .[dev]
 python manage.py migrate
 
 # Start development server
-python manage.py runserver 0.0.0.0:8000
+python manage.py runserver 0.0.0.0:28000
 ```
 
 ### 4. Setup Frontend
@@ -233,9 +231,9 @@ npm run dev
 
 ### 5. Access the Application
 
-- **Frontend**: http://localhost:5173
-- **Backend API**: http://localhost:8000/api/
-- **API Documentation**: http://localhost:8000/api/schema/swagger/
+- **Frontend**: http://localhost:25173
+- **Backend API**: http://localhost:28000/api/
+- **API Documentation**: http://localhost:28000/api/schema/swagger/
 
 ---
 

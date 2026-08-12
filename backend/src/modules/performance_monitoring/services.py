@@ -17,9 +17,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from datetime import timezone as datetime_timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence, cast
 from uuid import UUID
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -233,14 +234,15 @@ def _percentile(values: Sequence[float], percentile: int) -> float:
 
 
 def _compare(value: float, comparison: str, threshold: float) -> bool:
-    return {
+    comparisons: dict[str, bool] = {
         Comparison.GT: value > threshold,
         Comparison.GTE: value >= threshold,
         Comparison.LT: value < threshold,
         Comparison.LTE: value <= threshold,
         Comparison.EQ: value == threshold,
         Comparison.NE: value != threshold,
-    }.get(comparison, False)
+    }
+    return comparisons.get(comparison, False)
 
 
 class MetricsCollectionService:
@@ -364,11 +366,12 @@ class MetricsCollectionService:
         if metric.metric_type == MetricType.COUNTER:
             if bool(_setting(tenant, "rules.counter_requires_session_id")) and not session_id:
                 raise InvalidMetricValueError("Counter metrics require a session_id.")
-            previous = (
+            previous = cast(
+                MetricDataPoint | None,
                 MetricDataPoint.objects.for_tenant(tenant)
                 .filter(metric=metric, session_id=session_id, tags=normalized_tags)
                 .order_by("-timestamp")
-                .first()
+                .first(),
             )
             if (
                 previous
@@ -378,7 +381,10 @@ class MetricsCollectionService:
                 raise InvalidMetricValueError("Counter values must be monotonic within a session and tag set.")
         key = str(idempotency_key or "").strip()
         if key:
-            existing = MetricDataPoint.objects.for_tenant(tenant).filter(metric=metric, idempotency_key=key).first()
+            existing = cast(
+                MetricDataPoint | None,
+                MetricDataPoint.objects.for_tenant(tenant).filter(metric=metric, idempotency_key=key).first(),
+            )
             if existing:
                 if float(existing.value) != numeric_value or existing.tags != normalized_tags:
                     raise ConflictError("Idempotency key was already used with a different data point.")
@@ -450,7 +456,7 @@ class MetricsCollectionService:
                         self.record_metric(
                             tenant_id,
                             str(payload.get("metric_name", "")),
-                            payload.get("value"),
+                            cast(Decimal | float | int, payload.get("value")),
                             tags=payload.get("tags"),
                             timestamp=payload.get("timestamp"),
                             metric_type=str(payload.get("metric_type", MetricType.GAUGE)),
@@ -519,8 +525,8 @@ class MetricsCollectionService:
         seconds = intervals.get(interval)
         if interval == "auto":
             span = (end - start).total_seconds()
-            buckets = list(_setting(tenant, "query.automatic_buckets"))
-            selected = next((item for item in buckets if span <= item["max_range_seconds"]), buckets[-1])
+            auto_buckets = list(_setting(tenant, "query.automatic_buckets"))
+            selected = next((item for item in auto_buckets if span <= item["max_range_seconds"]), auto_buckets[-1])
             seconds = int(selected["bucket_seconds"])
             interval = next((key for key, value in intervals.items() if int(value) == seconds), f"{seconds}s")
         if seconds is None:
@@ -530,16 +536,17 @@ class MetricsCollectionService:
         )
         for key, expected in dict(tags or {}).items():
             points = points.filter(tags__contains={str(key): str(expected)})
-        buckets: dict[int, list[float]] = {}
-        for point in points.only("timestamp", "value").order_by("timestamp"):
+        value_buckets: dict[int, list[float]] = {}
+        ordered_points = cast(Sequence[MetricDataPoint], list(points.only("timestamp", "value").order_by("timestamp")))
+        for point in ordered_points:
             epoch = int(point.timestamp.timestamp())
-            buckets.setdefault(epoch - epoch % seconds, []).append(float(point.value))
+            value_buckets.setdefault(epoch - epoch % seconds, []).append(float(point.value))
         data = [
             MetricBucket(
                 datetime.fromtimestamp(bucket, tz=datetime_timezone.utc),
                 self._aggregate(values, aggregation),
             )
-            for bucket, values in sorted(buckets.items())
+            for bucket, values in sorted(value_buckets.items())
         ]
         return MetricQueryResult(name, aggregation, interval, data)
 
@@ -792,10 +799,13 @@ class AlertingService:
         now = timezone.now()
         window_start = now - timedelta(minutes=rule.evaluation_window_minutes)
         points = (
-            list(
-                MetricDataPoint.objects.for_tenant(tenant)
-                .filter(metric=metric, timestamp__gte=window_start, timestamp__lte=now)
-                .order_by("timestamp")
+            cast(
+                list[MetricDataPoint],
+                list(
+                    MetricDataPoint.objects.for_tenant(tenant)
+                    .filter(metric=metric, timestamp__gte=window_start, timestamp__lte=now)
+                    .order_by("timestamp")
+                ),
             )
             if metric
             else []
@@ -885,11 +895,12 @@ class AlertingService:
             # Absence is deliberately 2x the configured window to avoid sparse-series false positives.
             if points:
                 return False, None
-            latest = (
+            latest = cast(
+                MetricDataPoint | None,
                 MetricDataPoint.objects.for_tenant(rule.tenant_id)
                 .filter(metric__metric_name=rule.metric_name)
                 .order_by("-timestamp")
-                .first()
+                .first(),
             )
             old_enough = latest is None or timezone.now() - latest.timestamp >= timedelta(
                 minutes=float(_setting(tenant_id, "rules.absence_window_multiplier")) * rule.evaluation_window_minutes
@@ -897,6 +908,8 @@ class AlertingService:
             return old_enough, None
         if not points:
             return False, None
+        if rule.threshold is None:
+            raise MonitoringError("Alert threshold is required.")
         values = [point.value for point in points]
         if rule.condition == AlertCondition.RATE:
             elapsed_minutes = max(
@@ -1003,6 +1016,7 @@ class SLOMonitoringService:
         data.setdefault("window_days", int(defaults["window_days"]))
         data.setdefault("expected_interval_seconds", int(defaults["expected_interval_seconds"]))
         self._validate(tenant, data)
+        data["objective_percentage"] = Decimal(str(data["objective_percentage"]))
         budget = self._budget_minutes(data["window_days"], data["objective_percentage"])
         return ServiceLevelObjective.objects.create(
             tenant_id=tenant,
@@ -1036,6 +1050,8 @@ class SLOMonitoringService:
             "expected_interval_seconds": data.get("expected_interval_seconds", slo.expected_interval_seconds),
         }
         self._validate(tenant, merged)
+        if "objective_percentage" in data:
+            data["objective_percentage"] = Decimal(str(data["objective_percentage"]))
         for field, value in data.items():
             if field in {
                 "name",
@@ -1065,10 +1081,13 @@ class SLOMonitoringService:
             raise NotFoundError("Active SLO was not found.")
         period_end = timezone.now()
         period_start = period_end - timedelta(days=slo.window_days)
-        points = list(
-            MetricDataPoint.objects.for_tenant(tenant)
-            .filter(metric=slo.indicator_metric, timestamp__gte=period_start, timestamp__lte=period_end)
-            .only("value")
+        points = cast(
+            list[MetricDataPoint],
+            list(
+                MetricDataPoint.objects.for_tenant(tenant)
+                .filter(metric=slo.indicator_metric, timestamp__gte=period_start, timestamp__lte=period_end)
+                .only("value")
+            ),
         )
         if not points:
             raise InsufficientDataError("The SLO has no telemetry in its configured window.")
@@ -1210,7 +1229,7 @@ class SLAMonitoringService:
         current.is_active = False
         current.effective_until = now
         current.save()
-        values = {
+        values: dict[str, Any] = {
             "service_name": current.service_name,
             "metric_name": current.metric_name,
             "metric": current.metric,
@@ -1293,10 +1312,11 @@ class SLAMonitoringService:
         if sla is None:
             raise SLANotFoundError("SLA definition was not found.")
         period_start, period_end = self._period_range(tenant, sla.window, period, start, end)
-        existing = (
+        existing = cast(
+            SLAComplianceRecord | None,
             SLAComplianceRecord.objects.for_tenant(tenant)
             .filter(sla=sla, period_start=period_start, period_end=period_end)
-            .first()
+            .first(),
         )
         if existing:
             return existing
@@ -1306,10 +1326,13 @@ class SLAMonitoringService:
         )
         if metric is None:
             raise InsufficientDataError("The SLA metric has no definition or telemetry.")
-        points = list(
-            MetricDataPoint.objects.for_tenant(tenant)
-            .filter(metric=metric, timestamp__gte=period_start, timestamp__lte=period_end)
-            .order_by("timestamp")
+        points = cast(
+            list[MetricDataPoint],
+            list(
+                MetricDataPoint.objects.for_tenant(tenant)
+                .filter(metric=metric, timestamp__gte=period_start, timestamp__lte=period_end)
+                .order_by("timestamp")
+            ),
         )
         total_seconds = max((period_end - period_start).total_seconds(), 1)
         expected = max(1, math.floor(total_seconds / sla.expected_interval_seconds))
@@ -1487,10 +1510,12 @@ class TelemetryService:
     @transaction.atomic
     def ingest_log(self, tenant_id: UUID | str, payload: Mapping[str, Any]) -> LogEntry:
         tenant = _tenant(tenant_id)
-        source = (
-            TelemetrySource.objects.for_tenant(tenant)
-            .filter(id=payload.get("source_id"), is_deleted=False, is_active=True)
-            .first()
+        source_id = payload.get("source_id")
+        if source_id is None:
+            raise MonitoringError("Telemetry source is required.")
+        source = cast(
+            TelemetrySource | None,
+            TelemetrySource.objects.for_tenant(tenant).filter(id=source_id, is_deleted=False, is_active=True).first(),
         )
         if source is None:
             raise NotFoundError("Active telemetry source was not found.")
@@ -1522,11 +1547,12 @@ class TelemetryService:
         if values["level"] not in set(_setting(tenant, "allowlists.log_levels")):
             raise MonitoringError("Log level is not enabled.")
         if idempotency_key:
-            existing = (
+            existing = cast(
+                LogEntry | None,
                 LogEntry.objects.select_for_update()
                 .for_tenant(tenant)
                 .filter(source=source, idempotency_key=idempotency_key)
-                .first()
+                .first(),
             )
             if existing is not None:
                 self._assert_equivalent_log(existing, values, timestamp_supplied=payload.get("timestamp") is not None)
@@ -1535,10 +1561,11 @@ class TelemetryService:
             # A savepoint keeps the surrounding transaction usable if a concurrent
             # request wins the tenant/source/idempotency unique-key race.
             with transaction.atomic():
-                entry = LogEntry.objects.create(tenant_id=tenant, **values)
-        except IntegrityError:
-            existing = (
-                LogEntry.objects.for_tenant(tenant).filter(source=source, idempotency_key=idempotency_key).first()
+                entry = cast(LogEntry, LogEntry.objects.create(tenant_id=tenant, **values))
+        except (IntegrityError, ValidationError):
+            existing = cast(
+                LogEntry | None,
+                LogEntry.objects.for_tenant(tenant).filter(source=source, idempotency_key=idempotency_key).first(),
             )
             if existing is None:
                 raise
@@ -1575,10 +1602,12 @@ class TelemetryService:
     @transaction.atomic
     def ingest_trace(self, tenant_id: UUID | str, payload: Mapping[str, Any]) -> Trace:
         tenant = _tenant(tenant_id)
-        source = (
-            TelemetrySource.objects.for_tenant(tenant)
-            .filter(id=payload.get("source_id"), is_deleted=False, is_active=True)
-            .first()
+        source_id = payload.get("source_id")
+        if source_id is None:
+            raise MonitoringError("Telemetry source is required.")
+        source = cast(
+            TelemetrySource | None,
+            TelemetrySource.objects.for_tenant(tenant).filter(id=source_id, is_deleted=False, is_active=True).first(),
         )
         service = self._relation(tenant, MonitoredService, payload.get("service_id"))
         if source is None or service is None:
@@ -1586,28 +1615,34 @@ class TelemetryService:
         trace_id = str(payload.get("trace_id", "")).lower()
         if not TRACE_ID_PATTERN.fullmatch(trace_id):
             raise MonitoringError("trace_id must contain 32 lowercase hexadecimal characters.")
-        existing = Trace.objects.for_tenant(tenant).filter(trace_id=trace_id).first()
+        trace_name = str(payload.get("name", "")).strip()
+        if not trace_name:
+            raise MonitoringError("Trace name is required.")
+        existing = cast(Trace | None, Trace.objects.for_tenant(tenant).filter(trace_id=trace_id).first())
         if existing:
             return existing
         spans = list(payload.get("spans") or [])
         max_spans = int(_setting(tenant, "limits.max_spans_per_trace"))
         if len(spans) > max_spans:
             raise MonitoringError(f"A trace cannot contain more than {max_spans} spans.")
-        trace = Trace.objects.create(
-            tenant_id=tenant,
-            source=source,
-            service=service,
-            environment=self._relation(tenant, MonitoringEnvironment, payload.get("environment_id")),
-            trace_id=trace_id,
-            name=str(payload.get("name", "")).strip(),
-            started_at=payload["started_at"],
-            ended_at=payload["ended_at"],
-            duration_ms=_numeric(payload.get("duration_ms")),
-            status=str(payload.get("status", "unset")),
-            attributes=dict(payload.get("attributes") or {}),
-            sampled=bool(payload.get("sampled", True)),
-            span_count=len(spans),
-            error_span_count=sum(1 for span in spans if span.get("status") == "error"),
+        trace = cast(
+            Trace,
+            Trace.objects.create(
+                tenant_id=tenant,
+                source=source,
+                service=service,
+                environment=self._relation(tenant, MonitoringEnvironment, payload.get("environment_id")),
+                trace_id=trace_id,
+                name=trace_name,
+                started_at=payload["started_at"],
+                ended_at=payload["ended_at"],
+                duration_ms=_numeric(payload.get("duration_ms")),
+                status=str(payload.get("status", "unset")),
+                attributes=dict(payload.get("attributes") or {}),
+                sampled=bool(payload.get("sampled", True)),
+                span_count=len(spans),
+                error_span_count=sum(1 for span in spans if span.get("status") == "error"),
+            ),
         )
         for item in spans:
             span_service = self._relation(tenant, MonitoredService, item.get("service_id")) or service
@@ -1696,7 +1731,10 @@ def deliver_alert_notification_job(job: AsyncJob) -> dict[str, Any]:
 
     tenant = _tenant(job.tenant_id)
     payload = dict(job.payload)
-    alert = Alert.objects.for_tenant(tenant).filter(id=payload.get("alert_id"), is_deleted=False).first()
+    alert_id = payload.get("alert_id")
+    if alert_id is None:
+        raise MonitoringError("Notification job alert is required.")
+    alert = cast(Alert | None, Alert.objects.for_tenant(tenant).filter(id=alert_id, is_deleted=False).first())
     if alert is None:
         raise NotFoundError("Notification job alert was not found.")
     delivery_key = str(payload.get("delivery_key", "")).strip()
@@ -1707,10 +1745,11 @@ def deliver_alert_notification_job(job: AsyncJob) -> dict[str, Any]:
     allowed_channels = set(_setting(tenant, "allowlists.notification_channels"))
     if channel not in allowed_channels:
         raise CapabilityUnavailableError(f"Notification channel '{channel}' is disabled.")
-    existing = (
+    existing = cast(
+        AlertNotificationOutcome | None,
         AlertNotificationOutcome.objects.for_tenant(tenant)
         .filter(idempotency_key=delivery_key, state__in=[DeliveryState.SENT, DeliveryState.DELIVERED])
-        .first()
+        .first(),
     )
     if existing is not None:
         return {"outcome_id": str(existing.id), "state": existing.state}
@@ -1926,6 +1965,7 @@ class MonitoringCatalogService:
             raise NotFoundError(f"{model.__name__} was not found.")
         if hasattr(instance, "is_active"):
             instance.is_active = False
+            instance.save(update_fields=["is_active", "updated_at"])
         instance.delete()
 
 

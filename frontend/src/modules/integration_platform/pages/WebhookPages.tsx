@@ -234,9 +234,12 @@ function WebhookForm({ edit }: { edit: boolean }) {
     mutationFn: async (form: FormData) => {
       const configResult = jsonObjectSchema.safeParse(JSON.parse(text(form, "config") || "{}"));
       if (!configResult.success) throw new Error("Configuration must be a JSON object.");
+      const submittedDirection = text(form, "direction");
+      const payloadDirection =
+        submittedDirection === "" ? loaded?.direction ?? direction : submittedDirection;
       const payload: WebhookCreateRequest = {
         name: text(form, "name"),
-        direction: text(form, "direction") as WebhookDirection,
+        direction: payloadDirection as WebhookDirection,
         url: text(form, "url") || undefined,
         events: text(form, "events")
           .split(",")

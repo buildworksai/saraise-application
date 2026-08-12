@@ -1574,6 +1574,9 @@ export function CreateReconciliationPage() {
     notes: "",
     idempotency_key: idempotencyKey(),
   });
+  const [errors, setErrors] = useState<Partial<Record<"bank_account" | "bank_statement", string>>>(
+    {}
+  );
   const mutation = useMutation({
     mutationFn: service.createReconciliation,
     onSuccess: (session) => {
@@ -1594,6 +1597,11 @@ export function CreateReconciliationPage() {
         submitLabel="Create draft"
         onSubmit={(e) => {
           e.preventDefault();
+          const nextErrors: Partial<Record<"bank_account" | "bank_statement", string>> = {};
+          if (!form.bank_account.trim()) nextErrors.bank_account = "Bank account ID is required";
+          if (!form.bank_statement.trim()) nextErrors.bank_statement = "Statement ID is required";
+          setErrors(nextErrors);
+          if (Object.values(nextErrors).some(Boolean)) return;
           mutation.mutate(form);
         }}
       >
@@ -1602,7 +1610,11 @@ export function CreateReconciliationPage() {
             id="recon-account"
             required
             value={form.bank_account}
-            onChange={(e) => setForm({ ...form, bank_account: e.target.value })}
+            error={errors.bank_account}
+            onChange={(e) => {
+              setForm({ ...form, bank_account: e.target.value });
+              if (errors.bank_account) setErrors({ ...errors, bank_account: undefined });
+            }}
           />
         </Field>
         <Field label="Statement ID" htmlFor="recon-statement">
@@ -1610,7 +1622,11 @@ export function CreateReconciliationPage() {
             id="recon-statement"
             required
             value={form.bank_statement}
-            onChange={(e) => setForm({ ...form, bank_statement: e.target.value })}
+            error={errors.bank_statement}
+            onChange={(e) => {
+              setForm({ ...form, bank_statement: e.target.value });
+              if (errors.bank_statement) setErrors({ ...errors, bank_statement: undefined });
+            }}
           />
         </Field>
         <div className="grid gap-4 sm:grid-cols-3">

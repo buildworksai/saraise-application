@@ -4,12 +4,12 @@
 # - builder installs devDependencies and builds dist/
 # - runtime stage serves only dist/ (no devDependencies/node_modules)
 
-FROM node:18.19.1-alpine AS builder
+FROM node:20.17.0-alpine AS builder
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --audit=false --fund=false
 
 COPY . .
 RUN npm run build

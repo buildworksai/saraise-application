@@ -19,15 +19,23 @@ describe("PasswordField", () => {
     render(<PasswordField id="password" label="Password" />);
 
     const input = screen.getByLabelText(/^password$/i);
-    const toggleButton = screen.getByRole("button");
+    const toggleButton = screen.getByRole("button", { name: "Reveal sign-in secret" });
 
     expect(input).toHaveAttribute("type", "password");
 
     await user.click(toggleButton);
     expect(input).toHaveAttribute("type", "text");
+    expect(screen.getByRole("button", { name: "Mask sign-in secret" })).toBeInTheDocument();
 
-    await user.click(toggleButton);
+    await user.click(screen.getByRole("button", { name: "Mask sign-in secret" }));
     expect(input).toHaveAttribute("type", "password");
+  });
+
+  it("should keep the password field label unambiguous for assistive technology", () => {
+    render(<PasswordField id="password" label="Password" />);
+
+    expect(screen.getByLabelText("Password")).toHaveAttribute("id", "password");
+    expect(screen.getByRole("button", { name: "Reveal sign-in secret" })).toBeInTheDocument();
   });
 
   it("should display error message", () => {

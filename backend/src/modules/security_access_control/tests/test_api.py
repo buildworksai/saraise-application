@@ -4,15 +4,35 @@ from __future__ import annotations
 
 import uuid
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
 from django.core.cache import cache
 from django.test import override_settings
 from django.utils import timezone
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 
-from src.modules.security_access_control.api import GovernedSecurityViewSet, SecurityRateThrottle
+from src.core.api import OperationFailed
+from src.modules.security_access_control.api import (
+    GovernedSecurityViewSet,
+    SecurityRateThrottle,
+    _actor,
+    _apply_filters,
+    _call,
+    _deletion_reason,
+    _optional_tenant,
+    _path_uuid,
+    _tenant,
+)
 from src.modules.security_access_control.models import Permission, Role
+from src.modules.security_access_control.services import (
+    SecurityConfigurationMissing,
+    SecurityConflict,
+    SecurityDependencyUnavailable,
+    SecurityNotFound,
+    SecurityValidationError,
+)
 
 pytest_plugins = ["src.core.testing.factories"]
 pytestmark = pytest.mark.django_db
@@ -250,3 +270,75 @@ def test_throttling_returns_429(authenticated_tenant_a_client, monkeypatch) -> N
     assert authenticated_tenant_a_client.get(f"{BASE}/roles/").status_code == 200
     assert authenticated_tenant_a_client.get(f"{BASE}/roles/").status_code == 429
     cache.clear()
+
+
+def test_security_api_helpers_fail_closed_for_tenant_actor_and_path_inputs(tenant_a) -> None:
+    request = SimpleNamespace(user=SimpleNamespace(profile=SimpleNamespace(tenant_id=str(tenant_a.id))))
+    assert _optional_tenant(request) == tenant_a.id
+    assert request.tenant_id == tenant_a.id
+    assert _tenant(request) == tenant_a.id
+
+    with pytest.raises(PermissionDenied):
+        _tenant(SimpleNamespace(user=SimpleNamespace(profile=SimpleNamespace(tenant_id=None))))
+    with pytest.raises(PermissionDenied):
+        _optional_tenant(SimpleNamespace(tenant_id="not-a-uuid", user=SimpleNamespace()))
+    with pytest.raises(PermissionDenied):
+        _actor(SimpleNamespace(user=SimpleNamespace(id=None)))
+
+    integer_actor = _actor(SimpleNamespace(user=SimpleNamespace(id=42)))
+    assert integer_actor == uuid.uuid5(uuid.NAMESPACE_URL, "saraise:user:42")
+    assert _path_uuid(str(tenant_a.id)) == tenant_a.id
+    with pytest.raises(NotFound):
+        _path_uuid("not-a-uuid")
+
+
+def test_security_call_adapter_maps_domain_errors_to_drf_contracts() -> None:
+    assert _call(lambda: "ok") == "ok"
+
+    with pytest.raises(NotFound):
+        _call(lambda: (_ for _ in ()).throw(SecurityNotFound("missing")))
+    with pytest.raises(OperationFailed) as conflict:
+        _call(lambda: (_ for _ in ()).throw(SecurityConflict("duplicate")))
+    assert conflict.value.error_code == "CONFLICT"
+    assert conflict.value.status_code == 409
+    with pytest.raises(ValidationError) as invalid:
+        _call(lambda: (_ for _ in ()).throw(SecurityValidationError("bad", detail={"field": ["bad"]})))
+    assert invalid.value.detail["field"] == ["bad"]
+    with pytest.raises(OperationFailed) as missing_config:
+        _call(lambda: (_ for _ in ()).throw(SecurityConfigurationMissing("missing config")))
+    assert missing_config.value.error_code == "SECURITY_CONFIGURATION_MISSING"
+    with pytest.raises(OperationFailed) as dependency:
+        _call(lambda: (_ for _ in ()).throw(SecurityDependencyUnavailable("policy down")))
+    assert dependency.value.error_code == "SECURITY_DEPENDENCY_UNAVAILABLE"
+
+
+def test_security_filter_and_deletion_helpers_parse_booleans_and_require_reason(tenant_a) -> None:
+    active = Role.objects.create(tenant_id=tenant_a.id, name="Active", code="active", is_active=True)
+    Role.objects.create(tenant_id=tenant_a.id, name="Inactive", code="inactive", is_active=False)
+
+    queryset = _apply_filters(Role.objects.for_tenant(tenant_a.id), {"is_active": "true"}, {"is_active": "is_active"})
+    assert list(queryset) == [active]
+    assert _deletion_reason(SimpleNamespace(query_params={"reason": " Retired "})) == "Retired"
+    with pytest.raises(ValidationError):
+        _deletion_reason(SimpleNamespace(query_params={}))
+
+
+def test_security_rate_throttle_handles_missing_and_invalid_dynamic_policy(tenant_a, monkeypatch) -> None:
+    throttle = SecurityRateThrottle()
+    no_tenant = SimpleNamespace(user=SimpleNamespace(is_authenticated=False), META={})
+    assert throttle.allow_request(no_tenant, object()) is True
+
+    malformed = SimpleNamespace(
+        user=SimpleNamespace(is_authenticated=True, pk=1, id=uuid.uuid4()), tenant_id=tenant_a.id
+    )
+    monkeypatch.setattr(
+        "src.modules.security_access_control.api.ConfigurationService.current",
+        lambda *args, **kwargs: SimpleNamespace(document={"limits": []}),
+    )
+    assert SecurityRateThrottle().allow_request(malformed, object()) is False
+
+    monkeypatch.setattr(
+        "src.modules.security_access_control.api.ConfigurationService.current",
+        lambda *args, **kwargs: (_ for _ in ()).throw(SecurityConfigurationMissing("missing")),
+    )
+    assert SecurityRateThrottle().allow_request(malformed, object()) is False

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, cast
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
@@ -175,14 +175,22 @@ def _call(operation: Callable[[], Any]) -> Any:
         raise ValidationError({"non_field_errors": ["The command document is invalid."]}) from exc
 
 
-class SalesViewSet(GovernedAPIViewMixin, SalesAccessMixin, viewsets.GenericViewSet):  # type: ignore[misc]  # noqa: F405
+def _dynamic_service(service: type[Any]) -> Any:
+    return cast(Any, service)
+
+
+class SalesViewSet(  # type: ignore[misc]  # noqa: F405
+    GovernedAPIViewMixin,
+    SalesAccessMixin,
+    viewsets.GenericViewSet[Any],
+):
     pagination_class = GovernedPageNumberPagination
     model: type[Any]
     service: type[Any]
     serializer_classes: Mapping[str, type[Any]] = {}
     ordering_default = "id"
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[Any]:
         serializer = self.serializer_classes.get(self.action)
         if serializer is None:
             raise RuntimeError(f"No serializer declared for {type(self).__name__}.{self.action}")
@@ -191,9 +199,9 @@ class SalesViewSet(GovernedAPIViewMixin, SalesAccessMixin, viewsets.GenericViewS
     def get_queryset(self) -> QuerySet[Any]:
         # Every viewset establishes the tenant boundary even though list methods
         # delegate filter policy to services.
-        return self.model.objects.for_tenant(_tenant(self.request)).filter(deleted_at__isnull=True)
+        return cast(QuerySet[Any], self.model.objects.for_tenant(_tenant(self.request)).filter(deleted_at__isnull=True))
 
-    def get_object(self):
+    def get_object(self) -> Any:
         obj = super().get_object()
         self.check_object_permissions(self.request, obj)
         return obj
@@ -222,25 +230,30 @@ class CustomerViewSet(SalesViewSet):
         "destroy": CustomerDetailSerializer,
     }  # noqa: F405
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Any]:
         params = self.request.query_params
-        return CustomerService.list_customers(
-            _tenant(self.request), params, None, params.get("ordering", "customer_code")
+        return cast(
+            QuerySet[Any],
+            _dynamic_service(CustomerService).list_customers(
+                _tenant(self.request), params, None, params.get("ordering", "customer_code")
+            ),
         )
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self._list(self.get_queryset())
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: object | None = None) -> Response:
         return Response(
-            CustomerDetailSerializer(_call(lambda: CustomerService.get_customer(_tenant(request), pk))).data
+            CustomerDetailSerializer(
+                _call(lambda: _dynamic_service(CustomerService).get_customer(_tenant(request), pk))
+            ).data
         )  # noqa: F405
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         serializer = CustomerWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)  # noqa: F405
         obj = _call(
-            lambda: CustomerService.create_customer(
+            lambda: _dynamic_service(CustomerService).create_customer(
                 _tenant(request),
                 _actor(request),
                 _correlation(request),
@@ -250,20 +263,20 @@ class CustomerViewSet(SalesViewSet):
         )
         return Response(CustomerDetailSerializer(obj).data, status=status.HTTP_201_CREATED)  # noqa: F405
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: object | None = None) -> Response:
         serializer = CustomerWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         values = dict(serializer.validated_data)  # noqa: F405
         obj = _call(
-            lambda: CustomerService.update_customer(
+            lambda: _dynamic_service(CustomerService).update_customer(
                 _tenant(request), pk, _actor(request), _correlation(request), _expected(request, values), values
             )
         )
         return Response(CustomerDetailSerializer(obj).data)  # noqa: F405
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: object | None = None) -> Response:
         obj = _call(
-            lambda: CustomerService.archive_customer(
+            lambda: _dynamic_service(CustomerService).archive_customer(
                 _tenant(request), pk, _actor(request), _correlation(request), _expected(request, {})
             )
         )
@@ -302,64 +315,73 @@ class QuotationViewSet(SalesViewSet):
         "convert": QuotationCommandSerializer,
     }  # noqa: F405
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Any]:
         p = self.request.query_params
-        return QuotationService.list_quotations(_tenant(self.request), p, None, p.get("ordering", "-quotation_date"))
+        return cast(
+            QuerySet[Any],
+            _dynamic_service(QuotationService).list_quotations(
+                _tenant(self.request), p, None, p.get("ordering", "-quotation_date")
+            ),
+        )
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self._list(self.get_queryset())
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: object | None = None) -> Response:
         return Response(
-            QuotationDetailSerializer(_call(lambda: QuotationService.get_quotation(_tenant(request), pk))).data
+            QuotationDetailSerializer(
+                _call(lambda: _dynamic_service(QuotationService).get_quotation(_tenant(request), pk))
+            ).data
         )  # noqa: F405
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         s = QuotationWriteSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         obj = _call(
-            lambda: QuotationService.create_quotation(
+            lambda: _dynamic_service(QuotationService).create_quotation(
                 _tenant(request), _actor(request), _correlation(request), _idempotency(request), dict(s.validated_data)
             )
         )
         return Response(QuotationDetailSerializer(obj).data, status=201)  # noqa: F405
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: object | None = None) -> Response:
         s = QuotationWriteSerializer(data=request.data, partial=True)
         s.is_valid(raise_exception=True)
         v = dict(s.validated_data)
         obj = _call(
-            lambda: QuotationService.update_draft(
+            lambda: _dynamic_service(QuotationService).update_draft(
                 _tenant(request), pk, _actor(request), _correlation(request), _expected(request, v), v
             )
         )
         return Response(QuotationDetailSerializer(obj).data)  # noqa: F405
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: object | None = None) -> Response:
         obj = _call(
-            lambda: QuotationService.archive_draft(
+            lambda: _dynamic_service(QuotationService).archive_draft(
                 _tenant(request), pk, _actor(request), _correlation(request), _expected(request, {})
             )
         )
         return Response(QuotationDetailSerializer(obj).data)  # noqa: F405
 
     @action(detail=False, methods=["post"])
-    def preview(self, request):
+    def preview(self, request: Request) -> Response:
         s = QuotationPreviewSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         result = _call(
-            lambda: QuotationService.preview_quotation(_tenant(request), _actor(request), dict(s.validated_data))
+            lambda: _dynamic_service(QuotationService).preview_quotation(
+                _tenant(request), _actor(request), dict(s.validated_data)
+            )
         )
         return Response(QuotationPreviewResultSerializer(result).data)
 
-    def _command(self, request, pk, method):
+    def _command(self, request: Request, pk: object | None, method: str) -> Response:
         s = QuotationCommandSerializer(data=request.data)
         s.is_valid(raise_exception=True)
-        kwargs = {}  # noqa: F405
+        kwargs: dict[str, object] = {}  # noqa: F405
         if method == "reject":
             kwargs["reason"] = s.validated_data.get("reason", "")
         obj = _call(
-            lambda: getattr(QuotationService, method)(
+            lambda: getattr(_dynamic_service(QuotationService), method)(
                 _tenant(request), pk, _actor(request), _correlation(request), _idempotency(request), **kwargs
             )
         )
@@ -367,27 +389,27 @@ class QuotationViewSet(SalesViewSet):
         return Response(serializer(obj).data)  # noqa: F405
 
     @action(detail=True, methods=["post"], url_path="commands/send")
-    def send(self, request, pk=None):
+    def send(self, request: Request, pk: object | None = None) -> Response:
         return self._command(request, pk, "send")
 
     @action(detail=True, methods=["post"], url_path="commands/accept")
-    def accept(self, request, pk=None):
+    def accept(self, request: Request, pk: object | None = None) -> Response:
         return self._command(request, pk, "accept")
 
     @action(detail=True, methods=["post"], url_path="commands/reject")
-    def reject(self, request, pk=None):
+    def reject(self, request: Request, pk: object | None = None) -> Response:
         return self._command(request, pk, "reject")
 
     @action(detail=True, methods=["post"], url_path="commands/expire")
-    def expire(self, request, pk=None):
+    def expire(self, request: Request, pk: object | None = None) -> Response:
         return self._command(request, pk, "expire")
 
     @action(detail=True, methods=["post"], url_path="commands/revise")
-    def revise(self, request, pk=None):
+    def revise(self, request: Request, pk: object | None = None) -> Response:
         return self._command(request, pk, "revise")
 
     @action(detail=True, methods=["post"], url_path="commands/convert")
-    def convert(self, request, pk=None):
+    def convert(self, request: Request, pk: object | None = None) -> Response:
         return self._command(request, pk, "convert_to_sales_order")
 
 
@@ -430,92 +452,99 @@ class SalesOrderViewSet(SalesViewSet):
         "destroy": SalesOrderDetailSerializer,
     }  # noqa: F405
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Any]:
         p = self.request.query_params
-        return SalesOrderService.list_orders(_tenant(self.request), p, None, p.get("ordering", "-order_date"))
+        return cast(
+            QuerySet[Any],
+            _dynamic_service(SalesOrderService).list_orders(
+                _tenant(self.request), p, None, p.get("ordering", "-order_date")
+            ),
+        )
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self._list(self.get_queryset())
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: object | None = None) -> Response:
         return Response(
-            SalesOrderDetailSerializer(_call(lambda: SalesOrderService.get_order(_tenant(request), pk))).data
+            SalesOrderDetailSerializer(
+                _call(lambda: _dynamic_service(SalesOrderService).get_order(_tenant(request), pk))
+            ).data
         )  # noqa: F405
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         s = SalesOrderWriteSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         obj = _call(
-            lambda: SalesOrderService.create_order(
+            lambda: _dynamic_service(SalesOrderService).create_order(
                 _tenant(request), _actor(request), _correlation(request), _idempotency(request), dict(s.validated_data)
             )
         )
         return Response(SalesOrderDetailSerializer(obj).data, status=201)  # noqa: F405
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: object | None = None) -> Response:
         s = SalesOrderWriteSerializer(data=request.data, partial=True)
         s.is_valid(raise_exception=True)
         v = dict(s.validated_data)
         obj = _call(
-            lambda: SalesOrderService.update_draft(
+            lambda: _dynamic_service(SalesOrderService).update_draft(
                 _tenant(request), pk, _actor(request), _correlation(request), _expected(request, v), v
             )
         )
         return Response(SalesOrderDetailSerializer(obj).data)  # noqa: F405
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: object | None = None) -> Response:
         obj = _call(
-            lambda: SalesOrderService.archive_draft(
+            lambda: _dynamic_service(SalesOrderService).archive_draft(
                 _tenant(request), pk, _actor(request), _correlation(request), _expected(request, {})
             )
         )
         return Response(SalesOrderDetailSerializer(obj).data)  # noqa: F405
 
-    def _command(self, request, pk, method):
+    def _command(self, request: Request, pk: object | None, method: str) -> Response:
         s = SalesOrderCommandSerializer(data=request.data)
         s.is_valid(raise_exception=True)
-        kwargs = {}  # noqa: F405
+        kwargs: dict[str, object] = {}  # noqa: F405
         if method == "cancel":
             kwargs["reason"] = s.validated_data.get("reason", "")
         if method == "mark_invoiced":
             kwargs["invoice_id"] = s.validated_data.get("invoice_id")
         obj = _call(
-            lambda: getattr(SalesOrderService, method)(
+            lambda: getattr(_dynamic_service(SalesOrderService), method)(
                 _tenant(request), pk, _actor(request), _correlation(request), _idempotency(request), **kwargs
             )
         )
         return Response(SalesOrderDetailSerializer(obj).data)  # noqa: F405
 
     @action(detail=True, methods=["post"], url_path="commands/confirm")
-    def confirm(self, r, pk=None):
+    def confirm(self, r: Request, pk: object | None = None) -> Response:
         return self._command(r, pk, "confirm")
 
     @action(detail=True, methods=["post"], url_path="commands/start-picking")
-    def start_picking(self, r, pk=None):
+    def start_picking(self, r: Request, pk: object | None = None) -> Response:
         return self._command(r, pk, "start_picking")
 
     @action(detail=True, methods=["post"], url_path="commands/start-packing")
-    def start_packing(self, r, pk=None):
+    def start_packing(self, r: Request, pk: object | None = None) -> Response:
         return self._command(r, pk, "start_packing")
 
     @action(detail=True, methods=["post"], url_path="commands/mark-ready")
-    def mark_ready(self, r, pk=None):
+    def mark_ready(self, r: Request, pk: object | None = None) -> Response:
         return self._command(r, pk, "mark_ready")
 
     @action(detail=True, methods=["post"], url_path="commands/ship")
-    def ship(self, r, pk=None):
+    def ship(self, r: Request, pk: object | None = None) -> Response:
         return self._command(r, pk, "ship")
 
     @action(detail=True, methods=["post"], url_path="commands/deliver")
-    def deliver(self, r, pk=None):
+    def deliver(self, r: Request, pk: object | None = None) -> Response:
         return self._command(r, pk, "deliver")
 
     @action(detail=True, methods=["post"], url_path="commands/mark-invoiced")
-    def mark_invoiced(self, r, pk=None):
+    def mark_invoiced(self, r: Request, pk: object | None = None) -> Response:
         return self._command(r, pk, "mark_invoiced")
 
     @action(detail=True, methods=["post"], url_path="commands/cancel")
-    def cancel(self, r, pk=None):
+    def cancel(self, r: Request, pk: object | None = None) -> Response:
         return self._command(r, pk, "cancel")
 
 
@@ -541,59 +570,70 @@ class DeliveryNoteViewSet(SalesViewSet):
         "cancel": DeliveryNoteCommandSerializer,
     }  # noqa: F405
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Any]:
         p = self.request.query_params
-        return DeliveryNoteService.list_delivery_notes(
-            _tenant(self.request), p, None, p.get("ordering", "-delivery_date")
+        return cast(
+            QuerySet[Any],
+            _dynamic_service(DeliveryNoteService).list_delivery_notes(
+                _tenant(self.request), p, None, p.get("ordering", "-delivery_date")
+            ),
         )
 
-    def list(self, r):
+    def list(self, r: Request) -> Response:
         return self._list(self.get_queryset())
 
-    def retrieve(self, r, pk=None):
+    def retrieve(self, r: Request, pk: object | None = None) -> Response:
         return Response(
-            DeliveryNoteDetailSerializer(_call(lambda: DeliveryNoteService.get_delivery_note(_tenant(r), pk))).data
+            DeliveryNoteDetailSerializer(
+                _call(lambda: _dynamic_service(DeliveryNoteService).get_delivery_note(_tenant(r), pk))
+            ).data
         )  # noqa: F405
 
-    def create(self, r):
+    def create(self, r: Request) -> Response:
         s = DeliveryNoteWriteSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         obj = _call(
-            lambda: DeliveryNoteService.create_delivery_note(
+            lambda: _dynamic_service(DeliveryNoteService).create_delivery_note(
                 _tenant(r), _actor(r), _correlation(r), _idempotency(r), dict(s.validated_data)
             )
         )
         return Response(DeliveryNoteDetailSerializer(obj).data, status=201)  # noqa: F405
 
-    def partial_update(self, r, pk=None):
+    def partial_update(self, r: Request, pk: object | None = None) -> Response:
         s = DeliveryNoteWriteSerializer(data=r.data, partial=True)
         s.is_valid(raise_exception=True)
         v = dict(s.validated_data)
         obj = _call(
-            lambda: DeliveryNoteService.update_draft(_tenant(r), pk, _actor(r), _correlation(r), _expected(r, v), v)
+            lambda: _dynamic_service(DeliveryNoteService).update_draft(
+                _tenant(r), pk, _actor(r), _correlation(r), _expected(r, v), v
+            )
         )
         return Response(DeliveryNoteDetailSerializer(obj).data)  # noqa: F405
 
-    def destroy(self, r, pk=None):
+    def destroy(self, r: Request, pk: object | None = None) -> Response:
         obj = _call(
-            lambda: DeliveryNoteService.archive_draft(_tenant(r), pk, _actor(r), _correlation(r), _expected(r, {}))
+            lambda: _dynamic_service(DeliveryNoteService).archive_draft(
+                _tenant(r), pk, _actor(r), _correlation(r), _expected(r, {})
+            )
         )
         return Response(DeliveryNoteDetailSerializer(obj).data)  # noqa: F405
 
-    def _command(self, r, pk, method):
+    def _command(self, r: Request, pk: object | None, method: str) -> Response:
         s = DeliveryNoteCommandSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         obj = _call(
-            lambda: getattr(DeliveryNoteService, method)(_tenant(r), pk, _actor(r), _correlation(r), _idempotency(r))
+            lambda: getattr(_dynamic_service(DeliveryNoteService), method)(
+                _tenant(r), pk, _actor(r), _correlation(r), _idempotency(r)
+            )
         )
         return Response(DeliveryNoteDetailSerializer(obj).data)  # noqa: F405
 
     @action(detail=True, methods=["post"], url_path="commands/complete")
-    def complete(self, r, pk=None):
+    def complete(self, r: Request, pk: object | None = None) -> Response:
         return self._command(r, pk, "complete")
 
     @action(detail=True, methods=["post"], url_path="commands/cancel")
-    def cancel(self, r, pk=None):
+    def cancel(self, r: Request, pk: object | None = None) -> Response:
         return self._command(r, pk, "cancel")
 
 
@@ -609,19 +649,19 @@ class ConfigurationViewSet(GovernedAPIViewMixin, SalesAccessMixin, viewsets.View
         "import_configuration": CONFIG_IMPORT,
     }  # noqa: F405
 
-    def _environment(self):
+    def _environment(self) -> str:
         from django.conf import settings
 
         return str(getattr(settings, "SARAISE_ENVIRONMENT", getattr(settings, "SARAISE_MODE", "development")))
 
-    def current(self, r):
+    def current(self, r: Request) -> Response:
         return Response(
             SalesConfigurationSerializer(
-                _call(lambda: SalesConfigurationService.get_current(_tenant(r), self._environment()))
+                _call(lambda: _dynamic_service(SalesConfigurationService).get_current(_tenant(r), self._environment()))
             ).data
         )  # noqa: F405
 
-    def apply(self, r):
+    def apply(self, r: Request) -> Response:
         proposed = r.data.get("proposed_values", r.data)
         s = SalesConfigurationWriteSerializer(data=proposed)
         s.is_valid(raise_exception=True)
@@ -629,13 +669,13 @@ class ConfigurationViewSet(GovernedAPIViewMixin, SalesAccessMixin, viewsets.View
         expected = _expected(r, {"expected_version": r.data.get("expected_version")})
         reason = str(r.data.get("reason", ""))
         obj = _call(
-            lambda: SalesConfigurationService.apply_change(
+            lambda: _dynamic_service(SalesConfigurationService).apply_change(
                 _tenant(r), _actor(r), _correlation(r), self._environment(), expected, v, reason
             )
         )
         return Response(SalesConfigurationSerializer(obj).data)  # noqa: F405
 
-    def preview(self, r):
+    def preview(self, r: Request) -> Response:
         proposed = r.data.get("proposed_values", r.data)
         s = SalesConfigurationWriteSerializer(data=proposed, partial=True)
         s.is_valid(raise_exception=True)
@@ -643,29 +683,37 @@ class ConfigurationViewSet(GovernedAPIViewMixin, SalesAccessMixin, viewsets.View
         v.pop("expected_version", None)
         v.pop("reason", None)
         return Response(
-            _call(lambda: SalesConfigurationService.preview_change(_tenant(r), _actor(r), self._environment(), v))
+            _call(
+                lambda: _dynamic_service(SalesConfigurationService).preview_change(
+                    _tenant(r), _actor(r), self._environment(), v
+                )
+            )
         )
 
-    def versions(self, r):
-        qs = _call(lambda: SalesConfigurationService.list_versions(_tenant(r), self._environment()))
+    def versions(self, r: Request) -> Response:
+        qs = _call(lambda: _dynamic_service(SalesConfigurationService).list_versions(_tenant(r), self._environment()))
         p = GovernedPageNumberPagination()
         page = p.paginate_queryset(qs, r, view=self)
         data = SalesConfigurationVersionSerializer(page, many=True).data
-        return p.get_paginated_response(data)  # noqa: F405
+        return p.get_paginated_response(cast(list[object], data))  # noqa: F405
 
-    def version_detail(self, r, version=None):
+    def version_detail(self, r: Request, version: object | None = None) -> Response:
         return Response(
             SalesConfigurationVersionSerializer(
-                _call(lambda: SalesConfigurationService.get_version(_tenant(r), self._environment(), version))
+                _call(
+                    lambda: _dynamic_service(SalesConfigurationService).get_version(
+                        _tenant(r), self._environment(), version
+                    )
+                )
             ).data
         )  # noqa: F405
 
-    def rollback(self, r):
+    def rollback(self, r: Request) -> Response:
         s = ConfigurationRollbackSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         v = s.validated_data
         obj = _call(
-            lambda: SalesConfigurationService.rollback(
+            lambda: _dynamic_service(SalesConfigurationService).rollback(
                 _tenant(r),
                 _actor(r),
                 _correlation(r),
@@ -677,15 +725,21 @@ class ConfigurationViewSet(GovernedAPIViewMixin, SalesAccessMixin, viewsets.View
         )
         return Response(SalesConfigurationSerializer(obj).data)  # noqa: F405
 
-    def export(self, r):
-        return Response(_call(lambda: SalesConfigurationService.export_configuration(_tenant(r), self._environment())))
+    def export(self, r: Request) -> Response:
+        return Response(
+            _call(
+                lambda: _dynamic_service(SalesConfigurationService).export_configuration(
+                    _tenant(r), self._environment()
+                )
+            )
+        )
 
-    def import_configuration(self, r):
+    def import_configuration(self, r: Request) -> Response:
         s = ConfigurationImportSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         v = s.validated_data
         result = _call(
-            lambda: SalesConfigurationService.import_configuration(
+            lambda: _dynamic_service(SalesConfigurationService).import_configuration(
                 _tenant(r),
                 _actor(r),
                 _correlation(r),

@@ -10,8 +10,12 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import IntegrityError
 from django.urls import resolve
 from rest_framework import status
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.test import APIClient
 
 from src.core.access.decision import AccessDecision, AccessReasonCode
@@ -22,7 +26,19 @@ from src.core.encryption.service import EncryptionService
 
 from ..adapter_registry import connector_adapter_registry
 from ..adapters import AdapterDescriptor, ConnectorAdapter
-from ..api import DataMappingViewSet, IntegrationViewSet, WebhookViewSet
+from ..api import (
+    DataMappingViewSet,
+    GovernedAccessMixin,
+    IntegrationViewSet,
+    WebhookViewSet,
+    _connector_health_payload,
+    _mapping_preview_payload,
+    _parse_boolean_filter,
+    _parse_datetime_filter,
+    _service_call,
+    _tenant_from_request,
+    _uuid,
+)
 from ..models import Integration
 from ..services import (
     INBOUND_NONCE_HEADER,
@@ -170,6 +186,152 @@ def test_connector_catalog_schema_filters_and_pagination(tenant_a_client) -> Non
 
 def test_invalid_boolean_filter_is_rejected(tenant_a_client) -> None:
     response = tenant_a_client.get(f"{BASE}/connectors/?is_active=definitely")
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_api_transport_helpers_fail_closed_and_normalize_values() -> None:
+    tenant_id = uuid.uuid4()
+    request = SimpleNamespace(user=SimpleNamespace(profile=SimpleNamespace(tenant_id=tenant_id)), tenant_id=tenant_id)
+
+    assert _tenant_from_request(request) == tenant_id
+    assert _uuid(uuid.UUID(int=7), "id") == uuid.UUID(int=7)
+    assert _parse_datetime_filter(None, "created_after") is None
+    assert _parse_datetime_filter("2026-08-03T12:13:14Z", "created_after").tzinfo is not None
+    assert _parse_boolean_filter(None, "is_active") is None
+    assert _parse_boolean_filter("1", "is_active") is True
+    assert _parse_boolean_filter("FALSE", "is_active") is False
+
+    with pytest.raises(PermissionDenied):
+        _tenant_from_request(SimpleNamespace(user=SimpleNamespace(profile=SimpleNamespace(tenant_id=None))))
+    with pytest.raises(ValidationError):
+        _uuid("not-a-uuid", "id")
+    with pytest.raises(ValidationError):
+        _parse_datetime_filter("not-a-date", "created_after")
+    with pytest.raises(ValidationError):
+        _parse_boolean_filter("yes", "is_active")
+
+
+def test_service_call_and_payload_helpers_preserve_public_boundaries() -> None:
+    assert _service_call(lambda: OperationResult.succeeded({"ok": True}, evidence={"proved": True})) == {"ok": True}
+    assert _service_call(lambda: {"raw": True}) == {"raw": True}
+
+    with pytest.raises(NotFound):
+        _service_call(lambda: (_ for _ in ()).throw(ObjectDoesNotExist()))
+    with pytest.raises(ValidationError):
+        _service_call(lambda: (_ for _ in ()).throw(DjangoValidationError({"name": ["invalid"]})))
+    with pytest.raises(OperationFailed) as conflict:
+        _service_call(lambda: (_ for _ in ()).throw(IntegrityError("duplicate")))
+    assert conflict.value.error_code == "IDEMPOTENCY_OR_UNIQUENESS_CONFLICT"
+
+    mapping_id = uuid.uuid4()
+    preview = _mapping_preview_payload(
+        TransformResult(
+            ({"target": "value"},),
+            (MappingFailure(2, mapping_id, "source", "target", "invalid", "Invalid value"),),
+        )
+    )
+    assert preview == {
+        "records": [{"target": "value"}],
+        "failures": [
+            {
+                "record_index": 2,
+                "mapping_id": mapping_id,
+                "source_field": "source",
+                "target_field": "target",
+                "code": "invalid",
+                "message": "Invalid value",
+            }
+        ],
+    }
+    with pytest.raises(OperationFailed):
+        _mapping_preview_payload(SimpleNamespace(records="bad", failures=()))
+    with pytest.raises(OperationFailed):
+        _mapping_preview_payload(SimpleNamespace(records=(), failures="bad"))
+
+    connector_id = uuid.uuid4()
+    healthy = _connector_health_payload(
+        connector_id,
+        OperationResult.succeeded(
+            {"healthy": True, "circuit_state": "open", "reason": "warming"},
+            evidence={"proved": True},
+        ),
+    )
+    assert healthy["status"] == "degraded"
+    assert healthy["circuit_state"] == "open"
+    assert healthy["reason"] == "warming"
+
+    unavailable = _connector_health_payload(
+        connector_id,
+        OperationResult.succeeded({"healthy": False}, evidence={"proved": True}),
+    )
+    assert unavailable["status"] == "unavailable"
+    assert unavailable["circuit_state"] == "unavailable"
+
+    with pytest.raises(OperationFailed):
+        _connector_health_payload(
+            connector_id, OperationResult.succeeded(["not", "mapping"], evidence={"proved": True})
+        )
+    with pytest.raises(OperationFailed):
+        _connector_health_payload(
+            connector_id, OperationResult.succeeded({"status": "unknown"}, evidence={"proved": True})
+        )
+
+
+def test_governed_access_mixin_rejects_unknown_query_and_unauthorized_tenant() -> None:
+    mixin = GovernedAccessMixin()
+    mixin.request = SimpleNamespace(query_params={"unexpected": "1"})
+    with pytest.raises(ValidationError):
+        mixin._validate_query({"allowed"})
+
+    mixin.request = SimpleNamespace(user=SimpleNamespace(id=uuid.uuid4(), profile=SimpleNamespace(tenant_id=None)))
+    with pytest.raises(PermissionDenied):
+        _ = mixin.tenant_id
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        f"{BASE}/connectors/?surprise=1",
+        f"{BASE}/integrations/?surprise=1",
+        f"{BASE}/webhooks/?surprise=1",
+        f"{BASE}/webhook-deliveries/?surprise=1",
+        f"{BASE}/data-mappings/?surprise=1",
+    ),
+)
+def test_collection_query_allowlists_reject_unknown_parameters(tenant_a_client, path) -> None:
+    response = tenant_a_client.get(path)
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        f"{BASE}/integrations/?connector_id=not-a-uuid",
+        f"{BASE}/webhook-deliveries/?webhook_id=not-a-uuid",
+        f"{BASE}/data-mappings/?integration_id=not-a-uuid",
+    ),
+)
+def test_uuid_filters_fail_closed_before_queryset_execution(tenant_a_client, path) -> None:
+    response = tenant_a_client.get(path)
+
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        f"{BASE}/integrations/?ordering=tenant_id",
+        f"{BASE}/webhooks/?ordering=encrypted_signing_secret",
+        f"{BASE}/data-mappings/?ordering=tenant_id",
+    ),
+)
+def test_ordering_allowlists_reject_private_fields(tenant_a_client, path) -> None:
+    response = tenant_a_client.get(path)
+
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
@@ -372,6 +534,23 @@ def test_webhook_create_returns_secret_once_and_read_never_replays_it(monkeypatc
     assert read.status_code == status.HTTP_200_OK
     assert secret not in json.dumps(read.json())
     _assert_no_secret_fields(_data(read))
+
+
+@pytest.mark.parametrize(
+    "unsafe_result",
+    (
+        (),
+        {"webhook": None, "signing_secret": "secret"},  # pragma: allowlist secret
+        {"webhook": SimpleNamespace(id=uuid.uuid4()), "signing_secret": ""},
+        SimpleNamespace(webhook=SimpleNamespace(id=uuid.uuid4()), signing_secret=None),
+    ),
+)
+def test_webhook_secret_payload_requires_record_and_non_empty_secret(unsafe_result) -> None:
+    with pytest.raises(OperationFailed) as exc:
+        WebhookViewSet._secret_payload(unsafe_result)
+
+    assert exc.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert exc.value.error_code == "SECRET_ISSUANCE_FAILED"
 
 
 def test_webhook_rejects_unsafe_outbound_destination(tenant_a_client) -> None:

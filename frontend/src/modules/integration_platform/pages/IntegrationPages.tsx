@@ -1040,7 +1040,9 @@ function CredentialForm({ rotate }: { rotate: boolean }) {
   const mutation = useMutation({
     mutationFn: (form: FormData) => {
       const request = {
-        credential_type: formText(form, "credential_type") as CredentialType,
+        credential_type: (rotate
+          ? credential.data?.credential_type
+          : formText(form, "credential_type")) as CredentialType,
         plaintext: formText(form, "plaintext"),
         expires_at: formText(form, "expires_at") || null,
       };

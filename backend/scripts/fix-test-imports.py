@@ -12,6 +12,7 @@ To absolute imports like:
     from src.modules.{module_name}.service import Service
     from src.modules.{module_name}.api import ViewSet
 """
+
 import re
 import sys
 from pathlib import Path

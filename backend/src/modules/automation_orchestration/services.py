@@ -309,7 +309,21 @@ def _event(
 ) -> OrchestrationEvent:
     safe_payload = _redact_payload(payload or {})
     encoded = json.dumps(safe_payload, default=str, separators=(",", ":"))
-    maximum = ConfigurationService.effective_document(tenant_id)["limits"]["event_metadata_bytes"]
+    try:
+        policy = ConfigurationService.effective_document(tenant_id)
+    except StateConflictError as exc:
+        if exc.code != "CONFIG_DISABLED":
+            raise
+        environment, cohort = ConfigurationService._scope(getattr(settings, "SARAISE_MODE", "development"), "all")
+        configuration = (
+            OrchestrationConfiguration.objects.for_tenant(tenant_id)
+            .filter(environment=environment, cohort=cohort)
+            .first()
+        )
+        policy = (
+            ConfigurationService.validate_document(configuration.document) if configuration else DEFAULT_CONFIGURATION
+        )
+    maximum = policy["limits"]["event_metadata_bytes"]
     if len(encoded.encode()) > maximum:
         raise ServiceValidationError("Event metadata exceeds the tenant policy limit", code="EVENT_TOO_LARGE")
     return OrchestrationEvent.objects.create(
@@ -619,7 +633,7 @@ class ConfigurationService:
         cls, tenant_id: uuid.UUID, *, environment: str | None = None, cohort: str = "all"
     ) -> dict[str, Any]:
         tenant = _uuid(tenant_id, "tenant_id")
-        environment, cohort = cls._scope(environment or getattr(settings, "SARAISE_MODE", "development"), cohort)
+        environment, cohort = cls._scope(str(environment or getattr(settings, "SARAISE_MODE", "development")), cohort)
         configuration = (
             OrchestrationConfiguration.objects.for_tenant(tenant).filter(environment=environment, cohort=cohort).first()
         )
@@ -1897,6 +1911,7 @@ class ExecutionService:
             input_value = _definition_input(definition, input)
             schedule = None
             if schedule_id is not None:
+                assert schedule_uuid is not None
                 schedule = _tenant_get(OrchestrationSchedule, tenant, schedule_uuid)
                 if schedule.definition_id != definition.id:
                     raise ServiceValidationError(
@@ -2220,7 +2235,11 @@ class ExecutionService:
                     {"from": "queued", "to": "running", "occurred_at": timezone.now().isoformat()},
                 ]
                 task.save(update_fields=["status", "started_at", "transition_history", "updated_at"])
-                transaction.on_commit(lambda wait=queue_wait_seconds: TASK_QUEUE_WAIT.observe(wait))
+
+                def observe_queue_wait(wait: float = queue_wait_seconds) -> None:
+                    TASK_QUEUE_WAIT.observe(wait)
+
+                transaction.on_commit(observe_queue_wait)
             elif attempt.status != "running" or task.status != "running":
                 raise StateConflictError("Attempt is stale for the current task state", code="STALE_DELIVERY")
             try:

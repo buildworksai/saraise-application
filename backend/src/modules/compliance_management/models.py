@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, ClassVar, cast
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -165,7 +165,7 @@ class AppendOnlyComplianceModel(TenantScopedModel):
     """Base for immutable historical and audit records."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    objects = ImmutableQuerySet.as_manager()
+    objects: ClassVar[Any] = ImmutableQuerySet.as_manager()
 
     class Meta:
         abstract = True
@@ -474,9 +474,10 @@ class RequirementPolicyMapping(MutableComplianceModel):
         if self.policy_id and self.tenant_id and self.policy.tenant_id != self.tenant_id:
             errors["policy"] = "Policy must belong to the same tenant."
         if self.policy_version_id:
-            if self.policy_version.tenant_id != self.tenant_id:
+            policy_version = cast(CompliancePolicyVersion, self.policy_version)
+            if policy_version.tenant_id != self.tenant_id:
                 errors["policy_version"] = "Policy version must belong to the same tenant."
-            elif self.policy_id and self.policy_version.policy_id != self.policy_id:
+            elif self.policy_id and policy_version.policy_id != self.policy_id:
                 errors["policy_version"] = "Policy version must belong to the mapped policy."
         if errors:
             raise ValidationError(errors)
@@ -548,9 +549,10 @@ class ComplianceAssessment(AppendOnlyComplianceModel):
         if self.requirement_id and self.tenant_id and self.requirement.tenant_id != self.tenant_id:
             errors["requirement"] = "Requirement must belong to the same tenant."
         if self.mapping_id:
-            if self.mapping.tenant_id != self.tenant_id:
+            mapping = cast(RequirementPolicyMapping, self.mapping)
+            if mapping.tenant_id != self.tenant_id:
                 errors["mapping"] = "Mapping must belong to the same tenant."
-            elif self.requirement_id and self.mapping.requirement_id != self.requirement_id:
+            elif self.requirement_id and mapping.requirement_id != self.requirement_id:
                 errors["mapping"] = "Mapping must reference the assessed requirement."
         if errors:
             raise ValidationError(errors)

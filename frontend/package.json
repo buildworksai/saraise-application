@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "engines": {
-    "node": "^18 || >=20"
+    "node": ">=20.17.0"
   },
   "scripts": {
     "dev": "vite",
@@ -12,9 +12,11 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src --ext .ts,.tsx --max-warnings 0",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
-    "generate-types": "openapi-typescript http://localhost:18000/api/schema/ -o src/types/api.ts"
+    "security:audit": "node scripts/security-audit.mjs",
+    "test": "NODE_OPTIONS=\"${NODE_OPTIONS:-} --localstorage-file=/tmp/saraise-frontend-localstorage.json\" vitest run",
+    "test:coverage": "NODE_OPTIONS=\"${NODE_OPTIONS:-} --localstorage-file=/tmp/saraise-frontend-localstorage.json\" vitest run --coverage",
+    "mutation:workflow-builder:shard": "node scripts/workflow-builder-mutation-shard.mjs",
+    "generate-types": "openapi-typescript http://localhost:28000/api/schema/ -o src/types/api.ts"
   },
   "dependencies": {
     "@axe-core/react": "^4.11.0",
@@ -37,7 +39,7 @@
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-hook-form": "7.54.1",
-    "react-router-dom": "6.22.0",
+    "react-router-dom": "7.18.2",
     "recharts": "^3.6.0",
     "sonner": "^2.0.7",
     "tailwind-merge": "2.3.0",
@@ -50,24 +52,24 @@
     "@testing-library/jest-dom": "6.4.2",
     "@testing-library/react": "14.2.0",
     "@testing-library/user-event": "14.5.2",
-    "@types/node": "18.19.3",
+    "@types/node": "20.19.25",
     "@types/react": "18.2.55",
     "@types/react-dom": "18.2.19",
     "@typescript-eslint/eslint-plugin": "8.51.0",
     "@typescript-eslint/parser": "8.51.0",
     "@vitejs/plugin-react": "4.3.4",
-    "@vitest/coverage-v8": "3.2.4",
+    "@vitest/coverage-v8": "3.2.7",
     "autoprefixer": "10.4.19",
     "eslint": "8.57.0",
     "eslint-plugin-react-hooks": "7.0.1",
     "eslint-plugin-react-refresh": "0.4.26",
     "jsdom": "22.1.0",
     "openapi-typescript": "^7.0.0",
-    "postcss": "8.4.38",
+    "postcss": "8.5.25",
     "tailwindcss": "3.4.17",
     "typescript": "5.3.3",
-    "vite": "6.4.1",
-    "vitest": "3.2.4"
+    "vite": "6.4.3",
+    "vitest": "3.2.7"
   },
   "overrides": {
     "qs": "6.15.3"

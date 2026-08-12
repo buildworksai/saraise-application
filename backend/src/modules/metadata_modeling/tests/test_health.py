@@ -7,8 +7,14 @@ from unittest.mock import patch
 import pytest
 
 from src.modules.metadata_modeling.api import MetadataHealthView
+from src.modules.metadata_modeling.health import health_check
 
 pytest_plugins = ["src.core.testing.factories"]
+
+
+def test_health_check_compatibility_export_is_callable_view():
+    assert callable(health_check)
+    assert health_check.view_class is MetadataHealthView
 
 
 @pytest.mark.django_db

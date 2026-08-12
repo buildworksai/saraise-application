@@ -11,6 +11,7 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import APIException, NotFound, PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -90,7 +91,9 @@ def _audience(request: Request) -> tuple[tuple[str, ...], tuple[str, ...]]:
     role = get_user_tenant_role(request.user)
     roles = (role,) if isinstance(role, str) and role else ()
     groups = getattr(request.user, "groups", None)
-    cohorts = tuple(groups.values_list("name", flat=True)) if hasattr(groups, "values_list") else ()
+    cohorts = (
+        tuple(groups.values_list("name", flat=True)) if groups is not None and hasattr(groups, "values_list") else ()
+    )
     return roles, cohorts
 
 
@@ -381,7 +384,7 @@ class ApiManagementResourceViewSet(ActionAccessMixin, viewsets.ViewSet):
 class GovernedConfigurationView(ActionAccessMixin, APIView):
     """APIView variant using HTTP methods as deny-default action names."""
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         self.action = self.request.method.lower()
         return super().get_permissions()
 

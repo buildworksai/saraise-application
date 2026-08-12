@@ -1,8 +1,8 @@
 """Persistence models for durable asynchronous work.
 
-The job row and its outbox event are deliberately separate records: the former
-is the durable execution state, while the latter is the recoverable request to
-publish that work to a broker. Services create both in one database transaction.
+The job row and its outbox event are deliberately separate records. The job is
+the durable execution state. The outbox event is the recoverable request to
+publish the work to a broker. Services create both in one database transaction.
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ if TYPE_CHECKING:
     class TenantScopedModel(models.Model):
         """Static shape of the canonical tenant ownership base."""
 
-        tenant_id: models.UUIDField[uuid.UUID, uuid.UUID]
-        objects = models.Manager["TenantScopedModel"]()  # type: ignore[django-manager-missing]
+        tenant_id: models.UUIDField[uuid.UUID, uuid.UUID]  # pragma: no mutate
+        objects: models.Manager[Any]  # pragma: no mutate
 
         class Meta:
             abstract = True
@@ -27,15 +27,16 @@ if TYPE_CHECKING:
     class TimestampedModel(models.Model):
         """Static shape of the canonical timestamp mixin."""
 
-        created_at: models.DateTimeField[Any, Any]
-        updated_at: models.DateTimeField[Any, Any]
+        created_at: models.DateTimeField[Any, Any]  # pragma: no mutate
+        updated_at: models.DateTimeField[Any, Any]  # pragma: no mutate
 
         class Meta:
             abstract = True
 
 else:
     try:
-        # Supplied by the parallel foundation-tenancy-base unit in integrated builds.
+        # Supplied by the parallel foundation-tenancy-base unit in integrated
+        # builds.
         from src.core.tenancy import TenantScopedModel, TimestampedModel
     except ModuleNotFoundError as exc:
         if exc.name not in {"src.core.tenancy", "src.core.tenancy.models"}:
@@ -49,7 +50,7 @@ else:
                 return self.filter(tenant_id=tenant_id)
 
         class TenantScopedModel(models.Model):
-            """Compatibility base used until the parallel tenancy unit is merged."""
+            """Compatibility base pending the parallel tenancy unit."""
 
             tenant_id = models.UUIDField(db_index=True)
             objects = TenantQuerySet.as_manager()
@@ -58,7 +59,7 @@ else:
                 abstract = True
 
         class TimestampedModel(models.Model):
-            """Compatibility timestamp mixin matching the canonical foundation."""
+            """Compatibility timestamp mixin for the canonical foundation."""
 
             created_at = models.DateTimeField(auto_now_add=True)
             updated_at = models.DateTimeField(auto_now=True)
@@ -94,8 +95,11 @@ class ImmutableTransitionError(RuntimeError):
 class AppendOnlyTransitionQuerySet(models.QuerySet["JobTransition"]):
     """Prevent bulk mutation of the job transition audit trail."""
 
-    def for_tenant(self, tenant_id: uuid.UUID) -> "AppendOnlyTransitionQuerySet":
-        """Retain the canonical explicit tenant boundary on the narrowed manager."""
+    def for_tenant(
+        self,
+        tenant_id: uuid.UUID,
+    ) -> "AppendOnlyTransitionQuerySet":
+        """Retain the explicit tenant boundary on the narrowed manager."""
 
         return self.filter(tenant_id=tenant_id)
 
@@ -112,7 +116,12 @@ class AsyncJob(TenantScopedModel, TimestampedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     actor_id = models.CharField(max_length=255, db_index=True)
     command = models.CharField(max_length=255, db_index=True)
-    status = models.CharField(max_length=20, choices=JobStatus.choices, default=JobStatus.QUEUED, db_index=True)
+    status = models.CharField(
+        max_length=20,
+        choices=JobStatus.choices,
+        default=JobStatus.QUEUED,
+        db_index=False,
+    )
     idempotency_key = models.CharField(max_length=255)
     payload = models.JSONField(default=dict)
     result = models.JSONField(null=True, blank=True)
@@ -132,8 +141,14 @@ class AsyncJob(TenantScopedModel, TimestampedModel):
             )
         ]
         indexes = [
-            models.Index(fields=("tenant_id", "status", "created_at"), name="asyncjob_tenant_status_idx"),
-            models.Index(fields=("tenant_id", "command", "created_at"), name="asyncjob_tenant_cmd_idx"),
+            models.Index(
+                fields=("tenant_id", "status", "created_at"),
+                name="asyncjob_tenant_status_idx",
+            ),
+            models.Index(
+                fields=("tenant_id", "command", "created_at"),
+                name="asyncjob_tenant_cmd_idx",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -144,8 +159,16 @@ class JobTransition(TenantScopedModel):
     """An immutable record of one guarded job state transition."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    job = models.ForeignKey(AsyncJob, on_delete=models.PROTECT, related_name="transitions")
-    from_status = models.CharField(max_length=20, choices=JobStatus.choices, blank=True)
+    job = models.ForeignKey(
+        AsyncJob,
+        on_delete=models.PROTECT,
+        related_name="transitions",
+    )
+    from_status = models.CharField(
+        max_length=20,
+        choices=JobStatus.choices,
+        blank=True,
+    )
     to_status = models.CharField(max_length=20, choices=JobStatus.choices)
     actor_id = models.CharField(max_length=255, null=True, blank=True)
     reason = models.TextField(blank=True)
@@ -154,18 +177,25 @@ class JobTransition(TenantScopedModel):
 
     # Django manager generics are invariant; this deliberate narrowing gives
     # transition history stronger mutation guarantees than the tenant base.
-    objects = AppendOnlyTransitionQuerySet.as_manager()  # type: ignore[assignment,misc]
+    objects = AppendOnlyTransitionQuerySet.as_manager()
 
     class Meta:
         db_table = "async_job_transitions"
         ordering = ("created_at", "id")
         indexes = [
-            models.Index(fields=("tenant_id", "job", "created_at"), name="jobtrans_tenant_job_idx"),
+            models.Index(
+                fields=("tenant_id", "job", "created_at"),
+                name="jobtrans_tenant_job_idx",
+            ),
         ]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self._state.adding:
-            raise ImmutableTransitionError("JobTransition records are append-only")
+            # fmt: off
+            raise ImmutableTransitionError(
+                "JobTransition records are append-only"
+            )
+            # fmt: on
         super().save(*args, **kwargs)
 
     def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
@@ -177,7 +207,7 @@ class JobTransition(TenantScopedModel):
 
 
 class OutboxEvent(TenantScopedModel, TimestampedModel):
-    """A broker publication request stored in the same transaction as its job."""
+    """Broker publication request stored transactionally with its job."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     aggregate_type = models.CharField(max_length=100)
@@ -202,8 +232,14 @@ class OutboxEvent(TenantScopedModel, TimestampedModel):
         db_table = "async_job_outbox_events"
         ordering = ("created_at", "id")
         indexes = [
-            models.Index(fields=("status", "available_at", "created_at"), name="outbox_pending_idx"),
-            models.Index(fields=("tenant_id", "aggregate_type", "aggregate_id"), name="outbox_tenant_agg_idx"),
+            models.Index(
+                fields=("status", "available_at", "created_at"),
+                name="outbox_pending_idx",
+            ),
+            models.Index(
+                fields=("tenant_id", "aggregate_type", "aggregate_id"),
+                name="outbox_tenant_agg_idx",
+            ),
         ]
 
     def __str__(self) -> str:

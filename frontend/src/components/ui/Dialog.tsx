@@ -26,6 +26,9 @@ export const Dialog = ({
   children,
   size = "md",
 }: DialogProps) => {
+  const accessibleTitle = title ?? "Dialog";
+  const accessibleDescription = description ?? "Modal dialog";
+
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
@@ -44,17 +47,23 @@ export const Dialog = ({
         >
           {(title ?? description) && (
             <div className="px-6 pt-6 pb-4">
-              {title && (
-                <DialogPrimitive.Title className="text-lg font-semibold">
-                  {title}
-                </DialogPrimitive.Title>
-              )}
-              {description && (
-                <DialogPrimitive.Description className="mt-2 text-sm text-muted-foreground">
-                  {description}
-                </DialogPrimitive.Description>
-              )}
+              <DialogPrimitive.Title className={title ? "text-lg font-semibold" : "sr-only"}>
+                {accessibleTitle}
+              </DialogPrimitive.Title>
+              <DialogPrimitive.Description
+                className={description ? "mt-2 text-sm text-muted-foreground" : "sr-only"}
+              >
+                {accessibleDescription}
+              </DialogPrimitive.Description>
             </div>
+          )}
+          {!title && !description && (
+            <>
+              <DialogPrimitive.Title className="sr-only">{accessibleTitle}</DialogPrimitive.Title>
+              <DialogPrimitive.Description className="sr-only">
+                {accessibleDescription}
+              </DialogPrimitive.Description>
+            </>
           )}
           <div className="px-6 pb-6">{children}</div>
           <DialogPrimitive.Close className="absolute right-4 top-4 text-muted-foreground hover:text-foreground">
@@ -84,7 +93,7 @@ export const ConfirmDialog = ({
   description,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
-  variant = "default",
+  variant,
   onConfirm,
 }: ConfirmDialogProps) => {
   const handleConfirm = () => {

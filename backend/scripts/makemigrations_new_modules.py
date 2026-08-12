@@ -2,6 +2,7 @@
 """
 Generate migrations for new modules, handling interactive prompts.
 """
+
 import os
 import subprocess
 import sys

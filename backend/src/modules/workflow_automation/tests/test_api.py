@@ -3,17 +3,31 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
+from decimal import Decimal
 
 import pytest
 from rest_framework import status
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.request import Request
+from rest_framework.test import APIRequestFactory
 
 from src.core.access.decision import AccessDecision, AccessReasonCode
 from src.core.async_jobs.services import execute
 from src.core.testing.factories import TenantUserFactory
 
+from ..api import (
+    GovernedWorkflowViewSet,
+    StrictSessionAuthentication,
+    _catalog_item,
+    _date_filter,
+    _detail_pk,
+    _json_safe,
+    _ui_schema,
+    _uuid_filter,
+)
 from ..models import Workflow, WorkflowInstance
-from ..services import WorkflowDefinitionService, WorkflowExecutionService
+from ..services import WorkflowDefinitionService, WorkflowExecutionService, default_configuration_document
 from .test_services import action_payload, approval_payload
 
 pytest_plugins = ["src.core.testing.factories"]
@@ -52,6 +66,33 @@ def test_unauthenticated_is_401_and_unsafe_session_requires_csrf(api_client, ten
     assert csrf_client.login(username=tenant_a_user.username, password="saraise-test-password")
     response = csrf_client.post("/api/v2/workflow-automation/workflows/", action_payload(), format="json")
     assert response.status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_api_query_helpers_fail_closed_for_missing_or_malformed_route_inputs() -> None:
+    factory = APIRequestFactory()
+    request = Request(
+        factory.get(
+            "/api/v2/workflow-automation/workflows/",
+            {
+                "updated_after": "2026-08-03T08:00:00Z",
+                "workflow_id": "00000000-0000-0000-0000-000000000001",
+            },
+        )
+    )
+
+    assert _date_filter(request, "missing") is None
+    assert _date_filter(request, "updated_after").isoformat().startswith("2026-08-03T08:00:00")
+    assert _uuid_filter(request, "missing") is None
+    assert _uuid_filter(request, "workflow_id") == uuid.UUID("00000000-0000-0000-0000-000000000001")
+    assert _detail_pk("abc") == "abc"
+    with pytest.raises(ValidationError):
+        _detail_pk(None)
+    bad_date = Request(factory.get("/api/v2/workflow-automation/workflows/", {"updated_after": "not-a-date"}))
+    with pytest.raises(ValidationError):
+        _date_filter(bad_date, "updated_after")
+    bad_uuid = Request(factory.get("/api/v2/workflow-automation/workflows/", {"workflow_id": "not-a-uuid"}))
+    with pytest.raises(ValidationError):
+        _uuid_filter(bad_uuid, "workflow_id")
 
 
 def test_workflow_endpoints_envelope_filters_etag_and_lifecycle(tenant_a_client) -> None:
@@ -229,6 +270,28 @@ def test_catalog_and_health_are_real_typed_capabilities(tenant_a_client) -> None
     assert "global_row_count" not in str(data(health)).lower()
 
 
+@pytest.mark.parametrize(
+    ("path", "field"),
+    (
+        ("/api/v2/workflow-automation/catalog/actions/?limit=not-an-int", "limit"),
+        ("/api/v2/workflow-automation/catalog/actions/?limit=100000", "limit"),
+        ("/api/v2/workflow-automation/catalog/actions/?ordering=tenant_id", "ordering"),
+        ("/api/v2/workflow-automation/catalog/subjects/?limit=not-an-int", "limit"),
+        ("/api/v2/workflow-automation/catalog/assignees/?limit=100000", "limit"),
+    ),
+)
+def test_catalog_validation_errors_use_governed_envelope(tenant_a_client, path, field) -> None:
+    response = tenant_a_client.get(path)
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert field in str(response.json()["error"])
+
+
+def test_catalog_lookup_rejects_unknown_provider_as_unavailable(tenant_a_client) -> None:
+    response = tenant_a_client.get("/api/v2/workflow-automation/catalog/lookups/missing-provider/")
+    assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert response.json()["error"]["code"] == "CAPABILITY_UNAVAILABLE"
+
+
 def test_policy_denial_is_403(tenant_a_client, monkeypatch: pytest.MonkeyPatch) -> None:
     def deny(self, tenant_id, identity, required_permission, **kwargs):
         del self, identity, required_permission, kwargs
@@ -270,3 +333,114 @@ def test_all_api_mutations_delegate_to_services(monkeypatch: pytest.MonkeyPatch,
     assert called is True
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert Workflow.objects.count() == 0
+
+
+def test_strict_authentication_rejects_authenticated_user_without_valid_tenant(monkeypatch) -> None:
+    request = APIRequestFactory().get("/api/v2/workflow-automation/workflows/")
+    user = object()
+    monkeypatch.setattr(
+        "src.modules.workflow_automation.api.SessionAuthentication.authenticate", lambda self, req: (user, None)
+    )
+    monkeypatch.setattr("src.modules.workflow_automation.api.get_user_tenant_id", lambda identity: "not-a-uuid")
+
+    with pytest.raises(PermissionDenied):
+        StrictSessionAuthentication().authenticate(Request(request))
+
+
+def test_governed_workflow_viewset_permissions_are_optional_without_registered_action(rf) -> None:
+    view = GovernedWorkflowViewSet()
+    view.action = "unknown"
+    view.access_prefix = "unknown"
+    view.request = Request(rf.get("/api/v2/workflow-automation/workflows/"))
+
+    permissions = view.get_permissions()
+
+    assert view.required_permission is None
+    assert view.quota_resource is None
+    assert view.quota_cost is None
+    assert permissions
+
+
+def test_catalog_serialization_builds_ui_schema_and_sanitizes_descriptor_shapes() -> None:
+    @dataclass(frozen=True)
+    class Descriptor:
+        key: str = "custom.action"
+        display_name: str = "Custom action"
+        availability: str = "unavailable"
+        availability_reason: str = "maintenance"
+        idempotency_supported: bool = True
+        outbound_network_required: bool = True
+        quota_cost: int = 3
+        contract_fingerprint: str = "fingerprint"
+        configuration_schema: dict[str, object] = None  # type: ignore[assignment]
+        lookup_descriptors: tuple[dict[str, str], ...] = ()
+
+    descriptor = Descriptor(
+        configuration_schema={
+            "required": ["account_id", "mode"],
+            "properties": {
+                "handler": {"type": "string"},
+                "account_id": {"type": "string", "title": "Account", "description": "Lookup account"},
+                "mode": {"type": "string", "enum": ["fast", "safe"]},
+                "amount": {"type": "number", "minimum": 0, "maximum": 100},
+                "dry_run": {"type": "boolean"},
+                "notes": {"type": "string"},
+                "ignored": [],
+            },
+        },
+        lookup_descriptors=({"field": "account_id", "provider_key": "accounts"},),
+    )
+
+    assert _json_safe({"amount": Decimal("12.5"), "items": (Decimal("1.5"),)}) == {"amount": 12.5, "items": [1.5]}
+    schema = _ui_schema(_json_safe(descriptor))
+    assert [field["kind"] for field in schema] == ["lookup", "select", "number", "boolean", "text"]
+    item = _catalog_item(descriptor, "action")
+    assert item["availability"] == "degraded"
+    assert item["reason"] == "maintenance"
+    assert item["descriptor_fingerprint"] == "fingerprint"
+    assert item["network_access"] is True
+
+
+def test_workflow_configuration_api_update_history_preview_and_rollback(tenant_a_client) -> None:
+    current = tenant_a_client.get("/api/v2/workflow-automation/configuration/")
+    assert current.status_code == status.HTTP_200_OK
+    current_data = data(current)
+    document = default_configuration_document()
+    document["limits"] = {**document["limits"], "catalog_default_limit": 9}
+
+    preview = tenant_a_client.post(
+        "/api/v2/workflow-automation/configuration/preview/",
+        {"document": document, "environment": "production"},
+        format="json",
+    )
+    assert preview.status_code == status.HTTP_200_OK
+    assert data(preview)["changed_sections"] == ["limits"]
+
+    updated = tenant_a_client.put(
+        "/api/v2/workflow-automation/configuration/00000000-0000-0000-0000-000000000000/",
+        {
+            "document": document,
+            "environment": "production",
+            "expected_version": current_data["version"],
+            "change_reason": "lower catalog default",
+        },
+        format="json",
+    )
+    assert updated.status_code == status.HTTP_200_OK, updated.content
+    assert data(updated)["version"] == current_data["version"] + 1
+
+    history = tenant_a_client.get("/api/v2/workflow-automation/configuration/history/")
+    assert history.status_code == status.HTTP_200_OK
+    assert {item["version"] for item in data(history)} >= {1, current_data["version"] + 1}
+
+    rollback = tenant_a_client.post(
+        "/api/v2/workflow-automation/configuration/rollback/",
+        {
+            "target_version": 1,
+            "environment": "production",
+            "expected_version": current_data["version"] + 1,
+        },
+        format="json",
+    )
+    assert rollback.status_code == status.HTTP_200_OK
+    assert data(rollback)["document"]["limits"]["catalog_default_limit"] == 25

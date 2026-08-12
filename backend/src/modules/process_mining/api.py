@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from django.db.models import QuerySet
@@ -77,7 +77,7 @@ from .services import (
 )
 
 
-class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.GenericViewSet):
+class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.GenericViewSet[Any]):
     """Bind the profile tenant before access evaluation and every service call."""
 
     def tenant_id(self) -> UUID:
@@ -86,14 +86,14 @@ class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.Ge
             tenant = UUID(str(value))
         except (TypeError, ValueError, AttributeError) as exc:
             raise PermissionDenied("Authenticated identity has no valid tenant.") from exc
-        self.request.tenant_id = tenant
+        setattr(self.request, "tenant_id", tenant)
         if not getattr(self, "configuration_management", False):
             configuration = ProcessMiningConfigurationService().resolve(tenant)
             role = get_user_tenant_role(self.request.user)
             groups = getattr(self.request.user, "groups", None)
-            cohorts = set(groups.values_list("name", flat=True)) if hasattr(groups, "values_list") else set()
-            allowed_roles = set(configuration["rollout_roles"])
-            allowed_cohorts = set(configuration["rollout_cohorts"])
+            cohorts = set(cast(Any, groups).values_list("name", flat=True)) if hasattr(groups, "values_list") else set()
+            allowed_roles = set(cast(list[str], configuration["rollout_roles"]))
+            allowed_cohorts = set(cast(list[str], configuration["rollout_cohorts"]))
             if not configuration["enabled"]:
                 raise PermissionDenied("Process mining is disabled for this tenant.")
             if allowed_roles and role not in allowed_roles:
@@ -108,9 +108,9 @@ class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.Ge
         try:
             tenant = UUID(str(value))
         except (TypeError, ValueError, AttributeError):
-            return model.objects.none()
-        self.request.tenant_id = tenant
-        return model.objects.for_tenant(tenant)
+            return cast(QuerySet[Any], model.objects.none())
+        setattr(self.request, "tenant_id", tenant)
+        return cast(QuerySet[Any], model.objects.for_tenant(tenant))
 
     def actor_id(self) -> UUID:
         value = getattr(self.request.user, "id", None)
@@ -134,7 +134,7 @@ class ProcessOverviewViewSet(mixins.ListModelMixin, TenantGovernedViewSet):
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
         del request, args, kwargs
         rows = ProcessModelService().get_process_overview(self.tenant_id(), self.request.query_params)
-        page = self.paginate_queryset(rows)
+        page = self.paginate_queryset(cast(Any, rows))
         if page is None:
             raise RuntimeError("Governed pagination is required.")
         return self.get_paginated_response(page)
@@ -196,18 +196,18 @@ class TransitionActionsMixin:
     """Expose the common cancel/retry actions without leaking other routes."""
 
     @action(detail=True, methods=["post"])
-    def cancel(self, request: object, pk: str | None = None) -> Response:
+    def cancel(self: Any, request: object, pk: str | None = None) -> Response:
         del request, pk
         if not ProcessMiningQueryService.exists(self.get_queryset(), self.kwargs["pk"]):
             raise NotFound()
-        return self._transition("cancel")
+        return cast(Response, self._transition("cancel"))
 
     @action(detail=True, methods=["post"])
-    def retry(self, request: object, pk: str | None = None) -> Response:
+    def retry(self: Any, request: object, pk: str | None = None) -> Response:
         del request, pk
         if not ProcessMiningQueryService.exists(self.get_queryset(), self.kwargs["pk"]):
             raise NotFound()
-        return self._transition("retry")
+        return cast(Response, self._transition("retry"))
 
 
 class EventExportViewSet(TransitionActionsMixin, TenantGovernedViewSet):
@@ -228,7 +228,7 @@ class EventExportViewSet(TransitionActionsMixin, TenantGovernedViewSet):
         return (
             empty
             if not getattr(self.request, "tenant_id", None)
-            else ProcessMiningQueryService.exports(self.request.tenant_id, self.request.query_params)
+            else ProcessMiningQueryService.exports(self.tenant_id(), self.request.query_params)
         )
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -314,7 +314,7 @@ class DiscoveryViewSet(TransitionActionsMixin, TenantGovernedViewSet):
         return (
             empty
             if not getattr(self.request, "tenant_id", None)
-            else ProcessMiningQueryService.discoveries(self.request.tenant_id, self.request.query_params)
+            else ProcessMiningQueryService.discoveries(self.tenant_id(), self.request.query_params)
         )
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -393,7 +393,7 @@ class ProcessModelViewSet(TenantGovernedViewSet):
         return (
             empty
             if not getattr(self.request, "tenant_id", None)
-            else ProcessMiningQueryService.models(self.request.tenant_id, self.request.query_params)
+            else ProcessMiningQueryService.models(self.tenant_id(), self.request.query_params)
         )
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -500,7 +500,7 @@ class ConformanceViewSet(TransitionActionsMixin, TenantGovernedViewSet):
         return (
             empty
             if not getattr(self.request, "tenant_id", None)
-            else ProcessMiningQueryService.conformance(self.request.tenant_id, self.request.query_params)
+            else ProcessMiningQueryService.conformance(self.tenant_id(), self.request.query_params)
         )
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -585,7 +585,7 @@ class BottleneckViewSet(TransitionActionsMixin, TenantGovernedViewSet):
         return (
             empty
             if not getattr(self.request, "tenant_id", None)
-            else ProcessMiningQueryService.bottlenecks(self.request.tenant_id, self.request.query_params)
+            else ProcessMiningQueryService.bottlenecks(self.tenant_id(), self.request.query_params)
         )
 
     def list(self, request: object, *args: object, **kwargs: object) -> Response:
@@ -659,7 +659,7 @@ class ModuleHealthAPIView(GovernedAPIViewMixin, ActionAccessMixin, APIView):
 
     def get(self, request: object) -> Response:
         del request
-        report = get_module_health(self.request.tenant_id)
+        report = get_module_health(cast(UUID, getattr(self.request, "tenant_id")))
         return Response(ModuleHealthSerializer(report.payload).data, status=report.status_code)
 
 

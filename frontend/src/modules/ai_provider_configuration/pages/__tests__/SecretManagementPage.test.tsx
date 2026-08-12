@@ -6,10 +6,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SecretManagementPage } from "../SecretManagementPage";
 import { aiProviderConfigurationService } from "../../services/ai_provider_configuration-service";
 import { secretService } from "../../services/secret-service";
+import type { AIProviderRuntimeConfiguration } from "../../contracts";
 
 vi.mock("../../services/ai_provider_configuration-service");
 vi.mock("../../services/secret-service");
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+const runtimeConfiguration: AIProviderRuntimeConfiguration = {
+  id: "runtime-config-1",
+  tenant_id: "tenant-1",
+  environment: "default",
+  version: 1,
+  updated_by: "operator-1",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+  values: {
+    presentation: { copied_indicator_timeout_ms: 1000 },
+  },
+};
 
 function renderPage() {
   const client = new QueryClient({
@@ -28,6 +42,9 @@ describe("SecretManagementPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(aiProviderConfigurationService.listCredentials).mockResolvedValue([]);
+    vi.mocked(aiProviderConfigurationService.getRuntimeConfiguration).mockResolvedValue(
+      runtimeConfiguration
+    );
   });
 
   it("does not claim rotation before the provider operation succeeds", async () => {

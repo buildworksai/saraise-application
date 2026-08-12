@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
-from typing import Any, ClassVar
+from typing import Any, Callable, ClassVar, Mapping, cast
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
@@ -45,7 +45,7 @@ from .services import (
 )
 
 
-def _bool(value, field):
+def _bool(value: Any, field: str) -> bool:
     normalized = str(value).lower()
     if normalized in {"true", "1"}:
         return True
@@ -54,31 +54,33 @@ def _bool(value, field):
     raise ValidationError({field: "Use true or false."})
 
 
-def _date(value, field):
+def _date(value: Any, field: str) -> date:
     try:
         return date.fromisoformat(str(value))
     except (TypeError, ValueError) as exc:
         raise ValidationError({field: "Use YYYY-MM-DD."}) from exc
 
 
-class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.GenericViewSet):
+class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.GenericViewSet[Any]):
     http_method_names = ("get", "post", "patch", "delete", "head", "options")
-    list_serializer_class: ClassVar[Any] = None
-    detail_serializer_class: ClassVar[Any] = None
+    archived_permission: ClassVar[str | None] = None
+    list_serializer_class: ClassVar[type[Any] | None] = None
+    detail_serializer_class: ClassVar[type[Any] | None] = None
+    archive_service: ClassVar[Callable[..., Any] | None] = None
 
-    def tenant_id(self):
+    def tenant_id(self) -> uuid.UUID:
         value = getattr(self.request, "tenant_id", None)
         if value is None:
             raise PermissionDenied("Authenticated identity has no valid tenant.")
-        return value
+        return cast(uuid.UUID, value)
 
-    def actor_id(self):
+    def actor_id(self) -> uuid.UUID:
         try:
             return uuid.UUID(str(self.request.user.pk))
         except (ValueError, TypeError, AttributeError):
             return uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:user:{self.request.user.pk}")
 
-    def idempotency_key(self, payload=None):
+    def idempotency_key(self, payload: Mapping[str, Any] | None = None) -> str:
         key = str(self.request.headers.get("Idempotency-Key") or (payload or {}).get("idempotency_key") or "").strip()
         if not key and self.request.path.startswith("/api/v1/"):
             key = f"legacy-{uuid.uuid4()}"
@@ -86,23 +88,31 @@ class TenantGovernedViewSet(GovernedAPIViewMixin, ActionAccessMixin, viewsets.Ge
             raise ValidationError({"idempotency_key": "A bounded Idempotency-Key header or field is required."})
         return key
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[Any]:
         if self.action == "list":
+            if self.list_serializer_class is None:
+                raise RuntimeError("List serializer class is required.")
             return self.list_serializer_class
         if self.action in {"retrieve"}:
+            if self.detail_serializer_class is None:
+                raise RuntimeError("Detail serializer class is required.")
             return self.detail_serializer_class
         return super().get_serializer_class()
 
-    def list(self, request):
+    def list(self, request: Any) -> Response:
         page = self.paginate_queryset(self.get_queryset())
         if page is None:
             raise RuntimeError("Governed pagination is required.")
+        if self.list_serializer_class is None:
+            raise RuntimeError("List serializer class is required.")
         return self.get_paginated_response(self.list_serializer_class(page, many=True).data)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Any, pk: Any = None) -> Response:
+        if self.detail_serializer_class is None:
+            raise RuntimeError("Detail serializer class is required.")
         return Response(self.detail_serializer_class(self.get_object()).data)
 
-    def handle_exception(self, exc):
+    def handle_exception(self, exc: Exception) -> Response:
         if isinstance(exc, StaleVersionError):
             exc = OperationFailed(
                 error_code="STALE_VERSION",
@@ -133,9 +143,11 @@ class CrudViewSet(
     mixins.UpdateModelMixin,
     mixins.DestroyModelMixin,
 ):
-    def destroy(self, request, *args, **kwargs):
+    def destroy(self, request: Any, *args: Any, **kwargs: Any) -> Response:
         payload = request.data if isinstance(request.data, dict) else {}
         instance = self.get_object()
+        if self.archive_service is None:
+            raise RuntimeError("Archive service is required.")
         self.archive_service(
             self.tenant_id(),
             self.actor_id(),
@@ -170,7 +182,7 @@ class ProjectViewSet(CrudViewSet):
     }
     archive_service = staticmethod(ProjectService.archive_project)
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         include = self.request.query_params.get("include_archived")
         include_archived = bool(include and _bool(include, "include_archived"))
         qs = (
@@ -193,7 +205,7 @@ class ProjectViewSet(CrudViewSet):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         return qs.order_by(ordering, "id")
 
-    def create(self, request):
+    def create(self, request: Any) -> Response:
         serializer = ProjectCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         project = ProjectService.create_project(
@@ -201,7 +213,7 @@ class ProjectViewSet(CrudViewSet):
         )
         return Response(ProjectDetailSerializer(project).data, status=201)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Any, pk: Any = None) -> Response:
         self.get_object()
         serializer = ProjectUpdateSerializer(data=request.data, partial=False)
         serializer.is_valid(raise_exception=True)
@@ -214,11 +226,11 @@ class ProjectViewSet(CrudViewSet):
         return Response(ProjectDetailSerializer(project).data)
 
     @action(detail=True, methods=["get"])
-    def summary(self, request, pk=None):
+    def summary(self, request: Any, pk: Any = None) -> Response:
         self.get_object()
         return Response(ProjectSummarySerializer(ProjectService.get_project_summary(self.tenant_id(), pk)).data)
 
-    def _transition(self, request, pk, command):
+    def _transition(self, request: Any, pk: Any, command: str) -> Response:
         self.get_object()
         serializer = ProjectTransitionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -233,27 +245,27 @@ class ProjectViewSet(CrudViewSet):
         return Response(ProjectDetailSerializer(project).data)
 
     @action(detail=True, methods=["post"])
-    def activate(self, r, pk=None):
+    def activate(self, r: Any, pk: Any = None) -> Response:
         return self._transition(r, pk, "activate")
 
     @action(detail=True, methods=["post"])
-    def hold(self, r, pk=None):
+    def hold(self, r: Any, pk: Any = None) -> Response:
         return self._transition(r, pk, "hold")
 
     @action(detail=True, methods=["post"])
-    def resume(self, r, pk=None):
+    def resume(self, r: Any, pk: Any = None) -> Response:
         return self._transition(r, pk, "resume")
 
     @action(detail=True, methods=["post"])
-    def complete(self, r, pk=None):
+    def complete(self, r: Any, pk: Any = None) -> Response:
         return self._transition(r, pk, "complete")
 
     @action(detail=True, methods=["post"])
-    def cancel(self, r, pk=None):
+    def cancel(self, r: Any, pk: Any = None) -> Response:
         return self._transition(r, pk, "cancel")
 
     @action(detail=True, methods=["post"])
-    def restore(self, request, pk=None):
+    def restore(self, request: Any, pk: Any = None) -> Response:
         serializer = ArchiveRestoreSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         project = ProjectService.restore_project(
@@ -266,7 +278,7 @@ class ProjectViewSet(CrudViewSet):
         return Response(ProjectDetailSerializer(project).data)
 
     @action(detail=True, methods=["post"])
-    def duplicate(self, request, pk=None):
+    def duplicate(self, request: Any, pk: Any = None) -> Response:
         self.get_object()
         serializer = DuplicateProjectSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -302,7 +314,7 @@ class TaskViewSet(CrudViewSet):
         },
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         p = self.request.query_params
         include = bool(p.get("include_archived") and _bool(p["include_archived"], "include_archived"))
         qs = (
@@ -327,7 +339,7 @@ class TaskViewSet(CrudViewSet):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         return qs.order_by(ordering, "id")
 
-    def create(self, request):
+    def create(self, request: Any) -> Response:
         s = TaskCreateSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         obj = TaskService.create_task(
@@ -335,7 +347,7 @@ class TaskViewSet(CrudViewSet):
         )
         return Response(TaskDetailSerializer(obj).data, status=201)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Any, pk: Any = None) -> Response:
         self.get_object()
         s = TaskUpdateSerializer(data=request.data)
         s.is_valid(raise_exception=True)
@@ -347,7 +359,7 @@ class TaskViewSet(CrudViewSet):
         )
         return Response(TaskDetailSerializer(obj).data)
 
-    def _transition(self, r, pk, command):
+    def _transition(self, r: Any, pk: Any, command: str) -> Response:
         self.get_object()
         s = TaskTransitionSerializer(data=r.data)
         s.is_valid(raise_exception=True)
@@ -363,35 +375,35 @@ class TaskViewSet(CrudViewSet):
         return Response(TaskDetailSerializer(obj).data)
 
     @action(detail=True, methods=["post"])
-    def start(self, r, pk=None):
+    def start(self, r: Any, pk: Any = None) -> Response:
         return self._transition(r, pk, "start")
 
     @action(detail=True, methods=["post"], url_path="submit-review")
-    def submit_review(self, r, pk=None):
+    def submit_review(self, r: Any, pk: Any = None) -> Response:
         return self._transition(r, pk, "submit_review")
 
     @action(detail=True, methods=["post"], url_path="request-changes")
-    def request_changes(self, r, pk=None):
+    def request_changes(self, r: Any, pk: Any = None) -> Response:
         return self._transition(r, pk, "request_changes")
 
     @action(detail=True, methods=["post"])
-    def complete(self, r, pk=None):
+    def complete(self, r: Any, pk: Any = None) -> Response:
         return self._transition(r, pk, "complete")
 
     @action(detail=True, methods=["post"])
-    def block(self, r, pk=None):
+    def block(self, r: Any, pk: Any = None) -> Response:
         return self._transition(r, pk, "block")
 
     @action(detail=True, methods=["post"])
-    def unblock(self, r, pk=None):
+    def unblock(self, r: Any, pk: Any = None) -> Response:
         return self._transition(r, pk, "unblock")
 
     @action(detail=True, methods=["post"])
-    def cancel(self, r, pk=None):
+    def cancel(self, r: Any, pk: Any = None) -> Response:
         return self._transition(r, pk, "cancel")
 
     @action(detail=True, methods=["post"])
-    def reorder(self, r, pk=None):
+    def reorder(self, r: Any, pk: Any = None) -> Response:
         s = ReorderTaskSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         obj = TaskService.reorder_task(
@@ -405,7 +417,7 @@ class TaskViewSet(CrudViewSet):
         return Response(TaskDetailSerializer(obj).data)
 
     @action(detail=True, methods=["post"])
-    def restore(self, r, pk=None):
+    def restore(self, r: Any, pk: Any = None) -> Response:
         s = ArchiveRestoreSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         obj = TaskService.restore_task(
@@ -429,7 +441,7 @@ class ProjectMemberViewSet(CrudViewSet):
         "restore": "project_management.member:restore",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         p = self.request.query_params
         include = bool(p.get("include_archived") and _bool(p["include_archived"], "include_archived"))
         qs = (
@@ -445,7 +457,7 @@ class ProjectMemberViewSet(CrudViewSet):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         return qs.order_by(ordering, "id")
 
-    def create(self, r):
+    def create(self, r: Any) -> Response:
         s = ProjectMemberCreateSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = ProjectMemberService.add_member(
@@ -453,7 +465,7 @@ class ProjectMemberViewSet(CrudViewSet):
         )
         return Response(ProjectMemberDetailSerializer(o).data, status=201)
 
-    def partial_update(self, r, pk=None):
+    def partial_update(self, r: Any, pk: Any = None) -> Response:
         self.get_object()
         s = ProjectMemberUpdateSerializer(data=r.data)
         s.is_valid(raise_exception=True)
@@ -464,11 +476,11 @@ class ProjectMemberViewSet(CrudViewSet):
         )
         return Response(ProjectMemberDetailSerializer(o).data)
 
-    def archive_service(self, *args):
+    def archive_service(self, *args: Any) -> ProjectMember:
         return ProjectMemberService.archive_member(args[0], args[1], args[2], args[4])
 
     @action(detail=True, methods=["post"])
-    def restore(self, r, pk=None):
+    def restore(self, r: Any, pk: Any = None) -> Response:
         s = IdempotencySerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = ProjectMemberService.restore_member(
@@ -493,7 +505,7 @@ class TimeEntryViewSet(CrudViewSet):
         "restore": "project_management.time_entry:restore",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         p = self.request.query_params
         include = bool(p.get("include_archived") and _bool(p["include_archived"], "include_archived"))
         qs = (
@@ -513,7 +525,7 @@ class TimeEntryViewSet(CrudViewSet):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         return qs.order_by(ordering, "id")
 
-    def create(self, r):
+    def create(self, r: Any) -> Response:
         s = TimeEntryCreateSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = TimeEntryService.create_time_entry(
@@ -521,7 +533,7 @@ class TimeEntryViewSet(CrudViewSet):
         )
         return Response(TimeEntryDetailSerializer(o).data, status=201)
 
-    def partial_update(self, r, pk=None):
+    def partial_update(self, r: Any, pk: Any = None) -> Response:
         self.get_object()
         s = TimeEntryUpdateSerializer(data=r.data)
         s.is_valid(raise_exception=True)
@@ -534,7 +546,7 @@ class TimeEntryViewSet(CrudViewSet):
         return Response(TimeEntryDetailSerializer(o).data)
 
     @action(detail=True, methods=["post"])
-    def restore(self, r, pk=None):
+    def restore(self, r: Any, pk: Any = None) -> Response:
         s = ArchiveRestoreSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = TimeEntryService.restore_time_entry(
@@ -560,7 +572,7 @@ class ProjectMilestoneViewSet(CrudViewSet):
         **{x: "project_management.milestone:transition" for x in ("achieve", "reopen", "cancel")},
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         p = self.request.query_params
         include = bool(p.get("include_archived") and _bool(p["include_archived"], "include_archived"))
         qs = (
@@ -585,7 +597,7 @@ class ProjectMilestoneViewSet(CrudViewSet):
             raise ValidationError({"ordering": "Unsupported ordering field."})
         return qs.order_by(ordering, "id")
 
-    def create(self, r):
+    def create(self, r: Any) -> Response:
         s = ProjectMilestoneCreateSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = MilestoneService.create_milestone(
@@ -593,7 +605,7 @@ class ProjectMilestoneViewSet(CrudViewSet):
         )
         return Response(ProjectMilestoneDetailSerializer(o).data, status=201)
 
-    def partial_update(self, r, pk=None):
+    def partial_update(self, r: Any, pk: Any = None) -> Response:
         self.get_object()
         s = ProjectMilestoneUpdateSerializer(data=r.data)
         s.is_valid(raise_exception=True)
@@ -606,7 +618,7 @@ class ProjectMilestoneViewSet(CrudViewSet):
         return Response(ProjectMilestoneDetailSerializer(o).data)
 
     @action(detail=True, methods=["post"])
-    def achieve(self, r, pk=None):
+    def achieve(self, r: Any, pk: Any = None) -> Response:
         s = MilestoneAchieveSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = MilestoneService.achieve_milestone(
@@ -619,7 +631,7 @@ class ProjectMilestoneViewSet(CrudViewSet):
         return Response(ProjectMilestoneDetailSerializer(o).data)
 
     @action(detail=True, methods=["post"])
-    def reopen(self, r, pk=None):
+    def reopen(self, r: Any, pk: Any = None) -> Response:
         s = IdempotencySerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = MilestoneService.reopen_milestone(
@@ -628,7 +640,7 @@ class ProjectMilestoneViewSet(CrudViewSet):
         return Response(ProjectMilestoneDetailSerializer(o).data)
 
     @action(detail=True, methods=["post"])
-    def cancel(self, r, pk=None):
+    def cancel(self, r: Any, pk: Any = None) -> Response:
         s = IdempotencySerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = MilestoneService.cancel_milestone(
@@ -637,7 +649,7 @@ class ProjectMilestoneViewSet(CrudViewSet):
         return Response(ProjectMilestoneDetailSerializer(o).data)
 
     @action(detail=True, methods=["post"])
-    def restore(self, r, pk=None):
+    def restore(self, r: Any, pk: Any = None) -> Response:
         s = ArchiveRestoreSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = MilestoneService.restore_milestone(
@@ -653,7 +665,7 @@ class ProjectActivityViewSet(TenantGovernedViewSet, mixins.ListModelMixin, mixin
     serializer_class = ProjectActivitySerializer
     action_permissions = {"list": "project_management.activity:read", "retrieve": "project_management.activity:read"}
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         project_id = self.request.query_params.get("project_id")
         if self.action == "list" and not project_id:
             raise ValidationError({"project_id": "This filter is required."})
@@ -676,7 +688,7 @@ class ConfigurationVersionViewSet(TenantGovernedViewSet, mixins.ListModelMixin, 
         "retrieve": "project_management.configuration:read",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         qs = ProjectManagementConfigurationVersion.objects.for_tenant(self.tenant_id()).select_related("configuration")
         p = self.request.query_params
         if p.get("environment"):
@@ -699,7 +711,7 @@ class ConfigurationViewSet(TenantGovernedViewSet):
         "import_document": "project_management.configuration:import",
     }
 
-    def list(self, r):
+    def list(self, r: Any) -> Response:
         return Response(
             ConfigurationVersionSerializer(
                 ConfigurationService.get_active(
@@ -709,18 +721,18 @@ class ConfigurationViewSet(TenantGovernedViewSet):
         )
 
     @action(detail=False, methods=["post"], url_path="drafts")
-    def drafts(self, r):
+    def drafts(self, r: Any) -> Response:
         s = ConfigurationDraftSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = ConfigurationService.create_draft(self.tenant_id(), self.actor_id(), **s.validated_data)
         return Response(ConfigurationVersionSerializer(o).data, status=201)
 
     @action(detail=False, methods=["post"], url_path=r"drafts/(?P<draft_id>[^/.]+)/simulate")
-    def simulate(self, r, draft_id=None):
+    def simulate(self, r: Any, draft_id: Any = None) -> Response:
         return Response(ConfigurationService.simulate(self.tenant_id(), draft_id))
 
     @action(detail=False, methods=["post"], url_path=r"drafts/(?P<draft_id>[^/.]+)/publish")
-    def publish(self, r, draft_id=None):
+    def publish(self, r: Any, draft_id: Any = None) -> Response:
         s = ConfigurationPublishSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = ConfigurationService.publish(
@@ -729,7 +741,7 @@ class ConfigurationViewSet(TenantGovernedViewSet):
         return Response(ConfigurationVersionSerializer(o).data)
 
     @action(detail=False, methods=["post"])
-    def rollback(self, r):
+    def rollback(self, r: Any) -> Response:
         s = ConfigurationRollbackSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = ConfigurationService.rollback(
@@ -741,7 +753,7 @@ class ConfigurationViewSet(TenantGovernedViewSet):
         return Response(ConfigurationVersionSerializer(o).data)
 
     @action(detail=False, methods=["get"])
-    def export(self, r):
+    def export(self, r: Any) -> Response:
         return Response(
             ConfigurationService.export_document(
                 self.tenant_id(), r.query_params.get("environment", ConfigurationService.runtime_environment())
@@ -749,7 +761,7 @@ class ConfigurationViewSet(TenantGovernedViewSet):
         )
 
     @action(detail=False, methods=["post"], url_path="import")
-    def import_document(self, r):
+    def import_document(self, r: Any) -> Response:
         s = ConfigurationImportSerializer(data=r.data)
         s.is_valid(raise_exception=True)
         o = ConfigurationService.import_document(self.tenant_id(), self.actor_id(), s.validated_data["document"])
@@ -760,7 +772,7 @@ class PortfolioDashboardView(GovernedAPIViewMixin, ActionAccessMixin, APIView):
     action_permissions = {"get": "project_management.project:read"}
     required_entitlement = "project_management.core"
 
-    def get(self, request):
+    def get(self, request: Any) -> Response:
         tenant = get_user_tenant_id(request.user)
         if not tenant:
             raise PermissionDenied("Authenticated identity has no tenant.")
@@ -771,7 +783,7 @@ class MyWorkView(GovernedAPIViewMixin, ActionAccessMixin, APIView):
     action_permissions = {"get": "project_management.task:read"}
     required_entitlement = "project_management.core"
 
-    def get(self, request):
+    def get(self, request: Any) -> Response:
         raise OperationFailed(
             error_code="EMPLOYEE_LINK_UNAVAILABLE",
             message="My Work requires a tenant-safe employee identity provider.",

@@ -8,7 +8,7 @@ import logging
 import uuid
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime
-from typing import Any, Iterable, Mapping
+from typing import Any, Generic, Iterable, Mapping, Protocol, TypeVar, cast
 
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
@@ -23,6 +23,16 @@ from .datasets import dataset_registry
 from .models import Dashboard, DashboardShare, DashboardWidget, QueryDefinition, QueryExecution, Report
 
 logger = logging.getLogger(__name__)
+ModelT = TypeVar("ModelT", bound=Model)
+
+
+class DatasetProvider(Protocol):
+    def describe(self) -> object: ...
+
+    def validate(self, tenant_id: uuid.UUID, spec: Mapping[str, Any]) -> object: ...
+
+    def execute(self, tenant_id: uuid.UUID, validated: object, parameters: Mapping[str, Any]) -> object: ...
+
 
 TERMINAL_EXECUTION_STATES = frozenset({"succeeded", "failed", "cancelled", "timed_out"})
 STATE_TRANSITIONS = {
@@ -62,7 +72,7 @@ def _tenant_uuid(value: uuid.UUID | str) -> uuid.UUID:
 
 
 def _required_text(value: object, name: str, maximum: int = 255) -> str:
-    normalized = str(value).strip() if value is not None else ""
+    normalized = value.strip() if isinstance(value, str) else None
     if not normalized or len(normalized) > maximum:
         raise ValidationError({name: f"A non-empty value up to {maximum} characters is required."})
     return normalized
@@ -131,7 +141,7 @@ def _record(
 
 
 def _descriptor_dict(value: object) -> dict[str, Any]:
-    if is_dataclass(value):
+    if is_dataclass(value) and not isinstance(value, type):
         return asdict(value)
     if isinstance(value, Mapping):
         return dict(value)
@@ -141,7 +151,7 @@ def _descriptor_dict(value: object) -> dict[str, Any]:
     raise CapabilityUnavailable()
 
 
-def _dataset_provenance(provider: object) -> tuple[str, str]:
+def _dataset_provenance(provider: DatasetProvider) -> tuple[str, str]:
     descriptor = provider.describe()
     data = _descriptor_dict(descriptor)
     fingerprint = getattr(descriptor, "schema_fingerprint", "")
@@ -151,7 +161,7 @@ def _dataset_provenance(provider: object) -> tuple[str, str]:
     return str(data.get("version", "")), str(fingerprint)
 
 
-def _registry_get(key: str) -> object:
+def _registry_get(key: str) -> DatasetProvider:
     try:
         getter = getattr(dataset_registry, "get", None) or getattr(dataset_registry, "get_provider", None)
         provider = getter(key) if getter else None
@@ -160,7 +170,7 @@ def _registry_get(key: str) -> object:
         raise CapabilityUnavailable() from exc
     if provider is None:
         raise CapabilityUnavailable()
-    return provider
+    return cast(DatasetProvider, provider)
 
 
 def _model_payload(model: type[Model], payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -202,13 +212,16 @@ def _model_payload(model: type[Model], payload: Mapping[str, Any]) -> dict[str, 
     return {key: value for key, value in payload.items() if key in allowed and key not in server_owned}
 
 
-def _get(model: type[Model], tenant_id: uuid.UUID | str, object_id: object, *, include_deleted: bool = False) -> Any:
-    queryset = model.objects.for_tenant(_tenant_uuid(tenant_id))
+def _get(
+    model: type[ModelT], tenant_id: uuid.UUID | str, object_id: object, *, include_deleted: bool = False
+) -> ModelT:
+    model_class = cast(Any, model)
+    queryset = model_class.objects.for_tenant(_tenant_uuid(tenant_id))
     if not include_deleted and any(field.name == "deleted_at" for field in model._meta.fields):
         queryset = queryset.filter(deleted_at__isnull=True)
     try:
-        return queryset.get(pk=object_id)
-    except (model.DoesNotExist, ValueError, TypeError) as exc:
+        return cast(ModelT, queryset.get(pk=object_id))
+    except (model_class.DoesNotExist, ValueError, TypeError) as exc:
         raise NotFound() from exc
 
 
@@ -265,8 +278,8 @@ class DatasetCatalogService:
         return descriptor
 
 
-class _DefinitionService:
-    model: type[Model]
+class _DefinitionService(Generic[ModelT]):
+    model: type[ModelT]
 
     @classmethod
     def _transition(
@@ -279,11 +292,12 @@ class _DefinitionService:
         correlation_id: str,
         idempotency_key: str,
         reason: str = "",
-    ) -> Any:
+    ) -> ModelT:
         _required_text(idempotency_key, "idempotency_key")
         with transaction.atomic():
             obj = (
-                cls.model.objects.for_tenant(_tenant_uuid(tenant_id))
+                cast(Any, cls.model)
+                .objects.for_tenant(_tenant_uuid(tenant_id))
                 .select_for_update()
                 .filter(pk=object_id, deleted_at__isnull=True)
                 .first()
@@ -297,7 +311,7 @@ class _DefinitionService:
             if replay is not None:
                 if replay.get("command") != command:
                     raise BIConflict("Idempotency key was used for another command.", code="IDEMPOTENCY_CONFLICT")
-                return obj
+                return cast(ModelT, obj)
             if obj.version != expected_version:
                 raise BIConflict("The supplied version is stale.", code="VERSION_CONFLICT")
             target = STATE_TRANSITIONS.get(command, {}).get(obj.state)
@@ -315,7 +329,7 @@ class _DefinitionService:
             if isinstance(obj, QueryDefinition):
                 update_fields.extend(("dataset_version", "dataset_schema_fingerprint"))
             obj.save(update_fields=update_fields)
-            return obj
+            return cast(ModelT, obj)
 
     @classmethod
     def _publish_guard(cls, tenant_id: uuid.UUID | str, obj: Any, command: str) -> None:
@@ -330,10 +344,16 @@ class _DefinitionService:
         expected_version: int,
         correlation_id: str,
         idempotency_key: str,
-    ) -> Any:
+    ) -> ModelT:
         _required_text(idempotency_key, "idempotency_key")
         with transaction.atomic():
-            obj = cls.model.objects.for_tenant(_tenant_uuid(tenant_id)).select_for_update().filter(pk=object_id).first()
+            obj = (
+                cast(Any, cls.model)
+                .objects.for_tenant(_tenant_uuid(tenant_id))
+                .select_for_update()
+                .filter(pk=object_id)
+                .first()
+            )
             if obj is None:
                 raise NotFound()
             replay = next(
@@ -342,7 +362,7 @@ class _DefinitionService:
             if replay is not None:
                 if replay.get("command") != "delete":
                     raise BIConflict("Idempotency key was used for another command.", code="IDEMPOTENCY_CONFLICT")
-                return obj
+                return cast(ModelT, obj)
             if obj.deleted_at is not None:
                 raise NotFound()
             if obj.version != expected_version:
@@ -358,10 +378,10 @@ class _DefinitionService:
             obj.save(
                 update_fields=("state", "deleted_at", "version", "updated_by_id", "transition_history", "updated_at")
             )
-            return obj
+            return cast(ModelT, obj)
 
 
-class QueryService(_DefinitionService):
+class QueryService(_DefinitionService[QueryDefinition]):
     model = QueryDefinition
 
     @staticmethod
@@ -401,12 +421,17 @@ class QueryService(_DefinitionService):
                 detail.update({name: "Unknown parameter." for name in unknown})
                 detail.update({name: "This parameter is required." for name in missing})
                 raise ValidationError({"parameters": detail})
-            expected_types = {"string": str, "integer": int, "number": (int, float), "boolean": bool}
+            expected_types: dict[str, type[object] | tuple[type[object], ...]] = {
+                "string": str,
+                "integer": int,
+                "number": (int, float),
+                "boolean": bool,
+            }
             invalid = {}
             for name, value in parameters.items():
                 definition = schema.get(name, {})
                 declared_type = definition.get("type") if isinstance(definition, Mapping) else None
-                expected = expected_types.get(declared_type)
+                expected = expected_types.get(declared_type) if isinstance(declared_type, str) else None
                 if expected is not None and (
                     not isinstance(value, expected)
                     or declared_type in {"integer", "number"}
@@ -462,7 +487,7 @@ class QueryService(_DefinitionService):
             )
             if existing is not None:
                 if any(item.get("idempotency_key") == idempotency_key for item in existing.transition_history):
-                    return existing
+                    return cast(QueryDefinition, existing)
                 raise BIConflict("An active query already uses this code.", code="DUPLICATE_CODE")
             try:
                 obj = QueryDefinition.objects.create(
@@ -516,7 +541,7 @@ class QueryService(_DefinitionService):
             if replay is not None:
                 if replay.get("command") != "update":
                     raise BIConflict("Idempotency key was used for another command.", code="IDEMPOTENCY_CONFLICT")
-                return obj
+                return cast(QueryDefinition, obj)
             if obj.version != expected_version:
                 raise BIConflict("The supplied version is stale.", code="VERSION_CONFLICT")
             candidate = {field.name: getattr(obj, field.name) for field in QueryDefinition._meta.concrete_fields}
@@ -549,7 +574,7 @@ class QueryService(_DefinitionService):
                 _record("update", actor_id, correlation_id, idempotency_key=idempotency_key),
             ]
             obj.save()
-            return obj
+            return cast(QueryDefinition, obj)
 
     @classmethod
     def _publish_guard(cls, tenant_id: uuid.UUID | str, obj: QueryDefinition, command: str) -> None:
@@ -651,7 +676,7 @@ class QueryService(_DefinitionService):
         return ExecutionService.enqueue(tenant_id, query, actor_id, effective, correlation_id, idempotency_key)
 
 
-class ReportService(_DefinitionService):
+class ReportService(_DefinitionService[Report]):
     model = Report
 
     @classmethod
@@ -684,7 +709,7 @@ class ReportService(_DefinitionService):
             )
             if existing is not None:
                 if any(item.get("idempotency_key") == idempotency_key for item in existing.transition_history):
-                    return existing
+                    return cast(Report, existing)
                 raise BIConflict("An active report already uses this code.", code="DUPLICATE_CODE")
             try:
                 obj = Report.objects.create(
@@ -737,7 +762,7 @@ class ReportService(_DefinitionService):
             if replay is not None:
                 if replay.get("command") != "update":
                     raise BIConflict("Idempotency key was used for another command.", code="IDEMPOTENCY_CONFLICT")
-                return obj
+                return cast(Report, obj)
             if obj.version != expected_version:
                 raise BIConflict("The supplied version is stale.", code="VERSION_CONFLICT")
             data = dict(payload)
@@ -766,13 +791,12 @@ class ReportService(_DefinitionService):
                 _record("update", actor_id, correlation_id, idempotency_key=idempotency_key),
             ]
             obj.save()
-            return obj
+            return cast(Report, obj)
 
     @classmethod
     def _publish_guard(cls, tenant_id: uuid.UUID | str, obj: Report, command: str) -> None:
-        if command == "publish" and (
-            obj.legacy_query or not obj.query_definition_id or obj.query_definition.state != "published"
-        ):
+        query = obj.query_definition if obj.query_definition_id else None
+        if command == "publish" and (obj.legacy_query or query is None or query.state != "published"):
             raise BIConflict("A published query definition is required.", code="PUBLISH_GUARD_FAILED")
 
     @classmethod
@@ -845,16 +869,19 @@ class ReportService(_DefinitionService):
         report = _get(Report, tenant_id, report_id)
         if report.state != "published":
             raise BIConflict("Only published reports can execute.", code="NOT_PUBLISHED")
+        query = report.query_definition
+        if query is None:
+            raise BIConflict("A report with an executable query definition is required.", code="PUBLISH_GUARD_FAILED")
         merged = dict(report.default_parameters)
         merged.update(parameters)
-        merged = QueryService._effective_parameters(report.query_definition, merged)
+        merged = QueryService._effective_parameters(query, merged)
         QueryService.validate(tenant_id, report.query_definition_id, merged)
         return ExecutionService.enqueue(
-            tenant_id, report.query_definition, actor_id, merged, correlation_id, idempotency_key, report=report
+            tenant_id, query, actor_id, merged, correlation_id, idempotency_key, report=report
         )
 
 
-class DashboardService(_DefinitionService):
+class DashboardService(_DefinitionService[Dashboard]):
     model = Dashboard
 
     @staticmethod
@@ -897,7 +924,7 @@ class DashboardService(_DefinitionService):
         )
         if existing is not None:
             if any(item.get("idempotency_key") == idempotency_key for item in existing.transition_history):
-                return existing
+                return cast(Dashboard, existing)
             raise BIConflict("An active dashboard already uses this code.", code="DUPLICATE_CODE")
         try:
             return Dashboard.objects.create(
@@ -939,7 +966,7 @@ class DashboardService(_DefinitionService):
             if replay is not None:
                 if replay.get("command") != "update":
                     raise BIConflict("Idempotency key was used for another command.", code="IDEMPOTENCY_CONFLICT")
-                return obj
+                return cast(Dashboard, obj)
             if obj.version != expected_version:
                 raise BIConflict("The supplied version is stale.", code="VERSION_CONFLICT")
             for key, value in _model_payload(Dashboard, payload).items():
@@ -954,7 +981,7 @@ class DashboardService(_DefinitionService):
                 _record("update", actor_id, correlation_id, idempotency_key=idempotency_key),
             ]
             obj.save()
-            return obj
+            return cast(Dashboard, obj)
 
     @classmethod
     def _publish_guard(cls, tenant_id: uuid.UUID | str, obj: Dashboard, command: str) -> None:
@@ -1121,6 +1148,8 @@ class DashboardService(_DefinitionService):
             if widget.version != expected_version:
                 raise BIConflict("The supplied version is stale.", code="VERSION_CONFLICT")
             data = dict(payload)
+            if "query_definition_id" in data and "report_id" in data:
+                raise ValidationError({"source": "Exactly one governed query or report is required."})
             if "query_definition_id" in data:
                 data["query_definition"] = _get(QueryDefinition, tenant, data.pop("query_definition_id"))
                 data["report"] = None
@@ -1148,7 +1177,7 @@ class DashboardService(_DefinitionService):
             dashboard.version += 1
             dashboard.updated_by_id = actor_id
             dashboard.save(update_fields=("version", "updated_by_id", "updated_at"))
-            return widget
+            return cast(DashboardWidget, widget)
 
     @classmethod
     def remove_widget(
@@ -1179,7 +1208,7 @@ class DashboardService(_DefinitionService):
             dashboard.version += 1
             dashboard.updated_by_id = actor_id
             dashboard.save(update_fields=("version", "updated_by_id", "updated_at"))
-            return widget
+            return cast(DashboardWidget, widget)
 
     @classmethod
     def reorder_widgets(
@@ -1216,6 +1245,9 @@ class DashboardService(_DefinitionService):
             if {str(item.get("id")) for item in items} != set(current):
                 raise ValidationError({"widgets": "The complete active widget layout is required."})
             rectangles: list[tuple[int, int, int, int]] = []
+            for offset, widget in enumerate(current.values(), start=1):
+                widget.display_order = 10_000 + offset
+                widget.save(update_fields=("display_order", "updated_at"))
             for order, data in enumerate(items):
                 x, y, width, height = (int(data[key]) for key in ("x", "y", "width", "height"))
                 if x < 0 or y < 0 or not 1 <= width <= 12 or not 1 <= height <= 24 or x + width > 12:
@@ -1234,7 +1266,7 @@ class DashboardService(_DefinitionService):
             dashboard.version += 1
             dashboard.updated_by_id = actor_id
             dashboard.save(update_fields=("version", "updated_by_id", "updated_at"))
-            return dashboard
+            return cast(Dashboard, dashboard)
 
     @classmethod
     def share(
@@ -1290,7 +1322,7 @@ class DashboardService(_DefinitionService):
                 "correlation_id": correlation_id,
             },
         )
-        return share
+        return cast(DashboardShare, share)
 
     @classmethod
     def update_share(
@@ -1321,7 +1353,7 @@ class DashboardService(_DefinitionService):
             if key in payload:
                 setattr(share, key, payload[key])
         share.save()
-        return share
+        return cast(DashboardShare, share)
 
     @classmethod
     def revoke_share(
@@ -1357,7 +1389,7 @@ class DashboardService(_DefinitionService):
                 "correlation_id": correlation_id,
             },
         )
-        return share
+        return cast(DashboardShare, share)
 
     @classmethod
     def enqueue_execution(
@@ -1429,14 +1461,14 @@ class ExecutionService:
             )
             if not same_request:
                 raise BIConflict("Idempotency key was used for another execution.", code="IDEMPOTENCY_CONFLICT")
-            return existing
+            return cast(QueryExecution, existing)
         with transaction.atomic():
             job = async_jobs.enqueue(
                 tenant, actor_id, "business_intelligence.execute_query", {"tenant_id": str(tenant)}, key
             )
             existing = QueryExecution.objects.for_tenant(tenant).filter(idempotency_key=key).first()
             if existing is not None:
-                return existing
+                return cast(QueryExecution, existing)
             execution = QueryExecution.objects.create(
                 tenant_id=tenant,
                 query_definition=query,
@@ -1448,7 +1480,6 @@ class ExecutionService:
                 definition_version=query.version,
                 dataset_key=query.dataset_key,
                 dataset_version=query.dataset_version,
-                dataset_schema_fingerprint=query.dataset_schema_fingerprint,
                 parameters=dict(parameters),
                 status="queued",
                 transition_history=[_record("enqueue", actor_id, correlation_id)],
@@ -1483,7 +1514,7 @@ class ExecutionService:
             if execution is None:
                 raise NotFound()
             if execution.status in TERMINAL_EXECUTION_STATES:
-                return execution
+                return cast(QueryExecution, execution)
             execution.status = "running"
             execution.started_at = timezone.now()
             execution.transition_history = [
@@ -1542,7 +1573,9 @@ class ExecutionService:
                 except Exception:
                     pass
             with transaction.atomic():
-                execution = QueryExecution.objects.for_tenant(tenant).select_for_update().get(pk=execution.id)
+                execution = cast(
+                    QueryExecution, QueryExecution.objects.for_tenant(tenant).select_for_update().get(pk=execution.id)
+                )
                 if execution.status == "cancelled":
                     return execution
                 execution.status = "succeeded"
@@ -1578,7 +1611,9 @@ class ExecutionService:
             return execution
         except Exception as exc:
             with transaction.atomic():
-                execution = QueryExecution.objects.for_tenant(tenant).select_for_update().get(pk=execution.id)
+                execution = cast(
+                    QueryExecution, QueryExecution.objects.for_tenant(tenant).select_for_update().get(pk=execution.id)
+                )
                 if execution.status not in TERMINAL_EXECUTION_STATES:
                     execution.status = "failed"
                     execution.result_columns = []
@@ -1613,7 +1648,7 @@ class ExecutionService:
 
     @staticmethod
     def cache_key(
-        tenant_id: uuid.UUID | str, provider: object, query: QueryDefinition, parameters: Mapping[str, Any]
+        tenant_id: uuid.UUID | str, provider: DatasetProvider, query: QueryDefinition, parameters: Mapping[str, Any]
     ) -> str:
         descriptor = _descriptor_dict(provider.describe())
         freshness_getter = getattr(provider, "freshness_token", None)
@@ -1637,7 +1672,7 @@ class ExecutionService:
             if execution is None:
                 raise NotFound()
             if execution.status in TERMINAL_EXECUTION_STATES:
-                return execution
+                return cast(QueryExecution, execution)
             execution.status = "cancelled"
             execution.completed_at = timezone.now()
             execution.transition_history = [*execution.transition_history, _record("cancel", actor_id, correlation_id)]
@@ -1648,7 +1683,7 @@ class ExecutionService:
                 )
             except async_jobs.InvalidJobTransition:
                 pass
-        return execution
+        return cast(QueryExecution, execution)
 
     @staticmethod
     def get_result(tenant_id: uuid.UUID | str, execution_id: object) -> QueryExecution:

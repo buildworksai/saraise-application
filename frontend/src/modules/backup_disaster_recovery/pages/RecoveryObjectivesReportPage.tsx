@@ -21,6 +21,14 @@ import {
   inputClass,
 } from "../components/ModuleUi";
 
+const utcDayBoundary = (date: string, hour: 0 | 24): string => {
+  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
+  const offsetDays = hour === 24 ? 1 : 0;
+  return new Date(Date.UTC(year, month - 1, day + offsetDays, 0, 0, 0))
+    .toISOString()
+    .replace(".000Z", "Z");
+};
+
 export const RecoveryObjectivesReportPage = () => {
   const configuration = useBackupDisasterRecoveryConfiguration();
   const [from, setFrom] = useState("");
@@ -41,17 +49,14 @@ export const RecoveryObjectivesReportPage = () => {
     setTo(endDate);
     setBucket(reportConfiguration.default_bucket);
     setFilters({
-      from: new Date(`${startDate}T00:00:00`).toISOString(),
-      to: new Date(`${endDate}T23:59:59`).toISOString(),
+      from: utcDayBoundary(startDate, 0),
+      to: utcDayBoundary(endDate, 24),
       bucket: reportConfiguration.default_bucket,
     });
   }, [configuration.data, filters]);
   const query = useQuery({
     queryKey: ["bdr", "objectives", filters],
-    queryFn: () =>
-      filters
-        ? backupDisasterRecoveryService.getObjectiveReport(filters)
-        : Promise.reject(new Error("Report configuration unavailable")),
+    queryFn: () => backupDisasterRecoveryService.getObjectiveReport(filters!),
     enabled: filters !== null,
   });
   if (configuration.error)
@@ -84,8 +89,8 @@ export const RecoveryObjectivesReportPage = () => {
     setValidation("");
     setFilters({
       runbook_id: runbookId.trim() || undefined,
-      from: new Date(`${from}T00:00:00`).toISOString(),
-      to: new Date(`${to}T23:59:59`).toISOString(),
+      from: utcDayBoundary(from, 0),
+      to: utcDayBoundary(to, 24),
       bucket,
     });
   };
@@ -191,7 +196,7 @@ export const RecoveryObjectivesReportPage = () => {
               label="Failed restores"
               value={String(report.failed_restores)}
               hint="Failures remain in compliance totals"
-              state={report.failed_restores ? "bad" : "good"}
+              state={report.failed_restores ? "bad" : undefined}
             />
           </section>
           {report.buckets.length ? (
@@ -207,7 +212,7 @@ export const RecoveryObjectivesReportPage = () => {
               ]}
             >
               {report.buckets.map((item) => (
-                <tr key={`${item.period_start}-${item.runbook_id}-${item.runbook_version}`}>
+                <tr key={`${item.period_start}:${item.runbook_id}:v${item.runbook_version}`}>
                   <td className="px-4 py-3">
                     {formatDateTime(item.period_start)} – {formatDateTime(item.period_end)}
                   </td>

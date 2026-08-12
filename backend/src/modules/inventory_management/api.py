@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Mapping
-from typing import Any
+from typing import Any, cast
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
@@ -39,8 +39,114 @@ from .models import (
     StorageLocation,
     Warehouse,
 )
-from .permissions import *  # noqa: F403 - constants form the auditable route map
-from .serializers import *  # noqa: F403 - explicit serializer lookup maps below
+from .permissions import (
+    BATCH_CREATE,
+    BATCH_READ,
+    BATCH_TRANSITION,
+    BATCH_UPDATE,
+    BULK_IMPORT,
+    BULK_QUOTA,
+    CONFIGURATION_ACTIVATE,
+    CONFIGURATION_AUDIT,
+    CONFIGURATION_EXPORT,
+    CONFIGURATION_IMPORT,
+    CONFIGURATION_PREVIEW,
+    CONFIGURATION_READ,
+    CONFIGURATION_ROLLBACK,
+    CONFIGURATION_UPDATE,
+    CYCLE_COUNT_APPROVE,
+    CYCLE_COUNT_CANCEL,
+    CYCLE_COUNT_CREATE,
+    CYCLE_COUNT_POST,
+    CYCLE_COUNT_READ,
+    CYCLE_COUNT_REJECT,
+    CYCLE_COUNT_START,
+    CYCLE_COUNT_SUBMIT,
+    CYCLE_COUNT_UPDATE,
+    ITEM_CREATE,
+    ITEM_DELETE,
+    ITEM_READ,
+    ITEM_UPDATE,
+    LOCATION_CREATE,
+    LOCATION_DELETE,
+    LOCATION_READ,
+    LOCATION_UPDATE,
+    POST_QUOTA,
+    REPORT_READ,
+    RESERVATION_CREATE,
+    RESERVATION_READ,
+    RESERVATION_TRANSITION,
+    RESERVATION_UPDATE,
+    SERIAL_CREATE,
+    SERIAL_READ,
+    SERIAL_UPDATE,
+    STOCK_BALANCE_READ,
+    STOCK_ENTRY_APPROVE,
+    STOCK_ENTRY_CANCEL,
+    STOCK_ENTRY_CREATE,
+    STOCK_ENTRY_DELETE,
+    STOCK_ENTRY_POST,
+    STOCK_ENTRY_READ,
+    STOCK_ENTRY_REJECT,
+    STOCK_ENTRY_REVERSE,
+    STOCK_ENTRY_SUBMIT,
+    STOCK_ENTRY_UPDATE,
+    STOCK_LEDGER_READ,
+    WAREHOUSE_CREATE,
+    WAREHOUSE_DELETE,
+    WAREHOUSE_READ,
+    WAREHOUSE_UPDATE,
+    InventoryAccessMixin,
+)
+from .serializers import (
+    BatchCreateSerializer,
+    BatchDetailSerializer,
+    BatchListSerializer,
+    BatchUpdateSerializer,
+    BulkImportSerializer,
+    ConfigurationActivateSerializer,
+    ConfigurationDetailSerializer,
+    ConfigurationImportSerializer,
+    ConfigurationListSerializer,
+    ConfigurationPreviewSerializer,
+    ConfigurationRevisionSerializer,
+    ConfigurationRollbackSerializer,
+    ConfigurationUpdateSerializer,
+    CycleCountCreateSerializer,
+    CycleCountDetailSerializer,
+    CycleCountListSerializer,
+    CycleCountUpdateSerializer,
+    InventoryJobSerializer,
+    ItemCreateSerializer,
+    ItemDetailSerializer,
+    ItemListSerializer,
+    ItemUpdateSerializer,
+    ReasonCommandSerializer,
+    ReservationConsumeSerializer,
+    ReservationCreateSerializer,
+    ReservationDetailSerializer,
+    ReservationListSerializer,
+    ReservationUpdateSerializer,
+    SerialNumberCreateSerializer,
+    SerialNumberDetailSerializer,
+    SerialNumberListSerializer,
+    SerialNumberUpdateSerializer,
+    StockBalanceSerializer,
+    StockEntryCreateSerializer,
+    StockEntryDetailSerializer,
+    StockEntryListSerializer,
+    StockEntryUpdateSerializer,
+    StockLedgerSerializer,
+    StorageLocationCreateSerializer,
+    StorageLocationDetailSerializer,
+    StorageLocationListSerializer,
+    StorageLocationUpdateSerializer,
+    VersionedCommandSerializer,
+    WarehouseCreateSerializer,
+    WarehouseDetailSerializer,
+    WarehouseListSerializer,
+    WarehouseUpdateSerializer,
+)
 from .services import (
     BatchService,
     CycleCountService,
@@ -137,11 +243,17 @@ def _call(operation: Callable[[], Any]) -> Any:
 def _manager_for_tenant(model: type[Any], tenant_id: uuid.UUID) -> QuerySet[Any]:
     manager = model.objects
     if hasattr(manager, "for_tenant"):
-        return manager.for_tenant(tenant_id)
-    return manager.filter(tenant_id=tenant_id)
+        return cast(QuerySet[Any], manager.for_tenant(tenant_id))
+    return cast(QuerySet[Any], manager.filter(tenant_id=tenant_id))
 
 
-class InventoryViewSet(GovernedAPIViewMixin, InventoryAccessMixin, viewsets.GenericViewSet):  # type: ignore[misc]  # noqa: F405
+def _required_environment(environment: str | None) -> str:
+    if not environment:
+        raise NotFound("The requested inventory configuration was not found.")
+    return environment
+
+
+class InventoryViewSet(GovernedAPIViewMixin, InventoryAccessMixin, viewsets.GenericViewSet[Any]):  # type: ignore[misc]
     """Common tenant isolation, pagination, filtering, and serialization."""
 
     pagination_class = GovernedPageNumberPagination
@@ -152,7 +264,7 @@ class InventoryViewSet(GovernedAPIViewMixin, InventoryAccessMixin, viewsets.Gene
     ordering_fields: tuple[str, ...] = ()
     default_ordering: tuple[str, ...] = ("id",)
 
-    def get_serializer_class(self):  # type: ignore[no-untyped-def]
+    def get_serializer_class(self) -> type[Any]:
         serializer = self.serializer_classes.get(self.action)
         if serializer is None:
             raise RuntimeError(f"No serializer declared for {type(self).__name__}.{self.action}")
@@ -185,12 +297,12 @@ class InventoryViewSet(GovernedAPIViewMixin, InventoryAccessMixin, viewsets.Gene
         del params
         return queryset
 
-    def get_object(self):  # type: ignore[no-untyped-def]
+    def get_object(self) -> Any:
         obj = super().get_object()
         self.check_object_permissions(self.request, obj)
         return obj
 
-    def _serialize(self, instance: Any, *, many: bool = False, serializer_class: type[Any] | None = None):
+    def _serialize(self, instance: Any, *, many: bool = False, serializer_class: type[Any] | None = None) -> Any:
         return (serializer_class or self.get_serializer_class())(
             instance, many=many, context=self.get_serializer_context()
         )
@@ -904,7 +1016,7 @@ class ConfigurationViewSet(InventoryViewSet):
     ordering_fields = ("environment", "status", "updated_at")
     default_ordering = ("environment",)
 
-    def get_object(self):  # type: ignore[no-untyped-def]
+    def get_object(self) -> Any:
         """Resolve environment inside the authenticated tenant or return 404."""
         environment = self.kwargs.get("environment")
         if not environment:
@@ -924,6 +1036,7 @@ class ConfigurationViewSet(InventoryViewSet):
 
     def partial_update(self, request: Request, environment: str | None = None) -> Response:
         self.get_object()
+        resolved_environment = _required_environment(environment)
         serializer = ConfigurationUpdateSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)  # noqa: F405,E702
         values = dict(serializer.validated_data)
@@ -932,7 +1045,7 @@ class ConfigurationViewSet(InventoryViewSet):
         revision = _call(
             lambda: InventoryConfigurationService.create_revision(
                 _tenant(request),
-                environment,
+                resolved_environment,
                 _actor(request),
                 values,
                 reason,
@@ -943,24 +1056,26 @@ class ConfigurationViewSet(InventoryViewSet):
 
     @action(detail=True, methods=["post"])
     def preview(self, request: Request, environment: str | None = None) -> Response:
+        resolved_environment = _required_environment(environment)
         serializer = ConfigurationPreviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)  # noqa: F405,E702
         return Response(
             _call(
                 lambda: InventoryConfigurationService.preview(
-                    _tenant(request), environment, serializer.validated_data["document"]
+                    _tenant(request), resolved_environment, serializer.validated_data["document"]
                 )
             )
         )
 
     @action(detail=True, methods=["post"])
     def activate(self, request: Request, environment: str | None = None) -> Response:
+        resolved_environment = _required_environment(environment)
         serializer = ConfigurationActivateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)  # noqa: F405,E702
         obj = _call(
             lambda: InventoryConfigurationService.activate(
                 _tenant(request),
-                environment,
+                resolved_environment,
                 serializer.validated_data["revision"],
                 _actor(request),
                 _idempotency_key(request),
@@ -970,12 +1085,13 @@ class ConfigurationViewSet(InventoryViewSet):
 
     @action(detail=True, methods=["post"])
     def rollback(self, request: Request, environment: str | None = None) -> Response:
+        resolved_environment = _required_environment(environment)
         serializer = ConfigurationRollbackSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)  # noqa: F405,E702
         obj = _call(
             lambda: InventoryConfigurationService.rollback(
                 _tenant(request),
-                environment,
+                resolved_environment,
                 serializer.validated_data["revision"],
                 _actor(request),
                 serializer.validated_data["change_reason"],
@@ -986,12 +1102,13 @@ class ConfigurationViewSet(InventoryViewSet):
 
     @action(detail=True, methods=["post"], url_path="import")
     def import_document(self, request: Request, environment: str | None = None) -> Response:
+        resolved_environment = _required_environment(environment)
         serializer = ConfigurationImportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)  # noqa: F405,E702
         obj = _call(
             lambda: InventoryConfigurationService.import_document(
                 _tenant(request),
-                environment,
+                resolved_environment,
                 _actor(request),
                 serializer.validated_data["document"],
                 serializer.validated_data["change_reason"],
@@ -1002,7 +1119,10 @@ class ConfigurationViewSet(InventoryViewSet):
 
     @action(detail=True, methods=["get"], url_path="export")
     def export_document(self, request: Request, environment: str | None = None) -> Response:
-        return Response(_call(lambda: InventoryConfigurationService.export_document(_tenant(request), environment)))
+        resolved_environment = _required_environment(environment)
+        return Response(
+            _call(lambda: InventoryConfigurationService.export_document(_tenant(request), resolved_environment))
+        )
 
     @action(detail=True, methods=["get"])
     def history(self, request: Request, environment: str | None = None) -> Response:
@@ -1022,7 +1142,7 @@ class DashboardViewSet(InventoryViewSet):
         return Response(_call(lambda: InventoryQueryService.dashboard(_tenant(request))))
 
 
-class ImportViewSet(GovernedAPIViewMixin, InventoryAccessMixin, viewsets.ViewSet):  # type: ignore[misc]  # noqa: F405
+class ImportViewSet(GovernedAPIViewMixin, InventoryAccessMixin, viewsets.ViewSet):  # type: ignore[misc]
     action_permissions = {"create": BULK_IMPORT}  # noqa: F405
     action_quotas = {"create": BULK_QUOTA}  # noqa: F405
 

@@ -6,11 +6,13 @@ from unittest.mock import patch
 
 import pytest
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 
 from src.core.access.decision import HttpPolicyEvaluator, PolicyEvaluation
 from src.core.testing.factories import authenticated_api_client
 from src.modules.security_access_control.services import SecurityPolicyEvaluator
 
+from .. import api as hr_api
 from ..models import Department
 from ..services import DepartmentService
 from .factories import DepartmentFactory, EmployeeFactory
@@ -25,6 +27,25 @@ def assert_success_envelope(response: Any) -> dict[str, Any]:
     assert payload["meta"]["timestamp"]
     assert response.headers.get("X-Correlation-ID")
     return payload
+
+
+def test_parse_helpers_accept_absent_optional_values_and_reject_malformed_values() -> None:
+    assert hr_api._parse_uuid(None, "department") is None
+    assert hr_api._parse_date(None, "attendance_date") is None
+    assert hr_api._parse_bool(None, "active") is None
+    assert hr_api._parse_choice(None, "status", {"active"}) is None
+    assert hr_api._parse_choice("active", "status", {"active"}) == "active"
+    assert hr_api._string_set(["active", 1]) == {"active", "1"}
+    assert hr_api._string_set("active") == set()
+
+    with pytest.raises(ValidationError):
+        hr_api._parse_uuid("not-a-uuid", "department")
+    with pytest.raises(ValidationError):
+        hr_api._parse_date("08/03/2026", "attendance_date")
+    with pytest.raises(ValidationError):
+        hr_api._parse_bool("yes", "active")
+    with pytest.raises(ValidationError):
+        hr_api._parse_choice("terminated", "status", {"active"})
 
 
 def test_unauthenticated_is_401_and_put_is_unsupported(api_client: Any) -> None:

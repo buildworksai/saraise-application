@@ -21,6 +21,7 @@ import { accountingService, createIdempotencyKey } from "../services/accounting-
 import type { AccountCreate } from "../contracts";
 
 const MODULE_PATH = "/accounting-finance/accounts";
+type FormErrors = Partial<Record<"code" | "name", string>>;
 
 export const CreateAccountPage = () => {
   const navigate = useNavigate();
@@ -32,6 +33,7 @@ export const CreateAccountPage = () => {
     normal_balance: "debit",
     is_active: true,
   });
+  const [errors, setErrors] = useState<FormErrors>({});
 
   const createMutation = useMutation({
     mutationFn: (data: AccountCreate) =>
@@ -48,8 +50,11 @@ export const CreateAccountPage = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.code.trim() || !form.name.trim()) {
-      toast.error("Code and name are required");
+    const nextErrors: FormErrors = {};
+    if (!form.code.trim()) nextErrors.code = "Code is required";
+    if (!form.name.trim()) nextErrors.name = "Name is required";
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
       return;
     }
     createMutation.mutate(form);
@@ -70,22 +75,32 @@ export const CreateAccountPage = () => {
           <CardTitle>Account Details</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             <div>
-              <label className="text-sm font-medium mb-2 block">Code</label>
               <Input
+                id="account-code"
+                label="Code"
                 value={form.code}
-                onChange={(e) => setForm({ ...form, code: e.target.value })}
+                onChange={(e) => {
+                  setForm({ ...form, code: e.target.value });
+                  if (errors.code) setErrors({ ...errors, code: undefined });
+                }}
                 placeholder="e.g. 1000"
+                error={errors.code}
                 required
               />
             </div>
             <div>
-              <label className="text-sm font-medium mb-2 block">Name</label>
               <Input
+                id="account-name"
+                label="Name"
                 value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onChange={(e) => {
+                  setForm({ ...form, name: e.target.value });
+                  if (errors.name) setErrors({ ...errors, name: undefined });
+                }}
                 placeholder="Account name"
+                error={errors.name}
                 required
               />
             </div>

@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from datetime import timezone as datetime_timezone
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from django.core.cache import cache
@@ -21,7 +21,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.utils import timezone
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
 from rest_framework import status as http_status
 from rest_framework.exceptions import NotFound
 
@@ -122,7 +122,31 @@ def _configured_text(
     field: str,
     setting_path: str = "validation.name_max_length",
 ) -> str:
-    return _text(value, field, int(setting(runtime_configuration(tenant_id), setting_path)))
+    return _text(value, field, _setting_int(runtime_configuration(tenant_id), setting_path))
+
+
+def _coerce_int(value: object) -> int:
+    return int(cast(Any, value))
+
+
+def _setting_int(policy: Mapping[str, object], path: str) -> int:
+    return _coerce_int(setting(policy, path))
+
+
+def _mapping(value: object) -> dict[str, object]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return dict(cast(Any, value))
+
+
+def _list(value: object) -> list[object]:
+    if isinstance(value, list):
+        return value
+    return list(cast(Any, value))
+
+
+def _set(value: object) -> set[object]:
+    return set(cast(Any, value))
 
 
 def _encrypt_secret(value: str, capability: str) -> str:
@@ -137,7 +161,7 @@ def _safe_mapping(tenant_id: UUID, value: object, field: str) -> dict[str, objec
         raise IntegrationPlatformError("validation_error", f"{field} must be an object.", status_code=400)
     result = dict(value)
     policy = runtime_configuration(tenant_id)
-    secret_keys = frozenset(str(item) for item in setting(policy, "security.secret_field_names"))
+    secret_keys = frozenset(str(item) for item in _list(setting(policy, "security.secret_field_names")))
     _reject_secrets(result, field, secret_keys)
     try:
         encoded = json.dumps(result, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
@@ -145,7 +169,7 @@ def _safe_mapping(tenant_id: UUID, value: object, field: str) -> dict[str, objec
         raise IntegrationPlatformError(
             "validation_error", f"{field} must contain JSON values.", status_code=400
         ) from exc
-    maximum = int(setting(policy, "security.payload_max_bytes"))
+    maximum = _setting_int(policy, "security.payload_max_bytes")
     if len(encoded.encode("utf-8")) > maximum:
         raise IntegrationPlatformError("payload_too_large", f"{field} exceeds {maximum} bytes.", status_code=413)
     return result
@@ -194,7 +218,7 @@ def _publish(
     tenant_id: UUID, aggregate_type: str, aggregate_id: UUID, event_type: str, payload: Mapping[str, object]
 ) -> OutboxEvent:
     secret_keys = frozenset(
-        str(value) for value in setting(runtime_configuration(tenant_id), "security.secret_field_names")
+        str(value) for value in _list(setting(runtime_configuration(tenant_id), "security.secret_field_names"))
     )
     safe = _redact(dict(payload), secret_keys)
     assert isinstance(safe, dict)
@@ -292,7 +316,7 @@ def durable_job_receipt(job: object) -> dict[str, object]:
         "status": job.status,
         "correlation_id": job.correlation_id,
         "accepted_at": job.created_at,
-        "poll_after_ms": int(setting(runtime_configuration(job.tenant_id), "jobs.poll_after_ms")),
+        "poll_after_ms": _setting_int(runtime_configuration(job.tenant_id), "jobs.poll_after_ms"),
     }
 
 
@@ -318,13 +342,13 @@ def durable_job_state(job: object) -> dict[str, object]:
         )
     result = job.result if isinstance(job.result, Mapping) else {}
     policy = runtime_configuration(job.tenant_id)
-    progress_min = int(setting(policy, "jobs.progress_min"))
-    progress_max = int(setting(policy, "jobs.progress_max"))
+    progress_min = _setting_int(policy, "jobs.progress_min")
+    progress_max = _setting_int(policy, "jobs.progress_max")
     raw_progress = result.get("progress_percent")
     progress = raw_progress if isinstance(raw_progress, int) and progress_min <= raw_progress <= progress_max else None
     terminal = {"succeeded", "failed", "cancelled", "timed_out"}
     if progress is None:
-        progress = int(setting(policy, "jobs.terminal_progress")) if job.status in terminal else progress_min
+        progress = _setting_int(policy, "jobs.terminal_progress") if job.status in terminal else progress_min
     evidence_keys = {
         "outcome",
         "occurred_at",
@@ -444,7 +468,7 @@ class ConfigurationService:
             "valid": True,
             "environment": environment,
             "from_version": current["version"],
-            "to_version": int(current["version"]) + 1,
+            "to_version": _coerce_int(current["version"]) + 1,
             "changed_sections": changed,
             "before": dict(before),
             "after": validated,
@@ -698,7 +722,7 @@ class CredentialService:
 
     @staticmethod
     def _hint(tenant_id: UUID, plaintext: str) -> str:
-        visible = int(setting(runtime_configuration(tenant_id), "security.credential_hint_characters"))
+        visible = _setting_int(runtime_configuration(tenant_id), "security.credential_hint_characters")
         return f"••••{plaintext[-visible:]}" if visible and len(plaintext) >= visible else "••••"
 
     def create(
@@ -715,7 +739,7 @@ class CredentialService:
         if credential_type not in CredentialType.values:
             raise IntegrationPlatformError("validation_error", "Unsupported credential type.", status_code=400)
         raw = self._plaintext(
-            plaintext, int(setting(runtime_configuration(tenant_id), "validation.credential_max_length"))
+            plaintext, _setting_int(runtime_configuration(tenant_id), "validation.credential_max_length")
         )
         with transaction.atomic():
             if (
@@ -769,7 +793,7 @@ class CredentialService:
     ) -> IntegrationCredential:
         tenant_id, actor_id = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
         raw = self._plaintext(
-            plaintext, int(setting(runtime_configuration(tenant_id), "validation.credential_max_length"))
+            plaintext, _setting_int(runtime_configuration(tenant_id), "validation.credential_max_length")
         )
         key = _configured_text(tenant_id, idempotency_key, "idempotency_key")
         with transaction.atomic():
@@ -867,7 +891,7 @@ class CredentialService:
                     "credential_type": credential.credential_type,
                 },
             )
-            return credential
+            return cast(IntegrationCredential, credential)
 
     def resolve_active(self, tenant_id: UUID, integration_id: UUID, credential_type: str) -> CredentialBundle:
         tenant_id = _uuid(tenant_id, "tenant_id")
@@ -968,7 +992,7 @@ class IntegrationService:
         tenant_id, actor_id = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
         connector_input = data.get("connector_id", data.get("connector"))
         connector_id = connector_input.id if isinstance(connector_input, Connector) else connector_input
-        connector = self._connector(tenant_id, _uuid(connector_id, "connector_id"))
+        connector = self._connector(tenant_id, _uuid(cast(UUID | str, connector_id), "connector_id"))
         config = _safe_mapping(tenant_id, data.get("config", {}), "config")
         _validate_schema(config, connector.schema)
         if data.get("integration_type", connector.connector_type) != connector.connector_type:
@@ -1090,7 +1114,7 @@ class IntegrationService:
             raise IntegrationPlatformError(
                 "successful_test_required", "A current successful test is required for activation.", status_code=409
             )
-        return integration
+        return cast(Integration, integration)
 
     def deactivate(self, tenant_id: UUID, actor_id: UUID, integration_id: UUID, transition_key: str) -> Integration:
         tenant_id, actor_id = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
@@ -1112,7 +1136,7 @@ class IntegrationService:
                 "integration.updated",
                 {"actor_id": str(actor_id), "action": "deactivate", "adapter_key": integration.connector.adapter_key},
             )
-            return integration
+            return cast(Integration, integration)
 
     def request_test(self, tenant_id: UUID, actor_id: UUID, integration_id: UUID, idempotency_key: str) -> AsyncJob:
         tenant_id, actor_id = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
@@ -1265,7 +1289,7 @@ class IntegrationService:
         if found != set(ids):
             raise NotFound()
         try:
-            quota_cost = int(setting(runtime_configuration(tenant_id), "synchronization.quota_cost"))
+            quota_cost = _setting_int(runtime_configuration(tenant_id), "synchronization.quota_cost")
             quota = self.quotas.consume(tenant_id, "integration_platform.integration:sync", cost=quota_cost)
         except Exception as exc:
             raise CapabilityUnavailable(capability="sync_quota") from exc
@@ -1341,7 +1365,7 @@ class IntegrationService:
         if len(mappings) != len(mapping_ids):
             raise NotFound()
         if direction == "push":
-            failure = OperationResult.failed(
+            failure: OperationResult[dict[str, object]] = OperationResult.failed(
                 code="sync_source_unavailable",
                 message="No governed source contract supplied records for this push job.",
                 evidence={"job_id": str(job.id)},
@@ -1360,7 +1384,7 @@ class IntegrationService:
                 },
             )
             return failure
-        batch_limit = int(setting(runtime_configuration(tenant_id), "synchronization.pull_batch_limit"))
+        batch_limit = _setting_int(runtime_configuration(tenant_id), "synchronization.pull_batch_limit")
         result = adapter.pull(integration.config, credential, RecordCursor(), batch_limit)
         if (
             not isinstance(result, OperationResult)
@@ -1458,7 +1482,7 @@ class WebhookService:
 
     @staticmethod
     def _new_secret(tenant_id: UUID) -> str:
-        return secrets.token_urlsafe(int(setting(runtime_configuration(tenant_id), "security.signing_secret_bytes")))
+        return secrets.token_urlsafe(_setting_int(runtime_configuration(tenant_id), "security.signing_secret_bytes"))
 
     def create(self, tenant_id: UUID, actor_id: UUID, data: Mapping[str, object]) -> SecretOnce:
         tenant_id, actor_id = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
@@ -1471,11 +1495,13 @@ class WebhookService:
                 name=_configured_text(tenant_id, data.get("name"), "name"),
                 direction=str(data.get("direction") or ""),
                 url=str(data.get("url") or ""),
-                events=list(data.get("events") or []),
+                events=_list(data.get("events") or []),
                 encrypted_signing_secret=_encrypt_secret(secret, "webhook_secret_encryption"),
                 config=_safe_mapping(tenant_id, data.get("config", {}), "config"),
-                timeout_seconds=int(data.get("timeout_seconds", setting(policy, "webhooks.timeout_seconds_default"))),
-                max_attempts=int(data.get("max_attempts", setting(policy, "webhooks.max_attempts_default"))),
+                timeout_seconds=_coerce_int(
+                    data.get("timeout_seconds", setting(policy, "webhooks.timeout_seconds_default"))
+                ),
+                max_attempts=_coerce_int(data.get("max_attempts", setting(policy, "webhooks.max_attempts_default"))),
             )
             _model_validation(webhook)
             webhook.save()
@@ -1566,7 +1592,7 @@ class WebhookService:
                 "webhook.updated",
                 {"actor_id": str(actor_id), "action": command, "direction": webhook.direction},
             )
-            return webhook
+            return cast(Webhook, webhook)
 
     def rotate_secret(self, tenant_id: UUID, actor_id: UUID, webhook_id: UUID, transition_key: str) -> SecretOnce:
         tenant_id, actor_id = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
@@ -1616,7 +1642,7 @@ class WebhookService:
         if webhook is None:
             raise NotFound()
         policy = runtime_configuration(webhook.tenant_id)
-        payload_max = int(setting(policy, "security.payload_max_bytes"))
+        payload_max = _setting_int(policy, "security.payload_max_bytes")
         if not isinstance(raw_body, bytes) or len(raw_body) > payload_max:
             raise IntegrationPlatformError("invalid_payload", "Webhook body is invalid or too large.", status_code=400)
         try:
@@ -1625,14 +1651,14 @@ class WebhookService:
             raise IntegrationPlatformError(
                 "invalid_timestamp", "Webhook timestamp is invalid.", status_code=401
             ) from exc
-        if abs((timezone.now() - issued_at).total_seconds()) > int(
-            setting(policy, "security.signature_window_seconds")
+        if abs((timezone.now() - issued_at).total_seconds()) > _setting_int(
+            policy, "security.signature_window_seconds"
         ):
             raise IntegrationPlatformError(
                 "stale_signature", "Webhook signature timestamp is outside the allowed window.", status_code=401
             )
-        nonce = _text(nonce, "nonce", int(setting(policy, "validation.nonce_max_length")))
-        signature = _text(signature, "signature", int(setting(policy, "validation.signature_max_length")))
+        nonce = _text(nonce, "nonce", _setting_int(policy, "validation.nonce_max_length"))
+        signature = _text(signature, "signature", _setting_int(policy, "validation.signature_max_length"))
         try:
             secret = EncryptionService.decrypt(webhook.encrypted_signing_secret)
         except Exception as exc:
@@ -1647,7 +1673,7 @@ class WebhookService:
             f"integration-platform:webhook-nonce:{webhook.public_id}:{hashlib.sha256(nonce.encode()).hexdigest()}"
         )
         try:
-            accepted = cache.add(nonce_key, "used", timeout=int(setting(policy, "security.signature_window_seconds")))
+            accepted = cache.add(nonce_key, "used", timeout=_setting_int(policy, "security.signature_window_seconds"))
         except Exception as exc:
             raise CapabilityUnavailable(capability="webhook_replay_protection") from exc
         if not accepted:
@@ -1673,7 +1699,8 @@ class WebhookService:
                 "invalid_json", "Webhook body must be valid UTF-8 JSON.", status_code=400
             ) from exc
         secret_keys = frozenset(
-            str(value) for value in setting(runtime_configuration(webhook.tenant_id), "security.secret_field_names")
+            str(value)
+            for value in _list(setting(runtime_configuration(webhook.tenant_id), "security.secret_field_names"))
         )
         payload = _redact(parsed, secret_keys)
         body_hash = hashlib.sha256(raw_body).hexdigest()
@@ -1718,7 +1745,7 @@ class WebhookService:
                 "event_not_subscribed", "The webhook does not subscribe to this event.", status_code=400
             )
         secret_keys = frozenset(
-            str(value) for value in setting(runtime_configuration(tenant_id), "security.secret_field_names")
+            str(value) for value in _list(setting(runtime_configuration(tenant_id), "security.secret_field_names"))
         )
         safe_payload = _redact(dict(payload), secret_keys)
         canonical = json.dumps(safe_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -1801,7 +1828,7 @@ class WebhookService:
                     "attempt_count": delivery.attempt_count,
                 },
             )
-            return delivery
+            return cast(WebhookDelivery, delivery)
 
 
 class WebhookDeliveryWorker:
@@ -1813,9 +1840,9 @@ class WebhookDeliveryWorker:
             return self.http_client
         policy = runtime_configuration(webhook.tenant_id)
         return ResilientHttpClient(
-            connect_timeout=min(int(setting(policy, "webhooks.connect_timeout_max_seconds")), webhook.timeout_seconds),
+            connect_timeout=min(_setting_int(policy, "webhooks.connect_timeout_max_seconds"), webhook.timeout_seconds),
             read_timeout=webhook.timeout_seconds,
-            max_retries=int(setting(policy, "webhooks.http_client_retries")),
+            max_retries=_setting_int(policy, "webhooks.http_client_retries"),
         )
 
     def execute(self, tenant_id: UUID, job: AsyncJob) -> OperationResult[dict[str, object]]:
@@ -1862,7 +1889,7 @@ class WebhookDeliveryWorker:
             "utf-8"
         )
         timestamp = str(int(timezone.now().timestamp()))
-        nonce = secrets.token_urlsafe(int(setting(runtime_configuration(tenant_id), "security.outbound_nonce_bytes")))
+        nonce = secrets.token_urlsafe(_setting_int(runtime_configuration(tenant_id), "security.outbound_nonce_bytes"))
         try:
             secret = EncryptionService.decrypt(webhook.encrypted_signing_secret)
         except Exception as exc:
@@ -1897,9 +1924,9 @@ class WebhookDeliveryWorker:
         delivery.save(update_fields=("response_code", "duration_ms", "updated_at"))
         policy = runtime_configuration(tenant_id)
         if (
-            int(setting(policy, "webhooks.success_status_min"))
+            _setting_int(policy, "webhooks.success_status_min")
             <= code
-            <= int(setting(policy, "webhooks.success_status_max"))
+            <= _setting_int(policy, "webhooks.success_status_max")
         ):
             self._record_attempt(delivery, "delivered")
             delivery.delivered_at = timezone.now()
@@ -1932,8 +1959,8 @@ class WebhookDeliveryWorker:
             )
             return OperationResult.succeeded(evidence, evidence=evidence, provider=webhook.url.split("/", 3)[2])
         error = RuntimeError(f"HTTP {code}")
-        if code in set(setting(policy, "webhooks.retry_statuses")) or code >= int(
-            setting(policy, "webhooks.retry_server_error_min")
+        if code in _set(setting(policy, "webhooks.retry_statuses")) or code >= _setting_int(
+            policy, "webhooks.retry_server_error_min"
         ):
             return (
                 self.schedule_retry(tenant_id, delivery.id, error)
@@ -1951,7 +1978,7 @@ class WebhookDeliveryWorker:
             raise NotFound()
         if delivery.attempt_count >= delivery.max_attempts:
             return self.move_to_dead_letter(tenant_id, delivery.id, error)
-        retry_max = int(setting(runtime_configuration(tenant_id), "webhooks.retry_delay_max_seconds"))
+        retry_max = _setting_int(runtime_configuration(tenant_id), "webhooks.retry_delay_max_seconds")
         base = min(retry_max, 2 ** max(0, delivery.attempt_count - 1))
         jitter = int.from_bytes(
             hashlib.sha256(f"{delivery.id}:{delivery.attempt_count}".encode()).digest()[:2], "big"
@@ -2100,7 +2127,7 @@ class WebhookDeliveryWorker:
                     "Immutable delivery attempt evidence conflicts with the requested outcome.",
                     status_code=409,
                 )
-            return existing
+            return cast(WebhookDeliveryAttempt, existing)
         attempt = WebhookDeliveryAttempt(
             tenant_id=delivery.tenant_id,
             delivery=delivery,
@@ -2117,7 +2144,7 @@ class WebhookDeliveryWorker:
 
 def _error_code(tenant_id: UUID, error: Exception) -> str:
     name = type(error).__name__.lower()
-    maximum = int(setting(runtime_configuration(tenant_id), "validation.error_code_max_length"))
+    maximum = _setting_int(runtime_configuration(tenant_id), "validation.error_code_max_length")
     return name[:maximum] if name else "dependency_failure"
 
 
@@ -2137,8 +2164,8 @@ class DataMappingService:
                 name=_configured_text(tenant_id, data.get("name"), "name"),
                 source_field=_configured_text(tenant_id, data.get("source_field"), "source_field"),
                 target_field=_configured_text(tenant_id, data.get("target_field"), "target_field"),
-                transform=dict(data.get("transform") or {}),
-                position=int(
+                transform=_mapping(data.get("transform") or {}),
+                position=_coerce_int(
                     data.get("position", setting(runtime_configuration(tenant_id), "mapping.default_position"))
                 ),
                 is_required=bool(
@@ -2212,16 +2239,10 @@ class DataMappingService:
     ) -> dict[str, object]:
         tenant_id = _uuid(tenant_id, "tenant_id")
         integration = _active(Integration, tenant_id, integration_id)
-        source_fields = (
-            set((source_schema.get("properties") or {}).keys())
-            if isinstance(source_schema.get("properties"), Mapping)
-            else set()
-        )
-        target_fields = (
-            set((target_schema.get("properties") or {}).keys())
-            if isinstance(target_schema.get("properties"), Mapping)
-            else set()
-        )
+        source_properties = source_schema.get("properties")
+        target_properties = target_schema.get("properties")
+        source_fields = set(source_properties.keys()) if isinstance(source_properties, Mapping) else set()
+        target_fields = set(target_properties.keys()) if isinstance(target_properties, Mapping) else set()
         errors: list[dict[str, object]] = []
         for index, item in enumerate(mappings):
             if isinstance(item, DataMapping):
@@ -2230,8 +2251,8 @@ class DataMappingService:
                 source, target, transform = item.source_field, item.target_field, item.transform
             else:
                 source, target, transform = (
-                    item.get("source_field"),
-                    item.get("target_field"),
+                    str(item.get("source_field", "")),
+                    str(item.get("target_field", "")),
                     item.get("transform", {}),
                 )
             try:
@@ -2260,7 +2281,7 @@ class DataMappingService:
         sample: Mapping[str, object] | Sequence[Mapping[str, object]],
     ) -> TransformResult:
         records = (sample,) if isinstance(sample, Mapping) else tuple(sample)
-        limit = int(setting(runtime_configuration(_uuid(tenant_id, "tenant_id")), "mapping.preview_record_limit"))
+        limit = _setting_int(runtime_configuration(_uuid(tenant_id, "tenant_id")), "mapping.preview_record_limit")
         if not records or len(records) > limit or any(not isinstance(record, Mapping) for record in records):
             raise IntegrationPlatformError(
                 "validation_error",

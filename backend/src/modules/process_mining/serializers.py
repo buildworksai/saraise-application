@@ -127,7 +127,12 @@ class CanonicalEventInputSerializer(serializers.Serializer):
 class EventBatchIngestSerializer(RejectServerOwnedFieldsMixin, serializers.Serializer):
     process_name = serializers.CharField(max_length=255)
     source_module = serializers.CharField(max_length=100)
-    events = CanonicalEventInputSerializer(many=True, allow_empty=False, max_length=10_000)
+    events = CanonicalEventInputSerializer(many=True, allow_empty=False)
+
+    def validate_events(self, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if len(value) > 10_000:
+            raise serializers.ValidationError("At most 10000 events can be ingested in one batch.")
+        return value
 
 
 EXPORT_LIST_FIELDS = (

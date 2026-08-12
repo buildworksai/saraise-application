@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import uuid
 from datetime import timedelta
 
@@ -17,6 +18,7 @@ from ..adapter_registry import register_backup_catalog, register_storage_adapter
 from ..models import RecoveryPointStatus, RestoreRun, RestoreRunStatus, ScopeType
 from ..ports import BackupArtifactDescriptor, BackupType
 from ..ports import ScopeType as PortScopeType
+from ..services import DEFAULT_CONFIGURATION_DOCUMENT
 from .factories import recovery_point_factory, runbook_factory, runbook_step_factory, step_execution_factory
 from .test_services import Catalog, Storage
 
@@ -474,6 +476,86 @@ def test_complete_governed_api_workflow(authenticated_tenant_a_client, tenant_a)
     )
     assert retired.status_code == status.HTTP_200_OK
     assert client.get(f"{PREFIX}/reports/objectives/?bucket=day").status_code == 200
+    report_from = (now - timedelta(days=7)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    report_to = (now + timedelta(days=1)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    ranged_report = client.get(f"{PREFIX}/reports/objectives/?from={report_from}&to={report_to}&bucket=month")
+    assert ranged_report.status_code == status.HTTP_200_OK
     readiness = client.get(f"{PREFIX}/readiness/")
     assert readiness.status_code == 200
     assert "provider_state" in readiness.json()["data"]
+
+
+@pytest.mark.django_db
+def test_configuration_api_round_trip_versions_import_export_and_rollback(authenticated_tenant_a_client):
+    client = authenticated_tenant_a_client
+    document = copy.deepcopy(dict(DEFAULT_CONFIGURATION_DOCUMENT))
+    document["reports"]["default_bucket"] = "day"
+    rollout = {"enabled": True, "roles": ["operator"], "cohorts": ["pilot"]}
+
+    preview = client.post(
+        f"{PREFIX}/configurations/preview/",
+        {"document": document, "rollout": rollout, "environment": "test"},
+        format="json",
+    )
+    assert preview.status_code == status.HTTP_200_OK, preview.content
+    assert preview.json()["data"]["valid"] is True
+
+    updated = client.patch(
+        f"{PREFIX}/configurations/current/",
+        {"document": document, "rollout": rollout, "environment": "test"},
+        HTTP_X_CORRELATION_ID=str(uuid.uuid4()),
+        format="json",
+    )
+    assert updated.status_code == status.HTTP_200_OK, updated.content
+    assert updated.json()["data"]["version"] == 1
+
+    current = client.get(f"{PREFIX}/configurations/current/?environment=test")
+    assert current.status_code == status.HTTP_200_OK
+    assert current.json()["data"]["rollout"] == rollout
+
+    exported = client.get(f"{PREFIX}/configurations/export-document/?environment=test")
+    assert exported.status_code == status.HTTP_200_OK
+    exported_payload = exported.json()["data"]
+    assert exported_payload["schema"] == "saraise.backup-disaster-recovery.configuration/v1"
+
+    imported_payload = dict(exported_payload)
+    imported_payload["document"] = copy.deepcopy(exported_payload["document"])
+    imported_payload["document"]["reports"]["default_bucket"] = "week"
+    imported = client.post(
+        f"{PREFIX}/configurations/import-document/",
+        imported_payload,
+        HTTP_X_CORRELATION_ID=str(uuid.uuid4()),
+        format="json",
+    )
+    assert imported.status_code == status.HTTP_200_OK, imported.content
+    assert imported.json()["data"]["version"] == 2
+
+    versions = client.get(f"{PREFIX}/configurations/versions/?environment=test")
+    assert versions.status_code == status.HTTP_200_OK
+    assert [item["version"] for item in versions.json()["data"]] == [2, 1]
+
+    rolled_back = client.post(
+        f"{PREFIX}/configurations/rollback/",
+        {"environment": "test", "version": 1},
+        HTTP_X_CORRELATION_ID=str(uuid.uuid4()),
+        format="json",
+    )
+    assert rolled_back.status_code == status.HTTP_200_OK
+    assert rolled_back.json()["data"]["version"] == 3
+    assert rolled_back.json()["data"]["document"]["reports"]["default_bucket"] == "day"
+
+    missing_version = client.post(
+        f"{PREFIX}/configurations/rollback/",
+        {"environment": "test", "version": 99},
+        HTTP_X_CORRELATION_ID=str(uuid.uuid4()),
+        format="json",
+    )
+    assert missing_version.status_code == status.HTTP_404_NOT_FOUND
+
+    bad_import = client.post(
+        f"{PREFIX}/configurations/import-document/",
+        {"rollout": rollout},
+        HTTP_X_CORRELATION_ID=str(uuid.uuid4()),
+        format="json",
+    )
+    assert bad_import.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY

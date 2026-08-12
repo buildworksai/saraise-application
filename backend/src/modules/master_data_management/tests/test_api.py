@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import inspect
 import uuid
+from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from src.core.access.decision import AccessDecision, AccessDecisionPipeline, AccessReasonCode
@@ -20,6 +23,7 @@ from src.modules.master_data_management.serializers import (
     MasterEntityTypeCreateSerializer,
     MatchingRuleWriteSerializer,
 )
+from src.modules.master_data_management.services import ConfigurationService
 
 from .factories import (
     actor_id,
@@ -66,6 +70,37 @@ def envelope(response: object) -> dict[str, object]:
     assert payload["meta"]["correlation_id"]  # type: ignore[index]
     assert payload["meta"]["timestamp"]  # type: ignore[index]
     return payload
+
+
+def test_api_boundary_helpers_are_strict_and_deterministic() -> None:
+    assert api.CsrfSessionAuthentication().authenticate_header(SimpleNamespace()) == "Session"
+
+    direct = uuid.uuid4()
+    assert api._actor_id(SimpleNamespace(user=SimpleNamespace(pk=direct))) == direct
+    derived = api._actor_id(SimpleNamespace(user=SimpleNamespace(pk="operator-1")))
+    assert derived == uuid.uuid5(uuid.NAMESPACE_URL, "saraise:user:operator-1")
+
+    assert api._uuid(direct, "entity_id") == direct
+    assert api._uuid(str(direct), "entity_id") == direct
+    with pytest.raises(ValidationError):
+        api._uuid("not-a-uuid", "entity_id")
+
+
+def test_governed_mdm_query_helpers_reject_unknown_ordering_and_invalid_booleans() -> None:
+    view = api.MasterEntityTypeViewSet()
+    view.request = SimpleNamespace(query_params={"unknown": "1"})
+    with pytest.raises(ValidationError):
+        view._validate_query({"is_active"})
+
+    view.request = SimpleNamespace(query_params={"is_active": "true"})
+    assert view._boolean_query("is_active") is True
+    view.request = SimpleNamespace(query_params={"is_active": "false"})
+    assert view._boolean_query("is_active") is False
+    view.request = SimpleNamespace(query_params={})
+    assert view._boolean_query("is_active") is None
+    view.request = SimpleNamespace(query_params={"is_active": "maybe"})
+    with pytest.raises(ValidationError):
+        view._boolean_query("is_active")
 
 
 @pytest.mark.parametrize(
@@ -606,6 +641,133 @@ def test_rule_issue_match_job_dashboard_and_health_surfaces(
     ready_payload = envelope(ready)
     serialized = str(ready_payload).lower()
     assert "password" not in serialized and "select " not in serialized
+
+
+def test_configuration_http_write_patch_import_rollback_and_history_are_tenant_audited(
+    authenticated_tenant_a_client: APIClient,
+) -> None:
+    client = authenticated_tenant_a_client
+    document = ConfigurationService.defaults()
+    create = client.post(
+        f"{BASE}/configurations/",
+        {
+            "document": document,
+            "expected_version": 0,
+            "idempotency_key": "api-mdm-config-create",
+            "reason": "Create tenant MDM configuration",
+        },
+        format="json",
+    )
+    assert create.status_code == 201, create.content
+    current = envelope(create)["data"]
+    assert current["version"] == 1  # type: ignore[index]
+
+    updated_document = deepcopy(document)
+    updated_document["operational"]["job_poll_interval_ms"] = 750  # type: ignore[index]
+    patch = client.patch(
+        f"{BASE}/configurations/{current['id']}/",
+        {
+            "document": updated_document,
+            "idempotency_key": "api-mdm-config-patch",
+            "reason": "Tune operational polling",
+        },
+        format="json",
+    )
+    assert patch.status_code == 200, patch.content
+    assert envelope(patch)["data"]["version"] == 2  # type: ignore[index]
+
+    imported_document = deepcopy(updated_document)
+    imported_document["feature_rollout"]["percentage"] = 25  # type: ignore[index]
+    imported = client.post(
+        f"{BASE}/configurations/import/",
+        {
+            "document": imported_document,
+            "expected_version": 2,
+            "idempotency_key": "api-mdm-config-import",
+            "reason": "Promote reviewed configuration",
+        },
+        format="json",
+    )
+    assert imported.status_code == 200, imported.content
+    assert envelope(imported)["data"]["version"] == 3  # type: ignore[index]
+
+    rollback = client.post(
+        f"{BASE}/configurations/rollback/",
+        {
+            "version": 1,
+            "idempotency_key": "api-mdm-config-rollback",
+            "reason": "Restore initial tenant configuration",
+        },
+        format="json",
+    )
+    assert rollback.status_code == 200, rollback.content
+    assert envelope(rollback)["data"]["version"] == 4  # type: ignore[index]
+    assert (
+        envelope(rollback)["data"]["document"]["operational"]["job_poll_interval_ms"]
+        == document["operational"]["job_poll_interval_ms"]  # type: ignore[index]
+    )
+
+    exported = envelope(client.get(f"{BASE}/configurations/export/"))["data"]
+    assert exported["configuration_version"] == 4  # type: ignore[index]
+    assert exported["module"] == "master_data_management"  # type: ignore[index]
+
+    history = envelope(client.get(f"{BASE}/configurations/history/"))["data"]
+    assert [entry["change_type"] for entry in history] == [  # type: ignore[union-attr]
+        "rollback",
+        "import",
+        "update",
+        "create",
+    ]
+
+
+def test_configuration_http_rejects_invalid_stale_and_cross_tenant_mutation(
+    authenticated_tenant_a_client: APIClient,
+    tenant_b: object,
+) -> None:
+    client = authenticated_tenant_a_client
+    foreign = ConfigurationService.write(
+        tenant_b.id,  # type: ignore[attr-defined]
+        actor_id("foreign-config"),
+        document=ConfigurationService.defaults(),
+        idempotency_key="foreign-mdm-config",
+        reason="Foreign tenant configuration",
+    )
+    assert (
+        client.patch(
+            f"{BASE}/configurations/{foreign.id}/",
+            {
+                "document": ConfigurationService.defaults(),
+                "idempotency_key": "api-mdm-config-cross-tenant",
+                "reason": "Cross tenant update attempt",
+            },
+            format="json",
+        ).status_code
+        == 404
+    )
+
+    current = envelope(client.get(f"{BASE}/configurations/"))["data"]
+    invalid = deepcopy(current["document"])  # type: ignore[index]
+    invalid["matching"]["outcomes"]["review"] = invalid["matching"]["outcomes"]["auto_confirm"]  # type: ignore[index]
+    rejected = client.post(
+        f"{BASE}/configurations/preview/",
+        {"document": invalid},
+        format="json",
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["error"]["code"] == "INVALID_CONFIGURATION"
+
+    stale = client.patch(
+        f"{BASE}/configurations/{current['id']}/",
+        {
+            "document": ConfigurationService.defaults(),
+            "expected_version": 99,
+            "idempotency_key": "api-mdm-config-stale-version",
+            "reason": "Stale operator save",
+        },
+        format="json",
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "CONFIGURATION_VERSION_CONFLICT"
 
 
 def test_legacy_v1_route_put_and_hard_delete_are_not_exposed(

@@ -21,6 +21,7 @@ from src.modules.email_marketing.models import (
 from src.modules.email_marketing.permissions import EmailMarketingAccessMixin
 from src.modules.email_marketing.services import (
     ConfigurationService,
+    _validate_tenant_json,
     get_platform_runtime_defaults,
     validate_configuration_document,
 )
@@ -93,6 +94,84 @@ def test_invalid_configuration_is_unsavable_and_audit_is_immutable() -> None:
         EmailMarketingConfigurationVersion.objects.for_tenant(tenant).update(change_type="tampered")
     with pytest.raises(ImmutableEvidenceError):
         audit.delete()
+
+
+@pytest.mark.parametrize(
+    ("path", "mutator", "expected_key"),
+    [
+        (
+            "retry delay ordering",
+            lambda document: document["resilience"].update(
+                {"retry_base_delay_seconds": 10, "retry_max_delay_seconds": 1}
+            ),
+            "resilience",
+        ),
+        (
+            "protected sent evidence",
+            lambda document: document["workflows"].update({"campaign_physical_delete_protected_states": ["cancelled"]}),
+            "workflows.campaign_physical_delete_protected_states",
+        ),
+        (
+            "acknowledgement completeness",
+            lambda document: document["workflows"]["provider_acknowledgement_mapping"].pop("failed"),
+            "workflows.provider_acknowledgement_mapping",
+        ),
+        (
+            "mandatory suppression scope",
+            lambda document: document["compliance"].update({"suppression_scopes": ["marketing"]}),
+            "compliance.suppression_scopes",
+        ),
+        (
+            "invalid delivery backend",
+            lambda document: document["integrations"].update({"allowed_delivery_backends": ["unsafe.Backend"]}),
+            "integrations",
+        ),
+        (
+            "invalid status semantic",
+            lambda document: document["display"]["status_semantics"].update({"draft": "purple"}),
+            "display.status_semantics",
+        ),
+        (
+            "public rate limit",
+            lambda document: document["rate_limits"].update({"public_per_minute": 0}),
+            "rate_limits.public_per_minute",
+        ),
+    ],
+)
+def test_configuration_validation_rejects_unsafe_runtime_policy_edges(
+    path: str,
+    mutator: object,
+    expected_key: str,
+) -> None:
+    document = get_platform_runtime_defaults()
+    mutator(document)
+
+    with pytest.raises(ValidationError) as exc_info:
+        validate_configuration_document(document)
+
+    assert expected_key in exc_info.value.detail or f"document.{expected_key}" in exc_info.value.detail, path
+
+
+def test_tenant_json_validation_enforces_configured_serialization_limits() -> None:
+    tenant = uuid.uuid4()
+    current = ConfigurationService.current(tenant)
+    document = deepcopy(current.document)
+    document["limits"]["serializer_json_max_depth"] = 2
+    document["limits"]["serializer_json_max_keys"] = 2
+    document["limits"]["template_design_max_bytes"] = 20
+    ConfigurationService.update(tenant, uuid.uuid4(), document, expected_version=current.version)
+
+    _validate_tenant_json(tenant, {"a": 1, "b": 2}, "template_design_max_bytes", "design_json")
+    with pytest.raises(ValidationError, match="byte limit"):
+        _validate_tenant_json(tenant, {"long": "x" * 30}, "template_design_max_bytes", "design_json")
+    with pytest.raises(ValidationError, match="nesting limit"):
+        _validate_tenant_json(tenant, {"a": {"b": {"c": 1}}}, "template_design_max_bytes", "design_json")
+    with pytest.raises(ValidationError, match="key limit"):
+        _validate_tenant_json(tenant, {"a": 1, "b": 2, "c": 3}, "template_design_max_bytes", "design_json")
+    with pytest.raises(ValidationError, match="invalid or oversized key"):
+        _validate_tenant_json(tenant, {1: "bad"}, "template_design_max_bytes", "design_json")
+    with pytest.raises(ValidationError, match="valid JSON"):
+        _validate_tenant_json(tenant, {"bad": object()}, "template_design_max_bytes", "design_json")
 
 
 def test_cross_tenant_configuration_relationship_is_rejected() -> None:

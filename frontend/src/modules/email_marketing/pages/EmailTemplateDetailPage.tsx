@@ -54,6 +54,7 @@ export function EmailTemplateDetailPage() {
       emailMarketingService.templates.clone(id, { new_code: cloneCode.toUpperCase() }),
     onSuccess: async (result) => {
       await refresh();
+      setCloneOpen(false);
       navigate(ROUTES.TEMPLATE_DETAIL(result.data.id));
     },
   });

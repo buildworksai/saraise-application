@@ -4,6 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MemberForm, MilestoneForm, ProjectForm, TaskForm, TimeEntryForm } from "./ProjectForms";
 
+const expectedFieldClass =
+  "w-full rounded-md border border-border bg-background px-3 py-2 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
 function expectExplicitLabel(control: HTMLElement) {
   const id = control.getAttribute("id");
   expect(id).toBeTruthy();
@@ -11,16 +14,20 @@ function expectExplicitLabel(control: HTMLElement) {
 }
 
 describe("project management forms", () => {
-  it("exposes project form controls through explicit labels and native constraints", () => {
+  it("exposes project form controls through explicit labels and governed constraints", () => {
     const { container } = render(<ProjectForm onSave={vi.fn()} />);
 
-    expect(container.querySelector("form")?.noValidate).toBe(false);
+    expect(container.querySelector("form")?.noValidate).toBe(true);
     const projectCode = screen.getByLabelText("Project code");
     expect(projectCode).toBeRequired();
     expect(projectCode).toHaveAttribute("maxLength", "50");
     expect(projectCode).toHaveClass("border-border");
+    expect(projectCode.getAttribute("class")).toBe(expectedFieldClass);
     expectExplicitLabel(projectCode);
     expect(screen.getByText("Uppercase letters, numbers, and hyphens.")).toHaveClass("text-xs");
+    expect(
+      screen.getByText(/Define the governed project record, budget guardrails/)
+    ).toBeInTheDocument();
 
     expect(screen.getByLabelText("Project name")).toBeRequired();
     expect(screen.getByLabelText("Project name")).toHaveAttribute("maxLength", "255");
@@ -28,6 +35,19 @@ describe("project management forms", () => {
     expect(screen.getByLabelText("Budget")).toHaveAttribute("min", "0");
     expect(screen.getByLabelText("Budget")).toHaveAttribute("step", "0.01");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+
+  it("shows governed member validation when saving empty identifiers", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+
+    render(<MemberForm onSave={onSave} />);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByText("Project ID is required")).toBeInTheDocument();
+    expect(screen.getByText("Employee ID is required")).toBeInTheDocument();
+    expect(onSave).not.toHaveBeenCalled();
   });
 
   it("guards browser unload only after a form becomes dirty and unregisters on unmount", async () => {
@@ -46,6 +66,7 @@ describe("project management forms", () => {
     const dirtyPrevent = vi.spyOn(dirtyEvent, "preventDefault");
     window.dispatchEvent(dirtyEvent);
     expect(dirtyPrevent).toHaveBeenCalledTimes(1);
+    expect(dirtyEvent.returnValue).toBe(false);
     expect(addListener).toHaveBeenCalledWith("beforeunload", expect.any(Function));
 
     unmount();
@@ -77,6 +98,7 @@ describe("project management forms", () => {
     expect(screen.getByRole("heading", { name: "Edit project" })).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Project code already exists.");
     expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    expect(screen.getByLabelText("Project code")).toHaveValue("legacy");
     expect(screen.getByLabelText("Project name")).toHaveValue("Legacy project");
     expect(screen.getByLabelText("Description")).toHaveValue("Existing description");
     expect(screen.getByLabelText("End date")).toHaveValue("2027-09-30");
@@ -129,6 +151,9 @@ describe("project management forms", () => {
     expect(screen.getByLabelText("End date")).toHaveValue("");
     expect(screen.getByLabelText("Manager ID")).toHaveValue("");
     expect(screen.getByLabelText("Budget")).toHaveValue(null);
+    expect(screen.getByLabelText("Start date")).not.toHaveDisplayValue(/Stryker/u);
+    expect(screen.getByLabelText("End date")).not.toHaveDisplayValue(/Stryker/u);
+    expect(screen.getByLabelText("Budget")).not.toHaveDisplayValue(/Stryker/u);
     await user.type(screen.getByLabelText("Project code"), "ops");
     await user.type(screen.getByLabelText("Project name"), "Operations");
     await user.type(screen.getByLabelText("Start date"), "2027-03-01");
@@ -140,15 +165,16 @@ describe("project management forms", () => {
       .querySelector("form")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 
-    expect(onSave).toHaveBeenCalledWith(
-      expect.objectContaining({
-        project_code: "OPS",
-        start_date: null,
-        end_date: null,
-        project_manager_id: null,
-        budget: null,
-      })
-    );
+    expect(onSave).toHaveBeenCalledWith({
+      project_code: "OPS",
+      project_name: "Operations",
+      description: "",
+      start_date: null,
+      end_date: null,
+      project_manager_id: null,
+      budget: null,
+      currency: "USD",
+    });
   });
 
   it("exposes task, member, time, and milestone required fields through labels", () => {
@@ -158,7 +184,11 @@ describe("project management forms", () => {
     expect(screen.getByLabelText("Project ID")).toBeRequired();
     expect(screen.getByLabelText("Project ID")).toHaveValue("");
     expect(screen.getByLabelText("Task code")).toBeRequired();
+    expect(screen.getByLabelText("Task code")).toHaveValue("");
     expect(screen.getByLabelText("Task name")).toBeRequired();
+    expect(screen.getByLabelText("Task name")).toHaveValue("");
+    expect(screen.getByText(/stable task code, priority/)).toBeInTheDocument();
+    expect(screen.getByText(/Stored uppercase for audit-stable lookup/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 
     unmount();
@@ -170,6 +200,8 @@ describe("project management forms", () => {
     expect(screen.getByLabelText("Allocation percentage")).toHaveValue(100);
     expect(screen.getByLabelText("Allocation percentage")).toHaveAttribute("min", "0.01");
     expect(screen.getByLabelText("Allocation percentage")).toHaveAttribute("max", "100");
+    expect(screen.getByLabelText("Employee ID")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 
     member.unmount();
     const time = render(<TimeEntryForm onSave={vi.fn()} />);
@@ -179,8 +211,14 @@ describe("project management forms", () => {
     expect(screen.getByLabelText("Date")).toBeRequired();
     expect(screen.getByLabelText("Hours")).toBeRequired();
     expect(screen.getByLabelText("Hours")).toHaveValue(null);
+    expect(screen.getByLabelText("Hours")).not.toHaveDisplayValue(/Stryker/u);
     expect(screen.getByLabelText("Work description")).toHaveValue("");
+    expect(screen.getByLabelText("Work description")).not.toHaveDisplayValue(/Stryker/u);
     expect(screen.getByLabelText("Hours")).toHaveAttribute("max", "24");
+    expect(screen.getByText(/daily hour limits/)).toBeInTheDocument();
+    expect(screen.getByText(/quarter-hour increments/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Employee ID")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 
     time.unmount();
     render(<MilestoneForm onSave={vi.fn()} />);
@@ -190,6 +228,10 @@ describe("project management forms", () => {
     expect(screen.getByLabelText("Milestone name")).toHaveValue("");
     expect(screen.getByLabelText("Target date")).toBeRequired();
     expect(screen.getByLabelText("Target date")).toHaveValue("");
+    expect(screen.getByLabelText("Target date")).not.toHaveDisplayValue(/Stryker/u);
+    expect(screen.getByText(/progress, risk, and governance reporting/)).toBeInTheDocument();
+    expect(screen.getByText(/schedule variance can be calculated/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 
   it("renders pending state consistently on related project forms", () => {
@@ -209,15 +251,15 @@ describe("project management forms", () => {
     expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
   });
 
-  it("submits task, member, time entry, and milestone payloads from governed controls", async () => {
-    const user = userEvent.setup();
+  it("submits task, member, time entry, and milestone payloads from governed controls", () => {
     const onTaskSave = vi.fn();
     const task = render(<TaskForm projectId="project-1" onSave={onTaskSave} />);
-    await user.clear(screen.getByLabelText("Project ID"));
-    await user.type(screen.getByLabelText("Project ID"), "project-2");
-    await user.type(screen.getByLabelText("Task code"), "task-1");
-    await user.type(screen.getByLabelText("Task name"), "Configure workflows");
-    await user.type(screen.getByLabelText("Due date"), "2027-04-30");
+    fireEvent.change(screen.getByLabelText("Project ID"), { target: { value: "project-2" } });
+    fireEvent.change(screen.getByLabelText("Task code"), { target: { value: "task-1" } });
+    fireEvent.change(screen.getByLabelText("Task name"), {
+      target: { value: "Configure workflows" },
+    });
+    fireEvent.change(screen.getByLabelText("Due date"), { target: { value: "2027-04-30" } });
     task.container
       .querySelector("form")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -234,11 +276,11 @@ describe("project management forms", () => {
 
     const onMemberSave = vi.fn();
     const member = render(<MemberForm projectId="project-1" onSave={onMemberSave} />);
-    await user.clear(screen.getByLabelText("Project ID"));
-    await user.type(screen.getByLabelText("Project ID"), "project-2");
-    await user.type(screen.getByLabelText("Employee ID"), "employee-1");
-    await user.clear(screen.getByLabelText("Allocation percentage"));
-    await user.type(screen.getByLabelText("Allocation percentage"), "55.50");
+    fireEvent.change(screen.getByLabelText("Project ID"), { target: { value: "project-2" } });
+    fireEvent.change(screen.getByLabelText("Employee ID"), { target: { value: "employee-1" } });
+    fireEvent.change(screen.getByLabelText("Allocation percentage"), {
+      target: { value: "55.50" },
+    });
     member.container
       .querySelector("form")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -247,7 +289,7 @@ describe("project management forms", () => {
         project: "project-2",
         employee_id: "employee-1",
         role: "member",
-        allocation_percentage: "55.5",
+        allocation_percentage: "55.50",
       })
     );
     member.unmount();
@@ -256,13 +298,14 @@ describe("project management forms", () => {
     const time = render(<TimeEntryForm projectId="project-1" onSave={onTimeSave} />);
     expect(screen.getByLabelText("Date")).toHaveValue(new Date().toISOString().slice(0, 10));
     expect(screen.getByLabelText("Hours")).toHaveValue(null);
-    await user.clear(screen.getByLabelText("Project ID"));
-    await user.type(screen.getByLabelText("Project ID"), "project-2");
-    await user.type(screen.getByLabelText("Employee ID"), "employee-1");
-    await user.clear(screen.getByLabelText("Date"));
-    await user.type(screen.getByLabelText("Date"), "2027-05-15");
-    await user.type(screen.getByLabelText("Hours"), "6.25");
-    await user.type(screen.getByLabelText("Work description"), "Mapped ERP process variants");
+    fireEvent.change(screen.getByLabelText("Project ID"), { target: { value: "project-2" } });
+    fireEvent.change(screen.getByLabelText("Employee ID"), { target: { value: "employee-1" } });
+    fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2027-05-15" } });
+    fireEvent.change(screen.getByLabelText("Hours"), { target: { value: "6.25" } });
+    fireEvent.change(screen.getByLabelText("Work description"), {
+      target: { value: "Mapped ERP process variants" },
+    });
+    expect(screen.getByLabelText("Work description")).toHaveValue("Mapped ERP process variants");
     time.container
       .querySelector("form")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -279,11 +322,14 @@ describe("project management forms", () => {
 
     const onMilestoneSave = vi.fn();
     const milestone = render(<MilestoneForm projectId="project-1" onSave={onMilestoneSave} />);
+    expect(screen.getByLabelText("Project ID")).toHaveValue("project-1");
+    expect(screen.getByLabelText("Project ID")).toHaveClass("focus-visible:ring-ring");
     expect(screen.getByLabelText("Target date")).toHaveValue("");
-    await user.clear(screen.getByLabelText("Project ID"));
-    await user.type(screen.getByLabelText("Project ID"), "project-2");
-    await user.type(screen.getByLabelText("Milestone name"), "Pilot complete");
-    await user.type(screen.getByLabelText("Target date"), "2027-06-30");
+    fireEvent.change(screen.getByLabelText("Project ID"), { target: { value: "project-2" } });
+    fireEvent.change(screen.getByLabelText("Milestone name"), {
+      target: { value: "Pilot complete" },
+    });
+    fireEvent.change(screen.getByLabelText("Target date"), { target: { value: "2027-06-30" } });
     milestone.container
       .querySelector("form")!
       .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));

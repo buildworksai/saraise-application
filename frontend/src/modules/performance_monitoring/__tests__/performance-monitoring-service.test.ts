@@ -1,7 +1,7 @@
 /* eslint-disable max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /* eslint-disable @typescript-eslint/unbound-method -- assertions intentionally reference Vitest mocks. */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { apiClient } from "@/services/api-client";
+import { ApiError, apiClient } from "@/services/api-client";
 import {
   ENDPOINTS,
   type ApiEnvelope,
@@ -11,7 +11,17 @@ import {
 import { performanceMonitoringService as service } from "../services/performance-monitoring-service";
 
 vi.mock("@/services/api-client", () => ({
-  ApiError: class ApiError extends Error {},
+  ApiError: class ApiError extends Error {
+    constructor(
+      message: string,
+      public status: number,
+      public details?: unknown,
+      public code?: string,
+      public correlationId?: string
+    ) {
+      super(message);
+    }
+  },
   apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }));
 
@@ -189,5 +199,252 @@ describe("performanceMonitoringService", () => {
     vi.mocked(apiClient.post).mockResolvedValue({ data: { id: metric.id }, meta });
     await service.evaluateSLO(metric.id);
     expect(apiClient.post).toHaveBeenCalledWith(ENDPOINTS.SLOS.EVALUATE(metric.id), {});
+  });
+
+  it("normalizes ApiError failures without swallowing non-API exceptions", async () => {
+    vi.mocked(apiClient.get).mockRejectedValueOnce(
+      new ApiError("Rate limit exceeded", 429, undefined, "rate_limited", "corr-rate")
+    );
+    await expect(service.listMetrics()).rejects.toMatchObject({
+      name: "PerformanceMonitoringApiError",
+      message: "Rate limit exceeded",
+      status: 429,
+      code: "rate_limited",
+      correlationId: "corr-rate",
+    });
+
+    const transportFailure = new TypeError("network unavailable");
+    vi.mocked(apiClient.get).mockRejectedValueOnce(transportFailure);
+    await expect(service.listMetrics()).rejects.toBe(transportFailure);
+  });
+
+  it("routes catalog, service, dashboard, and metric writes through their governed endpoints", async () => {
+    const telemetrySource = { id: metric.id, name: "OpenTelemetry", is_active: true };
+    const environment = { id: metric.id, name: "Production", slug: "production" };
+    const monitoredService = { id: metric.id, name: "API", service_key: "api" }; // pragma: allowlist secret
+    const dashboard = { id: metric.id, name: "Operations", layout: [] };
+    vi.mocked(apiClient.get)
+      .mockResolvedValueOnce({ data: [telemetrySource], meta })
+      .mockResolvedValueOnce({ data: [environment], meta })
+      .mockResolvedValueOnce({ data: [monitoredService], meta })
+      .mockResolvedValueOnce({ data: monitoredService, meta })
+      .mockResolvedValueOnce({ data: [dashboard], meta })
+      .mockResolvedValueOnce({ data: metric, meta })
+      .mockResolvedValueOnce({ data: { summaries: [] }, meta });
+    vi.mocked(apiClient.post)
+      .mockResolvedValueOnce({ data: telemetrySource, meta })
+      .mockResolvedValueOnce({ data: environment, meta })
+      .mockResolvedValueOnce({ data: dashboard, meta })
+      .mockResolvedValueOnce({ data: metric, meta });
+
+    await service.listTelemetrySources({ page: 2, ordering: "name" });
+    await service.createTelemetrySource({
+      name: "OpenTelemetry",
+    } as Parameters<typeof service.createTelemetrySource>[0]);
+    await service.listEnvironments({ search: "prod" });
+    await service.createEnvironment({
+      name: "Production",
+      slug: "production",
+    } as Parameters<typeof service.createEnvironment>[0]);
+    await service.listServices({ page_size: 10 });
+    await service.getService(metric.id);
+    await service.listDashboards({ search: "ops" });
+    await service.createDashboard({ name: "Operations" } as Parameters<
+      typeof service.createDashboard
+    >[0]);
+    await service.getMetric(metric.id);
+    await service.createMetric({ metric_name: metric.metric_name } as Parameters<
+      typeof service.createMetric
+    >[0]);
+    await service.summarizeMetrics(["api.requests", "api.errors"]);
+
+    expect(apiClient.get).toHaveBeenNthCalledWith(
+      1,
+      `${ENDPOINTS.TELEMETRY_SOURCES.LIST}?page=2&ordering=name`
+    );
+    expect(apiClient.post).toHaveBeenNthCalledWith(1, ENDPOINTS.TELEMETRY_SOURCES.LIST, {
+      name: "OpenTelemetry",
+    });
+    expect(apiClient.get).toHaveBeenNthCalledWith(2, `${ENDPOINTS.ENVIRONMENTS.LIST}?search=prod`);
+    expect(apiClient.post).toHaveBeenNthCalledWith(2, ENDPOINTS.ENVIRONMENTS.LIST, {
+      name: "Production",
+      slug: "production",
+    });
+    expect(apiClient.get).toHaveBeenNthCalledWith(3, `${ENDPOINTS.SERVICES.LIST}?page_size=10`);
+    expect(apiClient.get).toHaveBeenNthCalledWith(4, ENDPOINTS.SERVICES.DETAIL(metric.id));
+    expect(apiClient.get).toHaveBeenNthCalledWith(5, `${ENDPOINTS.DASHBOARDS.LIST}?search=ops`);
+    expect(apiClient.post).toHaveBeenNthCalledWith(3, ENDPOINTS.DASHBOARDS.LIST, {
+      name: "Operations",
+    });
+    expect(apiClient.get).toHaveBeenNthCalledWith(6, ENDPOINTS.METRICS.DETAIL(metric.id));
+    expect(apiClient.post).toHaveBeenNthCalledWith(4, ENDPOINTS.METRICS.LIST, {
+      metric_name: metric.metric_name,
+    });
+    expect(apiClient.get).toHaveBeenNthCalledWith(
+      7,
+      `${ENDPOINTS.METRICS.SUMMARY}?metric_names=api.requests%2Capi.errors&period=1h`
+    );
+  });
+
+  it("routes logs, traces, alert rules, SLAs, SLOs, health, and configuration history", async () => {
+    vi.mocked(apiClient.get)
+      .mockResolvedValueOnce({ data: [], meta })
+      .mockResolvedValueOnce({ data: { id: "log-id" }, meta })
+      .mockResolvedValueOnce({ data: [], meta })
+      .mockResolvedValueOnce({ data: { id: "trace-id" }, meta })
+      .mockResolvedValueOnce({ data: [], meta })
+      .mockResolvedValueOnce({ data: [], meta })
+      .mockResolvedValueOnce({ data: [], meta })
+      .mockResolvedValueOnce({ data: { id: metric.id, status: "compliant" }, meta })
+      .mockResolvedValueOnce({ data: [], meta })
+      .mockResolvedValueOnce({ data: { id: metric.id, remaining_percent: 99 }, meta })
+      .mockResolvedValueOnce({ data: [], meta })
+      .mockResolvedValueOnce({ data: { status: "healthy" }, meta })
+      .mockResolvedValueOnce({ data: [], meta })
+      .mockResolvedValueOnce({ data: [], meta })
+      .mockResolvedValueOnce({ data: { environment: "staging", document: {} }, meta });
+    vi.mocked(apiClient.post)
+      .mockResolvedValueOnce({ data: { id: metric.id }, meta })
+      .mockResolvedValueOnce({ data: { id: metric.id }, meta })
+      .mockResolvedValueOnce({ data: { id: metric.id }, meta })
+      .mockResolvedValueOnce({ data: { environment: "staging", document: {} }, meta });
+
+    await service.listLogs({
+      level: "error",
+      service_id: metric.id,
+      environment_id: metric.tenant_id,
+      trace_id: "trace-1",
+    });
+    await service.getLog("log-id");
+    await service.listTraces({ status: "error", min_duration_ms: 250 });
+    await service.getTrace("trace-id");
+    await service.listTraceSpans("trace-id");
+    await service.listAlertRules({ search: "latency" });
+    await service.createAlertRule({
+      name: "Latency breach",
+      metric_name: metric.metric_name,
+      condition: "above_threshold",
+      threshold: 500,
+      evaluation_window_minutes: 5,
+      cooldown_minutes: 10,
+      severity: "critical",
+      action: { channel: "pager" },
+      ignored_server_field: "must not cross boundary",
+    } as unknown as Parameters<typeof service.createAlertRule>[0]);
+    await service.listAlerts({ status: "firing", severity: "critical" });
+    await service.listSLAs({ page: 2 });
+    await service.createSLA({
+      metric_name: "api.availability",
+      service_name: "api",
+      comparison: "gte",
+      target: 99.9,
+      window: "calendar_month",
+    });
+    await service.evaluateSLA(metric.id);
+    await service.listSLOs({ search: "budget" });
+    await service.createSLO({
+      name: "API latency",
+      service_id: metric.tenant_id,
+      indicator_metric_id: metric.id,
+      comparison: "lte",
+      threshold: 250,
+      objective_percentage: 99,
+    });
+    await service.getSLOBudget(metric.id);
+    await service.listComplianceRecords({ ordering: "-period_end" });
+    await service.getHealth();
+    await service.listConfigurationHistory("staging");
+    await service.listConfigurationAudit("staging");
+    await service.rollbackConfiguration({
+      environment: "staging",
+      version: 1,
+      expected_version: 2,
+      change_reason: "Rollback failed rollout",
+    });
+    await service.importConfiguration({
+      environment: "staging",
+      document: {},
+      expected_version: 2,
+      change_reason: "Promote import",
+    } as Parameters<typeof service.importConfiguration>[0]);
+    await service.exportConfiguration("staging");
+
+    expect(apiClient.get).toHaveBeenNthCalledWith(
+      1,
+      `${ENDPOINTS.LOGS.LIST}?level=error&service_id=${metric.id}&environment_id=${metric.tenant_id}&trace_id=trace-1`
+    );
+    expect(apiClient.get).toHaveBeenNthCalledWith(2, ENDPOINTS.LOGS.DETAIL("log-id"));
+    expect(apiClient.get).toHaveBeenNthCalledWith(
+      3,
+      `${ENDPOINTS.TRACES.LIST}?status=error&min_duration_ms=250`
+    );
+    expect(apiClient.get).toHaveBeenNthCalledWith(4, ENDPOINTS.TRACES.DETAIL("trace-id"));
+    expect(apiClient.get).toHaveBeenNthCalledWith(5, ENDPOINTS.SPANS.FOR_TRACE("trace-id"));
+    expect(apiClient.get).toHaveBeenNthCalledWith(
+      6,
+      `${ENDPOINTS.ALERT_RULES.LIST}?search=latency`
+    );
+    expect(apiClient.post).toHaveBeenNthCalledWith(1, ENDPOINTS.ALERT_RULES.LIST, {
+      name: "Latency breach",
+      metric_name: metric.metric_name,
+      condition: "above_threshold",
+      threshold: 500,
+      evaluation_window_minutes: 5,
+      cooldown_minutes: 10,
+      severity: "critical",
+      action: { channel: "pager" },
+    });
+    expect(apiClient.get).toHaveBeenNthCalledWith(
+      7,
+      `${ENDPOINTS.ALERTS.LIST}?status=firing&severity=critical`
+    );
+    expect(apiClient.get).toHaveBeenNthCalledWith(8, `${ENDPOINTS.SLA.LIST}?page=2`);
+    expect(apiClient.post).toHaveBeenNthCalledWith(2, ENDPOINTS.SLA.LIST, {
+      metric_name: "api.availability",
+      service_name: "api",
+      comparison: "gte",
+      target: 99.9,
+      window: "calendar_month",
+    });
+    expect(apiClient.get).toHaveBeenNthCalledWith(9, ENDPOINTS.SLA.COMPLIANCE(metric.id));
+    expect(apiClient.get).toHaveBeenNthCalledWith(10, `${ENDPOINTS.SLOS.LIST}?search=budget`);
+    expect(apiClient.post).toHaveBeenNthCalledWith(3, ENDPOINTS.SLOS.LIST, {
+      name: "API latency",
+      service_id: metric.tenant_id,
+      indicator_metric_id: metric.id,
+      comparison: "lte",
+      threshold: 250,
+      objective_percentage: 99,
+    });
+    expect(apiClient.get).toHaveBeenNthCalledWith(11, ENDPOINTS.SLOS.BUDGET(metric.id));
+    expect(apiClient.get).toHaveBeenNthCalledWith(
+      12,
+      `${ENDPOINTS.COMPLIANCE_RECORDS.LIST}?ordering=-period_end`
+    );
+    expect(apiClient.get).toHaveBeenNthCalledWith(13, ENDPOINTS.HEALTH);
+    expect(apiClient.get).toHaveBeenNthCalledWith(
+      14,
+      `${ENDPOINTS.CONFIGURATION.HISTORY}?environment=staging`
+    );
+    expect(apiClient.get).toHaveBeenNthCalledWith(
+      15,
+      `${ENDPOINTS.CONFIGURATION.AUDIT}?environment=staging`
+    );
+    expect(apiClient.post).toHaveBeenNthCalledWith(4, ENDPOINTS.CONFIGURATION.ROLLBACK, {
+      environment: "staging",
+      version: 1,
+      expected_version: 2,
+      change_reason: "Rollback failed rollout",
+    });
+    expect(apiClient.post).toHaveBeenNthCalledWith(5, ENDPOINTS.CONFIGURATION.IMPORT, {
+      environment: "staging",
+      document: {},
+      expected_version: 2,
+      change_reason: "Promote import",
+    });
+    expect(apiClient.get).toHaveBeenNthCalledWith(
+      16,
+      `${ENDPOINTS.CONFIGURATION.EXPORT}?environment=staging`
+    );
   });
 });

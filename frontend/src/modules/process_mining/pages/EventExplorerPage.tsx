@@ -26,16 +26,17 @@ export function EventExplorerPage() {
   const [params, setParams] = useSearchParams();
   const [processName, setProcessName] = useState(params.get("process_name") ?? "");
   const [selectedCase, setSelectedCase] = useState<string | null>(null);
+  const [defaultEnd] = useState(() => new Date().toISOString());
   const page = Number(params.get("page") ?? 1);
   const configuration = useQuery({
     queryKey: ["process-mining", "configuration"],
     queryFn: processMiningService.getConfiguration,
   });
-  const now = new Date();
   const windowDays = configuration.data?.document.default_time_window_days;
   const start =
-    params.get("start") ?? new Date(now.getTime() - (windowDays ?? 0) * 86400000).toISOString();
-  const end = params.get("end") ?? now.toISOString();
+    params.get("start") ??
+    new Date(new Date(defaultEnd).getTime() - (windowDays ?? 0) * 86400000).toISOString();
+  const end = params.get("end") ?? defaultEnd;
   const activeProcess = params.get("process_name") ?? "";
   const query = useQuery({
     queryKey: [

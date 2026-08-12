@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Final
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 from uuid import UUID
 
-from rest_framework.authentication import SessionAuthentication
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import BaseAuthentication, SessionAuthentication
+from rest_framework.permissions import BasePermission, IsAuthenticated
 
 from src.core.access.permissions import RequiresAccess
 from src.core.auth_utils import get_user_tenant_id
+
+if TYPE_CHECKING:
+    from rest_framework.permissions import _PermissionClass
 
 PERMISSIONS: Final[tuple[str, ...]] = (
     "multi_company.company:read",
@@ -78,13 +82,14 @@ class MultiCompanyAccessMixin:
     unset; :class:`RequiresAccess` then denies it by default.
     """
 
-    authentication_classes = (SessionAuthentication401,)
-    permission_classes = (IsAuthenticated, RequiresAccess)
+    authentication_classes: ClassVar[Sequence[type[BaseAuthentication]]] = (SessionAuthentication401,)
+    permission_classes: ClassVar[Sequence[_PermissionClass]] = (IsAuthenticated, RequiresAccess)
     action_permissions: dict[str, str] = {}
     action_quotas: dict[str, str] = {}
-    required_entitlement = "module.multi_company"
+    required_entitlement: str = "module.multi_company"
+    request: Any
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         raw_tenant = get_user_tenant_id(getattr(self.request, "user", None))
         try:
             self.request.tenant_id = UUID(str(raw_tenant)) if raw_tenant else None

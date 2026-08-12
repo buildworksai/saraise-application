@@ -4,11 +4,15 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  ActionStepConfig,
+  ApprovalStepConfig,
   ConditionDescriptorDTO,
+  DecisionStepConfig,
   HandlerDescriptorDTO,
   WorkflowConfigurationDTO,
   WorkflowCreateDTO,
   WorkflowDetailDTO,
+  WorkflowStepWriteDTO,
 } from "../contracts";
 import { workflowService } from "../services/workflow-service";
 import {
@@ -16,6 +20,12 @@ import {
   WORKFLOW_CATALOG_ASSIGNEES_QUERY_KEY,
   WORKFLOW_CATALOG_CONDITIONS_QUERY_KEY,
 } from "./workflow-builder-utils";
+import {
+  actionConfigurationForStep,
+  actionDescriptorForStep,
+  conditionHandlerValue,
+  decisionConfigForStep,
+} from "./workflow-step-config-utils";
 import { WorkflowBuilder } from "./WorkflowBuilder";
 
 const configuration: WorkflowConfigurationDTO = {
@@ -323,6 +333,50 @@ describe("WorkflowBuilder", () => {
       ],
     });
   });
+
+  it("normalizes step-specific helper values only for compatible step types", () => {
+    const approvalStep = initial.steps.find((step) => step.step_type === "approval");
+    const decisionStep = initial.steps.find((step) => step.step_type === "decision");
+    const actionStep = initial.steps.find((step) => step.step_type === "action");
+    const actionShapedApprovalStep = {
+      ...approvalStep,
+      config: {
+        handler: action.key,
+        configuration: { injected: true },
+        condition: { handler: condition.key },
+      },
+    } as unknown as WorkflowStepWriteDTO;
+
+    expect(approvalStep).toBeDefined();
+    expect(decisionStep).toBeDefined();
+    expect(actionStep).toBeDefined();
+    expect(actionDescriptorForStep(approvalStep!, [action])).toBeUndefined();
+    expect(actionConfigurationForStep(approvalStep!)).toEqual({});
+    expect(decisionConfigForStep(approvalStep!)).toBeNull();
+    expect(actionDescriptorForStep(actionShapedApprovalStep, [action])).toBeUndefined();
+    expect(actionConfigurationForStep(actionShapedApprovalStep)).toEqual({});
+    expect(decisionConfigForStep(actionShapedApprovalStep)).toBeNull();
+    expect(decisionConfigForStep(decisionStep!)).toMatchObject({
+      condition: expect.objectContaining({ handler: "core.amount_gt" }),
+    });
+    expect(conditionHandlerValue(decisionStep!.config as DecisionStepConfig)).toBe(
+      "core.amount_gt"
+    );
+    expect(
+      conditionHandlerValue({
+        ...(decisionStep!.config as DecisionStepConfig),
+        condition: { handler: 42 },
+      })
+    ).toBe("");
+    expect(actionDescriptorForStep(actionStep!, [action])).toEqual(action);
+    expect(actionConfigurationForStep(actionStep!)).toEqual({
+      path: "amount",
+      limit: 2,
+      enabled: true,
+      mode: "strict",
+      target: "role-1",
+    });
+  });
   afterEach(() => vi.restoreAllMocks());
 
   it("edits every governed step type, validates, submits, reorders, removes, and navigates", async () => {
@@ -336,6 +390,8 @@ describe("WorkflowBuilder", () => {
     expect(screen.getByLabelText("Assignment")).toHaveClass("rounded-md");
     expect(screen.getByLabelText("On rejection")).toHaveClass("rounded-md");
     expect(screen.getByLabelText("Rejection branch")).toHaveClass("rounded-md");
+    expect(screen.getByLabelText("Rejection branch")).toHaveValue("notify");
+    expect(screen.getByLabelText("Rejection branch")).not.toHaveTextContent("Manager approval");
     expect(screen.getByLabelText("Channel")).toHaveClass("rounded-md");
     expect(screen.getByLabelText("Condition")).toHaveClass("rounded-md");
     expect(screen.getByLabelText("True branch")).toHaveClass("rounded-md");
@@ -437,9 +493,11 @@ describe("WorkflowBuilder", () => {
     await screen.findByText("Step palette");
     const timeoutInputs = screen.getAllByLabelText("Timeout seconds");
     const firstTimeout = timeoutInputs.at(0);
+    const secondTimeout = timeoutInputs.at(1);
     const firstTerminal = screen.getAllByLabelText("Terminal step").at(0);
-    if (!firstTimeout || !firstTerminal)
+    if (!firstTimeout || !secondTimeout || !firstTerminal)
       throw new Error("Project step controls were not rendered.");
+    expect(secondTimeout).toHaveValue(null);
     fireEvent.change(firstTimeout, { target: { value: "45" } });
     fireEvent.click(firstTerminal);
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -488,6 +546,7 @@ describe("WorkflowBuilder", () => {
   });
 
   it("submits edited workflow metadata and preserves immutable existing keys", async () => {
+    const user = userEvent.setup();
     const nonDefaultInitial: WorkflowDetailDTO = {
       ...initial,
       description: "",
@@ -518,11 +577,9 @@ describe("WorkflowBuilder", () => {
 
     const save = screen.getByRole("button", { name: "Save changes" });
     expect(save).toBeEnabled();
-    act(() => {
-      fireEvent.click(save);
-    });
+    await user.click(save);
 
-    expect(props.onSubmit).toHaveBeenCalled();
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalled());
     expect(props.onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
         key: "purchase_approval",
@@ -532,7 +589,7 @@ describe("WorkflowBuilder", () => {
         trigger_type: "event",
       })
     );
-  });
+  }, 10000);
 
   it("normalizes new workflow names and stable keys through governed slug rules", async () => {
     const user = userEvent.setup();
@@ -905,7 +962,7 @@ describe("WorkflowBuilder", () => {
         }),
       }),
     ]);
-  }, 10_000);
+  }, 20_000);
 
   it("preserves the selected descriptors when unavailable catalog entries are chosen", async () => {
     vi.mocked(workflowService.catalog.actions).mockResolvedValueOnce([action, lockedAction]);
@@ -921,6 +978,8 @@ describe("WorkflowBuilder", () => {
 
     const actionSelect = screen.getByLabelText("Registered action");
     expect(actionSelect).toHaveTextContent("Locked action — locked");
+    expect(actionSelect).toHaveTextContent("Project context — available");
+    expect(screen.getByRole("option", { name: "Project context — available" })).toBeEnabled();
     expect(screen.getByRole("option", { name: "Locked action — locked" })).toBeDisabled();
     fireEvent.change(actionSelect, { target: { value: "core.locked_action" } });
     expect(actionSelect).toHaveValue("core.project_context");
@@ -928,6 +987,7 @@ describe("WorkflowBuilder", () => {
 
     const conditionSelect = screen.getByLabelText("Condition");
     expect(conditionSelect).toHaveTextContent("Setup required condition — setup required");
+    expect(screen.getByRole("option", { name: "Amount greater than — available" })).toBeEnabled();
     expect(
       screen.getByRole("option", { name: "Setup required condition — setup required" })
     ).toBeDisabled();
@@ -970,6 +1030,113 @@ describe("WorkflowBuilder", () => {
     expect(
       screen.getByRole("option", { name: "Setup required condition — setup required" })
     ).toBeDisabled();
+  });
+
+  it("renders empty action field defaults when a selected action omits configuration", async () => {
+    const actionWithoutConfiguration: WorkflowDetailDTO = {
+      ...initial,
+      steps: [
+        {
+          ...initial.steps[0]!,
+          config: {
+            handler: "core.project_context",
+            schema_version: "1.0",
+            input_mapping: {},
+          } satisfies ActionStepConfig,
+          is_terminal: true,
+        },
+      ],
+    };
+    renderBuilder({ initial: actionWithoutConfiguration }, { seedGovernedQueries: true });
+
+    await screen.findByText("Step palette");
+
+    expect(screen.getByLabelText("Registered action")).toHaveValue("core.project_context");
+    expect(screen.getByText("Project context")).toBeInTheDocument();
+    expect(screen.getByLabelText("Context path")).toHaveValue("");
+    expect(screen.getByLabelText("Limit")).toHaveValue(null);
+    expect(screen.getByLabelText("Enabled")).not.toBeChecked();
+    expect(screen.getByLabelText("Mode")).toHaveValue("");
+    expect(screen.getByLabelText("Target")).toHaveValue("");
+  });
+
+  it("does not render decision controls when the decision condition contract is missing", async () => {
+    const decisionMissingCondition: WorkflowDetailDTO = {
+      ...initial,
+      steps: [
+        {
+          ...initial.steps[3]!,
+          config: {
+            true_step_key: "approve",
+            false_step_key: "notify",
+          } as DecisionStepConfig,
+          is_terminal: true,
+        },
+      ],
+    };
+    renderBuilder({ initial: decisionMissingCondition }, { seedGovernedQueries: true });
+
+    await screen.findByText("Step palette");
+
+    expect(screen.queryByLabelText("Condition")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("True branch")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("False branch")).not.toBeInTheDocument();
+    expect(screen.queryByText("Amount greater than")).not.toBeInTheDocument();
+  });
+
+  it("renders non-string decision condition handlers as an unselected safe condition", async () => {
+    const decisionWithInvalidHandler: WorkflowDetailDTO = {
+      ...initial,
+      steps: initial.steps.map((step) =>
+        step.key === "route"
+          ? {
+              ...step,
+              config: {
+                condition: { handler: 42 },
+                true_step_key: "approve",
+                false_step_key: "notify",
+              } as DecisionStepConfig,
+            }
+          : step
+      ),
+    };
+    renderBuilder({ initial: decisionWithInvalidHandler }, { seedGovernedQueries: true });
+
+    await screen.findByText("Step palette");
+
+    expect(screen.getByLabelText("Condition")).toHaveValue("");
+    expect(screen.getByLabelText("True branch")).toHaveValue("approve");
+    expect(screen.getByLabelText("False branch")).toHaveValue("notify");
+    expect(screen.queryByLabelText("Minimum")).not.toBeInTheDocument();
+    expect(screen.getByText("Route decision: choose a condition.")).toBeInTheDocument();
+  });
+
+  it("formats governed rejection labels and tolerates condition edits while the catalog is loading", async () => {
+    const configuredLabels: WorkflowConfigurationDTO = {
+      ...configuration,
+      document: {
+        ...configuration.document,
+        allowed_values: {
+          ...configuration.document.allowed_values,
+          approval_rejection_behaviors: [
+            ...configuration.document.allowed_values.approval_rejection_behaviors,
+            "manual_review" as ApprovalStepConfig["rejection_behavior"],
+          ],
+        },
+      },
+    };
+    vi.mocked(workflowService.configuration.get).mockResolvedValueOnce(configuredLabels);
+    vi.mocked(workflowService.catalog.conditions).mockReturnValueOnce(
+      new Promise<ConditionDescriptorDTO[]>(() => undefined)
+    );
+    renderBuilder();
+
+    await screen.findByText("Step palette");
+
+    expect(screen.getByRole("option", { name: "manual review" })).toBeInTheDocument();
+    expect(() =>
+      fireEvent.change(screen.getByLabelText("Condition"), { target: { value: "" } })
+    ).not.toThrow();
   });
 
   it("renders lookup outage states without accepting unavailable lookup values", async () => {
@@ -1022,6 +1189,21 @@ describe("WorkflowBuilder", () => {
     expect(submitted.steps.find((step) => step.key === "project")).toEqual(
       expect.objectContaining({ timeout_action: "notify", timeout_seconds: 45 })
     );
+  });
+
+  it("treats omitted terminal flags as non-terminal in the rendered controls", async () => {
+    const omittedTerminalFlag: WorkflowDetailDTO = {
+      ...initial,
+      steps: initial.steps.map((step, index) =>
+        index === 0 ? { ...step, is_terminal: undefined as unknown as boolean } : step
+      ),
+    };
+
+    renderBuilder({ initial: omittedTerminalFlag }, { seedGovernedQueries: true });
+
+    await screen.findByText("Step palette");
+
+    expect(screen.getAllByLabelText("Terminal step").at(0)).not.toBeChecked();
   });
 
   it("surfaces server validation defects without submitting the draft", async () => {
@@ -1121,10 +1303,34 @@ describe("WorkflowBuilder", () => {
 
     await waitFor(() => expect(assignment).toBeDisabled());
     expect(assignment).toHaveTextContent("Assignee directory unavailable");
+    expect(
+      screen.getByRole("option", { name: "Assignee directory unavailable" })
+    ).toBeInTheDocument();
+    expect(assignment).not.toHaveTextContent("Choose a user or role");
 
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(props.onSubmit).toHaveBeenCalled());
+    const submitted = vi.mocked(props.onSubmit).mock.calls[0]?.[0];
+    if (!submitted) throw new Error("Workflow draft payload was not submitted.");
+    expect(submitted.steps[1]?.config).toEqual(
+      expect.objectContaining({ assignment_kind: "role", assignee_id: "role-1" })
+    );
+  });
+
+  it("ignores approval assignee changes for ids outside the governed directory", async () => {
+    const { props } = renderBuilder({}, { seedGovernedQueries: true });
+
+    await screen.findByText("Step palette");
+    const assignment = screen.getByLabelText("Assignment");
+    expect(assignment).toHaveValue("role-1");
+
+    fireEvent.change(assignment, { target: { value: "missing-user" } });
+    expect(assignment).toHaveValue("role-1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(1));
     const submitted = vi.mocked(props.onSubmit).mock.calls[0]?.[0];
     if (!submitted) throw new Error("Workflow draft payload was not submitted.");
     expect(submitted.steps[1]?.config).toEqual(
@@ -1167,7 +1373,73 @@ describe("WorkflowBuilder", () => {
         reject_step_key: null,
       })
     );
+
+    fireEvent.change(screen.getByLabelText("On rejection"), { target: { value: "goto" } });
+    expect(screen.getByLabelText("Rejection branch")).toHaveValue("");
+    fireEvent.change(screen.getByLabelText("Rejection branch"), { target: { value: "project" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(props.onSubmit).toHaveBeenCalledTimes(3));
+    submitted = vi.mocked(props.onSubmit).mock.calls[2]?.[0];
+    if (!submitted) throw new Error("Workflow draft second retry was not submitted.");
+    expect(submitted.steps[1]?.config).toEqual(
+      expect.objectContaining({
+        rejection_behavior: "goto",
+        reject_step_key: "project",
+      })
+    );
   }, 10_000);
+
+  it("preserves a configured rejection branch when goto is re-enabled", async () => {
+    const failWithStoredBranch: WorkflowDetailDTO = {
+      ...initial,
+      steps: initial.steps.map((step) =>
+        step.key === "approve"
+          ? {
+              ...step,
+              config: {
+                ...(step.config as ApprovalStepConfig),
+                rejection_behavior: "fail",
+                reject_step_key: "notify",
+              },
+            }
+          : step
+      ),
+    };
+
+    renderBuilder({ initial: failWithStoredBranch }, { seedGovernedQueries: true });
+
+    await screen.findByText("Step palette");
+    expect(screen.queryByLabelText("Rejection branch")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("On rejection"), { target: { value: "goto" } });
+
+    expect(screen.getByLabelText("Rejection branch")).toHaveValue("notify");
+  });
+
+  it("renders goto approval branches with no configured target as an empty selection", async () => {
+    const gotoWithoutBranch: WorkflowDetailDTO = {
+      ...initial,
+      steps: initial.steps.map((step) =>
+        step.key === "approve"
+          ? {
+              ...step,
+              config: {
+                ...(step.config as ApprovalStepConfig),
+                rejection_behavior: "goto",
+                reject_step_key: null,
+              },
+            }
+          : step
+      ),
+    };
+
+    renderBuilder({ initial: gotoWithoutBranch }, { seedGovernedQueries: true });
+
+    await screen.findByText("Step palette");
+
+    expect(screen.getByLabelText("Rejection branch")).toHaveValue("");
+  });
 
   it("persists notification recipient and template edits for both delivery channels", async () => {
     const { props } = renderBuilder({}, { seedGovernedQueries: true });
@@ -1206,6 +1478,9 @@ describe("WorkflowBuilder", () => {
         template_key: "workflow.custom.in_app",
       })
     );
+
+    fireEvent.change(screen.getByLabelText("Channel"), { target: { value: "in_app" } });
+    expect(screen.getByDisplayValue("actor.id")).toBeInTheDocument();
   });
 
   it("shows empty-state guardrails after all steps are removed", async () => {

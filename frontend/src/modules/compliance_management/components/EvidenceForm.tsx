@@ -42,27 +42,37 @@ export function EvidenceForm({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     setLocalError("");
-    if (!value.name.trim()) {
+    const normalized: EvidenceWriteRequest = {
+      ...value,
+      document_id: value.reference_kind === "dms_document" ? value.document_id : null,
+      external_uri: value.reference_kind === "external_url" ? value.external_uri : "",
+      text_reference: value.reference_kind === "text_reference" ? value.text_reference : "",
+    };
+    if (!normalized.name.trim()) {
       setLocalError("Evidence name is required.");
       return;
     }
-    if (value.reference_kind === "external_url" && !value.external_uri?.trim()) {
+    if (normalized.reference_kind === "external_url" && !normalized.external_uri?.trim()) {
       setLocalError("An external URL is required.");
       return;
     }
-    if (value.reference_kind === "dms_document" && !value.document_id) {
+    if (normalized.reference_kind === "dms_document" && !normalized.document_id) {
       setLocalError("A DMS document UUID is required.");
       return;
     }
-    if (value.reference_kind === "text_reference" && !value.text_reference?.trim()) {
+    if (normalized.reference_kind === "text_reference" && !normalized.text_reference?.trim()) {
       setLocalError("A text reference is required.");
       return;
     }
-    if (value.valid_from && value.valid_until && value.valid_until <= value.valid_from) {
+    if (
+      normalized.valid_from &&
+      normalized.valid_until &&
+      normalized.valid_until <= normalized.valid_from
+    ) {
       setLocalError("Valid-until must be later than valid-from.");
       return;
     }
-    onSubmit(value);
+    onSubmit(normalized);
   };
   return (
     <form onSubmit={submit} className="space-y-5" noValidate>

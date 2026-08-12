@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import sys
+import types
 import uuid
 from datetime import timedelta
 from datetime import timezone as datetime_timezone
@@ -58,6 +60,8 @@ def test_local_access_collector_includes_crm_configuration_and_dynamic_api_quota
     assert "module.crm" in capabilities
     assert "crm.configuration:read" in permissions
     assert "crm.configuration:read" in capabilities | permissions
+    assert "backup_disaster_recovery.*:read" in permissions
+    assert "backup_disaster_recovery.*:read" in capabilities | permissions
     assert "crm.api.list" in resources
     assert "crm.api.retrieve" in resources
     assert "backup-recovery" in capabilities
@@ -377,13 +381,22 @@ def test_bootstrap_local_access_creates_exact_permission_set_membership_grant_an
     monkeypatch.setattr(
         command,
         "_collect_local_access_contracts",
-        lambda: ({"crm.configuration:read"}, {"crm.api.win_rate"}, {"crm"}),
+        lambda: (
+            {"crm.configuration:read", "backup_disaster_recovery.*:read"},
+            {"crm.api.win_rate", "bdr.api.read"},
+            {"crm"},
+        ),
     )
 
     command._bootstrap_local_access(str(tenant_uuid), (user,))
 
     actor_id = uuid.uuid5(uuid.NAMESPACE_URL, "saraise:seed:local-access@example.com")
     permission = Permission.objects.get(module="crm", resource="configuration", action="read")
+    wildcard_permission = Permission.objects.get(
+        module="backup_disaster_recovery",
+        resource="*",
+        action="read",
+    )
     with tenant_context(tenant_uuid):
         permission_set = PermissionSet.objects.for_tenant(tenant_uuid).get(name="Local development administrator")
         membership = PermissionSetPermission.objects.for_tenant(tenant_uuid).get(
@@ -405,14 +418,25 @@ def test_bootstrap_local_access_creates_exact_permission_set_membership_grant_an
     assert permission_set.created_by == actor_id
     assert permission_set.updated_by == actor_id
     assert membership.added_by == actor_id
+    assert (
+        PermissionSetPermission.objects.for_tenant(tenant_uuid)
+        .filter(
+            permission_set=permission_set,
+            permission=wildcard_permission,
+            removed_at__isnull=True,
+        )
+        .exists()
+    )
     assert grant.expires_at == fixed_now + timedelta(days=365)
     assert grant.granted_by == actor_id
     assert grant.reason == "Seeded local development UAT access"
     assert Entitlement.objects.get(tenant_id=tenant_uuid, capability="crm").enabled is True
     assert Entitlement.objects.get(tenant_id=tenant_uuid, capability="crm.configuration:read").enabled is True
+    assert Entitlement.objects.get(tenant_id=tenant_uuid, capability="backup_disaster_recovery.*:read").enabled is True
     quota = Quota.objects.get(tenant_id=tenant_uuid, resource="crm.api.win_rate")
     assert quota.limit == 1_000_000
     assert quota.remaining == 1_000_000
+    assert Quota.objects.get(tenant_id=tenant_uuid, resource="bdr.api.read").remaining == 1_000_000
 
 
 @pytest.mark.django_db
@@ -599,3 +623,173 @@ def test_bootstrap_local_access_refreshes_exact_expiry_grant_reason(monkeypatch)
     assert permission_set_update_saves == []
     assert grant.expires_at == fixed_now + timedelta(days=365)
     assert grant.reason == "Seeded local development UAT access"
+
+
+def test_bootstrap_local_ai_provider_catalog_upserts_seeded_providers_and_models(monkeypatch) -> None:
+    provider_calls: list[tuple[str, dict[str, object]]] = []
+    model_calls: list[tuple[object, str, dict[str, object]]] = []
+
+    class ProviderManager:
+        def update_or_create(self, *, name: str, defaults: dict[str, object]):
+            provider = types.SimpleNamespace(name=name)
+            provider_calls.append((name, defaults))
+            return provider, True
+
+    class ModelManager:
+        def update_or_create(self, *, provider: object, model_id: str, defaults: dict[str, object]):
+            model_calls.append((provider, model_id, defaults))
+            return types.SimpleNamespace(model_id=model_id), True
+
+    fake_models = types.ModuleType("src.modules.ai_provider_configuration.models")
+    fake_models.AIProvider = types.SimpleNamespace(objects=ProviderManager())
+    fake_models.AIModel = types.SimpleNamespace(objects=ModelManager())
+    monkeypatch.setitem(sys.modules, "src.modules.ai_provider_configuration.models", fake_models)
+
+    Command()._bootstrap_local_ai_provider_catalog()
+
+    assert [name for name, _ in provider_calls] == ["OpenAI", "Anthropic"]
+    assert provider_calls[0][1]["config"] == {"seeded_for": "local_uat"}
+    assert [model_id for _, model_id, _ in model_calls] == ["gpt-4.1-mini", "claude-3-5-sonnet-latest"]
+    assert model_calls[0][2]["capabilities"] == ["chat", "tool-calling", "structured-output"]
+    assert model_calls[1][2]["max_tokens"] == 200000
+
+
+def test_bootstrap_local_ai_provider_catalog_warns_when_models_unavailable(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "src.modules.ai_provider_configuration.models", None)
+
+    Command()._bootstrap_local_ai_provider_catalog()
+
+
+def test_bootstrap_local_procurement_configuration_creates_missing_active_environments(monkeypatch) -> None:
+    created_rows: list[dict[str, object]] = []
+    existing_by_environment = {"production"}
+
+    class FakeConfigurationEnvironment:
+        values = ("development", "production")
+
+    class FakeConfigurationStatus:
+        ACTIVE = "active"
+
+    class FakeQuerySet:
+        def __init__(self, environment: str | None = None):
+            self.environment = environment
+
+        def filter(self, **kwargs):
+            return FakeQuerySet(str(kwargs.get("environment")))
+
+        def exists(self) -> bool:
+            return self.environment in existing_by_environment
+
+        def order_by(self, *_args):
+            return self
+
+        def values_list(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            return 4 if self.environment == "development" else None
+
+    class FakeProcurementManager:
+        def for_tenant(self, tenant_uuid: uuid.UUID):
+            assert isinstance(tenant_uuid, uuid.UUID)
+            return FakeQuerySet()
+
+        def create(self, **kwargs):
+            created_rows.append(kwargs)
+            return types.SimpleNamespace(**kwargs)
+
+    fake_models = types.ModuleType("src.modules.purchase_management.models")
+    fake_models.ConfigurationEnvironment = FakeConfigurationEnvironment
+    fake_models.ConfigurationStatus = FakeConfigurationStatus
+    fake_models.ProcurementConfiguration = types.SimpleNamespace(objects=FakeProcurementManager())
+    monkeypatch.setitem(sys.modules, "src.modules.purchase_management.models", fake_models)
+    monkeypatch.setattr(
+        seed_default_users_module.timezone, "now", lambda: timezone.datetime(2026, 5, 1, tzinfo=datetime_timezone.utc)
+    )
+
+    Command()._bootstrap_local_procurement_configuration(str(uuid.uuid4()), ())
+
+    assert [row["environment"] for row in created_rows] == ["development"]
+    assert created_rows[0]["version"] == 5
+    assert created_rows[0]["status"] == "active"
+    assert created_rows[0]["quote_scoring_weights"]["price"] == 55
+
+
+def test_bootstrap_local_procurement_configuration_warns_when_models_unavailable(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "src.modules.purchase_management.models", None)
+
+    Command()._bootstrap_local_procurement_configuration(str(uuid.uuid4()), ())
+
+
+def test_bootstrap_local_multi_company_configuration_creates_and_activates_missing_environments(monkeypatch) -> None:
+    tenant_uuid = uuid.uuid4()
+    created_drafts: list[tuple[uuid.UUID, str, str, dict[str, object], str]] = []
+    activated: list[tuple[uuid.UUID, str, str, str]] = []
+
+    class FakeEnvironment:
+        values = ("development", "production")
+
+    class FakeStatus:
+        ACTIVE = "active"
+
+    class FakeVersion:
+        Environment = FakeEnvironment
+        Status = FakeStatus
+
+    class FakeQuerySet:
+        def __init__(self, environment: str | None = None):
+            self.environment = environment
+
+        def filter(self, **kwargs):
+            return FakeQuerySet(str(kwargs.get("environment")))
+
+        def exists(self) -> bool:
+            return self.environment == "production"
+
+    class FakeVersionManager:
+        def for_tenant(self, value: uuid.UUID):
+            assert value == tenant_uuid
+            return FakeQuerySet()
+
+    FakeVersion.objects = FakeVersionManager()
+
+    class FakeConfigurationService:
+        @staticmethod
+        def create_draft(tenant_id, author_id, correlation_id, environment, settings, description):
+            created_drafts.append((tenant_id, author_id, environment, settings, description))
+            assert correlation_id == "seed-default-users-multi-company-configuration"
+            return types.SimpleNamespace(id=f"draft-{environment}")
+
+        @staticmethod
+        def activate(tenant_id, draft_id, activator_id, correlation_id):
+            activated.append((tenant_id, draft_id, activator_id, correlation_id))
+
+    fake_models = types.ModuleType("src.modules.multi_company.models")
+    fake_models.MultiCompanyConfigurationVersion = FakeVersion
+    fake_services = types.ModuleType("src.modules.multi_company.services")
+    fake_services.DEFAULT_SETTINGS = {"allow_cross_company_posting": False}
+    fake_services.MultiCompanyConfigurationService = FakeConfigurationService
+    monkeypatch.setitem(sys.modules, "src.modules.multi_company.models", fake_models)
+    monkeypatch.setitem(sys.modules, "src.modules.multi_company.services", fake_services)
+
+    Command()._bootstrap_local_multi_company_configuration(str(tenant_uuid), ())
+
+    assert [(draft[0], draft[2], draft[3]) for draft in created_drafts] == [
+        (tenant_uuid, "development", {"allow_cross_company_posting": False})
+    ]
+    assert activated == [
+        (
+            tenant_uuid,
+            "draft-development",
+            str(
+                uuid.uuid5(uuid.NAMESPACE_URL, "saraise:seed:local-multi-company-configuration:multi-company-activator")
+            ),
+            "seed-default-users-multi-company-configuration",
+        )
+    ]
+
+
+def test_bootstrap_local_multi_company_configuration_warns_when_models_unavailable(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "src.modules.multi_company.models", None)
+
+    Command()._bootstrap_local_multi_company_configuration(str(uuid.uuid4()), ())

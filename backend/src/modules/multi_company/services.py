@@ -170,7 +170,7 @@ def _get(model: type[Any], tenant_id: uuid.UUID | str, object_id: Any, *, delete
         query = query.filter(is_deleted=False)
     try:
         return query.get(pk=object_id)
-    except (ObjectDoesNotExist, ValueError, TypeError) as exc:
+    except (ObjectDoesNotExist, ValidationError, ValueError, TypeError) as exc:
         raise NotFoundError(f"{model.__name__} was not found") from exc
 
 
@@ -180,7 +180,7 @@ def _locked_get(model: type[Any], tenant_id: uuid.UUID | str, object_id: Any, *,
         query = query.filter(is_deleted=False)
     try:
         return query.get(pk=object_id)
-    except (ObjectDoesNotExist, ValueError, TypeError) as exc:
+    except (ObjectDoesNotExist, ValidationError, ValueError, TypeError) as exc:
         raise NotFoundError(f"{model.__name__} was not found") from exc
 
 
@@ -1978,7 +1978,7 @@ class MultiCompanyConfigurationService:
             correlation_id,
             body["environment"],
             body["settings"],
-            f"Imported: {body.get('change_summary','configuration')}",
+            f"Imported: {body.get('change_summary', 'configuration')}",
             body["schema_version"],
         )
         ConfigurationAuditRecord.objects.create(

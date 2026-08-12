@@ -146,15 +146,33 @@ def _patch_files(files: list[Path]) -> list[Path]:
     return sorted(patch_files)
 
 
-def _runner_for_files(files: list[Path]) -> str:
-    test_targets: set[str] = set()
+def _derived_test_targets(source_file: Path, package_root: Path) -> tuple[Path, ...]:
+    parts = source_file.parts
+    if len(parts) >= 3 and parts[:2] == ("src", "modules"):
+        module_tests = Path("src") / "modules" / parts[2] / "tests"
+        if (package_root / module_tests).is_dir():
+            return (module_tests,)
+    if len(parts) >= 3 and parts[:2] == ("src", "core"):
+        core_package_tests = Path("src") / "core" / parts[2] / "tests"
+        if (package_root / core_package_tests).is_dir():
+            return (core_package_tests,)
+    if len(parts) >= 2 and parts[:2] == ("src", "core"):
+        core_tests = Path("src") / "core" / "tests"
+        if (package_root / core_tests).is_dir():
+            return (core_tests,)
+    return tuple(Path(target) for target in DEFAULT_TEST_TARGETS)
+
+
+def _runner_for_files(files: list[Path], package_root: Path) -> str:
+    test_targets: set[Path] = set()
     for source_file in files:
-        test_targets.update(SOURCE_TEST_TARGETS.get(source_file.as_posix(), ()))
+        test_targets.update(_derived_test_targets(source_file, package_root))
+        test_targets.update(Path(target) for target in SOURCE_TEST_TARGETS.get(source_file.as_posix(), ()))
 
     if not test_targets:
-        test_targets.update(DEFAULT_TEST_TARGETS)
+        test_targets.update(Path(target) for target in DEFAULT_TEST_TARGETS)
 
-    quoted_targets = " ".join(shlex.quote(target) for target in sorted(test_targets))
+    quoted_targets = " ".join(shlex.quote(target.as_posix()) for target in sorted(test_targets))
     python = shlex.quote(sys.executable)
     command = (
         "SARAISE_MODE=development DJANGO_USE_SQLITE_FOR_TESTS=1 "
@@ -173,7 +191,7 @@ def run_gate(arguments: list[str], package_root: Path) -> int:
     cache.unlink(missing_ok=True)
 
     mutation_paths = ",".join(path.as_posix() for path in files)
-    runner = _runner_for_files(files)
+    runner = _runner_for_files(files, package_root)
     patch_file = _write_patch_file(files, package_root)
     print(f"Mutation gate: mutating {mutation_paths}", flush=True)
     print(f"Mutation gate: runner {runner}", flush=True)

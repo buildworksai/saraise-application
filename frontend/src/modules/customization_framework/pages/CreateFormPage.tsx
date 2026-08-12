@@ -17,6 +17,7 @@ export function CreateFormPage() {
   const configuration = useRuntimeConfiguration();
   const [name, setName] = useState("");
   const [key, setKey] = useState("");
+  const [keyEdited, setKeyEdited] = useState(false);
   const [description, setDescription] = useState("");
   const [module, setModule] = useState("");
   const [resource, setResource] = useState("");
@@ -82,10 +83,11 @@ export function CreateFormPage() {
               maxLength={runtime.limits.form_name_length}
               value={name}
               onChange={(event) => {
-                setName(event.target.value);
-                if (!key)
+                const nextName = event.target.value;
+                setName(nextName);
+                if (!keyEdited)
                   setKey(
-                    event.target.value
+                    nextName
                       .toLowerCase()
                       .replace(/[^a-z0-9]+/gu, "-")
                       .replace(/^-|-$/gu, "")
@@ -98,7 +100,10 @@ export function CreateFormPage() {
               required
               maxLength={runtime.limits.form_key_length}
               value={key}
-              onChange={(event) => setKey(event.target.value)}
+              onChange={(event) => {
+                setKeyEdited(true);
+                setKey(event.target.value);
+              }}
             />
           </div>
           <Textarea

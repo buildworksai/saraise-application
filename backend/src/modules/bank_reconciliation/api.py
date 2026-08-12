@@ -394,7 +394,7 @@ class StatementImportViewSet(TenantGovernedViewSet):
     def get_queryset(self) -> QuerySet[BankStatementImport]:
         qs = BankStatementImport.objects.for_tenant(self.tenant_id()).select_related("bank_account")
         account_id = self.request.query_params.get("account") or self.request.query_params.get("bank_account")
-        file_format = self.request.query_params.get("format") or self.request.query_params.get("file_format")
+        file_format = self.request.query_params.get("file_format")
         bank_account_id = _uuid_query_value(account_id, "account")
         if bank_account_id is not None:
             qs = qs.filter(bank_account_id=bank_account_id)
@@ -680,9 +680,9 @@ class ReconciliationViewSet(TenantGovernedViewSet):
     def report(self, request: object, pk: str | None = None) -> StreamingHttpResponse:
         del request, pk
         self.object_or_404(self.get_queryset())
-        report_format = str(self.request.query_params.get("format") or "csv").lower()
+        report_format = str(self.request.query_params.get("report_format") or "csv").lower()
         if report_format not in {"csv", "pdf"}:
-            raise ValidationError({"format": "Supported values are csv and pdf."})
+            raise ValidationError({"report_format": "Supported values are csv and pdf."})
         content_type = "application/pdf" if report_format == "pdf" else "text/csv; charset=utf-8"
         response = StreamingHttpResponse(
             ReconciliationService.export_report(self.tenant_id(), self.kwargs["pk"], self.actor_id(), report_format),

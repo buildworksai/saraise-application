@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Final
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 from uuid import UUID
 
-from rest_framework.authentication import SessionAuthentication
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import BaseAuthentication, SessionAuthentication
+from rest_framework.permissions import BasePermission, IsAuthenticated
 
 from src.core.access.permissions import RequiresAccess
 from src.core.auth_utils import get_user_tenant_id
+
+if TYPE_CHECKING:
+    from rest_framework.permissions import _PermissionClass
 
 PERMISSIONS: Final[tuple[str, ...]] = (
     "budget.budget:create",
@@ -43,13 +47,14 @@ class SessionAuthentication401(SessionAuthentication):
 class BudgetAccessMixin:
     """Bind the canonical request tenant and resolve actions deny-by-default."""
 
-    authentication_classes = (SessionAuthentication401,)
-    permission_classes = (IsAuthenticated, RequiresAccess)
-    action_permissions: dict[str, str] = {}
-    action_quotas: dict[str, str] = {}
-    required_entitlement = "module.budget_management"
+    authentication_classes: ClassVar[Sequence[type[BaseAuthentication]]] = (SessionAuthentication401,)
+    permission_classes: ClassVar[Sequence[_PermissionClass]] = (IsAuthenticated, RequiresAccess)
+    action_permissions: ClassVar[dict[str, str]] = {}
+    action_quotas: ClassVar[dict[str, str]] = {}
+    required_entitlement: str = "module.budget_management"
+    request: Any
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         tenant = get_user_tenant_id(getattr(self.request, "user", None))
         try:
             self.request.tenant_id = UUID(str(tenant)) if tenant else None

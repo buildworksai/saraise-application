@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime
-from typing import Any, Iterable
+from typing import Any, Iterable, cast
 from uuid import UUID
 
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
@@ -14,7 +14,7 @@ from django.http import JsonResponse
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, NotFound, PermissionDenied, ValidationError
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -208,7 +208,7 @@ class TenantGovernedViewSet(GovernedAPIViewMixin, MultiCompanyAccessMixin, views
         return value
 
     def paginated(self, rows: Iterable[Any], serializer: type, **context: Any) -> Response:
-        page = self.paginate_queryset(rows)
+        page = self.paginate_queryset(cast(Any, rows))
         if page is None:
             raise RuntimeError("Governed pagination is mandatory.")
         serializer_context = {"request": self.request, **context}
@@ -363,7 +363,9 @@ class CompanyV2ViewSet(TenantGovernedViewSet):
         serializer = ExpectedVersionSerializer(
             data={
                 "expected_version": self.request.query_params.get("expected_version")
-                or self.request.data.get("expected_version")
+                or self.request.data.get("expected_version"),
+                "transition_key": self.request.query_params.get("transition_key")
+                or self.request.data.get("transition_key"),
             }
         )
         serializer.is_valid(raise_exception=True)
@@ -387,6 +389,7 @@ class CompanyV2ViewSet(TenantGovernedViewSet):
             self.actor_id(),
             self.correlation_id(),
             serializer.validated_data["expected_version"],
+            serializer.validated_data["transition_key"],
         )
         return Response(CompanyDetailSerializer(company, context={"request": self.request}).data)
 
@@ -401,6 +404,7 @@ class CompanyV2ViewSet(TenantGovernedViewSet):
             self.actor_id(),
             self.correlation_id(),
             serializer.validated_data["expected_version"],
+            serializer.validated_data["transition_key"],
         )
         return Response(CompanyDetailSerializer(company, context={"request": self.request}).data)
 
@@ -732,7 +736,7 @@ class ReconciliationViewSet(mixins.ListModelMixin, TenantGovernedViewSet):
         if variance_status == "variance":
             rows = [row for row in rows if row.get("variance") != 0]
         rows = _sort_projection(rows, filters["ordering"])
-        page = self.paginate_queryset(rows)
+        page = self.paginate_queryset(cast(Any, rows))
         if page is None:
             raise RuntimeError("Governed pagination is mandatory.")
         return self.get_paginated_response(page)
@@ -757,7 +761,7 @@ class ConsolidationRunViewSet(TenantGovernedViewSet):
     def get_queryset(self) -> QuerySet[ConsolidationRun]:
         return ConsolidationRun.objects.for_tenant(self.tenant_id()).filter(is_deleted=False)
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         if getattr(self, "action", "") == "eliminations":
             self.action_permissions = {
                 **type(self).action_permissions,
@@ -1018,7 +1022,9 @@ class TransferPricingRuleViewSet(TenantGovernedViewSet):
         serializer = ExpectedVersionSerializer(
             data={
                 "expected_version": self.request.query_params.get("expected_version")
-                or self.request.data.get("expected_version")
+                or self.request.data.get("expected_version"),
+                "transition_key": self.request.query_params.get("transition_key")
+                or self.request.data.get("transition_key"),
             }
         )
         serializer.is_valid(raise_exception=True)
@@ -1130,15 +1136,16 @@ class ConfigurationVersionViewSet(TenantGovernedViewSet):
         serializer = ConfigurationDraftSerializer(data=self.request.data)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
-        if data.pop("expected_version", None) is None:
+        expected_version = data.pop("expected_version", None)
+        if expected_version is None:
             raise ValidationError({"expected_version": "This field is required."})
         value = self.service_class().update_draft(
             self.tenant_id(),
             self.kwargs["pk"],
             self.actor_id(),
             self.correlation_id(),
-            data["settings"],
-            data.get("change_summary"),
+            expected_version,
+            {"settings": data["settings"], "change_summary": data.get("change_summary")},
         )
         return Response(ConfigurationVersionSerializer(value, context={"request": self.request}).data)
 
@@ -1223,7 +1230,7 @@ class AsyncJobViewSet(mixins.RetrieveModelMixin, TenantGovernedViewSet):
         "multi_company.transaction.expire_drafts": "multi_company.transaction:update",
     }
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         raw_tenant = get_user_tenant_id(getattr(self.request, "user", None))
         try:
             tenant_id = UUID(str(raw_tenant))
@@ -1237,10 +1244,11 @@ class AsyncJobViewSet(mixins.RetrieveModelMixin, TenantGovernedViewSet):
                 .values_list("command", flat=True)
                 .first()
             )
-            if command:
+            permission = self.COMMAND_PERMISSIONS.get(command) if command else None
+            if permission:
                 self.action_permissions = {
                     **type(self).action_permissions,
-                    "retrieve": self.COMMAND_PERMISSIONS.get(command),
+                    "retrieve": permission,
                 }
         return super().get_permissions()
 
@@ -1271,7 +1279,7 @@ class DeprecatedV1HeadersMixin:
     sunset = "Wed, 31 Dec 2026 23:59:59 GMT"
 
     def finalize_response(self, request: Any, response: Any, *args: Any, **kwargs: Any) -> Any:
-        response = super().finalize_response(request, response, *args, **kwargs)
+        response = cast(Any, super()).finalize_response(request, response, *args, **kwargs)
         response["Deprecation"] = "true"
         response["Sunset"] = self.sunset
         response["Link"] = '</api/v2/multi-company/>; rel="successor-version"'

@@ -214,6 +214,42 @@ describe("TenantSidebar", () => {
     );
   });
 
+  it("renders manually mounted tenant modules from the route registry", async () => {
+    renderSidebar({ initialPath: "/tenant/dashboard" });
+
+    await userEvent.click(screen.getByRole("button", { name: /^tenant management$/i }));
+    expect(screen.getByRole("link", { name: /tenant directory/i })).toHaveAttribute(
+      "href",
+      "/tenant-management"
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /^accounting finance$/i }));
+    expect(screen.getByRole("link", { name: /chart of accounts/i })).toHaveAttribute(
+      "href",
+      "/accounting-finance/accounts"
+    );
+    expect(screen.getByRole("link", { name: /^payments$/i })).toHaveAttribute(
+      "href",
+      "/accounting-finance/payments"
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /^billing subscriptions$/i }));
+    expect(screen.getByRole("link", { name: /^subscriptions$/i })).toHaveAttribute(
+      "href",
+      "/billing-subscriptions"
+    );
+    expect(screen.getByRole("link", { name: /quota management/i })).toHaveAttribute(
+      "href",
+      "/billing-subscriptions/quotas"
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /^localization$/i }));
+    expect(screen.getByRole("link", { name: /localization resources/i })).toHaveAttribute(
+      "href",
+      "/localization"
+    );
+  });
+
   it("hides admin-only configuration links for non-admin tenant users", () => {
     renderSidebarForUser(tenantUser);
 

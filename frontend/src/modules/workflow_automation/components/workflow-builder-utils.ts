@@ -1,6 +1,7 @@
 import type {
   ActionStepConfig,
   ApprovalStepConfig,
+  HandlerDescriptorDTO,
   NotificationStepConfig,
   StepType,
   WorkflowConfigurationDocument,
@@ -14,6 +15,10 @@ export const WORKFLOW_CATALOG_ACTIONS_QUERY_KEY = ["workflow-catalog-actions"] a
 export const WORKFLOW_CATALOG_CONDITIONS_QUERY_KEY = ["workflow-catalog-conditions"] as const;
 export const WORKFLOW_CATALOG_ASSIGNEES_QUERY_KEY = ["workflow-catalog-assignees"] as const;
 
+export function workflowStepCardKey(step: WorkflowStepWriteDTO, index: number): string {
+  return `${step.key}-${index}`;
+}
+
 export function slug(value: string, maximum: number): string {
   return value
     .toLowerCase()
@@ -26,6 +31,20 @@ export function recipientPath(config: NotificationStepConfig): string {
   const value =
     config.recipient_mapping[config.channel === "email" ? "recipient_email" : "recipient_id"];
   return typeof value === "string" ? value : "";
+}
+
+export function actionConfigForSelection(
+  actions: readonly HandlerDescriptorDTO[] | undefined,
+  selectedKey: string
+): ActionStepConfig | null {
+  const descriptor = actions?.find((item) => item.key === selectedKey);
+  if (descriptor?.availability !== "available") return null;
+  return {
+    handler: descriptor.key,
+    schema_version: descriptor.schema_version,
+    input_mapping: {},
+    configuration: {},
+  };
 }
 
 export function newStep(

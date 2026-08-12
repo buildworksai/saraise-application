@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/Button";
 import { LogoVideo } from "@/components/ui/logo-video";
 import { AuthLegalFooter } from "@/components/auth/AuthLegalFooter";
 import { Send, CheckCircle2, Loader2 } from "lucide-react";
+import { ApiError } from "@/services/api-client";
 import { authService } from "@/services/auth-service";
 
 export function ForgotPasswordForm() {
@@ -21,6 +22,14 @@ export function ForgotPasswordForm() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [submittedEmail, setSubmittedEmail] = useState("");
+
+  const getForgotPasswordFailureMessage = (err: unknown) => {
+    if (err instanceof ApiError && err.status >= 500) {
+      return "Password reset service is temporarily unavailable. Try again later.";
+    }
+    return "Unable to process your request right now.";
+  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -31,20 +40,23 @@ export function ForgotPasswordForm() {
       return;
     }
 
+    const normalizedEmail = email.trim();
     setIsSubmitting(true);
     try {
       // Phase 6 backend integration
-      await authService.forgotPassword({ email: email.trim() });
+      await authService.forgotPassword({ email: normalizedEmail });
+      setSubmittedEmail(normalizedEmail);
       setSuccess(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to process your request right now.");
+      setError(getForgotPasswordFailureMessage(err));
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="h-screen flex overflow-hidden">
+    <main id="main-content" className="h-screen flex overflow-hidden">
+      <h1 className="sr-only">Reset your SARAISE password</h1>
       <div className="hidden lg:flex lg:w-1/2 bg-[#040818] flex-col relative overflow-hidden h-full">
         <LogoVideo
           background
@@ -55,11 +67,8 @@ export function ForgotPasswordForm() {
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#040818]/15 to-[#040818]/70 pointer-events-none" />
         <div className="absolute inset-0 opacity-5 z-[1]">
           <div
-            className="absolute inset-0"
-            style={{
-              backgroundImage: `radial-gradient(circle at 2px 2px, rgba(255,255,255,0.3) 1px, transparent 0)`,
-              backgroundSize: "60px 60px",
-            }}
+            data-testid="forgot-password-background-pattern"
+            className="absolute inset-0 bg-[radial-gradient(circle_at_2px_2px,rgba(255,255,255,0.3)_1px,transparent_0)] bg-[length:60px_60px]"
           />
         </div>
         <div className="relative z-10 flex flex-col h-full px-8 lg:px-12 py-12 text-white">
@@ -101,7 +110,7 @@ export function ForgotPasswordForm() {
                     <CheckCircle2 className="w-8 h-8 text-green-600 dark:text-green-400" />
                   </div>
                   <p className="text-base">
-                    {`If an account exists for ${email}, a reset link is on its way. Check your inbox (and spam folder).`}
+                    {`If an account exists for ${submittedEmail}, a reset link is on its way. Check your inbox (and spam folder).`}
                   </p>
                   <Link
                     to="/login"
@@ -117,6 +126,7 @@ export function ForgotPasswordForm() {
                   }}
                   className="space-y-5"
                   aria-busy={isSubmitting}
+                  noValidate
                 >
                   <div className="space-y-2">
                     <Label htmlFor="reset-email" className="text-sm font-semibold">
@@ -186,6 +196,6 @@ export function ForgotPasswordForm() {
           </Card>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

@@ -150,7 +150,7 @@ export function CreateDeliveryPage() {
               max={10}
               value={priority}
               onChange={(e) => {
-                setPriority(e.target.valueAsNumber);
+                setPriority(Number.isNaN(e.target.valueAsNumber) ? 0 : e.target.valueAsNumber);
                 setPreview(null);
               }}
             />

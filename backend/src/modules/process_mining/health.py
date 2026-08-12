@@ -56,6 +56,15 @@ def _result(healthy: bool, message: str, code: str) -> HealthCheckResult:
     return HealthCheckResult(healthy, message, timezone.now(), {"code": code})
 
 
+def _configured_int(configuration: Mapping[str, object], key: str) -> int:
+    value = configuration[key]
+    if isinstance(value, bool):
+        raise ValueError(f"{key} must be numeric")
+    if isinstance(value, int | float | str | bytes | bytearray):
+        return int(value)
+    raise ValueError(f"{key} must be numeric")
+
+
 def database_readiness_probe() -> HealthCheckResult:
     try:
         tables = set(connection.introspection.table_names())
@@ -80,8 +89,10 @@ def async_readiness_probe(freshness_seconds: int | None = None) -> HealthCheckRe
     try:
         if not set(ASYNC_TABLES).issubset(set(connection.introspection.table_names())):
             return _result(False, "async_schema_unavailable", "schema_missing")
-        configured_seconds = int(
-            DEFAULT_CONFIGURATION["outbox_freshness_seconds"] if freshness_seconds is None else freshness_seconds
+        configured_seconds = (
+            _configured_int(DEFAULT_CONFIGURATION, "outbox_freshness_seconds")
+            if freshness_seconds is None
+            else freshness_seconds
         )
         stale = OutboxEvent.objects.filter(  # nosemgrep: semgrep.tenant-id-required-in-queries
             status=OutboxStatus.PENDING, created_at__lt=timezone.now() - timedelta(seconds=configured_seconds)
@@ -118,7 +129,7 @@ def get_module_health(tenant_id: uuid.UUID | None = None) -> ModuleHealthReport:
     configuration = ProcessMiningConfigurationService().resolve(tenant_id) if tenant_id else DEFAULT_CONFIGURATION
     probes = {
         "database_rls": database_readiness_probe(),
-        "async_outbox": async_readiness_probe(int(configuration["outbox_freshness_seconds"])),
+        "async_outbox": async_readiness_probe(_configured_int(configuration, "outbox_freshness_seconds")),
         "algorithms": adapter_readiness_probe(),
         "export_storage": storage_readiness_probe(),
     }

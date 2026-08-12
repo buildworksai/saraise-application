@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CreateAiProviderConfigurationResourcePage } from "../CreateAiProviderConfigurationResourcePage";
 import { aiProviderConfigurationService } from "../../services/ai_provider_configuration-service";
+import type { AIProviderRuntimeConfiguration } from "../../contracts";
 
 const navigate = vi.fn();
 vi.mock("../../services/ai_provider_configuration-service");
@@ -13,6 +14,23 @@ vi.mock("react-router-dom", async () => ({
   useNavigate: () => navigate,
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
+const runtimeConfiguration: AIProviderRuntimeConfiguration = {
+  id: "runtime-config-1",
+  tenant_id: "tenant-1",
+  environment: "default",
+  version: 1,
+  updated_by: "operator-1",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+  values: {
+    credential_policy: { default_label: "Default credential" },
+    field_limits: {
+      credential_label_max: 120,
+      credential_secret_hint_length: 4,
+    },
+  },
+};
 
 function renderPage() {
   const client = new QueryClient({
@@ -41,6 +59,9 @@ describe("CreateAiProviderConfigurationResourcePage", () => {
         updated_at: "2026-01-01T00:00:00Z",
       },
     ]);
+    vi.mocked(aiProviderConfigurationService.getRuntimeConfiguration).mockResolvedValue(
+      runtimeConfiguration
+    );
   });
 
   it("validates the provider before submitting secret material", async () => {

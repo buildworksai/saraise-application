@@ -19,7 +19,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import Protocol, TextIO, runtime_checkable
+from typing import Protocol, SupportsFloat, SupportsIndex, TextIO, runtime_checkable
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 
@@ -99,6 +99,13 @@ class BottleneckResult:
     variants: tuple[Mapping[str, object], ...]
     total_cases: int
     average_case_duration_seconds: Decimal
+
+
+def _required_float(configuration: Mapping[str, object], key: str) -> float:
+    value = configuration[key]
+    if isinstance(value, str | bytes | bytearray) or isinstance(value, SupportsFloat | SupportsIndex):
+        return float(value)
+    raise ValueError(f"{key} must be numeric")
 
 
 @runtime_checkable
@@ -287,7 +294,7 @@ class HeuristicMiner(DirectlyFollowsMiner):
     def _edge_allowed(self, frequency: int, maximum: int, parameters: Mapping[str, object]) -> bool:
         if "dependency_threshold" not in parameters:
             raise ValueError("dependency_threshold must be supplied by tenant configuration")
-        threshold = float(parameters["dependency_threshold"])
+        threshold = _required_float(parameters, "dependency_threshold")
         return frequency / maximum >= threshold
 
 
@@ -304,7 +311,7 @@ class InductiveMiner(DirectlyFollowsMiner):
     def _edge_allowed(self, frequency: int, maximum: int, parameters: Mapping[str, object]) -> bool:
         if "noise_threshold" not in parameters:
             raise ValueError("noise_threshold must be supplied by tenant configuration")
-        threshold = float(parameters["noise_threshold"])
+        threshold = _required_float(parameters, "noise_threshold")
         return frequency / maximum >= threshold
 
 
@@ -380,11 +387,11 @@ def _percentile(values: Sequence[float], percentile: float) -> float:
 
 def _severity(median: float, p95: float, configuration: Mapping[str, object]) -> str:
     ratio = p95 / median if median > 0 else (float("inf") if p95 > 0 else 1)
-    if ratio > float(configuration["bottleneck_critical_ratio"]):
+    if ratio > _required_float(configuration, "bottleneck_critical_ratio"):
         return "critical"
-    if ratio > float(configuration["bottleneck_high_ratio"]):
+    if ratio > _required_float(configuration, "bottleneck_high_ratio"):
         return "high"
-    if ratio > float(configuration["bottleneck_medium_ratio"]):
+    if ratio > _required_float(configuration, "bottleneck_medium_ratio"):
         return "medium"
     return "low"
 
@@ -426,7 +433,7 @@ class TransitionDurationAnalyzer:
                     transition_resources[key][target.resource] += 1
         if not case_durations:
             raise InvalidAdapterResult("Bottleneck analysis requires traces")
-        percentile = float(configuration["tail_duration_percentile"])
+        percentile = _required_float(configuration, "tail_duration_percentile")
         ranked = sorted(
             transition_durations, key=lambda key: (-_percentile(transition_durations[key], percentile), key)
         )
@@ -448,7 +455,8 @@ class TransitionDurationAnalyzer:
                     "severity": _severity(median, _percentile(values, percentile), configuration),
                     "resource_bottleneck": (
                         top_resource
-                        if cases and top_count / cases > float(configuration["resource_concentration_threshold"])
+                        if cases
+                        and top_count / cases > _required_float(configuration, "resource_concentration_threshold")
                         else ""
                     ),
                     "rank": rank,
@@ -462,14 +470,14 @@ class TransitionDurationAnalyzer:
         for activities, count in sorted(variants.items(), key=lambda item: (-item[1], item[0])):
             percentage = count * 100 / total
             duration = statistics.mean(variant_durations[activities])
-            if percentage < float(configuration["variant_grouping_percentage"]):
+            if percentage < _required_float(configuration, "variant_grouping_percentage"):
                 grouped_count += count
                 grouped_weighted_duration += duration * count
                 continue
-            key = hashlib.sha256("\0".join(activities).encode()).hexdigest()
+            variant_key = hashlib.sha256("\0".join(activities).encode()).hexdigest()
             rows.append(
                 {
-                    "variant_key": key,
+                    "variant_key": variant_key,
                     "activities": list(activities),
                     "case_count": count,
                     "percentage": Decimal(str(round(percentage, 4))),

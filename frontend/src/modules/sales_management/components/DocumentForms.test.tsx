@@ -5,9 +5,15 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type * as ReactRouter from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Customer, Quotation, SalesConfiguration, SalesOrder } from "../contracts";
+import type {
+  Customer,
+  DeliveryNote,
+  Quotation,
+  SalesConfiguration,
+  SalesOrder,
+} from "../contracts";
 import { salesService } from "../services/sales-service";
-import { CommercialDocumentForm } from "./DocumentForms";
+import { CommercialDocumentForm, DeliveryDocumentForm } from "./DocumentForms";
 
 const navigate = vi.hoisted(() => vi.fn());
 
@@ -25,15 +31,22 @@ vi.mock("../services/sales-service", () => ({
     configuration: () => ["sales-management", "configuration"],
     customers: (filters = {}) => ["sales-management", "customers", filters],
     quotations: () => ["sales-management", "quotations"],
+    orders: (filters = {}) => ["sales-management", "orders", filters],
+    order: (id: string) => ["sales-management", "order", id],
+    deliveries: () => ["sales-management", "deliveries"],
   },
   salesService: {
     getConfiguration: vi.fn(),
     listCustomers: vi.fn(),
+    listOrders: vi.fn(),
+    getOrder: vi.fn(),
     previewQuotation: vi.fn(),
     createQuotation: vi.fn(),
     updateQuotation: vi.fn(),
     createOrder: vi.fn(),
     updateOrder: vi.fn(),
+    createDeliveryNote: vi.fn(),
+    updateDeliveryNote: vi.fn(),
   },
 }));
 
@@ -168,6 +181,39 @@ const order: SalesOrder = {
   capabilities: [],
   lock_version: 6,
 };
+const deliveryOrder: SalesOrder = { ...order, status: "confirmed" };
+const deliveryNote: DeliveryNote = {
+  ...mutable,
+  id: "delivery-1",
+  delivery_number: "DN-1",
+  delivery_date: "2026-08-01",
+  sales_order: "order-1",
+  order_number: "SO-1",
+  warehouse_id: null,
+  carrier_name: "DHL",
+  tracking_number: "TRACK-1",
+  proof_document_id: null,
+  status: "draft",
+  notes: "",
+  transition_history: [],
+  lines: [
+    {
+      ...mutable,
+      id: "delivery-line-1",
+      delivery_note: "delivery-1",
+      sales_order_line: "order-line-1",
+      line_number: 1,
+      item_id: null,
+      quantity_delivered: "1",
+      batch_number: "",
+      serial_number: "",
+      lock_version: 1,
+    },
+  ],
+  allowed_commands: ["complete"],
+  capabilities: [],
+  lock_version: 1,
+};
 
 function page<T>(data: T[]) {
   return {
@@ -204,6 +250,8 @@ describe("CommercialDocumentForm", () => {
     vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "idem-document") });
     vi.mocked(salesService.getConfiguration).mockResolvedValue(configuration);
     vi.mocked(salesService.listCustomers).mockResolvedValue(page([customer]));
+    vi.mocked(salesService.listOrders).mockResolvedValue(page([deliveryOrder]));
+    vi.mocked(salesService.getOrder).mockResolvedValue(deliveryOrder);
   });
 
   it("validates quotations, previews server totals, and creates an idempotent draft", async () => {
@@ -295,5 +343,53 @@ describe("CommercialDocumentForm", () => {
     );
     expect(navigate).toHaveBeenCalledWith("/sales-management/sales-orders/order-1");
     confirm.mockRestore();
+  });
+
+  it("creates delivery drafts from eligible order lines with over-delivery guardrails", async () => {
+    vi.mocked(salesService.createDeliveryNote).mockResolvedValue(deliveryNote);
+    renderForm(<DeliveryDocumentForm />);
+
+    expect(
+      await screen.findByText("Select an order to load real remaining quantities.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save delivery draft" })).toBeDisabled();
+
+    await userEvent.selectOptions(screen.getByLabelText("Sales order"), "order-1");
+    expect(await screen.findByText("SKU-1 · Widget")).toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText("Select Widget"));
+    await userEvent.clear(screen.getByLabelText("Deliver"));
+    await userEvent.type(screen.getByLabelText("Deliver"), "2");
+    expect(
+      screen.getByText("Quantity for Widget exceeds the remaining deliverable amount.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save delivery draft" })).toBeDisabled();
+
+    await userEvent.clear(screen.getByLabelText("Deliver"));
+    await userEvent.type(screen.getByLabelText("Deliver"), "1");
+    await userEvent.type(screen.getByLabelText("Tracking number"), "TRACK-1");
+    expect(
+      screen.getByText("Carrier name is required when a tracking number is supplied.")
+    ).toBeInTheDocument();
+
+    await userEvent.type(screen.getByLabelText("Carrier"), "DHL");
+    await userEvent.click(screen.getByRole("button", { name: "Save delivery draft" }));
+    await waitFor(() =>
+      expect(salesService.createDeliveryNote).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sales_order: "order-1",
+          carrier_name: "DHL",
+          tracking_number: "TRACK-1",
+          lines: [
+            expect.objectContaining({
+              sales_order_line: "order-line-1",
+              quantity_delivered: "1",
+              line_number: 1,
+            }),
+          ],
+        }),
+        "idem-document"
+      )
+    );
+    expect(navigate).toHaveBeenCalledWith("/sales-management/deliveries/delivery-1");
   });
 });

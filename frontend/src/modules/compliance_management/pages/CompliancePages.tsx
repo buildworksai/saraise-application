@@ -1,7 +1,7 @@
 /* eslint-disable max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /* eslint-disable complexity, @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/no-unused-expressions, @typescript-eslint/non-nullable-type-assertion-style -- cohesive workflow pages intentionally keep related governed state adjacent. */
 /* Page implementations share state primitives so every workflow presents the same governed failure semantics. */
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, Download, Plus, Save, Upload } from "lucide-react";
@@ -354,19 +354,20 @@ function FrameworkFormPage({ edit }: { readonly edit: boolean }) {
     source_package: "",
     source_version: "",
   });
-  const value =
-    edit && existing.data
-      ? {
-          code: existing.data.code,
-          name: existing.data.name,
-          version: existing.data.version,
-          category: existing.data.category,
-          description: existing.data.description,
-          source_kind: existing.data.source_kind,
-          source_package: existing.data.source_package,
-          source_version: existing.data.source_version,
-        }
-      : form;
+  useEffect(() => {
+    if (!edit || !existing.data) return;
+    setForm({
+      code: existing.data.code,
+      name: existing.data.name,
+      version: existing.data.version,
+      category: existing.data.category,
+      description: existing.data.description,
+      source_kind: existing.data.source_kind,
+      source_package: existing.data.source_package,
+      source_version: existing.data.source_version,
+    });
+  }, [edit, existing.data]);
+  const value = form;
   const mutation = useMutation({
     mutationFn: (body: FrameworkWriteRequest) =>
       edit
@@ -392,7 +393,7 @@ function FrameworkFormPage({ edit }: { readonly edit: boolean }) {
       mutation.mutate(value);
   };
   const set = (key: keyof FrameworkWriteRequest, next: string) =>
-    setForm((current) => ({ ...value, ...current, [key]: next }));
+    setForm((current) => ({ ...current, [key]: next }));
   return (
     <CompliancePage
       title={edit ? "Edit framework" : "Create framework"}
@@ -677,21 +678,22 @@ function RequirementFormPage({ edit }: { readonly edit: boolean }) {
     sort_order: 0,
     tags: [],
   });
-  const current =
-    edit && existing.data
-      ? {
-          framework_id: existing.data.framework,
-          code: existing.data.code,
-          title: existing.data.title,
-          description: existing.data.description,
-          section: existing.data.section,
-          guidance: existing.data.guidance,
-          applicability: existing.data.applicability,
-          applicability_rationale: existing.data.applicability_rationale,
-          sort_order: existing.data.sort_order,
-          tags: existing.data.tags,
-        }
-      : value;
+  useEffect(() => {
+    if (!edit || !existing.data) return;
+    setValue({
+      framework_id: existing.data.framework,
+      code: existing.data.code,
+      title: existing.data.title,
+      description: existing.data.description,
+      section: existing.data.section,
+      guidance: existing.data.guidance,
+      applicability: existing.data.applicability,
+      applicability_rationale: existing.data.applicability_rationale,
+      sort_order: existing.data.sort_order,
+      tags: existing.data.tags,
+    });
+  }, [edit, existing.data]);
+  const current = value;
   const mutation = useMutation({
     mutationFn: (body: RequirementWriteRequest) =>
       edit
@@ -710,7 +712,7 @@ function RequirementFormPage({ edit }: { readonly edit: boolean }) {
       </CompliancePage>
     );
   const set = <K extends keyof RequirementWriteRequest>(key: K, next: RequirementWriteRequest[K]) =>
-    setValue((prior) => ({ ...current, ...prior, [key]: next }));
+    setValue((prior) => ({ ...prior, [key]: next }));
   return (
     <CompliancePage
       title={edit ? "Edit requirement" : "Create requirement"}
@@ -1087,7 +1089,7 @@ function PolicyFormPage({ edit }: { readonly edit: boolean }) {
         title: existing.data.title,
         summary: existing.data.summary,
         category: existing.data.category,
-        owner: existing.data.owner,
+        owner_id: existing.data.owner,
         review_frequency_days: existing.data.review_frequency_days,
         effective_date: existing.data.effective_date,
         expiry_date: existing.data.expiry_date,

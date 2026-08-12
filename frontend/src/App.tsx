@@ -241,14 +241,89 @@ const AccountingAccountListPage = lazy(() =>
     default: m.AccountListView,
   }))
 );
+const AccountingPostingPeriodListPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceListPages").then((m) => ({
+    default: m.PostingPeriodListView,
+  }))
+);
+const AccountingJournalEntryListPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceListPages").then((m) => ({
+    default: m.JournalEntryListView,
+  }))
+);
+const AccountingAPInvoiceListPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceListPages").then((m) => ({
+    default: m.APInvoiceListView,
+  }))
+);
+const AccountingARInvoiceListPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceListPages").then((m) => ({
+    default: m.ARInvoiceListView,
+  }))
+);
+const AccountingPaymentListPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceListPages").then((m) => ({
+    default: m.PaymentListView,
+  }))
+);
 const AccountingAccountDetailPage = lazy(() =>
   import("./modules/accounting_finance/pages/ResourceDetailPages").then((m) => ({
     default: m.AccountDetailView,
   }))
 );
+const AccountingPostingPeriodDetailPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceDetailPages").then((m) => ({
+    default: m.PostingPeriodDetailView,
+  }))
+);
+const AccountingJournalEntryDetailPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceDetailPages").then((m) => ({
+    default: m.JournalEntryDetailView,
+  }))
+);
+const AccountingAPInvoiceDetailPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceDetailPages").then((m) => ({
+    default: m.APInvoiceDetailView,
+  }))
+);
+const AccountingARInvoiceDetailPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceDetailPages").then((m) => ({
+    default: m.ARInvoiceDetailView,
+  }))
+);
+const AccountingPaymentDetailPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceDetailPages").then((m) => ({
+    default: m.PaymentDetailView,
+  }))
+);
 const CreateAccountingAccountPage = lazy(() =>
   import("./modules/accounting_finance/pages/CreateAccountPage").then((m) => ({
     default: m.CreateAccountPage,
+  }))
+);
+const AccountingAccountFormPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceFormPages").then((m) => ({
+    default: m.AccountFormPage,
+  }))
+);
+const AccountingPostingPeriodFormPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceFormPages").then((m) => ({
+    default: m.PostingPeriodFormPage,
+  }))
+);
+const AccountingJournalEntryFormPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceFormPages").then((m) => ({
+    default: m.JournalEntryFormPage,
+  }))
+);
+const AccountingInvoiceFormPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceFormPages").then((m) => ({
+    default: m.InvoiceFormPage,
+  }))
+);
+const AccountingPaymentFormPage = lazy(() =>
+  import("./modules/accounting_finance/pages/ResourceFormPages").then((m) => ({
+    default: m.PaymentFormPage,
   }))
 );
 
@@ -380,6 +455,21 @@ function LegacyHumanResourcesLeaveRequestRedirect({ edit = false }: { edit?: boo
   );
 }
 
+function LegacyPostingPeriodRedirect({ edit = false }: { edit?: boolean }) {
+  const { id } = useParams();
+  return (
+    <Navigate
+      to={`/accounting-finance/periods/${encodeURIComponent(id!)}${edit ? "/edit" : ""}`}
+      replace
+    />
+  );
+}
+
+function LegacyBillingSubscriptionRedirect() {
+  const { id } = useParams();
+  return <Navigate to={`/billing-subscriptions/${encodeURIComponent(id!)}`} replace />;
+}
+
 // Legacy route inventory is being migrated module-by-module into the typed registry.
 // eslint-disable-next-line max-lines-per-function
 function AnimatedRoutes() {
@@ -492,10 +582,10 @@ function AnimatedRoutes() {
               </ProtectedRoute>
             }
           />
-          {import.meta.env.VITE_SARAISE_MODE === "self-hosted" && (
-            <Route
-              path="/settings/license"
-              element={
+          <Route
+            path="/license/settings"
+            element={
+              import.meta.env.VITE_SARAISE_MODE === "self-hosted" ? (
                 <ProtectedRoute>
                   <ModuleLayout>
                     <RouteTitle title="License settings">
@@ -503,9 +593,27 @@ function AnimatedRoutes() {
                     </RouteTitle>
                   </ModuleLayout>
                 </ProtectedRoute>
-              }
-            />
-          )}
+              ) : (
+                <Navigate to="/settings" replace />
+              )
+            }
+          />
+          <Route
+            path="/settings/license"
+            element={
+              import.meta.env.VITE_SARAISE_MODE === "self-hosted" ? (
+                <ProtectedRoute>
+                  <ModuleLayout>
+                    <RouteTitle title="License settings">
+                      <LicenseSettingsPage />
+                    </RouteTitle>
+                  </ModuleLayout>
+                </ProtectedRoute>
+              ) : (
+                <Navigate to="/settings" replace />
+              )
+            }
+          />
 
           {/* Accounting & Finance */}
           <Route
@@ -539,6 +647,274 @@ function AnimatedRoutes() {
                 <ModuleLayout>
                   <RouteTitle title="Accounting account detail">
                     <AccountingAccountDetailPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/accounts/:id/edit"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Edit accounting account">
+                    <AccountingAccountFormPage edit />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/posting-periods"
+            element={<Navigate to="/accounting-finance/periods" replace />}
+          />
+          <Route
+            path="/accounting-finance/posting-periods/new"
+            element={<Navigate to="/accounting-finance/periods/new" replace />}
+          />
+          <Route
+            path="/accounting-finance/posting-periods/:id"
+            element={<LegacyPostingPeriodRedirect />}
+          />
+          <Route
+            path="/accounting-finance/posting-periods/:id/edit"
+            element={<LegacyPostingPeriodRedirect edit />}
+          />
+          <Route
+            path="/accounting-finance/periods"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Posting periods">
+                    <AccountingPostingPeriodListPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/periods/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Create posting period">
+                    <AccountingPostingPeriodFormPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/periods/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Posting period detail">
+                    <AccountingPostingPeriodDetailPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/periods/:id/edit"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Edit posting period">
+                    <AccountingPostingPeriodFormPage edit />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/journal-entries"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Journal entries">
+                    <AccountingJournalEntryListPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/journal-entries/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Create journal entry">
+                    <AccountingJournalEntryFormPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/journal-entries/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Journal entry detail">
+                    <AccountingJournalEntryDetailPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/journal-entries/:id/edit"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Edit journal entry">
+                    <AccountingJournalEntryFormPage edit />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/ap-invoices"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Accounts payable invoices">
+                    <AccountingAPInvoiceListPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/ap-invoices/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Create AP invoice">
+                    <AccountingInvoiceFormPage kind="ap" />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/ap-invoices/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="AP invoice detail">
+                    <AccountingAPInvoiceDetailPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/ap-invoices/:id/edit"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Edit AP invoice">
+                    <AccountingInvoiceFormPage kind="ap" edit />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/ar-invoices"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Accounts receivable invoices">
+                    <AccountingARInvoiceListPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/ar-invoices/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Create AR invoice">
+                    <AccountingInvoiceFormPage kind="ar" />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/ar-invoices/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="AR invoice detail">
+                    <AccountingARInvoiceDetailPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/ar-invoices/:id/edit"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Edit AR invoice">
+                    <AccountingInvoiceFormPage kind="ar" edit />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/payments"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Payments">
+                    <AccountingPaymentListPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/payments/new"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Record payment">
+                    <AccountingPaymentFormPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/payments/:id"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Payment detail">
+                    <AccountingPaymentDetailPage />
+                  </RouteTitle>
+                </ModuleLayout>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/accounting-finance/payments/:id/edit"
+            element={
+              <ProtectedRoute>
+                <ModuleLayout>
+                  <RouteTitle title="Edit payment">
+                    <AccountingPaymentFormPage edit />
                   </RouteTitle>
                 </ModuleLayout>
               </ProtectedRoute>
@@ -764,6 +1140,18 @@ function AnimatedRoutes() {
 
           {/* BillingSubscriptions routes */}
           <Route
+            path="/billing/subscriptions"
+            element={<Navigate to="/billing-subscriptions" replace />}
+          />
+          <Route
+            path="/billing/subscriptions/new"
+            element={<Navigate to="/billing-subscriptions/create" replace />}
+          />
+          <Route
+            path="/billing/subscriptions/:id"
+            element={<LegacyBillingSubscriptionRedirect />}
+          />
+          <Route
             path="/billing-subscriptions"
             element={
               <ProtectedRoute>
@@ -814,6 +1202,10 @@ function AnimatedRoutes() {
 
           {/* Localization routes */}
           <Route
+            path="/localization/new"
+            element={<Navigate to="/localization/create" replace />}
+          />
+          <Route
             path="/localization"
             element={
               <ProtectedRoute>
@@ -851,6 +1243,15 @@ function AnimatedRoutes() {
           />
 
           {/* Regional routes */}
+          <Route
+            path="/regional/currencies"
+            element={<Navigate to={REGIONAL_ROUTES.ROOT} replace />}
+          />
+          <Route path="/regional/taxes" element={<Navigate to={REGIONAL_ROUTES.ROOT} replace />} />
+          <Route
+            path="/regional/calendars"
+            element={<Navigate to={REGIONAL_ROUTES.ROOT} replace />}
+          />
           <Route
             path={REGIONAL_ROUTES.ROOT}
             element={
@@ -901,6 +1302,8 @@ function AnimatedRoutes() {
               </ProtectedRoute>
             }
           />
+
+          <Route path="/notifications/inbox" element={<Navigate to="/notifications" replace />} />
 
           {/* Migration shim: module-owned routes are rendered from the typed registry. */}
           {registryTenantRoutes.map(({ id, path, title, Page }) => (

@@ -9,6 +9,7 @@ from django.db.models import Count, QuerySet
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -708,7 +709,7 @@ class DocumentIntelligenceConfigurationViewSet(TenantGovernedViewSet):
         "simulate": "document_intelligence.configuration:update",
     }
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         if getattr(self, "action", "") == "current" and self.request.method != "GET":
             self.action_permissions = {
                 **self.action_permissions,
@@ -833,7 +834,7 @@ class ModuleHealthAPIView(GovernedAPIViewMixin, APIView):
     authentication_classes = (SessionAuthentication401,)
     permission_classes = ()
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         from rest_framework.permissions import IsAuthenticated
 
         from src.core.access.permissions import RequiresAccess
@@ -841,9 +842,9 @@ class ModuleHealthAPIView(GovernedAPIViewMixin, APIView):
         tenant_id = get_user_tenant_id(getattr(self.request, "user", None))
         if tenant_id is not None:
             try:
-                self.request.tenant_id = UUID(str(tenant_id))
+                setattr(self.request, "tenant_id", UUID(str(tenant_id)))
             except (TypeError, ValueError, AttributeError):
-                self.request.tenant_id = None
+                setattr(self.request, "tenant_id", None)
         self.required_permission = "document_intelligence.health:read"
         self.required_entitlement = self.required_permission
         self.quota_resource = "document_intelligence.api_reads"

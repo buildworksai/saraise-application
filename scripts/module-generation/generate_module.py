@@ -524,8 +524,8 @@ Apache-2.0
         print(f"\n10. Test end-to-end:")
         print(f"    - Start backend: cd backend && python manage.py runserver")
         print(f"    - Start frontend: cd frontend && npm run dev")
-        print(f"    - Test API: curl http://localhost:8000/api/v1/{self.module_name}/health/")
-        print(f"    - Test UI: http://localhost:5173/{self.module_name}")
+        print(f"    - Test API: curl http://localhost:28000/api/v1/{self.module_name}/health/")
+        print(f"    - Test UI: http://localhost:25173/{self.module_name}")
 
 
 def main():

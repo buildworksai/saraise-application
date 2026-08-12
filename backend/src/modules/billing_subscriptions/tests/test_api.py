@@ -8,13 +8,17 @@ Tests all DRF ViewSet endpoints:
 - Custom actions
 """
 
+from types import SimpleNamespace
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.test import APIClient
 
 from src.core.auth_utils import get_user_tenant_id
+from src.modules.billing_subscriptions import api
 from src.modules.billing_subscriptions.models import Subscription, SubscriptionPlan, UsageRecord
 
 User = get_user_model()
@@ -149,3 +153,200 @@ class TestBillingSubscriptionsAPI:
         assert set(response.data) == {"users", "storage", "api_calls"}
         assert response.data["users"] == {"used": 0, "limit": 0}
         assert response.data["storage"] == {"used": 0.0, "limit": 0}
+
+
+class RecordingQuerySet:
+    def __init__(self):
+        self.calls = []
+
+    def filter(self, **kwargs):
+        self.calls.append(("filter", kwargs))
+        return self
+
+    def order_by(self, *fields):
+        self.calls.append(("order_by", fields))
+        return self
+
+
+class RecordingManager:
+    def __init__(self):
+        self.queryset = RecordingQuerySet()
+        self.none_called = False
+
+    def filter(self, **kwargs):
+        return self.queryset.filter(**kwargs)
+
+    def none(self):
+        self.none_called = True
+        return self.queryset
+
+
+def _view(view_cls, query_params=None, data=None):
+    view = view_cls()
+    view.request = SimpleNamespace(
+        user=SimpleNamespace(),
+        query_params=query_params or {},
+        data=data or {},
+    )
+    return view
+
+
+def test_subscription_plan_queryset_filters_active_plans_by_billing_cycle(monkeypatch):
+    manager = RecordingManager()
+    monkeypatch.setattr(api.SubscriptionPlan, "objects", manager)
+    view = _view(api.SubscriptionPlanViewSet, {"billing_cycle": "yearly"})
+
+    assert view.get_queryset() is manager.queryset
+    assert manager.queryset.calls == [
+        ("filter", {"is_active": True}),
+        ("filter", {"billing_cycle": "yearly"}),
+        ("order_by", ("price",)),
+    ]
+
+
+def test_tenant_scoped_viewsets_fail_closed_without_tenant_and_apply_allowed_filters(monkeypatch):
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: None)
+
+    subscription_manager = RecordingManager()
+    monkeypatch.setattr(api.Subscription, "objects", subscription_manager)
+    assert _view(api.SubscriptionViewSet).get_queryset() is subscription_manager.queryset
+    assert subscription_manager.none_called is True
+
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: "tenant-1")
+    subscription_view = _view(api.SubscriptionViewSet, {"status": "active"})
+    subscription_view.get_queryset()
+    assert subscription_manager.queryset.calls[-3:] == [
+        ("filter", {"tenant_id": "tenant-1"}),
+        ("filter", {"status": "active"}),
+        ("order_by", ("-created_at",)),
+    ]
+
+    invoice_manager = RecordingManager()
+    monkeypatch.setattr(api.Invoice, "objects", invoice_manager)
+    invoice_view = _view(api.InvoiceViewSet, {"subscription_id": "sub-1", "status": "paid"})
+    invoice_view.get_queryset()
+    assert invoice_manager.queryset.calls == [
+        ("filter", {"tenant_id": "tenant-1"}),
+        ("filter", {"subscription_id": "sub-1"}),
+        ("filter", {"status": "paid"}),
+        ("order_by", ("-created_at",)),
+    ]
+
+    payment_manager = RecordingManager()
+    monkeypatch.setattr(api.Payment, "objects", payment_manager)
+    payment_view = _view(api.PaymentViewSet, {"invoice_id": "inv-1", "status": "succeeded"})
+    payment_view.get_queryset()
+    assert payment_manager.queryset.calls == [
+        ("filter", {"tenant_id": "tenant-1"}),
+        ("filter", {"invoice_id": "inv-1"}),
+        ("filter", {"status": "succeeded"}),
+        ("order_by", ("-created_at",)),
+    ]
+
+    usage_manager = RecordingManager()
+    monkeypatch.setattr(api.UsageRecord, "objects", usage_manager)
+    usage_view = _view(api.UsageRecordViewSet, {"resource_type": "api_calls"})
+    usage_view.get_queryset()
+    assert usage_manager.queryset.calls == [
+        ("filter", {"tenant_id": "tenant-1"}),
+        ("filter", {"resource_type": "api_calls"}),
+        ("order_by", ("-recorded_at",)),
+    ]
+
+
+def test_subscription_and_usage_perform_create_require_authenticated_tenant(monkeypatch):
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: None)
+
+    with pytest.raises(PermissionDenied):
+        _view(api.SubscriptionViewSet).perform_create(SimpleNamespace())
+    with pytest.raises(PermissionDenied):
+        _view(api.UsageRecordViewSet).perform_create(SimpleNamespace())
+
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: "tenant-1")
+    saved = {}
+    api.UsageRecordViewSet().request = SimpleNamespace(user=SimpleNamespace())
+    usage_view = _view(api.UsageRecordViewSet)
+    usage_view.perform_create(SimpleNamespace(save=lambda **kwargs: saved.update(kwargs)))
+    assert saved == {"tenant_id": "tenant-1"}
+
+
+def test_subscription_actions_validate_plan_and_delegate_to_service(monkeypatch):
+    subscription = SimpleNamespace(tenant_id="tenant-1")
+    service_calls = []
+
+    class Service:
+        def create_subscription(self, tenant_id, plan_id):
+            service_calls.append(("create", tenant_id, plan_id))
+            return SimpleNamespace(id="sub-created")
+
+        def cancel_subscription(self, tenant_id, reason):
+            service_calls.append(("cancel", tenant_id, reason))
+            return SimpleNamespace(id="sub-cancelled")
+
+        def upgrade_subscription(self, tenant_id, plan_id):
+            service_calls.append(("upgrade", tenant_id, plan_id))
+            return SimpleNamespace(id="sub-upgraded")
+
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: "tenant-1")
+    monkeypatch.setattr(api, "SubscriptionService", Service)
+
+    serializer = SimpleNamespace(validated_data={"plan": SimpleNamespace(id="plan-1")}, instance=None)
+    view = _view(api.SubscriptionViewSet)
+    view.perform_create(serializer)
+    assert serializer.instance.id == "sub-created"
+
+    view.get_object = lambda: subscription
+    view.get_serializer = lambda instance: SimpleNamespace(data={"id": instance.id})
+
+    view.request = SimpleNamespace(data={"reason": "operator request"})
+    cancel = view.cancel(view.request)
+    assert cancel.status_code == status.HTTP_200_OK
+    assert cancel.data == {"id": "sub-cancelled"}
+
+    missing_plan = view.upgrade(SimpleNamespace(data={}))
+    assert missing_plan.status_code == status.HTTP_400_BAD_REQUEST
+    assert missing_plan.data == {"error": "plan_id is required"}
+
+    upgraded = view.upgrade(SimpleNamespace(data={"plan_id": "plan-2"}))
+    assert upgraded.status_code == status.HTTP_200_OK
+    assert upgraded.data == {"id": "sub-upgraded"}
+    assert service_calls == [
+        ("create", "tenant-1", "plan-1"),
+        ("cancel", "tenant-1", "operator request"),
+        ("upgrade", "tenant-1", "plan-2"),
+    ]
+
+
+def test_quota_list_uses_tenant_usage_and_rate_limit_service(monkeypatch):
+    tenant = SimpleNamespace(max_users=25, max_storage_gb=100)
+    usage = SimpleNamespace(active_users=7, storage_used_gb="12.50")
+
+    class TenantQuery:
+        def first(self):
+            return tenant
+
+    class TenantObjects:
+        def filter(self, **kwargs):
+            assert kwargs == {"id": "tenant-1"}
+            return TenantQuery()
+
+    class UsageObjects:
+        def get_or_create(self, **kwargs):
+            assert kwargs["tenant"] is tenant
+            assert "date" in kwargs
+            return usage, False
+
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: "tenant-1")
+    monkeypatch.setattr(api.Tenant, "objects", TenantObjects())
+    monkeypatch.setattr(api.TenantResourceUsage, "objects", UsageObjects())
+    monkeypatch.setattr(api.RateLimitService, "get_usage", lambda tenant_id, resource: 123)
+    monkeypatch.setattr(api.RateLimitService, "get_limit", lambda tenant_id, resource: 1000)
+
+    response = api.QuotaViewSet().list(SimpleNamespace(user=SimpleNamespace()))
+
+    assert response.status_code == status.HTTP_200_OK
+    assert response.data == {
+        "users": {"used": 7, "limit": 25},
+        "storage": {"used": 12.5, "limit": 100},
+        "api_calls": {"used": 123, "limit": 1000},
+    }

@@ -11,9 +11,10 @@ import hashlib
 import json
 import re
 import uuid
+from collections.abc import Iterable
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import TypeAlias
+from typing import Any, TypeAlias, cast, overload
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
@@ -79,6 +80,25 @@ def _schema_hash(schema: dict[str, JSONValue]) -> str:
     return hashlib.sha256(_canonical_json(schema).encode("utf-8")).hexdigest()
 
 
+def _json_list(values: Iterable[JSONValue]) -> list[JSONValue]:
+    return list(values)
+
+
+def _json_object(value: JSONValue) -> dict[str, JSONValue]:
+    return value if isinstance(value, dict) else {}
+
+
+def _json_int(value: JSONValue, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValidationError({field_name: [{"code": "INVALID_INTEGER", "message": "Must be an integer."}]})
+    return value
+
+
+def _schema_fields(schema: dict[str, JSONValue]) -> list[dict[str, JSONValue]]:
+    fields = schema.get("fields", [])
+    return [item for item in fields if isinstance(item, dict)] if isinstance(fields, list) else []
+
+
 def _clean_id(value: uuid.UUID | str, field_name: str) -> uuid.UUID:
     try:
         return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
@@ -109,12 +129,13 @@ def _event(
     changed_fields: list[str] | None = None,
     idempotency_key: str = "",
 ) -> OutboxEvent:
+    changed_fields_payload: list[JSONValue] = [str(field) for field in changed_fields or []]
     payload: dict[str, JSONValue] = {
         "tenant_id": str(tenant_id),
         "actor_id": str(actor_id),
         "correlation_id": correlation_id,
         "version": version,
-        "changed_fields": changed_fields or [],
+        "changed_fields": changed_fields_payload,
     }
     if idempotency_key:
         payload["idempotency_key"] = idempotency_key
@@ -127,12 +148,39 @@ def _event(
     )
 
 
+@overload
+def _prior_result(
+    tenant_id: uuid.UUID,
+    event_type: str,
+    idempotency_key: str,
+    model: type[EntityDefinition],
+) -> EntityDefinition | None: ...
+
+
+@overload
+def _prior_result(
+    tenant_id: uuid.UUID,
+    event_type: str,
+    idempotency_key: str,
+    model: type[DynamicResource],
+) -> DynamicResource | None: ...
+
+
+@overload
+def _prior_result(
+    tenant_id: uuid.UUID,
+    event_type: str,
+    idempotency_key: str,
+    model: type[EntitySchemaVersion],
+) -> EntitySchemaVersion | None: ...
+
+
 def _prior_result(
     tenant_id: uuid.UUID,
     event_type: str,
     idempotency_key: str,
     model: type[EntityDefinition] | type[DynamicResource] | type[EntitySchemaVersion],
-):
+) -> EntityDefinition | DynamicResource | EntitySchemaVersion | None:
     if not idempotency_key:
         raise ValidationError({"idempotency_key": [{"code": "REQUIRED", "message": "Idempotency-Key is required."}]})
     event = (
@@ -146,7 +194,7 @@ def _prior_result(
     result = model.objects.for_tenant(tenant_id).filter(pk=event.aggregate_id).first()
     if result is None:
         raise ConflictError("The idempotency key belongs to an unavailable prior result.")
-    return result
+    return cast(EntityDefinition | DynamicResource | EntitySchemaVersion, result)
 
 
 def _validate_naming(strategy: str, config: object) -> dict[str, JSONValue]:
@@ -296,17 +344,17 @@ def _normalize_fields(fields: object) -> list[dict[str, JSONValue]]:
         raise ValidationError({"fields": [{"code": "REQUIRED", "message": "At least one field is required."}]})
     normalized = [_normalize_field(raw, index) for index, raw in enumerate(fields)]
     keys = [str(field["key"]) for field in normalized]
-    orders = [int(field["order"]) for field in normalized]
+    orders = [_json_int(field["order"], "order") for field in normalized]
     if len(keys) != len(set(keys)):
         raise ValidationError({"fields": [{"code": "DUPLICATE_KEY", "message": "Field keys must be unique."}]})
     if len(orders) != len(set(orders)):
         raise ValidationError({"fields": [{"code": "DUPLICATE_ORDER", "message": "Field orders must be unique."}]})
-    return sorted(normalized, key=lambda item: int(item["order"]))
+    return sorted(normalized, key=lambda item: _json_int(item["order"], "order"))
 
 
 def _json_schema_matches(value: JSONValue, rules: dict[str, JSONValue]) -> bool:
     expected = rules.get("type")
-    types = {
+    types: dict[str, type[object] | tuple[type[object], ...]] = {
         "object": dict,
         "array": list,
         "string": str,
@@ -331,8 +379,9 @@ def _json_schema_matches(value: JSONValue, rules: dict[str, JSONValue]) -> bool:
             for key, child_rules in properties.items():
                 if key in value and isinstance(child_rules, dict) and not _json_schema_matches(value[key], child_rules):
                     return False
-    if isinstance(value, list) and isinstance(rules.get("items"), dict):
-        return all(_json_schema_matches(item, rules["items"]) for item in value)
+    items_rules = rules.get("items")
+    if isinstance(value, list) and isinstance(items_rules, dict):
+        return all(_json_schema_matches(item, items_rules) for item in value)
     return True
 
 
@@ -382,7 +431,8 @@ def _validate_value(
         if rules.get("maximum") is not None and number > Decimal(str(rules["maximum"])):
             raise ValueError("MAXIMUM")
         places = rules.get("decimal_places")
-        if isinstance(places, int) and max(0, -number.as_tuple().exponent) > places:
+        exponent = cast(int, number.as_tuple().exponent)
+        if isinstance(places, int) and max(0, -exponent) > places:
             raise ValueError("DECIMAL_PLACES")
         return int(number) if number == number.to_integral_value() else float(number)
     if field_type == "date":
@@ -679,11 +729,16 @@ class EntityDefinitionService:
             correlation_id=correlation_id,
         )
         if source.active_version_id:
+            if clone.versions.exists():
+                return clone
+            active_version = source.active_version
+            if active_version is None:
+                raise NotFound("Active schema version not found.")
             SchemaVersionService.create_candidate(
                 tenant_id,
                 actor_id,
                 clone.id,
-                source.active_version.schema.get("fields", []),
+                active_version.schema.get("fields", []),
                 based_on_version_id=None,
                 change_summary=f"Cloned from {source.code}",
                 correlation_id=correlation_id,
@@ -722,9 +777,10 @@ class EntityDefinitionService:
             "errors": error_list,
             "warnings": [],
         }
+        fields_json = _json_list(fields)
         return {
-            "normalized_schema": {"fields": fields},
-            "form_descriptor": fields,
+            "normalized_schema": {"fields": fields_json},
+            "form_descriptor": fields_json,
             "sample_validation": report,
             "impact": report,
         }
@@ -757,9 +813,10 @@ class EntityDefinitionService:
             "errors": error_list,
             "warnings": [],
         }
+        fields_json = _json_list(fields)
         return {
-            "normalized_schema": {"fields": fields},
-            "form_descriptor": fields,
+            "normalized_schema": {"fields": fields_json},
+            "form_descriptor": fields_json,
             "sample_validation": report,
             "impact": report,
         }
@@ -767,7 +824,12 @@ class EntityDefinitionService:
     @classmethod
     def export_definition(cls, tenant_id: uuid.UUID, definition_id: uuid.UUID) -> dict[str, JSONValue]:
         entity = cls.get_definition(tenant_id, definition_id)
-        schema = entity.active_version.schema if entity.active_version_id else {"fields": []}
+        schema: dict[str, JSONValue] = {"fields": []}
+        if entity.active_version_id:
+            active_version = entity.active_version
+            if active_version is None:
+                raise NotFound("Active schema version not found.")
+            schema = active_version.schema
         body: dict[str, JSONValue] = {
             "format_version": FORMAT_VERSION,
             "entity": {
@@ -798,7 +860,7 @@ class EntityDefinitionService:
         mode: str,
         idempotency_key: str,
         correlation_id: str,
-    ):
+    ) -> dict[str, JSONValue] | EntitySchemaVersion:
         if mode not in {"create", "new_version", "validate_only"}:
             raise ValidationError({"mode": [{"code": "INVALID_CHOICE", "message": "Unsupported import mode."}]})
         checksum = document.get("checksum")
@@ -841,9 +903,10 @@ class EntityDefinitionService:
                 correlation_id=correlation_id,
             )
         else:
-            entity = EntityDefinition.objects.for_tenant(tenant_id).filter(code=entity_payload.get("code")).first()
-            if entity is None:
+            existing = EntityDefinition.objects.for_tenant(tenant_id).filter(code=entity_payload.get("code")).first()
+            if existing is None:
                 raise NotFound("Target definition not found.")
+            entity = existing
         return SchemaVersionService.create_candidate(
             tenant_id,
             actor_id,
@@ -908,7 +971,8 @@ class SchemaVersionService:
     ) -> EntitySchemaVersion:
         entity = EntityDefinitionService.get_definition(tenant_id, definition_id)
         normalized = _normalize_fields(fields)
-        schema: dict[str, JSONValue] = {"fields": normalized}
+        normalized_json = _json_list(normalized)
+        schema: dict[str, JSONValue] = {"fields": normalized_json}
         based_on = None
         if based_on_version_id:
             based_on = cls.get_version(tenant_id, definition_id, based_on_version_id)
@@ -939,8 +1003,8 @@ class SchemaVersionService:
     def _compatibility(old: dict[str, JSONValue] | None, new: dict[str, JSONValue]) -> str:
         if old is None:
             return "compatible"
-        old_fields = {str(item["key"]): item for item in old.get("fields", []) if isinstance(item, dict)}
-        new_fields = {str(item["key"]): item for item in new.get("fields", []) if isinstance(item, dict)}
+        old_fields = {str(item["key"]): item for item in _schema_fields(old)}
+        new_fields = {str(item["key"]): item for item in _schema_fields(new)}
         for key, descriptor in old_fields.items():
             replacement = new_fields.get(key)
             if replacement is None or replacement.get("field_type") != descriptor.get("field_type"):
@@ -990,22 +1054,26 @@ class SchemaVersionService:
     ) -> dict[str, JSONValue]:
         old = cls.get_version(tenant_id, definition_id, from_version_id)
         new = cls.get_version(tenant_id, definition_id, to_version_id)
-        old_fields = {str(item["key"]): item for item in old.schema.get("fields", []) if isinstance(item, dict)}
-        new_fields = {str(item["key"]): item for item in new.schema.get("fields", []) if isinstance(item, dict)}
+        old_fields = {str(item["key"]): item for item in _schema_fields(old.schema)}
+        new_fields = {str(item["key"]): item for item in _schema_fields(new.schema)}
         added = sorted(set(new_fields) - set(old_fields))
         removed = sorted(set(old_fields) - set(new_fields))
         changed = sorted(key for key in set(old_fields) & set(new_fields) if old_fields[key] != new_fields[key])
-        changes: list[JSONValue] = (
-            [{"key": key, "kind": "added", "after": new_fields[key]} for key in added]
-            + [{"key": key, "kind": "removed", "before": old_fields[key]} for key in removed]
-            + [{"key": key, "kind": "changed", "before": old_fields[key], "after": new_fields[key]} for key in changed]
+        added_json: list[JSONValue] = [str(key) for key in added]
+        removed_json: list[JSONValue] = [str(key) for key in removed]
+        changed_json: list[JSONValue] = [str(key) for key in changed]
+        changes: list[JSONValue] = []
+        changes.extend({"key": key, "kind": "added", "after": new_fields[key]} for key in added)
+        changes.extend({"key": key, "kind": "removed", "before": old_fields[key]} for key in removed)
+        changes.extend(
+            {"key": key, "kind": "changed", "before": old_fields[key], "after": new_fields[key]} for key in changed
         )
         return {
             "from_version": old.version,
             "to_version": new.version,
-            "added": added,
-            "removed": removed,
-            "changed": changed,
+            "added": added_json,
+            "removed": removed_json,
+            "changed": changed_json,
             "changes": changes,
             "compatibility": cls._compatibility(old.schema, new.schema),
         }
@@ -1097,34 +1165,42 @@ class SchemaVersionService:
         correlation_id: str,
     ) -> EntitySchemaVersion:
         source = cls.get_version(tenant_id, definition_id, source_version_id)
-        candidate = cls.create_candidate(
-            tenant_id,
-            actor_id,
-            definition_id,
-            source.schema.get("fields", []),
-            based_on_version_id=source.id,
-            change_summary=f"Rollback to version {source.version}",
-            correlation_id=correlation_id,
+        if source.status not in {"published", "superseded"}:
+            raise ValidationError(
+                {"status": [{"code": "INVALID_TRANSITION", "message": "Only published history can roll back."}]}
+            )
+        report = cls.validate_candidate(tenant_id, definition_id, source.id)
+        if report["incompatible_resources"]:
+            raise ValidationError(
+                {"schema": [{"code": "INCOMPATIBLE_RESOURCES", "message": "Existing records are invalid."}]}
+            )
+        now = timezone.now()
+        EntitySchemaVersion.objects.for_tenant(tenant_id).filter(
+            entity_definition_id=definition_id, status="published"
+        ).update(status="superseded", published_at=None, published_by=None)
+        EntitySchemaVersion.objects.for_tenant(tenant_id).filter(pk=source.pk).update(
+            status="published", published_at=now, published_by=actor_id
         )
-        result = cls.publish_candidate(
-            tenant_id,
-            actor_id,
-            definition_id,
-            candidate.id,
-            idempotency_key=idempotency_key,
-            correlation_id=correlation_id,
-        )
+        source.status = "published"
+        source.published_at = now
+        source.published_by = actor_id
+        entity = EntityDefinitionService.get_definition(tenant_id, definition_id)
+        entity.active_version = source
+        entity.status = "published"
+        entity.updated_by = actor_id
+        entity.lock_version += 1
+        entity.save()
         _event(
             tenant_id,
             "entity_schema_version",
-            result.id,
+            source.id,
             "metadata_modeling.schema.rolled_back.v1",
             actor_id=actor_id,
             correlation_id=correlation_id,
-            version=result.version,
+            version=source.version,
             idempotency_key=idempotency_key,
         )
-        return result
+        return source
 
 
 class NamingService:
@@ -1165,11 +1241,14 @@ class NamingService:
             return NamingService.preview_record_key(tenant_id, entity, data)
         config = _validate_naming("sequence", entity.naming_config)
         sequence_key = str(config["sequence_key"])
+        prefix_template = str(config["prefix_template"])
+        padding = _json_int(config["padding"], "padding")
+        reset_period = str(config["reset_period"])
         period_key = ""
         now = timezone.now()
-        if config["reset_period"] == "yearly":
+        if reset_period == "yearly":
             period_key = now.strftime("%Y")
-        elif config["reset_period"] == "monthly":
+        elif reset_period == "monthly":
             period_key = now.strftime("%Y-%m")
         sequence, _ = (
             NamingSequence.objects.for_tenant(tenant_id)
@@ -1180,9 +1259,9 @@ class NamingService:
                 sequence_key=sequence_key,
                 period_key=period_key,
                 defaults={
-                    "prefix_template": config["prefix_template"],
-                    "padding": config["padding"],
-                    "reset_period": config["reset_period"],
+                    "prefix_template": prefix_template,
+                    "padding": padding,
+                    "reset_period": reset_period,
                     "is_active": True,
                 },
             )
@@ -1252,7 +1331,8 @@ class DynamicResourceService:
             try:
                 queryset = queryset.filter(entity_definition_id=_clean_id(entity_id, "entity_id"))
             except ValidationError:
-                return queryset.none()
+                empty_queryset: QuerySet[DynamicResource] = queryset.none()
+                return empty_queryset
         if entity_code:
             queryset = queryset.filter(entity_definition__code=entity_code)
         if state:
@@ -1263,23 +1343,31 @@ class DynamicResourceService:
             queryset = queryset.filter(created_at__gte=created_after)
         if created_before:
             queryset = queryset.filter(created_at__lte=created_before)
-        return queryset.order_by(ordering if ordering in ALLOWED_ORDERINGS else "-created_at")
+        ordered_queryset: QuerySet[DynamicResource] = queryset.order_by(
+            ordering if ordering in ALLOWED_ORDERINGS else "-created_at"
+        )
+        return ordered_queryset
 
     @staticmethod
     def get_resource(
         tenant_id: uuid.UUID, resource_id: uuid.UUID | str, *, include_deleted: bool = False
     ) -> DynamicResource:
-        manager = (
-            getattr(DynamicResource, "all_objects", DynamicResource.objects)
-            if include_deleted
-            else DynamicResource.objects
+        manager = cast(
+            Any,
+            (
+                getattr(DynamicResource, "all_objects", DynamicResource.objects)
+                if include_deleted
+                else DynamicResource.objects
+            ),
         )
         try:
             lookup_id = _clean_id(resource_id, "resource_id")
             queryset = manager.for_tenant(tenant_id)
             if not include_deleted:
                 queryset = queryset.filter(deleted_at__isnull=True)
-            return queryset.select_related("entity_definition", "schema_version").get(pk=lookup_id)
+            return cast(
+                DynamicResource, queryset.select_related("entity_definition", "schema_version").get(pk=lookup_id)
+            )
         except (DynamicResource.DoesNotExist, ValueError, TypeError, ValidationError) as exc:
             raise NotFound("Dynamic resource not found.") from exc
 
@@ -1339,7 +1427,7 @@ class DynamicResourceService:
             tenant_id, schema_version.schema.get("fields", []), data, apply_defaults=apply_defaults
         )
         if errors:
-            raise ValidationError(errors)
+            raise ValidationError(cast(Any, errors))
         return cleaned
 
     @classmethod
@@ -1363,12 +1451,15 @@ class DynamicResourceService:
             raise ValidationError(
                 {"entity_definition": [{"code": "NOT_PUBLISHED", "message": "Schema is not published."}]}
             )
-        cleaned = cls.validate_data(tenant_id, entity, entity.active_version, data)
+        schema_version = entity.active_version
+        if schema_version is None:
+            raise NotFound("Active schema version not found.")
+        cleaned = cls.validate_data(tenant_id, entity, schema_version, data)
         record_key = NamingService.allocate_record_key(tenant_id, entity, cleaned)
         resource = DynamicResource.objects.create(
             tenant_id=tenant_id,
             entity_definition=entity,
-            schema_version=entity.active_version,
+            schema_version=schema_version,
             record_key=record_key,
             display_name=(display_name or record_key)[:255],
             data=cleaned,
@@ -1408,6 +1499,8 @@ class DynamicResourceService:
         entity = EntityDefinitionService.get_definition(tenant_id, entity_id)
         if entity.active_version_id:
             schema_version = entity.active_version
+            if schema_version is None:
+                raise NotFound("Active schema version not found.")
             cleaned = cls.validate_data(tenant_id, entity, schema_version, data)
         else:
             schema_version = (
@@ -1435,7 +1528,7 @@ class DynamicResourceService:
             ]
             cleaned, errors = cls.validate_descriptors(tenant_id, descriptors, data)
             if errors:
-                raise ValidationError(errors)
+                raise ValidationError(cast(Any, errors))
         record_key = str(uuid.uuid4())
         resource = DynamicResource.objects.create(
             tenant_id=tenant_id,
@@ -1727,15 +1820,19 @@ class DynamicResourceService:
 class MetadataService:
     """Compatibility facade for v1 callers; new integrations use tenant-first services."""
 
-    def validate_data(self, *args, **kwargs):
+    def validate_data(self, *args: Any, **kwargs: Any) -> dict[str, JSONValue]:
         if len(args) >= 3 and isinstance(args[0], uuid.UUID):
             return DynamicResourceService.validate_data(*args, **kwargs)
         if len(args) != 2:
             raise TypeError("validate_data expects (entity, data) or (tenant_id, entity, schema_version, data)")
-        entity, data = args
+        entity = cast(Any, args[0])
+        data = args[1]
         if entity.active_version_id:
             try:
-                return DynamicResourceService.validate_data(entity.tenant_id, entity, entity.active_version, data)
+                active_version = entity.active_version
+                if active_version is None:
+                    raise DjangoValidationError("Active schema version not found.")
+                return DynamicResourceService.validate_data(entity.tenant_id, entity, active_version, data)
             except ValidationError as exc:
                 raise DjangoValidationError(exc.detail) from exc
         # Legacy draft schemas are supported only for migration-era v1 callers.
@@ -1755,13 +1852,25 @@ class MetadataService:
             )
         cleaned, errors = DynamicResourceService.validate_descriptors(entity.tenant_id, descriptors, data)
         if errors:
-            readable = {key: [str(item.get("message", item)) for item in value] for key, value in errors.items()}
+            readable: dict[str, list[str]] = {}
+            for key, value in errors.items():
+                if isinstance(value, list):
+                    readable[key] = [
+                        str(item.get("message", item)) if isinstance(item, dict) else str(item) for item in value
+                    ]
+                else:
+                    readable[key] = [str(value)]
             raise DjangoValidationError(readable)
         # Preserve the legacy contract which normalized numeric values to float.
         for descriptor in descriptors:
-            key = descriptor["key"]
-            if descriptor["field_type"] == "number" and key in cleaned:
-                cleaned[key] = float(cleaned[key])
+            key = str(descriptor["key"])
+            value = cleaned.get(key)
+            if (
+                descriptor["field_type"] == "number"
+                and isinstance(value, (int, float, Decimal))
+                and not isinstance(value, bool)
+            ):
+                cleaned[key] = float(value)
         return cleaned
 
 
@@ -1858,6 +1967,7 @@ class MetadataConfigurationService:
         changed = sorted(key for key in cls.FIELDS if before.get(key) != after.get(key))
         diff: list[JSONValue] = [{"path": key, "before": before.get(key), "after": after.get(key)} for key in changed]
         effective_values: dict[str, JSONValue] = {field: copy.deepcopy(after[field]) for field in cls.FIELDS}
+        changed_fields: list[JSONValue] = [str(field) for field in changed]
         return {
             "valid": True,
             "errors": [],
@@ -1866,7 +1976,7 @@ class MetadataConfigurationService:
             "effective_values": effective_values,
             "before": before,
             "after": after,
-            "changed_fields": changed,
+            "changed_fields": changed_fields,
         }
 
     @classmethod

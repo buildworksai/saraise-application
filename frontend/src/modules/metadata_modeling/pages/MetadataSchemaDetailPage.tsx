@@ -37,14 +37,13 @@ export function MetadataSchemaDetailPage() {
     enabled: Boolean(id),
   });
   const action = useMutation({
-    mutationFn: async () => {
-      if (!confirm) return;
-      if (confirm.action === "archive")
+    mutationFn: async (confirmed: NonNullable<typeof confirm>) => {
+      if (confirmed.action === "archive")
         await metadataModelingService.archiveDefinition(id, idempotencyKey());
-      if (confirm.action === "restore")
+      if (confirmed.action === "restore")
         await metadataModelingService.restoreDefinition(id, idempotencyKey());
-      if (confirm.action === "rollback" && confirm.versionId)
-        await metadataModelingService.rollbackVersion(id, confirm.versionId, idempotencyKey());
+      if (confirmed.action === "rollback" && confirmed.versionId)
+        await metadataModelingService.rollbackVersion(id, confirmed.versionId, idempotencyKey());
     },
     onSuccess: async () => {
       setConfirm(null);
@@ -241,7 +240,9 @@ export function MetadataSchemaDetailPage() {
               : "Archive"
         }
         variant={confirm?.action === "archive" ? "danger" : "default"}
-        onConfirm={() => action.mutate()}
+        onConfirm={() => {
+          if (confirm) action.mutate(confirm);
+        }}
       />
     </main>
   );

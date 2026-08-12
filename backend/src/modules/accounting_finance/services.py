@@ -946,7 +946,7 @@ class JournalEntryService:
                     "source_module": "accounting_finance",
                     "source_reference": str(original.id),
                     "source_idempotency_key": transition_key,
-                    "reversed_entry": original,
+                    "reversed_entry_id": original.id,
                     "lines": payload_lines,
                 },
             )
@@ -1587,15 +1587,20 @@ class ARInvoiceService(_InvoiceBase):
         return ARInvoiceService._aging(tenant_id, as_of_date)
 
 
+def _invoice_payment_query(invoice: APInvoice | ARInvoice) -> Q:
+    return Q(ap_invoice_id=invoice.id) if isinstance(invoice, APInvoice) else Q(ar_invoice_id=invoice.id)
+
+
 def _recompute_invoice(invoice: APInvoice | ARInvoice, tenant: UUID, actor: str, transition_key: str) -> None:
-    total = Payment.objects.for_tenant(tenant).filter(
-        Q(ap_invoice_id=invoice.id) | Q(ar_invoice_id=invoice.id), status="recorded"
-    ).aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
-    invoice.paid_amount = _money(total)
-    command = "record_full_payment" if invoice.paid_amount == invoice.total_amount else "record_partial_payment"
+    total = Payment.objects.for_tenant(tenant).filter(_invoice_payment_query(invoice), status="recorded").aggregate(
+        total=Sum("amount")
+    )["total"] or Decimal("0.00")
+    paid_amount = _money(total)
+    command = "record_full_payment" if paid_amount == invoice.total_amount else "record_partial_payment"
     machine = AP_INVOICE_MACHINE if isinstance(invoice, APInvoice) else AR_INVOICE_MACHINE
-    if invoice.paid_amount > 0 and invoice.status not in ("paid", "cancelled"):
+    if paid_amount > 0 and invoice.status not in ("paid", "cancelled"):
         invoice = _apply(machine, invoice, command, tenant, transition_key, actor)
+    invoice.paid_amount = paid_amount
     invoice.updated_by, invoice.version = actor, invoice.version + 1
     invoice.save(update_fields=["paid_amount", "updated_by", "version", "updated_at"])
 
@@ -1668,7 +1673,7 @@ class PaymentService:
                     "PAYMENT_INVOICE_MISMATCH", "Payment currency/date does not match the invoice."
                 )
             paid = Payment.objects.for_tenant(tenant).filter(
-                Q(ap_invoice=invoice) | Q(ar_invoice=invoice), status="recorded"
+                _invoice_payment_query(invoice), status="recorded"
             ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
             if _money(paid + amount) > invoice.total_amount:
                 raise AccountingServiceError(
@@ -1807,7 +1812,7 @@ class PaymentService:
                 reason=reason,
             )
             total = Payment.objects.for_tenant(tenant).filter(
-                Q(ap_invoice=invoice) | Q(ar_invoice=invoice), status="recorded"
+                _invoice_payment_query(invoice), status="recorded"
             ).aggregate(total=Sum("amount"))["total"] or Decimal("0")
             invoice.paid_amount = _money(total)
             desired = "paid" if total == invoice.total_amount else "partially_paid" if total > 0 else "posted"

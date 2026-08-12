@@ -14,7 +14,7 @@ from django.utils.http import content_disposition_header
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -644,7 +644,7 @@ class DmsConfigurationViewSet(TenantGovernedViewSet):
     service_class = DmsConfigurationService
     action_permissions = CONFIGURATION_ACTION_PERMISSIONS
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         if getattr(self, "action", "") == "current" and self.request.method == "PUT":
             self.action = "update_current"
         return super().get_permissions()

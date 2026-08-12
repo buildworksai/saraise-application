@@ -1,3 +1,4 @@
+/* eslint-disable max-lines-per-function -- workflow coverage needs cohesive end-to-end fixtures and assertions. */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -5,12 +6,16 @@ import type {
   Asset,
   AssetConfiguration,
   AssetConfigurationDocument,
+  AssetConfigurationExport,
+  AssetConfigurationPreview,
+  AssetConfigurationVersion,
   DepreciationEntry,
 } from "../contracts";
 import { ROUTES } from "../contracts";
 import { AssetForm } from "../components/AssetForm";
 import { AssetManagementApiError, assetService } from "../services/asset-service";
 import { AssetDetailPage } from "./AssetDetailPage";
+import { AssetConfigurationPage } from "./AssetConfigurationPage";
 import { EditAssetPage } from "./EditAssetPage";
 import { AssetListPage } from "./AssetListPage";
 
@@ -152,6 +157,22 @@ const configuration: AssetConfiguration = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
+const configurationVersion: AssetConfigurationVersion = {
+  id: "00000000-0000-4000-8000-000000000010",
+  version: 1,
+  document: configurationDocument,
+  source: "operator",
+  correlation_id: "corr-asset-config-1",
+  created_at: "2026-01-02T00:00:00Z",
+};
+
+const configurationExport: AssetConfigurationExport = {
+  schema_version: "1.0",
+  module: "asset_management",
+  version: 1,
+  document: configurationDocument,
+};
+
 function renderRoute(element: React.ReactElement, path: string, pattern = path) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -187,6 +208,134 @@ describe("asset management workflows", () => {
 
     expect(await screen.findByText("No assets yet")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Create asset" })).toHaveLength(2);
+  });
+
+  it("applies list filters, pagination, and register navigation through query state", async () => {
+    vi.spyOn(assetService, "getConfiguration").mockResolvedValue({
+      ...configuration,
+      document: { ...configurationDocument, asset_list_page_size: 10 },
+    });
+    const listAssets = vi.spyOn(assetService, "listAssets").mockResolvedValue({
+      items: [asset],
+      count: 2,
+      next: "/api/next",
+      previous: "/api/prev",
+    });
+    renderRoute(
+      <AssetListPage />,
+      `${ROUTES.ASSETS.LIST}?page=0&search=lap&category=fixed&is_active=false&purchase_date_after=2026-01-01&purchase_date_before=2026-12-31&ordering=-purchase_date`,
+      ROUTES.ASSETS.LIST
+    );
+
+    expect(await screen.findByRole("button", { name: asset.asset_code })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(listAssets).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          category: "fixed",
+          is_active: false,
+          ordering: "-purchase_date",
+          page: 1,
+          page_size: 10,
+          purchase_date_after: "2026-01-01",
+          purchase_date_before: "2026-12-31",
+          search: "lap",
+        })
+      )
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() =>
+      expect(listAssets).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }))
+    );
+
+    fireEvent.change(screen.getByLabelText("Search assets"), { target: { value: "  Studio  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    await waitFor(() =>
+      expect(listAssets).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 1, search: "Studio" })
+      )
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: asset.asset_code }));
+    expect(await screen.findByText("Navigated away")).toBeInTheDocument();
+  });
+
+  it("previews, saves, exports, imports, and rolls back versioned configuration", async () => {
+    const preview: AssetConfigurationPreview = {
+      valid: true,
+      current_version: 1,
+      changes: { asset_list_page_size: { from: 25, to: 30 } },
+      document: { ...configurationDocument, asset_list_page_size: 30 },
+    };
+    vi.spyOn(assetService, "getConfiguration").mockResolvedValue(configuration);
+    vi.spyOn(assetService, "listConfigurationHistory").mockResolvedValue({
+      items: [configurationVersion],
+      count: 1,
+      next: null,
+      previous: null,
+    });
+    const previewConfiguration = vi
+      .spyOn(assetService, "previewConfiguration")
+      .mockResolvedValue(preview);
+    const updateConfiguration = vi.spyOn(assetService, "updateConfiguration").mockResolvedValue({
+      ...configuration,
+      version: 2,
+      document: preview.document,
+    });
+    const exportConfiguration = vi
+      .spyOn(assetService, "exportConfiguration")
+      .mockResolvedValue(configurationExport);
+    const importConfiguration = vi
+      .spyOn(assetService, "importConfiguration")
+      .mockResolvedValue(configuration);
+    const rollbackConfiguration = vi
+      .spyOn(assetService, "rollbackConfiguration")
+      .mockResolvedValue(configuration);
+    renderRoute(<AssetConfigurationPage />, ROUTES.ASSETS.CONFIGURATION);
+
+    const documentEditor = await screen.findByLabelText("Configuration document");
+    fireEvent.change(documentEditor, {
+      target: { value: JSON.stringify(preview.document, null, 2) },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() => expect(previewConfiguration).toHaveBeenCalledWith(preview.document));
+    expect(await screen.findByText("asset_list_page_size")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save version" }));
+    await waitFor(() => expect(updateConfiguration).toHaveBeenCalledWith(preview.document));
+
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    await waitFor(() => expect(exportConfiguration).toHaveBeenCalled());
+    const importEditor = screen.getByLabelText("Configuration import document");
+    await waitFor(() =>
+      expect(importEditor).toHaveValue(JSON.stringify(configurationExport, null, 2))
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Import" }));
+    await waitFor(() => expect(importConfiguration).toHaveBeenCalledWith(configurationExport));
+
+    fireEvent.click(screen.getByRole("button", { name: "Roll back" }));
+    await waitFor(() => expect(rollbackConfiguration).toHaveBeenCalledWith(1));
+  });
+
+  it("fails closed when configuration JSON is malformed", async () => {
+    vi.spyOn(assetService, "getConfiguration").mockResolvedValue(configuration);
+    vi.spyOn(assetService, "listConfigurationHistory").mockResolvedValue({
+      items: [],
+      count: 0,
+      next: null,
+      previous: null,
+    });
+    const previewConfiguration = vi.spyOn(assetService, "previewConfiguration");
+    renderRoute(<AssetConfigurationPage />, ROUTES.ASSETS.CONFIGURATION);
+
+    fireEvent.change(await screen.findByLabelText("Configuration document"), {
+      target: { value: "{ invalid" },
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/JSON/u);
+    expect(screen.getByRole("button", { name: "Preview" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save version" })).toBeDisabled();
+    expect(previewConfiguration).not.toHaveBeenCalled();
   });
 });
 
@@ -1192,4 +1341,55 @@ describe("asset detail workflows", () => {
       expect(getAsset).not.toHaveBeenCalled();
     }
   );
+
+  it("requires the configured archive confirmation before deleting an asset", async () => {
+    vi.spyOn(assetService, "getAsset").mockResolvedValue(asset);
+    vi.spyOn(assetService, "getConfiguration").mockResolvedValue({
+      ...configuration,
+      document: { ...configurationDocument, archive_confirmation: "asset_name" },
+    });
+    vi.spyOn(assetService, "listDepreciationEntries").mockResolvedValue({
+      items: [entry],
+      count: 1,
+      next: null,
+      previous: null,
+    });
+    const deleteAsset = vi.spyOn(assetService, "deleteAsset").mockResolvedValue();
+    renderRoute(<AssetDetailPage />, ROUTES.ASSETS.DETAIL(asset.id), ROUTES.ASSETS.DETAIL_PATTERN);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Archive" }));
+    expect(screen.getByRole("button", { name: "Archive asset" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(`Type ${asset.asset_name} to confirm`), {
+      target: { value: asset.asset_name },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Archive asset" }));
+
+    await waitFor(() => expect(deleteAsset).toHaveBeenCalledWith(asset.id));
+    expect(await screen.findByText("Navigated away")).toBeInTheDocument();
+  });
+
+  it("blocks depreciation when configuration marks the category non-depreciable", async () => {
+    vi.spyOn(assetService, "getAsset").mockResolvedValue({ ...asset, category: "current" });
+    vi.spyOn(assetService, "getConfiguration").mockResolvedValue(configuration);
+    vi.spyOn(assetService, "listDepreciationEntries").mockResolvedValue({
+      items: [],
+      count: 0,
+      next: null,
+      previous: null,
+    });
+    const calculate = vi.spyOn(assetService, "calculateDepreciation");
+    renderRoute(<AssetDetailPage />, ROUTES.ASSETS.DETAIL(asset.id), ROUTES.ASSETS.DETAIL_PATTERN);
+
+    const calculateButton = (
+      await screen.findAllByRole("button", {
+        name: "Calculate depreciation",
+      })
+    )[0];
+    if (!calculateButton) throw new Error("Expected depreciation button.");
+    expect(calculateButton).toBeDisabled();
+    expect(screen.getAllByText("Current assets are configured as non-depreciable.")).toHaveLength(
+      2
+    );
+    expect(calculate).not.toHaveBeenCalled();
+  });
 });

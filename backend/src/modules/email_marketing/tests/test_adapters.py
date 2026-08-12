@@ -6,6 +6,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from django.utils import timezone
 
 from src.modules.email_marketing import adapters
 
@@ -233,3 +234,93 @@ def test_retry_safe_connection_failure_uses_bounded_backoff(monkeypatch, setting
     assert result.successful is True
     assert calls == 2
     assert delays == [0.25]
+
+
+def test_operation_result_and_delivery_message_reject_ambiguous_provider_evidence() -> None:
+    tenant_id = uuid.uuid4()
+
+    with pytest.raises(ValueError, match="requires evidence"):
+        adapters.OperationResult.success(None)
+    with pytest.raises(ValueError, match="retryable or ambiguous"):
+        adapters.OperationResult(True, "accepted", value={"id": "msg"}, retryable=True)
+    with pytest.raises(ValueError, match="cannot contain"):
+        adapters.OperationResult(False, "provider_error", value={"id": "msg"}, retryable=True, detail="failed")
+    with pytest.raises(ValueError, match="bounded stable"):
+        adapters.OperationResult.failure("bad code")
+    with pytest.raises(ValueError, match="safe bound"):
+        adapters.OperationResult.failure("provider_error", detail="x" * 501)
+    with pytest.raises(adapters.AdapterError, match="operation failed"):
+        adapters.OperationResult.failure("provider_error").unwrap()
+
+    assert adapters.normalize_email(" Person@EXAMPLE.COM ") == "Person@example.com"
+    with pytest.raises(ValueError, match="email must be a string"):
+        adapters.normalize_email(None)
+    with pytest.raises(ValueError, match="email is invalid"):
+        adapters.normalize_email("invalid")
+    with pytest.raises(ValueError, match="recipient_key"):
+        adapters.AudienceCandidate(email="person@example.com", recipient_key="")
+    with pytest.raises(ValueError, match="display_name"):
+        adapters.AudienceCandidate(email="person@example.com", display_name="Bad\nName")
+    with pytest.raises(ValueError, match="invalid key"):
+        adapters.AudienceCandidate(email="person@example.com", personalization={"bad key": "value"})
+    with pytest.raises(ValueError, match="values must be scalar"):
+        adapters.AudienceCandidate(email="person@example.com", personalization={"nested": {"value": 1}})
+
+    with pytest.raises(ValueError, match="non-allowlisted headers"):
+        adapters.DeliveryMessage(
+            tenant_id=tenant_id,
+            recipient="customer@example.com",
+            from_email="sender@example.com",
+            from_name="Sender",
+            reply_to=None,
+            rendered=adapters.RenderedEmail("Subject", "", "Text"),
+            headers={"X-Unsafe": "value"},
+        )
+    with pytest.raises(ValueError, match="header is invalid"):
+        adapters.DeliveryMessage(
+            tenant_id=tenant_id,
+            recipient="customer@example.com",
+            from_email="sender@example.com",
+            from_name="Sender",
+            reply_to=None,
+            rendered=adapters.RenderedEmail("Subject", "", "Text"),
+            headers={"List-Unsubscribe": "<https://example.test>\r\nBcc: attacker@example.test"},
+        )
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        (
+            {
+                "provider_event_id": "evt-1",
+                "provider_message_id": "msg-1",
+                "event_type": "clicked",
+                "occurred_at": "not-a-date",
+            },
+            "timestamp is invalid",
+        ),
+        (
+            {
+                "provider_event_id": "evt-1",
+                "provider_message_id": "msg-1",
+                "event_type": "opened",
+                "occurred_at": timezone.now().replace(tzinfo=None).isoformat(),
+            },
+            "timezone-aware",
+        ),
+        (
+            {
+                "provider_event_id": "evt-1",
+                "provider_message_id": "msg-1",
+                "event_type": "clicked",
+                "occurred_at": timezone.now().isoformat(),
+                "link_url_hash": "not-sha256",
+            },
+            "SHA-256",
+        ),
+    ],
+)
+def test_verified_provider_event_rejects_untrusted_provider_payloads(payload: dict[str, object], message: str) -> None:
+    with pytest.raises(adapters.InvalidAdapterOutput, match=message):
+        adapters.VerifiedDeliveryEvent.from_mapping(payload)

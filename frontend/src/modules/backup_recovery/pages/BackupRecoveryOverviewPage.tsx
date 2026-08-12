@@ -52,7 +52,7 @@ export const BackupRecoveryOverviewPage = () => {
   const tenant = useAuthStore((state) => state.user?.tenant_id ?? null);
   const health = useQuery({
     queryKey: backupRecoveryQueryKeys.health(tenant),
-    queryFn: backupRecoveryService.health,
+    queryFn: () => backupRecoveryService.health(),
     refetchInterval: 30000,
   });
   const completed = useQuery({

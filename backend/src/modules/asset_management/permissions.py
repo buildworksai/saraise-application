@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Final
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 from uuid import UUID
 
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import BaseAuthentication
+from rest_framework.permissions import BasePermission, IsAuthenticated
 
 from src.core.access.permissions import RequiresAccess
 from src.core.auth_utils import get_user_tenant_id
 
 from .api_auth import StrictSessionAuthentication
+
+if TYPE_CHECKING:
+    from rest_framework.permissions import _PermissionClass
 
 ENTITLEMENT: Final = "asset_management"
 
@@ -40,12 +45,13 @@ SOD_ACTIONS: Final[tuple[str, ...]] = ()
 class AssetAccessMixin:
     """Attach exact action permission metadata before shared access evaluation."""
 
-    authentication_classes = (StrictSessionAuthentication,)
-    permission_classes = (IsAuthenticated, RequiresAccess)
-    required_entitlement = ENTITLEMENT
-    action_permissions: dict[str | None, str] = {}
+    authentication_classes: ClassVar[Sequence[type[BaseAuthentication]]] = (StrictSessionAuthentication,)
+    permission_classes: ClassVar[Sequence[_PermissionClass]] = (IsAuthenticated, RequiresAccess)
+    required_entitlement: ClassVar[str] = ENTITLEMENT
+    action_permissions: ClassVar[dict[str | None, str]] = {}
+    request: Any
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         try:
             raw_tenant = get_user_tenant_id(getattr(self.request, "user", None))
             self.request.tenant_id = UUID(str(raw_tenant)) if raw_tenant else None
@@ -60,12 +66,13 @@ class AssetAccessMixin:
 class ActionAccessMixin:
     """Resolve one manifest permission for the selected DRF action."""
 
-    authentication_classes = (StrictSessionAuthentication,)
-    permission_classes = (IsAuthenticated, RequiresAccess)
-    action_permissions: dict[str, str] = {}
-    quota_cost = 1
+    authentication_classes: ClassVar[Sequence[type[BaseAuthentication]]] = (StrictSessionAuthentication,)
+    permission_classes: ClassVar[Sequence[_PermissionClass]] = (IsAuthenticated, RequiresAccess)
+    action_permissions: ClassVar[dict[str, str]] = {}
+    quota_cost: ClassVar[int] = 1
+    request: Any
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
         self.request.tenant_id = None
         action = getattr(self, "action", "")
         permission = self.action_permissions.get(action)

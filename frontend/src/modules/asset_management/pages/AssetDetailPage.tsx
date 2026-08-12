@@ -122,11 +122,13 @@ export const AssetDetailPage = () => {
     Number(asset.current_value) > Number(asset.residual_value);
   const depreciationUnavailableReason = !asset.is_active
     ? "Inactive assets cannot receive new depreciation entries."
-    : asset.depreciation_method === "none"
-      ? "This asset has no depreciation method."
-      : asset.useful_life_years === null
-        ? "A useful life is required before depreciation can be calculated."
-        : "The asset is already at its residual value.";
+    : configuration.non_depreciable_categories.includes(asset.category)
+      ? `${titleCase(asset.category)} assets are configured as non-depreciable.`
+      : asset.depreciation_method === "none"
+        ? "This asset has no depreciation method."
+        : asset.useful_life_years === null
+          ? "A useful life is required before depreciation can be calculated."
+          : "The asset is already at its residual value.";
 
   const submitDepreciation = (event: FormEvent) => {
     event.preventDefault();

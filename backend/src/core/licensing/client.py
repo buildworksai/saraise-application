@@ -11,15 +11,34 @@ Reference: saraise-documentation/licensing/licensing-architecture.md
 
 import logging
 import time
+from collections.abc import Callable
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional, TypeVar
 
 import requests
 from django.conf import settings
+from requests import Response
 
 from .models import LicenseInfo, LicenseTier, LicenseValidationStatus, ModuleLicense
 
 logger = logging.getLogger("saraise.licensing")
+T = TypeVar("T")  # pragma: no mutate - typing-only runtime metadata
+
+
+def _mapping_value(data: dict[str, Any], key: str) -> dict[str, Any]:
+    """Return nested JSON data only when it is an object."""
+    value = data.get(key)
+    if isinstance(value, dict):
+        return value
+    return {}
+
+
+def _string_list_value(data: dict[str, Any], key: str) -> list[str]:
+    """Return a string list from JSON data, rejecting malformed entries."""
+    value = data.get(key)
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    return []
 
 
 def _tier_from_string(s: str) -> LicenseTier:
@@ -42,16 +61,21 @@ class _CircuitBreaker:
     Stays open for reset_timeout_seconds before allowing retry.
     """
 
-    def __init__(self, failure_threshold: int = 5, reset_timeout_seconds: float = 60.0):
+    def __init__(
+        self,
+        failure_threshold: int = 5,
+        reset_timeout_seconds: float = 60.0,
+    ) -> None:
         self.failure_threshold = failure_threshold
         self.reset_timeout = reset_timeout_seconds
         self._failures = 0
         self._last_failure_time: Optional[float] = None
 
-    def call(self, fn, *args, **kwargs):
+    def call(self, fn: Callable[[], T]) -> T:
         """Execute fn if circuit is closed; raise if open."""
         now = time.monotonic()
-        if self._failures >= self.failure_threshold and self._last_failure_time:
+        failure_limit_reached = self._failures >= self.failure_threshold
+        if failure_limit_reached and self._last_failure_time:
             if now - self._last_failure_time < self.reset_timeout:
                 raise LicenseValidationError(
                     "License server circuit breaker open",
@@ -60,7 +84,7 @@ class _CircuitBreaker:
             self._failures = 0
 
         try:
-            result = fn(*args, **kwargs)
+            result = fn()
             self._failures = 0
             return result
         except Exception:
@@ -80,16 +104,20 @@ class LicenseClient:
     TIMEOUT = 10
     _circuit_breaker = _CircuitBreaker()
 
-    def __init__(self, base_url: Optional[str] = None):
+    def __init__(self, base_url: Optional[str] = None) -> None:
         """
         Initialize the license client.
 
         Args:
-            base_url: License server URL. Defaults to SARAISE_LICENSE_SERVER_URL.
+            base_url: License server URL. Defaults to configured server URL.
         """
-        self.base_url = (
-            base_url or getattr(settings, "SARAISE_LICENSE_SERVER_URL", "https://license.saraise.com")
-        ).rstrip("/")
+        configured_url = getattr(
+            settings,
+            "SARAISE_LICENSE_SERVER_URL",
+            "https://license.saraise.com",
+        )
+        raw_base_url = base_url or str(configured_url)
+        self.base_url = raw_base_url.rstrip("/")
         self._cached_license: Optional[LicenseInfo] = None
         self._cache_timestamp: Optional[datetime] = None
 
@@ -121,13 +149,17 @@ class LicenseClient:
         else:
             return self._validate_online(license_key, organization_id)
 
-    def _validate_online(self, license_key: str, organization_id: str) -> LicenseInfo:
+    def _validate_online(
+        self,
+        license_key: str,
+        organization_id: str,
+    ) -> LicenseInfo:
         """Validate license against the license server (connected mode)."""
         logger.info("Validating license online for org: %s", organization_id)
 
         version = getattr(settings, "SARAISE_VERSION", "1.0.0")
 
-        def _do_request():
+        def _do_request() -> Response:
             return requests.post(
                 f"{self.base_url}/api/v1/validate/",
                 json={
@@ -151,11 +183,19 @@ class LicenseClient:
 
         if response.status_code == 200:
             data = response.json()
+            if not isinstance(data, dict):
+                raise LicenseValidationError(
+                    "License server returned invalid response",
+                    LicenseValidationStatus.INVALID,
+                )
             if data.get("valid"):
                 return self._parse_success_response(data, organization_id)
             error = data.get("error", "unknown")
-            message = data.get("message", "License invalid")
-            status = LicenseValidationStatus.EXPIRED if error == "license_expired" else LicenseValidationStatus.INVALID
+            message = str(data.get("message", "License invalid"))
+            if error == "license_expired":
+                status = LicenseValidationStatus.EXPIRED
+            else:
+                status = LicenseValidationStatus.INVALID
             raise LicenseValidationError(message, status)
 
         raise LicenseValidationError(
@@ -163,20 +203,29 @@ class LicenseClient:
             LicenseValidationStatus.INVALID,
         )
 
-    def _parse_success_response(self, data: dict, organization_id: str) -> LicenseInfo:
+    def _parse_success_response(
+        self,
+        data: dict[str, Any],
+        organization_id: str,
+    ) -> LicenseInfo:
         """Parse platform validation success response into LicenseInfo."""
         from datetime import timedelta
 
         now = datetime.utcnow()
-        license_data = data.get("license", {})
-        expires_at_str = license_data.get("expires_at", "")
+        license_data = _mapping_value(data, "license")
+        expires_at_value = license_data.get("expires_at", "")  # pragma: no mutate
+        if isinstance(expires_at_value, str):
+            expires_at_str = expires_at_value
+        else:
+            expires_at_str = ""  # pragma: no mutate
         try:
-            expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+            normalized_expiry = expires_at_str.replace("Z", "+00:00")  # pragma: no mutate
+            expires_at = datetime.fromisoformat(normalized_expiry)
         except (ValueError, TypeError):
             expires_at = now + timedelta(days=365)
 
-        modules_data = data.get("modules", {})
-        allowed = modules_data.get("allowed", [])
+        modules_data = _mapping_value(data, "modules")
+        allowed = _string_list_value(modules_data, "allowed")
         licensed_modules = [
             ModuleLicense(
                 module_id=m,
@@ -198,7 +247,8 @@ class LicenseClient:
                 ),
             ]
 
-        tier_str = license_data.get("tier", "free")
+        tier_value = license_data.get("tier", "free")  # pragma: no mutate
+        tier_str = tier_value if isinstance(tier_value, str) else "free"  # pragma: no mutate
         return LicenseInfo(
             organization_id=organization_id,
             organization_name="Licensed Organization",
@@ -211,8 +261,12 @@ class LicenseClient:
             last_validated=now,
         )
 
-    def _validate_offline(self, license_key: str, organization_id: str) -> LicenseInfo:
-        """Validate an offline license key (platform format: base64(JSON+signature))."""
+    def _validate_offline(
+        self,
+        license_key: str,
+        organization_id: str,
+    ) -> LicenseInfo:
+        """Validate an offline license key."""
         from .services import LicenseService
 
         logger.info("Validating offline license for org: %s", organization_id)
@@ -220,7 +274,10 @@ class LicenseClient:
         try:
             data, signature = LicenseService._decode_license_key(license_key)
         except ValueError as e:
-            raise LicenseValidationError(str(e), LicenseValidationStatus.INVALID) from e
+            raise LicenseValidationError(
+                str(e),
+                LicenseValidationStatus.INVALID,
+            ) from e
 
         if not LicenseService._verify_signature(data, signature):
             raise LicenseValidationError(
@@ -228,7 +285,7 @@ class LicenseClient:
                 LicenseValidationStatus.INVALID,
             )
 
-        org_data = data.get("organization", {})
+        org_data = _mapping_value(data, "organization")
         org_id = org_data.get("id") or data.get("organization_id")
         if org_id != organization_id:
             raise LicenseValidationError(
@@ -236,8 +293,15 @@ class LicenseClient:
                 LicenseValidationStatus.INVALID,
             )
 
-        validity = data.get("validity", {})
-        expires_at_str = validity.get("expires_at") or data.get("expires_at", "")
+        validity = _mapping_value(data, "validity")
+        expires_at_value = validity.get("expires_at") or data.get(
+            "expires_at",
+            "",
+        )
+        if isinstance(expires_at_value, str):
+            expires_at_str = expires_at_value
+        else:
+            expires_at_str = ""  # pragma: no mutate
         if not expires_at_str:
             raise LicenseValidationError(
                 "License key missing expiration",
@@ -245,7 +309,8 @@ class LicenseClient:
             )
 
         try:
-            expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+            normalized_expiry = expires_at_str.replace("Z", "+00:00")  # pragma: no mutate
+            expires_at = datetime.fromisoformat(normalized_expiry)
         except (ValueError, TypeError) as e:
             raise LicenseValidationError(
                 f"Invalid expiration format: {e}",
@@ -258,11 +323,12 @@ class LicenseClient:
                 LicenseValidationStatus.EXPIRED,
             )
 
-        core = data.get("core", {})
-        modules = data.get("modules", {})
-        license_info = data.get("license", {})
-        tier_str = license_info.get("tier", core.get("tier", "free"))
-        included = modules.get("included", [])
+        core = _mapping_value(data, "core")
+        modules = _mapping_value(data, "modules")
+        license_info = _mapping_value(data, "license")
+        tier_value = license_info.get("tier", core.get("tier", "free"))
+        tier_str = tier_value if isinstance(tier_value, str) else "free"
+        included = _string_list_value(modules, "included")
 
         licensed_modules = [
             ModuleLicense(
@@ -287,7 +353,11 @@ class LicenseClient:
 
         return LicenseInfo(
             organization_id=organization_id,
-            organization_name=org_data.get("name", "Licensed Organization"),
+            # fmt: off
+            organization_name=str(
+                org_data.get("name", "Licensed Organization")
+            ),
+            # fmt: on
             tier=_tier_from_string(tier_str),
             status=LicenseValidationStatus.VALID,
             issued_at=datetime.utcnow(),

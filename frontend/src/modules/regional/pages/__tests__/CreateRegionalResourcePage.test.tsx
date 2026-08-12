@@ -34,7 +34,7 @@ describe("CreateRegionalResourcePage", () => {
   it("loads the governed form and validates required fields", async () => {
     renderPage(createTestQueryClient());
     const name = await screen.findByLabelText("Name");
-    expect(name).toHaveValue("Regional resource");
+    await waitFor(() => expect(name).toHaveValue("Regional resource"));
     await userEvent.clear(name);
     await userEvent.type(name, " ");
     await userEvent.click(screen.getByRole("button", { name: "Create resource" }));

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
-from typing import Final
+from typing import Any, ClassVar, Final, cast
 from uuid import UUID
 
 from django.conf import settings
@@ -59,11 +59,15 @@ class StrictSessionAuthentication(SessionAuthentication):
 class EmailMarketingAccessMixin:
     """Resolve action policy, module entitlement, and metered quota explicitly."""
 
-    authentication_classes = (StrictSessionAuthentication,)
-    permission_classes = (IsAuthenticated, RequiresAccess)
-    action_permissions: dict[str, str] = {}
-    action_quotas: dict[str, str] = {}
-    read_actions = frozenset({"list", "retrieve", "analytics"})
+    authentication_classes: ClassVar[Any] = (StrictSessionAuthentication,)
+    permission_classes: ClassVar[Any] = (IsAuthenticated, RequiresAccess)
+    action_permissions: ClassVar[dict[str, str]] = {}
+    action_quotas: ClassVar[dict[str, str]] = {}
+    read_actions: ClassVar[frozenset[str]] = frozenset({"list", "retrieve", "analytics"})
+    request: Any
+
+    def required_permission_for_action(self, action: str) -> str | None:
+        return self.action_permissions.get(action)
 
     def get_permissions(self) -> list[BasePermission]:
         action = str(getattr(self, "action", ""))
@@ -72,7 +76,7 @@ class EmailMarketingAccessMixin:
             self.request.tenant_id = UUID(str(raw_tenant))
         except (TypeError, ValueError, AttributeError):
             self.request.tenant_id = None
-        self.required_permission = self.action_permissions.get(action)
+        self.required_permission = self.required_permission_for_action(action)
         if self.request.tenant_id is not None and not str(self.required_permission or "").startswith(
             "email_marketing.configuration:"
         ):
@@ -153,11 +157,12 @@ class ProviderWebhookPermission(BasePermission):
         )
         if not hmac.compare_digest(signature, digest.hexdigest()):
             return False
+        typed_request = cast(Any, request)
         try:
-            request.tenant_id = tenant_id
+            typed_request.tenant_id = tenant_id
         except (TypeError, ValueError, AttributeError):
             return False
-        request.gateway_key = gateway_key
+        typed_request.gateway_key = gateway_key
         return True
 
 

@@ -119,7 +119,10 @@ def _uuid(value: UUID | str, field: str) -> UUID:
 def _date(value: date | str, field: str) -> date:
     if isinstance(value, datetime):
         raise BudgetDomainError("INVALID_DATE", f"{field} must be a date")
-    parsed = value if isinstance(value, date) else parse_date(str(value))
+    try:
+        parsed = value if isinstance(value, date) else parse_date(str(value))
+    except ValueError as exc:
+        raise BudgetDomainError("INVALID_DATE", f"{field} must be an ISO date") from exc
     if parsed is None:
         raise BudgetDomainError("INVALID_DATE", f"{field} must be an ISO date")
     return parsed
@@ -139,13 +142,20 @@ def _decimal(value: Decimal | str | int, field: str, *, positive: bool = False) 
         unquantized = Decimal(str(value))
     except (InvalidOperation, ValueError) as exc:
         raise BudgetDomainError("INVALID_DECIMAL", f"{field} must be a valid decimal") from exc
-    if not unquantized.is_finite() or unquantized.as_tuple().exponent < -2:
+    exponent = unquantized.as_tuple().exponent
+    if not unquantized.is_finite() or isinstance(exponent, str) or exponent < -2:
         raise BudgetDomainError("INVALID_DECIMAL", f"{field} must have at most two fractional digits")
     result = unquantized.quantize(MONEY)
     if result < 0 or (positive and result <= 0):
         qualifier = "positive" if positive else "nonnegative"
         raise BudgetDomainError("INVALID_AMOUNT", f"{field} must be {qualifier}")
     return result
+
+
+def _decimal_value(value: Any, field: str, *, positive: bool = False) -> Decimal:
+    if not isinstance(value, (Decimal, str, int)) or isinstance(value, bool):
+        raise BudgetDomainError("INVALID_DECIMAL", f"{field} must be a decimal string")
+    return _decimal(value, field, positive=positive)
 
 
 def _percent(value: Decimal | str | int, field: str = "threshold_percentage") -> Decimal:
@@ -413,7 +423,7 @@ class BudgetService:
             "account_name": "",
             "period_type": period_type,
             "period_number": period_number,
-            "budget_amount": _decimal(data.get("budget_amount"), "budget_amount"),
+            "budget_amount": _decimal_value(data.get("budget_amount"), "budget_amount"),
             "committed_amount": Decimal("0.00"),
             "actual_amount": Decimal("0.00"),
             "source": "manual",
@@ -763,7 +773,7 @@ class BudgetService:
         )
         for item in pending:
             cancellation_key = (
-                f"cancel:{uuid.uuid5(uuid.NAMESPACE_URL, f'{tenant_id}:{budget.id}:{idempotency_key}:{item.id}') }"
+                f"cancel:{uuid.uuid5(uuid.NAMESPACE_URL, f'{tenant_id}:{budget.id}:{idempotency_key}:{item.id}')}"
             )
             BudgetApprovalDecision.objects.create(
                 tenant_id=tenant_id,
@@ -1017,6 +1027,8 @@ class BudgetControlService:
             code = _clean_text(raw.get("account_code"), "account_code", upper=True)
             period_type = str(raw.get("period_type", "")).lower()
             period_number = raw.get("period_number")
+            if not isinstance(period_number, int) or isinstance(period_number, bool):
+                raise BudgetDomainError("INVALID_PERIOD_NUMBER", "period_number must be an integer")
             identity = (code, period_type, period_number)
             if identity in seen:
                 raise BudgetDomainError("DUPLICATE_ACTUAL", "Actuals snapshot contains a duplicate period")
@@ -1034,7 +1046,7 @@ class BudgetControlService:
                 raise BudgetDomainError(
                     "ACTUAL_IDENTITY_MISMATCH", "Actuals snapshot does not match an allocation"
                 ) from exc
-            actual = _decimal(raw.get("actual_amount"), "actual_amount")
+            actual = _decimal_value(raw.get("actual_amount"), "actual_amount")
             line.actual_amount, line.variance = actual, line.budget_amount - actual
             line.actuals_as_of, line.source = timezone.now(), "accounting_sync"
             line.save(update_fields=["actual_amount", "variance", "actuals_as_of", "source", "updated_at"])
@@ -1109,7 +1121,7 @@ class BudgetControlService:
         tenant_id: UUID, budget_line_id: UUID, amount: Decimal | str, *, source_id: UUID | str, idempotency_key: str
     ) -> BudgetLine:
         return BudgetControlService._commitment(
-            tenant_id, budget_line_id, amount, source_id=source_id, idempotency_key=idempotency_key, release=False
+            tenant_id, budget_line_id, amount, source_id=str(source_id), idempotency_key=idempotency_key, release=False
         )
 
     @staticmethod
@@ -1117,7 +1129,7 @@ class BudgetControlService:
         tenant_id: UUID, budget_line_id: UUID, amount: Decimal | str, *, source_id: UUID | str, idempotency_key: str
     ) -> BudgetLine:
         return BudgetControlService._commitment(
-            tenant_id, budget_line_id, amount, source_id=source_id, idempotency_key=idempotency_key, release=True
+            tenant_id, budget_line_id, amount, source_id=str(source_id), idempotency_key=idempotency_key, release=True
         )
 
 
@@ -1227,11 +1239,10 @@ class VarianceAlertService:
         return created
 
     @staticmethod
-    @transaction.atomic
     def dispatch_alert(tenant_id: UUID, alert_id: UUID, *, idempotency_key: str) -> AsyncJob:
         tenant_id = _uuid(tenant_id, "tenant_id")
         try:
-            alert = VarianceAlert.objects.select_for_update().get(tenant_id=tenant_id, id=_uuid(alert_id, "alert_id"))
+            alert = VarianceAlert.objects.get(tenant_id=tenant_id, id=_uuid(alert_id, "alert_id"))
         except VarianceAlert.DoesNotExist as exc:
             raise BudgetDomainError("NOT_FOUND", "Variance alert not found", http_status=404) from exc
         if get_integrations().notification is None:
@@ -1240,16 +1251,18 @@ class VarianceAlertService:
             raise BudgetDomainError(
                 "CAPABILITY_UNAVAILABLE", "Notification capability is not configured", http_status=503
             )
-        job = enqueue(
-            tenant_id,
-            uuid.UUID(int=0),
-            "budget_management.dispatch_variance_alert",
-            {"alert_id": str(alert.id)},
-            f"budget-alert-notify:{_clean_text(idempotency_key, 'idempotency_key')}",
-        )
-        alert.notification_job_id, alert.notification_status = job.id, "pending"
-        alert.save(update_fields=["notification_job_id", "notification_status"])
-        return job
+        with transaction.atomic():
+            alert = VarianceAlert.objects.select_for_update().get(tenant_id=tenant_id, id=alert.id)
+            job = enqueue(
+                tenant_id,
+                uuid.UUID(int=0),
+                "budget_management.dispatch_variance_alert",
+                {"alert_id": str(alert.id)},
+                f"budget-alert-notify:{_clean_text(idempotency_key, 'idempotency_key')}",
+            )
+            alert.notification_job_id, alert.notification_status = job.id, "pending"
+            alert.save(update_fields=["notification_job_id", "notification_status"])
+            return job
 
     @staticmethod
     @transaction.atomic

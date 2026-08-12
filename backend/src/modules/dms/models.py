@@ -36,12 +36,13 @@ SHA256_PATTERN = r"^[0-9a-f]{64}$"
 
 
 def _postgres_document_indexes() -> list[models.Index]:
-    """Keep PostgreSQL-only GIN indexes out of SQLite test schema creation."""
+    """Declare PostgreSQL search indexes only for PostgreSQL-backed schemas."""
+
     from django.conf import settings
 
-    engine = settings.DATABASES["default"]["ENGINE"]
-    if engine == "django.db.backends.sqlite3":
+    if settings.DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3":
         return []
+
     return [
         GinIndex(fields=["tags"], name="dms_doc_tags_gin"),
         GinIndex(
@@ -220,7 +221,7 @@ class Document(MutableDmsModel):
             raise ValidationError({"folder": "The target folder has been deleted."}, code="deleted_folder")
 
         if not isinstance(self.tags, list):
-            raise ValidationError({"tags": "Tags must be an array."}, code="invalid_tags")
+            raise ValidationError({"tags": ValidationError("Tags must be an array.", code="invalid_tags")})
         from .services import DmsConfigurationService
 
         policy = DmsConfigurationService.runtime_values(self.tenant_id)
@@ -249,7 +250,9 @@ class Document(MutableDmsModel):
         self.tags = normalized_tags
 
         if not isinstance(self.metadata, dict):
-            raise ValidationError({"metadata": "Metadata must be a JSON object."}, code="invalid_metadata")
+            raise ValidationError(
+                {"metadata": ValidationError("Metadata must be a JSON object.", code="invalid_metadata")}
+            )
         try:
             encoded_metadata = json.dumps(
                 self.metadata,
@@ -281,7 +284,9 @@ class Document(MutableDmsModel):
         if not self._state.adding:
             previous_owner = type(self)._base_manager.filter(pk=self.pk).values_list("created_by", flat=True).first()
             if previous_owner is not None and previous_owner != self.created_by:
-                raise ValidationError({"created_by": "Document ownership is immutable."}, code="immutable_owner")
+                raise ValidationError(
+                    {"created_by": ValidationError("Document ownership is immutable.", code="immutable_owner")}
+                )
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:

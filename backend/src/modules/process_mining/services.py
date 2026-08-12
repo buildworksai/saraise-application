@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from datetime import timezone as datetime_timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO, TypeVar, cast
 from uuid import UUID
 
 from django.core.files import File
@@ -34,11 +34,13 @@ from src.core.api.results import CapabilityUnavailable, OperationFailed
 from src.core.async_jobs.models import AsyncJob, OutboxEvent
 from src.core.async_jobs.services import enqueue
 from src.core.middleware.correlation import get_correlation_id
+from src.core.state_machine import IdempotencyConflictError, IllegalTransitionError, StateMachineError
 
 from .adapters import (
     BottleneckAlgorithm,
     CanonicalEvent,
     ConformanceAlgorithm,
+    EventSourceAdapter,
     ExportFormatter,
     MiningAlgorithm,
     canonical_events,
@@ -72,6 +74,7 @@ from .models import (
 from .state_machines import configured_state_machine
 
 logger = logging.getLogger("saraise.process_mining")
+ModelT = TypeVar("ModelT")
 
 # These are persisted as each tenant's versioned starting document. Runtime
 # behavior always reads the tenant record; editing source is never required.
@@ -258,6 +261,13 @@ def _actor(value: UUID | str) -> UUID:
         raise ValidationError({"actor_id": "A valid actor UUID is required."}) from exc
 
 
+def _identifier(value: UUID | str, field: str) -> UUID:
+    try:
+        return value if isinstance(value, UUID) else UUID(str(value))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValidationError({field: "A valid UUID is required."}) from exc
+
+
 def _correlation_id(value: str | None = None) -> str:
     correlation_id = value or get_correlation_id()
     if not isinstance(correlation_id, str) or not correlation_id.strip():
@@ -284,17 +294,21 @@ class ProcessMiningConfigurationService:
                 detail["missing"] = sorted(missing)
             if unknown:
                 detail["unknown"] = sorted(unknown)
-            raise ValidationError({"document": detail})
-        normalized = deepcopy(document)
+            raise ValidationError({"document": cast(Any, detail)})
+        normalized: dict[str, Any] = deepcopy(document)
         for field, (minimum, maximum) in INTEGER_LIMITS.items():
             value = normalized[field]
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                 raise ValidationError({field: f"Must be an integer from {minimum} through {maximum}."})
-        for field, (minimum, maximum) in FLOAT_LIMITS.items():
-            value = normalized[field]
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not minimum <= float(value) <= maximum:
-                raise ValidationError({field: f"Must be a number from {minimum} through {maximum}."})
-            normalized[field] = float(value)
+        for field, (float_minimum, float_maximum) in FLOAT_LIMITS.items():
+            numeric_value = normalized[field]
+            if (
+                isinstance(numeric_value, bool)
+                or not isinstance(numeric_value, (int, float))
+                or not float_minimum <= float(numeric_value) <= float_maximum
+            ):
+                raise ValidationError({field: f"Must be a number from {float_minimum} through {float_maximum}."})
+            normalized[field] = float(numeric_value)
         if normalized["retention_days"] < normalized["retention_min_days"]:
             raise ValidationError({"retention_days": "Must be at least retention_min_days."})
         if normalized["algorithm_threshold_min"] >= normalized["algorithm_threshold_max"]:
@@ -489,7 +503,44 @@ def _configuration(tenant_id: UUID) -> dict[str, object]:
     return ProcessMiningConfigurationService().resolve(tenant_id)
 
 
-def _workflow_machine(tenant_id: UUID, workflow_kind: str):
+def _config_int(configuration: Mapping[str, object], key: str) -> int:
+    value = configuration[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValidationError({"configuration": f"{key} must be an integer."})
+    return value
+
+
+def _config_float(configuration: Mapping[str, object], key: str) -> float:
+    value = configuration[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValidationError({"configuration": f"{key} must be numeric."})
+    return float(value)
+
+
+def _config_str_list(configuration: Mapping[str, object], key: str) -> tuple[str, ...]:
+    value = configuration[key]
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise ValidationError({"configuration": f"{key} must be a string list."})
+    if not all(isinstance(item, str) for item in value):
+        raise ValidationError({"configuration": f"{key} must be a string list."})
+    return tuple(value)
+
+
+def _config_workflow(configuration: Mapping[str, object], key: str) -> Mapping[str, Sequence[str]]:
+    value = configuration[key]
+    if not isinstance(value, Mapping):
+        raise ValidationError({"configuration": f"{key} must be a workflow mapping."})
+    workflow: dict[str, Sequence[str]] = {}
+    for state, targets in value.items():
+        if not isinstance(state, str) or not isinstance(targets, Sequence) or isinstance(targets, (str, bytes)):
+            raise ValidationError({"configuration": f"{key} must be a workflow mapping."})
+        if not all(isinstance(target, str) for target in targets):
+            raise ValidationError({"configuration": f"{key} must be a workflow mapping."})
+        workflow[state] = tuple(targets)
+    return workflow
+
+
+def _workflow_machine(tenant_id: UUID, workflow_kind: str) -> Any:
     """Build the command engine from the tenant's validated, versioned policy."""
     configuration = _configuration(tenant_id)
     if workflow_kind == "export":
@@ -497,8 +548,8 @@ def _workflow_machine(tenant_id: UUID, workflow_kind: str):
             name="process_mining.export",
             model=EventExportJob,
             states=ExportStatus.values,
-            workflow=configuration["export_transitions"],
-            terminal_states=configuration["export_terminal_states"],
+            workflow=_config_workflow(configuration, "export_transitions"),
+            terminal_states=_config_str_list(configuration, "export_terminal_states"),
         )
     models = {
         "discovery": ProcessDiscoveryJob,
@@ -512,9 +563,46 @@ def _workflow_machine(tenant_id: UUID, workflow_kind: str):
         name=f"process_mining.{workflow_kind}",
         model=model,
         states=AnalysisStatus.values,
-        workflow=configuration["analysis_transitions"],
-        terminal_states=configuration["analysis_terminal_states"],
+        workflow=_config_workflow(configuration, "analysis_transitions"),
+        terminal_states=_config_str_list(configuration, "analysis_terminal_states"),
     )
+
+
+def _apply_workflow_transition(
+    tenant_id: UUID,
+    workflow_kind: str,
+    aggregate: object,
+    command: str,
+    *,
+    transition_key: str,
+    metadata: Mapping[str, object],
+) -> object:
+    try:
+        return _workflow_machine(tenant_id, workflow_kind).apply(
+            aggregate,
+            command,
+            tenant_id=tenant_id,
+            transition_key=transition_key,
+            metadata=metadata,
+        )
+    except IdempotencyConflictError as exc:
+        raise OperationFailed(
+            error_code="IDEMPOTENCY_CONFLICT",
+            message="The transition key was already used for another command.",
+            http_status=409,
+        ) from exc
+    except IllegalTransitionError as exc:
+        raise OperationFailed(
+            error_code="ILLEGAL_TRANSITION",
+            message="The requested lifecycle transition is no longer legal.",
+            http_status=409,
+        ) from exc
+    except StateMachineError as exc:
+        raise OperationFailed(
+            error_code="STATE_TRANSITION_FAILED",
+            message="The lifecycle transition could not be applied.",
+            http_status=422,
+        ) from exc
 
 
 def _required_text(value: object, field: str, limit: int) -> str:
@@ -583,14 +671,15 @@ def _enqueue_or_unavailable(
         ) from exc
 
 
-def _get(model: type[Any], tenant_id: UUID, identifier: UUID | str, *, active: bool = False) -> Any:
+def _get(model: type[ModelT], tenant_id: UUID, identifier: UUID | str, *, active: bool = False) -> ModelT:
     filters: dict[str, object] = {"pk": identifier}
-    if active and any(field.name == "is_deleted" for field in model._meta.fields):
+    model_type = cast(Any, model)
+    if active and any(field.name == "is_deleted" for field in model_type._meta.fields):
         filters["is_deleted"] = False
-    value = model.objects.for_tenant(tenant_id).filter(**filters).first()
+    value = model_type.objects.for_tenant(tenant_id).filter(**filters).first()
     if value is None:
         raise NotFound()
-    return value
+    return cast(ModelT, value)
 
 
 def _canonical_hash(
@@ -620,10 +709,10 @@ def _safe_attributes(value: object, configuration: Mapping[str, object]) -> dict
     if not isinstance(value, dict):
         raise ValidationError({"attributes": "Attributes must be an object."})
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    maximum = int(configuration["attributes_max_bytes"])
+    maximum = _config_int(configuration, "attributes_max_bytes")
     if len(encoded.encode("utf-8")) > maximum:
         raise ValidationError({"attributes": f"Attributes must not exceed {maximum} bytes."})
-    forbidden = set(configuration["forbidden_attribute_keys"])
+    forbidden = set(_config_str_list(configuration, "forbidden_attribute_keys"))
     if any(str(key).lower() in forbidden for key in value):
         raise ValidationError({"attributes": "Credential-like attribute keys are forbidden."})
     return value
@@ -640,20 +729,24 @@ class EventLogService:
     ) -> IngestResult:
         tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
         configuration = _configuration(tenant_id)
-        text_limit = int(configuration["text_max_length"])
-        source_module = _required_text(source_module, "source_module", int(configuration["source_module_max_length"]))
+        text_limit = _config_int(configuration, "text_max_length")
+        source_module = _required_text(
+            source_module, "source_module", _config_int(configuration, "source_module_max_length")
+        )
         process_name = _required_text(process_name, "process_name", text_limit)
         if not isinstance(events, Sequence) or isinstance(events, (str, bytes)) or not events:
             raise ValidationError({"events": "A nonempty event array is required."})
-        max_batch_events = int(configuration["max_batch_events"])
+        max_batch_events = _config_int(configuration, "max_batch_events")
         if len(events) > max_batch_events:
             raise ValidationError({"events": f"A batch may contain at most {max_batch_events} events."})
         source = registry.get("process_mining.canonical")
+        if not isinstance(source, EventSourceAdapter):
+            raise ValidationError({"source_module": "The source is not registered."})
         if not source.validate_source(source_module):
             raise ValidationError({"source_module": "The source is not registered."})
         now = timezone.now()
-        cutoff = now - timedelta(days=int(configuration["max_event_age_days"]))
-        future_cutoff = now + timedelta(seconds=int(configuration["future_clock_skew_seconds"]))
+        cutoff = now - timedelta(days=_config_int(configuration, "max_event_age_days"))
+        future_cutoff = now + timedelta(seconds=_config_int(configuration, "future_clock_skew_seconds"))
         valid: list[tuple[int, ProcessEvent]] = []
         evidence: list[IngestRowEvidence] = []
         seen_hashes: set[str] = set()
@@ -683,9 +776,7 @@ class EventLogService:
                         )
                     )
                     continue
-                seen_hashes.add(event_hash)
-                if source_event_id:
-                    seen_sources.add(source_event_id)
+                attributes = _safe_attributes(mapped.get("attributes"), configuration)
                 valid.append(
                     (
                         index,
@@ -699,11 +790,14 @@ class EventLogService:
                             activity=activity,
                             occurred_at=occurred_at,
                             resource=resource or None,
-                            attributes=_safe_attributes(mapped.get("attributes"), configuration),
+                            attributes=attributes,
                             event_hash=event_hash,
                         ),
                     )
                 )
+                seen_hashes.add(event_hash)
+                if source_event_id:
+                    seen_sources.add(source_event_id)
             except (ValidationError, ValueError, TypeError) as exc:
                 evidence.append(IngestRowEvidence(index, "rejected", code="INVALID_EVENT", message=str(exc)))
         hashes = [event.event_hash for _, event in valid]
@@ -732,7 +826,7 @@ class EventLogService:
                 inserts.append(event)
         with transaction.atomic():
             ProcessEvent.objects.bulk_create(
-                inserts, ignore_conflicts=True, batch_size=int(configuration["bulk_insert_batch_size"])
+                inserts, ignore_conflicts=True, batch_size=_config_int(configuration, "bulk_insert_batch_size")
             )
             for event in inserts:
                 persisted = (
@@ -788,13 +882,13 @@ class EventLogService:
         tenant_id = _tenant(tenant_id)
         configuration = _configuration(tenant_id)
         process_name = _required_text(
-            filters.get("process_name"), "process_name", int(configuration["text_max_length"])
+            filters.get("process_name"), "process_name", _config_int(configuration, "text_max_length")
         )
         start = _aware_datetime(filters.get("start"), "start")
         end = _aware_datetime(filters.get("end"), "end")
         if end <= start:
             raise ValidationError({"end": "End must follow start."})
-        maximum_days = int(configuration["event_query_max_days"])
+        maximum_days = _config_int(configuration, "event_query_max_days")
         if end - start > timedelta(days=maximum_days):
             raise ValidationError({"end": f"Event queries are bounded to {maximum_days} days."})
         queryset = ProcessEvent.objects.for_tenant(tenant_id).filter(
@@ -817,8 +911,8 @@ class EventLogService:
         tenant_id = _tenant(tenant_id)
         actor_id = _actor(actor_id or uuid.UUID(int=0))
         configuration = _configuration(tenant_id)
-        retention_days = int(configuration["retention_days"] if retention_days is None else retention_days)
-        minimum = int(configuration["retention_min_days"])
+        retention_days = _config_int(configuration, "retention_days") if retention_days is None else retention_days
+        minimum = _config_int(configuration, "retention_min_days")
         if retention_days < minimum:
             raise ValidationError({"retention_days": f"Retention must be at least {minimum} days."})
         cutoff = timezone.now() - timedelta(days=retention_days)
@@ -885,9 +979,10 @@ class ProcessMiningQueryService:
 
     @staticmethod
     def model_versions(tenant_id: UUID, process_model_id: UUID | str) -> QuerySet[ProcessModelVersion]:
+        process_model_uuid = _identifier(process_model_id, "process_model_id")
         return (
             ProcessModelVersion.objects.for_tenant(_tenant(tenant_id))
-            .filter(process_model_id=process_model_id)
+            .filter(process_model_id=process_model_uuid)
             .order_by("-version", "-id")
         )
 
@@ -965,7 +1060,7 @@ class ExportService:
     ) -> EventExportJob:
         tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
         configuration = _configuration(tenant_id)
-        limit = int(configuration["text_max_length"])
+        limit = _config_int(configuration, "text_max_length")
         process_name, idempotency_key = _required_text(process_name, "process_name", limit), _required_text(
             idempotency_key, "idempotency_key", limit
         )
@@ -975,8 +1070,10 @@ class ExportService:
         if existing:
             return existing
         count = _filter_events(tenant_id, process_name, event_filter).count()
-        projected = count * int(configuration["export_projection_bytes_per_event"])
-        if count > int(configuration["max_export_events"]) or projected > int(configuration["max_export_bytes"]):
+        projected = count * _config_int(configuration, "export_projection_bytes_per_event")
+        if count > _config_int(configuration, "max_export_events") or projected > _config_int(
+            configuration, "max_export_bytes"
+        ):
             raise OperationFailed(
                 error_code="EXPORT_TOO_LARGE",
                 message="The requested export exceeds the safe limit.",
@@ -1019,27 +1116,30 @@ class ExportService:
             raise NotFound()
         actor_id = record.created_by
         configuration = _configuration(tenant_id)
-        record = _workflow_machine(tenant_id, "export").apply(
-            record,
-            "start",
-            tenant_id=tenant_id,
-            transition_key=f"worker:{async_job_id}:start",
-            metadata=_audit(actor_id, "Export worker started"),
+        record = cast(
+            EventExportJob,
+            _workflow_machine(tenant_id, "export").apply(
+                record,
+                "start",
+                tenant_id=tenant_id,
+                transition_key=f"worker:{async_job_id}:start",
+                metadata=_audit(actor_id, "Export worker started"),
+            ),
         )
         formatter = registry.get(record.format)
         if not isinstance(formatter, ExportFormatter):
             raise CapabilityUnavailable(capability=f"export:{record.format}")
         events = _filter_events(tenant_id, record.process_name, record.event_filter).iterator(
-            chunk_size=int(configuration["export_iterator_chunk_size"])
+            chunk_size=_config_int(configuration, "export_iterator_chunk_size")
         )
         key = f"process_mining/{tenant_id}/{record.id}.{formatter.extension}"
         stored_key = ""
-        chunk_size = int(configuration["checksum_chunk_bytes"])
+        chunk_size = _config_int(configuration, "checksum_chunk_bytes")
         try:
             with tempfile.NamedTemporaryFile(
                 mode="w+", encoding="utf-8", newline="", suffix=f".{formatter.extension}"
             ) as temporary:
-                count = formatter.write(canonical_events(events), temporary)
+                count = formatter.write(canonical_events(events), cast(TextIO, temporary))
                 temporary.flush()
                 size = Path(temporary.name).stat().st_size
                 digest = hashlib.sha256()
@@ -1063,18 +1163,21 @@ class ExportService:
                     row_count=count,
                     byte_size=size,
                     sha256=digest.hexdigest(),
-                    expires_at=now + timedelta(days=int(configuration["export_expiry_days"])),
+                    expires_at=now + timedelta(days=_config_int(configuration, "export_expiry_days")),
                     completed_at=now,
                     error_code="",
                     error_message="",
                 )
                 record = EventExportJob.objects.for_tenant(tenant_id).get(pk=record.id)
-                record = _workflow_machine(tenant_id, "export").apply(
-                    record,
-                    "complete",
-                    tenant_id=tenant_id,
-                    transition_key=f"worker:{async_job_id}:complete",
-                    metadata=_audit(actor_id, "Export artifact verified"),
+                record = cast(
+                    EventExportJob,
+                    _workflow_machine(tenant_id, "export").apply(
+                        record,
+                        "complete",
+                        tenant_id=tenant_id,
+                        transition_key=f"worker:{async_job_id}:complete",
+                        metadata=_audit(actor_id, "Export artifact verified"),
+                    ),
                 )
                 _publish(
                     tenant_id,
@@ -1116,7 +1219,7 @@ class ExportService:
 
     def open_download(self, tenant_id: UUID, export_id: UUID) -> tuple[EventExportJob, Any]:
         record = _get(EventExportJob, _tenant(tenant_id), export_id, active=True)
-        chunk_size = int(_configuration(record.tenant_id)["checksum_chunk_bytes"])
+        chunk_size = _config_int(_configuration(record.tenant_id), "checksum_chunk_bytes")
         if (
             record.status != ExportStatus.COMPLETED
             or not record.artifact_key
@@ -1140,14 +1243,18 @@ class ExportService:
     ) -> EventExportJob:
         tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
         record = _get(EventExportJob, tenant_id, export_id, active=True)
-        updated = _workflow_machine(tenant_id, "export").apply(
-            record,
-            command,
-            tenant_id=tenant_id,
-            transition_key=_required_text(
-                transition_key, "transition_key", int(_configuration(tenant_id)["text_max_length"])
+        updated = cast(
+            EventExportJob,
+            _apply_workflow_transition(
+                tenant_id,
+                "export",
+                record,
+                command,
+                transition_key=_required_text(
+                    transition_key, "transition_key", _config_int(_configuration(tenant_id), "text_max_length")
+                ),
+                metadata=_audit(actor_id, reason or f"Export {command}"),
             ),
-            metadata=_audit(actor_id, reason or f"Export {command}"),
         )
         _publish(
             tenant_id, "event_export", updated.id, f"process.export.{updated.status}", {"export_id": str(updated.id)}
@@ -1170,7 +1277,9 @@ class ExportService:
                 actor_id,
                 "process_mining.export_event_log",
                 {"export_id": str(record.id)},
-                _required_text(idempotency_key, "idempotency_key", int(_configuration(tenant_id)["text_max_length"])),
+                _required_text(
+                    idempotency_key, "idempotency_key", _config_int(_configuration(tenant_id), "text_max_length")
+                ),
             )
             record.async_job_id = job.id
             record.save(update_fields=["async_job_id", "updated_at"])
@@ -1185,7 +1294,7 @@ class ExportService:
     def delete_export(self, tenant_id: UUID, export_id: UUID, actor_id: UUID) -> None:
         tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
         record = _get(EventExportJob, tenant_id, export_id, active=True)
-        if record.status not in set(_configuration(tenant_id)["export_terminal_states"]):
+        if record.status not in set(_config_str_list(_configuration(tenant_id), "export_terminal_states")):
             raise ValidationError({"status": "Only terminal export metadata can be deleted."})
         artifact_key = record.artifact_key
         with transaction.atomic():
@@ -1238,7 +1347,7 @@ class ProcessModelService:
         model_data: Mapping[str, object],
     ) -> ProcessModel:
         tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
-        limit = int(_configuration(tenant_id)["text_max_length"])
+        limit = _config_int(_configuration(tenant_id), "text_max_length")
         validate_graph(model_data)
         with transaction.atomic():
             model = ProcessModel.objects.create(
@@ -1307,7 +1416,7 @@ class ProcessModelService:
     ) -> ProcessModel:
         tenant_id = _tenant(tenant_id)
         _actor(actor_id)
-        limit = int(_configuration(tenant_id)["text_max_length"])
+        limit = _config_int(_configuration(tenant_id), "text_max_length")
         model = _get(ProcessModel, tenant_id, model_id, active=True)
         model.name = _required_text(name, "name", limit)
         model.description = str(description or "").strip()
@@ -1344,7 +1453,7 @@ class ProcessModelService:
     ) -> ProcessModelVersion:
         tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
         transition_key = _required_text(
-            transition_key, "transition_key", int(_configuration(tenant_id)["text_max_length"])
+            transition_key, "transition_key", _config_int(_configuration(tenant_id), "text_max_length")
         )
         with transaction.atomic():
             model = (
@@ -1393,13 +1502,18 @@ class ProcessModelService:
         search = str(filters.get("search") or "").strip()
         if search:
             events = events.filter(process_name__icontains=search)
-        rows = list(
-            events.values("process_name")
-            .annotate(
-                event_count=Count("id"), case_count=Count("case_id", distinct=True), last_activity=Max("occurred_at")
+        rows: list[dict[str, object]] = [
+            dict(row)
+            for row in (
+                events.values("process_name")
+                .annotate(
+                    event_count=Count("id"),
+                    case_count=Count("case_id", distinct=True),
+                    last_activity=Max("occurred_at"),
+                )
+                .order_by("process_name")
             )
-            .order_by("process_name")
-        )
+        ]
         for row in rows:
             model = (
                 ProcessModel.objects.for_tenant(tenant_id)
@@ -1455,7 +1569,7 @@ class ProcessDiscoveryService:
     ) -> ProcessDiscoveryJob:
         tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
         configuration = _configuration(tenant_id)
-        limit = int(configuration["text_max_length"])
+        limit = _config_int(configuration, "text_max_length")
         process_name, idempotency_key = _required_text(process_name, "process_name", limit), _required_text(
             idempotency_key, "idempotency_key", limit
         )
@@ -1471,12 +1585,15 @@ class ProcessDiscoveryService:
         counts = queryset.aggregate(
             events=Count("id"), cases=Count("case_id", distinct=True), activities=Count("activity", distinct=True)
         )
-        min_events, min_cases = int(configuration["discovery_min_events"]), int(configuration["discovery_min_cases"])
+        min_events, min_cases = (
+            _config_int(configuration, "discovery_min_events"),
+            _config_int(configuration, "discovery_min_cases"),
+        )
         if counts["events"] < min_events or counts["cases"] < min_cases:
             raise ValidationError(
                 {"process_name": f"Discovery requires at least {min_events} events across {min_cases} cases."}
             )
-        alpha_max = int(configuration["alpha_max_activities"])
+        alpha_max = _config_int(configuration, "alpha_max_activities")
         if algorithm == MiningAlgorithmName.ALPHA and counts["activities"] > alpha_max:
             raise ValidationError({"algorithm": f"Alpha miner supports at most {alpha_max} activities."})
         normalized = dict(parameters)
@@ -1486,9 +1603,13 @@ class ProcessDiscoveryService:
             else ("noise_threshold", configuration["inductive_default_threshold"])
         )
         if algorithm in {MiningAlgorithmName.HEURISTIC, MiningAlgorithmName.INDUCTIVE}:
-            threshold = float(normalized.get(threshold_name, default))
-            minimum, maximum = float(configuration["algorithm_threshold_min"]), float(
-                configuration["algorithm_threshold_max"]
+            threshold_value = normalized.get(threshold_name, default)
+            if isinstance(threshold_value, bool) or not isinstance(threshold_value, (int, float, str)):
+                raise ValidationError({threshold_name: "Must be numeric."})
+            threshold = float(threshold_value)
+            minimum, maximum = (
+                _config_float(configuration, "algorithm_threshold_min"),
+                _config_float(configuration, "algorithm_threshold_max"),
             )
             if not minimum <= threshold <= maximum:
                 raise ValidationError({threshold_name: f"Must be between {minimum} and {maximum}."})
@@ -1530,12 +1651,15 @@ class ProcessDiscoveryService:
             return record
         if record.async_job_id != async_job_id:
             raise NotFound()
-        record = _workflow_machine(tenant_id, "discovery").apply(
-            record,
-            "start",
-            tenant_id=tenant_id,
-            transition_key=f"worker:{async_job_id}:start",
-            metadata=_audit(record.created_by, "Discovery worker started"),
+        record = cast(
+            ProcessDiscoveryJob,
+            _workflow_machine(tenant_id, "discovery").apply(
+                record,
+                "start",
+                tenant_id=tenant_id,
+                transition_key=f"worker:{async_job_id}:start",
+                metadata=_audit(record.created_by, "Discovery worker started"),
+            ),
         )
         _publish(
             tenant_id,
@@ -1600,12 +1724,15 @@ class ProcessDiscoveryService:
                     error_message="",
                 )
                 record = ProcessDiscoveryJob.objects.for_tenant(tenant_id).get(pk=record.id)
-                record = _workflow_machine(tenant_id, "discovery").apply(
-                    record,
-                    "complete",
-                    tenant_id=tenant_id,
-                    transition_key=f"worker:{async_job_id}:complete",
-                    metadata=_audit(record.created_by, "Discovery model published"),
+                record = cast(
+                    ProcessDiscoveryJob,
+                    _workflow_machine(tenant_id, "discovery").apply(
+                        record,
+                        "complete",
+                        tenant_id=tenant_id,
+                        transition_key=f"worker:{async_job_id}:complete",
+                        metadata=_audit(record.created_by, "Discovery model published"),
+                    ),
                 )
                 _publish(
                     tenant_id,
@@ -1658,14 +1785,18 @@ class ProcessDiscoveryService:
     ) -> ProcessDiscoveryJob:
         tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
         record = _get(ProcessDiscoveryJob, tenant_id, discovery_id, active=True)
-        return _workflow_machine(tenant_id, "discovery").apply(
-            record,
-            command,
-            tenant_id=tenant_id,
-            transition_key=_required_text(
-                transition_key, "transition_key", int(_configuration(tenant_id)["text_max_length"])
+        return cast(
+            ProcessDiscoveryJob,
+            _apply_workflow_transition(
+                tenant_id,
+                "discovery",
+                record,
+                command,
+                transition_key=_required_text(
+                    transition_key, "transition_key", _config_int(_configuration(tenant_id), "text_max_length")
+                ),
+                metadata=_audit(actor_id, reason or f"Discovery {command}"),
             ),
-            metadata=_audit(actor_id, reason or f"Discovery {command}"),
         )
 
     def cancel_discovery(
@@ -1683,7 +1814,9 @@ class ProcessDiscoveryService:
             actor_id,
             "process_mining.discover_process",
             {"discovery_id": str(record.id)},
-            _required_text(idempotency_key, "idempotency_key", int(_configuration(tenant_id)["text_max_length"])),
+            _required_text(
+                idempotency_key, "idempotency_key", _config_int(_configuration(tenant_id), "text_max_length")
+            ),
         )
         record.async_job_id = job.id
         record.save(update_fields=["async_job_id", "updated_at"])
@@ -1693,7 +1826,7 @@ class ProcessDiscoveryService:
         tenant_id = _tenant(tenant_id)
         _actor(actor_id)
         record = _get(ProcessDiscoveryJob, tenant_id, discovery_id, active=True)
-        if record.status not in set(_configuration(tenant_id)["analysis_terminal_states"]):
+        if record.status not in set(_config_str_list(_configuration(tenant_id), "analysis_terminal_states")):
             raise ValidationError({"status": "Only terminal discovery jobs can be deleted."})
         ProcessDiscoveryJob.objects.for_tenant(tenant_id).filter(pk=record.id).update(
             is_deleted=True, deleted_at=timezone.now()
@@ -1718,13 +1851,15 @@ class ConformanceService:
     ) -> ConformanceCheck:
         tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
         configuration = _configuration(tenant_id)
-        idempotency_key = _required_text(idempotency_key, "idempotency_key", int(configuration["text_max_length"]))
+        idempotency_key = _required_text(
+            idempotency_key, "idempotency_key", _config_int(configuration, "text_max_length")
+        )
         existing = ConformanceCheck.objects.for_tenant(tenant_id).filter(idempotency_key=idempotency_key).first()
         if existing:
             return existing
         version = _get(ProcessModelVersion, tenant_id, model_version_id)
         count = _filter_events(tenant_id, version.process_model.process_name, event_filter).count()
-        maximum = int(configuration["max_conformance_events"])
+        maximum = _config_int(configuration, "max_conformance_events")
         if count > maximum:
             raise ValidationError({"event_filter": f"Conformance is limited to {maximum} events."})
         if count == 0:
@@ -1756,12 +1891,15 @@ class ConformanceService:
             return record
         if record.async_job_id != async_job_id:
             raise NotFound()
-        record = _workflow_machine(tenant_id, "conformance").apply(
-            record,
-            "start",
-            tenant_id=tenant_id,
-            transition_key=f"worker:{async_job_id}:start",
-            metadata=_audit(record.created_by, "Conformance worker started"),
+        record = cast(
+            ConformanceCheck,
+            _workflow_machine(tenant_id, "conformance").apply(
+                record,
+                "start",
+                tenant_id=tenant_id,
+                transition_key=f"worker:{async_job_id}:start",
+                metadata=_audit(record.created_by, "Conformance worker started"),
+            ),
         )
         try:
             version = record.process_model_version
@@ -1817,12 +1955,15 @@ class ConformanceService:
                     error_message="",
                 )
                 record = ConformanceCheck.objects.for_tenant(tenant_id).get(pk=record.id)
-                record = _workflow_machine(tenant_id, "conformance").apply(
-                    record,
-                    "complete",
-                    tenant_id=tenant_id,
-                    transition_key=f"worker:{async_job_id}:complete",
-                    metadata=_audit(record.created_by, "Conformance evidence persisted"),
+                record = cast(
+                    ConformanceCheck,
+                    _workflow_machine(tenant_id, "conformance").apply(
+                        record,
+                        "complete",
+                        tenant_id=tenant_id,
+                        transition_key=f"worker:{async_job_id}:complete",
+                        metadata=_audit(record.created_by, "Conformance evidence persisted"),
+                    ),
                 )
                 _publish(
                     tenant_id,
@@ -1882,14 +2023,18 @@ class ConformanceService:
     ) -> ConformanceCheck:
         tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
         record = _get(ConformanceCheck, tenant_id, check_id, active=True)
-        return _workflow_machine(tenant_id, "conformance").apply(
-            record,
-            command,
-            tenant_id=tenant_id,
-            transition_key=_required_text(
-                transition_key, "transition_key", int(_configuration(tenant_id)["text_max_length"])
+        return cast(
+            ConformanceCheck,
+            _apply_workflow_transition(
+                tenant_id,
+                "conformance",
+                record,
+                command,
+                transition_key=_required_text(
+                    transition_key, "transition_key", _config_int(_configuration(tenant_id), "text_max_length")
+                ),
+                metadata=_audit(actor_id, reason or f"Conformance {command}"),
             ),
-            metadata=_audit(actor_id, reason or f"Conformance {command}"),
         )
 
     def cancel_check(
@@ -1907,7 +2052,9 @@ class ConformanceService:
             actor_id,
             "process_mining.check_conformance",
             {"check_id": str(record.id)},
-            _required_text(idempotency_key, "idempotency_key", int(_configuration(tenant_id)["text_max_length"])),
+            _required_text(
+                idempotency_key, "idempotency_key", _config_int(_configuration(tenant_id), "text_max_length")
+            ),
         )
         record.async_job_id = job.id
         record.save(update_fields=["async_job_id", "updated_at"])
@@ -1917,7 +2064,7 @@ class ConformanceService:
         tenant_id = _tenant(tenant_id)
         _actor(actor_id)
         record = _get(ConformanceCheck, tenant_id, check_id, active=True)
-        if record.status not in set(_configuration(tenant_id)["analysis_terminal_states"]):
+        if record.status not in set(_config_str_list(_configuration(tenant_id), "analysis_terminal_states")):
             raise ValidationError({"status": "Only terminal checks can be deleted."})
         ConformanceCheck.objects.for_tenant(tenant_id).filter(pk=record.id).update(
             is_deleted=True, deleted_at=timezone.now()
@@ -1935,7 +2082,7 @@ class BottleneckService:
     ) -> BottleneckAnalysis:
         tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
         configuration = _configuration(tenant_id)
-        limit = int(configuration["text_max_length"])
+        limit = _config_int(configuration, "text_max_length")
         process_name, idempotency_key = _required_text(process_name, "process_name", limit), _required_text(
             idempotency_key, "idempotency_key", limit
         )
@@ -1952,7 +2099,8 @@ class BottleneckService:
                 time_range_start=start,
                 time_range_end=end,
                 status=AnalysisStatus.COMPLETED,
-                completed_at__gte=timezone.now() - timedelta(minutes=int(configuration["bottleneck_reuse_minutes"])),
+                completed_at__gte=timezone.now()
+                - timedelta(minutes=_config_int(configuration, "bottleneck_reuse_minutes")),
                 is_deleted=False,
             )
             .order_by("-completed_at")
@@ -1966,7 +2114,7 @@ class BottleneckService:
         events = ProcessEvent.objects.for_tenant(tenant_id).filter(
             process_name=process_name, occurred_at__gte=start, occurred_at__lte=end
         )
-        minimum_cases = int(configuration["bottleneck_min_cases"])
+        minimum_cases = _config_int(configuration, "bottleneck_min_cases")
         if events.values("case_id").distinct().count() < minimum_cases:
             raise ValidationError({"process_name": f"Bottleneck analysis requires at least {minimum_cases} cases."})
         with transaction.atomic():
@@ -1997,12 +2145,15 @@ class BottleneckService:
             return record
         if record.async_job_id != async_job_id:
             raise NotFound()
-        record = _workflow_machine(tenant_id, "bottleneck").apply(
-            record,
-            "start",
-            tenant_id=tenant_id,
-            transition_key=f"worker:{async_job_id}:start",
-            metadata=_audit(record.created_by, "Bottleneck worker started"),
+        record = cast(
+            BottleneckAnalysis,
+            _workflow_machine(tenant_id, "bottleneck").apply(
+                record,
+                "start",
+                tenant_id=tenant_id,
+                transition_key=f"worker:{async_job_id}:start",
+                metadata=_audit(record.created_by, "Bottleneck worker started"),
+            ),
         )
         try:
             rows = (
@@ -2044,12 +2195,15 @@ class BottleneckService:
                     error_message="",
                 )
                 record = BottleneckAnalysis.objects.for_tenant(tenant_id).get(pk=record.id)
-                record = _workflow_machine(tenant_id, "bottleneck").apply(
-                    record,
-                    "complete",
-                    tenant_id=tenant_id,
-                    transition_key=f"worker:{async_job_id}:complete",
-                    metadata=_audit(record.created_by, "Bottleneck evidence persisted"),
+                record = cast(
+                    BottleneckAnalysis,
+                    _workflow_machine(tenant_id, "bottleneck").apply(
+                        record,
+                        "complete",
+                        tenant_id=tenant_id,
+                        transition_key=f"worker:{async_job_id}:complete",
+                        metadata=_audit(record.created_by, "Bottleneck evidence persisted"),
+                    ),
                 )
                 critical = sum(item.get("severity") == "critical" for item in result.findings)
                 if result.findings:
@@ -2122,14 +2276,18 @@ class BottleneckService:
     ) -> BottleneckAnalysis:
         tenant_id, actor_id = _tenant(tenant_id), _actor(actor_id)
         record = _get(BottleneckAnalysis, tenant_id, analysis_id, active=True)
-        return _workflow_machine(tenant_id, "bottleneck").apply(
-            record,
-            command,
-            tenant_id=tenant_id,
-            transition_key=_required_text(
-                transition_key, "transition_key", int(_configuration(tenant_id)["text_max_length"])
+        return cast(
+            BottleneckAnalysis,
+            _apply_workflow_transition(
+                tenant_id,
+                "bottleneck",
+                record,
+                command,
+                transition_key=_required_text(
+                    transition_key, "transition_key", _config_int(_configuration(tenant_id), "text_max_length")
+                ),
+                metadata=_audit(actor_id, reason or f"Bottleneck {command}"),
             ),
-            metadata=_audit(actor_id, reason or f"Bottleneck {command}"),
         )
 
     def cancel_analysis(
@@ -2147,7 +2305,9 @@ class BottleneckService:
             actor_id,
             "process_mining.analyze_bottlenecks",
             {"analysis_id": str(record.id)},
-            _required_text(idempotency_key, "idempotency_key", int(_configuration(tenant_id)["text_max_length"])),
+            _required_text(
+                idempotency_key, "idempotency_key", _config_int(_configuration(tenant_id), "text_max_length")
+            ),
         )
         record.async_job_id = job.id
         record.save(update_fields=["async_job_id", "updated_at"])
@@ -2157,7 +2317,7 @@ class BottleneckService:
         tenant_id = _tenant(tenant_id)
         _actor(actor_id)
         record = _get(BottleneckAnalysis, tenant_id, analysis_id, active=True)
-        if record.status not in set(_configuration(tenant_id)["analysis_terminal_states"]):
+        if record.status not in set(_config_str_list(_configuration(tenant_id), "analysis_terminal_states")):
             raise ValidationError({"status": "Only terminal analyses can be deleted."})
         BottleneckAnalysis.objects.for_tenant(tenant_id).filter(pk=record.id).update(
             is_deleted=True, deleted_at=timezone.now()

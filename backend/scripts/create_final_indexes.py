@@ -3,6 +3,7 @@
 Create a single index migration with all AddIndex operations.
 This runs AFTER all models are created.
 """
+
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).parent.parent

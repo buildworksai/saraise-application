@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Final
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 from uuid import UUID
 
-from rest_framework.authentication import SessionAuthentication
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.authentication import BaseAuthentication, SessionAuthentication
+from rest_framework.permissions import BasePermission, IsAuthenticated
 
 from src.core.access.permissions import RequiresAccess
 from src.core.auth_utils import get_user_tenant_id
@@ -48,6 +49,11 @@ PERMISSIONS: Final[tuple[str, ...]] = (
 )
 SOD_ACTIONS: Final[tuple[tuple[str, str], ...]] = ()
 
+if TYPE_CHECKING:
+    from rest_framework.permissions import _PermissionClass as PermissionClass
+else:
+    PermissionClass = type
+
 
 class SessionAuthentication401(SessionAuthentication):
     def authenticate_header(self, request: object) -> str:
@@ -56,22 +62,23 @@ class SessionAuthentication401(SessionAuthentication):
 
 
 class ActionAccessMixin:
-    authentication_classes = (SessionAuthentication401,)
-    permission_classes = (IsAuthenticated, RequiresAccess)
-    action_permissions: dict[str, str] = {}
-    action_quotas: dict[str, str] = {}
+    authentication_classes: Sequence[type[BaseAuthentication]] = (SessionAuthentication401,)
+    permission_classes: Sequence[PermissionClass] = (IsAuthenticated, RequiresAccess)
+    action_permissions: ClassVar[dict[str, str]] = {}
+    action_quotas: ClassVar[dict[str, str]] = {}
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> list[BasePermission]:
+        request = cast(Any, self).request
         action = getattr(self, "action", "")
-        tenant = get_user_tenant_id(getattr(self.request, "user", None))
+        tenant = get_user_tenant_id(getattr(request, "user", None))
         try:
-            self.request.tenant_id = UUID(str(tenant)) if tenant else None
+            setattr(request, "tenant_id", UUID(str(tenant)) if tenant else None)
         except (TypeError, ValueError, AttributeError):
-            self.request.tenant_id = None
-        self.required_permission = self.action_permissions.get(action)
-        self.required_entitlement = "process_mining.core"
-        self.quota_resource = self.action_quotas.get(action, "process_mining.api_reads")
-        self.quota_cost = 1
+            setattr(request, "tenant_id", None)
+        cast(Any, self).required_permission = self.action_permissions.get(action)
+        cast(Any, self).required_entitlement = "process_mining.core"
+        cast(Any, self).quota_resource = self.action_quotas.get(action, "process_mining.api_reads")
+        cast(Any, self).quota_cost = 1
         return [IsAuthenticated(), RequiresAccess()]
 
 

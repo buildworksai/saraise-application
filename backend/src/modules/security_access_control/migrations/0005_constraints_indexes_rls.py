@@ -200,12 +200,14 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name="role",
-            constraint=models.CheckConstraint(check=Q(hierarchy_level__gte=0), name="sec_role_hierarchy_nonnegative"),
+            constraint=models.CheckConstraint(
+                condition=Q(hierarchy_level__gte=0), name="sec_role_hierarchy_nonnegative"
+            ),
         ),
         migrations.AddConstraint(
             model_name="role",
             constraint=models.CheckConstraint(
-                check=Q(parent_role__isnull=True) | ~Q(parent_role=F("id")), name="sec_role_parent_not_self"
+                condition=Q(parent_role__isnull=True) | ~Q(parent_role=F("id")), name="sec_role_parent_not_self"
             ),
         ),
         migrations.AddConstraint(
@@ -217,7 +219,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="userrole",
             constraint=models.CheckConstraint(
-                check=Q(valid_until__isnull=True) | Q(valid_until__gt=F("valid_from")),
+                condition=Q(valid_until__isnull=True) | Q(valid_until__gt=F("valid_from")),
                 name="sec_user_role_valid_interval",
             ),
         ),
@@ -238,7 +240,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="permissionset",
             constraint=models.CheckConstraint(
-                check=Q(default_duration_days__isnull=True)
+                condition=Q(default_duration_days__isnull=True)
                 | (Q(default_duration_days__gte=1) & Q(default_duration_days__lte=365)),
                 name="sec_permset_duration_range",
             ),
@@ -254,7 +256,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="userpermissionset",
             constraint=models.CheckConstraint(
-                check=Q(expires_at__gt=F("granted_at")), name="sec_user_permset_interval"
+                condition=Q(expires_at__gt=F("granted_at")), name="sec_user_permset_interval"
             ),
         ),
         migrations.AddConstraint(
@@ -276,7 +278,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="fieldsecurity",
             constraint=models.CheckConstraint(
-                check=Q(visibility="masked", mask_pattern__gt="") | ~Q(visibility="masked"),
+                condition=Q(visibility="masked", mask_pattern__gt="") | ~Q(visibility="masked"),
                 name="sec_field_mask_required",
             ),
         ),
@@ -296,35 +298,35 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="securityprofile",
             constraint=models.CheckConstraint(
-                check=Q(session_timeout_minutes__gte=5) & Q(session_timeout_minutes__lte=1440),
+                condition=Q(session_timeout_minutes__gte=5) & Q(session_timeout_minutes__lte=1440),
                 name="sec_profile_session_timeout",
             ),
         ),
         migrations.AddConstraint(
             model_name="securityprofile",
             constraint=models.CheckConstraint(
-                check=Q(absolute_session_timeout_hours__gte=1) & Q(absolute_session_timeout_hours__lte=168),
+                condition=Q(absolute_session_timeout_hours__gte=1) & Q(absolute_session_timeout_hours__lte=168),
                 name="sec_profile_absolute_timeout",
             ),
         ),
         migrations.AddConstraint(
             model_name="securityprofile",
             constraint=models.CheckConstraint(
-                check=Q(max_concurrent_sessions__gte=1) & Q(max_concurrent_sessions__lte=100),
+                condition=Q(max_concurrent_sessions__gte=1) & Q(max_concurrent_sessions__lte=100),
                 name="sec_profile_session_count",
             ),
         ),
         migrations.AddConstraint(
             model_name="securityprofileassignment",
             constraint=models.CheckConstraint(
-                check=Q(user__isnull=False, role__isnull=True) | Q(user__isnull=True, role__isnull=False),
+                condition=Q(user__isnull=False, role__isnull=True) | Q(user__isnull=True, role__isnull=False),
                 name="sec_profile_assignment_one_subject",
             ),
         ),
         migrations.AddConstraint(
             model_name="securityprofileassignment",
             constraint=models.CheckConstraint(
-                check=Q(valid_until__isnull=True) | Q(valid_until__gt=F("valid_from")),
+                condition=Q(valid_until__isnull=True) | Q(valid_until__gt=F("valid_from")),
                 name="sec_profile_assignment_interval",
             ),
         ),

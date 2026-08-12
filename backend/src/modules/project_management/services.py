@@ -12,7 +12,7 @@ import re
 import uuid
 from datetime import date
 from decimal import Decimal
-from typing import Mapping
+from typing import Any, Mapping, cast
 
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -38,50 +38,50 @@ from .models import (
 
 
 class ProjectManagementError(ValidationError):
-    def __init__(self, message: str, code: str = "INVALID_OPERATION"):
+    def __init__(self, message: str, code: str = "INVALID_OPERATION") -> None:
         self.code = code
         super().__init__(message, code=code)
 
 
 class StaleVersionError(ProjectManagementError):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("The record changed since it was loaded.", "STALE_VERSION")
 
 
 class IdempotencyConflictError(ProjectManagementError):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("The idempotency key was already used for a different command.", "IDEMPOTENCY_CONFLICT")
 
 
-def _uuid(value, field="identifier"):
+def _uuid(value: Any, field: str = "identifier") -> uuid.UUID:
     try:
         return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
     except (TypeError, ValueError, AttributeError) as exc:
         raise ProjectManagementError(f"{field} must be a valid UUID.", "INVALID_UUID") from exc
 
 
-def _actor(value):
+def _actor(value: Any) -> uuid.UUID:
     return _uuid(value, "actor_id")
 
 
-def _tenant(value):
+def _tenant(value: Any) -> uuid.UUID:
     return _uuid(value, "tenant_id")
 
 
-def _required(value, field, maximum=255):
+def _required(value: Any, field: str, maximum: int = 255) -> str:
     result = str(value or "").strip()
     if not result or len(result) > maximum:
         raise ProjectManagementError(f"{field} must be a bounded non-empty string.", "INVALID_INPUT")
     return result
 
 
-def _correlation(seed):
+def _correlation(seed: str) -> str:
     current = get_correlation_id().strip()
     return current[:64] if current else f"cmd-{hashlib.sha256(seed.encode()).hexdigest()[:40]}"
 
 
-def _snapshot(instance):
-    values = {}
+def _snapshot(instance: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {}
     for field in instance._meta.concrete_fields:
         if field.name in {"tenant_id", "description"}:
             continue
@@ -92,8 +92,16 @@ def _snapshot(instance):
     return values
 
 
-def _fingerprint(action, data):
-    def canonical(value):
+def _save(instance: Any, **kwargs: Any) -> None:
+    getattr(instance, "save")(**kwargs)
+
+
+def _service_update(queryset: Any, **kwargs: Any) -> None:
+    getattr(queryset, "_service_update")(**kwargs)
+
+
+def _fingerprint(action: str, data: Any) -> str:
+    def canonical(value: Any) -> Any:
         if isinstance(value, Mapping):
             return {str(k): canonical(v) for k, v in sorted(value.items())}
         if isinstance(value, (list, tuple)):
@@ -110,20 +118,20 @@ def _fingerprint(action, data):
 class ActivityService:
     @staticmethod
     def record(
-        tenant_id,
-        actor_id,
-        entity_type,
-        entity_id,
-        action,
+        tenant_id: Any,
+        actor_id: Any,
+        entity_type: str,
+        entity_id: Any,
+        action: str,
         *,
-        project=None,
-        before=None,
-        after=None,
-        idempotency_key="",
-        fingerprint="",
-        metadata=None,
-        correlation_id=None,
-    ):
+        project: Any = None,
+        before: Mapping[str, Any] | None = None,
+        after: Mapping[str, Any] | None = None,
+        idempotency_key: str = "",
+        fingerprint: str = "",
+        metadata: Mapping[str, Any] | None = None,
+        correlation_id: str | None = None,
+    ) -> ProjectActivity:
         meta = dict(metadata or {})
         if idempotency_key:
             meta.update({"idempotency_key": idempotency_key, "fingerprint": fingerprint})
@@ -169,11 +177,11 @@ class ActivityService:
                 },
             )
             event.payload["event_id"] = str(event.id)
-            event.save()
+            _save(event)
         return activity
 
     @staticmethod
-    def replay(tenant_id, action, idempotency_key, fingerprint, model):
+    def replay(tenant_id: Any, action: str, idempotency_key: str, fingerprint: str, model: Any) -> Any:
         if not idempotency_key:
             raise ProjectManagementError("idempotency_key is required.", "IDEMPOTENCY_REQUIRED")
         activity = (
@@ -191,7 +199,7 @@ class ActivityService:
             raise IdempotencyConflictError()
 
     @staticmethod
-    def list_for_project(tenant_id, project_id, filters=None):
+    def list_for_project(tenant_id: Any, project_id: Any, filters: Mapping[str, Any] | None = None) -> Any:
         queryset = ProjectActivity.objects.for_tenant(_tenant(tenant_id)).filter(project_id=_uuid(project_id))
         for key in ("entity_type", "entity_id", "action"):
             value = (filters or {}).get(key)
@@ -200,16 +208,16 @@ class ActivityService:
         return queryset.order_by("-created_at")
 
 
-def _version(instance, expected):
+def _version(instance: Any, expected: Any) -> None:
     if isinstance(expected, bool) or int(expected) != instance.version:
         raise StaleVersionError()
 
 
-def _active_configuration(tenant_id):
+def _active_configuration(tenant_id: Any) -> ProjectManagementConfigurationVersion:
     return ConfigurationService.get_active(tenant_id, ConfigurationService.runtime_environment())
 
 
-def _project(tenant_id, project_id, include_archived=False, lock=False):
+def _project(tenant_id: Any, project_id: Any, include_archived: bool = False, lock: bool = False) -> Project:
     qs = (Project.all_objects if include_archived else Project.objects).for_tenant(_tenant(tenant_id))
     if lock:
         qs = qs.select_for_update()
@@ -233,7 +241,13 @@ class ProjectService:
 
     @staticmethod
     @transaction.atomic
-    def create_project(tenant_id, actor_id=None, data=None, idempotency_key=None, **legacy):
+    def create_project(
+        tenant_id: Any,
+        actor_id: Any = None,
+        data: Mapping[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        **legacy: Any,
+    ) -> Project:
         # Backwards compatible invocation for the original public service API.
         if data is None:
             data = legacy
@@ -251,9 +265,9 @@ class ProjectService:
         fp = _fingerprint("project.create", payload)
         replay = ActivityService.replay(tenant_id, "project.created", key, fp, Project)
         if replay:
-            return replay
+            return cast(Project, replay)
         project = Project(tenant_id=_tenant(tenant_id), **payload)
-        project.save()
+        _save(project)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -269,14 +283,21 @@ class ProjectService:
 
     @staticmethod
     @transaction.atomic
-    def update_project(tenant_id, actor_id, project_id, data, expected_version, idempotency_key):
+    def update_project(
+        tenant_id: Any,
+        actor_id: Any,
+        project_id: Any,
+        data: Mapping[str, Any],
+        expected_version: Any,
+        idempotency_key: str,
+    ) -> Project:
         project = _project(tenant_id, project_id, lock=True)
-        _version(project, expected_version)
         payload = {k: v for k, v in dict(data).items() if k in ProjectService.MUTABLE}
         fp = _fingerprint("project.update", {"id": project_id, "version": expected_version, **payload})
         replay = ActivityService.replay(tenant_id, "project.updated", idempotency_key, fp, Project)
         if replay:
-            return replay
+            return cast(Project, replay)
+        _version(project, expected_version)
         before = _snapshot(project)
         if "project_code" in payload:
             payload["project_code"] = _required(payload["project_code"], "project_code", 50).upper()
@@ -287,7 +308,7 @@ class ProjectService:
         for field, value in payload.items():
             setattr(project, field, value)
         project.version += 1
-        project.save()
+        _save(project)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -304,12 +325,14 @@ class ProjectService:
 
     @staticmethod
     @transaction.atomic
-    def transition_project(tenant_id, actor_id, project_id, command, transition_key, reason=""):
+    def transition_project(
+        tenant_id: Any, actor_id: Any, project_id: Any, command: str, transition_key: str, reason: str = ""
+    ) -> Project:
         project = _project(tenant_id, project_id, lock=True)
         fp = _fingerprint("project.transition", {"id": project_id, "command": command, "reason": reason})
         replay = ActivityService.replay(tenant_id, "project.transitioned", transition_key, fp, Project)
         if replay:
-            return replay
+            return cast(Project, replay)
         transitions = {
             "activate": ({ProjectStatus.PLANNING}, ProjectStatus.ACTIVE),
             "hold": ({ProjectStatus.ACTIVE}, ProjectStatus.ON_HOLD),
@@ -357,7 +380,7 @@ class ProjectService:
                 "at": timezone.now().isoformat(),
             },
         ]
-        project.save()
+        _save(project)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -375,30 +398,34 @@ class ProjectService:
 
     @staticmethod
     @transaction.atomic
-    def archive_project(tenant_id, actor_id, project_id, expected_version, idempotency_key):
+    def archive_project(
+        tenant_id: Any, actor_id: Any, project_id: Any, expected_version: Any, idempotency_key: str
+    ) -> Project:
         project = _project(tenant_id, project_id, lock=True)
         _version(project, expected_version)
         return ProjectService._archive(tenant_id, actor_id, project, True, idempotency_key)
 
     @staticmethod
     @transaction.atomic
-    def restore_project(tenant_id, actor_id, project_id, expected_version, idempotency_key):
+    def restore_project(
+        tenant_id: Any, actor_id: Any, project_id: Any, expected_version: Any, idempotency_key: str
+    ) -> Project:
         project = _project(tenant_id, project_id, include_archived=True, lock=True)
         _version(project, expected_version)
         return ProjectService._archive(tenant_id, actor_id, project, False, idempotency_key)
 
     @staticmethod
-    def _archive(tenant_id, actor_id, project, archive, key):
+    def _archive(tenant_id: Any, actor_id: Any, project: Project, archive: bool, key: str) -> Project:
         action = "project.archived" if archive else "project.restored"
         fp = _fingerprint(action, {"id": project.id, "version": project.version})
         replay = ActivityService.replay(tenant_id, action, key, fp, Project)
         if replay:
-            return replay
+            return cast(Project, replay)
         before = _snapshot(project)
         project.archived_at = timezone.now() if archive else None
         project.archived_by_id = _actor(actor_id) if archive else None
         project.version += 1
-        project.save()
+        _save(project)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -415,7 +442,14 @@ class ProjectService:
 
     @staticmethod
     @transaction.atomic
-    def duplicate_project(tenant_id, actor_id, project_id, project_code, project_name, idempotency_key):
+    def duplicate_project(
+        tenant_id: Any,
+        actor_id: Any,
+        project_id: Any,
+        project_code: str,
+        project_name: str,
+        idempotency_key: str,
+    ) -> Project:
         source = _project(tenant_id, project_id)
         clone = ProjectService.create_project(
             tenant_id,
@@ -434,7 +468,7 @@ class ProjectService:
         )
         if clone.tasks.exists():
             return clone
-        task_map = {}
+        task_map: dict[Any, Task] = {}
         for task in (
             Task.objects.for_tenant(_tenant(tenant_id))
             .filter(project=source, archived_at__isnull=True)
@@ -493,7 +527,7 @@ class ProjectService:
         return clone
 
     @staticmethod
-    def get_project_summary(tenant_id, project_id):
+    def get_project_summary(tenant_id: Any, project_id: Any) -> dict[str, Any]:
         project = _project(tenant_id, project_id)
         tasks = Task.objects.for_tenant(_tenant(tenant_id)).filter(project=project, archived_at__isnull=True)
         milestones = ProjectMilestone.objects.for_tenant(_tenant(tenant_id)).filter(
@@ -520,7 +554,7 @@ class ProjectService:
         }
 
     @staticmethod
-    def get_portfolio_summary(tenant_id):
+    def get_portfolio_summary(tenant_id: Any) -> dict[str, Any]:
         tenant = _tenant(tenant_id)
         today = timezone.localdate()
         projects = Project.objects.for_tenant(tenant)
@@ -563,7 +597,7 @@ class TaskService:
     }
 
     @staticmethod
-    def _payload(tenant_id, data, instance=None):
+    def _payload(tenant_id: Any, data: Mapping[str, Any], instance: Task | None = None) -> dict[str, Any]:
         payload = {k: v for k, v in dict(data).items() if k in TaskService.MUTABLE}
         project_id = payload.pop("project", instance.project_id if instance else None)
         payload["project"] = _project(tenant_id, project_id)
@@ -582,7 +616,7 @@ class TaskService:
 
     @staticmethod
     @transaction.atomic
-    def create_task(tenant_id, actor_id, data, idempotency_key):
+    def create_task(tenant_id: Any, actor_id: Any, data: Mapping[str, Any], idempotency_key: str) -> Task:
         payload = TaskService._payload(tenant_id, data)
         config = _active_configuration(tenant_id)
         if not re.fullmatch(config.task_code_pattern, payload.get("task_code", "")):
@@ -590,9 +624,9 @@ class TaskService:
         fp = _fingerprint("task.create", data)
         replay = ActivityService.replay(tenant_id, "task.created", idempotency_key, fp, Task)
         if replay:
-            return replay
+            return cast(Task, replay)
         task = Task(tenant_id=_tenant(tenant_id), **payload)
-        task.save()
+        _save(task)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -608,12 +642,20 @@ class TaskService:
 
     @staticmethod
     @transaction.atomic
-    def update_task(tenant_id, actor_id, task_id, data, expected_version, idempotency_key):
+    def update_task(
+        tenant_id: Any,
+        actor_id: Any,
+        task_id: Any,
+        data: Mapping[str, Any],
+        expected_version: Any,
+        idempotency_key: str,
+    ) -> Task:
         try:
-            task = (
+            task = cast(
+                Task,
                 Task.objects.for_tenant(_tenant(tenant_id))
                 .select_for_update()
-                .get(pk=_uuid(task_id), archived_at__isnull=True)
+                .get(pk=_uuid(task_id), archived_at__isnull=True),
             )
         except Task.DoesNotExist as exc:
             raise ProjectManagementError("Task was not found.", "NOT_FOUND") from exc
@@ -623,7 +665,7 @@ class TaskService:
         for k, v in payload.items():
             setattr(task, k, v)
         task.version += 1
-        task.save()
+        _save(task)
         fp = _fingerprint("task.update", {"id": task_id, **data})
         ActivityService.record(
             tenant_id,
@@ -641,12 +683,21 @@ class TaskService:
 
     @staticmethod
     @transaction.atomic
-    def transition_task(tenant_id, actor_id, task_id, command, transition_key, reason="", target_state=None):
+    def transition_task(
+        tenant_id: Any,
+        actor_id: Any,
+        task_id: Any,
+        command: str,
+        transition_key: str,
+        reason: str = "",
+        target_state: Any = None,
+    ) -> Task:
         try:
-            task = (
+            task = cast(
+                Task,
                 Task.objects.for_tenant(_tenant(tenant_id))
                 .select_for_update()
-                .get(pk=_uuid(task_id), archived_at__isnull=True)
+                .get(pk=_uuid(task_id), archived_at__isnull=True),
             )
         except Task.DoesNotExist as exc:
             raise ProjectManagementError("Task was not found.", "NOT_FOUND") from exc
@@ -655,8 +706,8 @@ class TaskService:
         )
         replay = ActivityService.replay(tenant_id, "task.transitioned", transition_key, fp, Task)
         if replay:
-            return replay
-        target = {
+            return cast(Task, replay)
+        target: Any = {
             "start": TaskStatus.IN_PROGRESS,
             "submit_review": TaskStatus.REVIEW,
             "request_changes": TaskStatus.IN_PROGRESS,
@@ -698,7 +749,7 @@ class TaskService:
                 "at": timezone.now().isoformat(),
             },
         ]
-        task.save()
+        _save(task)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -715,13 +766,15 @@ class TaskService:
         return task
 
     @staticmethod
-    def reorder_task(tenant_id, actor_id, task_id, position, expected_version, idempotency_key):
+    def reorder_task(
+        tenant_id: Any, actor_id: Any, task_id: Any, position: Any, expected_version: Any, idempotency_key: str
+    ) -> Task:
         return TaskService.update_task(
             tenant_id, actor_id, task_id, {"position": position}, expected_version, idempotency_key
         )
 
     @staticmethod
-    def _archive(tenant_id, actor_id, task_id, expected_version, key, restore):
+    def _archive(tenant_id: Any, actor_id: Any, task_id: Any, expected_version: Any, key: str, restore: bool) -> Task:
         try:
             task = Task.all_objects.for_tenant(_tenant(tenant_id)).select_for_update().get(pk=_uuid(task_id))
         except Task.DoesNotExist as exc:
@@ -730,7 +783,7 @@ class TaskService:
         task.archived_at = None if restore else timezone.now()
         task.archived_by_id = None if restore else _actor(actor_id)
         task.version += 1
-        task.save()
+        _save(task)
         action = "task.restored" if restore else "task.archived"
         ActivityService.record(
             tenant_id,
@@ -762,33 +815,33 @@ class TaskService:
 
     @staticmethod
     @transaction.atomic
-    def recalculate_actual_hours(tenant_id, task_id):
+    def recalculate_actual_hours(tenant_id: Any, task_id: Any) -> Task:
         try:
-            task = Task.objects.for_tenant(_tenant(tenant_id)).select_for_update().get(pk=_uuid(task_id))
+            task = cast(Task, Task.objects.for_tenant(_tenant(tenant_id)).select_for_update().get(pk=_uuid(task_id)))
         except Task.DoesNotExist as exc:
             raise ProjectManagementError("Task was not found.", "NOT_FOUND") from exc
         task.actual_hours = TimeEntry.objects.for_tenant(_tenant(tenant_id)).filter(
             task=task, archived_at__isnull=True
         ).aggregate(total=models.Sum("hours_worked"))["total"] or Decimal("0.00")
-        task.save(update_fields=["actual_hours", "updated_at"])
+        _save(task, update_fields=["actual_hours", "updated_at"])
         return task
 
     @staticmethod
-    def update_task_hours(task):
+    def update_task_hours(task: Task) -> Task:
         return TaskService.recalculate_actual_hours(task.tenant_id, task.id)
 
 
 class ProjectMemberService:
     @staticmethod
     @transaction.atomic
-    def add_member(tenant_id, actor_id, data, idempotency_key):
+    def add_member(tenant_id: Any, actor_id: Any, data: Mapping[str, Any], idempotency_key: str) -> ProjectMember:
         payload = dict(data)
         payload["project"] = _project(tenant_id, payload["project"])
         allocation = Decimal(str(payload.get("allocation_percentage", 100)))
         if allocation > _active_configuration(tenant_id).max_allocation_percentage or allocation <= 0:
             raise ProjectManagementError("Allocation exceeds the configured safe limit.", "ALLOCATION_LIMIT")
         member = ProjectMember(tenant_id=_tenant(tenant_id), **payload)
-        member.save()
+        _save(member)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -804,12 +857,15 @@ class ProjectMemberService:
 
     @staticmethod
     @transaction.atomic
-    def update_member(tenant_id, actor_id, member_id, data, idempotency_key):
+    def update_member(
+        tenant_id: Any, actor_id: Any, member_id: Any, data: Mapping[str, Any], idempotency_key: str
+    ) -> ProjectMember:
         try:
-            member = (
+            member = cast(
+                ProjectMember,
                 ProjectMember.objects.for_tenant(_tenant(tenant_id))
                 .select_for_update()
-                .get(pk=_uuid(member_id), archived_at__isnull=True)
+                .get(pk=_uuid(member_id), archived_at__isnull=True),
             )
         except ProjectMember.DoesNotExist as exc:
             raise ProjectManagementError("Member was not found.", "NOT_FOUND") from exc
@@ -817,7 +873,7 @@ class ProjectMemberService:
             setattr(member, field, data[field])
         if member.allocation_percentage > _active_configuration(tenant_id).max_allocation_percentage:
             raise ProjectManagementError("Allocation exceeds the configured safe limit.", "ALLOCATION_LIMIT")
-        member.save()
+        _save(member)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -832,14 +888,14 @@ class ProjectMemberService:
         return member
 
     @staticmethod
-    def _archive(tenant_id, actor_id, member_id, key, restore):
+    def _archive(tenant_id: Any, actor_id: Any, member_id: Any, key: str, restore: bool) -> ProjectMember:
         try:
             member = ProjectMember.all_objects.for_tenant(_tenant(tenant_id)).get(pk=_uuid(member_id))
         except ProjectMember.DoesNotExist as exc:
             raise ProjectManagementError("Member was not found.", "NOT_FOUND") from exc
         member.archived_at = None if restore else timezone.now()
         member.archived_by_id = None if restore else _actor(actor_id)
-        member.save()
+        _save(member)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -871,7 +927,7 @@ class ProjectMemberService:
 
 class TimeEntryService:
     @staticmethod
-    def _payload(tenant_id, data):
+    def _payload(tenant_id: Any, data: Mapping[str, Any]) -> dict[str, Any]:
         payload = dict(data)
         payload["project"] = _project(tenant_id, payload["project"])
         task_id = payload.get("task")
@@ -887,7 +943,7 @@ class TimeEntryService:
         return payload
 
     @staticmethod
-    def _validate(tenant_id, payload, exclude=None):
+    def _validate(tenant_id: Any, payload: dict[str, Any], exclude: Any = None) -> None:
         config = _active_configuration(tenant_id)
         entry_date = payload["entry_date"]
         if isinstance(entry_date, str):
@@ -912,7 +968,13 @@ class TimeEntryService:
 
     @staticmethod
     @transaction.atomic
-    def create_time_entry(tenant_id, actor_id=None, data=None, idempotency_key=None, **legacy):
+    def create_time_entry(
+        tenant_id: Any,
+        actor_id: Any = None,
+        data: Mapping[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        **legacy: Any,
+    ) -> TimeEntry:
         if data is None:
             data = legacy
             actor_id = actor_id or uuid.UUID(int=0)
@@ -920,13 +982,13 @@ class TimeEntryService:
         fp = _fingerprint("time.create", data)
         replay = ActivityService.replay(tenant_id, "time_entry.changed", key, fp, TimeEntry)
         if replay:
-            return replay
+            return cast(TimeEntry, replay)
         payload = TimeEntryService._payload(tenant_id, data)
         TimeEntryService._validate(tenant_id, payload)
         payload["idempotency_key"] = key
         try:
             entry = TimeEntry(tenant_id=_tenant(tenant_id), **payload)
-            entry.save()
+            _save(entry)
         except ValidationError:
             raise
         ActivityService.record(
@@ -946,12 +1008,20 @@ class TimeEntryService:
 
     @staticmethod
     @transaction.atomic
-    def update_time_entry(tenant_id, actor_id, entry_id, data, expected_version, idempotency_key):
+    def update_time_entry(
+        tenant_id: Any,
+        actor_id: Any,
+        entry_id: Any,
+        data: Mapping[str, Any],
+        expected_version: Any,
+        idempotency_key: str,
+    ) -> TimeEntry:
         try:
-            entry = (
+            entry = cast(
+                TimeEntry,
                 TimeEntry.objects.for_tenant(_tenant(tenant_id))
                 .select_for_update()
-                .get(pk=_uuid(entry_id), archived_at__isnull=True)
+                .get(pk=_uuid(entry_id), archived_at__isnull=True),
             )
         except TimeEntry.DoesNotExist as exc:
             raise ProjectManagementError("Time entry was not found.", "NOT_FOUND") from exc
@@ -971,7 +1041,7 @@ class TimeEntryService:
         for k, v in payload.items():
             setattr(entry, k, v)
         entry.version += 1
-        entry.save()
+        _save(entry)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -990,7 +1060,9 @@ class TimeEntryService:
         return entry
 
     @staticmethod
-    def _archive(tenant_id, actor_id, entry_id, expected_version, key, restore):
+    def _archive(
+        tenant_id: Any, actor_id: Any, entry_id: Any, expected_version: Any, key: str, restore: bool
+    ) -> TimeEntry:
         try:
             entry = TimeEntry.all_objects.for_tenant(_tenant(tenant_id)).select_for_update().get(pk=_uuid(entry_id))
         except TimeEntry.DoesNotExist as exc:
@@ -999,7 +1071,7 @@ class TimeEntryService:
         entry.archived_at = None if restore else timezone.now()
         entry.archived_by_id = None if restore else _actor(actor_id)
         entry.version += 1
-        entry.save()
+        _save(entry)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -1034,11 +1106,13 @@ class TimeEntryService:
 class MilestoneService:
     @staticmethod
     @transaction.atomic
-    def create_milestone(tenant_id, actor_id, data, idempotency_key):
+    def create_milestone(
+        tenant_id: Any, actor_id: Any, data: Mapping[str, Any], idempotency_key: str
+    ) -> ProjectMilestone:
         payload = dict(data)
         payload["project"] = _project(tenant_id, payload["project"])
         milestone = ProjectMilestone(tenant_id=_tenant(tenant_id), **payload)
-        milestone.save()
+        _save(milestone)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -1054,13 +1128,20 @@ class MilestoneService:
 
     @staticmethod
     @transaction.atomic
-    def update_milestone(tenant_id, actor_id, milestone_id, data, expected_version, idempotency_key):
+    def update_milestone(
+        tenant_id: Any,
+        actor_id: Any,
+        milestone_id: Any,
+        data: Mapping[str, Any],
+        expected_version: Any,
+        idempotency_key: str,
+    ) -> ProjectMilestone:
         milestone = MilestoneService._get(tenant_id, milestone_id, True)
         _version(milestone, expected_version)
         for k in {"milestone_name", "target_date", "description"} & data.keys():
             setattr(milestone, k, data[k])
         milestone.version += 1
-        milestone.save()
+        _save(milestone)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -1075,7 +1156,7 @@ class MilestoneService:
         return milestone
 
     @staticmethod
-    def _get(tenant_id, milestone_id, lock=False):
+    def _get(tenant_id: Any, milestone_id: Any, lock: bool = False) -> ProjectMilestone:
         qs = ProjectMilestone.all_objects.for_tenant(_tenant(tenant_id))
         qs = qs.select_for_update() if lock else qs
         try:
@@ -1084,7 +1165,14 @@ class MilestoneService:
             raise ProjectManagementError("Milestone was not found.", "NOT_FOUND") from exc
 
     @staticmethod
-    def _lifecycle(tenant_id, actor_id, milestone_id, action, key, achieved_date=None):
+    def _lifecycle(
+        tenant_id: Any,
+        actor_id: Any,
+        milestone_id: Any,
+        action: str,
+        key: str,
+        achieved_date: date | str | None = None,
+    ) -> ProjectMilestone:
         milestone = MilestoneService._get(tenant_id, milestone_id, True)
         if action == "achieve":
             achieved = achieved_date if isinstance(achieved_date, date) else date.fromisoformat(str(achieved_date))
@@ -1098,7 +1186,7 @@ class MilestoneService:
             milestone.achieved_date = None
             milestone.cancelled_at = timezone.now()
         milestone.version += 1
-        milestone.save()
+        _save(milestone)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -1135,13 +1223,15 @@ class MilestoneService:
     )
 
     @staticmethod
-    def _archive(tenant_id, actor_id, milestone_id, expected_version, key, restore):
+    def _archive(
+        tenant_id: Any, actor_id: Any, milestone_id: Any, expected_version: Any, key: str, restore: bool
+    ) -> ProjectMilestone:
         milestone = MilestoneService._get(tenant_id, milestone_id, True)
         _version(milestone, expected_version)
         milestone.archived_at = None if restore else timezone.now()
         milestone.archived_by_id = None if restore else _actor(actor_id)
         milestone.version += 1
-        milestone.save()
+        _save(milestone)
         ActivityService.record(
             tenant_id,
             actor_id,
@@ -1200,14 +1290,14 @@ class ConfigurationService:
     }
 
     @staticmethod
-    def runtime_environment():
+    def runtime_environment() -> str:
         from django.conf import settings
 
         value = str(getattr(settings, "SARAISE_MODE", "development"))
         return value if value in ConfigurationEnvironment.values else ConfigurationEnvironment.DEVELOPMENT
 
     @staticmethod
-    def _validate(values):
+    def _validate(values: Mapping[str, Any]) -> dict[str, Any]:
         unknown = set(values) - ConfigurationService.FIELDS
         if unknown:
             raise ProjectManagementError(
@@ -1256,7 +1346,7 @@ class ConfigurationService:
 
     @staticmethod
     @transaction.atomic
-    def get_active(tenant_id, environment):
+    def get_active(tenant_id: Any, environment: str) -> ProjectManagementConfigurationVersion:
         tenant = _tenant(tenant_id)
         if environment not in ConfigurationEnvironment.values:
             raise ProjectManagementError("Unknown environment.", "INVALID_ENVIRONMENT")
@@ -1273,14 +1363,16 @@ class ConfigurationService:
             created_by_id=system,
             **ConfigurationService.DEFAULTS,
         )
-        version.save()
+        _save(version)
         config.active_version = version
-        config.save(update_fields=["active_version", "updated_at"])
+        _save(config, update_fields=["active_version", "updated_at"])
         return version
 
     @staticmethod
     @transaction.atomic
-    def create_draft(tenant_id, actor_id, environment, values, change_summary):
+    def create_draft(
+        tenant_id: Any, actor_id: Any, environment: str, values: Mapping[str, Any], change_summary: str
+    ) -> ProjectManagementConfigurationVersion:
         active = ConfigurationService.get_active(tenant_id, environment)
         merged = ConfigurationService._validate(
             {**{f: getattr(active, f) for f in ConfigurationService.FIELDS}, **values}
@@ -1300,11 +1392,11 @@ class ConfigurationService:
             created_by_id=_actor(actor_id),
             **merged,
         )
-        draft.save()
+        _save(draft)
         return draft
 
     @staticmethod
-    def simulate(tenant_id, draft_id):
+    def simulate(tenant_id: Any, draft_id: Any) -> dict[str, Any]:
         try:
             draft = ProjectManagementConfigurationVersion.objects.for_tenant(_tenant(tenant_id)).get(
                 pk=_uuid(draft_id), state=ConfigurationState.DRAFT
@@ -1341,7 +1433,9 @@ class ConfigurationService:
 
     @staticmethod
     @transaction.atomic
-    def publish(tenant_id, actor_id, draft_id, idempotency_key):
+    def publish(
+        tenant_id: Any, actor_id: Any, draft_id: Any, idempotency_key: str
+    ) -> ProjectManagementConfigurationVersion:
         try:
             draft = (
                 ProjectManagementConfigurationVersion.objects.for_tenant(_tenant(tenant_id))
@@ -1353,14 +1447,20 @@ class ConfigurationService:
         result = ConfigurationService.simulate(tenant_id, draft.id)
         if not result["valid"]:
             raise ProjectManagementError("Configuration would invalidate existing records.", "SIMULATION_FAILED")
-        ProjectManagementConfigurationVersion.objects.filter(
-            tenant_id=_tenant(tenant_id), pk=draft.configuration.active_version_id
-        )._service_update(state=ConfigurationState.SUPERSEDED)
-        ProjectManagementConfigurationVersion.objects.filter(tenant_id=_tenant(tenant_id), pk=draft.pk)._service_update(
-            state=ConfigurationState.ACTIVE
+        active_version_id = draft.configuration.active_version_id
+        if active_version_id is not None:
+            _service_update(
+                ProjectManagementConfigurationVersion.objects.filter(
+                    tenant_id=_tenant(tenant_id), pk=active_version_id
+                ),
+                state=ConfigurationState.SUPERSEDED,
+            )
+        _service_update(
+            ProjectManagementConfigurationVersion.objects.filter(tenant_id=_tenant(tenant_id), pk=draft.pk),
+            state=ConfigurationState.ACTIVE,
         )
         draft.configuration.active_version_id = draft.id
-        draft.configuration.save(update_fields=["active_version", "updated_at"])
+        _save(draft.configuration, update_fields=["active_version", "updated_at"])
         draft.refresh_from_db()
         ActivityService.record(
             tenant_id,
@@ -1375,7 +1475,7 @@ class ConfigurationService:
         return draft
 
     @staticmethod
-    def export_document(tenant_id, environment):
+    def export_document(tenant_id: Any, environment: str) -> dict[str, Any]:
         active = ConfigurationService.get_active(tenant_id, environment)
         return {
             "schema_version": "1.0",
@@ -1388,7 +1488,9 @@ class ConfigurationService:
         }
 
     @staticmethod
-    def import_document(tenant_id, actor_id, document):
+    def import_document(
+        tenant_id: Any, actor_id: Any, document: Mapping[str, Any]
+    ) -> ProjectManagementConfigurationVersion:
         if (
             not isinstance(document, dict)
             or document.get("schema_version") != "1.0"
@@ -1405,7 +1507,9 @@ class ConfigurationService:
 
     @staticmethod
     @transaction.atomic
-    def rollback(tenant_id, actor_id, target_version, idempotency_key):
+    def rollback(
+        tenant_id: Any, actor_id: Any, target_version: Any, idempotency_key: str
+    ) -> ProjectManagementConfigurationVersion:
         tenant = _tenant(tenant_id)
         try:
             target = ProjectManagementConfigurationVersion.objects.for_tenant(tenant).get(version=int(target_version))

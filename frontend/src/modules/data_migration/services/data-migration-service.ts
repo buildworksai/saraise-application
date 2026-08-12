@@ -87,7 +87,21 @@ function withQuery(path: string, filters: object): string {
 }
 
 async function unwrap<T>(operation: () => Promise<ApiEnvelope<T>>): Promise<T> {
-  return (await request(operation)).data;
+  const envelope: Partial<ApiEnvelope<T>> = await request(operation);
+  const correlationId =
+    envelope.meta && typeof envelope.meta.correlation_id === "string"
+      ? envelope.meta.correlation_id
+      : null;
+  if (!Object.hasOwn(envelope, "data")) {
+    throw new DataMigrationApiError(
+      "The server omitted required response data.",
+      502,
+      "invalid_response",
+      correlationId,
+      false
+    );
+  }
+  return envelope.data as T;
 }
 
 async function page<T>(

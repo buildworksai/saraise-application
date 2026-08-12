@@ -13,10 +13,26 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ className, error, id, label, ...props }, ref) => {
+  (
+    {
+      className,
+      error,
+      id,
+      label,
+      "aria-describedby": ariaDescribedBy,
+      "aria-invalid": ariaInvalid,
+      ...props
+    },
+    ref
+  ) => {
     const generatedId = useId();
     const inputId = id ?? (label ? generatedId : undefined);
     const errorId = inputId ? `${inputId}-error` : undefined;
+    const describedBy = Array.from(
+      new Set(
+        [...(ariaDescribedBy?.split(/\s+/) ?? []), error ? errorId : undefined].filter(Boolean)
+      )
+    ).join(" ");
     return (
       <div className="w-full">
         {label && (
@@ -27,6 +43,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         <input
           id={inputId}
           ref={ref}
+          aria-describedby={describedBy || undefined}
+          aria-invalid={error ? "true" : ariaInvalid}
           className={clsx(
             // Root-cause fix: semantic tokens (no hardcoded grays/blues).
             "block w-full px-3 py-2 rounded-md border bg-background text-foreground shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background",

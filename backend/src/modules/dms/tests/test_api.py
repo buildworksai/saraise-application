@@ -4,21 +4,32 @@ from __future__ import annotations
 
 import uuid
 from datetime import timedelta
+from types import SimpleNamespace
 
 import pytest
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.test import APIClient
 
 from src.core.access.permissions import RequiresAccess
 from src.modules.dms import api
+from src.modules.dms.health import ModuleHealthReport
 from src.modules.dms.services import (
     DEFAULT_DMS_CONFIGURATION,
+    DmsConflict,
+    DmsDependencyUnavailable,
+    DmsIntegrityFailure,
+    DmsNotFound,
+    DmsPermissionDenied,
+    DmsValidationError,
     DocumentService,
     PermissionService,
     ShareService,
     VersionService,
 )
+from src.modules.dms.storage import StorageIntegrityError, StorageUnavailableError, StorageValidationError
 from src.modules.dms.tests.test_services import AllowQuota, Directory, MemoryStorage
 
 pytest_plugins = ["src.core.testing"]
@@ -30,6 +41,37 @@ def actor_id(user) -> uuid.UUID:
 
 def data(response):
     return response.json()["data"]
+
+
+def test_transport_helpers_translate_domain_and_storage_errors_without_leaking_details(monkeypatch) -> None:
+    request = SimpleNamespace(user=SimpleNamespace(id="not-a-uuid"), tenant_id="stale")
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: None)
+    assert api._tenant_or_none(request) is None
+    assert request.tenant_id is None
+    assert api._actor(request) == uuid.uuid5(uuid.NAMESPACE_URL, "saraise:user:not-a-uuid")
+
+    translations = {
+        DmsNotFound("missing"): NotFound,
+        DmsPermissionDenied("denied"): PermissionDenied,
+        DmsValidationError("invalid"): ValidationError,
+        StorageValidationError("bad file"): ValidationError,
+        DjangoValidationError({"name": ["invalid"]}): ValidationError,
+    }
+    for exc, expected_type in translations.items():
+        assert isinstance(api._translate_error(exc), expected_type)
+
+    conflict = api._translate_error(DmsConflict("stale"))
+    dependency = api._translate_error(DmsDependencyUnavailable("directory down"))
+    storage_down = api._translate_error(StorageUnavailableError("storage down"))
+    integrity = api._translate_error(DmsIntegrityFailure("bad checksum"))
+    storage_integrity = api._translate_error(StorageIntegrityError("bad checksum"))
+    assert conflict.status_code == 409
+    assert dependency.status_code == 503
+    assert storage_down.status_code == 503
+    assert integrity.status_code == 503
+    assert storage_integrity.status_code == 503
+    with pytest.raises(ValidationError):
+        api._call(lambda: (_ for _ in ()).throw(DmsValidationError("wrapped")))
 
 
 @pytest.fixture(autouse=True)
@@ -304,3 +346,29 @@ def test_validation_filter_and_ordering_errors_use_stable_envelope(
     excessive_page = client.get("/api/v2/dms/folders/?page_size=1000")
     assert excessive_page.status_code == 200
     assert excessive_page.json()["meta"]["pagination"]["page_size"] == 100
+
+
+@pytest.mark.django_db
+def test_principal_search_and_health_api_validate_inputs_and_return_sanitized_status(
+    monkeypatch,
+    authenticated_tenant_a_client,
+) -> None:
+    invalid_type = authenticated_tenant_a_client.get("/api/v2/dms/principals/?type=service-account")
+    invalid_limit = authenticated_tenant_a_client.get("/api/v2/dms/principals/?search=Reader&limit=abc")
+    monkeypatch.setattr(
+        api,
+        "get_module_health",
+        lambda tenant_id: ModuleHealthReport(
+            "unhealthy",
+            {"status": "unhealthy", "checks": [{"name": "storage", "code": "STORAGE_DOWN"}], "tenant": str(tenant_id)},
+        ),
+    )
+    health = authenticated_tenant_a_client.get("/api/v2/dms/health/")
+
+    assert invalid_type.status_code == 400
+    assert invalid_type.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert invalid_limit.status_code == 400
+    assert invalid_limit.json()["error"]["code"] == "VALIDATION_ERROR"
+    assert health.status_code == 503
+    assert health.json()["status"] == "unhealthy"
+    assert "exception" not in str(health.json()).lower()

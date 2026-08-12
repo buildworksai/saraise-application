@@ -7,16 +7,19 @@ the governed response envelope remain real.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from django.urls import resolve
 from rest_framework import status, viewsets
+from rest_framework.exceptions import NotAuthenticated, NotFound, PermissionDenied, ValidationError
 
 from src.core.access.permissions import RequiresAccess
 from src.core.api import GovernedAPIViewMixin, GovernedPageNumberPagination
 from src.modules.ai_agent_management import api
 from src.modules.ai_agent_management import serializers as module_serializers
+from src.modules.ai_agent_management.approval_models import ApprovalRequest
 from src.modules.ai_agent_management.models import Agent
 from src.modules.ai_agent_management.urls import router
 
@@ -243,3 +246,138 @@ def test_audit_and_execution_serializers_do_not_expose_opaque_payloads():
         if not any(token in name for token in ("Audit", "Execution", "ToolInvocation", "ApprovalRequest")):
             continue
         assert not forbidden & set(serializer_class().fields), name
+
+
+def test_tenant_viewset_identity_helpers_fail_closed(monkeypatch):
+    view = api.GovernedTenantViewSet()
+
+    assert api._principal_id(SimpleNamespace(pk=7)) == api.uuid5(api.NAMESPACE_URL, "saraise:user:7")
+    with pytest.raises(NotAuthenticated):
+        api._principal_id(SimpleNamespace(pk=""))
+
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: None)
+    view.request = SimpleNamespace(user=SimpleNamespace(pk=7, is_authenticated=True))
+    with pytest.raises(PermissionDenied):
+        view.tenant_id()
+    assert view.tenant_id_for_query() is None
+
+    monkeypatch.setattr(api, "get_user_tenant_id", lambda user: "not-a-uuid")
+    with pytest.raises(PermissionDenied):
+        view.tenant_id()
+    assert view.tenant_id_for_query() is None
+
+    view.request = SimpleNamespace(correlation_id="not-a-uuid")
+    with pytest.raises(ValidationError):
+        view.correlation_id()
+
+
+@pytest.mark.django_db
+def test_agent_custom_actions_parse_payloads_and_delegate_to_tenant_services(monkeypatch, agent, actor_id):
+    view = api.AgentViewSet()
+    view.get_object = lambda: agent
+    view.tenant_id = lambda: agent.tenant_id
+    view.actor_id = lambda: actor_id
+    calls = []
+
+    def disable(tenant, actor, agent_id, reason, transition_key):
+        calls.append(("disable", tenant, actor, agent_id, reason, transition_key))
+        agent.status = "disabled"
+        return agent
+
+    def retire(tenant, actor, agent_id, reason, transition_key):
+        calls.append(("retire", tenant, actor, agent_id, reason, transition_key))
+        agent.status = "retired"
+        return agent
+
+    monkeypatch.setattr(api.AgentService, "disable_agent", disable)
+    monkeypatch.setattr(api.AgentService, "retire_agent", retire)
+
+    disable_request = SimpleNamespace(data={"transition_key": "disable-1", "reason": "maintenance"})
+    assert view.disable(disable_request, pk=agent.id).data["status"] == "disabled"
+
+    retire_request = SimpleNamespace(data={"transition_key": "retire-1", "reason": "replacement"})
+    assert view.retire(retire_request, pk=agent.id).data["status"] == "retired"
+
+    assert calls == [
+        ("disable", agent.tenant_id, actor_id, agent.id, "maintenance", "disable-1"),
+        ("retire", agent.tenant_id, actor_id, agent.id, "replacement", "retire-1"),
+    ]
+
+
+@pytest.mark.django_db
+def test_execution_transition_rejects_agent_mismatch_before_service_call(monkeypatch, execution, actor_id):
+    view = api.AgentExecutionViewSet()
+    view.get_object = lambda: execution
+    view.tenant_id = lambda: execution.tenant_id
+    view.actor_id = lambda: actor_id
+
+    monkeypatch.setattr(api.ExecutionService, "pause", lambda *args: pytest.fail("must not delegate"))
+    request = SimpleNamespace(data={"transition_key": "pause-1", "agent_id": uuid4()})
+
+    with pytest.raises(NotFound):
+        view.pause(request, pk=execution.id)
+
+
+@pytest.mark.django_db
+def test_approval_cancel_action_uses_request_permission_branch(monkeypatch, execution, tool, actor_id, approver_id):
+    approval = ApprovalRequest.objects.create(
+        tenant_id=execution.tenant_id,
+        tool=tool,
+        agent_execution=execution,
+        requested_by=actor_id,
+        requested_for=approver_id,
+        tool_input={},
+    )
+    view = api.ApprovalRequestViewSet()
+    view.get_object = lambda: approval
+    view.tenant_id = lambda: execution.tenant_id
+    view.actor_id = lambda: actor_id
+    captured = {}
+
+    def cancel(tenant, actor, approval_id, transition_key):
+        captured.update(
+            tenant=tenant,
+            actor=actor,
+            approval_id=approval_id,
+            transition_key=transition_key,
+        )
+        approval.status = "cancelled"
+        return approval
+
+    monkeypatch.setattr(api.ApprovalService, "cancel", cancel)
+
+    response = view.cancel(SimpleNamespace(data={"transition_key": "cancel-1"}), pk=approval.id)
+
+    assert response.data["status"] == "cancelled"
+    assert captured == {
+        "tenant": execution.tenant_id,
+        "actor": actor_id,
+        "approval_id": approval.id,
+        "transition_key": "cancel-1",
+    }
+
+
+@pytest.mark.django_db
+def test_tool_validate_action_returns_service_diagnostic(monkeypatch, tool, actor_id):
+    view = api.ToolViewSet()
+    view.get_object = lambda: tool
+    view.tenant_id = lambda: tool.tenant_id
+    view.actor_id = lambda: actor_id
+
+    monkeypatch.setattr(
+        api.ToolService,
+        "validation_diagnostic",
+        lambda tenant, tool_id, direction, value: {
+            "tenant_id": str(tenant),
+            "tool_id": str(tool_id),
+            "direction": direction,
+            "valid": value == {"value": 1},
+            "issues": (),
+        },
+    )
+
+    response = view.validate(SimpleNamespace(data={"direction": "input", "value": {"value": 1}}), pk=tool.id)
+
+    assert response.data["valid"] is True
+    assert response.data["tenant_id"] == str(tool.tenant_id)
+    assert response.data["tool_id"] == str(tool.id)

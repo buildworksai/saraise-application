@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 import uuid
-from typing import Any
+from typing import Any, ClassVar, TypeVar
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -12,7 +12,9 @@ from django.db import models
 from django.db.models import Q
 from django.utils import timezone
 
-from src.core.tenancy import TenantScopedModel, TimestampedModel
+from src.core.tenancy import TenantQuerySet, TenantScopedModel, TimestampedModel
+
+SecurityEvidenceT = TypeVar("SecurityEvidenceT", bound=TenantScopedModel)
 
 
 def _seed_default(section: str, key: str) -> object:
@@ -23,6 +25,19 @@ def _seed_default(section: str, key: str) -> object:
     if not isinstance(configured, dict):
         raise RuntimeError(f"Invalid security configuration seed section: {section}")
     return configured[key]
+
+
+def _seed_int_default(section: str, key: str) -> int:
+    value = _seed_default(section, key)
+    if not isinstance(value, (str, bytes, bytearray, int, float)):
+        raise RuntimeError(f"Invalid integer security configuration seed: {section}.{key}")
+    return int(value)
+
+
+def _int_from_seed_value(value: object, *, label: str) -> int:
+    if not isinstance(value, (str, bytes, bytearray, int, float)):
+        raise RuntimeError(f"Invalid integer security configuration seed: {label}")
+    return int(value)
 
 
 def default_field_visibility() -> str:
@@ -38,7 +53,7 @@ def default_row_rule_type() -> str:
 
 
 def default_row_rule_priority() -> int:
-    return int(_seed_default("defaults", "row_rule_priority"))
+    return _seed_int_default("defaults", "row_rule_priority")
 
 
 def _profile_seed_default(key: str) -> object:
@@ -57,15 +72,24 @@ def default_mfa_requirement() -> str:
 
 
 def default_session_timeout_minutes() -> int:
-    return int(_profile_seed_default("session_timeout_minutes"))
+    return _int_from_seed_value(
+        _profile_seed_default("session_timeout_minutes"),
+        label="defaults.security_profile.session_timeout_minutes",
+    )
 
 
 def default_absolute_session_timeout_hours() -> int:
-    return int(_profile_seed_default("absolute_session_timeout_hours"))
+    return _int_from_seed_value(
+        _profile_seed_default("absolute_session_timeout_hours"),
+        label="defaults.security_profile.absolute_session_timeout_hours",
+    )
 
 
 def default_max_concurrent_sessions() -> int:
-    return int(_profile_seed_default("max_concurrent_sessions"))
+    return _int_from_seed_value(
+        _profile_seed_default("max_concurrent_sessions"),
+        label="defaults.security_profile.max_concurrent_sessions",
+    )
 
 
 def default_download_allowed() -> bool:
@@ -93,7 +117,7 @@ def default_access_notification() -> bool:
 
 
 def default_profile_assignment_precedence() -> int:
-    return int(_seed_default("defaults", "profile_assignment_precedence"))
+    return _seed_int_default("defaults", "profile_assignment_precedence")
 
 
 class MutableSecurityModel(TenantScopedModel, TimestampedModel):
@@ -112,10 +136,10 @@ class ImmutableConfigurationError(RuntimeError):
     """Raised when append-only configuration evidence is mutated."""
 
 
-class ImmutableConfigurationQuerySet(models.QuerySet):
+class ImmutableConfigurationQuerySet(TenantQuerySet[SecurityEvidenceT]):
     """Queryset that makes configuration history and replay evidence append-only."""
 
-    def for_tenant(self, tenant_id: uuid.UUID) -> "ImmutableConfigurationQuerySet":
+    def for_tenant(self, tenant_id: uuid.UUID) -> "ImmutableConfigurationQuerySet[SecurityEvidenceT]":
         return self.filter(tenant_id=tenant_id)
 
     def update(self, **kwargs: Any) -> int:
@@ -162,7 +186,7 @@ class SecurityConfigurationVersion(TenantScopedModel):
     change_kind = models.CharField(max_length=24)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    objects = ImmutableConfigurationQuerySet.as_manager()
+    objects: ClassVar[Any] = ImmutableConfigurationQuerySet["SecurityConfigurationVersion"].as_manager()
 
     class Meta:
         db_table = "security_configuration_versions"
@@ -195,7 +219,7 @@ class MutationReplay(TenantScopedModel):
     correlation_id = models.CharField(max_length=128)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    objects = ImmutableConfigurationQuerySet.as_manager()
+    objects: ClassVar[Any] = ImmutableConfigurationQuerySet["MutationReplay"].as_manager()
 
     class Meta:
         db_table = "security_mutation_replays"
@@ -342,7 +366,8 @@ class RolePermission(TenantScopedModel, TimestampedModel):
         indexes = [models.Index(fields=("tenant_id", "role", "is_granted"), name="sec_role_perm_decision_idx")]
 
     def clean(self) -> None:
-        if self.role_id and self.role.tenant_id != self.tenant_id:
+        role = self.role if self.role_id else None
+        if role is not None and role.tenant_id != self.tenant_id:
             raise ValidationError({"role_id": "Role must belong to this tenant."})
 
     def __str__(self) -> str:
@@ -390,7 +415,8 @@ class UserRole(TenantScopedModel, TimestampedModel):
         )
 
     def clean(self) -> None:
-        if self.role_id and self.role.tenant_id != self.tenant_id:
+        role = self.role if self.role_id else None
+        if role is not None and role.tenant_id != self.tenant_id:
             raise ValidationError({"role_id": "Role must belong to this tenant."})
         if not self.reason.strip():
             raise ValidationError({"reason": "A nonblank assignment reason is required."})
@@ -759,7 +785,8 @@ class SecurityProfileAssignment(TenantScopedModel, TimestampedModel):
             raise ValidationError("Exactly one of user or role is required.")
         if self.security_profile_id and self.security_profile.tenant_id != self.tenant_id:
             raise ValidationError({"security_profile_id": "Profile must belong to this tenant."})
-        if self.role_id and self.role.tenant_id != self.tenant_id:
+        role = self.role if self.role_id else None
+        if role is not None and role.tenant_id != self.tenant_id:
             raise ValidationError({"role_id": "Role must belong to this tenant."})
         if not self.reason.strip():
             raise ValidationError({"reason": "A nonblank assignment reason is required."})
@@ -771,7 +798,7 @@ class ImmutableAuditError(RuntimeError):
     """Raised whenever append-only security evidence is mutated."""
 
 
-class SecurityAuditQuerySet(models.QuerySet["SecurityAuditLog"]):
+class SecurityAuditQuerySet(TenantQuerySet["SecurityAuditLog"]):
     def for_tenant(self, tenant_id: uuid.UUID) -> "SecurityAuditQuerySet":
         return self.filter(tenant_id=tenant_id)
 
@@ -810,7 +837,7 @@ class SecurityAuditLog(TenantScopedModel):
     correlation_id = models.CharField(max_length=128)
     outbox_event_id = models.UUIDField(null=True, blank=True)
 
-    objects = SecurityAuditQuerySet.as_manager()
+    objects: ClassVar[Any] = SecurityAuditQuerySet.as_manager()
 
     class Meta:
         db_table = "security_audit_logs"

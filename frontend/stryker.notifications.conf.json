@@ -3,6 +3,7 @@
   "testRunner": "vitest",
   "coverageAnalysis": "all",
   "disableTypeChecks": false,
+  "ignorePatterns": [".stryker-tmp*/**", "coverage/**", "dist/**", "reports/**"],
   "concurrency": 3,
   "inPlace": true,
   "maxTestRunnerReuse": 1,

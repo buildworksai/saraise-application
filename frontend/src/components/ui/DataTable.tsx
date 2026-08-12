@@ -165,7 +165,7 @@ export function DataTable<T>({
                 } else {
                   setColumnVisibility((prev) => ({
                     ...prev,
-                    [columnId]: !prev[columnId],
+                    [columnId]: prev[columnId] === false,
                   }));
                 }
               }}

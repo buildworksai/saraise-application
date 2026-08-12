@@ -109,3 +109,39 @@ class TestTenantManagementService:
         assert summary["modules"]["enabled"] == 1
         assert summary["resource_usage"] is not None
         assert summary["health"] is not None
+
+    def test_get_tenant_setting_returns_default_for_missing_tenant_or_setting(self):
+        tenant = Tenant.objects.create(name="Settings Tenant", slug="settings-tenant", subdomain="settings")
+
+        assert TenantManagementService.get_tenant_setting(
+            tenant.id, "email", "missing", default={"enabled": False}
+        ) == {"enabled": False}
+        assert (
+            TenantManagementService.get_tenant_setting("00000000-0000-0000-0000-000000000000", "email", "host", "x")
+            == "x"
+        )
+
+    @pytest.mark.parametrize(
+        ("active_users", "api_calls", "response_time", "errors", "expected_reason"),
+        (
+            (0, 0, 1500.0, 75, "high_error_rate"),
+            (0, 0, 1500.0, 0, "slow_performance"),
+            (0, 0, None, 0, "no_active_users"),
+        ),
+    )
+    def test_calculate_health_score_records_at_risk_reasons(
+        self, active_users, api_calls, response_time, errors, expected_reason
+    ):
+        tenant = Tenant.objects.create(name="Risk Tenant", slug=f"risk-{expected_reason}", subdomain=expected_reason)
+        TenantManagementService.record_resource_usage(
+            tenant_id=tenant.id,
+            date=date.today(),
+            active_users=active_users,
+            api_calls=api_calls,
+            avg_response_time_ms=response_time,
+            error_count=errors,
+        )
+
+        health_score = TenantManagementService.calculate_health_score(tenant.id)
+
+        assert expected_reason in health_score.at_risk_reasons

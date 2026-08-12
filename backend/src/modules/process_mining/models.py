@@ -5,10 +5,11 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable
 from decimal import Decimal
-from typing import Any
+from typing import Any, ClassVar, cast
 
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models.fields.related import ForeignKey, OneToOneField
 
 from src.core.tenancy import TenantQuerySet, TenantScopedModel, TimestampedModel
 
@@ -92,7 +93,7 @@ class AppendOnlyDomainModel(TenantScopedModel):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     created_by = models.UUIDField(db_index=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
-    objects = AppendOnlyQuerySet.as_manager()
+    objects: ClassVar[Any] = AppendOnlyQuerySet.as_manager()
 
     class Meta:
         abstract = True
@@ -115,13 +116,16 @@ class StatefulDomainModel(MutableDomainModel):
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         if not self._state.adding and self.pk:
+            tenant_id = getattr(self, "tenant_id")
             prior = (
-                type(self)
-                ._base_manager.filter(pk=self.pk, tenant_id=self.tenant_id)
+                cast(Any, type(self)._base_manager)
+                .filter(pk=self.pk, tenant_id=tenant_id)
                 .values("status", "transition_history")
                 .first()
             )
-            if prior and prior["status"] != self.status and prior["transition_history"] == self.transition_history:
+            current_status = getattr(self, "status")
+            current_history = getattr(self, "transition_history")
+            if prior and prior["status"] != current_status and prior["transition_history"] == current_history:
                 raise ValidationError("Status changes must use the registered state machine.", code="state_machine")
         super().save(*args, **kwargs)
 
@@ -130,15 +134,21 @@ def _same_tenant(instance: models.Model, relation: str) -> None:
     relation_id = getattr(instance, f"{relation}_id", None)
     if relation_id is None or not getattr(instance, "tenant_id", None):
         return
-    related_model = instance._meta.get_field(relation).remote_field.model
-    if not related_model.objects.for_tenant(instance.tenant_id).filter(pk=relation_id).exists():
+    field = instance._meta.get_field(relation)
+    if not isinstance(field, ForeignKey | OneToOneField) or field.remote_field is None:
+        raise ValidationError({relation: "Referenced evidence relation is invalid."}, code="invalid_relation")
+    related_model = field.remote_field.model
+    manager = cast(Any, related_model).objects
+    tenant_id = getattr(instance, "tenant_id")
+    if not manager.for_tenant(tenant_id).filter(pk=relation_id).exists():
         raise ValidationError({relation: "Referenced evidence was not found."}, code="cross_tenant_reference")
 
 
 def _changed(instance: models.Model, names: Iterable[str]) -> set[str]:
     if instance._state.adding or not instance.pk:
         return set()
-    prior = type(instance)._base_manager.filter(pk=instance.pk, tenant_id=instance.tenant_id).values(*names).first()
+    tenant_id = getattr(instance, "tenant_id")
+    prior = type(instance)._base_manager.filter(pk=instance.pk, tenant_id=tenant_id).values(*names).first()
     return set() if prior is None else {name for name in names if prior[name] != getattr(instance, name)}
 
 

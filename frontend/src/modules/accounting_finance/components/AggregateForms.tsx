@@ -75,7 +75,7 @@ export function AccountForm({
   };
   const error = (name: string) => errors[name] ?? serverErrors[name];
   return (
-    <form onSubmit={submit} className="space-y-6">
+    <form onSubmit={submit} className="space-y-6" noValidate>
       <Card className="space-y-5 p-5">
         <FormGrid>
           <Field
@@ -242,7 +242,7 @@ export function PostingPeriodForm({
   };
   const error = (name: string) => errors[name] ?? serverErrors[name];
   return (
-    <form onSubmit={submit} className="space-y-6">
+    <form onSubmit={submit} className="space-y-6" noValidate>
       <Card className="p-5">
         <FormGrid>
           <Field
@@ -361,7 +361,7 @@ export function JournalEntryForm({
   };
   const error = (name: string) => errors[name] ?? serverErrors[name];
   return (
-    <form onSubmit={submit} className="space-y-6">
+    <form onSubmit={submit} className="space-y-6" noValidate>
       <Card className="space-y-5 p-5">
         <FormGrid>
           <Field
@@ -629,7 +629,7 @@ export function InvoiceForm({
   };
   const error = (name: string) => errors[name] ?? serverErrors[name];
   return (
-    <form onSubmit={submit} className="space-y-6">
+    <form onSubmit={submit} className="space-y-6" noValidate>
       <Card className="space-y-5 p-5">
         <FormGrid>
           <Field
@@ -857,7 +857,7 @@ export function PaymentForm({
   };
   const error = (name: string) => errors[name] ?? serverErrors[name];
   return (
-    <form onSubmit={submit} className="space-y-6">
+    <form onSubmit={submit} className="space-y-6" noValidate>
       <Card className="space-y-5 p-5">
         <FormGrid>
           <Field

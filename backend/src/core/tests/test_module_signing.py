@@ -6,6 +6,8 @@ Task: 501.1 - Module Manifest Schema & Signing
 from __future__ import annotations
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
 from src.core.module_manifest_schema import ModuleLifecycle, ModuleManifest, ModuleType
 from src.core.module_signing import ManifestSigner, SigningError, VerificationError
@@ -53,6 +55,26 @@ class TestManifestSigner:
 
         signer = ManifestSigner()
         with pytest.raises(SigningError, match="Private key required"):
+            signer.sign(manifest, algorithm="RS256")
+
+    def test_sign_rs256_rejects_non_rsa_private_key(self) -> None:
+        """Test RS256 signing rejects non-RSA private keys."""
+        private_key = ed25519.Ed25519PrivateKey.generate()
+        private_pem = private_key.private_bytes(
+            encoding=Encoding.PEM,
+            format=PrivateFormat.PKCS8,
+            encryption_algorithm=NoEncryption(),
+        )
+        manifest = ModuleManifest(
+            name="test-module",
+            version="1.0.0",
+            description="Test module",
+            type=ModuleType.DOMAIN,
+            lifecycle=ModuleLifecycle.MANAGED,
+        )
+
+        signer = ManifestSigner(private_key=private_pem)
+        with pytest.raises(SigningError, match="requires an RSA private key"):
             signer.sign(manifest, algorithm="RS256")
 
     def test_sign_hmac_sha256(self) -> None:
@@ -148,6 +170,25 @@ class TestManifestSigner:
 
         signer = ManifestSigner()
         with pytest.raises(VerificationError, match="Public key required"):
+            signer.verify(manifest, "signature", "RS256")
+
+    def test_verify_rs256_rejects_non_rsa_public_key(self) -> None:
+        """Test RS256 verification rejects non-RSA public keys."""
+        private_key = ed25519.Ed25519PrivateKey.generate()
+        public_pem = private_key.public_key().public_bytes(
+            encoding=Encoding.PEM,
+            format=PublicFormat.SubjectPublicKeyInfo,
+        )
+        manifest = ModuleManifest(
+            name="test-module",
+            version="1.0.0",
+            description="Test module",
+            type=ModuleType.DOMAIN,
+            lifecycle=ModuleLifecycle.MANAGED,
+        )
+
+        signer = ManifestSigner(public_key=public_pem)
+        with pytest.raises(VerificationError, match="requires an RSA public key"):
             signer.verify(manifest, "signature", "RS256")
 
     def test_verify_hmac_sha256(self) -> None:

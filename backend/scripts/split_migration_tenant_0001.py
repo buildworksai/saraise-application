@@ -5,6 +5,7 @@ Surgical migration splitter for tenant_management/migrations/0001_initial.py
 Splits 632-line migration with 5 models + 11 indexes into 6 separate migrations.
 Each migration file will be ≤200 lines per SARAISE standards.
 """
+
 import re
 from pathlib import Path
 

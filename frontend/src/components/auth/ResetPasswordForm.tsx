@@ -92,7 +92,8 @@ export function ResetPasswordForm() {
   };
 
   return (
-    <div className="h-screen flex overflow-hidden">
+    <main id="main-content" className="h-screen flex overflow-hidden">
+      <h1 className="sr-only">Set a new SARAISE password</h1>
       <div className="hidden lg:flex lg:w-1/2 bg-[#040818] flex-col relative overflow-hidden h-full">
         <LogoVideo
           background
@@ -235,6 +236,6 @@ export function ResetPasswordForm() {
           </Card>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

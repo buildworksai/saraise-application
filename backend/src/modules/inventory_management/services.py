@@ -397,12 +397,12 @@ class StorageLocationService:
             cls.validate_hierarchy(tenant, warehouse_id, command.get("parent_id"))
             location = StorageLocation(tenant_id=tenant)
             _apply_command(location, command, cls.fields)
-            _validate(location)
-            location.save()
             if location.is_default:
                 StorageLocation.objects.for_tenant(tenant).filter(
                     warehouse_id=location.warehouse_id, is_default=True
-                ).exclude(pk=location.pk).update(is_default=False, version=F("version") + 1)
+                ).update(is_default=False, version=F("version") + 1)
+            _validate(location)
+            location.save()
             return location
 
     @classmethod
@@ -887,7 +887,7 @@ class StockEntryService:
             reversal.reversal_of = original
             reversal.status = "approved"
             reversal.save()
-            InventoryPostingService.post(tenant, reversal.id, actor_id, key + ":post")
+            reversal = InventoryPostingService.post(tenant, reversal.id, actor_id, key + ":post")
             _transition(original, "reverse", actor_id, key + ":original", ENTRY_GRAPH)
             original.reversed_at = timezone.now()
             original.save()
@@ -1354,7 +1354,8 @@ class CycleCountService:
             _apply_command(
                 count,
                 {k: v for k, v in command.items() if k != "lines"},
-                {"count_number", "location_id", "count_type", "scheduled_for", "assigned_to_id"},
+                {"warehouse_id", "count_number", "location_id", "count_type", "scheduled_for", "assigned_to_id"},
+                exclude={"warehouse_id"},
             )
             _validate(count)
             count.save()
@@ -1435,11 +1436,18 @@ class CycleCountService:
             if count.status != "in_progress":
                 raise InventoryConflict("Counts can only be recorded while in progress.")
             for command in lines:
-                line = count.lines.select_for_update().get(pk=command.get("id"))
-                counted = Decimal(str(command.get("counted_quantity")))
+                line_id = command.get("id")
+                if line_id is None:
+                    raise InventoryError({"id": "This field is required."})
+                line = count.lines.select_for_update().get(pk=_uuid(line_id, "id"))
+                raw_counted = command.get("counted_quantity")
+                if raw_counted is None:
+                    raise InventoryError({"counted_quantity": "This field is required."})
+                counted = Decimal(str(raw_counted))
                 if counted < 0:
                     raise InventoryError({"counted_quantity": "Must be nonnegative."})
-                line.counted_quantity, line.variance_quantity = counted, counted - line.system_quantity
+                line.counted_quantity = counted
+                line.variance_quantity = counted - (line.system_quantity or QTY_ZERO)
                 line.counted_by_id, line.counted_at = _uuid(actor_id, "actor_id"), timezone.now()
                 line.save()
             return count
@@ -1859,6 +1867,8 @@ class StockService:
     @staticmethod
     def process_stock_entry(stock_entry: StockEntry, actor_id: UUID | str | None = None) -> StockEntry:
         actor = actor_id or stock_entry.created_by_id
+        if actor is None:
+            raise InventoryError({"actor_id": "This field is required."})
         return InventoryPostingService.post(
             stock_entry.tenant_id, stock_entry.id, actor, stock_entry.idempotency_key + ":legacy-post"
         )

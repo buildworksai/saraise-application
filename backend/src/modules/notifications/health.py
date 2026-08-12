@@ -137,7 +137,7 @@ def _adapter_statuses(
         return ComponentStatus(False, "channel_configuration_missing"), {}
     output: dict[str, object] = {}
     healthy = True
-    for channel in sorted(channels):
+    for channel in sorted(channels, key=str):
         raw = channels[channel]
         if not isinstance(channel, str) or not isinstance(raw, Mapping):
             healthy = False

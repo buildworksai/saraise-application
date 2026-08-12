@@ -1,4 +1,4 @@
-/* eslint-disable max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
+/* eslint-disable complexity, max-lines-per-function -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Edit3, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -17,7 +17,7 @@ import {
   Pagination,
   Surface,
 } from "../components/CustomizationUI";
-import { formatDate, parseJSON } from "../components/customization-utils";
+import { formatDate, jsonErrorMessage, parseJSON } from "../components/customization-utils";
 import { useRuntimeConfiguration } from "../components/useRuntimeConfiguration";
 import {
   ROUTES,
@@ -32,18 +32,59 @@ export function FieldValueListPage() {
   const configuration = useRuntimeConfiguration();
   const [params, setParams] = useSearchParams();
   const page = Number(params.get("page") ?? "1");
+  const definitionId = params.get("definition_id") ?? "";
+  const targetRecordId = params.get("target_record_id") ?? "";
+  const source = params.get("source") ?? "";
+  const hasScope = Boolean(definitionId || targetRecordId);
   const pageSize = configuration.data?.document.list_preferences.page_size;
+  const [draftDefinitionId, setDraftDefinitionId] = useState(definitionId);
+  const [draftTargetRecordId, setDraftTargetRecordId] = useState(targetRecordId);
+  const [draftSource, setDraftSource] = useState(source);
   const query = useQuery({
-    queryKey: ["customization", "field-values", page, pageSize],
-    queryFn: () => service.listValues({ page, page_size: pageSize }),
-    enabled: pageSize !== undefined,
+    queryKey: [
+      "customization",
+      "field-values",
+      page,
+      pageSize,
+      definitionId,
+      targetRecordId,
+      source,
+    ],
+    queryFn: () =>
+      service.listValues({
+        page,
+        page_size: pageSize,
+        definition_id: definitionId || undefined,
+        target_record_id: targetRecordId || undefined,
+        source: (source as FieldValueSource) || undefined,
+      }),
+    enabled: pageSize !== undefined && hasScope,
   });
-  if (configuration.isLoading || query.isLoading) return <PageSkeleton />;
+  if (configuration.isLoading || (hasScope && query.isLoading)) return <PageSkeleton />;
   if (configuration.error)
     return <GovernedError error={configuration.error} retry={() => void configuration.refetch()} />;
-  if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()} />;
-  if (!query.data)
+  if (hasScope && query.error)
+    return <GovernedError error={query.error} retry={() => void query.refetch()} />;
+  if (!configuration.data)
+    return (
+      <GovernedError error={new Error("No governed customization configuration was received.")} />
+    );
+  if (hasScope && !query.data)
     return <GovernedError error={new Error("No governed field-value response was received.")} />;
+  const valueSources = configuration.data.document.policies.value_sources;
+  const applyScope = () => {
+    const updated = new URLSearchParams(params);
+    updated.set("page", "1");
+    for (const [key, value] of [
+      ["definition_id", draftDefinitionId.trim()],
+      ["target_record_id", draftTargetRecordId.trim()],
+      ["source", draftSource.trim()],
+    ] as const) {
+      if (value) updated.set(key, value);
+      else updated.delete(key);
+    }
+    setParams(updated);
+  };
   return (
     <main className="space-y-6">
       <PageHeader
@@ -56,7 +97,53 @@ export function FieldValueListPage() {
           </Button>
         }
       />
-      {query.data.data.length === 0 ? (
+      <Surface>
+        <div className="grid gap-4 md:grid-cols-[1fr_1fr_180px_auto] md:items-end">
+          <label className="space-y-1 text-sm font-medium">
+            Definition UUID
+            <Input
+              value={draftDefinitionId}
+              onChange={(event) => setDraftDefinitionId(event.target.value)}
+              placeholder="Scope by field definition"
+            />
+          </label>
+          <label className="space-y-1 text-sm font-medium">
+            Target record UUID
+            <Input
+              value={draftTargetRecordId}
+              onChange={(event) => setDraftTargetRecordId(event.target.value)}
+              placeholder="Scope by target record"
+            />
+          </label>
+          <label className="space-y-1 text-sm font-medium">
+            Source
+            <select
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={draftSource}
+              onChange={(event) => setDraftSource(event.target.value)}
+            >
+              <option value="">All sources</option>
+              {valueSources.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button type="button" onClick={applyScope}>
+            Apply scope
+          </Button>
+        </div>
+        {!hasScope ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            Field values require a definition UUID or target record UUID before the server will
+            return scoped tenant data.
+          </p>
+        ) : null}
+      </Surface>
+      {!hasScope ? (
+        <EmptyPanel filtered noun="field values" />
+      ) : query.data!.data.length === 0 ? (
         <EmptyPanel
           filtered={false}
           noun="field values"
@@ -75,7 +162,7 @@ export function FieldValueListPage() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {query.data.data.map((item) => (
+                {query.data!.data.map((item) => (
                   <tr key={item.id}>
                     <td className="px-4 py-4">
                       <button
@@ -93,14 +180,16 @@ export function FieldValueListPage() {
               </tbody>
             </table>
           </div>
-          <Pagination
-            meta={query.data.meta.pagination}
-            onPage={(next) => {
-              const updated = new URLSearchParams(params);
-              updated.set("page", String(next));
-              setParams(updated);
-            }}
-          />
+          {query.data!.meta.pagination ? (
+            <Pagination
+              meta={query.data!.meta.pagination}
+              onPage={(next) => {
+                const updated = new URLSearchParams(params);
+                updated.set("page", String(next));
+                setParams(updated);
+              }}
+            />
+          ) : null}
         </section>
       )}
     </main>
@@ -123,7 +212,8 @@ export function CreateFieldValuePage() {
   const [error, setError] = useState("");
   useEffect(() => {
     const allowed = configuration.data?.document.policies.value_sources;
-    if (allowed && !source) setSource(allowed[0] ?? "");
+    const defaultSource = allowed?.[0];
+    if (defaultSource && !source) setSource(defaultSource);
   }, [configuration.data, source]);
   const mutation = useMutation({
     mutationFn: (request: FieldValueCreateRequest) => service.createValue(request),
@@ -143,7 +233,7 @@ export function CreateFieldValuePage() {
         value: parsed,
       });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Value must be valid JSON.");
+      setError(jsonErrorMessage(caught));
     }
   }
   if (configuration.isLoading || definitions.isLoading) return <PageSkeleton />;
@@ -238,10 +328,7 @@ export function FieldValueDetailPage() {
     enabled: Boolean(id),
   });
   const remove = useMutation({
-    mutationFn: () => {
-      if (!query.data) throw new Error("The current value revision is unavailable.");
-      return service.deleteValue(id, query.data.data.lock_version);
-    },
+    mutationFn: () => service.deleteValue(id, query.data!.data.lock_version),
     onSuccess: () => navigate(ROUTES.FIELD_VALUES),
   });
   if (query.isLoading) return <PageSkeleton />;
@@ -307,13 +394,11 @@ export function EditFieldValuePage() {
     if (query.data && !value) setValue(JSON.stringify(query.data.data.value, null, 2));
   }, [query.data, value]);
   const mutation = useMutation({
-    mutationFn: (parsed: JSONValue) => {
-      if (!query.data) throw new Error("The current value revision is unavailable.");
-      return service.updateValue(id, {
+    mutationFn: (parsed: JSONValue) =>
+      service.updateValue(id, {
         value: parsed,
-        expected_lock_version: query.data.data.lock_version,
-      });
-    },
+        expected_lock_version: query.data!.data.lock_version,
+      }),
     onSuccess: (result) => {
       void client.invalidateQueries({ queryKey: ["customization", "field-value", id] });
       navigate(ROUTES.FIELD_VALUE_DETAIL(result.data.id));
@@ -325,7 +410,7 @@ export function EditFieldValuePage() {
       setError("");
       mutation.mutate(parseJSON(value));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Value must be valid JSON.");
+      setError(jsonErrorMessage(caught));
     }
   }
   if (query.isLoading) return <PageSkeleton />;

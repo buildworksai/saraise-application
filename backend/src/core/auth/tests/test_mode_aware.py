@@ -580,7 +580,7 @@ class TestSaaSLogin(TestCase):
         """Set up test client."""
         self.client = APIClient()
 
-    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18000")
+    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18001")
     @patch("src.core.auth_api.delegate_login")
     def test_login_saas_success(self, mock_delegate):
         """Test successful login delegation in SaaS mode."""
@@ -606,7 +606,7 @@ class TestSaaSLogin(TestCase):
         assert response.data["message"] == "Login successful (SaaS mode)"
         mock_delegate.assert_called_once_with("test@example.com", "testpass123")
 
-    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18000")
+    @override_settings(SARAISE_MODE="saas", SARAISE_PLATFORM_URL="http://localhost:18001")
     @patch("src.core.auth_api.delegate_login")
     def test_login_saas_failure(self, mock_delegate):
         """Test failed login delegation in SaaS mode."""

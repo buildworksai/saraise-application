@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Callable
+from collections.abc import Sequence
+from typing import Any, Callable, cast
 
+from django.db.models import QuerySet
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import APIException, NotAuthenticated, NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -103,7 +106,11 @@ def _translate(exc: Exception) -> None:
     if isinstance(exc, CapabilityUnavailable):
         raise ServiceUnavailable({"code": exc.code, "message": exc.message}) from exc
     if isinstance(exc, NotificationServiceError):
-        payload = {"code": exc.code, "message": exc.message, **({"fields": exc.errors} if exc.errors else {})}
+        payload: dict[str, Any] = {
+            "code": exc.code,
+            "message": exc.message,
+            **({"fields": exc.errors} if exc.errors else {}),
+        }
         if exc.code in {"CONFLICT", "IDEMPOTENCY_CONFLICT", "ILLEGAL_TRANSITION"}:
             raise Conflict(payload) from exc
         if exc.code in {"NOT_FOUND", "CALLBACK_NOT_FOUND"}:
@@ -141,17 +148,28 @@ def _preference_matrix(tenant: uuid.UUID, user: uuid.UUID) -> dict[str, object]:
     return {"categories": categories, "channels": channels, "preferences": rows}
 
 
+def _pk(value: uuid.UUID | str | None) -> uuid.UUID | str:
+    if value is None:
+        raise NotFound("Resource not found.")
+    return value
+
+
 class GovernedTenantMixin(GovernedAPIViewMixin):
-    authentication_classes = [StrictSessionAuthentication]
-    permission_classes = [IsAuthenticated]
-    pagination_class = GovernedPageNumberPagination
+    authentication_classes: Any = [StrictSessionAuthentication]
+    permission_classes: Any = [IsAuthenticated]
+    pagination_class: Any = GovernedPageNumberPagination
     action_permissions: dict[str, str] = {}
     action_entitlements: dict[str, str] = {}
     action_quotas: dict[str, str] = {}
     action_quota_costs: dict[str, int] = {}
+    action: str
+    required_permission: str | None
+    required_entitlement: str | None
+    quota_resource: str | None
+    quota_cost: int
 
     @classmethod
-    def as_view(cls, actions=None, **initkwargs):
+    def as_view(cls, actions: dict[str, str] | None = None, **initkwargs: object) -> Any:
         """Keep published ViewSet route metadata immutable across requests.
 
         DRF adds an implicit ``head`` entry to the actions mapping captured by
@@ -160,30 +178,33 @@ class GovernedTenantMixin(GovernedAPIViewMixin):
         """
 
         if actions is None:
-            return super().as_view(**initkwargs)
-        view = super().as_view(actions=dict(actions), **initkwargs)
+            return cast(Any, super()).as_view(**initkwargs)
+        view = cast(Any, super()).as_view(actions=dict(actions), **initkwargs)
         view.actions = dict(view.actions)
         return view
 
     def _identity(self) -> tuple[uuid.UUID, uuid.UUID]:
-        if not self.request.user or not self.request.user.is_authenticated:
+        request = cast(Request, cast(Any, self).request)
+        if not request.user or not request.user.is_authenticated:
             raise NotAuthenticated()
-        raw_tenant = get_user_tenant_id(self.request.user)
+        raw_tenant = get_user_tenant_id(request.user)
         if not raw_tenant:
             raise PermissionDenied("A tenant context is required.")
         try:
             tenant = uuid.UUID(str(raw_tenant))
         except (TypeError, ValueError) as exc:
             raise PermissionDenied("The tenant context is invalid.") from exc
-        actor = identity_uuid(tenant, get_user_id(self.request.user))
-        self.request.tenant_id = tenant
+        actor = identity_uuid(tenant, get_user_id(request.user))
+        setattr(request, "tenant_id", tenant)
         return tenant, actor
 
-    def get_permissions(self):
+    def get_permissions(self) -> Any:
         tenant, _ = self._identity()
-        self.request.tenant_id = tenant
-        action_name = getattr(self, "action", None) or self.request.method.lower()
-        method_action = f"{action_name}_{self.request.method.lower()}"
+        request = cast(Request, cast(Any, self).request)
+        setattr(request, "tenant_id", tenant)
+        method = str(request.method or "").lower()
+        action_name = str(getattr(self, "action", None) or method)
+        method_action = f"{action_name}_{method}"
         if method_action in self.action_permissions:
             action_name = method_action
         required = self.action_permissions.get(action_name)
@@ -193,7 +214,7 @@ class GovernedTenantMixin(GovernedAPIViewMixin):
             action_name,
             (
                 "notifications.api_reads"
-                if action_name in READ_ACTIONS or self.request.method in {"GET", "HEAD"}
+                if action_name in READ_ACTIONS or request.method in {"GET", "HEAD"}
                 else "notifications.api_writes"
             ),
         )
@@ -201,11 +222,11 @@ class GovernedTenantMixin(GovernedAPIViewMixin):
         # Missing mappings remain None and RequiresAccess denies by default.
         return [IsAuthenticated(), RequiresAccess()]
 
-    def _paginate(self, queryset, serializer_class):
-        page = self.paginate_queryset(queryset)
+    def _paginate(self, queryset: QuerySet[Any] | Sequence[Any], serializer_class: type[Any]) -> Response:
+        page = cast(Any, self).paginate_queryset(queryset)
         if page is None:
             return Response(serializer_class(queryset, many=True).data)
-        return self.get_paginated_response(serializer_class(page, many=True).data)
+        return cast(Response, cast(Any, self).get_paginated_response(serializer_class(page, many=True).data))
 
     def _invoke(self, callback: Callable[[], Any]) -> Any:
         try:
@@ -214,7 +235,7 @@ class GovernedTenantMixin(GovernedAPIViewMixin):
             _translate(exc)
 
 
-class InboxViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
+class InboxViewSet(GovernedTenantMixin, viewsets.GenericViewSet[Any]):  # type: ignore[misc]
     action_permissions = {
         "list": "notifications.inbox:read",
         "retrieve": "notifications.inbox:read",
@@ -225,11 +246,11 @@ class InboxViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         "unread_count": "notifications.inbox:read",
     }
 
-    def _ids(self):
+    def _ids(self) -> tuple[uuid.UUID, uuid.UUID]:
         tenant, actor = self._identity()
         return tenant, actor
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Any]:
         tenant, user = self._ids()
         queryset = NotificationInboxService.list_for_user(tenant, user, self.request.query_params)
         filters = InboxFilterSet(self.request.query_params, queryset)
@@ -237,15 +258,15 @@ class InboxViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
             raise ValidationError(filters.errors)
         return filters.qs
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self._paginate(self.get_queryset(), InboxListSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         tenant, user = self._ids()
-        item = self._invoke(lambda: NotificationInboxService.get_for_user(tenant, user, pk))
+        item = self._invoke(lambda: NotificationInboxService.get_for_user(tenant, user, _pk(pk)))
         return Response(InboxDetailSerializer(item).data)
 
-    def _transition(self, request, pk, command):
+    def _transition(self, request: Request, pk: uuid.UUID | str | None, command: str) -> Response:
         serializer = InboxTransitionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, user = self._ids()
@@ -257,19 +278,19 @@ class InboxViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         return Response(InboxDetailSerializer(item).data)
 
     @action(detail=True, methods=["post"], url_path="mark-read")
-    def mark_read(self, request, pk=None):
+    def mark_read(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         return self._transition(request, pk, "mark_read")
 
     @action(detail=True, methods=["post"], url_path="mark-unread")
-    def mark_unread(self, request, pk=None):
+    def mark_unread(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         return self._transition(request, pk, "mark_unread")
 
     @action(detail=True, methods=["post"])
-    def archive(self, request, pk=None):
+    def archive(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         return self._transition(request, pk, "archive")
 
     @action(detail=False, methods=["post"], url_path="mark-all-read")
-    def mark_all_read(self, request):
+    def mark_all_read(self, request: Request) -> Response:
         serializer = InboxTransitionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, user = self._ids()
@@ -279,12 +300,12 @@ class InboxViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         return Response({"affected_count": count})
 
     @action(detail=False, methods=["get"], url_path="unread-count")
-    def unread_count(self, request):
+    def unread_count(self, request: Request) -> Response:
         tenant, user = self._ids()
         return Response({"count": NotificationInboxService.unread_count(tenant, user)})
 
 
-class TemplateViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
+class TemplateViewSet(GovernedTenantMixin, viewsets.GenericViewSet[Any]):  # type: ignore[misc]
     action_permissions = {
         "list": "notifications.template:read",
         "retrieve": "notifications.template:read",
@@ -300,7 +321,7 @@ class TemplateViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         "rollback": "notifications.template:activate",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Any]:
         tenant, _ = self._identity()
         queryset = NotificationTemplateService.list_templates(tenant, self.request.query_params)
         filters = TemplateFilterSet(self.request.query_params, queryset)
@@ -308,15 +329,15 @@ class TemplateViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
             raise ValidationError(filters.errors)
         return filters.qs
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self._paginate(self.get_queryset(), TemplateListSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         tenant, _ = self._identity()
-        item = self._invoke(lambda: NotificationTemplateService.get_template(tenant, pk))
+        item = self._invoke(lambda: NotificationTemplateService.get_template(tenant, _pk(pk)))
         return Response(TemplateDetailSerializer(item).data)
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         serializer = TemplateCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
@@ -327,29 +348,31 @@ class TemplateViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         item = self._invoke(lambda: NotificationTemplateService.create_template(tenant, actor, data, key))
         return Response(TemplateDetailSerializer(item).data, status=status.HTTP_201_CREATED)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         serializer = TemplateVersionCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, actor = self._identity()
         version = self._invoke(
-            lambda: NotificationTemplateService.create_version(tenant, pk, actor, serializer.validated_data)
+            lambda: NotificationTemplateService.create_version(tenant, _pk(pk), actor, serializer.validated_data)
         )
         return Response(TemplateVersionSerializer(version).data, status=status.HTTP_201_CREATED)
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         payload = request.data if request.data else {"transition_key": request.headers.get("X-Transition-Key")}
         serializer = InboxTransitionSerializer(data=payload)
         serializer.is_valid(raise_exception=True)
         tenant, actor = self._identity()
         item = self._invoke(
-            lambda: NotificationTemplateService.archive(tenant, pk, actor, serializer.validated_data["transition_key"])
+            lambda: NotificationTemplateService.archive(
+                tenant, _pk(pk), actor, serializer.validated_data["transition_key"]
+            )
         )
         return Response(TemplateDetailSerializer(item).data)
 
     @action(detail=True, methods=["get", "post"])
-    def versions(self, request, pk=None):
+    def versions(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         tenant, actor = self._identity()
-        template = self._invoke(lambda: NotificationTemplateService.get_template(tenant, pk))
+        template = self._invoke(lambda: NotificationTemplateService.get_template(tenant, _pk(pk)))
         if request.method == "POST":
             serializer = TemplateVersionCreateSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
@@ -365,19 +388,19 @@ class TemplateViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         )
 
     @action(detail=True, methods=["post"])
-    def preview(self, request, pk=None):
+    def preview(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         serializer = TemplatePreviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, _ = self._identity()
         result = self._invoke(
             lambda: NotificationTemplateService.preview(
-                tenant, pk, serializer.validated_data.get("version_id"), serializer.validated_data["context"]
+                tenant, _pk(pk), serializer.validated_data.get("version_id"), serializer.validated_data["context"]
             )
         )
         return Response(result)
 
     @action(detail=False, methods=["post"], url_path="preview-draft")
-    def preview_draft(self, request):
+    def preview_draft(self, request: Request) -> Response:
         serializer = UnsavedTemplatePreviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, _ = self._identity()
@@ -390,7 +413,7 @@ class TemplateViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         )
 
     @action(detail=True, methods=["post"])
-    def activate(self, request, pk=None):
+    def activate(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         serializer = TemplateTransitionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, actor = self._identity()
@@ -398,28 +421,30 @@ class TemplateViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         if version_id is None:
             version_id = self._invoke(
                 lambda: NotificationTemplateVersion.objects.for_tenant(tenant)
-                .get(template_id=pk, version=serializer.validated_data["version"])
+                .get(template_id=cast(uuid.UUID, _pk(pk)), version=serializer.validated_data["version"])
                 .id
             )
         item = self._invoke(
             lambda: NotificationTemplateService.activate(
-                tenant, pk, version_id, actor, serializer.validated_data["transition_key"]
+                tenant, _pk(pk), version_id, actor, serializer.validated_data["transition_key"]
             )
         )
         return Response(TemplateDetailSerializer(item).data)
 
     @action(detail=True, methods=["post"])
-    def restore(self, request, pk=None):
+    def restore(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         serializer = InboxTransitionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, actor = self._identity()
         item = self._invoke(
-            lambda: NotificationTemplateService.restore(tenant, pk, actor, serializer.validated_data["transition_key"])
+            lambda: NotificationTemplateService.restore(
+                tenant, _pk(pk), actor, serializer.validated_data["transition_key"]
+            )
         )
         return Response(TemplateDetailSerializer(item).data)
 
     @action(detail=True, methods=["post"])
-    def rollback(self, request, pk=None):
+    def rollback(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         serializer = TemplateRollbackSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, actor = self._identity()
@@ -427,18 +452,18 @@ class TemplateViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         if version_id is None:
             version_id = self._invoke(
                 lambda: NotificationTemplateVersion.objects.for_tenant(tenant)
-                .get(template_id=pk, version=serializer.validated_data["version"])
+                .get(template_id=cast(uuid.UUID, _pk(pk)), version=serializer.validated_data["version"])
                 .id
             )
         item = self._invoke(
             lambda: NotificationTemplateService.rollback(
-                tenant, pk, version_id, actor, serializer.validated_data["transition_key"]
+                tenant, _pk(pk), version_id, actor, serializer.validated_data["transition_key"]
             )
         )
         return Response(TemplateDetailSerializer(item).data)
 
 
-class DeliveryViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
+class DeliveryViewSet(GovernedTenantMixin, viewsets.GenericViewSet[Any]):  # type: ignore[misc]
     action_permissions = {
         "list": "notifications.delivery:read",
         "retrieve": "notifications.delivery:read",
@@ -461,7 +486,7 @@ class DeliveryViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
     }
     action_quotas = {"bulk": "notifications.delivery.dispatch_bulk", "urgent": "notifications.delivery.dispatch_urgent"}
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Any]:
         tenant, _ = self._identity()
         query = (
             NotificationDelivery.objects.for_tenant(tenant)
@@ -473,13 +498,13 @@ class DeliveryViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
             raise ValidationError(filters.errors)
         return filters.qs
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self._paginate(self.get_queryset(), DeliveryListSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         return Response(DeliveryDetailSerializer(self._invoke(lambda: self.get_queryset().get(pk=pk))).data)
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         serializer = DispatchCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
@@ -489,7 +514,7 @@ class DeliveryViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         return Response(DeliveryDetailSerializer(result.object).data, status=202)
 
     @action(detail=False, methods=["post"])
-    def urgent(self, request):
+    def urgent(self, request: Request) -> Response:
         serializer = DispatchCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
@@ -501,7 +526,7 @@ class DeliveryViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         return Response(DeliveryDetailSerializer(result.object).data, status=202)
 
     @action(detail=False, methods=["post"])
-    def bulk(self, request):
+    def bulk(self, request: Request) -> Response:
         serializer = BulkDispatchSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, actor = self._identity()
@@ -513,7 +538,7 @@ class DeliveryViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         return Response([DeliveryListSerializer(item.object).data for item in results], status=202)
 
     @action(detail=False, methods=["post"])
-    def preview(self, request):
+    def preview(self, request: Request) -> Response:
         serializer = DispatchPreviewSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, actor = self._identity()
@@ -522,12 +547,12 @@ class DeliveryViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         )
 
     @action(detail=True, methods=["get"])
-    def attempts(self, request, pk=None):
+    def attempts(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         tenant, _ = self._identity()
         self._invoke(lambda: self.get_queryset().get(pk=pk))
         queryset = (
-            NotificationDelivery._meta.get_field("attempts")
-            .related_model.objects.for_tenant(tenant)
+            cast(Any, NotificationDelivery._meta.get_field("attempts").related_model)
+            .objects.for_tenant(tenant)
             .filter(delivery_id=pk)
         )
         filters = DeliveryAttemptFilterSet(request.query_params, queryset)
@@ -536,44 +561,48 @@ class DeliveryViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         return self._paginate(filters.qs, DeliveryAttemptSerializer)
 
     @action(detail=True, methods=["post"])
-    def retry(self, request, pk=None):
+    def retry(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         serializer = DeliveryRetrySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, actor = self._identity()
         result = self._invoke(
-            lambda: NotificationDispatchService.retry(tenant, pk, actor, serializer.validated_data["idempotency_key"])
+            lambda: NotificationDispatchService.retry(
+                tenant, _pk(pk), actor, serializer.validated_data["idempotency_key"]
+            )
         )
         return Response(DeliveryDetailSerializer(result.object).data, status=202)
 
     @action(detail=True, methods=["post"])
-    def cancel(self, request, pk=None):
+    def cancel(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         serializer = DeliveryCancelSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, actor = self._identity()
         item = self._invoke(
-            lambda: NotificationDispatchService.cancel(tenant, pk, actor, serializer.validated_data["transition_key"])
+            lambda: NotificationDispatchService.cancel(
+                tenant, _pk(pk), actor, serializer.validated_data["transition_key"]
+            )
         )
         return Response(DeliveryDetailSerializer(item).data)
 
     @action(detail=True, methods=["post"])
-    def confirm(self, request, pk=None):
+    def confirm(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         serializer = DeliveryConfirmationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
         key = data.pop("idempotency_key")
         tenant, _ = self._identity()
-        item = self._invoke(lambda: NotificationDispatchService.confirm_delivery(tenant, pk, data, key))
+        item = self._invoke(lambda: NotificationDispatchService.confirm_delivery(tenant, _pk(pk), data, key))
         return Response(DeliveryDetailSerializer(item).data)
 
 
 class PreferenceAPIView(GovernedTenantMixin, APIView):
     action_permissions = {"get": "notifications.preference:read", "put": "notifications.preference:update"}
 
-    def get(self, request):
+    def get(self, request: Request) -> Response:
         tenant, user = self._identity()
         return Response(_preference_matrix(tenant, user))
 
-    def put(self, request):
+    def put(self, request: Request) -> Response:
         serializer = PreferenceBulkReplacementSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, user = self._identity()
@@ -588,13 +617,13 @@ class PreferenceAPIView(GovernedTenantMixin, APIView):
 class PreferenceResetAPIView(GovernedTenantMixin, APIView):
     action_permissions = {"post": "notifications.preference:update"}
 
-    def post(self, request):
+    def post(self, request: Request) -> Response:
         tenant, user = self._identity()
         self._invoke(lambda: NotificationPreferenceService.reset(tenant, user, user))
         return Response(_preference_matrix(tenant, user))
 
 
-class EndpointViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
+class EndpointViewSet(GovernedTenantMixin, viewsets.GenericViewSet[Any]):  # type: ignore[misc]
     action_permissions = {
         "list": "notifications.endpoint:read",
         "retrieve": "notifications.endpoint:read",
@@ -605,7 +634,7 @@ class EndpointViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         "rotate_secret": "notifications.endpoint:update",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Any]:
         tenant, user = self._identity()
         queryset = (
             NotificationEndpoint.objects.for_tenant(tenant).order_by("kind", "display_name")
@@ -617,35 +646,37 @@ class EndpointViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
             raise ValidationError(filters.errors)
         return filters.qs
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self._paginate(self.get_queryset(), EndpointListSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         return Response(EndpointDetailSerializer(self._invoke(lambda: self.get_queryset().get(pk=pk))).data)
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         serializer = EndpointRegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, user = self._identity()
         item = self._invoke(lambda: NotificationEndpointService.register(tenant, user, user, serializer.validated_data))
         return Response(EndpointDetailSerializer(item).data, status=201)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         serializer = EndpointUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, actor = self._identity()
-        item = self._invoke(lambda: NotificationEndpointService.update(tenant, pk, actor, serializer.validated_data))
+        item = self._invoke(
+            lambda: NotificationEndpointService.update(tenant, _pk(pk), actor, serializer.validated_data)
+        )
         return Response(EndpointDetailSerializer(item).data)
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         tenant, actor = self._identity()
-        item = self._invoke(lambda: NotificationEndpointService.revoke(tenant, pk, actor))
+        item = self._invoke(lambda: NotificationEndpointService.revoke(tenant, _pk(pk), actor))
         return Response(EndpointDetailSerializer(item).data)
 
     @action(detail=True, methods=["post"])
-    def verify(self, request, pk=None):
+    def verify(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         tenant, actor = self._identity()
-        item = self._invoke(lambda: NotificationEndpointService.verify(tenant, pk, actor))
+        item = self._invoke(lambda: NotificationEndpointService.verify(tenant, _pk(pk), actor))
         return Response(
             {
                 "verified": True,
@@ -656,13 +687,13 @@ class EndpointViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
         )
 
     @action(detail=True, methods=["post"], url_path="rotate-secret")
-    def rotate_secret(self, request, pk=None):
+    def rotate_secret(self, request: Request, pk: uuid.UUID | str | None = None) -> Response:
         serializer = EndpointSecretRotationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, actor = self._identity()
         item = self._invoke(
             lambda: NotificationEndpointService.rotate_secret_ref(
-                tenant, pk, actor, serializer.validated_data["secret_ref"]
+                tenant, _pk(pk), actor, serializer.validated_data["secret_ref"]
             )
         )
         return Response(EndpointDetailSerializer(item).data)
@@ -671,12 +702,12 @@ class EndpointViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
 class ConfigurationAPIView(GovernedTenantMixin, APIView):
     action_permissions = {"get": "notifications.configuration:read", "patch": "notifications.configuration:update"}
 
-    def get(self, request, environment):
+    def get(self, request: Request, environment: str) -> Response:
         tenant, actor = self._identity()
         item = self._invoke(lambda: NotificationConfigurationService.get_or_create_default(tenant, environment, actor))
         return Response(ConfigurationReadSerializer(item).data)
 
-    def patch(self, request, environment):
+    def patch(self, request: Request, environment: str) -> Response:
         tenant, actor = self._identity()
         serializer = ConfigurationWriteSerializer(data=request.data, context={"tenant_id": tenant})
         serializer.is_valid(raise_exception=True)
@@ -699,7 +730,7 @@ class ConfigurationAPIView(GovernedTenantMixin, APIView):
 class ConfigurationSimulateAPIView(GovernedTenantMixin, APIView):
     action_permissions = {"post": "notifications.configuration:update"}
 
-    def post(self, request, environment):
+    def post(self, request: Request, environment: str) -> Response:
         serializer = ConfigurationSimulationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, _ = self._identity()
@@ -712,7 +743,7 @@ class ConfigurationSimulateAPIView(GovernedTenantMixin, APIView):
 class ConfigurationHistoryAPIView(GovernedTenantMixin, APIView):
     action_permissions = {"get": "notifications.configuration:read"}
 
-    def get(self, request, environment):
+    def get(self, request: Request, environment: str) -> Response:
         tenant, _ = self._identity()
         queryset = NotificationConfigurationService.history(tenant, environment)
         filters = ConfigurationHistoryFilterSet(request.query_params, queryset)
@@ -721,7 +752,7 @@ class ConfigurationHistoryAPIView(GovernedTenantMixin, APIView):
         paginator = GovernedPageNumberPagination()
         page = paginator.paginate_queryset(filters.qs, request, view=self)
         items = []
-        for version in page:
+        for version in page or []:
             audit = version.audits.order_by("-created_at").first()
             action = {"created": "create", "updated": "update", "imported": "import", "rolled_back": "rollback"}.get(
                 audit.action if audit else "", audit.action if audit else "create"
@@ -748,7 +779,7 @@ class ConfigurationHistoryAPIView(GovernedTenantMixin, APIView):
 class ConfigurationRollbackAPIView(GovernedTenantMixin, APIView):
     action_permissions = {"post": "notifications.configuration:rollback"}
 
-    def post(self, request, environment):
+    def post(self, request: Request, environment: str) -> Response:
         serializer = ConfigurationRollbackSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, actor = self._identity()
@@ -771,7 +802,7 @@ class ConfigurationRollbackAPIView(GovernedTenantMixin, APIView):
 class ConfigurationImportAPIView(GovernedTenantMixin, APIView):
     action_permissions = {"post": "notifications.configuration:import"}
 
-    def post(self, request, environment):
+    def post(self, request: Request, environment: str) -> Response:
         serializer = ConfigurationImportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         tenant, actor = self._identity()
@@ -794,7 +825,7 @@ class ConfigurationImportAPIView(GovernedTenantMixin, APIView):
 class ConfigurationExportAPIView(GovernedTenantMixin, APIView):
     action_permissions = {"get": "notifications.configuration:export"}
 
-    def get(self, request, environment):
+    def get(self, request: Request, environment: str) -> Response:
         tenant, _ = self._identity()
         payload = self._invoke(lambda: NotificationConfigurationService.export_document(tenant, environment))
         response = Response(payload)
@@ -806,14 +837,14 @@ class LivenessAPIView(GovernedAPIViewMixin, APIView):
     authentication_classes = []
     permission_classes = []
 
-    def get(self, request):
+    def get(self, request: Request) -> Response:
         return Response(liveness())
 
 
 class ReadinessAPIView(GovernedTenantMixin, APIView):
     action_permissions = {"get": "notifications.health:read"}
 
-    def get(self, request):
+    def get(self, request: Request) -> Response:
         tenant, _ = self._identity()
         payload, http_status = readiness(tenant)
         return Response(payload, status=http_status)
@@ -825,7 +856,7 @@ class ProviderCallbackAPIView(GovernedAPIViewMixin, APIView):
     authentication_classes = []
     permission_classes = []
 
-    def post(self, request, callback_key):
+    def post(self, request: Request, callback_key: str) -> Response:
         try:
             result = NotificationProviderCallbackService.accept(callback_key, request.headers, request.body)
         except Exception as exc:
@@ -837,13 +868,13 @@ class ProviderCallbackAPIView(GovernedAPIViewMixin, APIView):
 NotificationViewSet = InboxViewSet
 
 
-class NotificationPreferenceViewSet(GovernedTenantMixin, viewsets.GenericViewSet):
+class NotificationPreferenceViewSet(GovernedTenantMixin, viewsets.GenericViewSet[Any]):  # type: ignore[misc]
     action_permissions = {"list": "notifications.preference:read", "create": "notifications.preference:update"}
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return PreferenceAPIView().get(request)
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         serializer = PreferenceBulkReplacementSerializer(data={"preferences": [request.data]})
         serializer.is_valid(raise_exception=True)
         tenant, user = self._identity()

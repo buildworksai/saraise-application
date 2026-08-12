@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from decimal import Decimal
 from typing import Any
 
@@ -139,7 +139,11 @@ def _validate_registered_custom_fields(instance: "CRMModel") -> None:
         )
     errors: dict[str, str] = {}
     for key, value in custom_fields.items():
-        first_error = next(Draft202012Validator(schema[key]).iter_errors(value), None)
+        field_schema = schema[key]
+        if not isinstance(field_schema, (Mapping, bool)):
+            errors[key] = "Custom field schema must be a JSON Schema object or boolean."
+            continue
+        first_error = next(Draft202012Validator(field_schema).iter_errors(value), None)
         if first_error is not None:
             errors[key] = first_error.message
     if errors:
@@ -462,7 +466,7 @@ class Account(CRMModel):
         if self.parent_account_id == self.id:
             raise ValidationError({"parent_account_id": "Account cannot be its own parent."})
         visited = {self.id}
-        parent_id = self.parent_account_id
+        parent_id: uuid.UUID | None = self.parent_account_id
         maximum_depth = int(effective_configuration(self.tenant_id)["account"]["hierarchy_max_depth"])
         ancestors = 0
         while parent_id:

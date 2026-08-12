@@ -1,3 +1,4 @@
+/* eslint-disable max-lines-per-function -- service contract tests intentionally keep endpoint call sequences together. */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
 /* eslint-disable @typescript-eslint/unbound-method -- assertions intentionally reference mocked client methods. */
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -190,5 +191,255 @@ describe("customization framework service", () => {
   it("does not fabricate execution deletion or mutation methods", () => {
     expect("deleteExecution" in service).toBe(false);
     expect("updateExecution" in service).toBe(false);
+  });
+
+  it("routes form create, layout, publish, archive, render schema, and delete commands to governed endpoints", async () => {
+    vi.mocked(apiClient.post).mockResolvedValue({ data: { id: "form-1" }, meta: envelope.meta });
+    vi.mocked(apiClient.get).mockResolvedValue({ data: { sections: [] }, meta: envelope.meta });
+    vi.mocked(apiClient.delete).mockResolvedValue(undefined);
+
+    await service.createForm({
+      key: "asset-intake",
+      name: "Asset intake",
+      description: "Operator intake",
+      owner_module: "fixed_assets",
+      target_resource: "asset",
+      target_contract_version: "1.0",
+    });
+    await service.createFormLayout("form-1", {
+      layout: {
+        schema_version: 1,
+        sections: [
+          {
+            id: "main",
+            title: "Main",
+            components: [
+              {
+                id: "delivery-note",
+                type: "field",
+                field_key: "delivery_note",
+                label: "Delivery note",
+                accessibility_label: "Delivery note",
+                width: 12,
+              },
+            ],
+          },
+        ],
+      },
+      change_summary: "Initial governed layout",
+    });
+    await service.publishForm("form-1", {
+      layout_version_id: "layout-1",
+      transition_key: "publish-1",
+    });
+    await service.archiveForm("form-1", {
+      transition_key: "archive-1",
+    });
+    await service.getRenderSchema("form-1");
+    await service.deleteForm("form-1", 9);
+
+    expect(apiClient.post).toHaveBeenNthCalledWith(
+      1,
+      ENDPOINTS.FORMS.CREATE,
+      expect.objectContaining({ key: "asset-intake", target_resource: "asset" }),
+      expect.objectContaining({
+        headers: expect.objectContaining({ "Idempotency-Key": expect.any(String) }),
+      })
+    );
+    expect(apiClient.post).toHaveBeenNthCalledWith(
+      2,
+      ENDPOINTS.FORMS.LAYOUT_VERSIONS("form-1"),
+      expect.objectContaining({ change_summary: "Initial governed layout" }),
+      expect.any(Object)
+    );
+    expect(apiClient.post).toHaveBeenNthCalledWith(
+      3,
+      ENDPOINTS.FORMS.PUBLISH("form-1"),
+      expect.objectContaining({ transition_key: "publish-1" }),
+      expect.any(Object)
+    );
+    expect(apiClient.post).toHaveBeenNthCalledWith(
+      4,
+      ENDPOINTS.FORMS.ARCHIVE("form-1"),
+      expect.objectContaining({ transition_key: "archive-1" }),
+      expect.any(Object)
+    );
+    expect(apiClient.get).toHaveBeenCalledWith(ENDPOINTS.FORMS.RENDER_SCHEMA("form-1"));
+    expect(apiClient.delete).toHaveBeenCalledWith(
+      `${ENDPOINTS.FORMS.DELETE("form-1")}?expected_lock_version=9`,
+      expect.any(Object)
+    );
+  });
+
+  it("routes rule versioning, publishing, lifecycle, evaluation, impact, and execution queries", async () => {
+    vi.mocked(apiClient.post).mockResolvedValue({
+      data: { id: "rule-version-1" },
+      meta: envelope.meta,
+    });
+    vi.mocked(apiClient.get).mockResolvedValue({ data: [], meta: envelope.meta });
+
+    await service.createRule({
+      key: "reject-invalid-credit",
+      name: "Reject invalid credit",
+      description: "Credit guard",
+      owner_module: "sales_management",
+      target_resource: "sales_order",
+      target_contract_version: "1.0",
+      trigger: "validate",
+      priority: 10,
+      stop_on_match: true,
+    });
+    await service.createRuleVersion("rule-1", {
+      condition_ast: { operator: "eq", field: "status", value: "draft" },
+      action_ast: [{ type: "reject-with-message", message: "Invalid credit" }],
+      change_summary: "Add credit guard",
+    });
+    await service.publishRule("rule-1", {
+      version_id: "rule-version-1",
+      transition_key: "publish-rule-1",
+    });
+    await service.transitionRule("rule-1", "pause", {
+      transition_key: "pause-1",
+    });
+    await service.evaluateRule("rule-1", {
+      record: { status: "draft" },
+      changed_fields: ["status"],
+      idempotency_key: "evaluate-1",
+    });
+    await service.getRuleImpact("rule-1");
+    await service.listRuleVersionCatalog({ status: "candidate", page: 2 });
+    await service.listExecutions({ rule_id: "rule-1", status: "rejected", page_size: 10 });
+
+    expect(apiClient.post).toHaveBeenNthCalledWith(
+      1,
+      ENDPOINTS.RULES.CREATE,
+      expect.objectContaining({ key: "reject-invalid-credit", priority: 10 }),
+      expect.any(Object)
+    );
+    expect(apiClient.post).toHaveBeenNthCalledWith(
+      2,
+      ENDPOINTS.RULES.VERSIONS("rule-1"),
+      expect.objectContaining({ change_summary: "Add credit guard" }),
+      expect.any(Object)
+    );
+    expect(apiClient.post).toHaveBeenNthCalledWith(
+      3,
+      ENDPOINTS.RULES.PUBLISH("rule-1"),
+      expect.objectContaining({ transition_key: "publish-rule-1" }),
+      expect.any(Object)
+    );
+    expect(apiClient.post).toHaveBeenNthCalledWith(
+      4,
+      ENDPOINTS.RULES.PAUSE("rule-1"),
+      expect.objectContaining({ transition_key: "pause-1" }),
+      expect.any(Object)
+    );
+    expect(apiClient.post).toHaveBeenNthCalledWith(5, ENDPOINTS.RULES.EVALUATE("rule-1"), {
+      record: { status: "draft" },
+      changed_fields: ["status"],
+      idempotency_key: "evaluate-1",
+    });
+    expect(apiClient.get).toHaveBeenNthCalledWith(1, ENDPOINTS.RULES.IMPACT("rule-1"));
+    expect(apiClient.get).toHaveBeenNthCalledWith(
+      2,
+      `${ENDPOINTS.RULE_VERSIONS.LIST}?status=candidate&page=2`
+    );
+    expect(apiClient.get).toHaveBeenNthCalledWith(
+      3,
+      `${ENDPOINTS.RULE_EXECUTIONS.LIST}?rule_id=rule-1&status=rejected&page_size=10`
+    );
+  });
+
+  it("routes value mutations and configuration import/export/rollback without losing envelope semantics", async () => {
+    vi.mocked(apiClient.post).mockResolvedValue({
+      data: runtimeConfiguration,
+      meta: envelope.meta,
+    });
+    vi.mocked(apiClient.patch).mockResolvedValue({
+      data: runtimeConfiguration,
+      meta: envelope.meta,
+    });
+    vi.mocked(apiClient.get).mockResolvedValue({
+      data: { kind: "customization-configuration" },
+      meta: envelope.meta,
+    });
+    vi.mocked(apiClient.delete).mockResolvedValue(undefined);
+
+    await service.createValue({
+      definition_id: field.id,
+      target_record_id: "sales-order-1",
+      value: "handle with care",
+      source: "ui",
+    });
+    await service.updateValue("value-1", {
+      value: "fragile",
+      expected_lock_version: 2,
+    });
+    await service.deleteValue("value-1", 3);
+    await service.previewConfiguration({
+      document: runtimeConfiguration.document,
+    });
+    await service.updateConfiguration({
+      environment: "development",
+      document: runtimeConfiguration.document,
+      expected_version: 1,
+    });
+    await service.rollbackConfiguration({ target_version: 1, expected_version: 2 });
+    await service.importConfiguration({
+      payload: {
+        schema: "saraise.customization-framework.configuration",
+        tenant_id: runtimeConfiguration.tenant_id,
+        version: 1,
+        environment: "development",
+        document: runtimeConfiguration.document,
+      },
+      expected_version: 3,
+    });
+    await service.exportConfiguration();
+
+    expect(apiClient.post).toHaveBeenNthCalledWith(
+      1,
+      ENDPOINTS.FIELD_VALUES.CREATE,
+      expect.objectContaining({
+        definition_id: field.id,
+        target_record_id: "sales-order-1",
+        value: "handle with care",
+      }),
+      expect.any(Object)
+    );
+    expect(apiClient.patch).toHaveBeenNthCalledWith(
+      1,
+      ENDPOINTS.FIELD_VALUES.UPDATE("value-1"),
+      expect.objectContaining({ expected_lock_version: 2 }),
+      expect.any(Object)
+    );
+    expect(apiClient.delete).toHaveBeenCalledWith(
+      `${ENDPOINTS.FIELD_VALUES.DELETE("value-1")}?expected_lock_version=3`,
+      expect.any(Object)
+    );
+    expect(apiClient.post).toHaveBeenNthCalledWith(
+      2,
+      ENDPOINTS.CONFIGURATION.PREVIEW,
+      expect.objectContaining({ document: runtimeConfiguration.document }),
+      expect.any(Object)
+    );
+    expect(apiClient.patch).toHaveBeenCalledWith(
+      ENDPOINTS.CONFIGURATION.UPDATE,
+      expect.objectContaining({ environment: "development", expected_version: 1 }),
+      expect.any(Object)
+    );
+    expect(apiClient.post).toHaveBeenNthCalledWith(
+      3,
+      ENDPOINTS.CONFIGURATION.ROLLBACK,
+      { target_version: 1, expected_version: 2 },
+      expect.any(Object)
+    );
+    expect(apiClient.post).toHaveBeenNthCalledWith(
+      4,
+      ENDPOINTS.CONFIGURATION.IMPORT,
+      expect.objectContaining({ expected_version: 3, payload: expect.any(Object) }),
+      expect.any(Object)
+    );
+    expect(apiClient.get).toHaveBeenCalledWith(ENDPOINTS.CONFIGURATION.EXPORT);
   });
 });

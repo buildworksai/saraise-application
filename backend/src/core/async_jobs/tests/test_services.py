@@ -48,6 +48,42 @@ def enqueue_job(tenant_id: uuid.UUID, actor_id: uuid.UUID, *, key: str = "invoic
     )
 
 
+def test_async_job_status_field_matches_longest_declared_status() -> None:
+    status_field = AsyncJob._meta.get_field("status")
+
+    assert status_field.max_length == 20
+    assert getattr(status_field, "db_index") is False
+    assert max(len(value) for value in JobStatus.values) <= status_field.max_length
+
+
+def test_async_job_model_indexes_are_named_for_operational_query_paths() -> None:
+    assert [index.name for index in AsyncJob._meta.indexes] == [
+        "asyncjob_tenant_status_idx",
+        "asyncjob_tenant_cmd_idx",
+    ]
+
+
+def test_job_transition_schema_is_append_only_and_queryable_from_job() -> None:
+    job_field = JobTransition._meta.get_field("job")
+    from_status_field = JobTransition._meta.get_field("from_status")
+    to_status_field = JobTransition._meta.get_field("to_status")
+
+    assert job_field.remote_field is not None
+    assert job_field.remote_field.related_name == "transitions"
+    assert from_status_field.max_length == 20
+    assert from_status_field.blank is True
+    assert to_status_field.max_length == 20
+    assert JobTransition.objects is not None
+    assert [index.name for index in JobTransition._meta.indexes] == ["jobtrans_tenant_job_idx"]
+
+
+def test_outbox_event_indexes_are_named_for_dispatcher_query_paths() -> None:
+    assert [index.name for index in OutboxEvent._meta.indexes] == [
+        "outbox_pending_idx",
+        "outbox_tenant_agg_idx",
+    ]
+
+
 @pytest.mark.django_db
 def test_enqueue_atomically_creates_job_transition_and_outbox(
     tenant_id: uuid.UUID,
@@ -199,23 +235,24 @@ def test_transition_history_rejects_instance_and_bulk_mutation(
     history = job.transitions.get()
     history.reason = "rewritten"
 
-    with pytest.raises(ImmutableTransitionError, match="append-only"):
+    with pytest.raises(ImmutableTransitionError, match="JobTransition records are append-only"):
         history.save()
-    with pytest.raises(ImmutableTransitionError, match="append-only"):
+    with pytest.raises(ImmutableTransitionError, match="JobTransition records are append-only"):
         history.delete()
-    with pytest.raises(ImmutableTransitionError, match="append-only"):
+    with pytest.raises(ImmutableTransitionError, match="JobTransition records are append-only"):
         JobTransition.objects.filter(id=history.id).update(reason="rewritten")
-    with pytest.raises(ImmutableTransitionError, match="append-only"):
+    with pytest.raises(ImmutableTransitionError, match="JobTransition records are append-only"):
         JobTransition.objects.filter(id=history.id).delete()
 
 
 def test_handler_registry_requires_explicit_replacement() -> None:
     command = f"test.{uuid.uuid4()}"
 
-    @register_handler(command)
     def first(job: AsyncJob) -> dict[str, bool]:
+        del job
         return {"first": True}
 
+    register_handler(command, first)
     assert get_handler(command) is first
     with pytest.raises(HandlerAlreadyRegistered):
         register_handler(command, lambda job: {"second": True})
@@ -235,13 +272,13 @@ def test_execute_runs_registered_handler_and_redelivery_is_idempotent(
     command = f"test.{uuid.uuid4()}"
     calls: list[uuid.UUID] = []
 
-    @register_handler(command)
     def handler(job: AsyncJob) -> dict[str, str]:
         calls.append(job.id)
         assert job.status == JobStatus.RUNNING
         return {"processed": str(job.id)}
 
     try:
+        register_handler(command, handler)
         job = enqueue(tenant_id, actor_id, command, {"value": 7}, "execution")
         completed = execute(job.id, tenant_id)
         redelivered = execute(job.id, tenant_id)

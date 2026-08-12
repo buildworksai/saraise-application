@@ -22,7 +22,37 @@ describe("tenant route registry parity", () => {
         "automation_orchestration",
         "fixed_assets",
         "marketplace",
+        "accounting_finance",
+        "billing_subscriptions",
+        "localization",
+        "tenant_management",
       ])
+    );
+  });
+
+  it("publishes sidebar entries for manually mounted tenant modules", () => {
+    const branchFor = (module: string) =>
+      tenantSidebarTree.find((branch) => branch.module === module);
+    const pathsFor = (module: string) =>
+      branchFor(module)?.children.map((leaf) => `${leaf.label}:${leaf.path}`) ?? [];
+
+    expect(pathsFor("tenant_management")).toEqual(
+      expect.arrayContaining(["Tenant directory:/tenant-management"])
+    );
+    expect(pathsFor("accounting_finance")).toEqual(
+      expect.arrayContaining([
+        "Chart of accounts:/accounting-finance/accounts",
+        "Payments:/accounting-finance/payments",
+      ])
+    );
+    expect(pathsFor("billing_subscriptions")).toEqual(
+      expect.arrayContaining([
+        "Subscriptions:/billing-subscriptions",
+        "Quota management:/billing-subscriptions/quotas",
+      ])
+    );
+    expect(pathsFor("localization")).toEqual(
+      expect.arrayContaining(["Localization resources:/localization"])
     );
   });
 

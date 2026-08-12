@@ -24,6 +24,7 @@ import { workflowService } from "../services/workflow-service";
 import { StatusPill } from "./WorkflowUI";
 import { useWorkflowConfiguration } from "../hooks/use-workflow-configuration";
 import {
+  actionConfigForSelection,
   moveStepByOffset,
   newStep,
   recipientPath,
@@ -32,11 +33,18 @@ import {
   WORKFLOW_CATALOG_ACTIONS_QUERY_KEY,
   WORKFLOW_CATALOG_ASSIGNEES_QUERY_KEY,
   WORKFLOW_CATALOG_CONDITIONS_QUERY_KEY,
+  workflowStepCardKey,
   workflowBuilderIssues,
   workflowBuilderPayload,
 } from "./workflow-builder-utils";
 import { WorkflowSchemaField } from "./WorkflowSchemaField";
 import { inputClass } from "./workflow-schema-field-utils";
+import {
+  actionConfigurationForStep,
+  actionDescriptorForStep,
+  conditionHandlerValue,
+  decisionConfigForStep,
+} from "./workflow-step-config-utils";
 
 interface WorkflowBuilderProps {
   initial?: WorkflowDetailDTO;
@@ -336,27 +344,15 @@ export function WorkflowBuilder({
             // Rendering is discriminated by the four governed step contracts.
             // eslint-disable-next-line complexity
             (step, index) => {
-              const action =
-                step.step_type === "action"
-                  ? actions.data?.find(
-                      (descriptor) => descriptor.key === (step.config as ActionStepConfig).handler
-                    )
-                  : undefined;
-              const configuration =
-                step.step_type === "action" && "configuration" in step.config
-                  ? step.config.configuration ?? {}
-                  : {};
-              const decisionConfig =
-                step.step_type === "decision" && "condition" in step.config ? step.config : null;
-              const conditionHandler =
-                decisionConfig && typeof decisionConfig.condition.handler === "string"
-                  ? decisionConfig.condition.handler
-                  : "";
+              const action = actionDescriptorForStep(step, actions.data);
+              const configuration = actionConfigurationForStep(step);
+              const decisionConfig = decisionConfigForStep(step);
+              const conditionHandler = decisionConfig ? conditionHandlerValue(decisionConfig) : "";
               const conditionDescriptor = conditions.data?.find(
                 (descriptor) => descriptor.key === conditionHandler
               );
               return (
-                <Card key={`${step.key}-${index}`} className="p-5">
+                <Card key={workflowStepCardKey(step, index)} className="p-5">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                     <div className="flex-1 space-y-4">
                       <div className="grid gap-3 sm:grid-cols-2">
@@ -399,18 +395,14 @@ export function WorkflowBuilder({
                               className={`${inputClass} mt-1`}
                               value={(step.config as ActionStepConfig).handler}
                               onChange={(event) => {
-                                const descriptor = actions.data?.find(
-                                  (item) => item.key === event.target.value
+                                const config = actionConfigForSelection(
+                                  actions.data,
+                                  event.target.value
                                 );
-                                if (descriptor?.availability !== "available") return;
+                                if (!config) return;
                                 replaceStep(index, {
                                   ...step,
-                                  config: {
-                                    handler: descriptor.key,
-                                    schema_version: descriptor.schema_version,
-                                    input_mapping: {},
-                                    configuration: {},
-                                  },
+                                  config,
                                 });
                               }}
                             >
@@ -552,8 +544,11 @@ export function WorkflowBuilder({
                                 <option value="">Choose a step…</option>
                                 {steps
                                   .filter((candidate) => candidate.key !== step.key)
-                                  .map((candidate) => (
-                                    <option key={candidate.key} value={candidate.key}>
+                                  .map((candidate, candidateIndex) => (
+                                    <option
+                                      key={workflowStepCardKey(candidate, candidateIndex)}
+                                      value={candidate.key}
+                                    >
                                       {candidate.name}
                                     </option>
                                   ))}
@@ -620,7 +615,7 @@ export function WorkflowBuilder({
                           />
                         </div>
                       ) : null}
-                      {step.step_type === "decision" && decisionConfig ? (
+                      {decisionConfig ? (
                         <div className="space-y-3">
                           <div className="grid gap-3 sm:grid-cols-3">
                             <label className="block text-sm font-medium">
@@ -671,8 +666,11 @@ export function WorkflowBuilder({
                                   <option value="">Choose a step…</option>
                                   {steps
                                     .filter((candidate) => candidate.key !== step.key)
-                                    .map((candidate) => (
-                                      <option key={candidate.key} value={candidate.key}>
+                                    .map((candidate, candidateIndex) => (
+                                      <option
+                                        key={workflowStepCardKey(candidate, candidateIndex)}
+                                        value={candidate.key}
+                                      >
                                         {candidate.name}
                                       </option>
                                     ))}

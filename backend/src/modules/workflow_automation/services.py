@@ -2852,6 +2852,8 @@ class WorkflowTaskService:
             WorkflowTaskService._verify_assignment(tenant_uuid, task, actor, for_decision=True)
             if _history_has(task, key, command):
                 return task
+            if task.status in TERMINAL_TASK_STATES:
+                raise _conflict("ILLEGAL_TRANSITION", "The requested lifecycle transition is no longer legal.")
             task.meta_data = {**task.meta_data, **clean_meta}
             task.save(update_fields=("meta_data", "updated_at"))
             task = _apply_machine(

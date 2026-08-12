@@ -1958,8 +1958,8 @@ class ComplianceService:
             "notice_version",
         }
         unknown = set(values) - allowed
-        for key in unknown:
-            values.pop(key, None)
+        for unknown_field in unknown:
+            values.pop(unknown_field, None)
         values["email"] = normalize_email(str(values.get("email", "")))
         values.setdefault("purpose", configuration["defaults"]["consent_purpose"])
         if values.get("source") not in configuration["compliance"]["consent_sources"]:

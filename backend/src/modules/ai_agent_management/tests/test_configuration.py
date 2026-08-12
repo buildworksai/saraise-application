@@ -91,6 +91,45 @@ def test_configuration_rejects_unsafe_and_cross_tenant_values(tenant_id, other_t
 
 
 @pytest.mark.django_db
+def test_configuration_accepts_inclusive_threshold_boundaries_and_rejects_order_inversions():
+    boundary = ConfigurationService.defaults()
+    boundary["evaluation"]["quality_warn_threshold"] = 1
+    boundary["evaluation"]["quality_pass_threshold"] = 1
+    boundary["evaluation"]["hallucination_warn_threshold"] = 0
+    boundary["evaluation"]["hallucination_pass_threshold"] = 0
+    boundary["ui"]["saturation_warning_threshold"] = 1
+    boundary["ui"]["saturation_critical_threshold"] = 1
+
+    validated = ConfigurationService.validate_document(boundary)
+    assert validated["evaluation"]["quality_warn_threshold"] == 1
+    assert validated["evaluation"]["quality_pass_threshold"] == 1
+    assert validated["evaluation"]["hallucination_warn_threshold"] == 0
+    assert validated["evaluation"]["hallucination_pass_threshold"] == 0
+    assert validated["ui"]["saturation_warning_threshold"] == 1
+    assert validated["ui"]["saturation_critical_threshold"] == 1
+
+    invalid = ConfigurationService.defaults()
+    invalid["evaluation"]["efficiency_warn_threshold"] = 0.8
+    invalid["evaluation"]["efficiency_pass_threshold"] = 0.7
+    with pytest.raises(ValidationError) as caught:
+        ConfigurationService.validate_document(invalid)
+    assert "evaluation.efficiency_warn_threshold" in caught.value.message_dict
+
+    invalid = ConfigurationService.defaults()
+    invalid["ui"]["saturation_warning_threshold"] = 0.9
+    invalid["ui"]["saturation_critical_threshold"] = 0.8
+    with pytest.raises(ValidationError) as caught:
+        ConfigurationService.validate_document(invalid)
+    assert "ui.saturation_warning_threshold" in caught.value.message_dict
+
+
+def test_configuration_versions_reports_exact_invalid_tenant_field() -> None:
+    with pytest.raises(ValidationError) as caught:
+        ConfigurationService.versions("not-a-uuid")  # type: ignore[arg-type]
+    assert caught.value.message_dict == {"tenant_id": ["Must be a valid UUID."]}
+
+
+@pytest.mark.django_db
 def test_configuration_api_is_typed_and_tenant_scoped(
     authenticated_tenant_a_client,
     tenant_a,

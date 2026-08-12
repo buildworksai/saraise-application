@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Any, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from django.core.exceptions import ObjectDoesNotExist
@@ -14,6 +15,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import NotAuthenticated, NotFound, PermissionDenied, ValidationError
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from src.core.access.entitlements import Quota
@@ -114,7 +116,7 @@ def _principal_id(user: object) -> UUID:
         return uuid5(NAMESPACE_URL, f"saraise:user:{raw}")
 
 
-class GovernedTenantViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
+class GovernedTenantViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet[Any]):
     """Common deny-by-default access and tenant boundary."""
 
     authentication_classes = (GovernedSessionAuthentication,)
@@ -124,7 +126,7 @@ class GovernedTenantViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
     quota_resource = "ai_agent_management.api"
     quota_cost = 1
     filter_backends = (SearchFilter, OrderingFilter)
-    ordering = ("-created_at", "id")
+    ordering: tuple[str, ...] = ("-created_at", "id")
     ordering_fields: tuple[str, ...] = ()
     search_fields: tuple[str, ...] = ()
     permission_map: Mapping[str, str] = {}
@@ -156,7 +158,7 @@ class GovernedTenantViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
         except (ValueError, TypeError, AttributeError) as exc:
             raise ValidationError({"correlation_id": "A valid propagated UUID correlation_id is required."}) from exc
 
-    def check_permissions(self, request: object) -> None:
+    def check_permissions(self, request: Request) -> None:
         if not getattr(getattr(request, "user", None), "is_authenticated", False):
             raise NotAuthenticated("Authentication credentials were not provided.")
         setattr(request, "tenant_id", self.tenant_id())
@@ -214,7 +216,7 @@ class AgentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTen
     def get_queryset(self) -> QuerySet[Agent]:
         tenant = self.tenant_id_for_query()
         if tenant is None:
-            return Agent.objects.none()
+            return cast(QuerySet[Agent], Agent.objects.none())
         filters = {
             key: self.request.query_params.get(key) for key in ("status", "identity_type", "runner_key", "subject_id")
         }
@@ -222,16 +224,16 @@ class AgentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTen
         filters["ordering"] = self.request.query_params.get("ordering", "name")
         return AgentService.list_agents(tenant, filters)
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[Any]:
         return AgentListSerializer if self.action == "list" else AgentDetailSerializer
 
-    def create(self, request, *args, **kwargs):
+    def create(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         serializer = AgentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         agent = AgentService.create_agent(self.tenant_id(), self.actor_id(), serializer.validated_data)
         return Response(AgentDetailSerializer(agent).data, status=status.HTTP_201_CREATED)
 
-    def update(self, request, *args, **kwargs):
+    def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         agent = self.get_object()
         serializer = AgentUpdateSerializer(
             data=request.data, partial=kwargs.get("partial", False), context={"agent": agent}
@@ -240,18 +242,18 @@ class AgentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTen
         updated = AgentService.update_agent(self.tenant_id(), self.actor_id(), agent.id, serializer.validated_data)
         return Response(AgentDetailSerializer(updated).data)
 
-    def partial_update(self, request, *args, **kwargs):
+    def partial_update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
 
-    def destroy(self, request, *args, **kwargs):
+    def destroy(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         agent = self.get_object()
         retired = AgentService.retire_agent(
             self.tenant_id(), self.actor_id(), agent.id, "api_delete", f"retire:{agent.id}"
         )
         return Response(AgentDetailSerializer(retired).data)
 
-    def _transition(self, request, command: str) -> Response:
+    def _transition(self, request: Request, command: str) -> Response:
         agent = self.get_object()
         serializer = TransitionKeySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -269,19 +271,19 @@ class AgentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTen
         return Response(AgentDetailSerializer(value).data)
 
     @action(detail=True, methods=("post",))
-    def activate(self, request, pk=None):
+    def activate(self, request: Request, pk: object = None) -> Response:
         return self._transition(request, "activate")
 
     @action(detail=True, methods=("post",))
-    def disable(self, request, pk=None):
+    def disable(self, request: Request, pk: object = None) -> Response:
         return self._transition(request, "disable")
 
     @action(detail=True, methods=("post",))
-    def retire(self, request, pk=None):
+    def retire(self, request: Request, pk: object = None) -> Response:
         return self._transition(request, "retire")
 
     @action(detail=True, methods=("post",))
-    def execute(self, request, pk=None):
+    def execute(self, request: Request, pk: object = None) -> Response:
         agent = self.get_object()
         serializer = ExecuteAgentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -298,7 +300,7 @@ class AgentViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTen
         return Response(AgentExecutionDetailSerializer(execution).data, status=status.HTTP_202_ACCEPTED)
 
     @action(detail=True, methods=("post",))
-    def evaluate(self, request, pk=None):
+    def evaluate(self, request: Request, pk: object = None) -> Response:
         agent = self.get_object()
         serializer = EvaluationStartSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -322,48 +324,47 @@ class AgentExecutionViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Go
         "terminate": "ai.agent:terminate",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[AgentExecution]:
         tenant = self.tenant_id_for_query()
-        return (
-            AgentExecution.objects.none()
-            if tenant is None
-            else ExecutionService.list_executions(tenant, self.request.query_params)
+        return cast(
+            QuerySet[AgentExecution],
+            (
+                AgentExecution.objects.none()
+                if tenant is None
+                else ExecutionService.list_executions(tenant, self.request.query_params)
+            ),
         )
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[Any]:
         return AgentExecutionListSerializer if self.action == "list" else AgentExecutionDetailSerializer
 
-    def _transition(self, request, command: str):
+    def _transition(self, request: Request, command: str) -> Response:
         execution = self.get_object()
         serializer = TransitionExecutionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
-        method = {
-            "pause": ExecutionService.pause,
-            "resume": ExecutionService.resume,
-            "terminate": ExecutionService.terminate,
-        }[command]
         supplied_agent_id = values.get("agent_id")
         if supplied_agent_id is not None and supplied_agent_id != execution.agent_id:
             raise NotFound("The requested execution was not found for that agent.")
         args = (self.tenant_id(), self.actor_id(), execution.agent_id, execution.id)
-        value = (
-            method(*args, values.get("reason", ""), values["transition_key"])
-            if command == "terminate"
-            else method(*args, values["transition_key"])
-        )
+        if command == "pause":
+            value = ExecutionService.pause(*args, values["transition_key"])
+        elif command == "resume":
+            value = ExecutionService.resume(*args, values["transition_key"])
+        else:
+            value = ExecutionService.terminate(*args, values.get("reason", ""), values["transition_key"])
         return Response(AgentExecutionDetailSerializer(value).data)
 
     @action(detail=True, methods=("post",))
-    def pause(self, request, pk=None):
+    def pause(self, request: Request, pk: object = None) -> Response:
         return self._transition(request, "pause")
 
     @action(detail=True, methods=("post",))
-    def resume(self, request, pk=None):
+    def resume(self, request: Request, pk: object = None) -> Response:
         return self._transition(request, "resume")
 
     @action(detail=True, methods=("post",))
-    def terminate(self, request, pk=None):
+    def terminate(self, request: Request, pk: object = None) -> Response:
         return self._transition(request, "terminate")
 
 
@@ -378,15 +379,18 @@ class ScheduleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Governed
         "cancel": "ai.schedule:manage",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[AgentSchedulerTask]:
         tenant = self.tenant_id_for_query()
-        return (
-            AgentSchedulerTask.objects.none()
-            if tenant is None
-            else ScheduleService.list_schedules(tenant, self.request.query_params)
+        return cast(
+            QuerySet[AgentSchedulerTask],
+            (
+                AgentSchedulerTask.objects.none()
+                if tenant is None
+                else ScheduleService.list_schedules(tenant, self.request.query_params)
+            ),
         )
 
-    def create(self, request, *args, **kwargs):
+    def create(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         serializer = ScheduleCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         values = dict(serializer.validated_data)
@@ -395,7 +399,7 @@ class ScheduleViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Governed
         return Response(ScheduleSerializer(value).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=("post",))
-    def cancel(self, request, pk=None):
+    def cancel(self, request: Request, pk: object = None) -> Response:
         schedule = self.get_object()
         serializer = TransitionKeySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -417,15 +421,18 @@ class ApprovalRequestViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, G
         "cancel": "ai.approval:request",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[ApprovalRequest]:
         tenant = self.tenant_id_for_query()
-        return (
-            ApprovalRequest.objects.none()
-            if tenant is None
-            else ApprovalService.list_requests(tenant, self.request.query_params)
+        return cast(
+            QuerySet[ApprovalRequest],
+            (
+                ApprovalRequest.objects.none()
+                if tenant is None
+                else ApprovalService.list_requests(tenant, self.request.query_params)
+            ),
         )
 
-    def create(self, request, *args, **kwargs):
+    def create(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         serializer = ApprovalCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         values = dict(serializer.validated_data)
@@ -433,7 +440,7 @@ class ApprovalRequestViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, G
         value = ApprovalService.create_request(self.tenant_id(), self.actor_id(), execution_id, invocation_id, values)
         return Response(ApprovalRequestSerializer(value).data, status=status.HTTP_201_CREATED)
 
-    def _decision(self, request, command):
+    def _decision(self, request: Request, command: str) -> Response:
         approval = self.get_object()
         serializer = ApprovalDecisionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -449,34 +456,34 @@ class ApprovalRequestViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, G
         return Response(ApprovalRequestSerializer(value).data)
 
     @action(detail=True, methods=("post",))
-    def approve(self, request, pk=None):
+    def approve(self, request: Request, pk: object = None) -> Response:
         return self._decision(request, "approve")
 
     @action(detail=True, methods=("post",))
-    def reject(self, request, pk=None):
+    def reject(self, request: Request, pk: object = None) -> Response:
         return self._decision(request, "reject")
 
     @action(detail=True, methods=("post",))
-    def cancel(self, request, pk=None):
+    def cancel(self, request: Request, pk: object = None) -> Response:
         return self._decision(request, "cancel")
 
 
 class ServiceCrudViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTenantViewSet):
     """CRUD adapter whose concrete methods always delegate to a service."""
 
-    service = None
-    write_serializer_class = None
+    service: Any = None
+    write_serializer_class: type[Any] | None = None
 
-    def create(self, request, *args, **kwargs):
+    def create(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         return self._write(request, False)
 
-    def update(self, request, *args, **kwargs):
+    def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         return self._write(request, True)
 
-    def partial_update(self, request, *args, **kwargs):
+    def partial_update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         return self._write(request, True, partial=True)
 
-    def _write(self, request, updating, partial=False):
+    def _write(self, request: Request, updating: bool, partial: bool = False) -> Response:
         raise NotImplementedError
 
 
@@ -493,13 +500,13 @@ class SoDPolicyViewSet(ServiceCrudViewSet):
         "destroy": "ai.governance:manage",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[SoDPolicy]:
         tenant = self.tenant_id_for_query()
         return (
             SoDPolicy.objects.none() if tenant is None else SoDService.list_policies(tenant, self.request.query_params)
         )
 
-    def _write(self, request, updating, partial=False):
+    def _write(self, request: Request, updating: bool, partial: bool = False) -> Response:
         obj = self.get_object() if updating else None
         serializer = SoDPolicyWriteSerializer(data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
@@ -510,7 +517,7 @@ class SoDPolicyViewSet(ServiceCrudViewSet):
         )
         return Response(SoDPolicySerializer(value).data, status=status.HTTP_200_OK if obj else status.HTTP_201_CREATED)
 
-    def destroy(self, request, *args, **kwargs):
+    def destroy(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         return Response(
             SoDPolicySerializer(
                 SoDService.deactivate_policy(self.tenant_id(), self.actor_id(), self.get_object().id)
@@ -533,11 +540,11 @@ class ToolViewSet(ServiceCrudViewSet):
         "validate": "ai.tool:invoke",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Tool]:
         tenant = self.tenant_id_for_query()
         return Tool.objects.none() if tenant is None else ToolService.list_tools(tenant, self.request.query_params)
 
-    def _write(self, request, updating, partial=False):
+    def _write(self, request: Request, updating: bool, partial: bool = False) -> Response:
         obj = self.get_object() if updating else None
         serializer = ToolWriteSerializer(data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
@@ -548,13 +555,13 @@ class ToolViewSet(ServiceCrudViewSet):
         )
         return Response(ToolSerializer(value).data, status=status.HTTP_200_OK if obj else status.HTTP_201_CREATED)
 
-    def destroy(self, request, *args, **kwargs):
+    def destroy(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         return Response(
             ToolSerializer(ToolService.deactivate_tool(self.tenant_id(), self.actor_id(), self.get_object().id)).data
         )
 
     @action(detail=True, methods=("post",))
-    def validate(self, request, pk=None):
+    def validate(self, request: Request, pk: object = None) -> Response:
         tool = self.get_object()
         serializer = ToolValidationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -576,13 +583,13 @@ class EgressRuleViewSet(ServiceCrudViewSet):
         "destroy": "ai.governance:manage",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[EgressRule]:
         tenant = self.tenant_id_for_query()
         return (
             EgressRule.objects.none() if tenant is None else EgressService.list_rules(tenant, self.request.query_params)
         )
 
-    def _write(self, request, updating, partial=False):
+    def _write(self, request: Request, updating: bool, partial: bool = False) -> Response:
         obj = self.get_object() if updating else None
         serializer = EgressRuleWriteSerializer(data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
@@ -593,7 +600,7 @@ class EgressRuleViewSet(ServiceCrudViewSet):
         )
         return Response(EgressRuleSerializer(value).data, status=status.HTTP_200_OK if obj else status.HTTP_201_CREATED)
 
-    def destroy(self, request, *args, **kwargs):
+    def destroy(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         return Response(
             EgressRuleSerializer(
                 EgressService.deactivate_rule(self.tenant_id(), self.actor_id(), self.get_object().id)
@@ -612,20 +619,20 @@ class SecretViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTe
         "deactivate": "ai.secret:manage",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[Secret]:
         tenant = self.tenant_id_for_query()
         return (
             Secret.objects.none() if tenant is None else SecretService.list_metadata(tenant, self.request.query_params)
         )
 
-    def create(self, request, *args, **kwargs):
+    def create(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         serializer = SecretCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         value = SecretService.create_secret(self.tenant_id(), self.actor_id(), serializer.validated_data)
         return Response(SecretMetadataSerializer(value).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=("post",))
-    def rotate(self, request, pk=None):
+    def rotate(self, request: Request, pk: object = None) -> Response:
         secret = self.get_object()
         serializer = SecretRotateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -640,7 +647,7 @@ class SecretViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GovernedTe
         return Response(SecretMetadataSerializer(value).data)
 
     @action(detail=True, methods=("post",))
-    def deactivate(self, request, pk=None):
+    def deactivate(self, request: Request, pk: object = None) -> Response:
         return Response(
             SecretMetadataSerializer(
                 SecretService.deactivate_secret(self.tenant_id(), self.actor_id(), self.get_object().id)
@@ -658,11 +665,14 @@ class KillSwitchViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Govern
         "deactivate": "ai.governance:manage",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[KillSwitch]:
         tenant = self.tenant_id_for_query()
-        return KillSwitch.objects.none() if tenant is None else KillSwitchService.list_switches(tenant)
+        return cast(
+            QuerySet[KillSwitch],
+            KillSwitch.objects.none() if tenant is None else KillSwitchService.list_switches(tenant),
+        )
 
-    def create(self, request, *args, **kwargs):
+    def create(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         serializer = KillSwitchActivateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
@@ -677,7 +687,7 @@ class KillSwitchViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Govern
         return Response(KillSwitchSerializer(value).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=("post",))
-    def deactivate(self, request, pk=None):
+    def deactivate(self, request: Request, pk: object = None) -> Response:
         switch = self.get_object()
         serializer = KillSwitchDeactivateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -692,14 +702,16 @@ class TenantReadOnlyViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Go
     # Each evidence model has its own canonical event timestamp.  Preserve the
     # explicit queryset ordering below instead of applying the mutable-model
     # default (``created_at``), which append-only projections need not have.
-    ordering = ()
+    ordering: tuple[str, ...] = ()
     permission_map = {"list": "ai.governance:view", "retrieve": "ai.governance:view"}
 
-    def get_queryset(self):
-        model = self.queryset.model
+    def get_queryset(self) -> QuerySet[Any]:
+        queryset = self.queryset
+        assert queryset is not None
+        model = queryset.model
         tenant = self.tenant_id_for_query()
         if tenant is None:
-            return model.objects.none()
+            return cast(QuerySet[Any], model.objects.none())
         names = {field.name for field in model._meta.fields}
         timestamp = next(
             (
@@ -720,7 +732,7 @@ class TenantReadOnlyViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, Go
             None,
         )
         ordering = (f"-{timestamp}", "id") if timestamp else ("id",)
-        return model.objects.filter(tenant_id=tenant).order_by(*ordering)
+        return cast(QuerySet[Any], model.objects.filter(tenant_id=tenant).order_by(*ordering))
 
 
 class SoDViolationViewSet(TenantReadOnlyViewSet):
@@ -791,7 +803,7 @@ class CostSummaryViewSet(TenantReadOnlyViewSet):
     permission_map = {"list": "ai.usage:view", "retrieve": "ai.usage:view", "recalculate": "ai.usage:view"}
 
     @action(detail=False, methods=("post",))
-    def recalculate(self, request):
+    def recalculate(self, request: Request) -> Response:
         serializer = CostRecalculationSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
@@ -804,14 +816,17 @@ class AsyncJobViewSet(TenantReadOnlyViewSet):
     serializer_class = AsyncJobSerializer
     permission_map = {"list": "ai.execution:view", "retrieve": "ai.execution:view"}
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[AsyncJob]:
         tenant = self.tenant_id_for_query()
-        return (
-            AsyncJob.objects.none()
-            if tenant is None
-            else AsyncJob.objects.filter(tenant_id=tenant, command__startswith="ai_agent_management.").order_by(
-                "-created_at", "id"
-            )
+        return cast(
+            QuerySet[AsyncJob],
+            (
+                AsyncJob.objects.none()
+                if tenant is None
+                else AsyncJob.objects.filter(tenant_id=tenant, command__startswith="ai_agent_management.").order_by(
+                    "-created_at", "id"
+                )
+            ),
         )
 
 
@@ -831,15 +846,18 @@ class ConfigurationViewSet(GovernedTenantViewSet):
         "export": "ai.configuration:export",
     }
 
-    def get_queryset(self):
+    def get_queryset(self) -> QuerySet[AgentManagementConfiguration]:
         tenant = self.tenant_id_for_query()
-        return (
-            AgentManagementConfiguration.objects.none()
-            if tenant is None
-            else AgentManagementConfiguration.objects.filter(tenant_id=tenant)
+        return cast(
+            QuerySet[AgentManagementConfiguration],
+            (
+                AgentManagementConfiguration.objects.none()
+                if tenant is None
+                else AgentManagementConfiguration.objects.filter(tenant_id=tenant)
+            ),
         )
 
-    def list(self, request, *args, **kwargs):
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         value = ConfigurationService.current(
             self.tenant_id(),
             self.actor_id(),
@@ -850,7 +868,7 @@ class ConfigurationViewSet(GovernedTenantViewSet):
 
     retrieve = list
 
-    def update(self, request, *args, **kwargs):
+    def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         serializer = ConfigurationWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
@@ -868,7 +886,7 @@ class ConfigurationViewSet(GovernedTenantViewSet):
     create = update
 
     @action(detail=False, methods=("post",))
-    def preview(self, request):
+    def preview(self, request: Request) -> Response:
         serializer = ConfigurationWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
@@ -884,12 +902,12 @@ class ConfigurationViewSet(GovernedTenantViewSet):
         )
 
     @action(detail=False, methods=("get",))
-    def versions(self, request):
+    def versions(self, request: Request) -> Response:
         values = ConfigurationService.versions(self.tenant_id(), request.query_params.get("environment", "production"))
         return Response(ConfigurationVersionSerializer(values, many=True).data)
 
     @action(detail=False, methods=("post",))
-    def rollback(self, request):
+    def rollback(self, request: Request) -> Response:
         serializer = ConfigurationRollbackSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         values = serializer.validated_data
@@ -903,7 +921,7 @@ class ConfigurationViewSet(GovernedTenantViewSet):
         return Response(ConfigurationSerializer(current).data)
 
     @action(detail=False, methods=("post",), url_path="import")
-    def import_document(self, request):
+    def import_document(self, request: Request) -> Response:
         serializer = ConfigurationImportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         current = ConfigurationService.import_document(
@@ -915,7 +933,7 @@ class ConfigurationViewSet(GovernedTenantViewSet):
         return Response(ConfigurationSerializer(current).data)
 
     @action(detail=False, methods=("get",))
-    def export(self, request):
+    def export(self, request: Request) -> Response:
         return Response(
             ConfigurationService.export_document(
                 self.tenant_id(),

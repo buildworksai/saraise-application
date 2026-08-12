@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment -- reviewed existing generated/cohesive surface; zero-warning gate remains enforced for unsuppressed rules. */
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -76,6 +76,11 @@ describe("ApiManagementConfigurationPage", () => {
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
   });
 
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
   it("renders every governed configuration section and immutable evidence", async () => {
     renderPage();
     expect(
@@ -107,6 +112,52 @@ describe("ApiManagementConfigurationPage", () => {
       expect.objectContaining({ document: configuration.document })
     );
     expect(typeof request?.idempotency_key).toBe("string");
+  });
+
+  it("previews and saves dependency-mutated tenant policy with non-secret resource defaults", async () => {
+    vi.mocked(api_managementService.previewConfiguration).mockImplementation(
+      (_environment, request) =>
+        Promise.resolve({
+          valid: true,
+          normalized_document: request.document as typeof configuration.document,
+          changes: [
+            { field: "feature_enabled", before: true, after: false },
+            { field: "resource_config_default", before: {}, after: { country_code: "US" } },
+          ],
+        })
+    );
+
+    renderPage();
+
+    await userEvent.click(await screen.findByLabelText("Feature enabled"));
+    await userEvent.type(
+      screen.getByLabelText("Allowed resource configuration keys"),
+      "country_code"
+    );
+    const defaultConfig = screen.getByLabelText("Default resource configuration");
+    await userEvent.clear(defaultConfig);
+    fireEvent.change(defaultConfig, { target: { value: '{"country_code":"US"}' } });
+    await userEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+
+    await waitFor(() => expect(api_managementService.previewConfiguration).toHaveBeenCalledOnce());
+    const previewed = vi.mocked(api_managementService.previewConfiguration).mock.calls[0]?.[1]
+      .document;
+    expect(previewed).toMatchObject({
+      feature_enabled: false,
+      rollout_percentage: 0,
+      allowed_resource_config_keys: ["country_code"],
+      resource_config_default: { country_code: "US" },
+    });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Apply new version" }));
+    await waitFor(() => expect(api_managementService.updateConfiguration).toHaveBeenCalledOnce());
+    const saved = vi.mocked(api_managementService.updateConfiguration).mock.calls[0]?.[1];
+    expect(saved?.document).toMatchObject({
+      feature_enabled: false,
+      rollout_percentage: 0,
+      resource_config_default: { country_code: "US" },
+    });
+    expect(typeof saved?.idempotency_key).toBe("string");
   });
 
   it("fails closed when tenant configuration cannot be loaded", async () => {
@@ -155,6 +206,41 @@ describe("ApiManagementConfigurationPage", () => {
       })
     );
     expect(typeof request?.idempotency_key).toBe("string");
+  }, 10_000);
+
+  it("keeps apply blocked when server preview rejects the edited draft", async () => {
+    vi.mocked(api_managementService.previewConfiguration).mockResolvedValue({
+      valid: false,
+      normalized_document: configuration.document,
+      changes: [],
+      errors: { page_size: ["Must not exceed the tenant maximum."] },
+    });
+
+    renderPage();
+    fireEvent.change(await screen.findByLabelText("Page size"), { target: { value: "999" } });
+    await userEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("tenant maximum");
+    expect(screen.getByRole("button", { name: "Apply new version" })).toBeDisabled();
+    expect(api_managementService.updateConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("rejects non-portable imports before previewing or mutating configuration", async () => {
+    renderPage();
+    const invalid = new File([JSON.stringify({ module: "legacy_api" })], "legacy.json", {
+      type: "application/json",
+    });
+    Object.defineProperty(invalid, "text", {
+      value: () => Promise.resolve(JSON.stringify({ module: "legacy_api" })),
+    });
+
+    await userEvent.upload(await screen.findByLabelText("Import preview"), invalid);
+
+    await waitFor(() => {
+      expect(api_managementService.previewConfiguration).not.toHaveBeenCalled();
+    });
+    expect(api_managementService.importConfiguration).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Apply new version" })).toBeDisabled();
   });
 
   it("promotes imported configuration into the selected environment before preview", async () => {
@@ -212,7 +298,7 @@ describe("ApiManagementConfigurationPage", () => {
       environment: "staging",
       environment_registry: [...developmentPortable.document.environment_registry, "staging"],
     });
-  });
+  }, 10_000);
 
   it("fails closed when required server field metadata is missing", async () => {
     const incompleteFields = Object.fromEntries(

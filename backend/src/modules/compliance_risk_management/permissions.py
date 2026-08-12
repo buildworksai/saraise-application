@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Final, Mapping
+from typing import Any, Final, Mapping
 from uuid import UUID
 
 from rest_framework.authentication import SessionAuthentication
@@ -36,20 +36,20 @@ class ActionAccessMixin:
     concise while retaining explicit entitlement and quota metadata.
     """
 
-    authentication_classes = (GovernedSessionAuthentication,)
-    permission_classes = (IsAuthenticated, RequiresAccess)
+    authentication_classes: Any = (GovernedSessionAuthentication,)
+    permission_classes: Any = (IsAuthenticated, RequiresAccess)
     action_permissions: Mapping[str, str] = MappingProxyType({})
     action_access: Mapping[str, "AccessRequirement"] = MappingProxyType({})
     action_quotas: Mapping[str, str] = MappingProxyType({})
-    request: Request
+    request: Any
 
-    def get_permissions(self) -> list[object]:
+    def get_permissions(self) -> Any:
         request = self.request
         raw_tenant = get_user_tenant_id(getattr(request, "user", None))
         try:
-            request.tenant_id = UUID(str(raw_tenant)) if raw_tenant is not None else None
+            setattr(request, "tenant_id", UUID(str(raw_tenant)) if raw_tenant is not None else None)
         except (TypeError, ValueError, AttributeError):
-            request.tenant_id = None
+            setattr(request, "tenant_id", None)
 
         raw_action = getattr(self, "action", None)
         action = str(raw_action) if raw_action else ""
@@ -144,7 +144,7 @@ RISK_ACTIONS: Final = _actions(
     partial_update=_rule("compliance_risk.risk:update", "compliance_risk.risk_writes"),
     destroy=_rule("compliance_risk.risk:delete", "compliance_risk.risk_writes"),
     transition=_rule("compliance_risk.risk:transition", "compliance_risk.risk_transitions"),
-    score_preview=_rule("compliance_risk.risk:create", "compliance_risk.score_previews"),
+    score_preview=_rule("compliance_risk.risk:read", "compliance_risk.score_previews"),
     controls=_rule("compliance_risk.control:read", "compliance_risk.control_reads"),
     remediations=_rule("compliance_risk.remediation:read", "compliance_risk.remediation_reads"),
 )

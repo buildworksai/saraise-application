@@ -209,8 +209,8 @@ All endpoints automatically filter data by the authenticated user's tenant. Cros
         for method_name in dir(viewset_class):
             if hasattr(getattr(viewset_class, method_name), "mapping"):
                 action = getattr(viewset_class, method_name)
-                if hasattr(action, "detail") and hasattr(action, "methods"):
-                    methods = list(action.methods)
+                if hasattr(action, "detail") and hasattr(action, "mapping"):
+                    methods = list(action.mapping)
                     detail = action.detail
                     url_path = getattr(action, "url_path", method_name.replace("_", "-"))
 

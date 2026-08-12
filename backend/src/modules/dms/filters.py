@@ -86,7 +86,7 @@ class BaseFilterSet:
             normalized_search = str(search).strip()
             from .services import DmsConfigurationService
 
-            limit = DmsConfigurationService.runtime_values(self.tenant_id)["collection_search_max_length"]
+            limit = _policy_int(DmsConfigurationService.runtime_values(self.tenant_id), "collection_search_max_length")
             if len(normalized_search) > limit:
                 raise FilterValidationError({"search": "Search exceeds tenant policy."})
             if normalized_search:
@@ -136,6 +136,13 @@ def _datetime(value: object | None, name: str, *, end_of_day: bool = False) -> d
     return parsed
 
 
+def _policy_int(policy: Mapping[str, object], key: str) -> int:
+    value = policy[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise FilterValidationError({key: "Configured policy value must be an integer."})
+    return value
+
+
 class FolderFilterSet(BaseFilterSet):
     allowed = BaseFilterSet.allowed | frozenset({"parent_id"})
     ordering_fields = frozenset({"sort_order", "name", "path", "depth", "created_at", "updated_at"})
@@ -178,7 +185,9 @@ class DocumentFilterSet(BaseFilterSet):
         from .services import DmsConfigurationService
 
         policy = DmsConfigurationService.runtime_values(self.tenant_id)
-        if len(tags) > policy["tag_filter_max_tags"] or any(len(tag) > policy["tag_filter_max_length"] for tag in tags):
+        if len(tags) > _policy_int(policy, "tag_filter_max_tags") or any(
+            len(tag) > _policy_int(policy, "tag_filter_max_length") for tag in tags
+        ):
             raise FilterValidationError({"tags": "Tag filters exceed tenant policy."})
         for tag in tags:
             if connection.features.supports_json_field_contains:

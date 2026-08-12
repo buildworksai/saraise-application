@@ -38,7 +38,7 @@ SARAISE_LICENSE_MODE = cast(Literal["connected", "isolated"], os.getenv("SARAISE
 
 # Platform URL for SaaS mode (auth delegation and policy engine)
 # Required when SARAISE_MODE=saas (Phase 7.6)
-SARAISE_PLATFORM_URL: str = os.getenv("SARAISE_PLATFORM_URL", "http://localhost:18000")
+SARAISE_PLATFORM_URL: str = os.getenv("SARAISE_PLATFORM_URL", "http://localhost:18001")
 if SARAISE_MODE == "saas" and not (SARAISE_PLATFORM_URL or "").strip():
     from django.core.exceptions import ImproperlyConfigured
 
@@ -268,7 +268,7 @@ DATABASES = {
         "USER": os.getenv("DB_USER", "postgres"),
         "PASSWORD": os.getenv("DB_PASSWORD", "postgres"),
         "HOST": os.getenv("DB_HOST", "localhost"),
-        "PORT": os.getenv("DB_PORT", "5432"),
+        "PORT": os.getenv("DB_PORT", "25432"),
     }
 }
 
@@ -293,7 +293,7 @@ if SARAISE_MODE == "saas" and not _in_test:
     }
 
 # Redis configuration
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:26379/0")
 CACHES: dict[str, dict[str, Any]]
 if _use_sqlite:
     CACHES = {
@@ -347,12 +347,8 @@ elif SARAISE_MODE == "development":
     CORS_ALLOWED_ORIGINS = [
         "http://localhost:25173",  # Application frontend (Runtime Plane)
         "http://localhost:17000",  # Platform frontend (Control Plane UI)
-        "http://localhost:15173",  # Legacy/alternative port
-        "http://localhost:5173",  # Standard Vite dev server port
         "http://127.0.0.1:25173",
         "http://127.0.0.1:17000",
-        "http://127.0.0.1:15173",
-        "http://127.0.0.1:5173",
     ]
 else:
     # Non-development mode without explicit CORS origins: deny all cross-origin
@@ -382,12 +378,8 @@ elif SARAISE_MODE == "development":
     CSRF_TRUSTED_ORIGINS = [
         "http://localhost:25173",  # Application frontend (Runtime Plane)
         "http://localhost:17000",  # Platform frontend (Control Plane UI)
-        "http://localhost:15173",  # Legacy/alternative port
-        "http://localhost:5173",  # Standard Vite dev server port
         "http://127.0.0.1:25173",
         "http://127.0.0.1:17000",
-        "http://127.0.0.1:15173",
-        "http://127.0.0.1:5173",
     ]
 else:
     CSRF_TRUSTED_ORIGINS = []

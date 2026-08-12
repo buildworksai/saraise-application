@@ -56,9 +56,70 @@ const folder: Folder = {
   updated_at: "2026-07-22T00:00:00Z",
   allowed_actions: ["read", "update"],
 };
+const uploadOptions = {
+  transport: {
+    timeout_ms: 1000,
+    max_retries: 0,
+    circuit_breaker_failure_threshold: 10,
+    circuit_breaker_reset_ms: 1000,
+  },
+} as const;
+
+class FakeUploadRequest {
+  static instances: FakeUploadRequest[] = [];
+
+  readonly uploadListeners = new Map<string, (event: ProgressEvent) => void>();
+  readonly listeners = new Map<string, () => void>();
+  readonly headers: Record<string, string> = {};
+  readonly upload = {
+    addEventListener: (type: string, listener: (event: ProgressEvent) => void) => {
+      this.uploadListeners.set(type, listener);
+    },
+  };
+  method = "";
+  url = "";
+  withCredentials = false;
+  timeout = 0;
+  status = 200;
+  responseText = JSON.stringify({ data: document, meta });
+  body: XMLHttpRequestBodyInit | null = null;
+
+  constructor() {
+    FakeUploadRequest.instances.push(this);
+  }
+
+  open(method: string, url: string) {
+    this.method = method;
+    this.url = url;
+  }
+
+  setRequestHeader(name: string, value: string) {
+    this.headers[name] = value;
+  }
+
+  addEventListener(type: string, listener: () => void) {
+    this.listeners.set(type, listener);
+  }
+
+  abort() {
+    this.listeners.get("abort")?.();
+  }
+
+  send(body: XMLHttpRequestBodyInit) {
+    this.body = body;
+    this.uploadListeners.get("progress")?.({
+      lengthComputable: true,
+      loaded: 25,
+      total: 100,
+    } as ProgressEvent);
+    queueMicrotask(() => this.listeners.get("load")?.());
+  }
+}
 
 describe("dmsService", () => {
   afterEach(() => {
+    globalThis.document.cookie =
+      "saraise_csrftoken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/";
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -381,6 +442,40 @@ describe("dmsService", () => {
     );
   });
 
+  it("falls back to safe download names when content disposition is absent or malformed", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(new Blob(["policy"]), {
+          status: 200,
+          headers: { "Content-Disposition": "attachment; filename*=UTF-8''%E0%A4%A" },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(new Blob(["shared"]), {
+          status: 200,
+          headers: { "Content-Disposition": 'attachment; filename="shared-policy.pdf"' },
+        })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(dmsService.downloadDocument("document-1")).resolves.toMatchObject({
+      filename: "document",
+      mime_type: "text/plain;charset=UTF-8",
+    });
+    await expect(dmsService.downloadPublicShare("share/token")).resolves.toMatchObject({
+      filename: "shared-policy.pdf",
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(1, ENDPOINTS.DOCUMENTS.DOWNLOAD("document-1"), {
+      credentials: "include",
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/v2/dms/public/shares/share%2Ftoken/download/",
+      { credentials: "include" }
+    );
+  });
+
   it("normalizes failed downloads without leaking transport response bodies", async () => {
     vi.stubGlobal(
       "fetch",
@@ -412,5 +507,146 @@ describe("dmsService", () => {
       message: "Storage is down",
       correlation_id: "corr-download",
     });
+  });
+
+  it("uploads documents through multipart XHR with idempotency, CSRF, progress, and governed data", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeUploadRequest as unknown as typeof XMLHttpRequest);
+    vi.stubGlobal("crypto", { randomUUID: () => "upload-operation-key" });
+    globalThis.document.cookie = "saraise_csrftoken=csrf%20token; path=/";
+    const progress = vi.fn();
+
+    await expect(
+      dmsService.uploadDocument(
+        {
+          file: new File(["policy"], "policy.pdf", { type: "application/pdf" }),
+          name: "Policy",
+          folder_id: "folder-1",
+          description: "Approved",
+          tags: ["legal", "signed"],
+          metadata: { department: "legal" },
+        },
+        { ...uploadOptions, onProgress: progress }
+      )
+    ).resolves.toEqual(document);
+
+    const request = FakeUploadRequest.instances.at(-1);
+    expect(request).toBeDefined();
+    if (!request) throw new Error("Expected upload transport request");
+    expect(request.method).toBe("POST");
+    expect(request.url).toBe(ENDPOINTS.DOCUMENTS.UPLOAD);
+    expect(request.withCredentials).toBe(true);
+    expect(request.timeout).toBe(1000);
+    expect(request.headers).toMatchObject({
+      "Idempotency-Key": "upload-operation-key",
+      "X-CSRFToken": "csrf token",
+    });
+    expect(progress).toHaveBeenCalledWith({ loaded: 25, total: 100, percent: 25 });
+    expect(request.body).toBeInstanceOf(FormData);
+    const body = request.body as FormData;
+    expect(body.get("name")).toBe("Policy");
+    expect(body.get("folder_id")).toBe("folder-1");
+    expect(body.getAll("tags")).toEqual(["legal", "signed"]);
+    expect(body.get("metadata")).toBe(JSON.stringify({ department: "legal" }));
+  });
+
+  it("uploads immutable versions without document metadata and rejects malformed envelopes", async () => {
+    class MalformedUploadRequest extends FakeUploadRequest {
+      responseText = JSON.stringify({
+        data: { malformed: true },
+        meta,
+      });
+    }
+    vi.stubGlobal("crypto", { randomUUID: () => "version-operation-key" });
+    vi.stubGlobal("XMLHttpRequest", MalformedUploadRequest as unknown as typeof XMLHttpRequest);
+
+    const failure = await dmsService
+      .createVersion(
+        {
+          document_id: "document-1",
+          file: new File(["v2"], "policy-v2.pdf", { type: "application/pdf" }),
+          change_note: "Approved update",
+        },
+        uploadOptions
+      )
+      .catch((error: Error) => error);
+
+    expect(failure).toBeInstanceOf(DmsApiError);
+    if (!(failure instanceof DmsApiError)) throw new Error("Expected normalized DMS error");
+    expect(failure.problem).toEqual({
+      kind: "unexpected",
+      status: 502,
+      message: "The upload completed without a governed response.",
+      correlation_id: null,
+    });
+    const request = FakeUploadRequest.instances.at(-1);
+    expect(request?.headers["Idempotency-Key"]).toBe("version-operation-key");
+    expect(request?.body).toBeInstanceOf(FormData);
+    const body = request?.body as FormData;
+    expect(body.get("document_id")).toBe("document-1");
+    expect(body.get("change_note")).toBe("Approved update");
+    expect(body.get("metadata")).toBeNull();
+  });
+
+  it("normalizes upload validation failures with server correlation evidence", async () => {
+    class ValidationUploadRequest extends FakeUploadRequest {
+      status = 422;
+      responseText = JSON.stringify({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "File type is blocked",
+          correlation_id: "corr-upload-validation",
+          detail: {
+            field_errors: [
+              { field: "file", code: "blocked_signature", message: "Executable signature" },
+            ],
+          },
+        },
+      });
+    }
+    vi.stubGlobal("XMLHttpRequest", ValidationUploadRequest as unknown as typeof XMLHttpRequest);
+    vi.stubGlobal("crypto", { randomUUID: () => "upload-validation-key" });
+
+    const failure = await dmsService
+      .uploadDocument(
+        {
+          file: new File(["blocked"], "script.exe", { type: "application/octet-stream" }),
+          name: "Blocked",
+        },
+        uploadOptions
+      )
+      .catch((error: Error) => error);
+
+    expect(failure).toBeInstanceOf(DmsApiError);
+    if (!(failure instanceof DmsApiError)) throw new Error("Expected normalized DMS error");
+    expect(failure.problem).toMatchObject({
+      kind: "validation",
+      message: "File type is blocked",
+      correlation_id: "corr-upload-validation",
+      field_errors: [{ field: "file", code: "blocked_signature", message: "Executable signature" }],
+    });
+  });
+
+  it("does not retry aborted uploads", async () => {
+    class AbortUploadRequest extends FakeUploadRequest {
+      override send(body: XMLHttpRequestBodyInit) {
+        this.body = body;
+        queueMicrotask(() => this.abort());
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", AbortUploadRequest as unknown as typeof XMLHttpRequest);
+    vi.stubGlobal("crypto", { randomUUID: () => "abort-key" });
+
+    await expect(
+      dmsService.uploadDocument(
+        {
+          file: new File(["policy"], "policy.pdf", { type: "application/pdf" }),
+          name: "Policy",
+        },
+        { ...uploadOptions, transport: { ...uploadOptions.transport, max_retries: 2 } }
+      )
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(
+      FakeUploadRequest.instances.filter((item) => item instanceof AbortUploadRequest)
+    ).toHaveLength(1);
   });
 });

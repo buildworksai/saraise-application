@@ -2147,11 +2147,6 @@ class NotificationDispatchService:
             {"tenant_id": str(tenant), "delivery_id": str(delivery.id)},
             f"notifications:retry:{_required_text(idempotency_key, 'idempotency_key', 255)}",
         )
-        delivery.job_id = job.id
-        delivery.failure_code = ""
-        delivery.failure_message = ""
-        delivery.next_attempt_at = None
-        delivery.save(update_fields=["job_id", "failure_code", "failure_message", "next_attempt_at", "updated_at"])
         from .state_machines import DELIVERY_STATE_MACHINE
 
         delivery = DELIVERY_STATE_MACHINE.apply(
@@ -2161,6 +2156,12 @@ class NotificationDispatchService:
             tenant_id=tenant,
             metadata={"job_id": str(job.id)},
         )
+        delivery.refresh_from_db(fields=["status", "transition_history", "updated_at"])
+        delivery.job_id = job.id
+        delivery.failure_code = ""
+        delivery.failure_message = ""
+        delivery.next_attempt_at = None
+        delivery.save(update_fields=["job_id", "failure_code", "failure_message", "next_attempt_at", "updated_at"])
         return OperationResult(delivery.id, delivery.status, delivery.correlation_id, delivery, {"job_id": str(job.id)})
 
     @classmethod

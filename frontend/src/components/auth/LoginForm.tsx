@@ -12,10 +12,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/Input";
 import { Label } from "@/components/ui/Label";
 import { LogoVideo } from "@/components/ui/logo-video";
+import { ApiError } from "@/services/api-client";
 import { authService } from "@/services/auth-service";
 import { useAuthStore } from "@/stores/auth-store";
 import { Loader2, LogIn, Shield, Sparkles, Users } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 export function LoginForm() {
@@ -32,6 +33,12 @@ export function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [emailTouched, setEmailTouched] = useState(false);
   const [passwordTouched, setPasswordTouched] = useState(false);
+  const [passwordFocusRequest, setPasswordFocusRequest] = useState(0);
+
+  useEffect(() => {
+    if (isLoading || !(passwordFocusRequest > 0)) return;
+    document.getElementById(passwordId)?.focus();
+  }, [isLoading, passwordFocusRequest, passwordId]);
 
   const loginHighlights = [
     { icon: Sparkles, text: "AI-native orchestration across ERP workflows" },
@@ -40,9 +47,9 @@ export function LoginForm() {
   ] as const;
 
   const computeEmailError = (emailValue?: string) => {
-    const value = emailValue ?? email;
-    if (!value.trim()) return "Email is required";
-    const isValidEmail = /\S+@\S+\.\S+/.test(value.trim());
+    const value = (emailValue ?? email).trim();
+    if (!value) return "Email is required";
+    const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
     if (!isValidEmail) return "Please enter a valid email address";
     return null;
   };
@@ -51,6 +58,18 @@ export function LoginForm() {
     const value = passwordValue ?? password;
     if (!value) return "Password is required";
     return null;
+  };
+
+  const getLoginFailureMessage = (err: unknown) => {
+    if (err instanceof ApiError) {
+      if (err.status === 400 || err.status === 401 || err.status === 403) {
+        return "Invalid email or password";
+      }
+      if (err.status >= 500) {
+        return "Sign-in service is temporarily unavailable. Try again later.";
+      }
+    }
+    return "Unable to sign in right now. Try again later.";
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -70,7 +89,7 @@ export function LoginForm() {
       // Focus first field with error
       if (currentEmailError) {
         document.getElementById(emailId)?.focus();
-      } else if (currentPasswordError) {
+      } else {
         document.getElementById(passwordId)?.focus();
       }
       return;
@@ -78,11 +97,12 @@ export function LoginForm() {
 
     setError(null);
     setIsLoading(true);
+    const normalizedEmail = email.trim();
 
     try {
       // Phase 6 backend integration
       const response = await authService.login({
-        email: email.trim(),
+        email: normalizedEmail,
         password,
       });
 
@@ -104,17 +124,16 @@ export function LoginForm() {
         navigate("/", { replace: true });
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Invalid email or password";
-      setError(errorMessage);
-      // Focus password field on error for better UX
-      document.getElementById(passwordId)?.focus();
+      setError(getLoginFailureMessage(err));
+      setPasswordFocusRequest((current) => current + 1);
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="h-screen flex overflow-hidden">
+    <main id="main-content" className="h-screen flex overflow-hidden">
+      <h1 className="sr-only">Sign in to SARAISE</h1>
       {/* Left Panel - Logo and Branding */}
       <div className="hidden lg:flex lg:w-1/2 bg-[#040818] flex-col relative overflow-hidden h-full">
         <LogoVideo
@@ -127,11 +146,8 @@ export function LoginForm() {
         {/* Background Pattern */}
         <div className="absolute inset-0 opacity-5 z-[1]">
           <div
-            className="absolute inset-0"
-            style={{
-              backgroundImage: `radial-gradient(circle at 2px 2px, rgba(255,255,255,0.3) 1px, transparent 0)`,
-              backgroundSize: "60px 60px",
-            }}
+            data-testid="login-background-pattern"
+            className="absolute inset-0 bg-[radial-gradient(circle_at_2px_2px,rgba(255,255,255,0.3)_1px,transparent_0)] bg-[length:60px_60px]"
           />
         </div>
 
@@ -214,9 +230,9 @@ export function LoginForm() {
                       setEmailError(computeEmailError());
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && !emailError && email.trim()) {
-                        document.getElementById(passwordId)?.focus();
-                      }
+                      if (e.key !== "Enter") return;
+                      if (computeEmailError()) return;
+                      document.getElementById(passwordId)?.focus();
                     }}
                     autoFocus
                   />
@@ -256,11 +272,6 @@ export function LoginForm() {
                   helperText={!passwordError ? "Enter your password" : undefined}
                   autoComplete="current-password"
                   disabled={isLoading}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !passwordError && password && !isLoading) {
-                      void handleSubmit(e as unknown as React.FormEvent);
-                    }
-                  }}
                 />
                 <div className="text-right text-sm">
                   <Link
@@ -317,6 +328,6 @@ export function LoginForm() {
           </Card>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

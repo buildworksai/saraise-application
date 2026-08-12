@@ -12,7 +12,8 @@ Reference: saraise-documentation/planning/phases/phase-7.5-licensing.md
 
 import functools
 import logging
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Any, Concatenate, Optional, ParamSpec, cast
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -23,9 +24,10 @@ from .services import ModuleAccessService
 from .validator import get_license_validator
 
 logger = logging.getLogger("saraise.licensing")
+P = ParamSpec("P")
 
 
-def require_license(func: Callable) -> Callable:
+def require_license(func: Callable[P, Any]) -> Callable[P, Any]:
     """
     Decorator to require a valid license for an API endpoint.
 
@@ -38,7 +40,7 @@ def require_license(func: Callable) -> Callable:
     """
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
         validator = get_license_validator()
 
         # Skip in development mode
@@ -52,8 +54,16 @@ def require_license(func: Callable) -> Callable:
             return JsonResponse(
                 {
                     "error": "license_required",
-                    "message": "A valid license is required to access this feature.",
-                    "status": license_info.status.value if license_info else "not_found",
+                    # fmt: off
+                    "message": (
+                        "A valid license is required to access this feature."
+                    ),
+                    "status": (
+                        license_info.status.value
+                        if license_info
+                        else "not_found"
+                    ),
+                    # fmt: on
                 },
                 status=status.HTTP_402_PAYMENT_REQUIRED,
             )
@@ -63,7 +73,10 @@ def require_license(func: Callable) -> Callable:
     return wrapper
 
 
-def require_module(module_id: str, write: bool = False) -> Callable:
+def require_module(
+    module_id: str,
+    write: bool = False,
+) -> Callable[[Callable[P, Any]], Callable[P, Any]]:
     """
     Decorator to require a specific module license.
 
@@ -83,9 +96,9 @@ def require_module(module_id: str, write: bool = False) -> Callable:
             ...
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable[P, Any]) -> Callable[P, Any]:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> Any:
             validator = get_license_validator()
 
             # Skip in development mode
@@ -93,7 +106,11 @@ def require_module(module_id: str, write: bool = False) -> Callable:
                 return func(*args, **kwargs)
 
             # Check module access
-            if not validator.check_module_access(module_id, write_operation=write):
+            has_module_access = validator.check_module_access(
+                module_id,
+                write_operation=write,
+            )
+            if not has_module_access:
                 license_info = validator.get_license()
 
                 # Determine error type
@@ -106,7 +123,8 @@ def require_module(module_id: str, write: bool = False) -> Callable:
                             "message": (
                                 "Your license has expired. "
                                 "The system is in read-only mode. "
-                                "Please renew your subscription to enable write operations."
+                                "Please renew your subscription to enable "
+                                "write operations."
                             ),
                             "module": module_id,
                         },
@@ -118,7 +136,12 @@ def require_module(module_id: str, write: bool = False) -> Callable:
                     return JsonResponse(
                         {
                             "error": "module_not_licensed",
-                            "message": f"The '{module_id}' module is not included in your license.",
+                            # fmt: off
+                            "message": (
+                                f"The '{module_id}' module is not included "
+                                "in your license."
+                            ),
+                            # fmt: on
                             "module": module_id,
                             "upgrade_url": "https://subscribe.saraise.com",
                         },
@@ -127,7 +150,7 @@ def require_module(module_id: str, write: bool = False) -> Callable:
 
             return func(*args, **kwargs)
 
-        return wrapper
+        return cast(Callable[P, Any], wrapper)
 
     return decorator
 
@@ -141,7 +164,11 @@ class LicenseRequiredMixin:
             ...
     """
 
-    def check_license(self, request: Request, write: bool = False) -> Optional[JsonResponse]:
+    def check_license(
+        self,
+        request: Request,
+        write: bool = False,
+    ) -> Optional[JsonResponse]:
         """
         Check license and return error response if invalid.
 
@@ -167,16 +194,26 @@ class LicenseRequiredMixin:
             return JsonResponse(
                 {
                     "error": "soft_locked",
-                    "message": "System is in read-only mode due to expired license.",
+                    # fmt: off
+                    "message": (
+                        "System is in read-only mode due to expired license."
+                    ),
+                    # fmt: on
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
 
         return None
 
-    def initial(self, request: Request, *args, **kwargs):
+    def initial(
+        self,
+        request: Request,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         """Override to add license check."""
-        super().initial(request, *args, **kwargs)
+        super_initial = getattr(super(), "initial")
+        super_initial(request, *args, **kwargs)
 
         # Determine if this is a write operation
         write = request.method in ("POST", "PUT", "PATCH", "DELETE")
@@ -209,7 +246,10 @@ class ModuleRequiredMixin:
 
         write = request.method in ("POST", "PUT", "PATCH", "DELETE")
 
-        if not validator.check_module_access(self.required_module, write_operation=write):
+        if not validator.check_module_access(
+            self.required_module,
+            write_operation=write,
+        ):
             if validator.is_soft_locked() and write:
                 return JsonResponse(
                     {
@@ -222,7 +262,11 @@ class ModuleRequiredMixin:
             return JsonResponse(
                 {
                     "error": "module_not_licensed",
-                    "message": f"Module '{self.required_module}' is not licensed.",
+                    # fmt: off
+                    "message": (
+                        f"Module '{self.required_module}' is not licensed."
+                    ),
+                    # fmt: on
                     "upgrade_url": "https://subscribe.saraise.com",
                 },
                 status=status.HTTP_402_PAYMENT_REQUIRED,
@@ -230,9 +274,15 @@ class ModuleRequiredMixin:
 
         return None
 
-    def initial(self, request: Request, *args, **kwargs):
+    def initial(
+        self,
+        request: Request,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         """Override to add module license check."""
-        super().initial(request, *args, **kwargs)
+        super_initial = getattr(super(), "initial")
+        super_initial(request, *args, **kwargs)
 
         error_response = self.check_module_license(request)
         if error_response:
@@ -252,7 +302,9 @@ class LicenseException(Exception):
 # ============================================================================
 
 
-def requires_license(func: Callable) -> Callable:
+def requires_license(
+    func: Callable[Concatenate[Any, P], Any],
+) -> Callable[Concatenate[Any, P], Any]:
     """
     Decorator to require valid license for a view.
 
@@ -265,7 +317,7 @@ def requires_license(func: Callable) -> Callable:
     """
 
     @functools.wraps(func)
-    def wrapper(request, *args, **kwargs):
+    def wrapper(request: Any, *args: P.args, **kwargs: P.kwargs) -> Any:
         # Skip in development mode
         if getattr(settings, "SARAISE_MODE", "development") == "development":
             return func(request, *args, **kwargs)
@@ -285,10 +337,15 @@ def requires_license(func: Callable) -> Callable:
             )
         return func(request, *args, **kwargs)
 
-    return wrapper
+    return cast(Callable[Concatenate[Any, P], Any], wrapper)
 
 
-def requires_module(module_name: str):
+def requires_module(
+    module_name: str,
+) -> Callable[
+    [Callable[Concatenate[Any, P], Any]],
+    Callable[Concatenate[Any, P], Any],
+]:
     """
     Decorator to require specific module access.
 
@@ -300,15 +357,22 @@ def requires_module(module_name: str):
             ...
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(
+        func: Callable[Concatenate[Any, P], Any],
+    ) -> Callable[Concatenate[Any, P], Any]:
         @functools.wraps(func)
-        def wrapper(request, *args, **kwargs):
+        def wrapper(
+            request: Any,
+            *args: P.args,
+            **kwargs: P.kwargs,
+        ) -> Any:
+            mode = getattr(settings, "SARAISE_MODE", "development")
             # Skip in development mode
-            if getattr(settings, "SARAISE_MODE", "development") == "development":
+            if mode == "development":
                 return func(request, *args, **kwargs)
 
             # Skip in SaaS mode
-            if getattr(settings, "SARAISE_MODE", "development") == "saas":
+            if mode == "saas":
                 return func(request, *args, **kwargs)
 
             license = getattr(request, "license", None)
@@ -321,7 +385,10 @@ def requires_module(module_name: str):
                     status=403,
                 )
 
-            can_access, reason = ModuleAccessService.can_access_module(license, module_name)
+            can_access, reason = ModuleAccessService.can_access_module(
+                license,
+                module_name,
+            )
             if not can_access:
                 return JsonResponse(
                     {
@@ -334,12 +401,17 @@ def requires_module(module_name: str):
 
             return func(request, *args, **kwargs)
 
-        return wrapper
+        return cast(Callable[Concatenate[Any, P], Any], wrapper)
 
     return decorator
 
 
-def requires_write_access(module_name: str):
+def requires_write_access(
+    module_name: str,
+) -> Callable[
+    [Callable[Concatenate[Any, P], Any]],
+    Callable[Concatenate[Any, P], Any],
+]:
     """
     Decorator to require write access (not in soft lock).
 
@@ -351,15 +423,22 @@ def requires_write_access(module_name: str):
             ...
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(
+        func: Callable[Concatenate[Any, P], Any],
+    ) -> Callable[Concatenate[Any, P], Any]:
         @functools.wraps(func)
-        def wrapper(request, *args, **kwargs):
+        def wrapper(
+            request: Any,
+            *args: P.args,
+            **kwargs: P.kwargs,
+        ) -> Any:
+            mode = getattr(settings, "SARAISE_MODE", "development")
             # Skip in development mode
-            if getattr(settings, "SARAISE_MODE", "development") == "development":
+            if mode == "development":
                 return func(request, *args, **kwargs)
 
             # Skip in SaaS mode
-            if getattr(settings, "SARAISE_MODE", "development") == "saas":
+            if mode == "saas":
                 return func(request, *args, **kwargs)
 
             license = getattr(request, "license", None)
@@ -376,7 +455,12 @@ def requires_write_access(module_name: str):
                 return JsonResponse(
                     {
                         "error": "read_only_mode",
-                        "message": ("License expired. Read-only mode active. " "Please renew to enable writes."),
+                        # fmt: off
+                        "message": (
+                            "License expired. Read-only mode active. "
+                            "Please renew to enable writes."
+                        ),
+                        # fmt: on
                         "module": module_name,
                     },
                     status=403,
@@ -384,6 +468,6 @@ def requires_write_access(module_name: str):
 
             return func(request, *args, **kwargs)
 
-        return wrapper
+        return cast(Callable[Concatenate[Any, P], Any], wrapper)
 
     return decorator

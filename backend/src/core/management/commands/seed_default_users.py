@@ -4,8 +4,10 @@ import ast
 import os
 import re
 import uuid
+from collections.abc import Iterable, Mapping
 from datetime import timedelta
 from pathlib import Path
+from typing import Any, cast
 
 import yaml
 from django.conf import settings
@@ -21,8 +23,12 @@ from src.core.user_models import UserProfile
 
 User = get_user_model()
 PASSWORD_ENV = "SARAISE_SEED_DEFAULT_PASSWORD"  # pragma: allowlist secret
+LOCAL_DEVELOPMENT_API_CALLS_PER_DAY = 1_000_000
 PERMISSION_CODE_RE = re.compile(
     r"^(?P<module>[a-z][a-z0-9_-]{0,99})\.(?P<resource>[a-z][a-z0-9_-]{0,99}):(?P<action>[a-z][a-z0-9_-]{0,49})$"
+)
+MANIFEST_PERMISSION_CODE_RE = re.compile(
+    r"^(?P<module>[a-z][a-z0-9_-]{0,99})\.(?P<resource>\*|[a-z][a-z0-9_-]{0,99}):(?P<action>[a-z][a-z0-9_-]{0,49})$"
 )
 ACCESS_RESOURCE_RE = re.compile(r"['\"]([a-z][a-z0-9_-]*(?:[.:][a-z][a-z0-9_-]*)*)['\"]")
 STANDARD_VIEWSET_ACTIONS = (
@@ -52,12 +58,42 @@ LOCAL_DEVELOPMENT_QUOTA_RESOURCES = (
     "integrity-verifications",
     "provider-probes",
 )
+LOCAL_AI_PROVIDER_CATALOG: tuple[dict[str, Any], ...] = (
+    {
+        "name": "OpenAI",
+        "provider_type": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "api_version": "",
+        "models": (
+            {
+                "model_id": "gpt-4.1-mini",
+                "display_name": "GPT-4.1 mini",
+                "capabilities": ("chat", "tool-calling", "structured-output"),
+                "max_tokens": 32768,
+            },
+        ),
+    },
+    {
+        "name": "Anthropic",
+        "provider_type": "anthropic",
+        "base_url": "https://api.anthropic.com",
+        "api_version": "2023-06-01",
+        "models": (
+            {
+                "model_id": "claude-3-5-sonnet-latest",
+                "display_name": "Claude 3.5 Sonnet",
+                "capabilities": ("chat", "tool-calling"),
+                "max_tokens": 200000,
+            },
+        ),
+    },
+)
 
 
 class Command(BaseCommand):
     help = "Seed default users for development (platform and tenant users)"
 
-    def add_arguments(self, parser):
+    def add_arguments(self, parser: Any) -> None:
         parser.add_argument(
             "--force",
             action="store_true",
@@ -70,7 +106,7 @@ class Command(BaseCommand):
         )
 
     @transaction.atomic
-    def handle(self, *args, **options):
+    def handle(self, *args: Any, **options: Any) -> None:
         force = options.get("force", False)
         common_password = options.get("password") or os.environ.get(PASSWORD_ENV)
         if not common_password:
@@ -133,13 +169,13 @@ class Command(BaseCommand):
         tenant_slug = "buildworks"
         try:
             from src.core.licensing.models import License, LicenseStatus, Organization
-            from src.modules.tenant_management.models import Tenant  # type: ignore
+            from src.modules.tenant_management.models import Tenant
 
-            organization, organization_created = Organization.objects.get_or_create(
+            organization, organization_created = cast(Any, Organization).objects.get_or_create(
                 domain="buildworks.ai",
                 defaults={"name": "BuildWorks AI"},
             )
-            License.objects.get_or_create(
+            cast(Any, License).objects.get_or_create(
                 organization=organization,
                 defaults={
                     "status": LicenseStatus.ACTIVE,
@@ -171,10 +207,13 @@ class Command(BaseCommand):
                     "default_currency": "USD",
                     "max_users": 50,
                     "max_storage_gb": 10,
-                    "max_api_calls_per_day": 10000,
+                    "max_api_calls_per_day": LOCAL_DEVELOPMENT_API_CALLS_PER_DAY,
                     "created_by": None,
                 },
             )
+            if tenant_obj.max_api_calls_per_day < LOCAL_DEVELOPMENT_API_CALLS_PER_DAY:
+                tenant_obj.max_api_calls_per_day = LOCAL_DEVELOPMENT_API_CALLS_PER_DAY
+                tenant_obj.save(update_fields=["max_api_calls_per_day", "updated_at"])
             mode = getattr(settings, "SARAISE_MODE", "development")
             tenant_id = str(organization.id if mode in {"development", "self-hosted"} else tenant_obj.id)
             if tenant_created:
@@ -264,7 +303,9 @@ class Command(BaseCommand):
                     self._seeded_tenant_emails(tenant_users),
                 )
                 self._bootstrap_local_access(tenant_id, local_users)
+                self._bootstrap_local_ai_provider_catalog()
                 self._bootstrap_local_procurement_configuration(tenant_id, local_users)
+                self._bootstrap_local_multi_company_configuration(tenant_id, local_users)
 
         # Summary
         self.stdout.write(self.style.SUCCESS("\n✅ Default users seeded successfully!"))
@@ -285,12 +326,12 @@ class Command(BaseCommand):
             self.stdout.write("         are managed via Role model in security_access_control module.")
 
     @staticmethod
-    def _seeded_tenant_emails(tenant_users) -> tuple[str, ...]:
+    def _seeded_tenant_emails(tenant_users: Iterable[Mapping[str, object]]) -> tuple[str, ...]:
         """Return configured tenant emails used to bind explicit local access grants."""
 
         return tuple(str(user_config["email"]) for user_config in tenant_users)
 
-    def _local_access_users(self, tenant_id: str, seeded_emails: tuple[str, ...]):
+    def _local_access_users(self, tenant_id: str, seeded_emails: tuple[str, ...]) -> tuple[Any, ...]:
         """Return users that should receive explicit local UAT access grants."""
 
         return tuple(
@@ -303,7 +344,7 @@ class Command(BaseCommand):
             .order_by("id")
         )
 
-    def _bootstrap_local_access(self, tenant_id: str, tenant_users) -> None:
+    def _bootstrap_local_access(self, tenant_id: str, tenant_users: Iterable[Any]) -> None:
         """Create explicit local access state for every seeded tenant UAT identity."""
 
         try:
@@ -329,7 +370,7 @@ class Command(BaseCommand):
         permissions, resources, capabilities = self._collect_local_access_contracts()
         created_permissions = []
         for code in sorted(permissions):
-            match = PERMISSION_CODE_RE.fullmatch(code)
+            match = MANIFEST_PERMISSION_CODE_RE.fullmatch(code)
             if match is None:
                 continue
             item, _ = Permission.objects.get_or_create(
@@ -417,7 +458,48 @@ class Command(BaseCommand):
             )
         )
 
-    def _bootstrap_local_procurement_configuration(self, tenant_id: str, tenant_users) -> None:
+    def _bootstrap_local_ai_provider_catalog(self) -> None:
+        """Create platform-owned AI provider reference rows needed by local UAT."""
+
+        try:
+            from src.modules.ai_provider_configuration.models import AIModel, AIProvider
+        except Exception as exc:
+            self.stdout.write(self.style.WARNING(f"⚠️  Could not bootstrap AI provider catalog: {exc}"))
+            return
+
+        provider_count = 0
+        model_count = 0
+        for provider_config in LOCAL_AI_PROVIDER_CATALOG:
+            provider, _ = AIProvider.objects.update_or_create(
+                name=str(provider_config["name"]),
+                defaults={
+                    "provider_type": str(provider_config["provider_type"]),
+                    "base_url": str(provider_config["base_url"]),
+                    "api_version": str(provider_config["api_version"]),
+                    "config": {"seeded_for": "local_uat"},
+                    "is_active": True,
+                },
+            )
+            provider_count += 1
+            for model_config in provider_config["models"]:
+                AIModel.objects.update_or_create(
+                    provider=provider,
+                    model_id=str(model_config["model_id"]),
+                    defaults={
+                        "display_name": str(model_config["display_name"]),
+                        "capabilities": list(model_config["capabilities"]),
+                        "pricing": {},
+                        "max_tokens": int(model_config["max_tokens"]),
+                        "is_active": True,
+                    },
+                )
+                model_count += 1
+
+        self.stdout.write(
+            self.style.SUCCESS(f"✅ Bootstrapped AI provider catalog: {provider_count} providers, {model_count} models")
+        )
+
+    def _bootstrap_local_procurement_configuration(self, tenant_id: str, tenant_users: Iterable[Any]) -> None:
         """Ensure local purchase-management settings have an active tenant policy."""
 
         try:
@@ -489,6 +571,53 @@ class Command(BaseCommand):
                 self.style.SUCCESS(f"✅ Bootstrapped local procurement configuration: {created} active environments")
             )
 
+    def _bootstrap_local_multi_company_configuration(self, tenant_id: str, tenant_users: Iterable[Any]) -> None:
+        """Ensure local multi-company UAT has active fail-closed configuration."""
+
+        try:
+            from src.modules.multi_company.models import MultiCompanyConfigurationVersion
+            from src.modules.multi_company.services import DEFAULT_SETTINGS, MultiCompanyConfigurationService
+        except Exception as exc:
+            self.stdout.write(self.style.WARNING(f"⚠️  Could not bootstrap multi-company configuration: {exc}"))
+            return
+
+        tenant_uuid = uuid.UUID(str(tenant_id))
+        users = tuple(tenant_users)
+        actor_email = users[0].email if users else "local-multi-company-configuration"
+        author_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:seed:{actor_email}:multi-company-author"))
+        activator_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:seed:{actor_email}:multi-company-activator"))
+        created = 0
+        for environment in MultiCompanyConfigurationVersion.Environment.values:
+            active_exists = (
+                MultiCompanyConfigurationVersion.objects.for_tenant(tenant_uuid)
+                .filter(
+                    environment=environment,
+                    status=MultiCompanyConfigurationVersion.Status.ACTIVE,
+                )
+                .exists()
+            )
+            if active_exists:
+                continue
+            draft = MultiCompanyConfigurationService.create_draft(
+                tenant_uuid,
+                author_id,
+                "seed-default-users-multi-company-configuration",
+                environment,
+                dict(DEFAULT_SETTINGS),
+                f"Seed local multi-company {environment} defaults",
+            )
+            MultiCompanyConfigurationService.activate(
+                tenant_uuid,
+                draft.id,
+                activator_id,
+                "seed-default-users-multi-company-configuration",
+            )
+            created += 1
+        if created:
+            self.stdout.write(
+                self.style.SUCCESS(f"✅ Bootstrapped local multi-company configuration: {created} active environments")
+            )
+
     def _collect_local_access_contracts(self) -> tuple[set[str], set[str], set[str]]:
         permissions: set[str] = set()
         resources: set[str] = set()
@@ -514,7 +643,7 @@ class Command(BaseCommand):
             except OSError:
                 continue
             for token in ACCESS_RESOURCE_RE.findall(text):
-                if PERMISSION_CODE_RE.fullmatch(token):
+                if PERMISSION_CODE_RE.fullmatch(token) or MANIFEST_PERMISSION_CODE_RE.fullmatch(token):
                     permissions.add(token)
                     capabilities.add(token.split(".", maxsplit=1)[0])
                 elif token.startswith("module."):
@@ -628,7 +757,7 @@ class Command(BaseCommand):
         if not token:
             return
 
-        if key in {"permission", "permissions"} and PERMISSION_CODE_RE.fullmatch(token):
+        if key in {"permission", "permissions"} and MANIFEST_PERMISSION_CODE_RE.fullmatch(token):
             permissions.add(token)
             capabilities.add(token.split(".", maxsplit=1)[0])
         elif key in {"entitlement", "entitlements"}:
@@ -647,7 +776,7 @@ class Command(BaseCommand):
         tenant_id: str | None = None,
         tenant_role: str | None = None,
         force: bool = False,
-    ):
+    ) -> tuple[Any, bool]:
         """Create or update a user with profile."""
         try:
             # Get user and refresh from database to ensure it's not stale
@@ -731,7 +860,7 @@ class Command(BaseCommand):
                 profile.tenant_role = tenant_role
                 # Try to save, but handle orphaned profile errors
                 try:
-                    profile.save()
+                    cast(Any, profile).save()
                 except Exception as e:
                     # If save fails due to orphaned user, delete and recreate
                     if "does not exist" in str(e).lower():
@@ -823,7 +952,7 @@ class Command(BaseCommand):
             profile.tenant_role = tenant_role
             # Try to save, but handle orphaned profile errors
             try:
-                profile.save()
+                cast(Any, profile).save()
             except Exception as e:
                 # If save fails due to orphaned user, delete and recreate
                 if "does not exist" in str(e).lower():
@@ -840,7 +969,7 @@ class Command(BaseCommand):
 
             return user, True
 
-    def _cleanup_orphaned_profiles(self):
+    def _cleanup_orphaned_profiles(self) -> None:
         """Remove any UserProfile records that reference non-existent users."""
         try:
             # Get all user IDs that exist

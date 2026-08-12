@@ -207,29 +207,32 @@ export function RunDetailPage() {
             ) : (
               <div className="divide-y">
                 {tasks.map((task) => (
-                  <button
-                    type="button"
+                  <div
                     key={task.id}
-                    onClick={() => setSelectedTaskId(task.id)}
-                    className="flex w-full items-center justify-between gap-3 py-3 text-left hover:bg-muted/30"
+                    className="flex w-full items-center justify-between gap-3 py-3 hover:bg-muted/30"
                   >
-                    <div>
-                      <p className="font-medium">{task.node_name}</p>
-                      <p className="text-xs text-muted-foreground">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTaskId(task.id)}
+                      className="min-w-0 flex-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      aria-label={`Inspect ${task.node_name}`}
+                    >
+                      <span className="block font-medium">{task.node_name}</span>
+                      <span className="block text-xs text-muted-foreground">
                         Attempt {task.current_attempt}/{task.max_attempts} ·{" "}
                         {formatDuration(task.started_at, task.completed_at, minuteThreshold)}
-                      </p>
+                      </span>
                       {task.status === "retry_wait" ? (
-                        <p className="text-xs text-secondary-foreground">
+                        <span className="block text-xs text-secondary-foreground">
                           Retry pending; inspect attempt timing for the countdown.
-                        </p>
+                        </span>
                       ) : null}
                       {task.error_message ? (
-                        <p className="mt-1 text-xs text-destructive">
+                        <span className="mt-1 block text-xs text-destructive">
                           {task.error_code}: {task.error_message}
-                        </p>
+                        </span>
                       ) : null}
-                    </div>
+                    </button>
                     <div className="flex items-center gap-2">
                       <StatusPill status={task.status} />
                       {task.status === "failed" ? (
@@ -246,7 +249,7 @@ export function RunDetailPage() {
                         </Button>
                       ) : null}
                     </div>
-                  </button>
+                  </div>
                 ))}
               </div>
             )}

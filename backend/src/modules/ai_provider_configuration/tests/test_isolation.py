@@ -9,12 +9,14 @@ Rule: ALL tenant-scoped queries MUST filter by tenant_id
 """
 
 import uuid
+from typing import Any
 
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APIClient
 
+from src.core.access import AccessDecision, AccessReasonCode
 from src.core.auth_utils import get_user_tenant_id
 from src.modules.ai_provider_configuration.models import (
     AIModel,
@@ -23,6 +25,7 @@ from src.modules.ai_provider_configuration.models import (
     AIProviderCredential,
     AIUsageLog,
 )
+from src.modules.ai_provider_configuration.permissions import AIProviderActionPermission
 
 User = get_user_model()
 
@@ -31,6 +34,31 @@ User = get_user_model()
 def override_saraise_mode(settings):
     """Force development mode for tests to bypass licensing."""
     settings.SARAISE_MODE = "development"
+
+
+@pytest.fixture(autouse=True)
+def allow_ai_provider_access(monkeypatch):
+    """Allow module access through the same pipeline seam used by the API."""
+
+    class AllowPipeline:
+        def decide(
+            self,
+            tenant_id: uuid.UUID | str | None,
+            identity: object,
+            required_permission: str | None,
+            **kwargs: Any,
+        ) -> AccessDecision:
+            del identity, required_permission, kwargs
+            if tenant_id is None:
+                return AccessDecision.deny(AccessReasonCode.DENY_TENANT_MISMATCH, "Tenant is required.")
+            return AccessDecision(
+                allowed=True,
+                reason_code=AccessReasonCode.ALLOW,
+                reason="test isolation access granted",
+                tenant_id=uuid.UUID(str(tenant_id)),
+            )
+
+    monkeypatch.setattr(AIProviderActionPermission, "pipeline", AllowPipeline())
 
 
 @pytest.fixture

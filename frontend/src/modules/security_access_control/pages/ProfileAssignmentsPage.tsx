@@ -75,7 +75,9 @@ export function ProfileAssignmentsPage() {
   });
   const reset = () => setParams(new URLSearchParams());
   const filtered = Boolean(profile || user || role || revoked);
-  if (query.isLoading) return <PageSkeleton />;
+  if (configuration.isLoading || query.isLoading) return <PageSkeleton />;
+  if (configuration.error)
+    return <GovernedError error={configuration.error} retry={() => void configuration.refetch()} />;
   if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()} />;
   if (!query.data)
     return <GovernedError error={new Error("No profile-assignment response was received.")} />;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from django.core.exceptions import ValidationError
 
@@ -11,6 +12,11 @@ from src.core.tenancy.models import TenantQuerySet
 
 class DmsQuerySet(TenantQuerySet):
     """Common tenant boundary plus the soft-deletion visibility contract."""
+
+    def for_tenant(self, tenant_id: UUID) -> "DmsQuerySet":
+        """Return records owned by ``tenant_id`` while preserving DMS queryset methods."""
+
+        return self.filter(tenant_id=tenant_id)
 
     def alive(self) -> "DmsQuerySet":
         """Return records that have not been soft deleted."""

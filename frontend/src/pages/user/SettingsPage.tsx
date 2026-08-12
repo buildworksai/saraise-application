@@ -132,6 +132,7 @@ export const SettingsPage = () => {
                 <p className="text-xs text-muted-foreground">Receive notifications via email</p>
               </div>
               <button
+                aria-label="Email Notifications"
                 onClick={() =>
                   setSettings((prev) => ({
                     ...prev,
@@ -155,6 +156,7 @@ export const SettingsPage = () => {
                 <p className="text-xs text-muted-foreground">Receive browser push notifications</p>
               </div>
               <button
+                aria-label="Push Notifications"
                 onClick={() =>
                   setSettings((prev) => ({
                     ...prev,
@@ -180,6 +182,7 @@ export const SettingsPage = () => {
                 </p>
               </div>
               <button
+                aria-label="Security Alerts"
                 onClick={() =>
                   setSettings((prev) => ({
                     ...prev,
@@ -216,8 +219,11 @@ export const SettingsPage = () => {
           </div>
           <div className="p-6 space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-2">Language</label>
+              <label htmlFor="settings-language" className="block text-sm font-medium mb-2">
+                Language
+              </label>
               <select
+                id="settings-language"
                 value={settings.language}
                 onChange={(e) => setSettings((prev) => ({ ...prev, language: e.target.value }))}
                 className="w-full px-4 py-2 border border-border rounded-md bg-background"
@@ -229,8 +235,11 @@ export const SettingsPage = () => {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2">Timezone</label>
+              <label htmlFor="settings-timezone" className="block text-sm font-medium mb-2">
+                Timezone
+              </label>
               <select
+                id="settings-timezone"
                 value={settings.timezone}
                 onChange={(e) => setSettings((prev) => ({ ...prev, timezone: e.target.value }))}
                 className="w-full px-4 py-2 border border-border rounded-md bg-background"

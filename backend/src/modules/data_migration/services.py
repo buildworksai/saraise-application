@@ -14,9 +14,10 @@ import os
 import re
 import socket
 import uuid
+from collections.abc import Container, Iterable, Mapping, Sequence, Sized
 from dataclasses import asdict, dataclass
 from decimal import Decimal
-from typing import Mapping, Sequence
+from typing import Any, cast
 from urllib.parse import urlsplit
 from uuid import UUID
 
@@ -30,7 +31,7 @@ from src.core.async_jobs.models import AsyncJob
 from src.core.async_jobs.services import enqueue
 from src.core.middleware.correlation import get_correlation_id
 
-from .adapters import SOURCE_ADAPTERS, TARGET_ADAPTERS
+from .adapters import SOURCE_ADAPTERS, TARGET_ADAPTERS, SourceAdapter, TargetAdapter
 from .events import publish_event
 from .models import (
     DataMigrationConfiguration,
@@ -124,6 +125,30 @@ def _text(value: object, field: str, maximum: int = 255) -> str:
     return normalized
 
 
+def _mapping(value: object, field: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise MigrationServiceError(f"{field} must be an object", code="INVALID_ARGUMENT")
+    return cast(Mapping[str, object], value)
+
+
+def _mapping_items(value: object, field: str) -> list[Mapping[str, object]]:
+    if not isinstance(value, Iterable) or isinstance(value, (str, bytes, Mapping)):
+        raise MigrationServiceError(f"{field} must be a list of objects", code="INVALID_ARGUMENT")
+    return [_mapping(item, field) for item in value]
+
+
+def _iterable(value: object, field: str) -> Iterable[object]:
+    if not isinstance(value, Iterable):
+        raise MigrationServiceError(f"{field} must be iterable", code="INVALID_ARGUMENT")
+    return value
+
+
+def _container(value: object, field: str) -> Container[object]:
+    if not isinstance(value, Container):
+        raise MigrationServiceError(f"{field} must be a container", code="INVALID_ARGUMENT")
+    return value
+
+
 def _correlation(value: str | None = None) -> str:
     return _text(value or get_correlation_id() or str(uuid.uuid4()), "correlation_id", 128)
 
@@ -187,12 +212,13 @@ def _validate_connection_destination(values: Mapping[str, object]) -> None:
 
 
 def _job(tenant_id: UUID, job_id: object, *, lock: bool = False, include_deleted: bool = False) -> MigrationJob:
+    job_uuid = _uuid(job_id, "job_id")
     query = MigrationJob.objects.for_tenant(tenant_id)
     if lock:
         query = query.select_for_update()
     if not include_deleted:
         query = query.filter(is_deleted=False)
-    result = query.filter(pk=job_id).first()
+    result = query.filter(pk=job_uuid).first()
     if result is None:
         raise NotFound("Migration job not found.")
     return result
@@ -292,16 +318,16 @@ def _configuration(tenant_id: UUID) -> DataMigrationConfiguration:
     return config
 
 
-def _source_adapter(key: str) -> object:
+def _source_adapter(key: str) -> SourceAdapter:
     try:
-        return SOURCE_ADAPTERS.get(key)
+        return cast(SourceAdapter, SOURCE_ADAPTERS.get(key))
     except LookupError as exc:
         raise CapabilityUnavailable(key) from exc
 
 
-def _target_adapter(key: str) -> object:
+def _target_adapter(key: str) -> TargetAdapter:
     try:
-        return TARGET_ADAPTERS.get(key)
+        return cast(TargetAdapter, TARGET_ADAPTERS.get(key))
     except LookupError as exc:
         raise CapabilityUnavailable(key) from exc
 
@@ -324,7 +350,11 @@ def _validate_source_reference(
     """Resolve every source reference through its owning service boundary."""
     if source_type in {"database", "api"}:
         connection_id = source_config.get("connection_id")
-        if not ExternalConnection.objects.for_tenant(tenant).filter(pk=connection_id, is_active=True).exists():
+        if (
+            not ExternalConnection.objects.for_tenant(tenant)
+            .filter(pk=_uuid(connection_id, "connection_id"), is_active=True)
+            .exists()
+        ):
             raise MigrationServiceError(
                 "Active source connection not found for tenant.", code="INVALID_SOURCE_REFERENCE"
             )
@@ -366,7 +396,12 @@ class ExternalConnectionService:
         tenant_id: object, connection_id: object, actor_id: object, payload: Mapping[str, object]
     ) -> ExternalConnection:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
-        connection = ExternalConnection.objects.for_tenant(tenant).select_for_update().filter(pk=connection_id).first()
+        connection = (
+            ExternalConnection.objects.for_tenant(tenant)
+            .select_for_update()
+            .filter(pk=_uuid(connection_id, "connection_id"))
+            .first()
+        )
         if connection is None:
             raise NotFound("External connection not found.")
         immutable = {"id", "tenant_id", "created_by", "credential_ref"}
@@ -388,7 +423,12 @@ class ExternalConnectionService:
         tenant_id: object, connection_id: object, actor_id: object, credential_ref: str
     ) -> ExternalConnection:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
-        connection = ExternalConnection.objects.for_tenant(tenant).select_for_update().filter(pk=connection_id).first()
+        connection = (
+            ExternalConnection.objects.for_tenant(tenant)
+            .select_for_update()
+            .filter(pk=_uuid(connection_id, "connection_id"))
+            .first()
+        )
         if connection is None:
             raise NotFound("External connection not found.")
         connection.credential_ref = _text(credential_ref, "credential_ref")
@@ -412,7 +452,11 @@ class ExternalConnectionService:
     def test(tenant_id: object, connection_id: object, actor_id: object) -> dict[str, object]:
         tenant = _uuid(tenant_id, "tenant_id")
         _uuid(actor_id, "actor_id")
-        connection = ExternalConnection.objects.for_tenant(tenant).filter(pk=connection_id, is_active=True).first()
+        connection = (
+            ExternalConnection.objects.for_tenant(tenant)
+            .filter(pk=_uuid(connection_id, "connection_id"), is_active=True)
+            .first()
+        )
         if connection is None:
             raise NotFound("Active external connection not found.")
         # Providers register a source adapter that performs the smallest verified read.
@@ -439,7 +483,11 @@ class MigrationJobService:
         source_type = _text(values.get("source_type"), "source_type", 20)
         values["source_config"] = validate_source_config(source_type, values.get("source_config", {}))
         _validate_source_reference(
-            tenant, actor, source_type, values["source_config"], values.get("source_artifact_id")
+            tenant,
+            actor,
+            source_type,
+            _mapping(values["source_config"], "source_config"),
+            values.get("source_artifact_id"),
         )
         _enforce_runtime_policy(tenant, _text(values.get("target_adapter"), "target_adapter", 100))
         job = MigrationJob(tenant_id=tenant, created_by=actor, **values)
@@ -478,7 +526,7 @@ class MigrationJobService:
             tenant,
             actor,
             source_type,
-            values["source_config"],
+            _mapping(values["source_config"], "source_config"),
             values.get("source_artifact_id", job.source_artifact_id),
         )
         _enforce_runtime_policy(tenant, str(values.get("target_adapter", job.target_adapter)))
@@ -642,9 +690,9 @@ class MigrationJobService:
             raise MigrationServiceError(
                 "Import document contains forbidden identity or execution fields.", code="INVALID_IMPORT"
             )
-        mappings = supplied.get("mappings", [])
-        rules = supplied.get("rules", [])
-        job = MigrationJobService.create(tenant_id, actor_id, supplied.get("job", {}))
+        mappings = _mapping_items(supplied.get("mappings", []), "mappings")
+        rules = _mapping_items(supplied.get("rules", []), "rules")
+        job = MigrationJobService.create(tenant_id, actor_id, _mapping(supplied.get("job", {}), "job"))
         for item in mappings:
             MigrationMappingService.create(tenant_id, job.id, actor_id, item)
         for item in rules:
@@ -680,7 +728,7 @@ class MigrationMappingService:
             MigrationMapping.objects.for_tenant(tenant)
             .select_for_update()
             .select_related("job")
-            .filter(pk=mapping_id, job__is_deleted=False)
+            .filter(pk=_uuid(mapping_id, "mapping_id"), job__is_deleted=False)
             .first()
         )
         if mapping is None:
@@ -704,7 +752,7 @@ class MigrationMappingService:
             MigrationMapping.objects.for_tenant(tenant)
             .select_for_update()
             .select_related("job")
-            .filter(pk=mapping_id)
+            .filter(pk=_uuid(mapping_id, "mapping_id"))
             .first()
         )
         if mapping is None:
@@ -724,6 +772,11 @@ class MigrationMappingService:
         by_id = {str(row.id): row for row in rows}
         if len(ordered_ids) != len(rows) or set(map(str, ordered_ids)) != set(by_id):
             raise MigrationServiceError("Reorder must contain every mapping exactly once.", code="INVALID_ORDER")
+        offset = len(rows)
+        for index, row in enumerate(rows):
+            row.position = offset + index
+            row.updated_by = actor
+        MigrationMapping.objects.bulk_update(rows, ("position", "updated_by", "updated_at"))
         for position, identifier in enumerate(ordered_ids):
             row = by_id[str(identifier)]
             row.position = position
@@ -740,7 +793,8 @@ class MigrationMappingService:
         schema = adapter.describe_schema(job.target_entity)
         profile = SourceInspectionService.preview(tenant, job.id, min(25, _configuration(tenant).preview_row_limit))
         source_fields = sorted({key for record in profile.records for key in record})
-        targets = {str(item["name"]).lower(): item for item in schema.get("fields", [])}
+        schema_fields = cast(Iterable[Mapping[str, object]], _mapping_items(schema.get("fields", []), "fields"))
+        targets = {str(item["name"]).lower(): item for item in schema_fields}
         suggestions = []
         for source in source_fields:
             normalized = re.sub(r"[^a-z0-9]", "", source.lower())
@@ -767,7 +821,11 @@ class MigrationMappingService:
         suggestions = {item["id"]: item for item in MigrationMappingService.suggest_deterministic(tenant_id, job_id)}
         if not set(suggestion_ids) <= set(suggestions):
             raise MigrationServiceError("Unknown or stale mapping suggestion.", code="INVALID_SUGGESTION")
-        start = MigrationMapping.objects.for_tenant(_uuid(tenant_id, "tenant_id")).filter(job_id=job_id).count()
+        start = (
+            MigrationMapping.objects.for_tenant(_uuid(tenant_id, "tenant_id"))
+            .filter(job_id=_uuid(job_id, "job_id"))
+            .count()
+        )
         return [
             MigrationMappingService.create(
                 tenant_id,
@@ -818,7 +876,7 @@ class ValidationRuleService:
             ValidationRule.objects.for_tenant(tenant)
             .select_for_update()
             .select_related("job")
-            .filter(pk=rule_id)
+            .filter(pk=_uuid(rule_id, "rule_id"))
             .first()
         )
         if rule is None:
@@ -842,7 +900,7 @@ class ValidationRuleService:
             ValidationRule.objects.for_tenant(tenant)
             .select_for_update()
             .select_related("job")
-            .filter(pk=rule_id)
+            .filter(pk=_uuid(rule_id, "rule_id"))
             .first()
         )
         if rule is None:
@@ -851,9 +909,11 @@ class ValidationRuleService:
         rule.delete()
         _bump_definition(job, actor, "Validation rule deleted")
 
-    reorder = staticmethod(
-        lambda tenant_id, job_id, actor_id, ordered_ids: _reorder_rules(tenant_id, job_id, actor_id, ordered_ids)
-    )
+    @staticmethod
+    def reorder(
+        tenant_id: object, job_id: object, actor_id: object, ordered_ids: Sequence[object]
+    ) -> list[ValidationRule]:
+        return _reorder_rules(tenant_id, job_id, actor_id, ordered_ids)
 
     @staticmethod
     def evaluate(
@@ -870,7 +930,7 @@ class ValidationRuleService:
             if rule.rule_type == "required":
                 passed = value not in (None, "")
             elif rule.rule_type == "type":
-                expected = config["type"]
+                expected = str(config["type"])
                 passed = {
                     "string": lambda: isinstance(value, str),
                     "integer": lambda: isinstance(value, int) and not isinstance(value, bool),
@@ -878,21 +938,29 @@ class ValidationRuleService:
                     "boolean": lambda: isinstance(value, bool),
                 }.get(expected, lambda: False)()
             elif rule.rule_type == "range":
+                comparable = cast(Any, value)
+                minimum = cast(Any, config.get("min"))
+                maximum = cast(Any, config.get("max"))
                 passed = (
                     value is not None
-                    and (config.get("min") is None or value >= config["min"])
-                    and (config.get("max") is None or value <= config["max"])
+                    and (minimum is None or comparable >= minimum)
+                    and (maximum is None or comparable <= maximum)
                 )
             elif rule.rule_type == "length":
+                minimum = cast(Any, config.get("min"))
+                maximum = cast(Any, config.get("max"))
                 passed = (
-                    value is not None
-                    and (config.get("min") is None or len(value) >= config["min"])
-                    and (config.get("max") is None or len(value) <= config["max"])
+                    isinstance(value, Sized)
+                    and (minimum is None or len(value) >= minimum)
+                    and (maximum is None or len(value) <= maximum)
                 )
             elif rule.rule_type == "regex":
-                passed = isinstance(value, str) and re.fullmatch(config["pattern"], value) is not None
+                pattern = config["pattern"]
+                if not isinstance(pattern, str):
+                    raise MigrationServiceError("regex pattern must be a string", code="INVALID_RULE_CONFIG")
+                passed = isinstance(value, str) and re.fullmatch(pattern, value) is not None
             elif rule.rule_type == "allowed_values":
-                passed = value in config["values"]
+                passed = value in _container(config["values"], "values")
             elif rule.rule_type in ("unique", "referential"):
                 passed = bool(
                     adapter.validate_reference(job.target_entity, rule.field_name, value, rule.rule_type, config)
@@ -923,6 +991,11 @@ def _reorder_rules(
     by_id = {str(row.id): row for row in rows}
     if len(ordered_ids) != len(rows) or set(map(str, ordered_ids)) != set(by_id):
         raise MigrationServiceError("Reorder must contain every rule exactly once.", code="INVALID_ORDER")
+    offset = len(rows)
+    for index, row in enumerate(rows):
+        row.position = offset + index
+        row.updated_by = actor
+    ValidationRule.objects.bulk_update(rows, ("position", "updated_by", "updated_at"))
     for position, identifier in enumerate(ordered_ids):
         by_id[str(identifier)].position = position
         by_id[str(identifier)].updated_by = actor
@@ -950,19 +1023,28 @@ class SourceInspectionService:
     def inspect(tenant_id: object, job_id: object, job_version_id: object) -> SourceProfile:
         tenant = _uuid(tenant_id, "tenant_id")
         job = _job(tenant, job_id)
-        version = MigrationJobVersion.objects.for_tenant(tenant).filter(pk=job_version_id, job=job).first()
+        version = (
+            MigrationJobVersion.objects.for_tenant(tenant)
+            .filter(pk=_uuid(job_version_id, "job_version_id"), job=job)
+            .first()
+        )
         if version is None:
             raise NotFound("Migration job version not found.")
         adapter = _source_adapter(f"core.{job.source_type}")
         profile = adapter.inspect(tenant, job.source_artifact_id, job.source_config, _configuration(tenant))
         if not profile or not profile.get("source_checksum"):
             raise MigrationServiceError("Inspection produced no verified source evidence.", code="UNVERIFIED_SOURCE")
+        profile_fields = cast(Iterable[Mapping[str, object]], _mapping_items(profile.get("fields", ()), "fields"))
+        representative_values = cast(
+            Iterable[Mapping[str, object]],
+            _mapping_items(profile.get("representative_values", ()), "representative_values"),
+        )
         return SourceProfile(
-            tuple(profile.get("fields", ())),
-            tuple(_redact(item) for item in profile.get("representative_values", ())),
-            int(profile.get("row_estimate", 0)),
+            tuple(dict(item) for item in profile_fields),
+            tuple(_redact(item) for item in representative_values),
+            int(cast(Any, profile.get("row_estimate", 0))),
             str(profile["source_checksum"]),
-            tuple(profile.get("warnings", ())),
+            tuple(str(item) for item in _iterable(profile.get("warnings", ()), "warnings")),
         )
 
     @staticmethod
@@ -1042,7 +1124,7 @@ class MigrationExecutionService:
     @transaction.atomic
     def cancel(tenant_id: object, run_id: object, actor_id: object, transition_key: str) -> MigrationRun:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
-        run = MigrationRun.objects.for_tenant(tenant).select_for_update().filter(pk=run_id).first()
+        run = MigrationRun.objects.for_tenant(tenant).select_for_update().filter(pk=_uuid(run_id, "run_id")).first()
         if run is None:
             raise NotFound("Migration run not found.")
         run.cancel_requested_at = timezone.now()
@@ -1061,7 +1143,7 @@ class MigrationExecutionService:
                 MigrationRun.objects.for_tenant(tenant)
                 .select_for_update()
                 .select_related("job")
-                .filter(pk=run_id)
+                .filter(pk=_uuid(run_id, "run_id"))
                 .first()
             )
             if run is None:
@@ -1115,7 +1197,7 @@ class MigrationExecutionService:
     @staticmethod
     @transaction.atomic
     def _process_batch(
-        tenant: UUID, run_id: UUID, batch: Sequence[tuple[int, Mapping[str, object]]], target: object
+        tenant: UUID, run_id: UUID, batch: Sequence[tuple[int, Mapping[str, object]]], target: TargetAdapter
     ) -> None:
         run = MigrationRun.objects.for_tenant(tenant).select_for_update().select_related("job").get(pk=run_id)
         job = run.job
@@ -1161,16 +1243,20 @@ class MigrationExecutionService:
                         raise MigrationServiceError(
                             "Target adapter returned no durable write evidence.", code="UNVERIFIED_WRITE"
                         )
+                    operation = str(evidence["operation"])
+                    target_record_id = str(evidence["record_id"])
+                    before_payload_encrypted = str(evidence.get("before_payload_encrypted", ""))
+                    after_checksum = str(evidence["after_checksum"])
                     MigrationChange.objects.create(
                         tenant_id=tenant,
                         run=run,
                         sequence=row_number,
                         target_adapter=job.target_adapter,
                         target_entity=job.target_entity,
-                        target_record_id=evidence["record_id"],
-                        operation=evidence["operation"],
-                        before_payload_encrypted=evidence.get("before_payload_encrypted", ""),
-                        after_checksum=evidence["after_checksum"],
+                        target_record_id=target_record_id,
+                        operation=operation,
+                        before_payload_encrypted=before_payload_encrypted,
+                        after_checksum=after_checksum,
                         idempotency_key=f"{run.id}:{row_number}",
                     )
                     run.succeeded_records += 1
@@ -1213,17 +1299,20 @@ def _transform(value: object, kind: str, config: Mapping[str, object], record: M
         if target == "string":
             return "" if value is None else str(value)
         if target == "integer":
-            return int(value)
+            return int(cast(Any, value))
         if target == "number":
             return Decimal(str(value))
         if target == "boolean":
-            return str(value).strip().lower() in validated.get("true_values", ["true", "1", "yes"])
+            true_values = _container(validated.get("true_values", ["true", "1", "yes"]), "true_values")
+            return str(value).strip().lower() in true_values
     if kind == "lookup":
-        return validated.get("values", {}).get(str(value), validated.get("default"))
+        return _mapping(validated.get("values", {}), "values").get(str(value), validated.get("default"))
     if kind == "concat":
-        return str(validated.get("separator", "")).join(str(record.get(field, "")) for field in validated["fields"])
+        return str(validated.get("separator", "")).join(
+            str(record.get(str(field), "")) for field in _iterable(validated["fields"], "fields")
+        )
     if kind == "split":
-        return str(value).split(str(validated["separator"]))[int(validated.get("index", 0))]
+        return str(value).split(str(validated["separator"]))[int(cast(Any, validated.get("index", 0)))]
     if kind == "regex_replace":
         return re.sub(str(validated["pattern"]), str(validated.get("replacement", "")), str(value))
     if kind == "date_parse":
@@ -1231,7 +1320,9 @@ def _transform(value: object, kind: str, config: Mapping[str, object], record: M
 
         return datetime.strptime(str(value), str(validated["format"])).isoformat()
     if kind == "boolean_map":
-        return value in validated["true_values"] if value not in validated["false_values"] else False
+        true_values = _container(validated["true_values"], "true_values")
+        false_values = _container(validated["false_values"], "false_values")
+        return value in true_values if value not in false_values else False
     raise MigrationServiceError(f"Unknown transform {kind!r}.", code="UNKNOWN_TRANSFORM")
 
 
@@ -1244,7 +1335,7 @@ class RollbackService:
         existing = MigrationRollback.objects.for_tenant(tenant).filter(idempotency_key=key).first()
         if existing:
             return existing
-        run = MigrationRun.objects.for_tenant(tenant).select_for_update().filter(pk=run_id).first()
+        run = MigrationRun.objects.for_tenant(tenant).select_for_update().filter(pk=_uuid(run_id, "run_id")).first()
         if run is None:
             raise NotFound("Migration run not found.")
         if run.mode != "commit" or run.status not in ("succeeded", "partial"):
@@ -1284,7 +1375,7 @@ class RollbackService:
                 MigrationRollback.objects.for_tenant(tenant)
                 .select_for_update()
                 .select_related("run")
-                .filter(pk=rollback_id)
+                .filter(pk=_uuid(rollback_id, "rollback_id"))
                 .first()
             )
             if rollback is None:
@@ -1294,7 +1385,7 @@ class RollbackService:
             rollback = ROLLBACK_MACHINE.apply(rollback, "start", transition_key=f"start:{rollback.id}")
             rollback.started_at = timezone.now()
             rollback.save(update_fields=("started_at", "updated_at"))
-        target_cache: dict[str, object] = {}
+        target_cache: dict[str, TargetAdapter] = {}
         try:
             for change in (
                 MigrationChange.objects.for_tenant(tenant)
@@ -1440,7 +1531,7 @@ class DataMigrationConfigurationService:
 
     @classmethod
     def export(cls, tenant_id: object) -> dict[str, object]:
-        document = {"schema_version": "1.0", "configuration": cls.get(tenant_id).as_document()}
+        document: dict[str, object] = {"schema_version": "1.0", "configuration": cls.get(tenant_id).as_document()}
         document["checksum"] = _snapshot_checksum(document)
         return document
 
@@ -1450,7 +1541,9 @@ class DataMigrationConfigurationService:
     ) -> DataMigrationConfiguration:
         if document.get("schema_version") != "1.0" or document.get("checksum") != _snapshot_checksum(document):
             raise MigrationServiceError("Invalid configuration document.", code="INVALID_IMPORT")
-        return cls.update(tenant_id, actor_id, document.get("configuration", {}), expected_version)
+        return cls.update(
+            tenant_id, actor_id, _mapping(document.get("configuration", {}), "configuration"), expected_version
+        )
 
     @classmethod
     def restore(

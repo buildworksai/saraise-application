@@ -17,7 +17,7 @@ from .mode import is_saas
 
 def get_platform_url() -> str:
     """Get platform URL for SaaS mode."""
-    return getattr(settings, "SARAISE_PLATFORM_URL", "http://localhost:18000")
+    return getattr(settings, "SARAISE_PLATFORM_URL", "http://localhost:18001")
 
 
 def validate_session(session_id: str) -> Optional[Dict[str, Any]]:

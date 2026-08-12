@@ -23,8 +23,11 @@ from django.test import override_settings
 
 from src.core.access.entitlements import Entitlement, Quota
 from src.core.licensing.models import License, LicenseStatus, Organization
+from src.core.management.commands.seed_default_users import LOCAL_DEVELOPMENT_API_CALLS_PER_DAY
 from src.core.tenancy.rls import tenant_context
 from src.core.user_models import UserProfile
+from src.modules.ai_provider_configuration.models import AIModel, AIProvider
+from src.modules.multi_company.models import MultiCompanyConfigurationVersion
 from src.modules.purchase_management.models import (
     ConfigurationEnvironment,
     ConfigurationStatus,
@@ -47,12 +50,13 @@ def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
     call_command("seed_default_users", password=password, force=True, stdout=StringIO())
 
     organization = Organization.objects.get(domain="buildworks.ai")
-    Tenant.objects.get(slug="buildworks")
+    tenant = Tenant.objects.get(slug="buildworks")
     license_record = License.objects.get(organization=organization)
     tenant_admin = User.objects.get(email="admin@buildworks.ai")
     profile = UserProfile.objects.get(user=tenant_admin)
 
     assert license_record.status == LicenseStatus.ACTIVE
+    assert tenant.max_api_calls_per_day == LOCAL_DEVELOPMENT_API_CALLS_PER_DAY
     assert profile.tenant_id == str(organization.id)
     assert profile.tenant_role == "tenant_admin"
     assert profile.platform_role is None
@@ -61,8 +65,12 @@ def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
     assert tenant_admin.check_password(password)
 
     reconciled_password = "UatSeedReconciled123!"  # pragma: allowlist secret
+    tenant.max_api_calls_per_day = 10000
+    tenant.save(update_fields=["max_api_calls_per_day"])
     call_command("seed_default_users", password=reconciled_password, stdout=StringIO())
+    tenant.refresh_from_db()
     tenant_admin.refresh_from_db()
+    assert tenant.max_api_calls_per_day == LOCAL_DEVELOPMENT_API_CALLS_PER_DAY
     assert tenant_admin.check_password(reconciled_password)
 
     tenant_uuid = uuid.UUID(profile.tenant_id)
@@ -127,6 +135,11 @@ def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
             )
             .exists()
         )
+        assert set(
+            MultiCompanyConfigurationVersion.objects.for_tenant(tenant_uuid)
+            .filter(status=MultiCompanyConfigurationVersion.Status.ACTIVE)
+            .values_list("environment", flat=True)
+        ) == set(MultiCompanyConfigurationVersion.Environment.values)
         assert (
             Entitlement.objects.filter(tenant_id=tenant_uuid)
             .filter(
@@ -248,3 +261,14 @@ def test_development_seed_binds_tenant_users_to_organization_scope() -> None:
             .filter(environment=ConfigurationEnvironment.DEVELOPMENT, status=ConfigurationStatus.ACTIVE)
             .exists()
         )
+
+    openai = AIProvider.objects.get(name="OpenAI", is_active=True)
+    anthropic = AIProvider.objects.get(name="Anthropic", is_active=True)
+    assert openai.provider_type == "openai"
+    assert anthropic.provider_type == "anthropic"
+    assert AIModel.objects.filter(provider=openai, model_id="gpt-4.1-mini", is_active=True).exists()
+    assert AIModel.objects.filter(
+        provider=anthropic,
+        model_id="claude-3-5-sonnet-latest",
+        is_active=True,
+    ).exists()

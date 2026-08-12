@@ -17,13 +17,13 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from threading import RLock
-from typing import Any, BinaryIO, Generic, Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Any, BinaryIO, Generic, Protocol, TypeVar, cast, overload, runtime_checkable
 from uuid import UUID
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import connection, transaction
-from django.db.models import Count, Prefetch, Q, QuerySet
+from django.db.models import Count, Model, Prefetch, Q, QuerySet
 from django.utils import timezone
 
 from src.core.access.entitlements import Quota, QuotaService
@@ -52,6 +52,9 @@ from .models import (
 from .storage import DocumentStoragePort, generate_storage_key, get_document_storage
 
 logger = logging.getLogger("saraise.dms")
+
+if TYPE_CHECKING:
+    from src.modules.document_intelligence.adapters import DependencyHealth, DocumentDescriptor
 
 DOCUMENT_ACTIONS = frozenset({"read", "write", "delete", "share", "manage", "move", "download"})
 RESERVED_METADATA_NAMESPACE = "_extensions"
@@ -230,7 +233,7 @@ class DmsConfigurationService:
 
     @staticmethod
     def _copy(values: Mapping[str, object]) -> dict[str, object]:
-        return json.loads(json.dumps(dict(values), allow_nan=False))
+        return cast(dict[str, object], json.loads(json.dumps(dict(values), allow_nan=False)))
 
     @staticmethod
     def forbidden_name_characters(values: Mapping[str, object]) -> tuple[str, ...]:
@@ -281,7 +284,7 @@ class DmsConfigurationService:
             "dms.storage_bytes": "storage_quota_bytes",
         }
         for resource, field in resources.items():
-            new_limit = int(values[field])
+            new_limit = _policy_int(values, field)
             quota, created = Quota.objects.select_for_update().get_or_create(
                 tenant_id=tenant_id,
                 resource=resource,
@@ -311,13 +314,14 @@ class DmsConfigurationService:
         """Enforce tenant feature flags and server-owned role/group rollout targeting."""
 
         policy = cls.runtime_values(tenant_id)
-        if policy["feature_flags"].get(feature) is not True:
+        feature_flags = _policy_dict(policy, "feature_flags")
+        if feature_flags.get(feature) is not True:
             raise DmsPermissionDenied(f"{feature.replace('_', ' ').title()} is disabled by tenant policy.")
-        rollout = policy["rollout"]
+        rollout = _policy_dict(policy, "rollout")
         if rollout.get("enabled") is not True:
             raise DmsPermissionDenied("DMS is disabled for the configured rollout.")
-        required_roles = set(rollout.get("roles", ()))
-        required_cohorts = set(rollout.get("cohorts", ()))
+        required_roles = set(_policy_string_sequence(rollout, "roles"))
+        required_cohorts = set(_policy_string_sequence(rollout, "cohorts"))
         if not required_roles and not required_cohorts:
             return
         directory = LocalIdentityDirectory()
@@ -358,18 +362,17 @@ class DmsConfigurationService:
             if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
                 errors[field] = [f"Must be an integer between {minimum} and {maximum}."]
 
-        if values["principal_search_min_limit"] > values["principal_search_default_limit"]:
+        if _policy_int(values, "principal_search_min_limit") > _policy_int(values, "principal_search_default_limit"):
             errors["principal_search_default_limit"] = ["Must not be below principal_search_min_limit."]
-        if values["principal_search_default_limit"] > values["principal_search_max_limit"]:
+        if _policy_int(values, "principal_search_default_limit") > _policy_int(values, "principal_search_max_limit"):
             errors["principal_search_default_limit"] = ["Must not exceed principal_search_max_limit."]
-        if values["principal_query_min_length"] > values["principal_query_max_length"]:
+        if _policy_int(values, "principal_query_min_length") > _policy_int(values, "principal_query_max_length"):
             errors["principal_query_max_length"] = ["Must not be below principal_query_min_length."]
-        if values["default_share_access_count"] > values["max_share_access_count"]:
+        if _policy_int(values, "default_share_access_count") > _policy_int(values, "max_share_access_count"):
             errors["default_share_access_count"] = ["Must not exceed max_share_access_count."]
-        if (
-            values["folder_page_size"] > values["max_page_size"]
-            or values["document_page_size"] > values["max_page_size"]
-        ):
+        if _policy_int(values, "folder_page_size") > _policy_int(values, "max_page_size") or _policy_int(
+            values, "document_page_size"
+        ) > _policy_int(values, "max_page_size"):
             errors["max_page_size"] = ["Must be at least both configured page sizes."]
 
         allowed_permissions = {"read", "write", "delete", "share", "manage"}
@@ -619,13 +622,16 @@ class DmsConfigurationService:
             or document.get("module") != "dms"
             or isinstance(document.get("version"), bool)
             or not isinstance(document.get("version"), int)
-            or int(document["version"]) < 1
+            or _policy_int(document, "version") < 1
         ):
+            raise DmsValidationError("Unsupported configuration document schema.")
+        values = document.get("values", {})
+        if not isinstance(values, Mapping):
             raise DmsValidationError("Unsupported configuration document schema.")
         return cls.update(
             tenant_id,
             actor_id,
-            document.get("values", {}),
+            values,
             str(document.get("environment", "default")),
             action="imported",
         )
@@ -654,8 +660,11 @@ class DmsConfigurationService:
         environment: str = "default",
     ) -> QuerySet[DmsConfigurationVersion]:
         configuration = cls.current(tenant_id, actor_id, environment)
-        return DmsConfigurationVersion.objects.filter(tenant_id=tenant_id, configuration=configuration).order_by(
-            "-version"
+        return cast(
+            QuerySet[DmsConfigurationVersion],
+            DmsConfigurationVersion.objects.filter(tenant_id=tenant_id, configuration=configuration).order_by(
+                "-version"
+            ),
         )
 
     @classmethod
@@ -666,10 +675,13 @@ class DmsConfigurationService:
         environment: str = "default",
     ) -> QuerySet[DmsConfigurationAudit]:
         configuration = cls.current(tenant_id, actor_id, environment)
-        return DmsConfigurationAudit.objects.filter(
-            tenant_id=tenant_id,
-            configuration=configuration,
-        ).order_by("-created_at")
+        return cast(
+            QuerySet[DmsConfigurationAudit],
+            DmsConfigurationAudit.objects.filter(
+                tenant_id=tenant_id,
+                configuration=configuration,
+            ).order_by("-created_at"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -748,12 +760,13 @@ class LocalIdentityDirectory:
         limit: int,
     ) -> Sequence[PrincipalSummary]:
         policy = DmsConfigurationService.runtime_values(tenant_id)
-        if limit < policy["principal_search_min_limit"] or limit > policy["principal_search_max_limit"]:
+        if limit < _policy_int(policy, "principal_search_min_limit") or limit > _policy_int(
+            policy, "principal_search_max_limit"
+        ):
             raise DmsValidationError("Search limit violates tenant policy.")
         normalized = query.strip()
-        if (
-            len(normalized) < policy["principal_query_min_length"]
-            or len(normalized) > policy["principal_query_max_length"]
+        if len(normalized) < _policy_int(policy, "principal_query_min_length") or len(normalized) > _policy_int(
+            policy, "principal_query_max_length"
         ):
             raise DmsValidationError("Principal search length violates tenant policy.")
         results: list[PrincipalSummary] = []
@@ -802,6 +815,29 @@ def get_identity_directory() -> IdentityDirectoryPort:
         return _identity_directory
 
 
+def _policy_int(policy: Mapping[str, object], key: str) -> int:
+    value = policy[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise DmsIntegrityFailure(f"DMS policy field {key} is not a validated integer.")
+    return value
+
+
+def _policy_dict(policy: Mapping[str, object], key: str) -> dict[str, object]:
+    value = policy[key]
+    if not isinstance(value, dict):
+        raise DmsIntegrityFailure(f"DMS policy field {key} is not a validated object.")
+    return cast(dict[str, object], value)
+
+
+def _policy_string_sequence(policy: Mapping[str, object], key: str) -> tuple[str, ...]:
+    value = policy[key]
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise DmsIntegrityFailure(f"DMS policy field {key} is not a validated string list.")
+    if not all(isinstance(item, str) for item in value):
+        raise DmsIntegrityFailure(f"DMS policy field {key} contains a non-string value.")
+    return tuple(value)
+
+
 def _authorize_extensions(tenant_id: UUID, operation: str, document_id: UUID, version_id: UUID | None = None) -> None:
     try:
         run_operation_guards(tenant_id, DmsOperation(operation), document_id, version_id)
@@ -818,7 +854,7 @@ def _normalize_name(value: str, field: str = "name", *, tenant_id: UUID | None =
         raise DmsValidationError(
             f"{field.replace('_', ' ').title()} cannot be blank.", detail={field: ["Cannot be blank."]}
         )
-    if len(normalized) > policy["max_name_length"] or any(
+    if len(normalized) > _policy_int(policy, "max_name_length") or any(
         forbidden in normalized for forbidden in DmsConfigurationService.forbidden_name_characters(policy)
     ):
         raise DmsValidationError(
@@ -835,12 +871,12 @@ def _normalize_tags(tags: Sequence[object] | None, *, tenant_id: UUID | None = N
         if not isinstance(raw, str):
             raise DmsValidationError("Tags must be strings.", detail={"tags": ["Every tag must be text."]})
         value = unicodedata.normalize("NFKC", raw).strip().casefold()
-        if not value or len(value) > policy["max_tag_length"]:
+        if not value or len(value) > _policy_int(policy, "max_tag_length"):
             raise DmsValidationError("Tag is invalid.", detail={"tags": ["Tag violates the configured limit."]})
         if value not in seen:
             normalized.append(value)
             seen.add(value)
-    if len(normalized) > policy["max_document_tags"]:
+    if len(normalized) > _policy_int(policy, "max_document_tags"):
         raise DmsValidationError("Too many tags.", detail={"tags": ["Configured tag count limit exceeded."]})
     return normalized
 
@@ -890,9 +926,9 @@ def _normalize_metadata(
         )
     if existing_extensions:
         value[RESERVED_METADATA_NAMESPACE] = existing_extensions
-    _validate_json_primitives(value, maximum_key_length=policy["max_metadata_key_length"])
+    _validate_json_primitives(value, maximum_key_length=_policy_int(policy, "max_metadata_key_length"))
     serialized = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
-    if len(serialized) > policy["max_metadata_bytes"]:
+    if len(serialized) > _policy_int(policy, "max_metadata_bytes"):
         raise DmsValidationError("Metadata is too large.", detail={"metadata": ["Configured metadata limit exceeded."]})
     return value
 
@@ -932,7 +968,7 @@ def _emit(
     )
 
 
-_ModelT = TypeVar("_ModelT")
+_ModelT = TypeVar("_ModelT", bound=Model)
 
 
 class LazyQuerySequence(Sequence[_ModelT], Generic[_ModelT]):
@@ -941,7 +977,15 @@ class LazyQuerySequence(Sequence[_ModelT], Generic[_ModelT]):
     def __init__(self, queryset: QuerySet[_ModelT]) -> None:
         self.queryset = queryset
 
+    @overload
+    def __getitem__(self, index: int) -> _ModelT: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> Sequence[_ModelT]: ...
+
     def __getitem__(self, index: int | slice) -> _ModelT | Sequence[_ModelT]:
+        if isinstance(index, slice):
+            return cast(Sequence[_ModelT], self.queryset[index])
         return self.queryset[index]
 
     def __len__(self) -> int:
@@ -978,7 +1022,7 @@ class FolderService:
 
     def attach_allowed_actions(self, actor_id: UUID, folders: Sequence[Folder]) -> Sequence[Folder]:
         for folder in folders:
-            folder.allowed_actions = self.project_allowed_actions(actor_id, folder)
+            setattr(folder, "allowed_actions", self.project_allowed_actions(actor_id, folder))
         return folders
 
     def create_folder(
@@ -995,7 +1039,7 @@ class FolderService:
         with transaction.atomic():
             parent = self._parent(tenant_id, parent_id, lock=True)
             depth = parent.depth + 1 if parent else 0
-            if depth > policy["max_folder_depth"]:
+            if depth > _policy_int(policy, "max_folder_depth"):
                 raise DmsValidationError(
                     "Folder depth exceeds tenant policy.", detail={"parent_id": ["Depth limit exceeded."]}
                 )
@@ -1024,26 +1068,27 @@ class FolderService:
         if lock:
             queryset = queryset.select_for_update()
         try:
-            return queryset.get(id=parent_id)
+            return cast(Folder, queryset.get(id=parent_id))
         except Folder.DoesNotExist as exc:
             raise DmsNotFound("Folder was not found.") from exc
 
     def get_folder(self, tenant_id: UUID, actor_id: UUID, folder_id: UUID) -> Folder:
         del actor_id
         try:
-            return Folder.objects.for_tenant(tenant_id).alive().get(id=folder_id)
+            return cast(Folder, Folder.objects.for_tenant(tenant_id).alive().get(id=folder_id))
         except Folder.DoesNotExist as exc:
             raise DmsNotFound("Folder was not found.") from exc
 
     def list_folders(self, tenant_id: UUID, actor_id: UUID) -> QuerySet[Folder]:
         del actor_id
-        return (
+        return cast(
+            QuerySet[Folder],
             Folder.objects.for_tenant(tenant_id)
             .alive()
             .annotate(
                 children_count=Count("children", filter=Q(children__is_deleted=False), distinct=True),
                 documents_count=Count("documents", filter=Q(documents__is_deleted=False), distinct=True),
-            )
+            ),
         )
 
     def list_contents(self, tenant_id: UUID, actor_id: UUID, *, folder_id: UUID | None = None) -> FolderContents:
@@ -1072,7 +1117,7 @@ class FolderService:
         breadcrumbs.reverse()
         self.attach_allowed_actions(actor_id, breadcrumbs)
         if folder is not None:
-            folder.allowed_actions = self.project_allowed_actions(actor_id, folder)
+            setattr(folder, "allowed_actions", self.project_allowed_actions(actor_id, folder))
         return FolderContents(
             folder,
             breadcrumbs,
@@ -1117,7 +1162,7 @@ class FolderService:
             folder.save(update_fields=("name", "description", "sort_order", "path", "updated_at"))
             if folder.path != old_path:
                 self._rewrite_descendants(tenant_id, old_path, folder.path, 0)
-            return folder
+            return cast(Folder, folder)
 
     def _rewrite_descendants(self, tenant_id: UUID, old_prefix: str, new_prefix: str, depth_delta: int) -> None:
         descendants = list(
@@ -1130,7 +1175,7 @@ class FolderService:
         for descendant in descendants:
             descendant.path = f"{new_prefix}{descendant.path[len(old_prefix):]}"
             descendant.depth += depth_delta
-            maximum_depth = DmsConfigurationService.runtime_values(tenant_id)["max_folder_depth"]
+            maximum_depth = _policy_int(DmsConfigurationService.runtime_values(tenant_id), "max_folder_depth")
             if descendant.depth > maximum_depth:
                 raise DmsValidationError("Folder move would exceed the maximum depth.")
         if descendants:
@@ -1170,7 +1215,7 @@ class FolderService:
                 .first()
             )
             depth_delta = new_depth - folder.depth
-            maximum_depth = DmsConfigurationService.runtime_values(tenant_id)["max_folder_depth"]
+            maximum_depth = _policy_int(DmsConfigurationService.runtime_values(tenant_id), "max_folder_depth")
             if (deepest if deepest is not None else folder.depth) + depth_delta > maximum_depth:
                 raise DmsValidationError("Folder move would exceed the maximum depth.")
             old_path = folder.path
@@ -1180,7 +1225,7 @@ class FolderService:
             folder.save(update_fields=("parent", "depth", "path", "updated_at"))
             self._rewrite_descendants(tenant_id, old_path, folder.path, depth_delta)
             _emit(tenant_id, "dms.folder.moved", "folder", folder.id, actor_id, parent_id=parent.id if parent else None)
-            return folder
+            return cast(Folder, folder)
 
     def delete_folder(self, tenant_id: UUID, actor_id: UUID, folder_id: UUID) -> None:
         with transaction.atomic():
@@ -1225,8 +1270,15 @@ class PermissionService:
 
     def acl_query(self, tenant_id: UUID, actor_id: UUID, permission: str) -> Q:
         principals = self._principals(tenant_id, actor_id)
-        implications = DmsConfigurationService.runtime_values(tenant_id)["permission_implications"]
-        accepted = {grant for grant, implied in implications.items() if permission in implied}
+        implications = _policy_dict(DmsConfigurationService.runtime_values(tenant_id), "permission_implications")
+        accepted = {
+            grant
+            for grant, implied in implications.items()
+            if isinstance(grant, str)
+            and isinstance(implied, Sequence)
+            and not isinstance(implied, (str, bytes))
+            and permission in implied
+        }
         principal_q = Q(pk__in=[])
         for principal_type, principal_id in principals:
             principal_q |= Q(
@@ -1239,7 +1291,7 @@ class PermissionService:
         return Q(created_by=actor_id) | principal_q
 
     def has_document_access(self, tenant_id: UUID, actor: object, document: Document, permission: str) -> bool:
-        implications = DmsConfigurationService.runtime_values(tenant_id)["permission_implications"]
+        implications = _policy_dict(DmsConfigurationService.runtime_values(tenant_id), "permission_implications")
         if document.tenant_id != tenant_id or document.is_deleted or permission not in implications:
             return False
         actor_id = actor if isinstance(actor, UUID) else getattr(actor, "id", None)
@@ -1254,15 +1306,22 @@ class PermissionService:
             principals = self._principals(tenant_id, normalized_actor)
             return any(
                 (grant.principal_type, grant.principal_id) in principals
-                and permission in implications.get(grant.permission, ())
+                and permission
+                in (
+                    implied
+                    if isinstance((implied := implications.get(grant.permission, ())), Sequence)
+                    and not isinstance(implied, (str, bytes))
+                    else ()
+                )
                 for grant in prefetched
             )
-        return (
+        return cast(
+            bool,
             Document.objects.for_tenant(tenant_id)
             .alive()
             .filter(id=document.id)
             .filter(self.acl_query(tenant_id, normalized_actor, permission))
-            .exists()
+            .exists(),
         )
 
     def require(self, tenant_id: UUID, actor_id: UUID, document: Document, permission: str) -> None:
@@ -1270,9 +1329,11 @@ class PermissionService:
             raise DmsPermissionDenied("Document access is denied.")
 
     def allowed_actions(self, tenant_id: UUID, actor_id: UUID, document: Document) -> frozenset[str]:
+        implications = _policy_dict(DmsConfigurationService.runtime_values(tenant_id), "permission_implications")
         allowed = {
             capability
-            for capability in DmsConfigurationService.runtime_values(tenant_id)["permission_implications"]
+            for capability in implications
+            if isinstance(capability, str)
             if self.has_document_access(tenant_id, actor_id, document, capability)
         }
         if "read" in allowed:
@@ -1285,20 +1346,22 @@ class PermissionService:
         document = DocumentService(permission_service=self).get_document(
             tenant_id, actor_id, document_id, permission="manage"
         )
-        return (
+        return cast(
+            QuerySet[DocumentPermission],
             DocumentPermission.objects.for_tenant(tenant_id)
             .alive()
             .filter(document=document)
-            .order_by("principal_type", "principal_id", "permission")
+            .order_by("principal_type", "principal_id", "permission"),
         )
 
     def get_permission(self, tenant_id: UUID, actor_id: UUID, permission_id: UUID) -> DocumentPermission:
         try:
-            grant = (
+            grant = cast(
+                DocumentPermission,
                 DocumentPermission.objects.for_tenant(tenant_id)
                 .alive()
                 .select_related("document")
-                .get(id=permission_id)
+                .get(id=permission_id),
             )
         except DocumentPermission.DoesNotExist as exc:
             raise DmsNotFound("Permission grant was not found.") from exc
@@ -1321,7 +1384,7 @@ class PermissionService:
         )
         if principal_id == document.created_by and principal_type == "user":
             raise DmsValidationError("The document owner already has implicit access.")
-        implications = DmsConfigurationService.runtime_values(tenant_id)["permission_implications"]
+        implications = _policy_dict(DmsConfigurationService.runtime_values(tenant_id), "permission_implications")
         if permission not in implications or principal_type not in {"user", "role", "group"}:
             raise DmsValidationError("Permission grant is invalid.")
         try:
@@ -1343,13 +1406,16 @@ class PermissionService:
                 .exists()
             ):
                 raise DmsConflict("This live permission grant already exists.")
-            grant = DocumentPermission.objects.create(
-                tenant_id=tenant_id,
-                document=document,
-                principal_type=principal_type,
-                principal_id=principal_id,
-                permission=permission,
-                created_by=actor_id,
+            grant = cast(
+                DocumentPermission,
+                DocumentPermission.objects.create(
+                    tenant_id=tenant_id,
+                    document=document,
+                    principal_type=principal_type,
+                    principal_id=principal_id,
+                    permission=permission,
+                    created_by=actor_id,
+                ),
             )
             _emit(
                 tenant_id,
@@ -1367,7 +1433,7 @@ class PermissionService:
         self, tenant_id: UUID, actor_id: UUID, permission_id: UUID, *, permission: str
     ) -> DocumentPermission:
         DmsConfigurationService.require_feature(tenant_id, actor_id, "permission_management")
-        if permission not in DmsConfigurationService.runtime_values(tenant_id)["permission_implications"]:
+        if permission not in _policy_dict(DmsConfigurationService.runtime_values(tenant_id), "permission_implications"):
             raise DmsValidationError("Permission is invalid.")
         with transaction.atomic():
             grant = self.get_permission(tenant_id, actor_id, permission_id)
@@ -1391,13 +1457,16 @@ class PermissionService:
             grant.is_deleted = True
             grant.deleted_at = now
             grant.save(update_fields=("is_deleted", "deleted_at", "updated_at"))
-            replacement = DocumentPermission.objects.create(
-                tenant_id=tenant_id,
-                document=grant.document,
-                principal_type=grant.principal_type,
-                principal_id=grant.principal_id,
-                permission=permission,
-                created_by=actor_id,
+            replacement = cast(
+                DocumentPermission,
+                DocumentPermission.objects.create(
+                    tenant_id=tenant_id,
+                    document=grant.document,
+                    principal_type=grant.principal_type,
+                    principal_id=grant.principal_id,
+                    permission=permission,
+                    created_by=actor_id,
+                ),
             )
             _emit(
                 tenant_id,
@@ -1427,7 +1496,7 @@ class PermissionService:
                 if prior is None:
                     raise
                 self.require(tenant_id, actor_id, prior.document, "manage")
-                grant = (
+                replacement = (
                     DocumentPermission.objects.for_tenant(tenant_id)
                     .alive()
                     .filter(
@@ -1438,8 +1507,9 @@ class PermissionService:
                     .order_by("-created_at")
                     .first()
                 )
-                if grant is None:
+                if replacement is None:
                     return
+                grant = replacement
             grant = DocumentPermission.objects.select_for_update().get(id=grant.id)
             grant.is_deleted = True
             grant.deleted_at = timezone.now()
@@ -1515,7 +1585,7 @@ class DocumentService:
         if folder_id is None:
             return None
         try:
-            return Folder.objects.for_tenant(tenant_id).alive().get(id=folder_id)
+            return cast(Folder, Folder.objects.for_tenant(tenant_id).alive().get(id=folder_id))
         except Folder.DoesNotExist as exc:
             raise DmsNotFound("Folder was not found.") from exc
 
@@ -1671,7 +1741,7 @@ class DocumentService:
                 version_id=str(version.id),
                 size_bytes=saved.size_bytes,
             )
-            return document
+            return cast(Document, document)
         except Exception:
             if quota_consumed:
                 try:
@@ -1768,11 +1838,19 @@ class DocumentService:
         supplied = dict(filters or {})
         if "folder_id" in supplied:
             folder_id = supplied["folder_id"]
-            queryset = queryset.filter(folder_id=folder_id) if folder_id else queryset.filter(folder__isnull=True)
+            if not folder_id:
+                queryset = queryset.filter(folder__isnull=True)
+            elif isinstance(folder_id, UUID | str):
+                queryset = queryset.filter(folder_id=folder_id)
+            else:
+                raise DmsValidationError("Folder filter is invalid.")
         if supplied.get("mime_type"):
             queryset = queryset.filter(current_version__mime_type=supplied["mime_type"])
         if supplied.get("creator_id"):
-            queryset = queryset.filter(created_by=supplied["creator_id"])
+            creator_id = supplied["creator_id"]
+            if not isinstance(creator_id, UUID | str):
+                raise DmsValidationError("Creator filter is invalid.")
+            queryset = queryset.filter(created_by=creator_id)
         if supplied.get("tag"):
             tag = str(supplied["tag"])
             queryset = (
@@ -1786,15 +1864,17 @@ class DocumentService:
             queryset = queryset.filter(updated_at__lte=supplied["modified_before"])
         if search:
             policy = DmsConfigurationService.runtime_values(tenant_id)
-            if len(search) > policy["max_document_search_length"]:
+            if len(search) > _policy_int(policy, "max_document_search_length"):
                 raise DmsValidationError("Search exceeds tenant policy.")
             queryset = queryset.filter(Q(name__icontains=search) | Q(description__icontains=search))
-        configured_ordering = DmsConfigurationService.runtime_values(tenant_id)["document_ordering_fields"]
+        configured_ordering = _policy_string_sequence(
+            DmsConfigurationService.runtime_values(tenant_id), "document_ordering_fields"
+        )
         allowed_ordering = {field.lstrip("-") for field in configured_ordering}
         fields = [part.strip() for part in ordering.split(",") if part.strip()]
         if not fields or any(field.lstrip("-") not in allowed_ordering for field in fields):
             raise DmsValidationError("Ordering field is not allowed.")
-        return queryset.order_by(*fields, "id")
+        return cast(QuerySet[Document], queryset.order_by(*fields, "id"))
 
     def get_document(
         self,
@@ -1805,16 +1885,17 @@ class DocumentService:
         permission: str = "read",
     ) -> Document:
         try:
-            document = (
+            document = cast(
+                Document,
                 Document.objects.for_tenant(tenant_id)
                 .alive()
                 .select_related("folder", "current_version")
-                .get(id=document_id)
+                .get(id=document_id),
             )
         except Document.DoesNotExist as exc:
             raise DmsNotFound("Document was not found.") from exc
         self.permissions.require(tenant_id, actor_id, document, permission)
-        document.allowed_actions = self.permissions.allowed_actions(tenant_id, actor_id, document)
+        setattr(document, "allowed_actions", self.permissions.allowed_actions(tenant_id, actor_id, document))
         return document
 
     def update_document(
@@ -1854,8 +1935,8 @@ class DocumentService:
             _emit(
                 tenant_id, "dms.document.metadata_updated", "document", document.id, actor_id, document_id=document.id
             )
-            document.allowed_actions = self.permissions.allowed_actions(tenant_id, actor_id, document)
-            return document
+            setattr(document, "allowed_actions", self.permissions.allowed_actions(tenant_id, actor_id, document))
+            return cast(Document, document)
 
     def move_document(
         self,
@@ -1884,8 +1965,8 @@ class DocumentService:
                 document_id=document.id,
                 folder_id=target.id if target else None,
             )
-            document.allowed_actions = self.permissions.allowed_actions(tenant_id, actor_id, document)
-            return document
+            setattr(document, "allowed_actions", self.permissions.allowed_actions(tenant_id, actor_id, document))
+            return cast(Document, document)
 
     def _artifact(self, document: Document, version: DocumentVersion) -> DownloadArtifact:
         storage = self._storage(version.storage_backend)
@@ -1900,7 +1981,9 @@ class DocumentService:
                 handle,
                 version.checksum_sha256,
                 version.size_bytes,
-                DmsConfigurationService.runtime_values(document.tenant_id)["download_verification_chunk_size"],
+                _policy_int(
+                    DmsConfigurationService.runtime_values(document.tenant_id), "download_verification_chunk_size"
+                ),
             ),
             version.original_filename,
             version.mime_type,
@@ -1997,7 +2080,7 @@ class VersionService:
             "file",
             tenant_id=tenant_id,
         )
-        if len(change_note) > policy["version_change_note_max_length"]:
+        if len(change_note) > _policy_int(policy, "version_change_note_max_length"):
             raise DmsValidationError("Version change note exceeds tenant policy.")
         try:
             quota = self.documents.quota.consume(tenant_id, "dms.storage_bytes", cost=saved.size_bytes)
@@ -2038,7 +2121,7 @@ class VersionService:
                     mime_type=version.mime_type,
                     size_bytes=version.size_bytes,
                 )
-                return version
+                return cast(DocumentVersion, version)
         except Exception:
             try:
                 storage.delete(saved.key)
@@ -2058,19 +2141,21 @@ class VersionService:
 
     def list_versions(self, tenant_id: UUID, actor_id: UUID, document_id: UUID) -> QuerySet[DocumentVersion]:
         document = self.documents.get_document(tenant_id, actor_id, document_id)
-        return (
+        return cast(
+            QuerySet[DocumentVersion],
             DocumentVersion.objects.for_tenant(tenant_id)
             .filter(document=document)
             .select_related("source_version")
-            .order_by("-version_number")
+            .order_by("-version_number"),
         )
 
     def get_version(self, tenant_id: UUID, actor_id: UUID, version_id: UUID) -> DocumentVersion:
         try:
-            version = (
+            version = cast(
+                DocumentVersion,
                 DocumentVersion.objects.for_tenant(tenant_id)
                 .select_related("document", "source_version")
-                .get(id=version_id)
+                .get(id=version_id),
             )
         except DocumentVersion.DoesNotExist as exc:
             raise DmsNotFound("Document version was not found.") from exc
@@ -2132,9 +2217,9 @@ class ShareService:
         document = self.documents.get_document(tenant_id, actor_id, document_id, permission="share")
         policy = DmsConfigurationService.runtime_values(tenant_id)
         now = timezone.now()
-        if expires_at <= now or expires_at > now + timedelta(days=policy["max_share_lifetime_days"]):
+        if expires_at <= now or expires_at > now + timedelta(days=_policy_int(policy, "max_share_lifetime_days")):
             raise DmsValidationError("Share expiry violates tenant policy.")
-        if max_access_count is not None and not 1 <= max_access_count <= policy["max_share_access_count"]:
+        if max_access_count is not None and not 1 <= max_access_count <= _policy_int(policy, "max_share_access_count"):
             raise DmsValidationError("Share access limit violates tenant policy.")
         if version_id is None:
             version = document.current_version
@@ -2143,9 +2228,9 @@ class ShareService:
         if version is None:
             raise DmsNotFound("Document version was not found.")
         _authorize_extensions(tenant_id, "share", document.id, version.id)
-        token = secrets.token_urlsafe(policy["share_token_entropy_bytes"])
+        token = secrets.token_urlsafe(_policy_int(policy, "share_token_entropy_bytes"))
         digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
-        prefix = token[: policy["share_token_prefix_length"]]
+        prefix = token[: _policy_int(policy, "share_token_prefix_length")]
         with transaction.atomic():
             share = DocumentShare.objects.create(
                 tenant_id=tenant_id,
@@ -2172,16 +2257,20 @@ class ShareService:
 
     def list_shares(self, tenant_id: UUID, actor_id: UUID, document_id: UUID) -> QuerySet[DocumentShare]:
         document = self.documents.get_document(tenant_id, actor_id, document_id, permission="share")
-        return (
+        return cast(
+            QuerySet[DocumentShare],
             DocumentShare.objects.for_tenant(tenant_id)
             .filter(document=document)
             .select_related("version")
-            .order_by("-created_at")
+            .order_by("-created_at"),
         )
 
     def get_share(self, tenant_id: UUID, actor_id: UUID, share_id: UUID) -> DocumentShare:
         try:
-            share = DocumentShare.objects.for_tenant(tenant_id).select_related("document", "version").get(id=share_id)
+            share = cast(
+                DocumentShare,
+                DocumentShare.objects.for_tenant(tenant_id).select_related("document", "version").get(id=share_id),
+            )
         except DocumentShare.DoesNotExist as exc:
             raise DmsNotFound("Document share was not found.") from exc
         self.documents.permissions.require(tenant_id, actor_id, share.document, "share")
@@ -2190,7 +2279,7 @@ class ShareService:
     def revoke_share(self, tenant_id: UUID, actor_id: UUID, share_id: UUID) -> DocumentShare:
         with transaction.atomic():
             share = self.get_share(tenant_id, actor_id, share_id)
-            share = DocumentShare.objects.select_for_update().get(id=share.id)
+            share = cast(DocumentShare, DocumentShare.objects.select_for_update().get(id=share.id))
             if share.revoked_at is None:
                 share.revoked_at = timezone.now()
                 share.save(update_fields=("revoked_at",))
@@ -2218,7 +2307,9 @@ class ShareService:
                 )
             except DocumentShare.DoesNotExist as exc:
                 raise DmsNotFound("Shared document was not found.") from exc
-            if len(token) > DmsConfigurationService.runtime_values(share.tenant_id)["incoming_share_token_max_length"]:
+            if len(token) > _policy_int(
+                DmsConfigurationService.runtime_values(share.tenant_id), "incoming_share_token_max_length"
+            ):
                 raise DmsNotFound("Shared document was not found.")
             now = timezone.now()
             invalid = (
@@ -2264,13 +2355,13 @@ class MetadataExtensionService:
         policy = DmsConfigurationService.runtime_values(tenant_id)
         if (
             not namespace
-            or len(namespace) > policy["metadata_namespace_max_length"]
+            or len(namespace) > _policy_int(policy, "metadata_namespace_max_length")
             or not all(part.isidentifier() for part in namespace.split("."))
         ):
             raise DmsValidationError("Metadata namespace is invalid.")
         if schema_version < 1:
             raise DmsValidationError("Metadata schema version must be positive.")
-        _validate_json_primitives(dict(values), maximum_key_length=policy["max_metadata_key_length"])
+        _validate_json_primitives(dict(values), maximum_key_length=_policy_int(policy, "max_metadata_key_length"))
         service = DocumentService()
         with transaction.atomic():
             document = service.get_document(tenant_id, actor_id, document_id, permission="write")
@@ -2279,18 +2370,18 @@ class MetadataExtensionService:
             extensions = dict(metadata.get(RESERVED_METADATA_NAMESPACE, {}))
             extensions[namespace] = {"schema_version": schema_version, "values": dict(values)}
             metadata[RESERVED_METADATA_NAMESPACE] = extensions
-            _validate_json_primitives(metadata, maximum_key_length=policy["max_metadata_key_length"])
-            if len(json.dumps(metadata, separators=(",", ":")).encode()) > policy["max_metadata_bytes"]:
+            _validate_json_primitives(metadata, maximum_key_length=_policy_int(policy, "max_metadata_key_length"))
+            if len(json.dumps(metadata, separators=(",", ":")).encode()) > _policy_int(policy, "max_metadata_bytes"):
                 raise DmsValidationError("Metadata is too large.")
             document.metadata = metadata
             document.save(update_fields=("metadata", "updated_at"))
-            return document
+            return cast(Document, document)
 
 
 class DmsDocumentIntelligenceGateway:
     """Concrete service-only gateway consumed by document intelligence."""
 
-    def get_document(self, tenant_id: UUID, document_id: UUID, document_version_id: UUID) -> object:
+    def get_document(self, tenant_id: UUID, document_id: UUID, document_version_id: UUID) -> "DocumentDescriptor":
         try:
             version = (
                 DocumentVersion.objects.for_tenant(tenant_id)
@@ -2332,7 +2423,7 @@ class DmsDocumentIntelligenceGateway:
             raise DmsIntegrityFailure("Stored document content is unavailable.")
         return storage.open(version.storage_key)
 
-    def health(self) -> object:
+    def health(self) -> "DependencyHealth":
         from src.modules.document_intelligence.adapters import DependencyHealth
 
         result = get_document_storage().health_probe()

@@ -6,6 +6,7 @@ import hashlib
 import uuid
 from datetime import timedelta
 from decimal import Decimal
+from typing import cast
 
 import factory
 from django.utils import timezone
@@ -195,17 +196,20 @@ class VariantFactory(factory.django.DjangoModelFactory):
 
 def event_log(tenant_id: uuid.UUID, actor_id: uuid.UUID, cases: int = 10) -> list[ProcessEvent]:
     start = timezone.now() - timedelta(days=1)
-    rows = []
+    rows: list[ProcessEvent] = []
     for case in range(cases):
         for position, activity in enumerate(("Create", "Approve", "Complete")):
             rows.append(
-                EventFactory(
-                    tenant_id=tenant_id,
-                    created_by=actor_id,
-                    case_id=f"case-{case}",
-                    source_event_id=f"{case}-{position}",
-                    activity=activity,
-                    occurred_at=start + timedelta(minutes=case * 10 + position),
+                cast(
+                    ProcessEvent,
+                    EventFactory(
+                        tenant_id=tenant_id,
+                        created_by=actor_id,
+                        case_id=f"case-{case}",
+                        source_event_id=f"{case}-{position}",
+                        activity=activity,
+                        occurred_at=start + timedelta(minutes=case * 10 + position),
+                    ),
                 )
             )
     return rows

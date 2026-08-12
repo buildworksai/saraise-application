@@ -104,6 +104,77 @@ def test_configuration_rejects_unsafe_limits_and_baseline(tenant_a, actor_id, co
         ConfigurationService.preview(current, document=fail_open)
 
 
+@pytest.mark.parametrize(
+    ("mutator", "expected_detail"),
+    [
+        (
+            lambda document: document["limits"].update({"correlation_id_pattern": "(capture)"}),
+            "limits.correlation_id_pattern",
+        ),
+        (
+            lambda document: document["defaults"].update({"allowed_mfa_methods": ["totp", "totp"]}),
+            "defaults.allowed_mfa_methods",
+        ),
+        (lambda document: document.update({"remote_context_keys": ["record_id", "bad key"]}), "remote_context_keys"),
+        (
+            lambda document: document.update({"commercial_controls": {"entitlement": "optional", "quota": "required"}}),
+            "commercial_controls",
+        ),
+        (lambda document: document["ordering"].update({"roles": ["name", "unsafe"]}), "ordering.roles"),
+        (lambda document: document.update({"ui": []}), "ui"),
+        (lambda document: document.update({"semantic_tokens": {"success": "ok"}}), "semantic_tokens"),
+        (
+            lambda document: document.update(
+                {
+                    "feature_flags": {
+                        "configuration ui": {"enabled": True, "percentage": 100, "roles": [], "cohorts": []}
+                    }
+                }
+            ),
+            "feature_flags",
+        ),
+        (
+            lambda document: document.update(
+                {
+                    "feature_flags": {
+                        "configuration_ui": {"enabled": True, "percentage": True, "roles": [], "cohorts": []}
+                    }
+                }
+            ),
+            "feature_flags.configuration_ui",
+        ),
+        (
+            lambda document: document["defaults"]["security_profile"].update({"session_timeout_minutes": 1}),
+            "defaults.security_profile.session_timeout_minutes",
+        ),
+    ],
+)
+def test_configuration_validation_rejects_malformed_policy_branches(mutator, expected_detail) -> None:
+    document = default_security_configuration()
+    mutator(document)
+
+    with pytest.raises(SecurityValidationError) as exc_info:
+        ConfigurationService.validate_document(document)
+
+    assert expected_detail in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    ("rollout", "expected_detail"),
+    [
+        ({"enabled": True, "percentage": 100, "role_ids": []}, "rollout"),
+        ({"enabled": True, "percentage": True, "role_ids": [], "cohorts": []}, "rollout.percentage"),
+        ({"enabled": True, "percentage": 100, "role_ids": [""], "cohorts": []}, "rollout.role_ids"),
+        ({"enabled": True, "percentage": 100, "role_ids": [], "cohorts": [""]}, "rollout.cohorts"),
+    ],
+)
+def test_rollout_validation_rejects_malformed_targets(rollout, expected_detail) -> None:
+    with pytest.raises(SecurityValidationError) as exc_info:
+        ConfigurationService.validate_rollout(rollout)
+
+    assert expected_detail in exc_info.value.detail
+
+
 def test_configuration_api_preview_update_replay_export_versions_and_rollback(
     authenticated_tenant_a_client,
 ) -> None:

@@ -826,7 +826,7 @@ class DataMigrationConfigurationViewSet(TenantGovernedViewSet):
             DataMigrationConfigurationService.update,
             self.tenant_id,
             self.actor_id,
-            values["document"],
+            values,
             expected_version,
             self.correlation_id,
         )
@@ -865,11 +865,12 @@ class DataMigrationConfigurationViewSet(TenantGovernedViewSet):
         body.is_valid(raise_exception=True)
         values = dict(body.validated_data)
         expected_version = values.pop("expected_version")
+        document = values.pop("document")
         config = _call(
             DataMigrationConfigurationService.import_document,
             self.tenant_id,
             self.actor_id,
-            values,
+            document,
             expected_version,
         )
         return Response(DataMigrationConfigurationSerializer(config).data)

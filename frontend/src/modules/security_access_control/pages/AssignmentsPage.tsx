@@ -23,7 +23,14 @@ import {
   formatDate,
   useUnsavedChanges,
 } from "../components/SecurityUI";
-import { QUERY_KEYS, ROUTES, type DeletionReasonInput, type UserRole } from "../contracts";
+import {
+  QUERY_KEYS,
+  ROUTES,
+  type AssignmentFilters,
+  type DeletionReasonInput,
+  type RoleFilters,
+  type UserRole,
+} from "../contracts";
 import { securityService } from "../services/security-service";
 import { useSecurityConfiguration } from "../hooks/use-security-configuration";
 const assignmentSchema = z
@@ -65,31 +72,25 @@ export function AssignmentsPage() {
   const ordering = params.get("ordering") ?? "-valid_from";
   const page = Math.max(1, Number(params.get("page") ?? 1));
   const pageSize = configuration.data?.data.document.limits.list_page_size;
+  const filters: AssignmentFilters = {
+    user_id: user || undefined,
+    role_id: role || undefined,
+    revoked: revoked ? revoked === "true" : undefined,
+    active_at: activeAt || undefined,
+    ordering,
+    page,
+    page_size: pageSize,
+  };
   const query = useQuery({
-    queryKey: QUERY_KEYS.userRoles({
-      user_id: user || undefined,
-      role_id: role || undefined,
-      revoked: revoked ? revoked === "true" : undefined,
-      active_at: activeAt || undefined,
-      ordering,
-      page,
-      page_size: pageSize,
-    }),
-    queryFn: () =>
-      securityService.userRoles.list({
-        user_id: user || undefined,
-        role_id: role || undefined,
-        revoked: revoked ? revoked === "true" : undefined,
-        active_at: activeAt || undefined,
-        ordering,
-        page,
-        page_size: pageSize,
-      }),
+    queryKey: QUERY_KEYS.userRoles(filters),
+    queryFn: () => securityService.userRoles.list(filters),
     enabled: pageSize !== undefined,
   });
   const reset = () => setParams(new URLSearchParams());
   const filtered = Boolean(user || role || revoked || activeAt);
-  if (query.isLoading) return <PageSkeleton />;
+  if (configuration.isLoading || query.isLoading) return <PageSkeleton />;
+  if (configuration.error)
+    return <GovernedError error={configuration.error} retry={() => void configuration.refetch()} />;
   if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()} />;
   if (!query.data)
     return <GovernedError error={new Error("No governed assignment response was received.")} />;
@@ -310,14 +311,14 @@ function AssignmentForm({ initial }: { readonly initial?: UserRole }) {
   useUnsavedChanges(dirty);
   const lookupSize = configuration.data?.data.document.limits.lookup_page_size;
   const roleOrdering = configuration.data?.data.document.ordering.roles.join(",");
+  const roleFilters: RoleFilters = {
+    is_active: true,
+    page_size: lookupSize,
+    ordering: roleOrdering,
+  };
   const roles = useQuery({
-    queryKey: QUERY_KEYS.roles({ is_active: true, page_size: lookupSize, ordering: roleOrdering }),
-    queryFn: () =>
-      securityService.roles.list({
-        is_active: true,
-        page_size: lookupSize,
-        ordering: roleOrdering,
-      }),
+    queryKey: QUERY_KEYS.roles(roleFilters),
+    queryFn: () => securityService.roles.list(roleFilters),
     enabled: lookupSize !== undefined && roleOrdering !== undefined,
   });
   const mutation = useMutation({

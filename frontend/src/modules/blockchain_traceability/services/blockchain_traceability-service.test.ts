@@ -9,8 +9,14 @@ import type {
 } from "../contracts";
 import {
   BlockchainTraceabilityApiError,
+  anchorQuery,
+  attemptQuery,
   assetQuery,
   blockchainTraceabilityService,
+  credentialQuery,
+  eventQuery,
+  evidenceQuery,
+  networkQuery,
 } from "./blockchain_traceability-service";
 
 const meta = { correlation_id: "corr-1", timestamp: "2026-07-22T10:00:00Z" };
@@ -44,6 +50,32 @@ describe("blockchain traceability v2 service", () => {
       "/api/v2/blockchain-traceability/assets/?page=2&ordering=-created_at&status=recalled&product_ref=A%26B"
     );
     expect(assetQuery({ search: "serial 1" })).toContain("search=serial+1");
+  });
+
+  it("serializes every list filter family through governed query helpers", () => {
+    expect(networkQuery({ search: "main net", status: "active", provider_type: "fabric" })).toBe(
+      "/api/v2/blockchain-traceability/networks/?search=main+net&status=active&provider_type=fabric"
+    );
+    expect(
+      eventQuery({
+        asset_id: "asset-1",
+        event_type: "SHIP",
+        occurred_after: "2026-07-01T00:00:00Z",
+        actor_ref: "warehouse",
+      })
+    ).toContain("occurred_after=2026-07-01T00%3A00%3A00Z");
+    expect(anchorQuery({ asset_id: "asset-1", network_id: "network-1", status: "failed" })).toBe(
+      "/api/v2/blockchain-traceability/anchors/?asset_id=asset-1&network_id=network-1&status=failed"
+    );
+    expect(credentialQuery({ status: "revoked", credential_type: "authenticity" })).toContain(
+      "credential_type=authenticity"
+    );
+    expect(evidenceQuery({ standard: "FDA", jurisdiction: "US", result: "pass" })).toContain(
+      "jurisdiction=US"
+    );
+    expect(attemptQuery({ verification_type: "chain", outcome: "dependency_unavailable" })).toBe(
+      "/api/v2/blockchain-traceability/verification-attempts/?verification_type=chain&outcome=dependency_unavailable"
+    );
   });
 
   it("uses PATCH for partial network updates", async () => {
@@ -132,5 +164,117 @@ describe("blockchain traceability v2 service", () => {
     expect(put).toHaveBeenCalledWith("/api/v2/blockchain-traceability/configuration/current/", {
       document: configuration.document,
     });
+  });
+
+  it("routes configuration preview, history, import, export, and capability calls with environment scope", async () => {
+    const response = { data: { id: "configuration-1" }, meta } satisfies ApiV2Envelope<unknown>;
+    const get = vi.spyOn(apiClient, "get").mockResolvedValue(response);
+    const post = vi.spyOn(apiClient, "post").mockResolvedValue(response);
+
+    await blockchainTraceabilityService.previewConfiguration({ document: {} } as never);
+    await blockchainTraceabilityService.listConfigurationHistory("production");
+    await blockchainTraceabilityService.rollbackConfiguration({
+      version: 3,
+      change_reason: "rollback",
+    } as never);
+    await blockchainTraceabilityService.importConfiguration({ document: {} } as never);
+    await blockchainTraceabilityService.exportConfiguration("staging");
+    await blockchainTraceabilityService.getCapabilities("development");
+
+    expect(post).toHaveBeenCalledWith("/api/v2/blockchain-traceability/configuration/preview/", {
+      document: {},
+    });
+    expect(get).toHaveBeenCalledWith(
+      "/api/v2/blockchain-traceability/configuration/history/?environment=production"
+    );
+    expect(post).toHaveBeenCalledWith("/api/v2/blockchain-traceability/configuration/rollback/", {
+      version: 3,
+      change_reason: "rollback",
+    });
+    expect(post).toHaveBeenCalledWith(
+      "/api/v2/blockchain-traceability/configuration/import-document/",
+      { document: {} }
+    );
+    expect(get).toHaveBeenCalledWith(
+      "/api/v2/blockchain-traceability/configuration/export-document/?environment=staging"
+    );
+    expect(get).toHaveBeenCalledWith(
+      "/api/v2/blockchain-traceability/configuration/capabilities/?environment=development"
+    );
+  });
+
+  it("routes asset, event, credential, evidence, and verification transitions without synthetic completion", async () => {
+    const response = { data: { id: "resource-1" }, meta } satisfies ApiV2Envelope<unknown>;
+    const get = vi.spyOn(apiClient, "get").mockResolvedValue(response);
+    const post = vi.spyOn(apiClient, "post").mockResolvedValue(response);
+    const patch = vi.spyOn(apiClient, "patch").mockResolvedValue(response);
+    const del = vi.spyOn(apiClient, "delete").mockResolvedValue(undefined);
+
+    await blockchainTraceabilityService.createNetwork({ name: "Main" } as never);
+    await blockchainTraceabilityService.deleteNetwork("network-1");
+    await blockchainTraceabilityService.activateNetwork("network-1", {
+      transition_key: "activate",
+    });
+    await blockchainTraceabilityService.disableNetwork("network-1", { transition_key: "disable" });
+    await blockchainTraceabilityService.probeNetwork("network-1");
+    await blockchainTraceabilityService.registerAsset({ product_ref: "sku-1" } as never);
+    await blockchainTraceabilityService.getAsset("asset-1");
+    await blockchainTraceabilityService.updateAsset("asset-1", { status: "active" } as never);
+    await blockchainTraceabilityService.deleteAsset("asset-1");
+    await blockchainTraceabilityService.recallAsset("asset-1", { reason: "recall" } as never);
+    await blockchainTraceabilityService.releaseAssetRecall("asset-1", {
+      transition_key: "release",
+    });
+    await blockchainTraceabilityService.getAssetHistory("asset-1", { page: 2 });
+    await blockchainTraceabilityService.verifyAssetChain("asset-1", { idempotency_key: "chain" });
+    await blockchainTraceabilityService.appendEvent({ asset_id: "asset-1" } as never);
+    await blockchainTraceabilityService.getEvent("event-1");
+    await blockchainTraceabilityService.retryAnchor("anchor-1", { transition_key: "retry" });
+    await blockchainTraceabilityService.refreshAnchor("anchor-1");
+    await blockchainTraceabilityService.verifyAnchor("anchor-1", { idempotency_key: "verify" });
+    await blockchainTraceabilityService.issueCredential({ asset_id: "asset-1" } as never);
+    await blockchainTraceabilityService.getCredential("credential-1");
+    await blockchainTraceabilityService.revokeCredential("credential-1", {
+      transition_key: "revoke",
+      reason: "leaked",
+    });
+    await blockchainTraceabilityService.verifyAuthenticity({ asset_id: "asset-1" } as never);
+    await blockchainTraceabilityService.createComplianceEvidence({ asset_id: "asset-1" } as never);
+    await blockchainTraceabilityService.updateComplianceEvidence("evidence-1", {
+      result: "pass",
+    } as never);
+    await blockchainTraceabilityService.finalizeComplianceEvidence("evidence-1", {
+      transition_key: "finalize",
+    });
+    await blockchainTraceabilityService.supersedeComplianceEvidence("evidence-1", {
+      reason: "new evidence",
+    } as never);
+    await blockchainTraceabilityService.verifyComplianceEvidence("evidence-1", {
+      idempotency_key: "verify-evidence",
+    });
+    await blockchainTraceabilityService.getVerificationAttempt("attempt-1");
+    await blockchainTraceabilityService.getHealth();
+
+    expect(post).toHaveBeenCalledWith("/api/v2/blockchain-traceability/networks/", {
+      name: "Main",
+    });
+    expect(del).toHaveBeenCalledWith("/api/v2/blockchain-traceability/networks/network-1/");
+    expect(post).toHaveBeenCalledWith("/api/v2/blockchain-traceability/networks/network-1/probe/");
+    expect(patch).toHaveBeenCalledWith("/api/v2/blockchain-traceability/assets/asset-1/", {
+      status: "active",
+    });
+    expect(get).toHaveBeenCalledWith(
+      "/api/v2/blockchain-traceability/assets/asset-1/history/?page=2"
+    );
+    expect(post).toHaveBeenCalledWith("/api/v2/blockchain-traceability/anchors/anchor-1/refresh/");
+    expect(post).toHaveBeenCalledWith(
+      "/api/v2/blockchain-traceability/credentials/credential-1/revoke/",
+      { transition_key: "revoke", reason: "leaked" }
+    );
+    expect(post).toHaveBeenCalledWith(
+      "/api/v2/blockchain-traceability/compliance-evidence/evidence-1/finalize/",
+      { transition_key: "finalize" }
+    );
+    expect(get).toHaveBeenCalledWith("/api/v2/blockchain-traceability/health/");
   });
 });

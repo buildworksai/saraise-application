@@ -1,6 +1,6 @@
 /* eslint-disable max-lines, max-lines-per-function, @typescript-eslint/unbound-method -- Bank reconciliation has a wide governed UI surface; these tests keep each workflow state explicit. */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type * as ReactRouter from "react-router-dom";
@@ -510,6 +510,36 @@ describe("bank reconciliation governed pages", () => {
     expect(navigateSpy).toHaveBeenCalledWith("/bank-reconciliation/accounts/account-1");
   });
 
+  it("renders active-session archive guard and ledger-linked account creation", async () => {
+    service.health.mockResolvedValue({
+      status: "healthy",
+      components: { ledger_gateway: "available", import_worker: "available" },
+    });
+    service.getBankAccount.mockResolvedValue({ ...account, active_session_count: 2 });
+    service.createBankAccount.mockResolvedValue({ ...account, id: "ledger-linked-account" });
+
+    const detail = renderAt("/accounts/:id", "/accounts/account-1", <BankAccountDetailPage />);
+    expect(
+      await screen.findByText("This account has an active reconciliation and cannot be archived.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Archive" })).toBeDisabled();
+    detail.unmount();
+
+    renderPage("/bank-reconciliation/accounts/new", <CreateBankAccountPage />);
+
+    await userEvent.type(await screen.findByLabelText("Account number"), "000-222");
+    await userEvent.type(screen.getByLabelText("Account display name"), "Settlement");
+    await userEvent.type(screen.getByLabelText("Bank name"), "Civic Bank");
+    await userEvent.type(screen.getByLabelText("Ledger account ID"), "ledger-cash-2");
+    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    await waitFor(() =>
+      expect(service.createBankAccount).toHaveBeenCalledWith(
+        expect.objectContaining({ ledger_account_id: "ledger-cash-2" })
+      )
+    );
+  });
+
   it("renders statement filters, balance proof, import diagnostics, and void guard", async () => {
     service.listStatements.mockResolvedValue(
       collection([{ ...statement, balance_variance: "5.0000" }])
@@ -641,6 +671,56 @@ describe("bank reconciliation governed pages", () => {
     await waitFor(() => expect(service.restoreTransaction).toHaveBeenCalledWith("tx-1"));
   });
 
+  it("edits manual transactions and blocks imported source mutation", async () => {
+    const user = userEvent.setup();
+    service.getTransaction.mockResolvedValueOnce(transaction);
+    service.updateManualTransaction.mockResolvedValue({
+      ...transaction,
+      description: "Corrected customer payment",
+      amount: "30.0000",
+      reference_number: "",
+    });
+
+    const { unmount } = renderAt(
+      "/bank-reconciliation/transactions/:id/edit",
+      "/bank-reconciliation/transactions/tx-1/edit",
+      <EditTransactionPage />
+    );
+
+    expect(await screen.findByRole("heading", { name: "Edit manual transaction" })).toBeVisible();
+    await user.clear(screen.getByLabelText("Description"));
+    await user.type(screen.getByLabelText("Description"), "Corrected customer payment");
+    await user.clear(screen.getByLabelText("Amount"));
+    await user.type(screen.getByLabelText("Amount"), "30.0000");
+    await user.clear(screen.getByLabelText("Reference"));
+    await user.click(screen.getByRole("button", { name: "Save transaction" }));
+
+    await waitFor(() =>
+      expect(service.updateManualTransaction).toHaveBeenCalledWith("tx-1", {
+        transaction_date: "2026-07-15",
+        value_date: null,
+        description: "Corrected customer payment",
+        amount: "30.0000",
+        reference_number: "",
+        counterparty_name: "Customer LLC",
+      })
+    );
+    expect(navigateSpy).toHaveBeenCalledWith("/bank-reconciliation/transactions/tx-1");
+
+    unmount();
+    service.getTransaction.mockResolvedValueOnce({ ...transaction, source: "file" });
+    renderAt(
+      "/bank-reconciliation/transactions/:id/edit",
+      "/bank-reconciliation/transactions/tx-1/edit",
+      <EditTransactionPage />
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Imported transaction is immutable" })
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Save transaction" })).not.toBeInTheDocument();
+  });
+
   it("groups reconciliation transactions and blocks certification when guards fail", async () => {
     service.getReconciliation.mockResolvedValue({
       ...reconciliation,
@@ -741,13 +821,97 @@ describe("bank reconciliation governed pages", () => {
     );
   });
 
-  it("marks reconciliation and matching-rule create forms with native constraints", () => {
+  it("updates mutable account fields and matching-rule policies with exact service payloads", async () => {
+    service.getBankAccount.mockResolvedValue(account);
+    service.updateBankAccount.mockResolvedValue({ ...account, account_name: "Operating cash v2" });
+    renderAt("/accounts/:id/edit", "/accounts/account-1/edit", <EditBankAccountPage />);
+
+    const accountName = await screen.findByLabelText("Account name");
+    await userEvent.clear(accountName);
+    await userEvent.type(accountName, "Operating cash v2");
+    await userEvent.clear(screen.getByLabelText("Bank name"));
+    await userEvent.type(screen.getByLabelText("Bank name"), "Civic Bank Trust");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(service.updateBankAccount).toHaveBeenCalledWith("account-1", {
+        account_name: "Operating cash v2",
+        bank_name: "Civic Bank Trust",
+        account_type: "checking",
+        bank_identifier: "CIVICUS33",
+        ledger_account_id: "ledger-account-1",
+      })
+    );
+
+    service.getRule.mockResolvedValue(rule);
+    service.updateRule.mockResolvedValue({
+      ...rule,
+      rule_type: "counterparty",
+      configuration: { counterparty_pattern: "Customer.*" },
+    });
+    renderAt("/rules/:id/edit", "/rules/rule-1/edit", <EditMatchingRulePage />);
+
+    await userEvent.selectOptions(await screen.findByLabelText("Rule type"), "counterparty");
+    await userEvent.type(screen.getByLabelText("Counterparty pattern"), "Customer.*");
+    await userEvent.click(screen.getByRole("button", { name: "Save rule" }));
+    await waitFor(() =>
+      expect(service.updateRule).toHaveBeenCalledWith(
+        "rule-1",
+        expect.objectContaining({
+          name: "Exact reference",
+          rule_type: "counterparty",
+          priority: 10,
+          minimum_score: "1.0000",
+          configuration: { counterparty_pattern: "Customer.*" },
+        })
+      )
+    );
+  });
+
+  it("renders guarded missing-rule editor and create-rule extension payloads", async () => {
+    service.getRule.mockResolvedValue(null as never);
+    renderAt("/rules/:id/edit", "/rules/missing-rule/edit", <EditMatchingRulePage />);
+    expect(await screen.findByText("Rule not found")).toBeInTheDocument();
+
+    service.createRule.mockResolvedValue({ ...rule, rule_type: "extension", extension_key: "erp" });
+    renderPage("/bank-reconciliation/rules/new", <CreateMatchingRulePage />);
+
+    await userEvent.type(screen.getByLabelText("Rule name"), "Extension match");
+    await userEvent.selectOptions(screen.getByLabelText("Rule type"), "extension");
+    await userEvent.clear(screen.getByLabelText("Priority"));
+    await userEvent.type(screen.getByLabelText("Priority"), "7");
+    await userEvent.clear(screen.getByLabelText("Minimum score"));
+    await userEvent.type(screen.getByLabelText("Minimum score"), "0.8750");
+    await userEvent.type(screen.getByLabelText("Extension key"), "erp.rules.reference");
+    await userEvent.click(
+      screen.getByLabelText("Automatically confirm perfect deterministic matches")
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Create rule" }));
+
+    await waitFor(() =>
+      expect(service.createRule).toHaveBeenCalledWith({
+        name: "Extension match",
+        description: "",
+        rule_type: "extension",
+        priority: 7,
+        minimum_score: "1.0000",
+        configuration: {},
+        auto_confirm: true,
+        extension_key: "erp.rules.reference",
+      })
+    );
+  });
+
+  it("marks reconciliation and matching-rule create forms with governed required constraints", async () => {
     renderPage("/bank-reconciliation/reconciliations/new", <CreateReconciliationPage />);
 
     expect(screen.getByLabelText("Bank account ID")).toBeRequired();
     expect(screen.getByLabelText("Statement ID")).toBeRequired();
     expect(screen.getByLabelText("Reconciliation date")).toBeRequired();
     expect(screen.getByLabelText("Verified ledger balance")).toBeRequired();
+    await userEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    expect(screen.getByText("Bank account ID is required")).toBeInTheDocument();
+    expect(screen.getByText("Statement ID is required")).toBeInTheDocument();
+    expect(service.createReconciliation).not.toHaveBeenCalled();
 
     renderPage("/bank-reconciliation/rules/new", <CreateMatchingRulePage />);
 
@@ -782,7 +946,7 @@ describe("bank reconciliation governed pages", () => {
     await userEvent.click(screen.getByRole("button", { name: "Delete unused rule" }));
     await waitFor(() => expect(service.deleteRule).toHaveBeenCalledWith("rule-1"));
 
-    renderAt("/imports/:id", "/imports/import-1", <ImportJobDetailPage />);
+    const failedImport = renderAt("/imports/:id", "/imports/import-1", <ImportJobDetailPage />);
     expect(await screen.findByText("Sanitized diagnostics")).toBeInTheDocument();
     expect(screen.getByText("BAD_DATE")).toBeInTheDocument();
     expect(screen.getByText("Correlation ID: corr-import")).toBeInTheDocument();
@@ -792,6 +956,14 @@ describe("bank reconciliation governed pages", () => {
         idempotency_key: "idem-test",
       })
     );
+    failedImport.unmount();
+
+    service.getImport.mockResolvedValue({ ...importJob, status: "pending", error_code: "" });
+    service.cancelImport.mockResolvedValue({ ...importJob, status: "cancelled" });
+    renderAt("/imports/:id", "/imports/import-1", <ImportJobDetailPage />);
+    expect(await screen.findByRole("heading", { name: "july.csv" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(service.cancelImport).toHaveBeenCalledWith("import-1"));
   });
 
   it("renders accessible empty and permission states instead of silent blanks", async () => {
@@ -806,5 +978,203 @@ describe("bank reconciliation governed pages", () => {
     );
     renderPage("/bank-reconciliation/accounts", <BankAccountListPage />);
     expect(await screen.findByText("This information could not be loaded.")).toBeInTheDocument();
+  });
+
+  it("creates reconciliation drafts from URL-scoped statements with immutable idempotency evidence", async () => {
+    service.createReconciliation.mockResolvedValue(reconciliation);
+    window.history.pushState(
+      {},
+      "",
+      "/bank-reconciliation/reconciliations/new?statement=statement-1"
+    );
+    renderAt(
+      "/bank-reconciliation/reconciliations/new",
+      "/bank-reconciliation/reconciliations/new?statement=statement-1",
+      <CreateReconciliationPage />
+    );
+
+    expect(screen.getByLabelText("Statement ID")).toHaveValue("statement-1");
+    await userEvent.type(screen.getByLabelText("Bank account ID"), "account-1");
+    await userEvent.clear(screen.getByLabelText("Verified ledger balance"));
+    await userEvent.type(screen.getByLabelText("Verified ledger balance"), "125.0000");
+    await userEvent.clear(screen.getByLabelText("Tolerance"));
+    await userEvent.type(screen.getByLabelText("Tolerance"), "0.0100");
+    await userEvent.type(screen.getByLabelText("Notes"), "Verified against ledger close package");
+    await userEvent.click(screen.getByRole("button", { name: "Create draft" }));
+
+    await waitFor(() =>
+      expect(service.createReconciliation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bank_account: "account-1",
+          bank_statement: "statement-1",
+          ledger_balance: "125.0000",
+          tolerance: "0.0100",
+          notes: "Verified against ledger close package",
+          idempotency_key: "idem-test",
+        })
+      )
+    );
+    expect(navigateSpy).toHaveBeenCalledWith(
+      "/bank-reconciliation/reconciliations/recon-1/workspace"
+    );
+  });
+
+  it("keeps failed import list queries retryable without rendering stale job data", async () => {
+    service.listImports
+      .mockRejectedValueOnce(new Error("worker unavailable"))
+      .mockResolvedValueOnce(collection([importJob]));
+
+    renderPage("/bank-reconciliation/imports", <ImportJobListPage />);
+
+    expect(await screen.findByText("This information could not be loaded.")).toBeInTheDocument();
+    expect(screen.queryByText("july.csv")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Try Again" }));
+
+    expect(await screen.findByText("july.csv")).toBeInTheDocument();
+    expect(service.listImports).toHaveBeenCalledTimes(2);
+  });
+
+  it("covers bank-account detail not-found, archive rejection, and create mutation diagnostics", async () => {
+    service.getBankAccount.mockResolvedValueOnce(null as never);
+    renderAt("/accounts/:id", "/accounts/missing", <BankAccountDetailPage />);
+    expect(await screen.findByText("Account not found")).toBeInTheDocument();
+
+    service.getBankAccount.mockResolvedValueOnce(account);
+    service.archiveBankAccount.mockRejectedValueOnce(new Error("active settlement session"));
+    renderAt("/accounts/:id", "/accounts/account-1", <BankAccountDetailPage />);
+    expect(await screen.findByRole("heading", { name: "Operating cash" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(service.archiveBankAccount).toHaveBeenCalledWith("account-1"));
+    expect(toastError).toHaveBeenCalledWith("active settlement session");
+
+    service.createBankAccount.mockRejectedValueOnce(new Error("duplicate account hash"));
+    renderPage("/bank-reconciliation/accounts/new", <CreateBankAccountPage />);
+    await userEvent.type(await screen.findByLabelText("Account number"), "000-333");
+    await userEvent.type(screen.getByLabelText("Account display name"), "Treasury");
+    await userEvent.type(screen.getByLabelText("Bank name"), "Civic Bank");
+    await userEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await waitFor(() => expect(service.createBankAccount).toHaveBeenCalledTimes(1));
+    expect(toastError).toHaveBeenCalledWith("duplicate account hash");
+  });
+
+  it("covers manual statement row add/remove and statement/import empty action navigation", async () => {
+    service.createManualStatement.mockResolvedValue(statement);
+    const manualStatement = renderPage(
+      "/bank-reconciliation/statements/manual",
+      <CreateManualStatementPage />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Add row" }));
+    expect(screen.getByLabelText("Transaction 2 date")).toHaveValue("");
+    await userEvent.type(screen.getByLabelText("Transaction 2 date"), "2026-07-20");
+    await userEvent.type(screen.getByLabelText("Transaction 2 description"), "Bank fee");
+    await userEvent.clear(screen.getByLabelText("Transaction 2 amount"));
+    await userEvent.type(screen.getByLabelText("Transaction 2 amount"), "-5.0000");
+    await userEvent.click(screen.getByLabelText("Remove transaction 2"));
+    expect(screen.queryByLabelText("Transaction 2 date")).not.toBeInTheDocument();
+    manualStatement.unmount();
+
+    service.listStatements.mockResolvedValue(collection([]));
+    const statementList = renderPage("/bank-reconciliation/statements", <StatementListPage />);
+    expect(await screen.findByText("No statements found")).toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole("button", { name: "Import statement" }).at(-1)!);
+    expect(navigateSpy).toHaveBeenCalledWith("/bank-reconciliation/statements/import");
+    statementList.unmount();
+
+    service.listImports.mockResolvedValue(collection([]));
+    renderPage("/bank-reconciliation/imports", <ImportJobListPage />);
+    expect(await screen.findByText("No import jobs")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Import statement" }));
+    expect(navigateSpy).toHaveBeenCalledWith("/bank-reconciliation/statements/import");
+  });
+
+  it("covers reconciliation review/finalize paths and certified workspace evidence navigation", async () => {
+    service.getBankAccount.mockResolvedValue(account);
+    service.listStatementTransactions.mockResolvedValue(collection([]));
+    let workspaceSession: ReconciliationSession = {
+      ...reconciliation,
+      status: "in_progress",
+      summary,
+    };
+    service.getReconciliation.mockImplementation(() => Promise.resolve(workspaceSession));
+    service.submitReview.mockResolvedValue({ ...reconciliation, status: "review" });
+    service.finalizeReconciliation.mockResolvedValue({ ...reconciliation, status: "finalized" });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign });
+
+    const reviewWorkspace = renderAt(
+      "/reconciliations/:id/workspace",
+      "/reconciliations/recon-1/workspace",
+      <ReconciliationWorkspacePage />
+    );
+    expect(await screen.findByRole("button", { name: "Submit review" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Submit review" }));
+    await waitFor(() =>
+      expect(service.submitReview).toHaveBeenCalledWith("recon-1", {
+        idempotency_key: "idem-test",
+      })
+    );
+    reviewWorkspace.unmount();
+
+    workspaceSession = { ...reconciliation, status: "review", summary };
+    const finalizeWorkspace = renderAt(
+      "/reconciliations/:id/workspace",
+      "/reconciliations/recon-1/workspace",
+      <ReconciliationWorkspacePage />
+    );
+    expect(await screen.findByRole("button", { name: "Finalize" })).toBeEnabled();
+    await userEvent.click(screen.getByRole("button", { name: "Finalize" }));
+    await waitFor(() =>
+      expect(service.finalizeReconciliation).toHaveBeenCalledWith("recon-1", {
+        idempotency_key: "idem-test",
+      })
+    );
+    finalizeWorkspace.unmount();
+
+    workspaceSession = { ...reconciliation, status: "finalized", summary };
+    renderAt(
+      "/reconciliations/:id/workspace",
+      "/reconciliations/recon-1/workspace",
+      <ReconciliationWorkspacePage />
+    );
+    expect(
+      await screen.findByText("This session is read-only after certification.")
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "View evidence" }));
+    expect(assign).toHaveBeenCalledWith("/bank-reconciliation/reconciliations/recon-1");
+  });
+
+  it("covers succeeded imports, empty reconciliation/rule lists, and guarded matching-rule delete errors", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign });
+    service.getImport.mockResolvedValue({
+      ...importJob,
+      status: "succeeded",
+      error_code: "",
+      statement_id: "statement-2",
+    });
+    renderAt("/imports/:id", "/imports/import-1", <ImportJobDetailPage />);
+    expect(await screen.findByText("Import succeeded")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Open statement" }));
+    expect(assign).toHaveBeenCalledWith("/bank-reconciliation/statements/statement-2");
+
+    service.listReconciliations.mockResolvedValue(collection([]));
+    renderPage("/bank-reconciliation/reconciliations", <ReconciliationListPage />);
+    expect(await screen.findByText("No reconciliations found")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create reconciliation" }));
+    expect(navigateSpy).toHaveBeenCalledWith("/bank-reconciliation/reconciliations/new");
+
+    service.listRules.mockResolvedValue(collection([]));
+    renderPage("/bank-reconciliation/rules", <MatchingRuleListPage />);
+    expect(await screen.findByText("No matching rules")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create rule" }));
+    expect(navigateSpy).toHaveBeenCalledWith("/bank-reconciliation/rules/new");
+    cleanup();
+
+    service.getRule.mockResolvedValue({ ...rule, usage_count: 1, extension_key: "erp.match" });
+    service.deleteRule.mockRejectedValue(new Error("rule has match evidence"));
+    renderAt("/rules/:id", "/rules/rule-1", <MatchingRuleDetailPage />);
+    expect(await screen.findByText(/Owned by extension/u)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete unused rule" })).toBeDisabled();
   });
 });

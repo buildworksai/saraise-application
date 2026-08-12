@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar, cast
 from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -53,7 +53,7 @@ from .models import (
     AgentSchedulerTask,
 )
 from .quota_models import KillSwitch, QuotaUsage
-from .registries import evaluation_registry, runner_registry
+from .registries import EvaluationSuiteRunner, evaluation_registry, runner_registry
 from .token_models import CostRecord, CostSummary, TokenUsage
 from .tool_models import Tool, ToolInvocation
 from .tool_registry import ToolNotRegistered, ToolRegistry, tool_registry
@@ -66,6 +66,8 @@ INVOKE_TOOL_COMMAND = "ai_agent_management.invoke_tool"
 EXPIRE_APPROVALS_COMMAND = "ai_agent_management.expire_approvals"
 AGGREGATE_COST_COMMAND = "ai_agent_management.aggregate_cost"
 KILL_SWITCH_COMMAND = "ai_agent_management.enforce_kill_switch"
+
+AggregateT = TypeVar("AggregateT")
 
 CONFIGURATION_ENVIRONMENTS = ("development", "staging", "production")
 DEFAULT_CONFIGURATION: dict[str, Any] = {
@@ -657,10 +659,13 @@ class ConfigurationService:
 
     @staticmethod
     def versions(tenant_id: UUID, environment: str = "production") -> QuerySet[AgentManagementConfigurationVersion]:
-        return AgentManagementConfigurationVersion.objects.filter(
-            tenant_id=_uuid(tenant_id, "tenant_id"),
-            environment=ConfigurationService._environment(environment),
-        ).order_by("-version", "id")
+        return cast(
+            QuerySet[AgentManagementConfigurationVersion],
+            AgentManagementConfigurationVersion.objects.filter(
+                tenant_id=_uuid(tenant_id, "tenant_id"),
+                environment=ConfigurationService._environment(environment),
+            ).order_by("-version", "id"),
+        )
 
 
 class SessionValidator(Protocol):
@@ -704,7 +709,7 @@ def _mapping(value: Mapping[str, Any] | None, name: str) -> dict[str, Any]:
         return {}
     if not isinstance(value, Mapping):
         raise ValidationError({name: "Must be an object."})
-    return dict(value)
+    return {key: item for key, item in value.items()}
 
 
 def _safe_metadata(value: Mapping[str, Any] | None, tenant_id: UUID | None = None) -> dict[str, Any]:
@@ -736,13 +741,13 @@ def _actor(value: UUID | str) -> UUID:
 
 def _transition(
     machine: StateMachine[Any],
-    aggregate: Any,
+    aggregate: AggregateT,
     command: str,
     tenant_id: UUID,
     transition_key: str,
     *,
     metadata: Mapping[str, Any] | None = None,
-) -> Any:
+) -> AggregateT:
     configuration = ConfigurationService.resolve(tenant_id)
     maximum = int(configuration["agent"]["transition_key_maximum_length"])
     if not transition_key or len(transition_key) > maximum:
@@ -760,25 +765,28 @@ def _transition(
         graph = configuration["agent"]["execution_state_transitions"]
         if edge is not None and edge.target not in graph.get(current, []):
             raise IllegalTransitionError(f"Tenant configuration forbids {current!r} to {edge.target!r}")
-    return machine.apply(
-        aggregate,
-        command,
-        tenant_id=tenant_id,
-        transition_key=transition_key,
-        metadata=_safe_metadata(metadata, tenant_id),
+    return cast(
+        AggregateT,
+        machine.apply(
+            aggregate,
+            command,
+            tenant_id=tenant_id,
+            transition_key=transition_key,
+            metadata=_safe_metadata(metadata, tenant_id),
+        ),
     )
 
 
 def _transition_with_updates(
     machine: StateMachine[Any],
-    aggregate: Any,
+    aggregate: AggregateT,
     command: str,
     tenant_id: UUID,
     transition_key: str,
     updates: Mapping[str, Any],
     *,
     metadata: Mapping[str, Any] | None = None,
-) -> Any:
+) -> AggregateT:
     """Persist a lifecycle edge and its terminal invariants in one write.
 
     Several aggregates have database checks tying a terminal state to evidence
@@ -791,14 +799,14 @@ def _transition_with_updates(
     maximum = int(configuration["agent"]["transition_key_maximum_length"])
     if not transition_key or len(transition_key) > maximum:
         raise ValidationError({"transition_key": f"A transition key of at most {maximum} characters is required."})
-    model = type(aggregate)
-    locked = model._base_manager.select_for_update().get(pk=aggregate.pk, tenant_id=tenant_id)
+    model = cast(Any, type(aggregate))
+    locked = model._base_manager.select_for_update().get(pk=getattr(aggregate, "pk"), tenant_id=tenant_id)
     history = list(getattr(locked, "transition_history", []))
     existing = next((item for item in history if item.get("transition_key") == transition_key), None)
     if existing:
         if existing.get("command") != command:
             raise IdempotencyConflictError(f"Transition key {transition_key!r} already belongs to another command")
-        return locked
+        return cast(AggregateT, locked)
     state_field = machine.state_field
     current = str(getattr(locked, state_field))
     if current in machine.terminal_states:
@@ -829,7 +837,7 @@ def _transition_with_updates(
     )
     locked.transition_history = history
     locked.save(update_fields=sorted({state_field, "transition_history", "updated_at", *updates.keys()}))
-    return locked
+    return cast(AggregateT, locked)
 
 
 AGENT_MACHINE = StateMachine(
@@ -950,7 +958,7 @@ class AgentService:
     @staticmethod
     def get_agent(tenant_id: UUID, agent_id: UUID, *, for_update: bool = False) -> Agent:
         query = Agent.objects.select_for_update() if for_update else Agent.objects
-        return query.get(tenant_id=_uuid(tenant_id, "tenant_id"), id=_uuid(agent_id, "agent_id"))
+        return cast(Agent, query.get(tenant_id=_uuid(tenant_id, "tenant_id"), id=_uuid(agent_id, "agent_id")))
 
     @staticmethod
     def list_agents(tenant_id: UUID, filters: Mapping[str, Any] | None = None) -> QuerySet[Agent]:
@@ -970,7 +978,7 @@ class AgentService:
         ordering = str(values.get("ordering", "name"))
         if ordering not in set(configuration["ordering_fields"]):
             raise ValidationError({"ordering": "Unsupported ordering field."})
-        return query.order_by(ordering, "id")
+        return cast(QuerySet[Agent], query.order_by(ordering, "id"))
 
     @staticmethod
     @transaction.atomic
@@ -1070,6 +1078,8 @@ class ExecutionService:
                 agent.id,
                 {"scheduled_at": schedule_at, "task_data": dict(task), "idempotency_key": idempotency_key},
             )
+            if schedule.execution is None:
+                raise AgentServiceError("SCHEDULE_EXECUTION_MISSING", "Scheduled execution was not persisted.")
             return OperationResult.succeeded(
                 schedule.execution,
                 evidence={"execution_id": str(schedule.execution_id), "schedule_id": str(schedule.id)},
@@ -1105,8 +1115,11 @@ class ExecutionService:
 
     @staticmethod
     def get_execution(tenant_id: UUID, execution_id: UUID) -> AgentExecution:
-        return AgentExecution.objects.select_related("agent").get(
-            tenant_id=_uuid(tenant_id, "tenant_id"), id=_uuid(execution_id, "execution_id")
+        return cast(
+            AgentExecution,
+            AgentExecution.objects.select_related("agent").get(
+                tenant_id=_uuid(tenant_id, "tenant_id"), id=_uuid(execution_id, "execution_id")
+            ),
         )
 
     @staticmethod
@@ -1124,14 +1137,17 @@ class ExecutionService:
         ordering = str(values.get("ordering", "-created_at"))
         if ordering.lstrip("-") not in {"created_at", "started_at", "completed_at"}:
             raise ValidationError({"ordering": "Unsupported ordering field."})
-        return query.order_by(ordering, "id")
+        return cast(QuerySet[AgentExecution], query.order_by(ordering, "id"))
 
     @staticmethod
     def _owned(tenant_id: UUID, agent_id: UUID, execution_id: UUID) -> AgentExecution:
-        return AgentExecution.objects.select_related("agent").get(
-            tenant_id=_uuid(tenant_id, "tenant_id"),
-            agent_id=_uuid(agent_id, "agent_id"),
-            id=_uuid(execution_id, "execution_id"),
+        return cast(
+            AgentExecution,
+            AgentExecution.objects.select_related("agent").get(
+                tenant_id=_uuid(tenant_id, "tenant_id"),
+                agent_id=_uuid(agent_id, "agent_id"),
+                id=_uuid(execution_id, "execution_id"),
+            ),
         )
 
     @classmethod
@@ -1226,7 +1242,7 @@ class ScheduleService:
             raise ValidationError({"idempotency_key": "This field is required."})
         prior = AgentSchedulerTask.objects.filter(tenant_id=tenant, idempotency_key=key).first()
         if prior:
-            return prior
+            return cast(AgentSchedulerTask, prior)
         agent = AgentService.get_agent(tenant, agent_id)
         scheduled_at = values.get("scheduled_at")
         if not isinstance(scheduled_at, datetime):
@@ -1270,12 +1286,15 @@ class ScheduleService:
             transition_history=[],
             async_job_id=job.id,
         )
-        return schedule
+        return cast(AgentSchedulerTask, schedule)
 
     @staticmethod
     def get_schedule(tenant_id: UUID, task_id: UUID) -> AgentSchedulerTask:
-        return AgentSchedulerTask.objects.select_related("agent", "execution").get(
-            tenant_id=_uuid(tenant_id, "tenant_id"), id=_uuid(task_id, "task_id")
+        return cast(
+            AgentSchedulerTask,
+            AgentSchedulerTask.objects.select_related("agent", "execution").get(
+                tenant_id=_uuid(tenant_id, "tenant_id"), id=_uuid(task_id, "task_id")
+            ),
         )
 
     @staticmethod
@@ -1294,7 +1313,7 @@ class ScheduleService:
         ordering = str(values.get("ordering", "scheduled_at"))
         if ordering.lstrip("-") not in {"priority", "scheduled_at"}:
             raise ValidationError({"ordering": "Unsupported ordering field."})
-        return query.order_by(ordering, "id")
+        return cast(QuerySet[AgentSchedulerTask], query.order_by(ordering, "id"))
 
     @staticmethod
     @transaction.atomic
@@ -1384,8 +1403,11 @@ class ApprovalService:
 
     @staticmethod
     def get_request(tenant_id: UUID, approval_id: UUID) -> ApprovalRequest:
-        return ApprovalRequest.objects.select_related("tool", "agent_execution", "tool_invocation").get(
-            tenant_id=_uuid(tenant_id, "tenant_id"), id=_uuid(approval_id, "approval_id")
+        return cast(
+            ApprovalRequest,
+            ApprovalRequest.objects.select_related("tool", "agent_execution", "tool_invocation").get(
+                tenant_id=_uuid(tenant_id, "tenant_id"), id=_uuid(approval_id, "approval_id")
+            ),
         )
 
     @staticmethod
@@ -1407,7 +1429,7 @@ class ApprovalService:
             query = query.filter(expires_at__gte=values["expires_after"])
         if values.get("expires_before"):
             query = query.filter(expires_at__lte=values["expires_before"])
-        return query.order_by("-requested_at", "id")
+        return cast(QuerySet[ApprovalRequest], query.order_by("-requested_at", "id"))
 
     @staticmethod
     @transaction.atomic
@@ -1562,7 +1584,7 @@ class SoDService:
     @transaction.atomic
     def record_violation(tenant_id: UUID, **values: Any) -> SoDViolation:
         values.pop("tenant_id", None)
-        return SoDViolation.objects.create(tenant_id=_uuid(tenant_id, "tenant_id"), **values)
+        return cast(SoDViolation, SoDViolation.objects.create(tenant_id=_uuid(tenant_id, "tenant_id"), **values))
 
 
 class ToolService:
@@ -1815,7 +1837,7 @@ class EgressService:
         addresses: set[str] = set()
         try:
             for record in socket.getaddrinfo(canonical, port):
-                address = str(cls._address(record[4][0], tenant))
+                address = str(cls._address(str(record[4][0]), tenant))
                 addresses.add(address)
         except (OSError, ValueError, ValidationError):
             addresses.clear()
@@ -1835,17 +1857,20 @@ class EgressService:
             ):
                 matched = rule
                 break
-        return EgressRequest.objects.create(
-            tenant_id=tenant,
-            agent_execution=execution,
-            destination=canonical,
-            resolved_address=sorted(addresses)[0] if addresses else None,
-            port=port,
-            protocol=protocol,
-            allowed=matched is not None and bool(addresses),
-            matched_rule=matched,
-            reason_code="ALLOWLIST_MATCH" if matched and addresses else "EGRESS_DENIED",
-            metadata={},
+        return cast(
+            EgressRequest,
+            EgressRequest.objects.create(
+                tenant_id=tenant,
+                agent_execution=execution,
+                destination=canonical,
+                resolved_address=sorted(addresses)[0] if addresses else None,
+                port=port,
+                protocol=protocol,
+                allowed=matched is not None and bool(addresses),
+                matched_rule=matched,
+                reason_code="ALLOWLIST_MATCH" if matched and addresses else "EGRESS_DENIED",
+                metadata={},
+            ),
         )
 
 
@@ -1935,7 +1960,7 @@ class SecretService:
         if existing is not None:
             if existing.secret_id != _uuid(secret_id, "secret_id"):
                 raise IdempotencyConflictError("The idempotency key belongs to another secret.")
-            return existing.secret
+            return cast(Secret, existing.secret)
         secret = Secret.objects.select_for_update().get(tenant_id=tenant, id=_uuid(secret_id, "secret_id"))
         ciphertext, wrapped_data_key, key_id = SecretService._encrypt(plaintext)
         prior = (secret.ciphertext, secret.wrapped_data_key, secret.key_id)
@@ -2051,13 +2076,16 @@ class UsageService:
         tenant_id: UUID, resource: str, amount: int, remaining_after: int, execution_id: UUID | None = None
     ) -> QuotaUsage:
         execution = ExecutionService.get_execution(tenant_id, execution_id) if execution_id else None
-        return QuotaUsage.objects.create(
-            tenant_id=_uuid(tenant_id, "tenant_id"),
-            resource=resource,
-            agent_execution=execution,
-            usage_value=amount,
-            remaining_after=remaining_after,
-            metadata={},
+        return cast(
+            QuotaUsage,
+            QuotaUsage.objects.create(
+                tenant_id=_uuid(tenant_id, "tenant_id"),
+                resource=resource,
+                agent_execution=execution,
+                usage_value=amount,
+                remaining_after=remaining_after,
+                metadata={},
+            ),
         )
 
     @staticmethod
@@ -2071,15 +2099,18 @@ class UsageService:
         output_tokens: int,
         metadata: Mapping[str, Any] | None = None,
     ) -> TokenUsage:
-        return TokenUsage.objects.create(
-            tenant_id=_uuid(tenant_id, "tenant_id"),
-            agent_execution=ExecutionService.get_execution(tenant_id, execution_id),
-            provider=provider,
-            model=model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=input_tokens + output_tokens,
-            metadata=_safe_metadata(metadata),
+        return cast(
+            TokenUsage,
+            TokenUsage.objects.create(
+                tenant_id=_uuid(tenant_id, "tenant_id"),
+                agent_execution=ExecutionService.get_execution(tenant_id, execution_id),
+                provider=provider,
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=input_tokens + output_tokens,
+                metadata=_safe_metadata(metadata),
+            ),
         )
 
     @staticmethod
@@ -2165,7 +2196,10 @@ class UsageService:
 class KillSwitchService:
     @staticmethod
     def list_switches(tenant_id: UUID) -> QuerySet[KillSwitch]:
-        return KillSwitch.objects.filter(tenant_id=_uuid(tenant_id, "tenant_id")).order_by("-created_at", "id")
+        return cast(
+            QuerySet[KillSwitch],
+            KillSwitch.objects.filter(tenant_id=_uuid(tenant_id, "tenant_id")).order_by("-created_at", "id"),
+        )
 
     @staticmethod
     def check(tenant_id: UUID, agent_id: UUID | None = None, shard_id: UUID | None = None) -> OperationResult[None]:
@@ -2213,7 +2247,7 @@ class KillSwitchService:
             activated_at=timezone.now(),
         )
         enqueue(tenant, actor, KILL_SWITCH_COMMAND, {"kill_switch_id": str(switch.id)}, f"ai-kill:{transition_key}")
-        return switch
+        return cast(KillSwitch, switch)
 
     @staticmethod
     @transaction.atomic
@@ -2222,7 +2256,7 @@ class KillSwitchService:
     ) -> KillSwitch:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _actor(actor_id)
         maximum = int(ConfigurationService.resolve(tenant)["agent"]["transition_reason_maximum_length"])
-        switch = KillSwitch.objects.get(tenant_id=tenant, id=_uuid(kill_switch_id, "kill_switch_id"))
+        switch = cast(KillSwitch, KillSwitch.objects.get(tenant_id=tenant, id=_uuid(kill_switch_id, "kill_switch_id")))
         return _transition_with_updates(
             KILL_SWITCH_MACHINE,
             switch,
@@ -2247,10 +2281,11 @@ class AuditService:
                 "correlation_id": _correlation_uuid(request),
                 "agent_execution": ExecutionService.get_execution(tenant, execution_id),
                 "initiating_principal": _actor(actor_id),
+                "request_timestamp": timezone.now(),
                 "summary": {},
             },
         )
-        return trail
+        return cast(AuditTrail, trail)
 
     @staticmethod
     @transaction.atomic
@@ -2270,17 +2305,23 @@ class AuditService:
         }
         values = {key: value for key, value in relations.items() if key in allowed}
         values["metadata"] = _safe_metadata(values.get("metadata"))
-        request_id = _uuid(values.get("request_id"), "request_id")
+        raw_request_id = values.get("request_id")
+        if raw_request_id is None:
+            raise ValidationError({"request_id": "This relation is required."})
+        request_id = _uuid(raw_request_id, "request_id")
         values["request_id"] = request_id
-        return AuditEvent.objects.create(
-            tenant_id=_uuid(tenant_id, "tenant_id"),
-            event_type=event_type,
-            initiating_principal=_actor(actor_id),
-            subject_id=_uuid(subject_id, "subject_id"),
-            correlation_id=_correlation_uuid(request_id),
-            outcome=outcome,
-            outcome_details={},
-            **values,
+        return cast(
+            AuditEvent,
+            AuditEvent.objects.create(
+                tenant_id=_uuid(tenant_id, "tenant_id"),
+                event_type=event_type,
+                initiating_principal=_actor(actor_id),
+                subject_id=_uuid(subject_id, "subject_id"),
+                correlation_id=_correlation_uuid(request_id),
+                outcome=outcome,
+                outcome_details={},
+                **values,
+            ),
         )
 
     record_lifecycle_event = record_event
@@ -2329,8 +2370,11 @@ class AuditService:
 
     @staticmethod
     def get_trail(tenant_id: UUID, request_id: UUID) -> AuditTrail:
-        return AuditTrail.objects.select_related("agent_execution").get(
-            tenant_id=_uuid(tenant_id, "tenant_id"), request_id=_uuid(request_id, "request_id")
+        return cast(
+            AuditTrail,
+            AuditTrail.objects.select_related("agent_execution").get(
+                tenant_id=_uuid(tenant_id, "tenant_id"), request_id=_uuid(request_id, "request_id")
+            ),
         )
 
     @staticmethod
@@ -2344,7 +2388,7 @@ class AuditService:
             query = query.filter(event_timestamp__gte=values["started_at"])
         if values.get("ended_at"):
             query = query.filter(event_timestamp__lte=values["ended_at"])
-        return query.order_by("-event_timestamp", "id")
+        return cast(QuerySet[AuditEvent], query.order_by("-event_timestamp", "id"))
 
 
 class EvaluationService:
@@ -2390,7 +2434,7 @@ class EvaluationService:
                 reason="Evaluation worker claimed job",
             )
         suite_key = str(job.payload.get("suite_key", ""))
-        runner = evaluation_registry.require(suite_key)
+        runner = cast(EvaluationSuiteRunner, evaluation_registry.require(suite_key))
         try:
             result = runner(tenant_id=str(tenant), agent_id=str(job.payload["agent_id"]), job_id=str(job.id))
         except Exception:

@@ -881,7 +881,7 @@ describe("Human Resources form pages", () => {
   });
 
   it("renders governed missing-data errors for leave allocation and request edit details", async () => {
-    vi.spyOn(hrService, "getLeaveBalance").mockResolvedValue(undefined as never);
+    vi.spyOn(hrService, "getLeaveBalance").mockResolvedValue(null as never);
 
     const balanceView = renderAt(
       <EditLeaveBalancePage />,
@@ -895,7 +895,7 @@ describe("Human Resources form pages", () => {
     expect(screen.getByText("The request could not be completed safely.")).toBeInTheDocument();
     balanceView.unmount();
 
-    vi.spyOn(hrService, "getLeaveRequest").mockResolvedValue(undefined as never);
+    vi.spyOn(hrService, "getLeaveRequest").mockResolvedValue(null as never);
 
     renderAt(
       <EditLeaveRequestPage />,

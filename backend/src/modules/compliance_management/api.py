@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Callable
+from collections.abc import Sequence
+from datetime import date, datetime
+from typing import Any, Callable, TypeVar
 from uuid import UUID
 
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -14,6 +16,7 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 
 from src.core.access import RequiresAccess
@@ -73,6 +76,8 @@ from .services import (
     RequirementService,
 )
 
+_Checked = TypeVar("_Checked")
+
 
 class RequiredSessionAuthentication(SessionAuthentication):
     """Strict CSRF-enforcing session authentication with a 401 challenge."""
@@ -88,7 +93,7 @@ def _tenant(request: Any) -> UUID:
         tenant = raw if isinstance(raw, UUID) else UUID(str(raw))
     except (TypeError, ValueError, AttributeError) as exc:
         raise PermissionDenied("Authenticated tenant context is required.") from exc
-    request.tenant_id = tenant
+    setattr(request, "tenant_id", tenant)
     return tenant
 
 
@@ -100,7 +105,7 @@ def _correlation(request: Any) -> UUID:
         return uuid.uuid5(uuid.NAMESPACE_URL, f"saraise:request:{raw or uuid.uuid4()}")
 
 
-def _call(operation: Callable[..., Any], *args: object, **kwargs: object):
+def _call(operation: Callable[..., Any], *args: object, **kwargs: object) -> Any:
     try:
         return operation(*args, **kwargs)
     except ComplianceNotFound as exc:
@@ -125,10 +130,10 @@ def _idempotency(request: Any, *, required: bool = True) -> str:
         raise ValidationError({"Idempotency-Key": ["This header is required."]})
     if len(value) > 255:
         raise ValidationError({"Idempotency-Key": ["Must be 255 characters or fewer."]})
-    return value
+    return str(value)
 
 
-def _as_of(raw: str | None):
+def _as_of(raw: str | None) -> date | datetime | None:
     if not raw:
         return None
     parsed = parse_datetime(raw) or parse_date(raw)
@@ -137,18 +142,18 @@ def _as_of(raw: str | None):
     return parsed
 
 
-class GovernedTenantViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
+class GovernedTenantViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet[Any]):
     """Fail-closed access metadata, strict sessions, and mandatory pagination."""
 
     authentication_classes = (RequiredSessionAuthentication,)
     permission_classes = (IsAuthenticated, RequiresAccess)
     access_name = ""
 
-    def get_permissions(self):
+    def get_permissions(self) -> Sequence[Any]:
         try:
             _tenant(self.request)
         except PermissionDenied:
-            self.request.tenant_id = None
+            setattr(self.request, "tenant_id", None)
         requirement = requirement_for(self.access_name, getattr(self, "action", ""), self.request.method)
         self.required_permission = requirement.permission if requirement else None
         self.required_entitlement = requirement.entitlement if requirement else None
@@ -161,24 +166,24 @@ class GovernedTenantViewSet(GovernedAPIViewMixin, viewsets.GenericViewSet):
         return _tenant(self.request)
 
     @property
-    def actor(self):
+    def actor(self) -> Any:
         return self.request.user
 
     @property
     def correlation_id(self) -> UUID:
         return _correlation(self.request)
 
-    def paginated(self, queryset, serializer_class):
+    def paginated(self, queryset: Any, serializer_class: type[Any]) -> Response:
         page = self.paginate_queryset(queryset)
         if page is None:
             raise RuntimeError("Governed pagination is required.")
         return self.get_paginated_response(serializer_class(page, many=True).data)
 
-    def checked(self, obj):
+    def checked(self, obj: _Checked) -> _Checked:
         self.check_object_permissions(self.request, obj)
         return obj
 
-    def handle_exception(self, exc):
+    def handle_exception(self, exc: Exception) -> Response:
         return super().handle_exception(_translate(exc))
 
 
@@ -202,7 +207,7 @@ class FrameworkViewSet(GovernedTenantViewSet):
     access_name = "framework"
     service = FrameworkService
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         filters = {
             key: self.request.query_params[key]
             for key in ("status", "category", "source_kind", "search")
@@ -210,14 +215,14 @@ class FrameworkViewSet(GovernedTenantViewSet):
         }
         return self.service.list_frameworks(self.tenant_id, filters, self.request.query_params.get("ordering", "name"))
 
-    def list(self, request, *args, **kwargs):
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         return self.paginated(self.get_queryset(), FrameworkListSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: Any | None = None) -> Response:
         obj = self.checked(_call(self.service.get_framework, self.tenant_id, pk))
         return Response(FrameworkDetailSerializer(obj).data)
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         serializer = FrameworkWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         obj = _call(
@@ -225,7 +230,7 @@ class FrameworkViewSet(GovernedTenantViewSet):
         )
         return Response(FrameworkDetailSerializer(obj).data, status=status.HTTP_201_CREATED)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: Any | None = None) -> Response:
         serializer = FrameworkWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         obj = _call(
@@ -238,24 +243,24 @@ class FrameworkViewSet(GovernedTenantViewSet):
         )
         return Response(FrameworkDetailSerializer(obj).data)
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: Any | None = None) -> Response:
         key = _idempotency(request, required=False) or str(self.correlation_id)
         _call(self.service.archive_framework, self.tenant_id, self.actor, pk, key, self.correlation_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=("post",))
-    def activate(self, request, pk=None):
+    def activate(self, request: Request, pk: Any | None = None) -> Response:
         obj = _call(
             self.service.activate_framework, self.tenant_id, self.actor, pk, _idempotency(request), self.correlation_id
         )
         return Response(FrameworkDetailSerializer(obj).data)
 
     @action(detail=True, methods=("get",))
-    def export(self, request, pk=None):
+    def export(self, request: Request, pk: Any | None = None) -> Response:
         return Response(_call(self.service.export_framework, self.tenant_id, pk))
 
     @action(detail=False, methods=("post",), url_path="import")
-    def import_package(self, request):
+    def import_package(self, request: Request) -> Response:
         serializer = FrameworkImportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         obj = _call(
@@ -269,7 +274,7 @@ class FrameworkViewSet(GovernedTenantViewSet):
         return Response(FrameworkDetailSerializer(obj).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=("get",))
-    def status(self, request, pk=None):
+    def status(self, request: Request, pk: Any | None = None) -> Response:
         obj = self.checked(_call(self.service.get_framework, self.tenant_id, pk))
         return Response(
             {
@@ -284,7 +289,7 @@ class RequirementViewSet(GovernedTenantViewSet):
     access_name = "requirement"
     service = RequirementService
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         filters = {
             key: self.request.query_params[key]
             for key in ("framework_id", "status", "applicability", "search")
@@ -294,15 +299,15 @@ class RequirementViewSet(GovernedTenantViewSet):
             self.tenant_id, filters, self.request.query_params.get("ordering", "sort_order")
         )
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self.paginated(self.get_queryset(), RequirementListSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: Any | None = None) -> Response:
         return Response(
             RequirementDetailSerializer(self.checked(_call(self.service.get_requirement, self.tenant_id, pk))).data
         )
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         serializer = RequirementWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         obj = _call(
@@ -310,7 +315,7 @@ class RequirementViewSet(GovernedTenantViewSet):
         )
         return Response(RequirementDetailSerializer(obj).data, status=status.HTTP_201_CREATED)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: Any | None = None) -> Response:
         serializer = RequirementWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         obj = _call(
@@ -323,20 +328,20 @@ class RequirementViewSet(GovernedTenantViewSet):
         )
         return Response(RequirementDetailSerializer(obj).data)
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: Any | None = None) -> Response:
         key = _idempotency(request, required=False) or str(self.correlation_id)
         _call(self.service.archive_requirement, self.tenant_id, self.actor, pk, key, self.correlation_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=("post",))
-    def restore(self, request, pk=None):
+    def restore(self, request: Request, pk: Any | None = None) -> Response:
         obj = _call(
             self.service.restore_requirement, self.tenant_id, self.actor, pk, _idempotency(request), self.correlation_id
         )
         return Response(RequirementDetailSerializer(obj).data)
 
     @action(detail=False, methods=("post",), url_path="import")
-    def import_rows(self, request):
+    def import_rows(self, request: Request) -> Response:
         serializer = RequirementBulkImportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         rows = _call(
@@ -355,7 +360,7 @@ class PolicyViewSet(GovernedTenantViewSet):
     access_name = "policy"
     service = PolicyService
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         filters = {
             key: self.request.query_params[key]
             for key in ("status", "category", "owner_id", "review_before", "expiry_before", "search")
@@ -363,13 +368,13 @@ class PolicyViewSet(GovernedTenantViewSet):
         }
         return self.service.list_policies(self.tenant_id, filters, self.request.query_params.get("ordering", "code"))
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self.paginated(self.get_queryset(), PolicyListSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: Any | None = None) -> Response:
         return Response(PolicyDetailSerializer(self.checked(_call(self.service.get_policy, self.tenant_id, pk))).data)
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         serializer = PolicyWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         obj = _call(
@@ -377,7 +382,7 @@ class PolicyViewSet(GovernedTenantViewSet):
         )
         return Response(PolicyDetailSerializer(obj).data, status=status.HTTP_201_CREATED)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: Any | None = None) -> Response:
         serializer = PolicyWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         obj = _call(
@@ -385,13 +390,13 @@ class PolicyViewSet(GovernedTenantViewSet):
         )
         return Response(PolicyDetailSerializer(obj).data)
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: Any | None = None) -> Response:
         key = _idempotency(request, required=False) or str(self.correlation_id)
         _call(self.service.archive, self.tenant_id, self.actor, pk, key, self.correlation_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=("get", "post"))
-    def versions(self, request, pk=None):
+    def versions(self, request: Request, pk: Any | None = None) -> Response:
         policy = self.checked(_call(self.service.get_policy, self.tenant_id, pk))
         if request.method == "GET":
             return self.paginated(
@@ -411,7 +416,7 @@ class PolicyViewSet(GovernedTenantViewSet):
         )
         return Response(PolicyVersionSerializer(obj).data, status=status.HTTP_201_CREATED)
 
-    def _transition(self, request, pk, command):
+    def _transition(self, request: Request, pk: Any | None, command: str) -> Response:
         serializer = PolicyTransitionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         key = serializer.validated_data.get("transition_key") or _idempotency(request)
@@ -443,23 +448,23 @@ class PolicyViewSet(GovernedTenantViewSet):
         return Response(PolicyDetailSerializer(obj).data)
 
     @action(detail=True, methods=("post",))
-    def submit(self, request, pk=None):
+    def submit(self, request: Request, pk: Any | None = None) -> Response:
         return self._transition(request, pk, "submit")
 
     @action(detail=True, methods=("post",), url_path="request-changes")
-    def request_changes(self, request, pk=None):
+    def request_changes(self, request: Request, pk: Any | None = None) -> Response:
         return self._transition(request, pk, "request_changes")
 
     @action(detail=True, methods=("post",))
-    def approve(self, request, pk=None):
+    def approve(self, request: Request, pk: Any | None = None) -> Response:
         return self._transition(request, pk, "approve")
 
     @action(detail=True, methods=("post",))
-    def publish(self, request, pk=None):
+    def publish(self, request: Request, pk: Any | None = None) -> Response:
         return self._transition(request, pk, "publish")
 
     @action(detail=True, methods=("post",))
-    def revise(self, request, pk=None):
+    def revise(self, request: Request, pk: Any | None = None) -> Response:
         return self._transition(request, pk, "revise")
 
 
@@ -467,7 +472,7 @@ class MappingViewSet(GovernedTenantViewSet):
     access_name = "mapping"
     service = MappingService
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         filters = {
             key: self.request.query_params[key]
             for key in ("framework_id", "requirement_id", "policy_id", "coverage")
@@ -477,13 +482,13 @@ class MappingViewSet(GovernedTenantViewSet):
             self.tenant_id, filters, self.request.query_params.get("ordering", "mapped_at")
         )
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self.paginated(self.get_queryset(), MappingSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: Any | None = None) -> Response:
         return Response(MappingSerializer(self.checked(_call(_get_mapping, self.tenant_id, pk))).data)
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         serializer = MappingWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
@@ -499,7 +504,7 @@ class MappingViewSet(GovernedTenantViewSet):
         )
         return Response(MappingSerializer(obj).data, status=status.HTTP_201_CREATED)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: Any | None = None) -> Response:
         existing = self.checked(_call(_get_mapping, self.tenant_id, pk))
         serializer = MappingWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -516,12 +521,12 @@ class MappingViewSet(GovernedTenantViewSet):
         )
         return Response(MappingSerializer(obj).data)
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: Any | None = None) -> Response:
         _call(self.service.remove_mapping, self.tenant_id, self.actor, pk, self.correlation_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=("post",))
-    def bulk(self, request):
+    def bulk(self, request: Request) -> Response:
         serializer = MappingBulkSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         rows = _call(
@@ -535,7 +540,7 @@ class MappingViewSet(GovernedTenantViewSet):
         return Response(MappingSerializer(rows, many=True).data)
 
 
-def _get_mapping(tenant_id, mapping_id):
+def _get_mapping(tenant_id: UUID, mapping_id: Any) -> RequirementPolicyMapping:
     try:
         return RequirementPolicyMapping.objects.for_tenant(tenant_id).filter(deleted_at__isnull=True).get(pk=mapping_id)
     except (RequirementPolicyMapping.DoesNotExist, ValueError) as exc:
@@ -545,7 +550,7 @@ def _get_mapping(tenant_id, mapping_id):
 class GapViewSet(GovernedTenantViewSet):
     access_name = "gap"
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         framework_id = request.query_params.get("framework_id")
         if not framework_id:
             raise ValidationError({"framework_id": ["This query parameter is required."]})
@@ -562,7 +567,7 @@ class AssessmentViewSet(GovernedTenantViewSet):
     access_name = "assessment"
     service = AssessmentService
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         filters = {
             key: self.request.query_params[key]
             for key in ("framework_id", "requirement_id", "status", "due_after", "due_before")
@@ -572,13 +577,13 @@ class AssessmentViewSet(GovernedTenantViewSet):
             self.tenant_id, filters, self.request.query_params.get("ordering", "-assessed_at")
         )
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self.paginated(self.get_queryset(), AssessmentSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: Any | None = None) -> Response:
         return Response(AssessmentSerializer(self.checked(_call(self.service.get_assessment, self.tenant_id, pk))).data)
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         serializer = AssessmentCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         obj = _call(
@@ -592,7 +597,7 @@ class AssessmentViewSet(GovernedTenantViewSet):
         return Response(AssessmentSerializer(obj).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=("get",))
-    def scorecard(self, request):
+    def scorecard(self, request: Request) -> Response:
         framework_id = request.query_params.get("framework_id")
         if not framework_id:
             raise ValidationError({"framework_id": ["This query parameter is required."]})
@@ -607,7 +612,7 @@ class EvidenceViewSet(GovernedTenantViewSet):
     access_name = "evidence"
     service = EvidenceService
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         filters = {
             key: self.request.query_params[key]
             for key in ("type", "classification", "requirement_id", "valid_before", "search")
@@ -617,15 +622,15 @@ class EvidenceViewSet(GovernedTenantViewSet):
             self.tenant_id, filters, self.request.query_params.get("ordering", "-collected_at")
         )
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self.paginated(self.get_queryset(), EvidenceListSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: Any | None = None) -> Response:
         return Response(
             EvidenceDetailSerializer(self.checked(_call(self.service.get_evidence, self.tenant_id, pk))).data
         )
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         serializer = EvidenceWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         obj = _call(
@@ -633,7 +638,7 @@ class EvidenceViewSet(GovernedTenantViewSet):
         )
         return Response(EvidenceDetailSerializer(obj).data, status=status.HTTP_201_CREATED)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: Any | None = None) -> Response:
         serializer = EvidenceWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         obj = _call(
@@ -641,12 +646,12 @@ class EvidenceViewSet(GovernedTenantViewSet):
         )
         return Response(EvidenceDetailSerializer(obj).data)
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: Any | None = None) -> Response:
         _call(self.service.archive_evidence, self.tenant_id, self.actor, pk, self.correlation_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=("post",))
-    def validate(self, request, pk=None):
+    def validate(self, request: Request, pk: Any | None = None) -> Response:
         return Response(
             EvidenceValidationSerializer(
                 _call(self.service.validate_evidence, self.tenant_id, pk, _as_of(request.data.get("as_of")))
@@ -654,7 +659,7 @@ class EvidenceViewSet(GovernedTenantViewSet):
         )
 
     @action(detail=True, methods=("post",), url_path="requirements")
-    def requirements(self, request, pk=None):
+    def requirements(self, request: Request, pk: Any | None = None) -> Response:
         serializer = EvidenceLinkWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
@@ -673,7 +678,7 @@ class EvidenceViewSet(GovernedTenantViewSet):
 class EvidenceLinkViewSet(GovernedTenantViewSet):
     access_name = "evidence-link"
 
-    def destroy(self, request, pk=None):
+    def destroy(self, request: Request, pk: Any | None = None) -> Response:
         _call(EvidenceService.unlink_requirement, self.tenant_id, self.actor, pk, self.correlation_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -682,22 +687,22 @@ class ConfigurationViewSet(GovernedTenantViewSet):
     access_name = "configuration"
     service = ConfigurationService
 
-    def get_queryset(self):
+    def get_queryset(self) -> Any:
         environment = self.request.query_params.get("environment", "development")
         qs = self.service.list_revisions(self.tenant_id, environment)
         if self.request.query_params.get("status"):
             qs = qs.filter(status=self.request.query_params["status"])
         return qs
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         return self.paginated(self.get_queryset(), ConfigurationRevisionSerializer)
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: Any | None = None) -> Response:
         return Response(
             ConfigurationRevisionSerializer(self.checked(_call(_get_configuration, self.tenant_id, pk))).data
         )
 
-    def create(self, request):
+    def create(self, request: Request) -> Response:
         serializer = ConfigurationWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
@@ -705,7 +710,7 @@ class ConfigurationViewSet(GovernedTenantViewSet):
         obj = _call(self.service.create_revision, self.tenant_id, self.actor, environment, data, self.correlation_id)
         return Response(ConfigurationRevisionSerializer(obj).data, status=status.HTTP_201_CREATED)
 
-    def partial_update(self, request, pk=None):
+    def partial_update(self, request: Request, pk: Any | None = None) -> Response:
         serializer = ConfigurationWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
@@ -714,25 +719,25 @@ class ConfigurationViewSet(GovernedTenantViewSet):
         return Response(ConfigurationRevisionSerializer(obj).data)
 
     @action(detail=True, methods=("get",))
-    def preview(self, request, pk=None):
+    def preview(self, request: Request, pk: Any | None = None) -> Response:
         return Response(ConfigurationPreviewSerializer(_call(self.service.preview, self.tenant_id, pk)).data)
 
     @action(detail=True, methods=("post",))
-    def activate(self, request, pk=None):
+    def activate(self, request: Request, pk: Any | None = None) -> Response:
         obj = _call(self.service.activate, self.tenant_id, self.actor, pk, _idempotency(request), self.correlation_id)
         return Response(ConfigurationRevisionSerializer(obj).data)
 
     @action(detail=True, methods=("post",))
-    def rollback(self, request, pk=None):
+    def rollback(self, request: Request, pk: Any | None = None) -> Response:
         obj = _call(self.service.rollback, self.tenant_id, self.actor, pk, _idempotency(request), self.correlation_id)
         return Response(ConfigurationRevisionSerializer(obj).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=("get",))
-    def export(self, request, pk=None):
+    def export(self, request: Request, pk: Any | None = None) -> Response:
         return Response(_call(self.service.export_revision, self.tenant_id, pk))
 
     @action(detail=False, methods=("post",), url_path="import")
-    def import_document(self, request):
+    def import_document(self, request: Request) -> Response:
         serializer = ConfigurationImportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         obj = _call(
@@ -745,17 +750,17 @@ class ConfigurationViewSet(GovernedTenantViewSet):
         return Response(ConfigurationRevisionSerializer(obj).data, status=status.HTTP_201_CREATED)
 
 
-def _get_configuration(tenant_id, revision_id):
+def _get_configuration(tenant_id: UUID, revision_id: Any) -> ComplianceConfigurationRevision:
     try:
         return ComplianceConfigurationRevision.objects.for_tenant(tenant_id).get(pk=revision_id)
-    except (ComplianceConfigurationRevision.DoesNotExist, ValueError) as exc:
+    except (ComplianceConfigurationRevision.DoesNotExist, DjangoValidationError, ValueError) as exc:
         raise ComplianceNotFound("Configuration revision was not found.") from exc
 
 
 class ActivityViewSet(GovernedTenantViewSet):
     access_name = "activity"
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         filters = {
             key: request.query_params[key]
             for key in (
@@ -780,7 +785,7 @@ class ActivityViewSet(GovernedTenantViewSet):
 class DashboardViewSet(GovernedTenantViewSet):
     access_name = "dashboard"
 
-    def list(self, request):
+    def list(self, request: Request) -> Response:
         result = _call(
             ComplianceDashboardService.summary,
             self.tenant_id,
@@ -793,7 +798,9 @@ class DashboardViewSet(GovernedTenantViewSet):
 class JobViewSet(GovernedTenantViewSet):
     access_name = "job"
 
-    def retrieve(self, request, pk=None):
+    def retrieve(self, request: Request, pk: Any | None = None) -> Response:
+        if pk is None:
+            raise NotFound()
         try:
             from src.core.async_jobs.models import AsyncJob
 

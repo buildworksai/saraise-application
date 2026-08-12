@@ -11,7 +11,7 @@ import hashlib
 import re
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -100,14 +100,14 @@ def _uuid(value: UUID | str, field: str = "id") -> UUID:
         raise ComplianceValidationError({field: ["Must be a valid UUID."]}) from exc
 
 
-def _actor(actor: object | None) -> object | None:
+def _actor(actor: object | None) -> Any | None:
     if actor is None:
         return None
     if getattr(actor, "pk", None) is not None:
         return actor
     try:
         return (
-            get_user_model().objects.filter(pk=actor).first()
+            get_user_model().objects.filter(pk=cast(Any, actor)).first()
         )  # nosemgrep: semgrep.tenant-id-required-in-queries -- reviewed false positive; scope enforced by surrounding domain policy.  # noqa: E501
     except (TypeError, ValueError):
         return None
@@ -179,7 +179,7 @@ def _state(instance: object) -> dict[str, object]:
     return _clean_snapshot(values)  # type: ignore[return-value]
 
 
-def _get(model: type, tenant_id: UUID | str, object_id: UUID | str, *, include_deleted: bool = False):
+def _get(model: Any, tenant_id: UUID | str, object_id: Any, *, include_deleted: bool = False) -> Any:
     tenant = _uuid(tenant_id, "tenant_id")
     queryset = model.objects.for_tenant(tenant)
     if hasattr(model, "deleted_at") and not include_deleted:
@@ -190,7 +190,7 @@ def _get(model: type, tenant_id: UUID | str, object_id: UUID | str, *, include_d
         raise ComplianceNotFound(f"{model.__name__} was not found.") from exc
 
 
-def _transition(instance: object, command: str, key: str, allowed: Mapping[str, str]) -> bool:
+def _transition(instance: Any, command: str, key: str, allowed: Mapping[str, str]) -> bool:
     if not key or len(key) > 255:
         raise ComplianceValidationError({"transition_key": ["A bounded transition key is required."]})
     history = list(getattr(instance, "transition_history", []))
@@ -241,7 +241,7 @@ class ActivityService:
         record = ComplianceActivity(
             tenant_id=_uuid(tenant_id, "tenant_id"),
             entity_type=entity_type,
-            entity_id=entity.pk,
+            entity_id=cast(Any, entity).pk,
             action=action[:100],
             actor=_actor(actor),
             correlation_id=_uuid(correlation_id, "correlation_id"),
@@ -256,7 +256,7 @@ class ActivityService:
     @staticmethod
     def list_activity(
         tenant_id: UUID | str, filters: Mapping[str, object] | None = None, ordering: str = "-occurred_at"
-    ):
+    ) -> Any:
         qs = ComplianceActivity.objects.for_tenant(_uuid(tenant_id, "tenant_id"))
         filters = filters or {}
         for key in ("entity_type", "entity_id", "actor_id", "action", "correlation_id"):
@@ -293,7 +293,7 @@ class ConfigurationService:
         }
 
     @classmethod
-    def list_revisions(cls, tenant_id: UUID | str, environment: str):
+    def list_revisions(cls, tenant_id: UUID | str, environment: str) -> Any:
         return (
             ComplianceConfigurationRevision.objects.for_tenant(_uuid(tenant_id, "tenant_id"))
             .filter(environment=cls._environment(environment))
@@ -301,7 +301,7 @@ class ConfigurationService:
         )
 
     @classmethod
-    def get_effective(cls, tenant_id: UUID | str, environment: str):
+    def get_effective(cls, tenant_id: UUID | str, environment: str) -> ComplianceConfigurationRevision:
         tenant = _uuid(tenant_id, "tenant_id")
         environment = cls._environment(environment)
         revision = (
@@ -315,7 +315,14 @@ class ConfigurationService:
 
     @classmethod
     @transaction.atomic
-    def create_revision(cls, tenant_id, actor, environment: str, data: Mapping[str, object], correlation_id):
+    def create_revision(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        environment: str,
+        data: Mapping[str, object],
+        correlation_id: UUID | str,
+    ) -> ComplianceConfigurationRevision:
         tenant = _uuid(tenant_id, "tenant_id")
         environment = cls._environment(environment)
         latest = (
@@ -347,7 +354,14 @@ class ConfigurationService:
 
     @classmethod
     @transaction.atomic
-    def update_draft(cls, tenant_id, actor, revision_id, data: Mapping[str, object], correlation_id):
+    def update_draft(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        revision_id: Any,
+        data: Mapping[str, object],
+        correlation_id: UUID | str,
+    ) -> ComplianceConfigurationRevision:
         revision = _get(ComplianceConfigurationRevision, tenant_id, revision_id, include_deleted=True)
         revision = ComplianceConfigurationRevision.objects.select_for_update().get(pk=revision.pk)
         if revision.status != "draft":
@@ -368,7 +382,7 @@ class ConfigurationService:
         return revision
 
     @classmethod
-    def preview(cls, tenant_id, revision_id):
+    def preview(cls, tenant_id: UUID | str, revision_id: Any) -> dict[str, object]:
         revision = _get(ComplianceConfigurationRevision, tenant_id, revision_id, include_deleted=True)
         active = (
             ComplianceConfigurationRevision.objects.for_tenant(_uuid(tenant_id))
@@ -400,7 +414,14 @@ class ConfigurationService:
 
     @classmethod
     @transaction.atomic
-    def activate(cls, tenant_id, actor, revision_id, transition_key: str, correlation_id):
+    def activate(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        revision_id: Any,
+        transition_key: str,
+        correlation_id: UUID | str,
+    ) -> ComplianceConfigurationRevision:
         tenant = _uuid(tenant_id)
         revision = _get(ComplianceConfigurationRevision, tenant, revision_id, include_deleted=True)
         revision = ComplianceConfigurationRevision.objects.select_for_update().get(pk=revision.pk)
@@ -438,7 +459,14 @@ class ConfigurationService:
 
     @classmethod
     @transaction.atomic
-    def rollback(cls, tenant_id, actor, revision_id, transition_key: str, correlation_id):
+    def rollback(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        revision_id: Any,
+        transition_key: str,
+        correlation_id: UUID | str,
+    ) -> ComplianceConfigurationRevision:
         source = _get(ComplianceConfigurationRevision, tenant_id, revision_id, include_deleted=True)
         data = {key: getattr(source, key) for key in cls._defaults()}
         revision = cls.create_revision(tenant_id, actor, source.environment, data, correlation_id)
@@ -456,7 +484,7 @@ class ConfigurationService:
         return revision
 
     @classmethod
-    def export_revision(cls, tenant_id, revision_id):
+    def export_revision(cls, tenant_id: UUID | str, revision_id: Any) -> dict[str, object]:
         revision = _get(ComplianceConfigurationRevision, tenant_id, revision_id, include_deleted=True)
         return {
             "schema": "saraise.compliance.configuration/v1",
@@ -465,7 +493,9 @@ class ConfigurationService:
         }
 
     @classmethod
-    def import_revision(cls, tenant_id, actor, document: Mapping[str, object], correlation_id):
+    def import_revision(
+        cls, tenant_id: UUID | str, actor: object | None, document: Mapping[str, object], correlation_id: UUID | str
+    ) -> ComplianceConfigurationRevision:
         if document.get("schema") != "saraise.compliance.configuration/v1":
             raise ComplianceValidationError({"schema": ["Unsupported configuration schema."]})
         config = document.get("configuration")
@@ -476,7 +506,9 @@ class ConfigurationService:
 
 class FrameworkService:
     @staticmethod
-    def list_frameworks(tenant_id, filters=None, ordering="name"):
+    def list_frameworks(
+        tenant_id: UUID | str, filters: Mapping[str, object] | None = None, ordering: str = "name"
+    ) -> Any:
         qs = ComplianceFramework.objects.for_tenant(_uuid(tenant_id)).filter(deleted_at__isnull=True)
         filters = filters or {}
         for key in ("status", "category", "source_kind"):
@@ -491,12 +523,14 @@ class FrameworkService:
         return qs.order_by(_ordering(ordering, "framework", "name"))
 
     @staticmethod
-    def get_framework(tenant_id, framework_id):
-        return _get(ComplianceFramework, tenant_id, framework_id)
+    def get_framework(tenant_id: UUID | str, framework_id: Any) -> ComplianceFramework:
+        return cast(ComplianceFramework, _get(ComplianceFramework, tenant_id, framework_id))
 
     @staticmethod
     @transaction.atomic
-    def create_framework(tenant_id, actor, data, correlation_id):
+    def create_framework(
+        tenant_id: UUID | str, actor: object | None, data: Mapping[str, object], correlation_id: UUID | str
+    ) -> ComplianceFramework:
         tenant = _uuid(tenant_id)
         values = _only(
             data,
@@ -511,7 +545,14 @@ class FrameworkService:
 
     @classmethod
     @transaction.atomic
-    def update_framework(cls, tenant_id, actor, framework_id, data, correlation_id):
+    def update_framework(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        framework_id: Any,
+        data: Mapping[str, object],
+        correlation_id: UUID | str,
+    ) -> ComplianceFramework:
         framework = cls.get_framework(tenant_id, framework_id)
         before = _state(framework)
         if framework.status == "archived":
@@ -534,7 +575,14 @@ class FrameworkService:
 
     @classmethod
     @transaction.atomic
-    def activate_framework(cls, tenant_id, actor, framework_id, transition_key, correlation_id):
+    def activate_framework(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        framework_id: Any,
+        transition_key: str,
+        correlation_id: UUID | str,
+    ) -> ComplianceFramework:
         framework = ComplianceFramework.objects.select_for_update().get(
             pk=cls.get_framework(tenant_id, framework_id).pk
         )
@@ -550,7 +598,14 @@ class FrameworkService:
 
     @classmethod
     @transaction.atomic
-    def archive_framework(cls, tenant_id, actor, framework_id, transition_key, correlation_id):
+    def archive_framework(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        framework_id: Any,
+        transition_key: str,
+        correlation_id: UUID | str,
+    ) -> ComplianceFramework:
         framework = ComplianceFramework.objects.select_for_update().get(
             pk=cls.get_framework(tenant_id, framework_id).pk
         )
@@ -566,7 +621,7 @@ class FrameworkService:
         return framework
 
     @staticmethod
-    def validate_import(tenant_id, package):
+    def validate_import(tenant_id: UUID | str, package: object) -> dict[str, object]:
         if not isinstance(package, Mapping) or package.get("schema") != "saraise.compliance.framework/v1":
             raise ComplianceValidationError({"package": ["Unsupported framework package schema."]})
         framework = package.get("framework")
@@ -599,7 +654,14 @@ class FrameworkService:
 
     @classmethod
     @transaction.atomic
-    def import_framework(cls, tenant_id, actor, package, idempotency_key, correlation_id):
+    def import_framework(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        package: object,
+        idempotency_key: str,
+        correlation_id: UUID | str,
+    ) -> ComplianceFramework:
         validated = cls.validate_import(tenant_id, package)
         prior = (
             ComplianceActivity.objects.for_tenant(_uuid(tenant_id))
@@ -608,8 +670,14 @@ class FrameworkService:
         )
         if prior:
             return cls.get_framework(tenant_id, prior.entity_id)
-        framework = cls.create_framework(tenant_id, actor, validated["framework"], correlation_id)
-        for row in validated["requirements"]:
+        framework_data = validated["framework"]
+        requirements = validated["requirements"]
+        if not isinstance(framework_data, Mapping) or not isinstance(requirements, list):
+            raise ComplianceValidationError({"package": ["Framework and requirements are required."]})
+        framework = cls.create_framework(tenant_id, actor, framework_data, correlation_id)
+        for row in requirements:
+            if not isinstance(row, Mapping):
+                raise ComplianceValidationError({"requirements": ["Every requirement row must be an object."]})
             RequirementService.create_requirement(
                 tenant_id, actor, {**dict(row), "framework_id": framework.id}, correlation_id
             )
@@ -619,14 +687,14 @@ class FrameworkService:
             framework,
             "framework.imported",
             {},
-            {"idempotency_key": idempotency_key, "requirements": len(validated["requirements"])},
+            {"idempotency_key": idempotency_key, "requirements": len(requirements)},
             "",
             correlation_id,
         )
         return framework
 
     @classmethod
-    def export_framework(cls, tenant_id, framework_id):
+    def export_framework(cls, tenant_id: UUID | str, framework_id: Any) -> dict[str, object]:
         framework = cls.get_framework(tenant_id, framework_id)
         fields = (
             "code",
@@ -661,7 +729,9 @@ class FrameworkService:
 
 class RequirementService:
     @staticmethod
-    def list_requirements(tenant_id, filters=None, ordering="sort_order"):
+    def list_requirements(
+        tenant_id: UUID | str, filters: Mapping[str, object] | None = None, ordering: str = "sort_order"
+    ) -> Any:
         qs = (
             ComplianceRequirement.objects.for_tenant(_uuid(tenant_id))
             .filter(deleted_at__isnull=True)
@@ -672,7 +742,7 @@ class RequirementService:
             if filters.get(key):
                 qs = qs.filter(**{key: filters[key]})
         if filters.get("framework_id"):
-            qs = qs.filter(framework_id=_uuid(filters["framework_id"], "framework_id"))
+            qs = qs.filter(framework_id=_uuid(cast(Any, filters["framework_id"]), "framework_id"))
         if filters.get("search"):
             qs = qs.filter(
                 Q(code__icontains=filters["search"])
@@ -682,12 +752,14 @@ class RequirementService:
         return qs.order_by(_ordering(ordering, "requirement", "sort_order"), "code")
 
     @staticmethod
-    def get_requirement(tenant_id, requirement_id):
-        return _get(ComplianceRequirement, tenant_id, requirement_id)
+    def get_requirement(tenant_id: UUID | str, requirement_id: Any) -> ComplianceRequirement:
+        return cast(ComplianceRequirement, _get(ComplianceRequirement, tenant_id, requirement_id))
 
     @staticmethod
     @transaction.atomic
-    def create_requirement(tenant_id, actor, data, correlation_id):
+    def create_requirement(
+        tenant_id: UUID | str, actor: object | None, data: Mapping[str, object], correlation_id: UUID | str
+    ) -> ComplianceRequirement:
         values = _only(
             data,
             {
@@ -722,7 +794,14 @@ class RequirementService:
 
     @classmethod
     @transaction.atomic
-    def update_requirement(cls, tenant_id, actor, requirement_id, data, correlation_id):
+    def update_requirement(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        requirement_id: Any,
+        data: Mapping[str, object],
+        correlation_id: UUID | str,
+    ) -> ComplianceRequirement:
         requirement = cls.get_requirement(tenant_id, requirement_id)
         before = _state(requirement)
         values = _only(
@@ -754,7 +833,15 @@ class RequirementService:
 
     @classmethod
     @transaction.atomic
-    def _change(cls, tenant_id, actor, requirement_id, command, transition_key, correlation_id):
+    def _change(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        requirement_id: Any,
+        command: str,
+        transition_key: str,
+        correlation_id: UUID | str,
+    ) -> ComplianceRequirement:
         source = (
             _get(ComplianceRequirement, tenant_id, requirement_id, include_deleted=True)
             if command == "restore"
@@ -793,7 +880,15 @@ class RequirementService:
 
     @classmethod
     @transaction.atomic
-    def bulk_import(cls, tenant_id, actor, framework_id, rows, idempotency_key, correlation_id):
+    def bulk_import(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        framework_id: Any,
+        rows: object,
+        idempotency_key: str,
+        correlation_id: UUID | str,
+    ) -> list[ComplianceRequirement]:
         framework = _get(ComplianceFramework, tenant_id, framework_id)
         config = _effective_or_defaults(tenant_id)
         if not isinstance(rows, list) or len(rows) > config["bulk_import_row_limit"]:
@@ -818,7 +913,7 @@ class RequirementService:
         return created
 
 
-def _effective_or_defaults(tenant_id, environment="development") -> dict[str, Any]:
+def _effective_or_defaults(tenant_id: UUID | str, environment: str = "development") -> dict[str, Any]:
     try:
         revision = ConfigurationService.get_effective(tenant_id, environment)
         return {key: getattr(revision, key) for key in ConfigurationService._defaults()}
@@ -828,7 +923,9 @@ def _effective_or_defaults(tenant_id, environment="development") -> dict[str, An
 
 class PolicyService:
     @staticmethod
-    def list_policies(tenant_id, filters=None, ordering="code"):
+    def list_policies(
+        tenant_id: UUID | str, filters: Mapping[str, object] | None = None, ordering: str = "code"
+    ) -> Any:
         qs = (
             CompliancePolicy.objects.for_tenant(_uuid(tenant_id))
             .filter(deleted_at__isnull=True)
@@ -851,12 +948,18 @@ class PolicyService:
         return qs.order_by(_ordering(ordering, "policy", "code"))
 
     @staticmethod
-    def get_policy(tenant_id, policy_id):
-        return _get(CompliancePolicy, tenant_id, policy_id)
+    def get_policy(tenant_id: UUID | str, policy_id: Any) -> CompliancePolicy:
+        return cast(CompliancePolicy, _get(CompliancePolicy, tenant_id, policy_id))
 
     @staticmethod
     @transaction.atomic
-    def create_policy(tenant_id, actor, data=None, correlation_id=None, **legacy):
+    def create_policy(
+        tenant_id: UUID | str,
+        actor: object | None,
+        data: Mapping[str, object] | None = None,
+        correlation_id: UUID | str | None = None,
+        **legacy: object,
+    ) -> CompliancePolicy:
         values = dict(data or {})
         values.update(legacy)
         values["code"] = values.pop("policy_code", values.get("code", ""))
@@ -882,7 +985,7 @@ class PolicyService:
         _validate_category(tenant_id, values.get("category"))
         if "owner_id" in values:
             owner_id = values.pop("owner_id")
-            values["owner"] = get_user_model().objects.filter(pk=owner_id).first()
+            values["owner"] = get_user_model().objects.filter(pk=cast(Any, owner_id)).first()
             if values["owner"] is None:
                 raise ComplianceValidationError({"owner_id": ["Owner was not found."]})
         _validate_owner(tenant_id, values.get("owner"))
@@ -900,7 +1003,14 @@ class PolicyService:
 
     @classmethod
     @transaction.atomic
-    def update_policy(cls, tenant_id, actor, policy_id, data, correlation_id):
+    def update_policy(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        policy_id: Any,
+        data: Mapping[str, object],
+        correlation_id: UUID | str,
+    ) -> CompliancePolicy:
         policy = cls.get_policy(tenant_id, policy_id)
         before = _state(policy)
         if policy.status in {"approved", "published", "archived"}:
@@ -922,7 +1032,7 @@ class PolicyService:
             _validate_category(tenant_id, values["category"])
         if "owner_id" in values:
             owner_id = values.pop("owner_id")
-            values["owner"] = get_user_model().objects.filter(pk=owner_id).first()
+            values["owner"] = get_user_model().objects.filter(pk=cast(Any, owner_id)).first()
             if values["owner"] is None:
                 raise ComplianceValidationError({"owner_id": ["Owner was not found."]})
             _validate_owner(tenant_id, values["owner"])
@@ -936,7 +1046,16 @@ class PolicyService:
 
     @classmethod
     @transaction.atomic
-    def create_version(cls, tenant_id, actor, policy_id, content, change_summary, idempotency_key, correlation_id):
+    def create_version(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        policy_id: Any,
+        content: str,
+        change_summary: str,
+        idempotency_key: str,
+        correlation_id: UUID | str,
+    ) -> CompliancePolicyVersion:
         policy = CompliancePolicy.objects.select_for_update().get(pk=cls.get_policy(tenant_id, policy_id).pk)
         if policy.status != "draft":
             raise ComplianceConflict("Versions can only be created while a policy is draft.")
@@ -983,7 +1102,16 @@ class PolicyService:
 
     @classmethod
     @transaction.atomic
-    def _transition_policy(cls, tenant_id, actor, policy_id, command, transition_key, correlation_id, reason=""):
+    def _transition_policy(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        policy_id: Any,
+        command: str,
+        transition_key: str,
+        correlation_id: UUID | str,
+        reason: str = "",
+    ) -> CompliancePolicy:
         policy = CompliancePolicy.objects.select_for_update().get(pk=cls.get_policy(tenant_id, policy_id).pk)
         before = _state(policy)
         transitions = {
@@ -1044,7 +1172,16 @@ class PolicyService:
 
     @classmethod
     @transaction.atomic
-    def revise(cls, tenant_id, actor, policy_id, content, change_summary, transition_key, correlation_id):
+    def revise(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        policy_id: Any,
+        content: str,
+        change_summary: str,
+        transition_key: str,
+        correlation_id: UUID | str,
+    ) -> tuple[CompliancePolicy, CompliancePolicyVersion]:
         policy = cls.get_policy(tenant_id, policy_id)
         if policy.status != "published":
             raise ComplianceConflict("Only a published policy can be revised.")
@@ -1063,7 +1200,9 @@ class PolicyService:
 
 class MappingService:
     @staticmethod
-    def list_mappings(tenant_id, filters=None, ordering="mapped_at"):
+    def list_mappings(
+        tenant_id: UUID | str, filters: Mapping[str, object] | None = None, ordering: str = "mapped_at"
+    ) -> Any:
         qs = (
             RequirementPolicyMapping.objects.for_tenant(_uuid(tenant_id))
             .filter(deleted_at__isnull=True)
@@ -1074,12 +1213,20 @@ class MappingService:
             if filters.get(key):
                 qs = qs.filter(**{key: filters[key]})
         if filters.get("framework_id"):
-            qs = qs.filter(requirement__framework_id=filters["framework_id"])
+            qs = qs.filter(requirement__framework_id=_uuid(cast(Any, filters["framework_id"]), "framework_id"))
         return qs.order_by(_ordering(ordering, "mapping", "mapped_at"))
 
     @staticmethod
     @transaction.atomic
-    def set_mapping(tenant_id, actor, requirement_id, policy_id, data, idempotency_key, correlation_id):
+    def set_mapping(
+        tenant_id: UUID | str,
+        actor: object | None,
+        requirement_id: Any,
+        policy_id: Any,
+        data: Mapping[str, object],
+        idempotency_key: str,
+        correlation_id: UUID | str,
+    ) -> RequirementPolicyMapping:
         requirement = _get(ComplianceRequirement, tenant_id, requirement_id)
         policy = _get(CompliancePolicy, tenant_id, policy_id)
         values = dict(data)
@@ -1118,7 +1265,9 @@ class MappingService:
 
     @staticmethod
     @transaction.atomic
-    def remove_mapping(tenant_id, actor, mapping_id, correlation_id):
+    def remove_mapping(
+        tenant_id: UUID | str, actor: object | None, mapping_id: Any, correlation_id: UUID | str
+    ) -> None:
         mapping = _get(RequirementPolicyMapping, tenant_id, mapping_id)
         before = _state(mapping)
         mapping.deleted_at = timezone.now()
@@ -1131,7 +1280,14 @@ class MappingService:
 
     @classmethod
     @transaction.atomic
-    def bulk_set_mappings(cls, tenant_id, actor, rows, idempotency_key, correlation_id):
+    def bulk_set_mappings(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        rows: object,
+        idempotency_key: str,
+        correlation_id: UUID | str,
+    ) -> list[RequirementPolicyMapping]:
         if not isinstance(rows, list):
             raise ComplianceValidationError({"rows": ["Must be a list."]})
         return [
@@ -1148,7 +1304,9 @@ class MappingService:
         ]
 
     @staticmethod
-    def gap_analysis(tenant_id, framework_id, as_of=None):
+    def gap_analysis(
+        tenant_id: UUID | str, framework_id: Any, as_of: date | datetime | None = None
+    ) -> dict[str, object]:
         del as_of
         requirements = ComplianceRequirement.objects.for_tenant(_uuid(tenant_id)).filter(
             framework_id=_uuid(framework_id, "framework_id"),
@@ -1184,7 +1342,9 @@ class MappingService:
 
 class AssessmentService:
     @staticmethod
-    def list_assessments(tenant_id, filters=None, ordering="-assessed_at"):
+    def list_assessments(
+        tenant_id: UUID | str, filters: Mapping[str, object] | None = None, ordering: str = "-assessed_at"
+    ) -> Any:
         qs = ComplianceAssessment.objects.for_tenant(_uuid(tenant_id)).select_related(
             "requirement", "mapping", "assessor"
         )
@@ -1193,7 +1353,7 @@ class AssessmentService:
             if filters.get(key):
                 qs = qs.filter(**{key: filters[key]})
         if filters.get("framework_id"):
-            qs = qs.filter(requirement__framework_id=filters["framework_id"])
+            qs = qs.filter(requirement__framework_id=_uuid(cast(Any, filters["framework_id"]), "framework_id"))
         if filters.get("due_after"):
             qs = qs.filter(due_date__gte=filters["due_after"])
         if filters.get("due_before"):
@@ -1201,31 +1361,42 @@ class AssessmentService:
         return qs.order_by(_ordering(ordering, "assessment", "-assessed_at"), "-created_at", "-id")
 
     @staticmethod
-    def get_assessment(tenant_id, assessment_id):
-        return _get(ComplianceAssessment, tenant_id, assessment_id, include_deleted=True)
+    def get_assessment(tenant_id: UUID | str, assessment_id: Any) -> ComplianceAssessment:
+        return cast(ComplianceAssessment, _get(ComplianceAssessment, tenant_id, assessment_id, include_deleted=True))
 
     @staticmethod
     @transaction.atomic
-    def record_assessment(tenant_id, actor, data, idempotency_key, correlation_id):
+    def record_assessment(
+        tenant_id: UUID | str,
+        actor: object | None,
+        data: Mapping[str, object],
+        idempotency_key: str,
+        correlation_id: UUID | str,
+    ) -> ComplianceAssessment:
         prior = (
             ComplianceActivity.objects.for_tenant(_uuid(tenant_id))
             .filter(action="assessment.recorded", after__idempotency_key=idempotency_key)
             .first()
         )
         if prior:
-            return _get(ComplianceAssessment, tenant_id, prior.entity_id, include_deleted=True)
+            return cast(
+                ComplianceAssessment, _get(ComplianceAssessment, tenant_id, prior.entity_id, include_deleted=True)
+            )
         values = dict(data)
         requirement = _get(ComplianceRequirement, tenant_id, values.pop("requirement_id"))
         mapping_id = values.pop("mapping_id", None)
         mapping = _get(RequirementPolicyMapping, tenant_id, mapping_id) if mapping_id else None
         if mapping and mapping.requirement_id != requirement.id:
             raise ComplianceValidationError({"mapping_id": ["Mapping belongs to another requirement."]})
+        assessed_at = values.pop("assessed_at", timezone.now())
+        if not isinstance(assessed_at, (date, datetime)):
+            raise ComplianceValidationError({"assessed_at": ["Must be a date or date-time."]})
         assessment = ComplianceAssessment(
             tenant_id=_uuid(tenant_id),
             requirement=requirement,
             mapping=mapping,
             assessor=_actor(actor),
-            assessed_at=values.pop("assessed_at", timezone.now()),
+            assessed_at=assessed_at,
             **values,
         )
         min_length = int(_effective_or_defaults(tenant_id)["minimum_assessment_note_length"])
@@ -1249,17 +1420,19 @@ class AssessmentService:
         return assessment
 
     @classmethod
-    def current_for_requirement(cls, tenant_id, requirement_id):
+    def current_for_requirement(cls, tenant_id: UUID | str, requirement_id: Any) -> ComplianceAssessment | None:
         requirement = _get(ComplianceRequirement, tenant_id, requirement_id)
-        return cls.list_assessments(tenant_id, {"requirement_id": requirement.id}).first()
+        return cast(
+            ComplianceAssessment | None, cls.list_assessments(tenant_id, {"requirement_id": requirement.id}).first()
+        )
 
     @classmethod
-    def history_for_requirement(cls, tenant_id, requirement_id):
+    def history_for_requirement(cls, tenant_id: UUID | str, requirement_id: Any) -> Any:
         _get(ComplianceRequirement, tenant_id, requirement_id)
         return cls.list_assessments(tenant_id, {"requirement_id": requirement_id})
 
     @classmethod
-    def list_overdue(cls, tenant_id, as_of):
+    def list_overdue(cls, tenant_id: UUID | str, as_of: date | datetime) -> Any:
         return (
             cls.list_assessments(tenant_id)
             .filter(due_date__lt=as_of)
@@ -1267,7 +1440,9 @@ class AssessmentService:
         )
 
     @classmethod
-    def scorecard(cls, tenant_id, framework_id, as_of=None):
+    def scorecard(
+        cls, tenant_id: UUID | str, framework_id: Any, as_of: date | datetime | None = None
+    ) -> dict[str, object]:
         as_of = as_of or timezone.now()
         requirements = list(
             ComplianceRequirement.objects.for_tenant(_uuid(tenant_id)).filter(
@@ -1312,7 +1487,9 @@ class EvidenceService:
     dms_validator: DmsReferenceValidator | None = None
 
     @staticmethod
-    def list_evidence(tenant_id, filters=None, ordering="-collected_at"):
+    def list_evidence(
+        tenant_id: UUID | str, filters: Mapping[str, object] | None = None, ordering: str = "-collected_at"
+    ) -> Any:
         qs = ComplianceEvidence.objects.for_tenant(_uuid(tenant_id)).filter(deleted_at__isnull=True)
         filters = filters or {}
         mapping = {"type": "evidence_type", "classification": "classification"}
@@ -1320,7 +1497,9 @@ class EvidenceService:
             if filters.get(incoming):
                 qs = qs.filter(**{field: filters[incoming]})
         if filters.get("requirement_id"):
-            qs = qs.filter(requirement_links__requirement_id=filters["requirement_id"])
+            qs = qs.filter(
+                requirement_links__requirement_id=_uuid(cast(Any, filters["requirement_id"]), "requirement_id")
+            )
         if filters.get("valid_before"):
             qs = qs.filter(valid_until__lte=filters["valid_before"])
         if filters.get("search"):
@@ -1328,12 +1507,14 @@ class EvidenceService:
         return qs.distinct().order_by(_ordering(ordering, "evidence", "-collected_at"))
 
     @staticmethod
-    def get_evidence(tenant_id, evidence_id):
-        return _get(ComplianceEvidence, tenant_id, evidence_id)
+    def get_evidence(tenant_id: UUID | str, evidence_id: Any) -> ComplianceEvidence:
+        return cast(ComplianceEvidence, _get(ComplianceEvidence, tenant_id, evidence_id))
 
     @classmethod
     @transaction.atomic
-    def register_evidence(cls, tenant_id, actor, data, correlation_id):
+    def register_evidence(
+        cls, tenant_id: UUID | str, actor: object | None, data: Mapping[str, object], correlation_id: UUID | str
+    ) -> ComplianceEvidence:
         values = _only(
             data,
             {
@@ -1376,14 +1557,17 @@ class EvidenceService:
             if cls.dms_validator is None:
                 raise ComplianceDependencyUnavailable("DMS reference validation is unavailable.")
             cls.dms_validator.validate_document_reference(
-                _uuid(tenant_id), _uuid(values.get("document_id"), "document_id")
+                _uuid(tenant_id), _uuid(cast(Any, values["document_id"]), "document_id")
             )
+        collected_at = values.pop("collected_at", timezone.now())
+        if not isinstance(collected_at, (date, datetime)):
+            raise ComplianceValidationError({"collected_at": ["Must be a date or date-time."]})
         evidence = ComplianceEvidence(
             tenant_id=_uuid(tenant_id),
             created_by=_actor(actor),
             updated_by=_actor(actor),
-            collected_by=values.pop("collected_by", _actor(actor)),
-            collected_at=values.pop("collected_at", timezone.now()),
+            collected_by=_actor(values.pop("collected_by", actor)),
+            collected_at=collected_at,
             **values,
         )
         _validate_model(evidence)
@@ -1395,7 +1579,14 @@ class EvidenceService:
 
     @classmethod
     @transaction.atomic
-    def update_evidence(cls, tenant_id, actor, evidence_id, data, correlation_id):
+    def update_evidence(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        evidence_id: Any,
+        data: Mapping[str, object],
+        correlation_id: UUID | str,
+    ) -> ComplianceEvidence:
         evidence = cls.get_evidence(tenant_id, evidence_id)
         before = _state(evidence)
         values = _only(
@@ -1427,7 +1618,9 @@ class EvidenceService:
 
     @classmethod
     @transaction.atomic
-    def archive_evidence(cls, tenant_id, actor, evidence_id, correlation_id):
+    def archive_evidence(
+        cls, tenant_id: UUID | str, actor: object | None, evidence_id: Any, correlation_id: UUID | str
+    ) -> None:
         evidence = cls.get_evidence(tenant_id, evidence_id)
         before = _state(evidence)
         evidence.deleted_at = timezone.now()
@@ -1440,7 +1633,15 @@ class EvidenceService:
 
     @classmethod
     @transaction.atomic
-    def link_requirement(cls, tenant_id, actor, evidence_id, requirement_id, data, correlation_id):
+    def link_requirement(
+        cls,
+        tenant_id: UUID | str,
+        actor: object | None,
+        evidence_id: Any,
+        requirement_id: Any,
+        data: Mapping[str, object],
+        correlation_id: UUID | str,
+    ) -> EvidenceRequirementLink:
         evidence = cls.get_evidence(tenant_id, evidence_id)
         requirement = _get(ComplianceRequirement, tenant_id, requirement_id)
         link = EvidenceRequirementLink(
@@ -1457,20 +1658,26 @@ class EvidenceService:
 
     @staticmethod
     @transaction.atomic
-    def unlink_requirement(tenant_id, actor, link_id, correlation_id):
+    def unlink_requirement(
+        tenant_id: UUID | str, actor: object | None, link_id: Any, correlation_id: UUID | str
+    ) -> None:
         link = _get(EvidenceRequirementLink, tenant_id, link_id, include_deleted=True)
         before = _state(link)
         ActivityService.record(tenant_id, actor, link, "evidence.unlinked", before, {}, "", correlation_id)
         link.delete()
 
     @classmethod
-    def validate_evidence(cls, tenant_id, evidence_id, as_of):
+    def validate_evidence(
+        cls, tenant_id: UUID | str, evidence_id: Any, as_of: date | datetime | None
+    ) -> dict[str, object]:
         evidence = cls.get_evidence(tenant_id, evidence_id)
         now = as_of or timezone.now()
         reference_valid = True
         if evidence.reference_kind == "dms_document":
             if cls.dms_validator is None:
                 raise ComplianceDependencyUnavailable("DMS reference validation is unavailable.")
+            if evidence.document_id is None:
+                raise ComplianceValidationError({"document_id": ["DMS evidence requires a document id."]})
             cls.dms_validator.validate_document_reference(_uuid(tenant_id), evidence.document_id)
         fresh = (evidence.valid_from is None or evidence.valid_from <= now) and (
             evidence.valid_until is None or evidence.valid_until >= now
@@ -1484,7 +1691,7 @@ class EvidenceService:
         }
 
     @staticmethod
-    def list_expiring(tenant_id, as_of, days):
+    def list_expiring(tenant_id: UUID | str, as_of: date | datetime, days: int) -> Any:
         if days < 0 or days > 365:
             raise ComplianceValidationError({"days": ["Must be between 0 and 365."]})
         return (
@@ -1496,7 +1703,9 @@ class EvidenceService:
 
 class ComplianceDashboardService:
     @classmethod
-    def summary(cls, tenant_id, framework_id=None, as_of=None):
+    def summary(
+        cls, tenant_id: UUID | str, framework_id: Any | None = None, as_of: date | datetime | None = None
+    ) -> dict[str, object]:
         tenant = _uuid(tenant_id)
         as_of = as_of or timezone.now()
         frameworks = ComplianceFramework.objects.for_tenant(tenant).filter(deleted_at__isnull=True)
@@ -1510,8 +1719,11 @@ class ComplianceDashboardService:
             .filter(requirement__in=requirements, assessed_at__lte=as_of)
             .values_list("requirement_id", flat=True)
         )
-        gaps = sum(MappingService.gap_analysis(tenant, framework.id, as_of)["gap_count"] for framework in frameworks)
-        warning_days = int(_effective_or_defaults(tenant)["evidence_warning_days"])
+        gaps = sum(
+            int(cast(Any, MappingService.gap_analysis(tenant, framework.id, as_of)["gap_count"]))
+            for framework in frameworks
+        )
+        warning_days = int(cast(Any, _effective_or_defaults(tenant)["evidence_warning_days"]))
         return {
             "frameworks": frameworks.count(),
             "requirements": requirements.count(),
@@ -1522,7 +1734,7 @@ class ComplianceDashboardService:
         }
 
     @staticmethod
-    def review_queue(tenant_id, as_of=None):
+    def review_queue(tenant_id: UUID | str, as_of: date | datetime | None = None) -> list[CompliancePolicy]:
         value = as_of or timezone.now().date()
         value = value.date() if isinstance(value, datetime) else value
         return list(
@@ -1533,7 +1745,9 @@ class ComplianceDashboardService:
         )
 
     @staticmethod
-    def readiness_breakdown(tenant_id, framework_id, as_of=None):
+    def readiness_breakdown(
+        tenant_id: UUID | str, framework_id: Any, as_of: date | datetime | None = None
+    ) -> dict[str, object]:
         return AssessmentService.scorecard(tenant_id, framework_id, as_of)
 
 

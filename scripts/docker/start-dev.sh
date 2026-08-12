@@ -1,13 +1,24 @@
 #!/bin/bash
 # Start SARAISE development environment
 # All containers use single saraise-network
-# External ports start with "1" prefix (18000, 15173, etc.)
+# Application external ports use the 2xxxx range to avoid local platform/Aptivra conflicts.
 
 set -e
 
+if [ -f .env ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
+: "${POSTGRES_PORT:=25432}"
+: "${REDIS_PORT:=26379}"
+: "${BACKEND_PORT:=28000}"
+: "${FRONTEND_PORT:=25173}"
+
 echo "🚀 Starting SARAISE Development Environment..."
 echo "📋 Using single network: saraise-network"
-echo "🔌 External ports: 18000 (backend), 15173 (frontend)"
+echo "🔌 External ports: ${BACKEND_PORT} (backend), ${FRONTEND_PORT} (frontend)"
 
 # Check if Docker is running
 if ! docker info > /dev/null 2>&1; then
@@ -45,14 +56,14 @@ else
     USE_EXISTING_REDIS=false
 fi
 
-# Check for port conflicts (using ports starting with 1)
-if lsof -i :18000 > /dev/null 2>&1; then
-    echo "⚠️  Port 18000 is already in use. Please stop the service using it or change BACKEND_PORT in .env"
+# Check for application port conflicts.
+if lsof -i :"${BACKEND_PORT}" > /dev/null 2>&1; then
+    echo "⚠️  Port ${BACKEND_PORT} is already in use. Please stop the service using it or change BACKEND_PORT in .env"
     exit 1
 fi
 
-if lsof -i :15173 > /dev/null 2>&1; then
-    echo "⚠️  Port 15173 is already in use. Please stop the service using it or change FRONTEND_PORT in .env"
+if lsof -i :"${FRONTEND_PORT}" > /dev/null 2>&1; then
+    echo "⚠️  Port ${FRONTEND_PORT} is already in use. Please stop the service using it or change FRONTEND_PORT in .env"
     exit 1
 fi
 
@@ -61,17 +72,17 @@ if [ ! -f .env ]; then
     echo "📝 Creating .env file from template..."
     cat > .env << EOF
 # Database
-POSTGRES_PORT=5432
+POSTGRES_PORT=${POSTGRES_PORT}
 
 # Redis
-REDIS_PORT=6379
+REDIS_PORT=${REDIS_PORT}
 
-# Backend (external port starts with 1)
-BACKEND_PORT=18000
+# Backend (application external port)
+BACKEND_PORT=${BACKEND_PORT}
 SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
 
-# Frontend (external port starts with 1)
-FRONTEND_PORT=15173
+# Frontend (application external port)
+FRONTEND_PORT=${FRONTEND_PORT}
 EOF
     echo "✅ Created .env file"
 fi
@@ -91,10 +102,10 @@ echo ""
 echo "✅ SARAISE Development Environment is running!"
 echo ""
 echo "📋 Services:"
-echo "   - Backend API: http://localhost:${BACKEND_PORT:-18000}"
-echo "   - Frontend UI: http://localhost:${FRONTEND_PORT:-15173}"
-echo "   - PostgreSQL: localhost:${POSTGRES_PORT:-5432} (saraise-db)"
-echo "   - Redis: localhost:${REDIS_PORT:-6379} (saraise-redis)"
+echo "   - Backend API: http://localhost:${BACKEND_PORT:-28000}"
+echo "   - Frontend UI: http://localhost:${FRONTEND_PORT:-25173}"
+echo "   - PostgreSQL: localhost:${POSTGRES_PORT:-25432} (saraise-db)"
+echo "   - Redis: localhost:${REDIS_PORT:-26379} (saraise-redis)"
 echo ""
 echo "🌐 Network: saraise-network (shared with all SARAISE services)"
 echo ""

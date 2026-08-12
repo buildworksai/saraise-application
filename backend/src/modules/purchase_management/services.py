@@ -75,7 +75,7 @@ class ConfigurationUnavailable(ProcurementError):
     status_code = 503
 
 
-def _uuid(value: uuid.UUID | str, name: str) -> uuid.UUID:
+def _uuid(value: object, name: str) -> uuid.UUID:
     try:
         return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
     except (TypeError, ValueError, AttributeError) as exc:
@@ -107,6 +107,19 @@ def _decimal(value: Any, name: str, *, strictly_positive: bool = False) -> Decim
         operator = "greater than zero" if strictly_positive else "non-negative"
         raise ProcurementValidationError(f"{name} must be {operator}")
     return result
+
+
+def _date_value(value: object, name: str) -> date:
+    if value is None:
+        raise ProcurementValidationError(f"{name} is required")
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(_text(value, name))
+    except ValueError as exc:
+        raise ProcurementValidationError(f"{name} must be an ISO-8601 date") from exc
 
 
 def _assert_version(record: Any, expected: int | None) -> None:
@@ -385,7 +398,8 @@ class RequisitionService:
     ) -> PurchaseRequisition:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
         lines = list(data.get("lines", []))
-        req_date, required = data.get("requisition_date"), data.get("required_date")
+        req_date = _date_value(data.get("requisition_date"), "requisition_date")
+        required = _date_value(data.get("required_date"), "required_date")
         if required < req_date:
             raise ProcurementValidationError("required_date must be on or after requisition_date")
         req = PurchaseRequisition.objects.create(
@@ -437,6 +451,8 @@ class RequisitionService:
         for field in ("requisition_date", "required_date", "purpose"):
             if field in data:
                 setattr(req, field, data[field])
+        if req.required_date < req.requisition_date:
+            raise ProcurementValidationError("required_date must be on or after requisition_date")
         if "currency" in data:
             req.currency = _currency(data["currency"])
         if lines:
@@ -650,6 +666,8 @@ class RFQService:
                 )
                 if req_line is None:
                     raise ProcurementNotFound("Requisition line was not found")
+                if requisition is not None and req_line.requisition_id != requisition.id:
+                    raise ProcurementNotFound("Requisition line was not found")
             RFQLine.objects.create(
                 tenant_id=tenant,
                 created_by=actor,
@@ -689,6 +707,8 @@ class RFQService:
         for field in ("title", "issue_date", "submission_deadline", "terms", "delivery_requirements"):
             if field in data:
                 setattr(rfq, field, data[field])
+        if rfq.submission_deadline.date() <= rfq.issue_date:
+            raise ProcurementValidationError("submission_deadline must follow issue_date")
         _save_mutation(rfq, actor, data.keys())
         _event(tenant, rfq, "purchase.rfq.updated.v1", actor_id=actor, correlation_id=correlation_id)
         return rfq
@@ -856,8 +876,8 @@ class RFQService:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
         rfq = RequestForQuotation.objects.for_tenant(tenant).select_for_update().get(pk=_uuid(rfq_id, "rfq_id"))
         if rfq.status == RFQStatus.AWARDED and rfq.awarded_quote_id:
-            quote = SupplierQuote.objects.for_tenant(tenant).get(pk=rfq.awarded_quote_id)
-            return quote, quote.purchase_orders.first()
+            awarded_quote = SupplierQuote.objects.for_tenant(tenant).get(pk=rfq.awarded_quote_id)
+            return awarded_quote, awarded_quote.purchase_orders.first()
         if rfq.status != RFQStatus.CLOSED:
             raise ProcurementConflict("Only closed RFQs can be awarded")
         quote = (
@@ -935,9 +955,14 @@ class QuoteService:
     ) -> SupplierQuote:
         tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
         rfq = RFQService.get_rfq(tenant, data.get("rfq_id"))
-        supplier = SupplierService.get_supplier(tenant, data.get("supplier_id"))
+        supplier_id = data.get("supplier_id")
+        if supplier_id is None:
+            raise ProcurementValidationError("supplier_id is required")
+        supplier = SupplierService.get_supplier(tenant, supplier_id)
         if rfq.status != RFQStatus.OPEN:
             raise ProcurementConflict("Quotes can only be created for open RFQs")
+        if supplier.status != SupplierStatus.ACTIVE:
+            raise ProcurementValidationError("Supplier must be active")
         if rfq.currency != _currency(data.get("currency")):
             raise ProcurementValidationError("Quote currency must match RFQ currency")
         quote = SupplierQuote.objects.create(
@@ -947,7 +972,7 @@ class QuoteService:
             quote_number=_text(data.get("quote_number"), "quote_number"),
             rfq=rfq,
             supplier=supplier,
-            valid_until=data.get("valid_until"),
+            valid_until=_date_value(data.get("valid_until"), "valid_until"),
             currency=rfq.currency,
             payment_terms=_text(data.get("payment_terms"), "payment_terms"),
             delivery_date=data.get("delivery_date"),
@@ -1022,9 +1047,12 @@ class QuoteService:
         expected_lock_version: int,
         correlation_id: str,
     ) -> SupplierQuote:
-        quote = QuoteService.get_quote(tenant_id, quote_id)
+        tenant, actor = _uuid(tenant_id, "tenant_id"), _uuid(actor_id, "actor_id")
+        quote = SupplierQuote.objects.for_tenant(tenant).select_for_update().get(pk=_uuid(quote_id, "quote_id"))
+        _assert_version(quote, expected_lock_version)
         if quote.status != QuoteStatus.DRAFT:
             raise ProcurementConflict("Only draft quotes may be deleted")
+        _event(tenant, quote, "purchase.quote.deleted.v1", actor_id=actor, correlation_id=correlation_id)
         quote.delete()
         return quote
 
@@ -1103,6 +1131,8 @@ class PurchaseOrderService:
         # Legacy positional signature: create_purchase_order(tenant, supplier_id, po_date=...).
         if data is None and actor_id is not None:
             supplier_id, actor = actor_id, tenant
+        if supplier_id is None:
+            raise ProcurementValidationError("supplier_id is required")
         supplier = SupplierService.get_supplier(tenant, supplier_id)
         if supplier.status != SupplierStatus.ACTIVE:
             raise ProcurementValidationError("Supplier must be active")
@@ -1122,7 +1152,7 @@ class PurchaseOrderService:
             created_by=actor,
             updated_by=actor,
             po_number=_text(values.get("po_number", f"PO-{uuid.uuid4().hex[:8]}"), "po_number").upper(),
-            po_date=values.get("po_date"),
+            po_date=_date_value(values.get("po_date"), "po_date"),
             supplier=supplier,
             expected_delivery_date=values.get("expected_delivery_date"),
             currency=_currency(values.get("currency", supplier.currency)),
@@ -1147,11 +1177,19 @@ class PurchaseOrderService:
                 if raw.get("requisition_line_id")
                 else None
             )
+            if raw.get("requisition_line_id") and req_line is None:
+                raise ProcurementNotFound("Requisition line was not found")
+            if req_line is not None and requisition is not None and req_line.requisition_id != requisition.id:
+                raise ProcurementNotFound("Requisition line was not found")
             quote_line = (
                 SupplierQuoteLine.objects.for_tenant(tenant).filter(pk=raw.get("quote_line_id")).first()
                 if raw.get("quote_line_id")
                 else None
             )
+            if raw.get("quote_line_id") and quote_line is None:
+                raise ProcurementNotFound("Quote line was not found")
+            if quote_line is not None and quote is not None and quote_line.quote_id != quote.id:
+                raise ProcurementNotFound("Quote line was not found")
             PurchaseOrderLine.objects.create(
                 tenant_id=tenant,
                 created_by=actor,
@@ -1374,7 +1412,7 @@ class PurchaseReceiptService:
             updated_by=actor,
             received_by=actor,
             receipt_number=_text(data.get("receipt_number"), "receipt_number").upper(),
-            receipt_date=data.get("receipt_date"),
+            receipt_date=_date_value(data.get("receipt_date"), "receipt_date"),
             purchase_order=order,
             warehouse_id=_uuid(data.get("warehouse_id"), "warehouse_id"),
         )

@@ -161,7 +161,8 @@ export function RegisterForm() {
 
   if (success) {
     return (
-      <div className="h-screen flex overflow-hidden">
+      <main id="main-content" className="h-screen flex overflow-hidden">
+        <h1 className="sr-only">Organization created</h1>
         {/* Left Panel - Logo and Branding */}
         <div className="hidden lg:flex lg:w-1/2 bg-[#040818] flex-col justify-center relative overflow-hidden h-full">
           <LogoVideo
@@ -210,12 +211,13 @@ export function RegisterForm() {
             </Card>
           </div>
         </div>
-      </div>
+      </main>
     );
   }
 
   return (
-    <div className="h-screen flex overflow-hidden">
+    <main id="main-content" className="h-screen flex overflow-hidden">
+      <h1 className="sr-only">Create a SARAISE organization</h1>
       {/* Left Panel - Logo and Branding */}
       <div className="hidden lg:flex lg:w-1/2 bg-[#040818] flex-col relative overflow-hidden h-full">
         <LogoVideo
@@ -453,6 +455,6 @@ export function RegisterForm() {
           </Card>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

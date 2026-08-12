@@ -136,7 +136,9 @@ export function SecurityProfilesPage() {
   });
   const reset = () => setParams(new URLSearchParams());
   const filtered = Boolean(search || type || mfa || active);
-  if (query.isLoading) return <PageSkeleton />;
+  if (configuration.isLoading || query.isLoading) return <PageSkeleton />;
+  if (configuration.error)
+    return <GovernedError error={configuration.error} retry={() => void configuration.refetch()} />;
   if (query.error) return <GovernedError error={query.error} retry={() => void query.refetch()} />;
   if (!query.data)
     return (
@@ -494,10 +496,14 @@ function ConfiguredProfileForm({
       absolute: Number(absolute),
       concurrent: Number(concurrent),
     });
+    const blockedCountryTokens = tokens(blockCountries).map((item) => item.toUpperCase());
+    const blockedIpTokens = tokens(blockIps).map((item) => item.toLowerCase());
     const overlapCountries = tokens(allowCountries).some((item) =>
-      tokens(blockCountries).includes(item)
+      blockedCountryTokens.includes(item.toUpperCase())
     );
-    const overlapIps = tokens(allowIps).some((item) => tokens(blockIps).includes(item));
+    const overlapIps = tokens(allowIps).some((item) =>
+      blockedIpTokens.includes(item.toLowerCase())
+    );
     if (
       !parsed.success ||
       overlapCountries ||

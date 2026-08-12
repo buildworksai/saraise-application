@@ -227,6 +227,7 @@ class ProcurementConfigurationFactory(TenantModelFactory):
     rfq_prefix = "RFQ"
     po_prefix = "PO"
     receipt_prefix = "GRN"
+    receipt_tolerance_percent = Decimal("5.00")
     minimum_rfq_suppliers = 3
     quote_scoring_weights = {"price": 55, "delivery": 20, "quality": 15, "service": 10}
 

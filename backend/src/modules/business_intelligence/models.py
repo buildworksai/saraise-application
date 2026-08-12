@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any
+from typing import Any, ClassVar, cast
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -102,7 +102,7 @@ class QueryDefinition(CodedDefinitionMixin, TenantScopedModel, TimestampedModel)
     updated_by_id = models.CharField(max_length=255)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    objects = BIQuerySet.as_manager()
+    objects: ClassVar[Any] = BIQuerySet.as_manager()
 
     class Meta:
         db_table = "bi_query_definitions"
@@ -160,7 +160,7 @@ class Report(CodedDefinitionMixin, TenantScopedModel, TimestampedModel):
     legacy_query = models.TextField(blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    objects = BIQuerySet.as_manager()
+    objects: ClassVar[Any] = BIQuerySet.as_manager()
 
     class Meta:
         db_table = "bi_reports"
@@ -196,7 +196,7 @@ class Report(CodedDefinitionMixin, TenantScopedModel, TimestampedModel):
         if self.state == LifecycleState.PUBLISHED:
             if not self.query_definition_id:
                 errors["query_definition"] = "Published reports require a query definition."
-            elif self.query_definition.state != LifecycleState.PUBLISHED:
+            elif cast(QueryDefinition, self.query_definition).state != LifecycleState.PUBLISHED:
                 errors["query_definition"] = "Published reports require a published query definition."
             if self.legacy_query:
                 errors["legacy_query"] = "Legacy query evidence cannot be executable."
@@ -226,7 +226,7 @@ class Dashboard(CodedDefinitionMixin, TenantScopedModel, TimestampedModel):
     legacy_layout = models.JSONField(null=True, blank=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    objects = BIQuerySet.as_manager()
+    objects: ClassVar[Any] = BIQuerySet.as_manager()
 
     class Meta:
         db_table = "bi_dashboards"
@@ -288,7 +288,7 @@ class DashboardWidget(TenantScopedModel, TimestampedModel):
     version = models.PositiveIntegerField(default=1)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
-    objects = BIQuerySet.as_manager()
+    objects: ClassVar[Any] = BIQuerySet.as_manager()
 
     class Meta:
         db_table = "bi_dashboard_widgets"
@@ -357,7 +357,7 @@ class DashboardShare(TenantScopedModel, TimestampedModel):
     expires_at = models.DateTimeField(null=True, blank=True)
     revoked_at = models.DateTimeField(null=True, blank=True)
 
-    objects = ShareQuerySet.as_manager()
+    objects: ClassVar[Any] = ShareQuerySet.as_manager()
 
     class Meta:
         db_table = "bi_dashboard_shares"
@@ -438,7 +438,7 @@ class QueryExecution(TenantScopedModel, TimestampedModel):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
 
-    objects = ExecutionQuerySet.as_manager()
+    objects: ClassVar[Any] = ExecutionQuerySet.as_manager()
 
     class Meta:
         db_table = "bi_query_executions"

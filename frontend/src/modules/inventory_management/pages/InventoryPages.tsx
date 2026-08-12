@@ -1256,7 +1256,7 @@ export function InventoryDashboardPage() {
   const navigate = useNavigate();
   const state = useQuery({
     queryKey: inventoryQueryKeys.dashboard(tenantId()),
-    queryFn: inventoryService.dashboard,
+    queryFn: () => inventoryService.dashboard(),
   });
   if (state.isLoading) return <InventorySkeleton label="Loading inventory dashboard" />;
   if (state.error)
@@ -1337,7 +1337,7 @@ export function ConfigurationListPage() {
   const navigate = useNavigate();
   const state = useQuery({
     queryKey: inventoryQueryKeys.resource(tenantId(), "configuration"),
-    queryFn: inventoryService.listConfigurations,
+    queryFn: () => inventoryService.listConfigurations(),
   });
   if (state.isLoading) return <InventorySkeleton label="Loading inventory settings" />;
   if (state.error)
@@ -1720,6 +1720,7 @@ export function ConfigurationPreviewPage() {
       return inventoryService.previewConfiguration(e, configDefaults(state.data.data));
     },
     enabled: Boolean(state.data),
+    retry: false,
   });
   if (state.isLoading || preview.isLoading)
     return <InventorySkeleton label="Calculating configuration impact" />;

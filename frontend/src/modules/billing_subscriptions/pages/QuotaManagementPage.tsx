@@ -23,7 +23,6 @@ export const QuotaManagementPage = () => {
   });
 
   const getUsagePercentage = (used: number, limit: number): number => {
-    if (limit <= 0) return 0; // Unlimited
     return Math.min((used / limit) * 100, 100);
   };
 
@@ -80,8 +79,8 @@ export const QuotaManagementPage = () => {
               <Users className="h-5 w-5 text-blue-500" />
               <h3 className="font-semibold">Active Users</h3>
             </div>
-            {quotas.users.used >= quotas.users.limit * 0.9 && (
-              <AlertCircle className="h-5 w-5 text-yellow-500" />
+            {quotas.users.limit > 0 && quotas.users.used >= quotas.users.limit * 0.9 && (
+              <AlertCircle data-testid="quota-users-alert" className="h-5 w-5 text-yellow-500" />
             )}
           </div>
           <div className="space-y-2">
@@ -94,6 +93,7 @@ export const QuotaManagementPage = () => {
             {quotas.users.limit > 0 && (
               <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                 <div
+                  data-testid="quota-users-progress"
                   className={cn(
                     "h-2 rounded-full transition-all",
                     getUsageColor(getUsagePercentage(quotas.users.used, quotas.users.limit))
@@ -117,8 +117,8 @@ export const QuotaManagementPage = () => {
               <HardDrive className="h-5 w-5 text-green-500" />
               <h3 className="font-semibold">Storage</h3>
             </div>
-            {quotas.storage.used >= quotas.storage.limit * 0.9 && (
-              <AlertCircle className="h-5 w-5 text-yellow-500" />
+            {quotas.storage.limit > 0 && quotas.storage.used >= quotas.storage.limit * 0.9 && (
+              <AlertCircle data-testid="quota-storage-alert" className="h-5 w-5 text-yellow-500" />
             )}
           </div>
           <div className="space-y-2">
@@ -132,6 +132,7 @@ export const QuotaManagementPage = () => {
             {quotas.storage.limit > 0 && (
               <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                 <div
+                  data-testid="quota-storage-progress"
                   className={cn(
                     "h-2 rounded-full transition-all",
                     getUsageColor(getUsagePercentage(quotas.storage.used, quotas.storage.limit))
@@ -157,9 +158,10 @@ export const QuotaManagementPage = () => {
               <Zap className="h-5 w-5 text-purple-500" />
               <h3 className="font-semibold">API Calls (Today)</h3>
             </div>
-            {quotas.api_calls.used >= quotas.api_calls.limit * 0.9 && (
-              <AlertCircle className="h-5 w-5 text-yellow-500" />
-            )}
+            {quotas.api_calls.limit > 0 &&
+              quotas.api_calls.used >= quotas.api_calls.limit * 0.9 && (
+                <AlertCircle data-testid="quota-api-alert" className="h-5 w-5 text-yellow-500" />
+              )}
           </div>
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
@@ -172,6 +174,7 @@ export const QuotaManagementPage = () => {
             {quotas.api_calls.limit > 0 && (
               <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
                 <div
+                  data-testid="quota-api-progress"
                   className={cn(
                     "h-2 rounded-full transition-all",
                     getUsageColor(getUsagePercentage(quotas.api_calls.used, quotas.api_calls.limit))
@@ -192,9 +195,9 @@ export const QuotaManagementPage = () => {
       </div>
 
       {/* Warning for high usage */}
-      {(quotas.users.used >= quotas.users.limit * 0.9 ||
-        quotas.storage.used >= quotas.storage.limit * 0.9 ||
-        quotas.api_calls.used >= quotas.api_calls.limit * 0.9) && (
+      {((quotas.users.limit > 0 && quotas.users.used >= quotas.users.limit * 0.9) ||
+        (quotas.storage.limit > 0 && quotas.storage.used >= quotas.storage.limit * 0.9) ||
+        (quotas.api_calls.limit > 0 && quotas.api_calls.used >= quotas.api_calls.limit * 0.9)) && (
         <Card className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800">
           <div className="flex items-start gap-3">
             <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5" />

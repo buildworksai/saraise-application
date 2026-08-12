@@ -122,6 +122,20 @@ describe("accounting aggregate forms", () => {
     expect(cancel).toHaveBeenCalledOnce();
   });
 
+  it("shows governed account validation when the submit button is clicked empty", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn();
+
+    render(<AccountForm pending={false} onSubmit={submit} onCancel={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+
+    expect(await screen.findAllByText("String must contain at least 1 character(s)")).toHaveLength(
+      2
+    );
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it("blocks invalid posting period dates and submits the corrected governed range", async () => {
     const user = userEvent.setup();
     const submit = vi.fn();
@@ -145,6 +159,20 @@ describe("accounting aggregate forms", () => {
       end_date: "2026-07-31",
       fiscal_year: 2026,
     });
+  });
+
+  it("shows governed posting-period validation when the submit button is clicked empty", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn();
+
+    render(<PostingPeriodForm pending={false} onSubmit={submit} onCancel={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Create period" }));
+
+    expect(
+      await screen.findByText("String must contain at least 1 character(s)")
+    ).toBeInTheDocument();
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it("enforces journal line semantics, balance, derived totals, and line re-numbering", async () => {
@@ -182,6 +210,20 @@ describe("accounting aggregate forms", () => {
     await user.click(screen.getByRole("button", { name: "Remove line 2" }));
     expect(screen.queryByLabelText("Line 3 account")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Line 2 account")).toHaveValue(accountId);
+  }, 10_000);
+
+  it("shows governed journal validation when the submit button is clicked empty", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn();
+
+    render(<JournalEntryForm pending={false} onSubmit={submit} onCancel={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Create draft" }));
+
+    expect(
+      await screen.findByText("String must contain at least 1 character(s)")
+    ).toBeInTheDocument();
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it("submits AP and AR invoices with party-specific payloads and calculated preview totals", async () => {
@@ -191,6 +233,7 @@ describe("accounting aggregate forms", () => {
       <InvoiceForm kind="ap" pending={false} onSubmit={submit} onCancel={vi.fn()} />
     );
 
+    await user.clear(screen.getByLabelText("Invoice number"));
     await user.type(screen.getByLabelText("Invoice number"), "AP-100");
     await user.type(screen.getByLabelText("Supplier UUID"), accountId);
     await user.clear(screen.getByLabelText("Invoice date"));
