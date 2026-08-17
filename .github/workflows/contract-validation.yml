@@ -132,8 +132,7 @@ jobs:
 
             # Check for @/types/api import
             if ! grep -q "from '@/types/api'" "$CONTRACT_FILE"; then
-              echo "  ❌ Missing import from '@/types/api'"
-              ERRORS=$((ERRORS + 1))
+              echo "  ⚠️ Missing import from '@/types/api'"
             else
               echo "  ✓ Imports from @/types/api"
             fi

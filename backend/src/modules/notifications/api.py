@@ -199,6 +199,8 @@ class GovernedTenantMixin(GovernedAPIViewMixin):
         return tenant, actor
 
     def get_permissions(self) -> Any:
+        if getattr(self, "swagger_fake_view", False):
+            return []
         tenant, _ = self._identity()
         request = cast(Request, cast(Any, self).request)
         setattr(request, "tenant_id", tenant)
