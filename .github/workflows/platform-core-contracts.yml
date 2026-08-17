@@ -23,6 +23,7 @@ jobs:
 
       - name: Checkout saraise-platform-core (optional)
         if: ${{ env.PLATFORM_CORE_READ_TOKEN != '' }}
+        continue-on-error: true
         uses: actions/checkout@v4
         with:
           repository: buildworksai/saraise-platform-core
@@ -31,8 +32,8 @@ jobs:
 
       - name: Validate platform-core contracts (if configured)
         run: |
-          if [ ! -d "_deps/saraise-platform-core" ]; then
-            echo "ℹ️ Skipping: PLATFORM_CORE_READ_TOKEN not configured."
+          if [ ! -f "_deps/saraise-platform-core/pyproject.toml" ] && [ ! -f "_deps/saraise-platform-core/setup.py" ]; then
+            echo "ℹ️ Skipping: platform-core checkout is not configured or did not complete."
             exit 0
           fi
 
