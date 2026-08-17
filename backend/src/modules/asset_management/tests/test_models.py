@@ -18,14 +18,12 @@ def _skip_without_depreciation_tenant_guard() -> None:
         return
 
     with connection.cursor() as cursor:
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT name
             FROM sqlite_master
             WHERE type = 'trigger'
               AND name IN ('asset_depreciation_tenant_guard_insert', 'asset_depreciation_tenant_guard_update')
-            """
-        )
+            """)
         triggers = {row[0] for row in cursor.fetchall()}
     if triggers != {"asset_depreciation_tenant_guard_insert", "asset_depreciation_tenant_guard_update"}:
         pytest.skip("SQLite test database was created with --nomigrations and lacks tenant guard triggers.")

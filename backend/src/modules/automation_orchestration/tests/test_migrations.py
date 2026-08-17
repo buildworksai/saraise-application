@@ -148,13 +148,11 @@ def test_postgresql_17_forward_reverse_forward_preserves_legacy_and_schema() -> 
                 [legacy_id],
             )
             assert cursor.fetchone() == original
-            cursor.execute(
-                """
+            cursor.execute("""
                 SELECT relname, relrowsecurity, relforcerowsecurity
                 FROM pg_class
                 WHERE relname LIKE 'automation_orchestration_%'
-                """
-            )
+                """)
             rls = {name: (enabled, forced) for name, enabled, forced in cursor.fetchall()}
             rls_migration = importlib.import_module(
                 "src.modules.automation_orchestration.migrations.0003_enable_orchestration_rls"

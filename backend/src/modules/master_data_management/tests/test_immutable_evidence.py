@@ -38,14 +38,12 @@ def _skip_without_mdm_evidence_triggers() -> None:
         return
 
     with connection.cursor() as cursor:
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT name
             FROM sqlite_master
             WHERE type = 'trigger'
               AND name IN ('mdm_quality_issue_evidence_immutable', 'mdm_match_candidate_evidence_immutable')
-            """
-        )
+            """)
         triggers = {row[0] for row in cursor.fetchall()}
     if triggers != {"mdm_quality_issue_evidence_immutable", "mdm_match_candidate_evidence_immutable"}:
         pytest.skip("SQLite test database was created with --nomigrations and lacks MDM evidence triggers.")

@@ -29,12 +29,10 @@ class TestModuleGuardrailService:
 
             # Create clean Python file
             clean_file = module_dir / "models.py"
-            clean_file.write_text(
-                """
+            clean_file.write_text("""
 def create_customer(name: str) -> dict:
     return {"name": name}
-"""
-            )
+""")
 
             violations = service.scan_module("sample-module", str(module_dir))
             assert len(violations) == 0
@@ -49,12 +47,10 @@ def create_customer(name: str) -> dict:
 
             # Create file with auth drift
             bad_file = module_dir / "auth.py"
-            bad_file.write_text(
-                """
+            bad_file.write_text("""
 def login(username: str, password: str) -> dict:
     return {"token": "jwt-token"}
-"""
-            )
+""")
 
             violations = service.scan_module("sample-module", str(module_dir))
             assert len(violations) > 0
@@ -70,12 +66,10 @@ def login(username: str, password: str) -> dict:
 
             # Create file with policy drift
             bad_file = module_dir / "permissions.py"
-            bad_file.write_text(
-                """
+            bad_file.write_text("""
 def check_permission(user: str) -> bool:
     return True  # Bypass permission check
-"""
-            )
+""")
 
             violations = service.scan_module("sample-module", str(module_dir))
             assert len(violations) > 0
