@@ -28,7 +28,7 @@ jobs:
       - name: Check Python licenses
         run: |
           pip install -r requirements.txt 2>/dev/null || pip install -e . 2>/dev/null || true
-          pip-licenses --format=table --with-urls --order=license
+          pip-licenses --format=plain --with-urls --order=license
           # Fail on copyleft licenses that conflict with Apache 2.0
           pip-licenses --fail-on="GPL;AGPL;LGPL;SSPL;EUPL;OSL;CPAL;RPL;Watcom" || {
             echo "::error::Found dependencies with copyleft licenses incompatible with Apache 2.0"
