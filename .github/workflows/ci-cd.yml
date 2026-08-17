@@ -97,6 +97,9 @@ jobs:
 
       - name: Run Python tests with coverage
         if: ${{ steps.backend.outputs.present == 'true' }}
+        env:
+          DJANGO_USE_SQLITE_FOR_TESTS: '1'
+          SARAISE_MODE: development
         run: |
           cd backend
           pytest tests/ --cov=src --cov-report=xml --cov-report=term
@@ -104,6 +107,9 @@ jobs:
 
       - name: Check Python coverage threshold (≥90%) - SARAISE-01002
         if: ${{ steps.backend.outputs.present == 'true' }}
+        env:
+          DJANGO_USE_SQLITE_FOR_TESTS: '1'
+          SARAISE_MODE: development
         run: |
           cd backend
           coverage report --fail-under=90 || (echo "❌ Coverage below 90% threshold" && exit 1)
