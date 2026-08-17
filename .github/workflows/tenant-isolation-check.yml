@@ -21,6 +21,11 @@ on:
       - 'backend/src/modules/**/*.py'
       - 'backend/src/modules/**/tests/**'
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   check-isolation-tests:
     name: Check Tenant Isolation Tests
@@ -39,6 +44,7 @@ jobs:
       - name: Post failure comment on PR
         if: failure() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        continue-on-error: true
         with:
           script: |
             github.rest.issues.createComment({
@@ -74,8 +80,7 @@ jobs:
       - name: Install backend dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
-          pip install -r backend/requirements-dev.txt
+          pip install -e './backend[dev,test]'
 
       - name: Run tenant isolation tests
         env:
@@ -87,6 +92,7 @@ jobs:
       - name: Post failure comment on PR
         if: failure() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
+        continue-on-error: true
         with:
           script: |
             github.rest.issues.createComment({

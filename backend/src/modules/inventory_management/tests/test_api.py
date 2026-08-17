@@ -72,6 +72,15 @@ def test_missing_authentication_returns_401(api_client) -> None:
     assert problem["correlation_id"]
 
 
+def test_permission_mapping_skips_request_validation_for_openapi_schema_generation() -> None:
+    view = inventory_api.ImportViewSet()
+    view.swagger_fake_view = True
+    view.action = "create"
+    view.request = SimpleNamespace(user=SimpleNamespace(is_authenticated=False), data={})
+
+    assert view.get_permissions() == []
+
+
 def test_list_uses_governed_envelope_and_pagination(authenticated_tenant_a_client, tenant_a) -> None:
     own = warehouse(tenant_a.id)
     response = authenticated_tenant_a_client.get(f"{BASE}/warehouses/?page_size=1&ordering=warehouse_code")

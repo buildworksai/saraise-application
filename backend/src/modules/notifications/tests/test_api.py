@@ -326,6 +326,15 @@ def test_identity_and_permission_mapping_fail_closed(monkeypatch):
     assert view.quota_resource == "notifications.api_writes"
 
 
+def test_permission_mapping_skips_identity_for_openapi_schema_generation():
+    view = TemplateViewSet()
+    view.swagger_fake_view = True
+    view.request = SimpleNamespace(user=SimpleNamespace(is_authenticated=False), method="GET")
+    view.action = "list"
+
+    assert view.get_permissions() == []
+
+
 @pytest.mark.parametrize(
     ("exc", "api_exc"),
     [

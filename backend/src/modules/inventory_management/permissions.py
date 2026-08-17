@@ -160,6 +160,9 @@ class InventoryAccessMixin:
     required_entitlement = ENTITLEMENT
 
     def get_permissions(self) -> list[object]:
+        if getattr(self, "swagger_fake_view", False):
+            return []
+
         raw_tenant = get_user_tenant_id(getattr(self.request, "user", None))
         try:
             self.request.tenant_id = UUID(str(raw_tenant)) if raw_tenant else None

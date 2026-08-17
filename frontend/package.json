@@ -14,8 +14,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint src --ext .ts,.tsx --max-warnings 0",
     "security:audit": "node scripts/security-audit.mjs",
-    "test": "NODE_OPTIONS=\"${NODE_OPTIONS:-} --localstorage-file=/tmp/saraise-frontend-localstorage.json\" vitest run",
-    "test:coverage": "NODE_OPTIONS=\"${NODE_OPTIONS:-} --localstorage-file=/tmp/saraise-frontend-localstorage.json\" vitest run --coverage",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "mutation:workflow-builder:shard": "node scripts/workflow-builder-mutation-shard.mjs",
     "generate-types": "openapi-typescript http://localhost:28000/api/schema/ -o src/types/api.ts"
   },

@@ -65,7 +65,8 @@ jobs:
         if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           pip install pip-audit
-          pip-audit --desc --strict --skip-editable
+          pip uninstall -y saraise-backend
+          pip-audit --desc --strict
 
       - name: Run Python linting (flake8)
         if: ${{ steps.backend.outputs.present == 'true' }}

@@ -14,6 +14,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
 from django.urls import resolve
+from drf_spectacular.openapi import AutoSchema
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.test import APIClient
@@ -27,6 +28,7 @@ from src.core.encryption.service import EncryptionService
 from ..adapter_registry import connector_adapter_registry
 from ..adapters import AdapterDescriptor, ConnectorAdapter
 from ..api import (
+    ConnectorViewSet,
     DataMappingViewSet,
     GovernedAccessMixin,
     IntegrationViewSet,
@@ -778,7 +780,7 @@ def test_every_required_route_resolves_to_the_intended_action() -> None:
     routes = {
         f"{BASE}/connectors/": "list",
         f"{BASE}/connectors/{resource_id}/": "retrieve",
-        f"{BASE}/connectors/{resource_id}/schema/": "schema",
+        f"{BASE}/connectors/{resource_id}/schema/": "connector_schema",
         f"{BASE}/connectors/{resource_id}/health/": "health",
         f"{BASE}/integrations/": "list",
         f"{BASE}/integrations/{resource_id}/": "retrieve",
@@ -808,3 +810,10 @@ def test_every_required_route_resolves_to_the_intended_action() -> None:
     for url, action_name in routes.items():
         match = resolve(url)
         assert action_name in match.func.actions.values(), url
+
+    connector_schema_route = resolve(f"{BASE}/connectors/{resource_id}/schema/")
+    assert connector_schema_route.url_name == "connector-schema"
+
+
+def test_connector_view_preserves_drf_spectacular_schema_adapter() -> None:
+    assert isinstance(ConnectorViewSet.schema, AutoSchema)

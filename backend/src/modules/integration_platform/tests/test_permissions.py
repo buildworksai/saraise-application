@@ -46,7 +46,7 @@ def test_permission_catalog_is_exact_unique_and_module_scoped() -> None:
 @pytest.mark.parametrize(
     ("action_map", "actions"),
     [
-        (CONNECTOR_ACTIONS, {"list", "retrieve", "schema", "health"}),
+        (CONNECTOR_ACTIONS, {"list", "retrieve", "schema", "connector_schema", "health"}),
         (
             INTEGRATION_ACTIONS,
             {

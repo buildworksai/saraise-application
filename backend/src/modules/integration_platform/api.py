@@ -14,6 +14,7 @@ from django.db import IntegrityError
 from django.db.models import Count, Q, QuerySet
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from drf_spectacular.openapi import AutoSchema
 from rest_framework import mixins, status, viewsets
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.decorators import action
@@ -684,6 +685,7 @@ class IntegrationCredentialViewSet(GovernedTenantReadOnlyViewSet):
 class ConnectorViewSet(GovernedAccessMixin, GovernedAPIViewMixin, viewsets.GenericViewSet[Any]):
     """Tenant-evaluated descriptors for the platform-global connector catalog."""
 
+    schema = AutoSchema()
     authentication_classes = (CanonicalSessionAuthentication,)
     permission_classes = (IsAuthenticated, RequiresAccess)
     pagination_class = GovernedPageNumberPagination
@@ -708,8 +710,8 @@ class ConnectorViewSet(GovernedAccessMixin, GovernedAPIViewMixin, viewsets.Gener
         connector = _service_call(lambda: self.service.get_connector(self.tenant_id, _uuid(pk, "id")))
         return Response(ConnectorDetailSerializer(connector).data)
 
-    @action(detail=True, methods=("get",))
-    def schema(self, request: Request, pk: str | None = None) -> Response:
+    @action(detail=True, methods=("get",), url_path="schema", url_name="schema")
+    def connector_schema(self, request: Request, pk: str | None = None) -> Response:
         del request
         connector_id = _uuid(pk, "id")
         connector = _service_call(lambda: self.service.get_schema(self.tenant_id, connector_id))

@@ -119,6 +119,7 @@ CONNECTOR_ACTIONS: Final[Mapping[str, AccessRequirement]] = {
     "list": access(CONNECTOR_READ, "integration_platform.connector.read"),
     "retrieve": access(CONNECTOR_READ, "integration_platform.connector.read"),
     "schema": access(CONNECTOR_READ, "integration_platform.connector.read"),
+    "connector_schema": access(CONNECTOR_READ, "integration_platform.connector.read"),
     "health": access(CONNECTOR_READ, "integration_platform.connector.health"),
 }
 
