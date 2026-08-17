@@ -509,6 +509,25 @@ describe("CRM detail, dashboard, kanban, and list pages", () => {
     expect(screen.getByText("Revenue prediction disabled")).toBeInTheDocument();
   });
 
+  it("does not request predictions when the feature is enabled without a provider", async () => {
+    renderWithClient(
+      <SalesDashboardPage />,
+      "/",
+      clientWithConfiguration({
+        ...configuration,
+        document: {
+          ...configuration.document,
+          providers: { ...configuration.document.providers, revenue_prediction: null },
+        },
+        feature_flags: { ...configuration.feature_flags, revenue_prediction: true },
+      })
+    );
+
+    expect(await screen.findByRole("heading", { name: "Sales dashboard" })).toBeInTheDocument();
+    expect(crmService.predictRevenue).not.toHaveBeenCalled();
+    expect(screen.getByText("Revenue prediction disabled")).toBeInTheDocument();
+  });
+
   it("moves kanban cards by keyboard only after explicit confirmation", async () => {
     const user = userEvent.setup();
     renderWithClient(<OpportunityKanbanPage />);

@@ -14,7 +14,9 @@ export function SalesDashboardPage() {
   const period = configuration.data?.document.ui.dashboard_forecast_period_days;
   const stalePageSize = configuration.data?.document.ui.stale_deal_page_size;
   const staleDays = configuration.data?.document.jobs.stale_deal_days;
-  const predictionEnabled = configuration.data?.feature_flags.revenue_prediction === true;
+  const predictionProvider = configuration.data?.document.providers.revenue_prediction;
+  const predictionEnabled =
+    configuration.data?.feature_flags.revenue_prediction === true && predictionProvider !== null;
   const pipeline = useQuery({
     queryKey: crmKeys.forecast("pipeline", { period }),
     queryFn: () => crmService.getPipeline({ period }),
