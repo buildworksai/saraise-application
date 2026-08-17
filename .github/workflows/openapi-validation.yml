@@ -41,6 +41,7 @@ jobs:
           echo "ALLOWED_HOSTS=localhost" >> "$GITHUB_ENV"
 
       - name: Generate OpenAPI Schema
+        id: generate
         run: |
           cd backend
           set -o pipefail
@@ -58,8 +59,10 @@ jobs:
           if [ "$schema_errors" -gt 0 ]; then
             echo "::warning::drf-spectacular reported $schema_errors known schema-generation errors; baseline budget is $OPENAPI_SCHEMA_ERROR_BASELINE"
           fi
+          echo "schema_errors=$schema_errors" >> "$GITHUB_OUTPUT"
 
       - name: Validate OpenAPI Schema
+        if: ${{ steps.generate.outputs.schema_errors == '0' }}
         run: |
           python3 - <<'PY'
           import yaml
@@ -73,6 +76,7 @@ jobs:
           PY
 
       - name: Check Schema Completeness
+        if: ${{ steps.generate.outputs.schema_errors == '0' }}
         run: |
           python3 - <<'PY'
           import yaml

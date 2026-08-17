@@ -64,6 +64,7 @@ jobs:
       - name: Audit Python dependencies (SARAISE-26001)
         if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
+          pip install 'setuptools>=83.0.0'
           pip install pip-audit
           pip uninstall -y saraise-backend
           pip-audit --desc --strict

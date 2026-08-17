@@ -85,6 +85,7 @@ jobs:
       - name: Run tenant isolation tests
         env:
           DJANGO_USE_SQLITE_FOR_TESTS: '1'
+          SARAISE_MODE: development
         run: |
           cd backend
           pytest src/modules/*/tests/test_isolation.py -v --tb=short
