@@ -182,6 +182,7 @@ site/
 *.swo
 *~
 .cache/
+migration-backups-*/
 
 # ====================
 # Redis / Session storage (dev)
