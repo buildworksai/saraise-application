@@ -25,11 +25,9 @@ def enable_rls(apps, schema_editor):
             if table == "ai_provider_configuration_resources"
             else "saraise_current_tenant_id()"
         )
-        schema_editor.execute(
-            f"""CREATE POLICY {policy_name} ON {table_name}
+        schema_editor.execute(f"""CREATE POLICY {policy_name} ON {table_name}
             USING (tenant_id = {tenant_expression})
-            WITH CHECK (tenant_id = {tenant_expression});"""
-        )
+            WITH CHECK (tenant_id = {tenant_expression});""")
 
 
 def disable_rls(apps, schema_editor):

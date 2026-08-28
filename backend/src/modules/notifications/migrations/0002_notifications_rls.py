@@ -22,8 +22,7 @@ def apply_security(apps, schema_editor):
         return
     for table in TABLES:
         schema_editor.execute(f"SELECT saraise_enable_rls('{table}'::REGCLASS)")
-    schema_editor.execute(
-        r"""
+    schema_editor.execute(r"""
         CREATE OR REPLACE FUNCTION notifications_same_tenant_fk()
         RETURNS TRIGGER LANGUAGE plpgsql AS $$
         DECLARE related_tenant UUID; related_id UUID;
@@ -37,8 +36,7 @@ def apply_security(apps, schema_editor):
           END IF;
           RETURN NEW;
         END $$;
-    """
-    )
+    """)
     relationships = (
         ("notifications_template_versions", "notifications_templates", "template_id"),
         ("notifications_templates", "notifications_template_versions", "active_version_id"),
@@ -55,8 +53,7 @@ def apply_security(apps, schema_editor):
             f'CREATE TRIGGER notifications_tenant_fk_{index} BEFORE INSERT OR UPDATE ON "{table}" '
             f"FOR EACH ROW EXECUTE FUNCTION notifications_same_tenant_fk('{related}', '{column}')"
         )
-    schema_editor.execute(
-        r"""
+    schema_editor.execute(r"""
         CREATE OR REPLACE FUNCTION notifications_active_version_owner()
         RETURNS TRIGGER LANGUAGE plpgsql AS $$
         DECLARE owner_id UUID;
@@ -72,8 +69,7 @@ def apply_security(apps, schema_editor):
         CREATE TRIGGER notifications_active_version_owner_trg
           BEFORE INSERT OR UPDATE ON notifications_templates
           FOR EACH ROW EXECUTE FUNCTION notifications_active_version_owner();
-    """
-    )
+    """)
 
 
 def remove_security(apps, schema_editor):

@@ -39,8 +39,7 @@ def install_same_tenant_guards(apps, schema_editor):
     """Add PostgreSQL triggers that prevent cross-tenant parent links."""
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute(
-        r"""
+    schema_editor.execute(r"""
         CREATE FUNCTION document_intelligence_require_same_tenant()
         RETURNS TRIGGER
         LANGUAGE plpgsql
@@ -63,22 +62,19 @@ def install_same_tenant_guards(apps, schema_editor):
             RETURN NEW;
         END;
         $$;
-        """
-    )
+        """)
     for child_table, fk_column, parent_table in SAME_TENANT_RELATIONSHIPS:
         trigger_name = f"docintel_same_tenant_{fk_column}_{child_table[-12:]}"
         quoted_trigger = schema_editor.quote_name(trigger_name)
         quoted_child = schema_editor.quote_name(child_table)
         quoted_fk = schema_editor.quote_name(fk_column)
-        schema_editor.execute(
-            f"""
+        schema_editor.execute(f"""
             CREATE TRIGGER {quoted_trigger}
             BEFORE INSERT OR UPDATE OF tenant_id, {quoted_fk} ON {quoted_child}
             FOR EACH ROW EXECUTE FUNCTION document_intelligence_require_same_tenant(
                 '{fk_column}', '{parent_table}'
             );
-            """
-        )
+            """)
 
 
 def remove_same_tenant_guards(apps, schema_editor):

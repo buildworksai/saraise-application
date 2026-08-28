@@ -17,15 +17,13 @@ def enable_rls(apps, schema_editor):
     policy = schema_editor.quote_name(POLICY_NAME)
     schema_editor.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;")
     schema_editor.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY;")
-    schema_editor.execute(
-        f"""CREATE POLICY {policy} ON {table}
+    schema_editor.execute(f"""CREATE POLICY {policy} ON {table}
             USING (
                 tenant_id = NULLIF(current_setting('{TENANT_SETTING}', true), '')::uuid
             )
             WITH CHECK (
                 tenant_id = NULLIF(current_setting('{TENANT_SETTING}', true), '')::uuid
-            );"""
-    )
+            );""")
 
 
 def disable_rls(apps, schema_editor):

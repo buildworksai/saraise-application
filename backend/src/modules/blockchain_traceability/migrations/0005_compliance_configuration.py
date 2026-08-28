@@ -79,14 +79,12 @@ def install_immutable_guards(apps, schema_editor):
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute(
-        """
+    schema_editor.execute("""
         CREATE OR REPLACE FUNCTION bct_reject_immutable_mutation() RETURNS trigger
         LANGUAGE plpgsql AS $$ BEGIN
           RAISE EXCEPTION 'immutable blockchain traceability audit rows cannot be modified';
         END $$;
-        """
-    )
+        """)
     for raw_table in IMMUTABLE_TABLES:
         table = schema_editor.quote_name(raw_table)
         trigger = schema_editor.quote_name(f"bct_immutable_{raw_table.removeprefix('blockchain_traceability_')}")

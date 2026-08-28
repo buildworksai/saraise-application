@@ -20,11 +20,9 @@ def enable_rls(apps, schema_editor) -> None:
             policy = f"{table}_tenant_isolation"
             cursor.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
             cursor.execute(f'ALTER TABLE "{table}" FORCE ROW LEVEL SECURITY')
-            cursor.execute(
-                f"""CREATE POLICY "{policy}" ON "{table}"
+            cursor.execute(f"""CREATE POLICY "{policy}" ON "{table}"
                     USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)
-                    WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)"""
-            )
+                    WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)""")
 
 
 def disable_rls(apps, schema_editor) -> None:

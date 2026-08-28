@@ -14,8 +14,7 @@ def protect_immutable_evidence(apps, schema_editor):
         "integration_platform_webhook_delivery_attempts",
     ):
         function = f"{table}_reject_mutation"
-        schema_editor.execute(
-            f"""
+        schema_editor.execute(f"""
             CREATE FUNCTION {function}() RETURNS trigger AS $$
             BEGIN
               RAISE EXCEPTION 'immutable integration platform evidence cannot be mutated';
@@ -24,8 +23,7 @@ def protect_immutable_evidence(apps, schema_editor):
             CREATE TRIGGER {table}_immutable
             BEFORE UPDATE OR DELETE ON {table}
             FOR EACH ROW EXECUTE FUNCTION {function}();
-            """
-        )
+            """)
 
 
 def unprotect_immutable_evidence(apps, schema_editor):

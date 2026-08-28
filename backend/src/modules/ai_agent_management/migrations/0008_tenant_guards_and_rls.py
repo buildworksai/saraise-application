@@ -84,8 +84,7 @@ def install_tenant_security(apps, schema_editor):
 
         for child, column, parent in TENANT_RELATIONS:
             trigger, function = _names(child, column)
-            cursor.execute(
-                f"""
+            cursor.execute(f"""
                 CREATE OR REPLACE FUNCTION {qn(function)}() RETURNS trigger
                 LANGUAGE plpgsql AS $$
                 BEGIN
@@ -100,8 +99,7 @@ def install_tenant_security(apps, schema_editor):
                     RETURN NEW;
                 END;
                 $$
-                """
-            )
+                """)
             cursor.execute(f"DROP TRIGGER IF EXISTS {qn(trigger)} ON {qn(child)}")
             cursor.execute(
                 f"CREATE TRIGGER {qn(trigger)} BEFORE INSERT OR UPDATE OF {qn(column)}, tenant_id "

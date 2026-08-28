@@ -47,16 +47,14 @@ def create_append_only_triggers(apps, schema_editor):
                 "BEGIN SELECT RAISE(ABORT, 'append-only evidence cannot be deleted'); END;"
             )
     elif schema_editor.connection.vendor == "postgresql":
-        schema_editor.execute(
-            """
+        schema_editor.execute("""
             CREATE OR REPLACE FUNCTION api_management_reject_evidence_mutation()
             RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
               RAISE EXCEPTION 'append-only evidence cannot be modified';
             END;
             $$;
-            """
-        )
+            """)
         for table in tables:
             schema_editor.execute(
                 f'CREATE TRIGGER "{table}_immutable" BEFORE UPDATE OR DELETE ON "{table}" '

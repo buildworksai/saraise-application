@@ -33,8 +33,7 @@ def create_search_index(apps, schema_editor) -> None:
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute(
-        """
+    schema_editor.execute("""
         CREATE INDEX dms_doc_search_gin
             ON dms_documents_v2
          USING GIN (
@@ -45,8 +44,7 @@ def create_search_index(apps, schema_editor) -> None:
                 coalesce(metadata::text, '')
             )
          )
-        """
-    )
+        """)
 
 
 def drop_search_index(apps, schema_editor) -> None:

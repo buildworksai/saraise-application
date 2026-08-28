@@ -35,8 +35,7 @@ def enable_security(apps, schema_editor):
             "WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', TRUE), '')::UUID)"
         )
 
-    schema_editor.execute(
-        """
+    schema_editor.execute("""
         CREATE FUNCTION fixed_assets_require_same_tenant() RETURNS TRIGGER LANGUAGE plpgsql AS $$
         DECLARE parent_id UUID; parent_tenant UUID;
         BEGIN
@@ -50,8 +49,7 @@ def enable_security(apps, schema_editor):
             RETURN NEW;
         END;
         $$;
-        """
-    )
+        """)
     for child, column, parent in RELATIONSHIPS:
         trigger = schema_editor.quote_name(f"fa_same_tenant_{child[-8:]}_{column[:10]}")
         schema_editor.execute(

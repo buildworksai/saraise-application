@@ -25,15 +25,13 @@ def restore_legacy_rls(apps, schema_editor):
     # Static migration identifiers are quoted by Django; DDL identifiers cannot be parameterized.
     schema_editor.execute(f"DROP POLICY IF EXISTS tenant_isolation_{TABLE_NAME} ON {table};")  # nosemgrep
     # Static migration identifiers are quoted by Django; DDL identifiers cannot be parameterized.
-    schema_editor.execute(
-        f"""CREATE POLICY {old_policy} ON {table}
+    schema_editor.execute(f"""CREATE POLICY {old_policy} ON {table}
             USING (
                 tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
             )
             WITH CHECK (
                 tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
-            );"""
-    )  # nosemgrep
+            );""")  # nosemgrep
 
 
 class Migration(migrations.Migration):

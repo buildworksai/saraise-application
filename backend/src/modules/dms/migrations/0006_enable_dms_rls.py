@@ -62,8 +62,7 @@ def _install_sqlite_guards(schema_editor) -> None:
 
     for table_name in TENANT_TABLES:
         trigger_name = _sqlite_trigger_name(table_name, "tenant_id_immutable")
-        schema_editor.execute(
-            f"""
+        schema_editor.execute(f"""
             CREATE TRIGGER {trigger_name}
             BEFORE UPDATE OF tenant_id ON {table_name}
             FOR EACH ROW
@@ -71,8 +70,7 @@ def _install_sqlite_guards(schema_editor) -> None:
             BEGIN
                 SELECT RAISE(ABORT, 'DMS tenant ownership is immutable');
             END
-            """
-        )
+            """)
 
     for table_name, column_name, related_table, related_document_column in SQLITE_RELATIONSHIPS:
         suffix = f"{column_name}_same_tenant"
@@ -91,8 +89,7 @@ def _install_sqlite_guards(schema_editor) -> None:
         )
         for operation, timing in operations:
             trigger_name = _sqlite_trigger_name(table_name, f"{suffix}_{operation}")
-            schema_editor.execute(
-                f"""
+            schema_editor.execute(f"""
                 CREATE TRIGGER {trigger_name}
                 {timing} ON {table_name}
                 FOR EACH ROW
@@ -100,8 +97,7 @@ def _install_sqlite_guards(schema_editor) -> None:
                 BEGIN
                     SELECT RAISE(ABORT, 'DMS relationship crosses tenant boundary');
                 END
-                """
-            )
+                """)
 
 
 def _remove_sqlite_guards(schema_editor) -> None:

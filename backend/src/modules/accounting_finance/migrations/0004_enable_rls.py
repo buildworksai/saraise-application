@@ -50,8 +50,7 @@ def enable_security(apps, schema_editor) -> None:
             "WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)"
         )
 
-    schema_editor.execute(
-        """
+    schema_editor.execute("""
         CREATE FUNCTION accounting_require_same_tenant()
         RETURNS TRIGGER LANGUAGE plpgsql AS $$
         DECLARE
@@ -71,8 +70,7 @@ def enable_security(apps, schema_editor) -> None:
             RETURN NEW;
         END;
         $$
-        """
-    )
+        """)
     for child, column, parent in RELATIONSHIPS:
         trigger = schema_editor.quote_name(_trigger_name(child, column))
         schema_editor.execute(

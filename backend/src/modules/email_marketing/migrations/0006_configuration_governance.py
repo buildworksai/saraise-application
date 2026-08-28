@@ -97,16 +97,14 @@ def install_governance(apps, schema_editor):
         return
     for table in TENANT_TABLES:
         schema_editor.execute(f"SELECT saraise_enable_rls('{table}'::REGCLASS)")
-    schema_editor.execute(
-        """
+    schema_editor.execute("""
         CREATE OR REPLACE FUNCTION email_marketing_reject_tamper()
         RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
             RAISE EXCEPTION 'email marketing evidence is append-only';
         END;
         $$;
-        """
-    )
+        """)
     for table in IMMUTABLE_TABLES:
         trigger = f"em_immutable_{table}"[:63]
         schema_editor.execute(f'DROP TRIGGER IF EXISTS "{trigger}" ON "{table}"')

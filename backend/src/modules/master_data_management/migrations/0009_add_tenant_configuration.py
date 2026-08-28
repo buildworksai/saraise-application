@@ -12,8 +12,7 @@ def enable_configuration_rls_and_immutability(apps, schema_editor):
         return
     for table_name in ("mdm_configurations", "mdm_configuration_versions"):
         schema_editor.execute(f"SELECT saraise_enable_rls('{table_name}'::REGCLASS);")
-    schema_editor.execute(
-        """
+    schema_editor.execute("""
         CREATE OR REPLACE FUNCTION mdm_reject_configuration_version_mutation()
         RETURNS trigger AS $$
         BEGIN
@@ -23,21 +22,18 @@ def enable_configuration_rls_and_immutability(apps, schema_editor):
         CREATE TRIGGER mdm_configuration_versions_append_only
         BEFORE UPDATE OR DELETE ON mdm_configuration_versions
         FOR EACH ROW EXECUTE FUNCTION mdm_reject_configuration_version_mutation();
-        """
-    )
+        """)
 
 
 def disable_configuration_rls_and_immutability(apps, schema_editor):
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute(
-        """
+    schema_editor.execute("""
         DROP TRIGGER IF EXISTS mdm_configuration_versions_append_only
         ON mdm_configuration_versions;
         DROP FUNCTION IF EXISTS mdm_reject_configuration_version_mutation();
-        """
-    )
+        """)
     quote = schema_editor.quote_name
     for table_name in ("mdm_configuration_versions", "mdm_configurations"):
         table = quote(table_name)

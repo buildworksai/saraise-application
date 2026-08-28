@@ -60,15 +60,12 @@ def install_configuration_guards(apps, schema_editor):
             schema_editor.execute(f"ALTER TABLE {quoted_table} ENABLE ROW LEVEL SECURITY;")
             schema_editor.execute(f"ALTER TABLE {quoted_table} FORCE ROW LEVEL SECURITY;")
             schema_editor.execute(f"DROP POLICY IF EXISTS {quoted_policy} ON {quoted_table};")
-            schema_editor.execute(
-                f"""
+            schema_editor.execute(f"""
                 CREATE POLICY {quoted_policy} ON {quoted_table}
                 USING (tenant_id = saraise_current_tenant_id())
                 WITH CHECK (tenant_id = saraise_current_tenant_id());
-                """
-            )
-        schema_editor.execute(
-            """
+                """)
+        schema_editor.execute("""
             CREATE FUNCTION document_intelligence_reject_config_evidence_mutation()
             RETURNS TRIGGER
             LANGUAGE plpgsql
@@ -78,17 +75,14 @@ def install_configuration_guards(apps, schema_editor):
                     USING ERRCODE = '55000';
             END;
             $$;
-            """
-        )
+            """)
         for table in IMMUTABLE_TABLES:
             trigger = f"docintel_append_only_{table.rsplit('_', 1)[-1]}"
-            schema_editor.execute(
-                f"""
+            schema_editor.execute(f"""
                 CREATE TRIGGER {schema_editor.quote_name(trigger)}
                 BEFORE UPDATE OR DELETE ON {schema_editor.quote_name(table)}
                 FOR EACH ROW EXECUTE FUNCTION document_intelligence_reject_config_evidence_mutation();
-                """
-            )
+                """)
 
 
 def remove_configuration_guards(apps, schema_editor):

@@ -191,16 +191,14 @@ def convert_legacy_tenant_to_uuid(apps, schema_editor) -> None:
     if schema_editor.connection.vendor != "postgresql":
         return
     with schema_editor.connection.cursor() as cursor:
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT tenant_id
              FROM customization_framework_resources
              WHERE tenant_id IS NULL
                 OR tenant_id !~*
                    '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
              LIMIT 1
-            """
-        )
+            """)
         invalid = cursor.fetchone()
     if invalid is not None:
         raise RuntimeError(
@@ -214,12 +212,10 @@ def convert_legacy_tenant_to_uuid(apps, schema_editor) -> None:
         _pattern_indexes = [row[0] for row in cursor.fetchall()]
     for _index_name in _pattern_indexes:
         schema_editor.execute(f'DROP INDEX IF EXISTS "{_index_name}"')
-    schema_editor.execute(
-        """
+    schema_editor.execute("""
         ALTER TABLE customization_framework_resources
         ALTER COLUMN tenant_id TYPE UUID USING tenant_id::UUID;
-        """
-    )
+        """)
 
 
 def restore_legacy_tenant_text(apps, schema_editor) -> None:
@@ -228,12 +224,10 @@ def restore_legacy_tenant_text(apps, schema_editor) -> None:
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute(
-        """
+    schema_editor.execute("""
         ALTER TABLE customization_framework_resources
         ALTER COLUMN tenant_id TYPE VARCHAR(36) USING tenant_id::TEXT;
-        """
-    )
+        """)
 
 
 def register_configuration_resource_contract(apps, schema_editor) -> None:
@@ -320,8 +314,7 @@ def install_evidence_guards(apps, schema_editor) -> None:
         return
     for table_name in NEW_TENANT_TABLES:
         schema_editor.execute(f"SELECT saraise_enable_rls('{table_name}'::REGCLASS);")
-    schema_editor.execute(
-        """
+    schema_editor.execute("""
         CREATE OR REPLACE FUNCTION customization_reject_evidence_mutation()
         RETURNS TRIGGER
         LANGUAGE plpgsql
@@ -331,23 +324,19 @@ def install_evidence_guards(apps, schema_editor) -> None:
                 USING ERRCODE = '55000';
         END;
         $$;
-        """
-    )
+        """)
     for table_name in IMMUTABLE_TABLES:
         trigger_name = f"cust_append_only_{table_name.removeprefix('customization_')}"
-        schema_editor.execute(
-            f"""
+        schema_editor.execute(f"""
             DROP TRIGGER IF EXISTS {schema_editor.quote_name(trigger_name)}
                 ON {schema_editor.quote_name(table_name)};
             CREATE TRIGGER {schema_editor.quote_name(trigger_name)}
             BEFORE UPDATE OR DELETE ON {schema_editor.quote_name(table_name)}
             FOR EACH ROW EXECUTE FUNCTION customization_reject_evidence_mutation();
-            """
-        )
+            """)
     for child_table, fk_column, parent_table in EVIDENCE_RELATIONSHIPS:
         trigger_name = f"cust_same_tenant_{fk_column}_{child_table[-8:]}"
-        schema_editor.execute(
-            f"""
+        schema_editor.execute(f"""
             DROP TRIGGER IF EXISTS {schema_editor.quote_name(trigger_name)}
                 ON {schema_editor.quote_name(child_table)};
             CREATE TRIGGER {schema_editor.quote_name(trigger_name)}
@@ -356,8 +345,7 @@ def install_evidence_guards(apps, schema_editor) -> None:
             FOR EACH ROW EXECUTE FUNCTION customization_require_same_tenant(
                 '{fk_column}', '{parent_table}'
             );
-            """
-        )
+            """)
 
 
 def remove_evidence_guards(apps, schema_editor) -> None:

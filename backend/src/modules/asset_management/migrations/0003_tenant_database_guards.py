@@ -26,8 +26,7 @@ def enable_tenant_guards(apps, schema_editor):
                     "WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)"
                 )
 
-            cursor.execute(
-                """
+            cursor.execute("""
                 CREATE OR REPLACE FUNCTION asset_depreciation_tenant_guard()
                 RETURNS trigger LANGUAGE plpgsql AS $$
                 BEGIN
@@ -41,35 +40,27 @@ def enable_tenant_guards(apps, schema_editor):
                     RETURN NEW;
                 END;
                 $$
-                """
-            )
-            cursor.execute(
-                """
+                """)
+            cursor.execute("""
                 CREATE TRIGGER asset_depreciation_tenant_guard_trigger
                 BEFORE INSERT OR UPDATE ON asset_depreciation_entries
                 FOR EACH ROW EXECUTE FUNCTION asset_depreciation_tenant_guard()
-                """
-            )
-            cursor.execute(
-                """
+                """)
+            cursor.execute("""
                 CREATE OR REPLACE FUNCTION asset_depreciation_immutable_guard()
                 RETURNS trigger LANGUAGE plpgsql AS $$
                 BEGIN
                     RAISE EXCEPTION 'depreciation history is immutable' USING ERRCODE = '55000';
                 END;
                 $$
-                """
-            )
-            cursor.execute(
-                """
+                """)
+            cursor.execute("""
                 CREATE TRIGGER asset_depreciation_immutable_guard_trigger
                 BEFORE UPDATE OR DELETE ON asset_depreciation_entries
                 FOR EACH ROW EXECUTE FUNCTION asset_depreciation_immutable_guard()
-                """
-            )
+                """)
         elif connection.vendor == "sqlite":
-            cursor.execute(
-                """
+            cursor.execute("""
                 CREATE TRIGGER asset_depreciation_tenant_guard_insert
                 BEFORE INSERT ON asset_depreciation_entries
                 FOR EACH ROW
@@ -80,10 +71,8 @@ def enable_tenant_guards(apps, schema_editor):
                 BEGIN
                     SELECT RAISE(ABORT, 'asset and depreciation entry must belong to the same tenant');
                 END
-                """
-            )
-            cursor.execute(
-                """
+                """)
+            cursor.execute("""
                 CREATE TRIGGER asset_depreciation_tenant_guard_update
                 BEFORE UPDATE OF asset_id, tenant_id ON asset_depreciation_entries
                 FOR EACH ROW
@@ -94,8 +83,7 @@ def enable_tenant_guards(apps, schema_editor):
                 BEGIN
                     SELECT RAISE(ABORT, 'asset and depreciation entry must belong to the same tenant');
                 END
-                """
-            )
+                """)
 
 
 def disable_tenant_guards(apps, schema_editor):

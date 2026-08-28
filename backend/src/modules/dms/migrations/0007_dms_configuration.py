@@ -30,21 +30,18 @@ def enable_configuration_isolation(apps, schema_editor) -> None:
             schema_editor.execute(f"SELECT saraise_enable_rls('{table_name}'::REGCLASS);")
         return
     for table_name in TENANT_TABLES:
-        schema_editor.execute(
-            f"""
+        schema_editor.execute(f"""
             CREATE TRIGGER {table_name}_tenant_id_immutable
             BEFORE UPDATE OF tenant_id ON {table_name}
             FOR EACH ROW WHEN NEW.tenant_id <> OLD.tenant_id
             BEGIN SELECT RAISE(ABORT, 'DMS tenant ownership is immutable'); END
-        """
-        )
+        """)
     for table_name, column_name, related_table in RELATIONSHIPS:
         for operation, timing in (
             ("insert", "BEFORE INSERT"),
             ("update", f"BEFORE UPDATE OF {column_name}, tenant_id"),
         ):
-            schema_editor.execute(
-                f"""
+            schema_editor.execute(f"""
                 CREATE TRIGGER {table_name}_{column_name}_same_tenant_{operation}
                 {timing} ON {table_name}
                 FOR EACH ROW WHEN NEW.{column_name} IS NOT NULL AND NOT EXISTS (
@@ -52,8 +49,7 @@ def enable_configuration_isolation(apps, schema_editor) -> None:
                     WHERE related.id = NEW.{column_name} AND related.tenant_id = NEW.tenant_id
                 )
                 BEGIN SELECT RAISE(ABORT, 'DMS relationship crosses tenant boundary'); END
-            """
-            )
+            """)
 
 
 def disable_configuration_isolation(apps, schema_editor) -> None:

@@ -21,8 +21,7 @@ def quarantine_legacy(apps, schema_editor):
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute(
-        r"""
+    schema_editor.execute(r"""
         CREATE FUNCTION process_mining_legacy_reject_write() RETURNS TRIGGER LANGUAGE plpgsql AS $$
         BEGIN
             RAISE EXCEPTION 'legacy process mining resources are read-only' USING ERRCODE = '55000';
@@ -30,8 +29,7 @@ def quarantine_legacy(apps, schema_editor):
         $$;
         CREATE TRIGGER process_mining_legacy_read_only BEFORE INSERT OR UPDATE OR DELETE
         ON process_mining_resources FOR EACH ROW EXECUTE FUNCTION process_mining_legacy_reject_write();
-    """
-    )
+    """)
 
 
 def restore_legacy_writes(apps, schema_editor):
@@ -47,8 +45,7 @@ def install_same_tenant_guards(apps, schema_editor):
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute(
-        r"""
+    schema_editor.execute(r"""
         CREATE FUNCTION process_mining_require_same_tenant() RETURNS TRIGGER LANGUAGE plpgsql AS $$
         DECLARE parent_id UUID; parent_tenant UUID;
         BEGIN
@@ -61,8 +58,7 @@ def install_same_tenant_guards(apps, schema_editor):
             RETURN NEW;
         END;
         $$;
-    """
-    )
+    """)
     for child, column, parent in RELATIONSHIPS:
         trigger = f"pm_same_tenant_{column}_{child[-8:]}"
         schema_editor.execute(

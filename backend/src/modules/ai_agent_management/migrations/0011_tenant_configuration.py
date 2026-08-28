@@ -27,8 +27,7 @@ def install_tenant_security(apps, schema_editor):
                 f"CREATE POLICY {qn(policy)} ON {qn(table)} "
                 f"USING ({tenant_expression}) WITH CHECK ({tenant_expression})"
             )
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE OR REPLACE FUNCTION ai_tenant_guard_fn_secret_rotation()
             RETURNS trigger LANGUAGE plpgsql AS $$
             BEGIN
@@ -43,22 +42,17 @@ def install_tenant_security(apps, schema_editor):
                 RETURN NEW;
             END;
             $$
-            """
-        )
-        cursor.execute(
-            """
+            """)
+        cursor.execute("""
             DROP TRIGGER IF EXISTS ai_tenant_guard_secret_rotation
             ON ai_secret_rotation_records
-            """
-        )
-        cursor.execute(
-            """
+            """)
+        cursor.execute("""
             CREATE TRIGGER ai_tenant_guard_secret_rotation
             BEFORE INSERT OR UPDATE OF secret_id, tenant_id
             ON ai_secret_rotation_records FOR EACH ROW
             EXECUTE FUNCTION ai_tenant_guard_fn_secret_rotation()
-            """
-        )
+            """)
 
 
 def remove_tenant_security(apps, schema_editor):

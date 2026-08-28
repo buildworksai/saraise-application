@@ -14,16 +14,14 @@ def protect_evidence(apps, schema_editor):
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute(
-        """
+    schema_editor.execute("""
         CREATE OR REPLACE FUNCTION crm_reject_configuration_evidence_mutation()
         RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
             RAISE EXCEPTION 'CRM configuration evidence is immutable';
         END;
         $$;
-        """
-    )
+        """)
     for table in EVIDENCE_TABLES:
         schema_editor.execute(
             f'CREATE TRIGGER "{table}_immutable" BEFORE UPDATE OR DELETE ON "{table}" '

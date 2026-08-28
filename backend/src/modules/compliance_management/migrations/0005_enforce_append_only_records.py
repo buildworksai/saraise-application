@@ -15,8 +15,7 @@ def install_triggers(apps, schema_editor):
     if schema_editor.connection.vendor != "postgresql":
         return
     quoted_function = schema_editor.quote_name(FUNCTION_NAME)
-    schema_editor.execute(
-        f"""
+    schema_editor.execute(f"""
         CREATE FUNCTION {quoted_function}()
         RETURNS trigger
         LANGUAGE plpgsql
@@ -26,8 +25,7 @@ def install_triggers(apps, schema_editor):
                 USING ERRCODE = '55000';
         END;
         $$;
-        """
-    )
+        """)
     for table in APPEND_ONLY_TABLES:
         trigger = schema_editor.quote_name(f"{table}_append_only"[:63])
         quoted_table = schema_editor.quote_name(table)

@@ -24,44 +24,36 @@ def enable_configuration_guards(apps, schema_editor):
                     "USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid) "
                     "WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid)"
                 )
-            cursor.execute(
-                """
+            cursor.execute("""
                 CREATE OR REPLACE FUNCTION asset_config_evidence_immutable_guard()
                 RETURNS trigger LANGUAGE plpgsql AS $$
                 BEGIN
                     RAISE EXCEPTION 'asset configuration evidence is immutable' USING ERRCODE = '55000';
                 END;
                 $$
-                """
-            )
+                """)
             for table in ("asset_management_configuration_versions", "asset_management_configuration_audits"):
-                cursor.execute(
-                    f"""
+                cursor.execute(f"""
                     CREATE TRIGGER {table}_immutable_guard_trigger
                     BEFORE UPDATE OR DELETE ON {table}
                     FOR EACH ROW EXECUTE FUNCTION asset_config_evidence_immutable_guard()
-                    """
-                )
+                    """)
         elif connection.vendor == "sqlite":
             for table in ("asset_management_configuration_versions", "asset_management_configuration_audits"):
-                cursor.execute(
-                    f"""
+                cursor.execute(f"""
                     CREATE TRIGGER {table}_immutable_update
                     BEFORE UPDATE ON {table}
                     BEGIN
                         SELECT RAISE(ABORT, 'asset configuration evidence is immutable');
                     END
-                    """
-                )
-                cursor.execute(
-                    f"""
+                    """)
+                cursor.execute(f"""
                     CREATE TRIGGER {table}_immutable_delete
                     BEFORE DELETE ON {table}
                     BEGIN
                         SELECT RAISE(ABORT, 'asset configuration evidence is immutable');
                     END
-                    """
-                )
+                    """)
 
 
 def disable_configuration_guards(apps, schema_editor):

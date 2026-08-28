@@ -70,8 +70,7 @@ def add_postgres_guards(apps, schema_editor):
             f'FOREIGN KEY ("tenant_id", "{column}") REFERENCES "{parent}" ("tenant_id", "id") '
             "DEFERRABLE INITIALLY IMMEDIATE"
         )
-    schema_editor.execute(
-        """
+    schema_editor.execute("""
         CREATE OR REPLACE FUNCTION inventory_reject_evidence_mutation()
         RETURNS TRIGGER LANGUAGE plpgsql AS $$
         BEGIN
@@ -84,8 +83,7 @@ def add_postgres_guards(apps, schema_editor):
         CREATE TRIGGER inventory_config_revision_immutable
           BEFORE UPDATE OR DELETE ON inventory_configuration_revisions
           FOR EACH ROW EXECUTE FUNCTION inventory_reject_evidence_mutation();
-        """
-    )
+        """)
 
 
 def remove_postgres_guards(apps, schema_editor):

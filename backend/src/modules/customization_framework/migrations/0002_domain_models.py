@@ -22,8 +22,7 @@ def make_legacy_table_read_only(apps, schema_editor) -> None:
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute(
-        r"""
+    schema_editor.execute(r"""
         CREATE OR REPLACE FUNCTION customization_legacy_reject_write()
         RETURNS TRIGGER
         LANGUAGE plpgsql
@@ -38,8 +37,7 @@ def make_legacy_table_read_only(apps, schema_editor) -> None:
         CREATE TRIGGER customization_legacy_read_only
         BEFORE INSERT OR UPDATE OR DELETE ON customization_framework_resources
         FOR EACH ROW EXECUTE FUNCTION customization_legacy_reject_write();
-        """
-    )
+        """)
 
 
 def restore_legacy_table_writes(apps, schema_editor) -> None:
@@ -48,13 +46,11 @@ def restore_legacy_table_writes(apps, schema_editor) -> None:
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute(
-        r"""
+    schema_editor.execute(r"""
         DROP TRIGGER IF EXISTS customization_legacy_read_only
             ON customization_framework_resources;
         DROP FUNCTION IF EXISTS customization_legacy_reject_write();
-        """
-    )
+        """)
 
 
 def install_relationship_guards(apps, schema_editor) -> None:
@@ -63,8 +59,7 @@ def install_relationship_guards(apps, schema_editor) -> None:
     del apps
     if schema_editor.connection.vendor != "postgresql":
         return
-    schema_editor.execute(
-        r"""
+    schema_editor.execute(r"""
         CREATE OR REPLACE FUNCTION customization_require_same_tenant()
         RETURNS TRIGGER
         LANGUAGE plpgsql
@@ -105,33 +100,28 @@ def install_relationship_guards(apps, schema_editor) -> None:
             RETURN NEW;
         END;
         $$;
-        """
-    )
+        """)
     for child_table, fk_column, parent_table in SAME_TENANT_RELATIONSHIPS:
         trigger_name = f"cust_same_tenant_{fk_column}_{child_table[-8:]}"
         quoted_trigger = schema_editor.quote_name(trigger_name)
         quoted_child = schema_editor.quote_name(child_table)
         quoted_fk = schema_editor.quote_name(fk_column)
-        schema_editor.execute(
-            f"""
+        schema_editor.execute(f"""
             DROP TRIGGER IF EXISTS {quoted_trigger} ON {quoted_child};
             CREATE TRIGGER {quoted_trigger}
             BEFORE INSERT OR UPDATE OF tenant_id, {quoted_fk} ON {quoted_child}
             FOR EACH ROW EXECUTE FUNCTION customization_require_same_tenant(
                 '{fk_column}', '{parent_table}'
             );
-            """
-        )
-    schema_editor.execute(
-        """
+            """)
+    schema_editor.execute("""
         DROP TRIGGER IF EXISTS cust_execution_version_rule
             ON customization_rule_executions;
         CREATE TRIGGER cust_execution_version_rule
         BEFORE INSERT OR UPDATE OF rule_id, rule_version_id
             ON customization_rule_executions
         FOR EACH ROW EXECUTE FUNCTION customization_require_execution_version();
-        """
-    )
+        """)
 
 
 def remove_relationship_guards(apps, schema_editor) -> None:

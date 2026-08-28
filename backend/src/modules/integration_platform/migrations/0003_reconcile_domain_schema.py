@@ -176,8 +176,7 @@ def reverse_backfill(apps, schema_editor) -> None:
 def stage_legacy_values(apps, schema_editor) -> None:
     Connector = apps.get_model("integration_platform", "Connector")
     Delivery = apps.get_model("integration_platform", "WebhookDelivery")
-    schema_editor.execute(
-        """
+    schema_editor.execute("""
         CREATE TABLE integration_platform_legacy_rollback (
             record_type varchar(32) NOT NULL,
             record_id varchar(64) NOT NULL,
@@ -185,8 +184,7 @@ def stage_legacy_values(apps, schema_editor) -> None:
             encrypted_value text NOT NULL,
             PRIMARY KEY (record_type, record_id, field_name)
         )
-        """
-    )
+        """)
     rows = []
     for connector in Connector.objects.all():
         rows.append(("connector", str(connector.pk), "config", EncryptionService.encrypt(json_text(connector.config))))

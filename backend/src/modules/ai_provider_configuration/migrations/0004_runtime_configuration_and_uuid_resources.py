@@ -33,11 +33,9 @@ def refresh_resource_rls(apps, schema_editor):
     table = schema_editor.quote_name("ai_provider_configuration_resources")
     policy = schema_editor.quote_name("aiprov_resources_tenant_policy")
     schema_editor.execute(f"DROP POLICY IF EXISTS {policy} ON {table};")
-    schema_editor.execute(
-        f"""CREATE POLICY {policy} ON {table}
+    schema_editor.execute(f"""CREATE POLICY {policy} ON {table}
         USING (tenant_id = saraise_current_tenant_id())
-        WITH CHECK (tenant_id = saraise_current_tenant_id());"""
-    )
+        WITH CHECK (tenant_id = saraise_current_tenant_id());""")
 
 
 def drop_resource_rls(apps, schema_editor):
@@ -56,11 +54,9 @@ def restore_resource_rls(apps, schema_editor):
     table = schema_editor.quote_name("ai_provider_configuration_resources")
     policy = schema_editor.quote_name("aiprov_resources_tenant_policy")
     schema_editor.execute(f"DROP POLICY IF EXISTS {policy} ON {table};")
-    schema_editor.execute(
-        f"""CREATE POLICY {policy} ON {table}
+    schema_editor.execute(f"""CREATE POLICY {policy} ON {table}
         USING (tenant_id = saraise_current_tenant_id()::text)
-        WITH CHECK (tenant_id = saraise_current_tenant_id()::text);"""
-    )
+        WITH CHECK (tenant_id = saraise_current_tenant_id()::text);""")
 
 
 def enable_new_table_rls(apps, schema_editor):
@@ -79,11 +75,9 @@ def enable_new_table_rls(apps, schema_editor):
         schema_editor.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;")
         schema_editor.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY;")
         schema_editor.execute(f"DROP POLICY IF EXISTS {policy} ON {table};")
-        schema_editor.execute(
-            f"""CREATE POLICY {policy} ON {table}
+        schema_editor.execute(f"""CREATE POLICY {policy} ON {table}
             USING (tenant_id = saraise_current_tenant_id())
-            WITH CHECK (tenant_id = saraise_current_tenant_id());"""
-        )
+            WITH CHECK (tenant_id = saraise_current_tenant_id());""")
 
 
 def disable_new_table_rls(apps, schema_editor):

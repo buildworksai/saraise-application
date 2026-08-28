@@ -25,11 +25,9 @@ def restore_legacy_security_configuration_rls(apps, schema_editor) -> None:
         return
     for table in TENANT_TABLES:
         schema_editor.execute(f'DROP POLICY IF EXISTS "tenant_isolation_{table}" ON "{table}"')
-        schema_editor.execute(
-            f"""CREATE POLICY "{table}_tenant_isolation" ON "{table}"
+        schema_editor.execute(f"""CREATE POLICY "{table}_tenant_isolation" ON "{table}"
                 USING (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
-                WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)"""
-        )
+                WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)""")
 
 
 class Migration(migrations.Migration):

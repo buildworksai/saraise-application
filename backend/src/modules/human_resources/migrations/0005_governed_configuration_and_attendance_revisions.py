@@ -47,18 +47,14 @@ def enable_immutable_records(apps, schema_editor):
         if vendor == "postgresql":
             function_name = schema_editor.quote_name(f"prevent_mutation_{table_name}")
             trigger_name = schema_editor.quote_name(f"immutable_{table_name}")
-            schema_editor.execute(
-                f"""CREATE FUNCTION {function_name}() RETURNS trigger AS $$
+            schema_editor.execute(f"""CREATE FUNCTION {function_name}() RETURNS trigger AS $$
                     BEGIN
                         RAISE EXCEPTION '{table_name} is immutable';
                     END;
-                    $$ LANGUAGE plpgsql;"""
-            )
-            schema_editor.execute(
-                f"""CREATE TRIGGER {trigger_name}
+                    $$ LANGUAGE plpgsql;""")
+            schema_editor.execute(f"""CREATE TRIGGER {trigger_name}
                     BEFORE UPDATE OR DELETE ON {quoted_table}
-                    FOR EACH ROW EXECUTE FUNCTION {function_name}();"""
-            )
+                    FOR EACH ROW EXECUTE FUNCTION {function_name}();""")
 
 
 def disable_immutable_records(apps, schema_editor):
