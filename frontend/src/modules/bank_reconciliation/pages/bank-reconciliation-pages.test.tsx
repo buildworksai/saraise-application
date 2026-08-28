@@ -909,8 +909,8 @@ describe("bank reconciliation governed pages", () => {
     expect(screen.getByLabelText("Reconciliation date")).toBeRequired();
     expect(screen.getByLabelText("Verified ledger balance")).toBeRequired();
     await userEvent.click(screen.getByRole("button", { name: "Create draft" }));
-    expect(screen.getByText("Bank account ID is required")).toBeInTheDocument();
-    expect(screen.getByText("Statement ID is required")).toBeInTheDocument();
+    expect(screen.getByLabelText("Bank account ID")).toBeInvalid();
+    expect(screen.getByLabelText("Statement ID")).toBeInvalid();
     expect(service.createReconciliation).not.toHaveBeenCalled();
 
     renderPage("/bank-reconciliation/rules/new", <CreateMatchingRulePage />);

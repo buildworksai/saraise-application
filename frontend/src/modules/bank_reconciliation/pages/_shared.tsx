@@ -153,7 +153,7 @@ export function FormCard({
         <CardTitle>{title}</CardTitle>
       </CardHeader>
       <CardContent>
-        <form className="space-y-5" onSubmit={onSubmit} noValidate>
+        <form className="space-y-5" onSubmit={onSubmit}>
           {children}
           <Button disabled={pending} type="submit">
             {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
