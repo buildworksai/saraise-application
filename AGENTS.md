@@ -545,6 +545,7 @@ Mode-conditional behavior belongs in the policy layer, never inside a security p
 | Frontend type checking | **WIRED** | `npm run typecheck` — ZERO errors |
 | Frontend lint | **WIRED** | `npm run lint` — ZERO warnings |
 | Frontend tests | **WIRED** | `npm run test` / `npm run test:coverage` (vitest) |
+| Per-component line + branch coverage ≥ 90% | **NOT WIRED — debt detector only** | `scripts/coverage-per-module.py` exists for measurement, but current repository evidence is below 90% across multiple frontend components. It must not be reported as a passing required gate until the measured debt is remediated and the CI step is re-enabled. |
 | Build | **WIRED** | `npm run build` |
 | Secret detection | **WIRED** | pre-commit security hook |
 | Tenant isolation check | **WIRED** | `.github/workflows/tenant-isolation-check.yml` |

@@ -134,6 +134,40 @@ def test_gate_fails_when_a_report_is_missing(tmp_path: Path) -> None:
     assert result != 0
 
 
+def test_frontend_scope_does_not_require_backend_report(tmp_path: Path) -> None:
+    """Split frontend CI jobs validate their own artifact without a false backend dependency."""
+
+    _make_source_tree(tmp_path)
+    frontend_report = tmp_path / "frontend/coverage/coverage-summary.json"
+    _write_frontend_report(frontend_report)
+
+    result = coverage_gate.main(
+        repo_root=tmp_path,
+        backend_report=tmp_path / "backend/missing-coverage.xml",
+        frontend_report=frontend_report,
+        scope="frontend",
+    )
+
+    assert result == 0
+
+
+def test_backend_scope_does_not_require_frontend_report(tmp_path: Path) -> None:
+    """Split backend CI jobs validate their own artifact without a false frontend dependency."""
+
+    _make_source_tree(tmp_path)
+    backend_report = tmp_path / "backend/coverage.xml"
+    _write_backend_report(backend_report)
+
+    result = coverage_gate.main(
+        repo_root=tmp_path,
+        backend_report=backend_report,
+        frontend_report=tmp_path / "frontend/coverage/missing-summary.json",
+        scope="backend",
+    )
+
+    assert result == 0
+
+
 def test_gate_fails_when_one_component_is_below_threshold(tmp_path: Path) -> None:
     """A weak module cannot be concealed by stronger shared components."""
 

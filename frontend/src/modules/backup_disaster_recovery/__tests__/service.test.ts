@@ -113,6 +113,12 @@ const expectedDefaultObjectiveFilters = () => {
   } as const;
 };
 
+const shiftIsoDate = (date: string, days: number): string => {
+  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
+  const shifted = new Date(Date.UTC(year, month - 1, day + days, 0, 0, 0));
+  return shifted.toISOString().slice(0, 10);
+};
+
 const renderObjectivesReportPage = (
   pageElement: ReactElement = React.createElement(RecoveryObjectivesReportPage),
   client = new QueryClient({
@@ -671,6 +677,7 @@ describe("RecoveryObjectivesReportPage", () => {
   });
 
   it("validates and applies operator report filters without preserving whitespace", async () => {
+    const expected = expectedDefaultObjectiveFilters();
     vi.spyOn(backupDisasterRecoveryService, "getConfiguration").mockResolvedValue(
       configurationFixture
     );
@@ -682,7 +689,7 @@ describe("RecoveryObjectivesReportPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Recovery objectives" })).toBeInTheDocument();
     await userEvent.clear(screen.getByLabelText("From"));
-    await userEvent.type(screen.getByLabelText("From"), "2026-09-02");
+    await userEvent.type(screen.getByLabelText("From"), shiftIsoDate(expected.endDate, 1));
     await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent(

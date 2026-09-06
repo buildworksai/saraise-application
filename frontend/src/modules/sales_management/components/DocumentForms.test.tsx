@@ -51,6 +51,11 @@ vi.mock("../services/sales-service", () => ({
 }));
 
 const stamp = "2026-07-31T00:00:00Z";
+const isoDateDaysFromToday = (days: number): string => {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
 const mutable = {
   tenant_id: "tenant-1",
   created_at: stamp,
@@ -255,6 +260,7 @@ describe("CommercialDocumentForm", () => {
   });
 
   it("validates quotations, previews server totals, and creates an idempotent draft", async () => {
+    const validUntil = isoDateDaysFromToday(configuration.quotation_validity_days);
     vi.mocked(salesService.previewQuotation).mockResolvedValue({
       subtotal_amount: "100.00",
       discount_amount: "0.00",
@@ -279,7 +285,7 @@ describe("CommercialDocumentForm", () => {
 
     await userEvent.selectOptions(screen.getByLabelText("Customer"), "customer-1");
     await userEvent.clear(screen.getByLabelText("Valid until"));
-    await userEvent.type(screen.getByLabelText("Valid until"), "2026-08-31");
+    await userEvent.type(screen.getByLabelText("Valid until"), validUntil);
     await userEvent.type(screen.getByLabelText("Item code"), "SKU-1");
     await userEvent.type(screen.getByLabelText("Item name"), "Widget");
     await userEvent.clear(screen.getByLabelText("Unit price"));
@@ -292,7 +298,7 @@ describe("CommercialDocumentForm", () => {
     expect(salesService.previewQuotation).toHaveBeenCalledWith(
       expect.objectContaining({
         customer: "customer-1",
-        valid_until: "2026-08-31",
+        valid_until: validUntil,
         lines: [expect.objectContaining({ item_code: "SKU-1", line_number: 1 })],
       })
     );

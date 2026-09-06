@@ -56,6 +56,10 @@ import { ProcessDetailPage } from "./ProcessDetailPage";
 import { ProcessMapPage } from "./ProcessMapPage";
 import { ProcessOverviewPage } from "./ProcessOverviewPage";
 
+function localDateTimeInputToIso(value: string) {
+  return new Date(value).toISOString();
+}
+
 const documentValue: ProcessMiningConfigurationDocument = {
   environment: "development",
   max_batch_events: 1000,
@@ -1067,8 +1071,8 @@ describe("process mining pages", () => {
     if (!payload) throw new Error("Expected conformance payload");
     expect(payload.process_model_version_id).toBe("version-1");
     expect(payload.event_filter).toEqual({
-      start: "2026-06-30T18:30:00.000Z",
-      end: "2026-07-30T18:30:00.000Z",
+      start: localDateTimeInputToIso("2026-07-01T00:00"),
+      end: localDateTimeInputToIso("2026-07-31T00:00"),
     });
     expect(payload.idempotency_key).toContain("process-mining:conformance:version-1");
     expect(screen.getByLabelText("Current route")).toHaveTextContent(
@@ -1165,8 +1169,8 @@ describe("process mining pages", () => {
     if (!payload) throw new Error("Expected bottleneck payload");
     expect(payload).toMatchObject({
       process_name: "Order to Cash",
-      time_range_start: "2026-06-30T18:30:00.000Z",
-      time_range_end: "2026-07-30T18:30:00.000Z",
+      time_range_start: localDateTimeInputToIso("2026-07-01T00:00"),
+      time_range_end: localDateTimeInputToIso("2026-07-31T00:00"),
     });
     expect(payload.idempotency_key).toContain("process-mining:bottleneck:order%20to%20cash");
     expect(screen.getByLabelText("Current route")).toHaveTextContent(

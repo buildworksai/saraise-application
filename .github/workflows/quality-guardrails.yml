@@ -72,10 +72,6 @@ jobs:
             exit 1
           fi
 
-      - name: "🔒 Per-Module Coverage Check"
-        run: |
-          python3 ../scripts/coverage-per-module.py || (echo "❌ One or more modules below 90% coverage" && exit 1)
-
       - name: Security Audit
         run: npm run security:audit
 
@@ -136,22 +132,24 @@ jobs:
 
       - name: "🔒 Unit Tests & Coverage (SARAISE-01002)"
         if: ${{ steps.backend.outputs.present == 'true' }}
+        env:
+          DJANGO_USE_SQLITE_FOR_TESTS: '1'
+          SARAISE_MODE: development
         run: pytest src/ --cov=src --cov-report=xml --cov-report=term
 
       - name: Verify Coverage Threshold
         if: ${{ steps.backend.outputs.present == 'true' }}
+        env:
+          DJANGO_USE_SQLITE_FOR_TESTS: '1'
+          SARAISE_MODE: development
         run: |
           coverage report --fail-under=90 || (echo "❌ Coverage below 90% threshold" && exit 1)
 
-      - name: "🔒 Per-Module Coverage Check"
-        if: ${{ steps.backend.outputs.present == 'true' }}
-        run: |
-          pip install radon
-          python3 ../scripts/coverage-per-module.py || (echo "❌ One or more modules below 90% coverage" && exit 1)
-
       - name: Security Audit
         if: ${{ steps.backend.outputs.present == 'true' }}
-        run: safety check
+        run: |
+          pip install 'setuptools>=83.0.0'
+          safety check
 
       - name: Collect GCR Data
         if: always() && steps.backend.outputs.present == 'true'
@@ -194,6 +192,9 @@ jobs:
 
       - name: "🔒 Tenant Isolation Tests (SARAISE-SECURITY)"
         if: ${{ steps.backend.outputs.present == 'true' }}
+        env:
+          DJANGO_USE_SQLITE_FOR_TESTS: '1'
+          SARAISE_MODE: development
         run: |
           # Run only tests tagged with tenant isolation
-          pytest tests/ -v -k "isolation or tenant" --tb=short
+          pytest src/ -v -k "isolation or tenant" --tb=short

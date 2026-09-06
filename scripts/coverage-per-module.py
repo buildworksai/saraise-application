@@ -417,17 +417,21 @@ def main(
     backend_report: Path | None = None,
     frontend_report: Path | None = None,
     threshold: float = THRESHOLD,
+    scope: str = "all",
 ) -> int:
     """Run the complete gate and return a process-compatible status code."""
 
     if not math.isfinite(threshold) or not 0.0 <= threshold <= 100.0:
         print("ERROR: threshold must be between zero and 100", file=sys.stderr)
         return 2
+    if scope not in {"all", "backend", "frontend"}:
+        print("ERROR: scope must be one of: all, backend, frontend", file=sys.stderr)
+        return 2
 
-    print(f"Checking per-component line and branch coverage (threshold: {threshold}%)")
+    print(f"Checking {scope} per-component line and branch coverage (threshold: {threshold}%)")
     try:
-        backend = check_backend_coverage(repo_root, backend_report)
-        frontend = check_frontend_coverage(repo_root, frontend_report)
+        backend = check_backend_coverage(repo_root, backend_report) if scope in {"all", "backend"} else []
+        frontend = check_frontend_coverage(repo_root, frontend_report) if scope in {"all", "frontend"} else []
     except CoverageReportError as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 2
@@ -459,6 +463,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         help="override the frontend coverage-summary.json path",
     )
+    parser.add_argument(
+        "--scope",
+        choices=("all", "backend", "frontend"),
+        default="all",
+        help="coverage surface to evaluate; split CI jobs must pass their own explicit scope",
+    )
     parser.add_argument("--threshold", type=float, default=THRESHOLD)
     return parser.parse_args(argv)
 
@@ -471,5 +481,6 @@ if __name__ == "__main__":
             backend_report=arguments.backend_report,
             frontend_report=arguments.frontend_report,
             threshold=arguments.threshold,
+            scope=arguments.scope,
         )
     )

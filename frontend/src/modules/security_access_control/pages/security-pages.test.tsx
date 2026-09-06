@@ -104,6 +104,11 @@ const configuration = {
   correlationId: "corr-config",
   timestamp: "2026-07-22T00:00:00Z",
 };
+
+function localDateTimeInputToIso(value: string) {
+  return new Date(value).toISOString();
+}
+
 function LocationProbe() {
   const location = useLocation();
   return <output aria-label="Current route">{`${location.pathname}${location.search}`}</output>;
@@ -560,8 +565,8 @@ describe("security administration page states", () => {
       expect(mocks.createUserRole).toHaveBeenCalledWith({
         user_id: "11111111-1111-4111-8111-111111111121",
         role_id: "11111111-1111-4111-8111-111111111122",
-        valid_from: "2026-07-22T03:00:00.000Z",
-        valid_until: "2026-08-22T03:00:00.000Z",
+        valid_from: localDateTimeInputToIso("2026-07-22T08:30"),
+        valid_until: localDateTimeInputToIso("2026-08-22T08:30"),
         reason: "Quarterly review approval",
       })
     );
@@ -747,7 +752,7 @@ describe("security administration page states", () => {
     fireEvent.submit(screen.getByRole("button", { name: "Save assignment" }).closest("form")!);
     await waitFor(() =>
       expect(mocks.updateUserRole).toHaveBeenCalledWith("11111111-1111-4111-8111-111111111110", {
-        valid_from: "2026-07-21T18:30:00.000Z",
+        valid_from: localDateTimeInputToIso("2026-07-22T00:00"),
         valid_until: null,
         reason: "Extended emergency cover",
       })

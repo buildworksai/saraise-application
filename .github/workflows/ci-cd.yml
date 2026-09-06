@@ -11,6 +11,10 @@ env:
   DOCKER_REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   # Quality Gates - SARAISE-04001, SARAISE-04002, SARAISE-02013
   quality-gates:
@@ -159,6 +163,7 @@ jobs:
         if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           cd backend
+          pip install 'setuptools>=83.0.0'
           pip install safety
           safety check || (echo "❌ Security vulnerabilities found" && exit 1)
 
@@ -228,10 +233,13 @@ jobs:
 
       - name: Run tenant isolation tests
         if: ${{ steps.backend.outputs.present == 'true' }}
+        env:
+          DJANGO_USE_SQLITE_FOR_TESTS: '1'
+          SARAISE_MODE: development
         run: |
           cd backend
           # Run only tests tagged with tenant isolation
-          pytest tests/ -v -k "isolation or tenant" --tb=short
+          pytest src/ -v -k "isolation or tenant" --tb=short
         continue-on-error: false
 
   # Build and Test

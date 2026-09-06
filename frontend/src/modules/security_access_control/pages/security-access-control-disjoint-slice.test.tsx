@@ -94,6 +94,10 @@ const mocks = vi.hoisted(() => ({
   listAuditLogs: vi.fn(),
 }));
 
+function localDateTimeInputToIso(value: string) {
+  return new Date(value).toISOString();
+}
+
 vi.mock("../services/security-service", () => ({
   securityService: {
     auditLogs: { list: mocks.listAuditLogs },
@@ -1059,8 +1063,8 @@ describe("security access-control disjoint slice", () => {
         role_id: ids.role,
         security_profile_id: ids.profile,
         user_id: null,
-        valid_from: "2026-08-10T06:30:00.000Z",
-        valid_until: "2026-08-10T07:30:00.000Z",
+        valid_from: localDateTimeInputToIso("2026-08-10T12:00"),
+        valid_until: localDateTimeInputToIso("2026-08-10T13:00"),
       })
     );
   });
@@ -1115,7 +1119,7 @@ describe("security access-control disjoint slice", () => {
     await user.click(screen.getByRole("button", { name: "Save grant" }));
     await waitFor(() =>
       expect(mocks.createUserPermissionSet).toHaveBeenCalledWith({
-        expires_at: "2026-12-31T18:30:00.000Z",
+        expires_at: localDateTimeInputToIso("2027-01-01T00:00"),
         permission_set_id: ids.permissionSet,
         reason: "Emergency close support",
         user_id: ids.user,

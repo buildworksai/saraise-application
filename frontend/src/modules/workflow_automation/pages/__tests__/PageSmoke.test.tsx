@@ -23,6 +23,7 @@ import { WorkflowEditPage } from "../WorkflowEditPage";
 import { WorkflowInstanceDetailPage } from "../WorkflowInstanceDetailPage";
 import { WorkflowInstanceListPage } from "../WorkflowInstanceListPage";
 import { WorkflowTaskDetailPage } from "../WorkflowTaskDetailPage";
+import { formatDate } from "../../workflow-utils";
 import { WorkflowListPage } from "../WorkflowListPage";
 
 const pagination = {
@@ -666,7 +667,9 @@ describe("workflow contextual pages", () => {
       <WorkflowTaskDetailPage />
     );
     expect(await screen.findByText("Structured value hidden")).toBeInTheDocument();
-    expect(screen.getByText("Completed by Nila at Jul 22, 2026, 6:30 AM")).toBeInTheDocument();
+    expect(
+      screen.getByText(`Completed by Nila at ${formatDate("2026-07-22T01:00:00Z")}`)
+    ).toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument();
   });
   it("renders scalar task context while hiding object and array resolver values", async () => {

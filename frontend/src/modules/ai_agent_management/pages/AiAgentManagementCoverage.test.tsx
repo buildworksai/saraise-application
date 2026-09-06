@@ -85,6 +85,10 @@ const mocks = vi.hoisted(() => ({
   updateConfiguration: vi.fn(),
 }));
 
+function localDateTimeInputToIso(value: string) {
+  return new Date(value).toISOString();
+}
+
 vi.mock("../services/ai-agent-service", () => ({ aiAgentService: mocks }));
 
 const pagination = {
@@ -951,7 +955,7 @@ describe("AI agent configuration, governance, form, and detail coverage", () => 
         idempotency_key: "schedule-key-1",
         max_retries: 1,
         priority: 5,
-        scheduled_at: "2026-07-29T04:00:00.000Z",
+        scheduled_at: localDateTimeInputToIso("2026-07-29T09:30"),
         task_data: { goal: "approve invoices" },
       })
     );
