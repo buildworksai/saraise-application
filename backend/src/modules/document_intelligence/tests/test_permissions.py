@@ -6,6 +6,7 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.test import APIRequestFactory
 
 from src.core.access.decision import AccessDecision, AccessReasonCode
@@ -107,6 +108,100 @@ def test_exactly_once_access_decision_is_reused_for_object_tenant_check() -> Non
     assert permission.has_object_permission(request, view, SimpleNamespace(tenant_id=tenant_id)) is True
     assert permission.has_object_permission(request, view, SimpleNamespace(tenant_id=uuid.uuid4())) is False
     pipeline.decide.assert_called_once()
+
+
+def test_get_permissions_defaults_action_to_empty_string_when_unset() -> None:
+    view = ActionAccessMixin()
+    view.request = SimpleNamespace(user=SimpleNamespace())
+
+    view.get_permissions()
+
+    assert view.required_permission is None
+    assert view.required_entitlement is None
+    assert view.quota_resource == "document_intelligence.api_writes"
+
+
+def test_get_permissions_leaves_tenant_id_unset_when_user_has_no_tenant() -> None:
+    view = ActionAccessMixin()
+    view.action = "list"
+    request = SimpleNamespace(user=SimpleNamespace())
+    view.request = request
+
+    view.get_permissions()
+
+    assert not hasattr(request, "tenant_id")
+
+
+def test_get_permissions_converts_valid_tenant_id_string_to_uuid() -> None:
+    tenant_id = uuid.uuid4()
+    view = ActionAccessMixin()
+    view.action = "list"
+    view.request = SimpleNamespace(user=SimpleNamespace(profile=SimpleNamespace(tenant_id=str(tenant_id))))
+
+    view.get_permissions()
+
+    assert view.request.tenant_id == tenant_id
+
+
+def test_get_permissions_fails_closed_to_none_on_invalid_tenant_id() -> None:
+    view = ActionAccessMixin()
+    view.action = "list"
+    view.request = SimpleNamespace(user=SimpleNamespace(profile=SimpleNamespace(tenant_id="not-a-uuid")))
+
+    view.get_permissions()
+
+    assert view.request.tenant_id is None
+
+
+def test_quota_resource_defaults_to_reads_for_every_declared_read_action() -> None:
+    for action in ("list", "retrieve", "pages", "scores"):
+        view = ActionAccessMixin()
+        view.action = action
+        view.request = SimpleNamespace(user=SimpleNamespace())
+
+        view.get_permissions()
+
+        assert view.quota_resource == "document_intelligence.api_reads", action
+
+
+def test_quota_resource_defaults_to_writes_for_non_read_actions() -> None:
+    for action in ("create", "update", "partial_update", "destroy", "cancel", "retry"):
+        view = ActionAccessMixin()
+        view.action = action
+        view.request = SimpleNamespace(user=SimpleNamespace())
+
+        view.get_permissions()
+
+        assert view.quota_resource == "document_intelligence.api_writes", action
+
+
+def test_required_permission_and_entitlement_are_none_when_action_unmapped() -> None:
+    view = ActionAccessMixin()
+    view.action = "update"
+    view.action_permissions = {}
+    view.request = SimpleNamespace(user=SimpleNamespace())
+
+    view.get_permissions()
+
+    assert view.required_permission is None
+    assert view.required_entitlement is None
+
+
+def test_get_permissions_returns_is_authenticated_then_requires_access_instances() -> None:
+    view = ActionAccessMixin()
+    view.action = "list"
+    view.request = SimpleNamespace(user=SimpleNamespace())
+
+    permissions = view.get_permissions()
+
+    assert isinstance(permissions[0], IsAuthenticated)
+    assert isinstance(permissions[1], RequiresAccess)
+    assert len(permissions) == 2
+
+
+def test_action_access_mixin_class_attributes_are_wired_for_fail_closed_access() -> None:
+    assert ActionAccessMixin.authentication_classes == (SessionAuthentication401,)
+    assert ActionAccessMixin.permission_classes == (IsAuthenticated, RequiresAccess)
 
 
 def test_dependency_and_quota_denials_remain_machine_distinguishable() -> None:
