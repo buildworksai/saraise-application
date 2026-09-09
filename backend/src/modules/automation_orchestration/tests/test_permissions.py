@@ -4,6 +4,7 @@ import dataclasses
 import pytest
 from rest_framework.authentication import SessionAuthentication
 
+from .. import permissions as permissions_module
 from ..api import GovernedTenantViewSet
 from ..permissions import (
     AccessRequirement,
@@ -90,6 +91,49 @@ def test_write_access_helper_specifies_state_changing_cost() -> None:
         quota_resource="automation_orchestration.run:execute",
         quota_cost=3,
     )
+
+
+def test_write_access_helper_enforces_keyword_only_cost() -> None:
+    # `cost` is deliberately keyword-only so call sites can never confuse it
+    # with a stray positional argument. Passing it positionally must be
+    # rejected at the call boundary, not silently accepted.
+    with pytest.raises(TypeError):
+        write_access("automation_orchestration.run:execute", 3)  # type: ignore[misc]
+
+
+def test_module_all_exports_exact_public_contract() -> None:
+    expected = {
+        "AccessRequirement",
+        "CATALOG_VIEW",
+        "CONFIGURATION_MANAGE",
+        "CONFIGURATION_VIEW",
+        "DEFINITION_MANAGE",
+        "DEFINITION_PUBLISH",
+        "DEFINITION_VIEW",
+        "HEALTH_VIEW",
+        "PERMISSIONS",
+        "RUN_CONTROL",
+        "RUN_EXECUTE",
+        "RUN_RETRY",
+        "RUN_VIEW",
+        "SCHEDULE_MANAGE",
+        "SCHEDULE_VIEW",
+        "SOD_ACTIONS",
+        "read_access",
+        "write_access",
+    }
+    assert set(permissions_module.__all__) == expected
+    assert len(permissions_module.__all__) == len(expected)
+    # Every declared export must actually resolve on the module, and every
+    # exported name must round-trip to the exact object importers already
+    # depend on -- a stale or truncated __all__ silently breaks `from
+    # ..permissions import *` without any import-time failure.
+    for name in permissions_module.__all__:
+        assert hasattr(permissions_module, name), name
+
+    assert permissions_module.CONFIGURATION_VIEW is DEFINITION_VIEW
+    assert permissions_module.CONFIGURATION_MANAGE is DEFINITION_MANAGE
+    assert permissions_module.HEALTH_VIEW is CATALOG_VIEW
 
 
 def test_api_uses_standard_csrf_enforcing_session_authentication() -> None:
