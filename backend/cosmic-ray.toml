@@ -1,0 +1,16 @@
+# Mutation testing — CI gate for the >= 90% repo-wide mutation-score threshold.
+# Enforced with:  cr-rate session.sqlite --estimate --fail-over 10
+# (survival rate > 10%  ==  kill rate < 90%  ==  build fails)
+#
+# For fast local iteration prefer mutmut:  pip install mutmut && mutmut run
+# Run cosmic-ray from this file's directory (backend) — module-path is
+# relative to the invocation directory, not the repo root.
+
+[cosmic-ray]
+module-path = "src"
+timeout = 30.0
+excluded-modules = ["tests", "test"]
+test-command = "python -m pytest -x -q"
+
+[cosmic-ray.distributor]
+name = "local"
