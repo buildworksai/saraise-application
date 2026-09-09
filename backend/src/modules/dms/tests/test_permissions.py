@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import uuid
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 from rest_framework.authentication import SessionAuthentication
+from rest_framework.permissions import IsAuthenticated
 
 from src.core.access.decision import AccessDecision, AccessReasonCode
 from src.core.access.permissions import RequiresAccess
@@ -120,6 +122,84 @@ def test_strict_session_authentication_never_uses_relaxed_csrf() -> None:
     )
 
 
+def test_session_authentication_401_challenge_is_exactly_session() -> None:
+    auth = SessionAuthentication401()
+    assert auth.authenticate_header(request=object()) == "Session"
+
+
+def test_folder_action_permissions_map_exactly() -> None:
+    assert FOLDER_ACTION_PERMISSIONS == {
+        "list": "dms.folder:read",
+        "create": "dms.folder:create",
+        "retrieve": "dms.folder:read",
+        "partial_update": "dms.folder:update",
+        "destroy": "dms.folder:delete",
+        "move": "dms.folder:update",
+        "contents": "dms.folder:read",
+    }
+
+
+def test_document_action_permissions_map_exactly() -> None:
+    assert DOCUMENT_ACTION_PERMISSIONS == {
+        "list": "dms.document:read",
+        "create": "dms.document:create",
+        "retrieve": "dms.document:read",
+        "partial_update": "dms.document:update",
+        "destroy": "dms.document:delete",
+        "move": "dms.document:move",
+        "download": "dms.document:download",
+    }
+
+
+def test_version_action_permissions_map_exactly() -> None:
+    assert VERSION_ACTION_PERMISSIONS == {
+        "list": "dms.version:read",
+        "create": "dms.version:create",
+        "retrieve": "dms.version:read",
+        "restore": "dms.version:restore",
+    }
+
+
+def test_document_permission_action_permissions_map_exactly() -> None:
+    assert DOCUMENT_PERMISSION_ACTION_PERMISSIONS == {
+        "list": "dms.permission:read",
+        "create": "dms.permission:grant",
+        "retrieve": "dms.permission:read",
+        "partial_update": "dms.permission:update",
+        "destroy": "dms.permission:revoke",
+    }
+
+
+def test_share_action_permissions_map_exactly() -> None:
+    assert SHARE_ACTION_PERMISSIONS == {
+        "list": "dms.share:read",
+        "create": "dms.share:create",
+        "retrieve": "dms.share:read",
+        "revoke": "dms.share:revoke",
+    }
+
+
+def test_health_action_permissions_map_exactly() -> None:
+    assert HEALTH_ACTION_PERMISSIONS == {"health": "dms.health:read"}
+
+
+def test_principal_action_permissions_map_exactly() -> None:
+    assert PRINCIPAL_ACTION_PERMISSIONS == {"search": "dms.permission:grant"}
+
+
+def test_configuration_action_permissions_map_exactly() -> None:
+    assert CONFIGURATION_ACTION_PERMISSIONS == {
+        "current": "dms.configuration:read",
+        "update_current": "dms.configuration:write",
+        "preview": "dms.configuration:write",
+        "history": "dms.configuration:read",
+        "audit": "dms.configuration:read",
+        "rollback": "dms.configuration:rollback",
+        "import_configuration": "dms.configuration:import",
+        "export_configuration": "dms.configuration:export",
+    }
+
+
 class _View(ActionAccessMixin):
     action_permissions = {"list": "dms.document:read"}
 
@@ -153,6 +233,27 @@ def test_invalid_profile_tenant_clears_any_injected_tenant(monkeypatch: pytest.M
     monkeypatch.setattr(permission_contract, "RequiresAccess", lambda: object())
     view.get_permissions()
     assert view.request.tenant_id is None
+
+
+def test_action_quotas_override_takes_precedence_over_permission_quota(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _QuotaView(ActionAccessMixin):
+        action_permissions: ClassVar[dict[str, str]] = {"list": "dms.document:read"}
+        action_quotas: ClassVar[dict[str, str]] = {"list": "dms.custom_quota"}
+
+    view = _QuotaView()
+    view.action = "list"
+    view.request = SimpleNamespace(user=SimpleNamespace(profile=SimpleNamespace(tenant_id=str(uuid.uuid4()))))
+    monkeypatch.setattr(permission_contract, "RequiresAccess", lambda: object())
+    view.get_permissions()
+    assert view.quota_resource == "dms.custom_quota"
+
+
+def test_class_defaults_are_deny_by_default_and_single_quota_cost() -> None:
+    assert ActionAccessMixin.action_permissions == {}
+    assert ActionAccessMixin.action_quotas == {}
+    assert ActionAccessMixin.quota_cost == 1
+    assert ActionAccessMixin.permission_classes[0] is IsAuthenticated
+    assert ActionAccessMixin.permission_classes[1] is RequiresAccess
 
 
 def test_undeclared_action_retains_no_access_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
