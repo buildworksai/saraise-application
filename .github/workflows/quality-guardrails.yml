@@ -149,7 +149,7 @@ jobs:
         run: |
           pip install 'setuptools>=83.0.0'
           pip install pip-audit
-          pip-audit --desc --strict
+          pip-audit . --desc --strict --skip-editable
 
       - name: Collect GCR Data
         if: always() && steps.backend.outputs.present == 'true'
