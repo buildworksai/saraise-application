@@ -18,13 +18,7 @@ from ..api import (
     ReconciliationViewSet,
     StatementImportViewSet,
 )
-from ..permissions import (
-    PERMISSIONS,
-    READ_ACTIONS,
-    ActionAccessMixin,
-    IsBankUser,
-    SessionAuthentication401,
-)
+from ..permissions import PERMISSIONS, READ_ACTIONS, ActionAccessMixin, IsBankUser, SessionAuthentication401
 
 
 def test_every_controller_action_has_a_declared_permission() -> None:
@@ -71,7 +65,10 @@ def _mixin_with_action(action: str) -> ActionAccessMixin:
 
 
 class _ConcreteAccess(ActionAccessMixin):
-    action_permissions = {"retrieve": "bank_reconciliation.account:read", "create": "bank_reconciliation.account:create"}
+    action_permissions = {
+        "retrieve": "bank_reconciliation.account:read",
+        "create": "bank_reconciliation.account:create",
+    }
     action_quotas = {"create": "bank_reconciliation.custom_quota"}
 
 

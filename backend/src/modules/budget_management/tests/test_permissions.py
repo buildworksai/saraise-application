@@ -23,11 +23,7 @@ import pytest
 from rest_framework.permissions import IsAuthenticated
 
 from src.core.access.permissions import RequiresAccess
-from src.modules.budget_management.permissions import (
-    PERMISSIONS,
-    BudgetAccessMixin,
-    SessionAuthentication401,
-)
+from src.modules.budget_management.permissions import PERMISSIONS, BudgetAccessMixin, SessionAuthentication401
 
 
 class _View(BudgetAccessMixin):

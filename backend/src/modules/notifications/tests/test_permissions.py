@@ -34,7 +34,6 @@ from src.modules.notifications.permissions import (
     TemplateAccessMixin,
 )
 
-
 # ---------------------------------------------------------------------------
 # Registry contracts
 # ---------------------------------------------------------------------------
@@ -135,7 +134,7 @@ def test_endpoint_action_permissions_exact_mapping():
         "partial_update": "notifications.endpoint:update",
         "destroy": "notifications.endpoint:delete",
         "verify": "notifications.endpoint:verify",
-        "rotate_secret_ref": "notifications.endpoint:update",
+        "rotate_secret_ref": "notifications.endpoint:update",  # pragma: allowlist secret
     }
 
 

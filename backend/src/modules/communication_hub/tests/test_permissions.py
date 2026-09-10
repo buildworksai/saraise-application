@@ -36,10 +36,7 @@ def permission():
 class TestIsCommunicationUser:
     def test_docstring_present(self):
         assert IsCommunicationUser.__doc__ == "Permission check for communication module access."
-        assert (
-            IsCommunicationUser.has_permission.__doc__
-            == "Check if user has communication permissions."
-        )
+        assert IsCommunicationUser.has_permission.__doc__ == "Check if user has communication permissions."
 
     def test_user_none_denied(self, permission):
         request = SimpleNamespace(user=None)

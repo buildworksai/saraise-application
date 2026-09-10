@@ -123,6 +123,119 @@ def test_configuration_accepts_inclusive_threshold_boundaries_and_rejects_order_
     assert "ui.saturation_warning_threshold" in caught.value.message_dict
 
 
+NUMERIC_BOUNDS = (
+    ("provider", "max_tokens", 1, 1_000_000, True),
+    ("provider", "temperature", 0, 2, False),
+    ("provider", "timeout_seconds", 1, 600, True),
+    ("provider", "max_retries", 0, 20, True),
+    ("provider", "retry_backoff_seconds", 0, 60, False),
+    ("provider", "circuit_failure_threshold", 1, 100, True),
+    ("provider", "circuit_reset_seconds", 1, 3600, True),
+    ("runner", "maximum_messages", 1, 10_000, True),
+    ("registry", "key_maximum_length", 1, 255, True),
+    ("agent", "transition_key_maximum_length", 16, 1024, True),
+    ("agent", "execution_idempotency_key_maximum_length", 16, 1024, True),
+    ("agent", "search_maximum_length", 1, 4096, True),
+    ("agent", "transition_reason_maximum_length", 1, 4096, True),
+    ("agent", "error_code_maximum_length", 1, 255, True),
+    ("schedule", "default_priority", -100, 100, True),
+    ("schedule", "priority_minimum", -100, 100, True),
+    ("schedule", "priority_maximum", -100, 100, True),
+    ("schedule", "default_maximum_retries", 0, 65535, True),
+    ("schedule", "maximum_retries_limit", 0, 65535, True),
+    ("schedule", "dispatch_batch_minimum", 1, 1000, True),
+    ("schedule", "dispatch_batch_maximum", 1, 1000, True),
+    ("health", "cache_probe_timeout_seconds", 1, 300, True),
+    ("health", "minimum_rls_table_count", 1, 1000, True),
+    ("health", "outbox_stale_minutes", 1, 1440, True),
+    ("evaluation", "quality_pass_threshold", 0, 1, False),
+    ("evaluation", "quality_warn_threshold", 0, 1, False),
+    ("evaluation", "hallucination_pass_threshold", 0, 1, False),
+    ("evaluation", "hallucination_warn_threshold", 0, 1, False),
+    ("evaluation", "max_token_fallback", 1, 1_000_000, True),
+    ("evaluation", "characters_per_estimated_token", 1, 20, True),
+    ("evaluation", "minimum_useful_output_length", 0, 10_000, True),
+    ("evaluation", "short_output_penalty", 0, 1, False),
+    ("evaluation", "efficiency_pass_threshold", 0, 1, False),
+    ("evaluation", "efficiency_warn_threshold", 0, 1, False),
+    ("secret", "rotation_interval_minimum_days", 1, 3650, True),
+    ("ui", "agent_page_size", 1, 100, True),
+    ("ui", "execution_page_size", 1, 100, True),
+    ("ui", "execution_poll_interval_ms", 1000, 300_000, True),
+    ("ui", "approval_page_size", 1, 100, True),
+    ("ui", "approval_poll_interval_ms", 1000, 300_000, True),
+    ("ui", "schedule_page_size", 1, 100, True),
+    ("ui", "selection_page_size", 1, 100, True),
+    ("ui", "usage_page_size", 1, 100, True),
+    ("ui", "summary_page_size", 1, 100, True),
+    ("ui", "health_poll_interval_ms", 5_000, 300_000, True),
+    ("ui", "saturation_warning_threshold", 0, 1, False),
+    ("ui", "saturation_critical_threshold", 0, 1, False),
+)
+
+# Fields whose boundary participates in a cross-field ordering check (tested
+# separately in test_configuration_accepts_inclusive_threshold_boundaries_and_rejects_order_inversions
+# and in test_configuration_rejects_weakened_runtime_guards_and_duplicate_navigation),
+# so pinning them individually to their own extreme here would trip the *other*
+# check first and mask the exact boundary under test.
+_ORDER_CONSTRAINED = {
+    ("schedule", "default_priority"),
+    ("schedule", "priority_minimum"),
+    ("schedule", "priority_maximum"),
+    ("schedule", "default_maximum_retries"),
+    ("schedule", "maximum_retries_limit"),
+    ("schedule", "dispatch_batch_minimum"),
+    ("schedule", "dispatch_batch_maximum"),
+    ("evaluation", "quality_pass_threshold"),
+    ("evaluation", "quality_warn_threshold"),
+    ("evaluation", "hallucination_pass_threshold"),
+    ("evaluation", "hallucination_warn_threshold"),
+    ("evaluation", "efficiency_pass_threshold"),
+    ("evaluation", "efficiency_warn_threshold"),
+    ("ui", "saturation_warning_threshold"),
+    ("ui", "saturation_critical_threshold"),
+}
+
+
+@pytest.mark.parametrize("section,key,minimum,maximum,integer", NUMERIC_BOUNDS)
+def test_numeric_bound_rejects_values_just_outside_the_configured_range(section, key, minimum, maximum, integer):
+    step = 1 if integer else 0.01
+    below = ConfigurationService.defaults()
+    below[section][key] = minimum - step
+    with pytest.raises(ValidationError) as caught_below:
+        ConfigurationService.validate_document(below)
+    assert f"{section}.{key}" in caught_below.value.message_dict
+
+    above = ConfigurationService.defaults()
+    above[section][key] = maximum + step
+    with pytest.raises(ValidationError) as caught_above:
+        ConfigurationService.validate_document(above)
+    assert f"{section}.{key}" in caught_above.value.message_dict
+
+    if integer:
+        fractional = ConfigurationService.defaults()
+        fractional[section][key] = minimum + 0.5
+        with pytest.raises(ValidationError) as caught_fraction:
+            ConfigurationService.validate_document(fractional)
+        assert f"{section}.{key}" in caught_fraction.value.message_dict
+
+
+@pytest.mark.parametrize(
+    "section,key,minimum,maximum,integer",
+    [bound for bound in NUMERIC_BOUNDS if (bound[0], bound[1]) not in _ORDER_CONSTRAINED],
+)
+def test_numeric_bound_accepts_the_exact_configured_boundaries(section, key, minimum, maximum, integer):
+    at_minimum = ConfigurationService.defaults()
+    at_minimum[section][key] = minimum
+    validated_min = ConfigurationService.validate_document(at_minimum)
+    assert validated_min[section][key] == minimum
+
+    at_maximum = ConfigurationService.defaults()
+    at_maximum[section][key] = maximum
+    validated_max = ConfigurationService.validate_document(at_maximum)
+    assert validated_max[section][key] == maximum
+
+
 def test_configuration_versions_reports_exact_invalid_tenant_field() -> None:
     with pytest.raises(ValidationError) as caught:
         ConfigurationService.versions("not-a-uuid")  # type: ignore[arg-type]

@@ -121,15 +121,11 @@ def _req(permission, entitlement, quota_resource, quota_cost=1):
 def test_entity_action_access_is_pinned_exactly():
     expected = {
         "list": _req("metadata_modeling.schema:read", "metadata_modeling.schemas", "metadata_modeling.api_reads"),
-        "retrieve": _req(
-            "metadata_modeling.schema:read", "metadata_modeling.schemas", "metadata_modeling.api_reads"
-        ),
+        "retrieve": _req("metadata_modeling.schema:read", "metadata_modeling.schemas", "metadata_modeling.api_reads"),
         "create": _req(
             "metadata_modeling.schema:create", "metadata_modeling.schemas", "metadata_modeling.schema_count"
         ),
-        "update": _req(
-            "metadata_modeling.schema:update", "metadata_modeling.schemas", "metadata_modeling.api_writes"
-        ),
+        "update": _req("metadata_modeling.schema:update", "metadata_modeling.schemas", "metadata_modeling.api_writes"),
         "partial_update": _req(
             "metadata_modeling.schema:update", "metadata_modeling.schemas", "metadata_modeling.api_writes"
         ),
@@ -142,12 +138,8 @@ def test_entity_action_access_is_pinned_exactly():
         "restore": _req(
             "metadata_modeling.schema:archive", "metadata_modeling.schemas", "metadata_modeling.api_writes"
         ),
-        "clone": _req(
-            "metadata_modeling.schema:create", "metadata_modeling.schemas", "metadata_modeling.schema_count"
-        ),
-        "preview": _req(
-            "metadata_modeling.schema:update", "metadata_modeling.schemas", "metadata_modeling.api_reads"
-        ),
+        "clone": _req("metadata_modeling.schema:create", "metadata_modeling.schemas", "metadata_modeling.schema_count"),
+        "preview": _req("metadata_modeling.schema:update", "metadata_modeling.schemas", "metadata_modeling.api_reads"),
         "preview_new": _req(
             "metadata_modeling.schema:update", "metadata_modeling.schemas", "metadata_modeling.api_reads"
         ),
@@ -189,36 +181,22 @@ def test_entity_action_access_is_pinned_exactly():
 def test_resource_action_access_is_pinned_exactly():
     expected = {
         "list": _req("metadata_modeling.record:read", "metadata_modeling.records", "metadata_modeling.api_reads"),
-        "retrieve": _req(
-            "metadata_modeling.record:read", "metadata_modeling.records", "metadata_modeling.api_reads"
-        ),
+        "retrieve": _req("metadata_modeling.record:read", "metadata_modeling.records", "metadata_modeling.api_reads"),
         "create": _req(
             "metadata_modeling.record:create", "metadata_modeling.records", "metadata_modeling.record_count"
         ),
-        "update": _req(
-            "metadata_modeling.record:update", "metadata_modeling.records", "metadata_modeling.api_writes"
-        ),
+        "update": _req("metadata_modeling.record:update", "metadata_modeling.records", "metadata_modeling.api_writes"),
         "partial_update": _req(
             "metadata_modeling.record:update", "metadata_modeling.records", "metadata_modeling.api_writes"
         ),
-        "destroy": _req(
-            "metadata_modeling.record:delete", "metadata_modeling.records", "metadata_modeling.api_writes"
-        ),
-        "restore": _req(
-            "metadata_modeling.record:delete", "metadata_modeling.records", "metadata_modeling.api_writes"
-        ),
+        "destroy": _req("metadata_modeling.record:delete", "metadata_modeling.records", "metadata_modeling.api_writes"),
+        "restore": _req("metadata_modeling.record:delete", "metadata_modeling.records", "metadata_modeling.api_writes"),
         "duplicate": _req(
             "metadata_modeling.record:create", "metadata_modeling.records", "metadata_modeling.record_count"
         ),
-        "submit": _req(
-            "metadata_modeling.record:submit", "metadata_modeling.records", "metadata_modeling.api_writes"
-        ),
-        "cancel": _req(
-            "metadata_modeling.record:cancel", "metadata_modeling.records", "metadata_modeling.api_writes"
-        ),
-        "versions": _req(
-            "metadata_modeling.record:read", "metadata_modeling.records", "metadata_modeling.api_reads"
-        ),
+        "submit": _req("metadata_modeling.record:submit", "metadata_modeling.records", "metadata_modeling.api_writes"),
+        "cancel": _req("metadata_modeling.record:cancel", "metadata_modeling.records", "metadata_modeling.api_writes"),
+        "versions": _req("metadata_modeling.record:read", "metadata_modeling.records", "metadata_modeling.api_reads"),
         "version_detail": _req(
             "metadata_modeling.record:read", "metadata_modeling.records", "metadata_modeling.api_reads"
         ),
@@ -230,15 +208,9 @@ def test_resource_action_access_is_pinned_exactly():
 def test_sequence_action_access_is_pinned_exactly():
     expected = {
         "list": _req("metadata_modeling.schema:read", "metadata_modeling.schemas", "metadata_modeling.api_reads"),
-        "retrieve": _req(
-            "metadata_modeling.schema:read", "metadata_modeling.schemas", "metadata_modeling.api_reads"
-        ),
-        "reset": _req(
-            "metadata_modeling.sequence:reset", "metadata_modeling.schemas", "metadata_modeling.api_writes"
-        ),
-        "preview": _req(
-            "metadata_modeling.record:read", "metadata_modeling.records", "metadata_modeling.api_reads"
-        ),
+        "retrieve": _req("metadata_modeling.schema:read", "metadata_modeling.schemas", "metadata_modeling.api_reads"),
+        "reset": _req("metadata_modeling.sequence:reset", "metadata_modeling.schemas", "metadata_modeling.api_writes"),
+        "preview": _req("metadata_modeling.record:read", "metadata_modeling.records", "metadata_modeling.api_reads"),
     }
     assert dict(SEQUENCE_ACTION_ACCESS) == expected
     assert set(SEQUENCE_ACTION_ACCESS.keys()) == set(expected.keys())
@@ -246,9 +218,7 @@ def test_sequence_action_access_is_pinned_exactly():
 
 def test_health_action_access_is_pinned_exactly():
     expected = {
-        "health": _req(
-            "metadata_modeling.health:read", "metadata_modeling.schemas", "metadata_modeling.api_reads"
-        ),
+        "health": _req("metadata_modeling.health:read", "metadata_modeling.schemas", "metadata_modeling.api_reads"),
     }
     assert dict(HEALTH_ACTION_ACCESS) == expected
     assert set(HEALTH_ACTION_ACCESS.keys()) == {"health"}
@@ -257,12 +227,8 @@ def test_health_action_access_is_pinned_exactly():
 def test_config_action_access_is_pinned_exactly():
     expected = {
         "list": _req("metadata_modeling.schema:read", "metadata_modeling.schemas", "metadata_modeling.api_reads"),
-        "update": _req(
-            "metadata_modeling.schema:update", "metadata_modeling.schemas", "metadata_modeling.api_writes"
-        ),
-        "preview": _req(
-            "metadata_modeling.schema:update", "metadata_modeling.schemas", "metadata_modeling.api_reads"
-        ),
+        "update": _req("metadata_modeling.schema:update", "metadata_modeling.schemas", "metadata_modeling.api_writes"),
+        "preview": _req("metadata_modeling.schema:update", "metadata_modeling.schemas", "metadata_modeling.api_reads"),
         "versions": _req(
             "metadata_modeling.schema:read", "metadata_modeling.schema_versions", "metadata_modeling.api_reads"
         ),

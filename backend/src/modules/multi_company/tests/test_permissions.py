@@ -11,7 +11,6 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 

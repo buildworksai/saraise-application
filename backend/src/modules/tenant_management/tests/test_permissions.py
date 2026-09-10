@@ -34,9 +34,7 @@ class TestTenantManagementPermissionNoResource:
         """No permission_resource attribute at all -> denied, no delegation."""
         perm = TenantManagementPermission()
         view = _View()  # no permission_resource set
-        with patch(
-            "src.modules.tenant_management.permissions.PolicyRequiredPermission.has_permission"
-        ) as mock_super:
+        with patch("src.modules.tenant_management.permissions.PolicyRequiredPermission.has_permission") as mock_super:
             result = perm.has_permission(_request("GET"), view)
         assert result is False
         mock_super.assert_not_called()
@@ -44,9 +42,7 @@ class TestTenantManagementPermissionNoResource:
     def test_none_permission_resource_denies(self):
         perm = TenantManagementPermission()
         view = _View(permission_resource=None)
-        with patch(
-            "src.modules.tenant_management.permissions.PolicyRequiredPermission.has_permission"
-        ) as mock_super:
+        with patch("src.modules.tenant_management.permissions.PolicyRequiredPermission.has_permission") as mock_super:
             result = perm.has_permission(_request("GET"), view)
         assert result is False
         mock_super.assert_not_called()
@@ -55,9 +51,7 @@ class TestTenantManagementPermissionNoResource:
         """Empty string is falsy -> denied (exercises `not resource`, not `is None`)."""
         perm = TenantManagementPermission()
         view = _View(permission_resource="")
-        with patch(
-            "src.modules.tenant_management.permissions.PolicyRequiredPermission.has_permission"
-        ) as mock_super:
+        with patch("src.modules.tenant_management.permissions.PolicyRequiredPermission.has_permission") as mock_super:
             result = perm.has_permission(_request("GET"), view)
         assert result is False
         mock_super.assert_not_called()

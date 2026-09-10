@@ -534,9 +534,7 @@ class TestUpdateTenantQuotas:
             # Must not raise -- DoesNotExist is caught and logged.
             service._update_tenant_quotas(missing_tenant_id, plan)
 
-        assert any(
-            missing_tenant_id in record.message and "not found" in record.message for record in caplog.records
-        )
+        assert any(missing_tenant_id in record.message and "not found" in record.message for record in caplog.records)
 
     def test_logs_error_and_does_not_raise_on_unexpected_save_failure(
         self,

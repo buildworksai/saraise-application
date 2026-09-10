@@ -1,13 +1,13 @@
 """Security metadata, access requirements, and authentication contracts."""
 
 import dataclasses
+
 import pytest
 from rest_framework.authentication import SessionAuthentication
 
 from .. import permissions as permissions_module
 from ..api import GovernedTenantViewSet
 from ..permissions import (
-    AccessRequirement,
     CATALOG_VIEW,
     CONFIGURATION_MANAGE,
     CONFIGURATION_VIEW,
@@ -23,6 +23,7 @@ from ..permissions import (
     SCHEDULE_MANAGE,
     SCHEDULE_VIEW,
     SOD_ACTIONS,
+    AccessRequirement,
     read_access,
     write_access,
 )

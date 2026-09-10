@@ -4,10 +4,7 @@ import uuid
 from types import SimpleNamespace
 
 from src.modules.purchase_management import permissions as permissions_module
-from src.modules.purchase_management.permissions import (
-    ACTION_ACCESS,
-    PurchaseRequiresAccess,
-)
+from src.modules.purchase_management.permissions import ACTION_ACCESS, PurchaseRequiresAccess
 
 
 def test_every_mutating_controller_action_has_access_metadata():

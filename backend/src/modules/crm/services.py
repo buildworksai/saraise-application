@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from time import monotonic
 from typing import Any
 from urllib.parse import urlsplit
@@ -501,7 +501,7 @@ class CRMConfigurationService:
             raise CRMServiceError("Default currency must be an allowed ISO-4217 code.", code="INVALID_CONFIGURATION")
         try:
             minimum_amount = Decimal(str(opportunity.get("minimum_amount")))
-        except (ValueError, TypeError) as exc:
+        except (ValueError, TypeError, InvalidOperation) as exc:
             raise CRMServiceError("Minimum opportunity amount is invalid.", code="INVALID_CONFIGURATION") from exc
         if minimum_amount <= 0:
             raise CRMServiceError("Minimum opportunity amount must be positive.", code="INVALID_CONFIGURATION")
@@ -547,7 +547,7 @@ class CRMConfigurationService:
             backoff_base = Decimal(str(providers["backoff_base_seconds"]))
             backoff_max = Decimal(str(providers["backoff_max_seconds"]))
             backoff_jitter = Decimal(str(providers["backoff_jitter_seconds"]))
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, InvalidOperation) as exc:
             raise CRMServiceError(
                 "Provider backoff values must be decimal strings.", code="INVALID_CONFIGURATION"
             ) from exc

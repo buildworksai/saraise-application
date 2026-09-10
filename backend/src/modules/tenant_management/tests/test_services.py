@@ -252,14 +252,18 @@ class TestTenantManagementService:
 
     def test_calculate_health_score_usage_score_clamped_at_100_when_over_max_users(self):
         """active_users far beyond max_users must clamp usage_score to 100, not exceed it."""
-        tenant = Tenant.objects.create(name="Overcap Tenant", slug="overcap-tenant", subdomain="overcap-tenant", max_users=5)
+        tenant = Tenant.objects.create(
+            name="Overcap Tenant", slug="overcap-tenant", subdomain="overcap-tenant", max_users=5
+        )
         TenantManagementService.record_resource_usage(tenant_id=tenant.id, date=date.today(), active_users=50)
         health_score = TenantManagementService.calculate_health_score(tenant.id)
         assert health_score.usage_score == 100
 
     def test_calculate_health_score_usage_score_exact_ratio(self):
         """active_users exactly half of max_users must give usage_score == 50."""
-        tenant = Tenant.objects.create(name="HalfCap Tenant", slug="halfcap-tenant", subdomain="halfcap-tenant", max_users=10)
+        tenant = Tenant.objects.create(
+            name="HalfCap Tenant", slug="halfcap-tenant", subdomain="halfcap-tenant", max_users=10
+        )
         TenantManagementService.record_resource_usage(tenant_id=tenant.id, date=date.today(), active_users=5)
         health_score = TenantManagementService.calculate_health_score(tenant.id)
         assert health_score.usage_score == 50
@@ -392,15 +396,11 @@ class TestTenantManagementService:
         """update_or_create on TenantHealthScore must overwrite, not duplicate, for the same date."""
         tenant = Tenant.objects.create(name="Recalc Tenant", slug="recalc-tenant", subdomain="recalc-tenant")
         today = date.today()
-        TenantManagementService.record_resource_usage(
-            tenant_id=tenant.id, date=today, active_users=1, error_count=0
-        )
+        TenantManagementService.record_resource_usage(tenant_id=tenant.id, date=today, active_users=1, error_count=0)
         first = TenantManagementService.calculate_health_score(tenant.id, target_date=today)
         assert first.error_score == 100
 
-        TenantManagementService.record_resource_usage(
-            tenant_id=tenant.id, date=today, active_users=1, error_count=100
-        )
+        TenantManagementService.record_resource_usage(tenant_id=tenant.id, date=today, active_users=1, error_count=100)
         second = TenantManagementService.calculate_health_score(tenant.id, target_date=today)
         assert second.error_score == 40
         assert tenant.health_scores.filter(date=today).count() == 1

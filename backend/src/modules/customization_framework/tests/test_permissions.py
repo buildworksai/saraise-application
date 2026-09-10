@@ -197,9 +197,7 @@ def test_permissions_field_must_be_a_list_not_merely_list_like() -> None:
         "permissions": ("p1",),
         "sod_actions": [],
         "metadata": {
-            "access_policy": {
-                "a": {"permission": "p1", "entitlement": "e1", "quota_resource": "q1", "quota_cost": 1}
-            },
+            "access_policy": {"a": {"permission": "p1", "entitlement": "e1", "quota_resource": "q1", "quota_cost": 1}},
             "sod_pairs": [],
         },
     }
@@ -265,9 +263,7 @@ def test_sod_actions_must_exactly_match_flattened_sod_pairs() -> None:
 
 def test_load_manifest_wraps_os_error(monkeypatch, tmp_path) -> None:
     missing = tmp_path / "missing.yaml"
-    monkeypatch.setattr(
-        permissions_module, "Path", lambda *_: SimpleNamespace(with_name=lambda name: missing)
-    )
+    monkeypatch.setattr(permissions_module, "Path", lambda *_: SimpleNamespace(with_name=lambda name: missing))
     with pytest.raises(ImproperlyConfigured):
         permissions_module._load_manifest()
 
@@ -275,9 +271,7 @@ def test_load_manifest_wraps_os_error(monkeypatch, tmp_path) -> None:
 def test_load_manifest_wraps_yaml_error(monkeypatch, tmp_path) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text("{ invalid: [", encoding="utf-8")
-    monkeypatch.setattr(
-        permissions_module, "Path", lambda *_: SimpleNamespace(with_name=lambda name: bad)
-    )
+    monkeypatch.setattr(permissions_module, "Path", lambda *_: SimpleNamespace(with_name=lambda name: bad))
     with pytest.raises(ImproperlyConfigured):
         permissions_module._load_manifest()
 

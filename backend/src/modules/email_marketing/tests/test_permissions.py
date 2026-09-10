@@ -409,7 +409,9 @@ def test_provider_webhook_permission_accounts_not_configured_dict_fails() -> Non
 def test_provider_webhook_permission_unknown_gateway_key_fails() -> None:
     permission = ProviderWebhookPermission()
     request = _signed_request(gateway="unknown-gateway")
-    with override_settings(EMAIL_MARKETING_PROVIDER_ACCOUNTS={"provider": {"tenant_id": str(uuid.uuid4()), "webhook_secret": "x"}}):
+    with override_settings(
+        EMAIL_MARKETING_PROVIDER_ACCOUNTS={"provider": {"tenant_id": str(uuid.uuid4()), "webhook_secret": "x"}}
+    ):
         assert permission.has_permission(request, SimpleNamespace()) is False
 
 
@@ -423,9 +425,7 @@ def test_provider_webhook_permission_account_not_dict_fails() -> None:
 def test_provider_webhook_permission_missing_secret_fails() -> None:
     permission = ProviderWebhookPermission()
     request = _signed_request()
-    with override_settings(
-        EMAIL_MARKETING_PROVIDER_ACCOUNTS={"provider": {"tenant_id": str(uuid.uuid4())}}
-    ):
+    with override_settings(EMAIL_MARKETING_PROVIDER_ACCOUNTS={"provider": {"tenant_id": str(uuid.uuid4())}}):
         assert permission.has_permission(request, SimpleNamespace()) is False
 
 
@@ -451,7 +451,9 @@ def test_provider_webhook_permission_missing_tenant_fails() -> None:
     permission = ProviderWebhookPermission()
     request = _signed_request()
     with override_settings(
-        EMAIL_MARKETING_PROVIDER_ACCOUNTS={"provider": {"webhook_secret": "provider-secret"}}
+        EMAIL_MARKETING_PROVIDER_ACCOUNTS={
+            "provider": {"webhook_secret": "provider-placeholder"}  # pragma: allowlist secret
+        }
     ):
         assert permission.has_permission(request, SimpleNamespace()) is False
 
@@ -461,7 +463,7 @@ def test_provider_webhook_permission_invalid_tenant_uuid_fails_closed() -> None:
     request = _signed_request()
     with override_settings(
         EMAIL_MARKETING_PROVIDER_ACCOUNTS={
-            "provider": {"tenant_id": "not-a-valid-uuid", "webhook_secret": "provider-secret"}
+            "provider": {"tenant_id": "not-a-valid-uuid", "webhook_secret": "provider-placeholder"}
         }
     ):
         assert permission.has_permission(request, SimpleNamespace()) is False

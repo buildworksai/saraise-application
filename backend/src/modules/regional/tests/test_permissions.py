@@ -19,11 +19,7 @@ from uuid import uuid4
 
 import pytest
 
-from src.modules.regional.permissions import (
-    PERMISSIONS,
-    SOD_ACTIONS,
-    RegionalPolicyPermission,
-)
+from src.modules.regional.permissions import PERMISSIONS, SOD_ACTIONS, RegionalPolicyPermission
 
 
 def make_profile(tenant_id=None, tenant_role=""):
@@ -222,9 +218,7 @@ class TestActionMapping:
             ("deactivate", "regional.resource:deactivate"),
         ],
     )
-    def test_every_resource_action_maps_and_delegates_to_has_perm(
-        self, permission, action, expected_permission
-    ):
+    def test_every_resource_action_maps_and_delegates_to_has_perm(self, permission, action, expected_permission):
         profile = make_profile(tenant_id=str(uuid4()), tenant_role="")
         user = make_user(profile=profile, has_perm_return=True)
         request = make_request(user=user)
@@ -241,12 +235,9 @@ class TestActionMapping:
             ("rollback", "regional.configuration:rollback"),
             ("import_document", "regional.configuration:import"),
             ("export_document", "regional.configuration:export"),
-        ]
-        ,
+        ],
     )
-    def test_every_configuration_action_maps_and_delegates_to_has_perm(
-        self, permission, action, expected_permission
-    ):
+    def test_every_configuration_action_maps_and_delegates_to_has_perm(self, permission, action, expected_permission):
         profile = make_profile(tenant_id=str(uuid4()), tenant_role="")
         user = make_user(profile=profile, has_perm_return=True)
         request = make_request(user=user)
@@ -400,9 +391,7 @@ class TestMutationHardeningEqVsIsAndOrdering:
     that same carve-out).
     """
 
-    def test_scope_less_than_configuration_lexically_falls_back_to_resource_mapping(
-        self, permission
-    ):
+    def test_scope_less_than_configuration_lexically_falls_back_to_resource_mapping(self, permission):
         """Kills `scope == 'configuration'` -> `scope <= 'configuration'` on
         line 75. A scope that sorts before "configuration" must NOT satisfy
         the write carve-out, even though `<=` would wrongly accept it."""
@@ -413,9 +402,7 @@ class TestMutationHardeningEqVsIsAndOrdering:
         # scope != "configuration" -> resource mapping -> "current" unmapped -> deny
         assert permission.has_permission(request, view) is False
 
-    def test_action_less_than_current_lexically_does_not_trigger_write_carveout(
-        self, permission
-    ):
+    def test_action_less_than_current_lexically_does_not_trigger_write_carveout(self, permission):
         """Kills `action == 'current'` -> `action <= 'current'` on line 76."""
         profile = make_profile(tenant_id=str(uuid4()), tenant_role="")
         user = make_user(profile=profile, has_perm_return=True)
@@ -424,9 +411,7 @@ class TestMutationHardeningEqVsIsAndOrdering:
         # action != "current" -> falls to mapping.get("aaa") -> unmapped -> deny
         assert permission.has_permission(request, view) is False
 
-    def test_action_greater_than_current_lexically_does_not_trigger_write_carveout(
-        self, permission
-    ):
+    def test_action_greater_than_current_lexically_does_not_trigger_write_carveout(self, permission):
         """Kills `action == 'current'` -> `action >= 'current'` on line 76."""
         profile = make_profile(tenant_id=str(uuid4()), tenant_role="")
         user = make_user(profile=profile, has_perm_return=True)
@@ -461,7 +446,6 @@ class TestMutationHardeningEqVsIsAndOrdering:
         view = make_view(action=action, permission_scope="configuration")
         assert permission.has_permission(request, view) is True
         assert user._has_perm_calls == ["regional.configuration:write"]
-
 
     def test_write_carveout_scope_check_uses_value_equality_not_identity(self, permission):
         """Kills `scope == 'configuration'` -> `scope is 'configuration'` on

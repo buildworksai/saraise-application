@@ -267,6 +267,7 @@ jobs:
         with:
           context: ./backend
           push: false
+          load: true
           tags: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}-api:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -285,7 +286,7 @@ jobs:
 
       - name: Upload Trivy backend SARIF
         if: always() && hashFiles('backend/Dockerfile') != ''
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-backend.sarif
           wait-for-processing: false
@@ -296,6 +297,7 @@ jobs:
         with:
           context: ./frontend
           push: false
+          load: true
           tags: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -313,7 +315,7 @@ jobs:
 
       - name: Upload Trivy frontend SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-frontend.sarif
           wait-for-processing: false

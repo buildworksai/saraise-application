@@ -259,7 +259,9 @@ class TestRuleDefinitions:
             (HEALTH_READ, "backup_disaster_recovery.health:read", "bdr.health.read", "default"),
         ],
     )
-    def test_rule_metadata_is_pinned(self, rule: AccessRule, permission: str, quota_resource: str, quota_key: str) -> None:
+    def test_rule_metadata_is_pinned(
+        self, rule: AccessRule, permission: str, quota_resource: str, quota_key: str
+    ) -> None:
         assert rule.permission == permission
         assert rule.quota_resource == quota_resource
         assert rule.quota_key == quota_key

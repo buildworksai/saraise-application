@@ -26,7 +26,6 @@ from src.modules.ai_provider_configuration.permissions import (
     TenantProviderThrottle,
 )
 
-
 # --------------------------------------------------------------------------
 # Test doubles
 # --------------------------------------------------------------------------
@@ -324,10 +323,7 @@ def test_has_permission_handles_no_tenant() -> None:
 
 
 def test_permission_message_and_class() -> None:
-    assert (
-        AIProviderActionPermission.message
-        == "You do not have permission to manage AI provider configuration."
-    )
+    assert AIProviderActionPermission.message == "You do not have permission to manage AI provider configuration."
     from rest_framework.permissions import BasePermission
 
     assert issubclass(AIProviderActionPermission, BasePermission)

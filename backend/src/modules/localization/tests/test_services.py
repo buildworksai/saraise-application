@@ -7,15 +7,9 @@ Tests business logic in services layer.
 import uuid
 
 import pytest
-
 from django.core.cache import cache
 
-from src.modules.localization.models import (
-    Language,
-    LocaleConfig,
-    TenantBaseModel,
-    Translation,
-)
+from src.modules.localization.models import Language, LocaleConfig, TenantBaseModel, Translation
 from src.modules.localization.services import LocalizationService, TranslationService
 
 
@@ -580,9 +574,7 @@ class TestTranslationService:
         with caplog.at_level("INFO"):
             result = service.invalidate_cache(self.TENANT, "fr")
         assert result is None
-        assert any(
-            self.TENANT in record.message and "fr" in record.message for record in caplog.records
-        )
+        assert any(self.TENANT in record.message and "fr" in record.message for record in caplog.records)
 
     def test_invalidate_cache_logs_without_language_code(self, db, caplog):
         """invalidate_cache logs an info message with 'None' as language when omitted."""
@@ -590,9 +582,7 @@ class TestTranslationService:
         with caplog.at_level("INFO"):
             result = service.invalidate_cache(self.TENANT)
         assert result is None
-        assert any(
-            self.TENANT in record.message and "None" in record.message for record in caplog.records
-        )
+        assert any(self.TENANT in record.message and "None" in record.message for record in caplog.records)
 
     def test_cache_timeout_constant(self):
         """CACHE_TIMEOUT is exactly one hour in seconds, as documented."""

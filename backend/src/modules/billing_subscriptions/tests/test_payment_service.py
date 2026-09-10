@@ -758,14 +758,14 @@ class PaymentServiceTestCase(TestCase):
             mock_intent = MagicMock()
             mock_intent.id = "pi_ra_dynamic_123"
             mock_intent.status = "".join(["requires", "_action"])
-            mock_intent.client_secret = "secret_ra"
+            mock_intent.client_secret = "client-value-ra"  # pragma: allowlist secret
             mock_stripe.PaymentIntent.create.return_value = mock_intent
 
             result = PaymentService._process_stripe_payment(self.payment, "pm_test_123")
 
         self.assertFalse(result["success"])
         self.assertTrue(result.get("requires_action"))
-        self.assertEqual(result.get("client_secret"), "secret_ra")
+        self.assertEqual(result.get("client_secret"), "client-value-ra")
 
     @override_settings(STRIPE_SECRET_KEY="sk_test_123")
     def test_process_stripe_payment_requires_action_check_rejects_lexically_smaller_status(self):
@@ -812,13 +812,13 @@ class PaymentServiceTestCase(TestCase):
             mock_intent = MagicMock()
             mock_intent.id = "pi_secret_123"
             mock_intent.status = "succeeded"
-            mock_intent.client_secret = "cs_test_distinctive_value"
+            mock_intent.client_secret = "client-value-success"  # pragma: allowlist secret
             mock_stripe.PaymentIntent.create.return_value = mock_intent
 
             result = PaymentService._process_stripe_payment(self.payment, "pm_test_123")
 
         self.assertTrue(result["success"])
-        self.assertEqual(result["client_secret"], "cs_test_distinctive_value")
+        self.assertEqual(result["client_secret"], "client-value-success")
 
     def test_process_stripe_payment_falls_back_to_usd_for_falsy_invoice_currency(self):
         """Test the `or "USD"` fallback actually engages for a falsy (empty string)

@@ -15,6 +15,7 @@ from rest_framework.request import Request
 
 from src.core.access import RequiresAccess
 
+from .. import permissions as permissions_module
 from ..api import ControlViewSet, RiskAssessmentViewSet
 from ..permissions import (
     ACTION_ACCESS,
@@ -36,7 +37,6 @@ from ..permissions import (
     GovernedSessionAuthentication,
     requirement_for,
 )
-from .. import permissions as permissions_module
 
 
 def test_manifest_and_runtime_permission_catalog_are_exact() -> None:

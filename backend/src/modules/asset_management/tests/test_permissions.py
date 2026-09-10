@@ -34,7 +34,6 @@ from src.modules.asset_management.permissions import (
     AssetAccessMixin,
 )
 
-
 del asset_management_pkg
 
 
@@ -124,9 +123,7 @@ def test_dunder_all_is_exactly_the_fixed_names_plus_upper_string_constants():
         "SOD_ACTIONS",
     }
     upper_string_constant_names = {
-        name
-        for name, value in vars(perm_module).items()
-        if name.isupper() and isinstance(value, str)
+        name for name, value in vars(perm_module).items() if name.isupper() and isinstance(value, str)
     }
     assert set(perm_module.__all__) == fixed_names | upper_string_constant_names
     # None of the module's lower/dunder string globals (which satisfy

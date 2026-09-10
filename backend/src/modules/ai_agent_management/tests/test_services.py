@@ -42,6 +42,8 @@ from src.modules.ai_agent_management.services import (
     UsageService,
 )
 from src.modules.ai_agent_management.tool_models import ToolInvocation
+from src.modules.ai_agent_management.tool_registry import ToolDefinition, ToolSchema
+from src.modules.ai_agent_management.tool_registry import tool_registry as global_tool_registry
 
 
 @pytest.mark.django_db
@@ -78,6 +80,23 @@ def test_agent_update_rolls_back_server_controlled_changes(agent, actor_id, othe
     agent.refresh_from_db()
     assert agent.name == original_name
     assert agent.tenant_id != other_tenant_id
+
+
+@pytest.mark.django_db
+def test_agent_update_applies_permitted_field_changes(agent, actor_id):
+    updated = AgentService.update_agent(agent.tenant_id, actor_id, agent.id, {"name": "Renamed agent"})
+    assert updated.name == "Renamed agent"
+    agent.refresh_from_db()
+    assert agent.name == "Renamed agent"
+
+
+@pytest.mark.django_db
+def test_agent_update_rejects_retired_agents_as_immutable(agent, actor_id, registered_runner):
+    AgentService.activate_agent(agent.tenant_id, actor_id, agent.id, "agent:activate:retire-guard")
+    AgentService.retire_agent(agent.tenant_id, actor_id, agent.id, "obsolete", "agent:retire:guard")
+    with pytest.raises(AgentServiceError) as caught:
+        AgentService.update_agent(agent.tenant_id, actor_id, agent.id, {"name": "must not apply"})
+    assert caught.value.code == "AGENT_RETIRED"
 
 
 @pytest.mark.django_db
@@ -149,6 +168,28 @@ def test_agent_list_is_tenant_scoped_and_filterable(agent, other_tenant_id, acto
     assert not AgentService.list_agents(agent.tenant_id, {"status": "active"}).exists()
     with pytest.raises(ValidationError):
         AgentService.list_agents(agent.tenant_id, {"ordering": "tenant_id"}).exists()
+
+
+@pytest.mark.django_db
+def test_transition_with_updates_replays_idempotently_and_rejects_key_reuse(agent, actor_id):
+    first = AgentService.retire_agent(agent.tenant_id, actor_id, agent.id, "obsolete", "agent:retire:replay")
+    replay = AgentService.retire_agent(agent.tenant_id, actor_id, agent.id, "obsolete", "agent:retire:replay")
+    assert replay.id == first.id
+    assert replay.deleted_at == first.deleted_at
+    assert [item["transition_key"] for item in replay.transition_history].count("agent:retire:replay") == 1
+
+
+@pytest.mark.django_db
+def test_transition_with_updates_rejects_key_reuse_across_a_different_command(execution, actor_id):
+    AgentExecution._base_manager.filter(pk=execution.pk).update(state="running")
+    ExecutionService.pause(execution.tenant_id, actor_id, execution.agent_id, execution.id, "shared-key")
+    # "shared-key" is already bound to "pause" in this execution's transition
+    # history; reusing it for "terminate" must fail closed rather than silently
+    # replay a different command's outcome.
+    with pytest.raises(IdempotencyConflictError):
+        ExecutionService.terminate(
+            execution.tenant_id, actor_id, execution.agent_id, execution.id, "reason", "shared-key"
+        )
 
 
 @pytest.mark.django_db
@@ -515,6 +556,104 @@ def test_approval_cancel_policy_and_expire_pending_paths(execution, tool, actor_
 
 
 @pytest.mark.django_db
+def test_approval_list_requests_filters_by_every_alias_and_expiry_window(execution, tool, actor_id, approver_id):
+    approval = ApprovalService.create_request(
+        execution.tenant_id,
+        actor_id,
+        execution.id,
+        None,
+        {
+            "tool_id": tool.id,
+            "tool_input": {},
+            "justification": "filter coverage",
+            "expires_at": timezone.now() + timedelta(hours=1),
+        },
+    )
+    decided = ApprovalService.approve(execution.tenant_id, approver_id, approval.id, "approve:filter-coverage")
+
+    tenant = execution.tenant_id
+    assert list(ApprovalService.list_requests(tenant, {"status": "approved"})) == [decided]
+    assert not ApprovalService.list_requests(tenant, {"status": "pending"}).exists()
+    assert list(ApprovalService.list_requests(tenant, {"tool_id": tool.id})) == [decided]
+    assert list(ApprovalService.list_requests(tenant, {"execution_id": execution.id})) == [decided]
+    assert list(ApprovalService.list_requests(tenant, {"approver_id": approver_id})) == [decided]
+    assert not ApprovalService.list_requests(tenant, {"approver_id": uuid4()}).exists()
+    assert list(
+        ApprovalService.list_requests(
+            tenant, {"expires_after": timezone.now(), "expires_before": timezone.now() + timedelta(hours=2)}
+        )
+    ) == [decided]
+    assert not ApprovalService.list_requests(tenant, {"expires_after": timezone.now() + timedelta(hours=2)}).exists()
+    assert not ApprovalService.list_requests(tenant, {"expires_before": timezone.now() - timedelta(hours=2)}).exists()
+
+
+@pytest.mark.django_db
+def test_execution_list_filters_by_every_alias_and_creation_window(execution, tenant_id, agent, actor_id):
+    tenant = execution.tenant_id
+    assert list(ExecutionService.list_executions(tenant, {"agent_id": agent.id})) == [execution]
+    assert not ExecutionService.list_executions(tenant, {"agent_id": uuid4()}).exists()
+    assert list(ExecutionService.list_executions(tenant, {"state": "created"})) == [execution]
+    assert not ExecutionService.list_executions(tenant, {"state": "completed"}).exists()
+    assert list(ExecutionService.list_executions(tenant, {"actor_id": actor_id})) == [execution]
+    assert not ExecutionService.list_executions(tenant, {"actor_id": uuid4()}).exists()
+    assert list(
+        ExecutionService.list_executions(
+            tenant,
+            {
+                "created_after": timezone.now() - timedelta(hours=1),
+                "created_before": timezone.now() + timedelta(hours=1),
+            },
+        )
+    ) == [execution]
+    assert not ExecutionService.list_executions(tenant, {"created_after": timezone.now() + timedelta(hours=1)}).exists()
+    assert not ExecutionService.list_executions(
+        tenant, {"created_before": timezone.now() - timedelta(hours=1)}
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_schedule_list_filters_by_every_alias_and_scheduled_window(agent, actor_id):
+    schedule = ScheduleService.create_schedule(
+        agent.tenant_id,
+        actor_id,
+        agent.id,
+        {
+            "scheduled_at": timezone.now() + timedelta(hours=1),
+            "task_data": {"task": "list-filter"},
+            "idempotency_key": "schedule:list-filter",
+        },
+    )
+    tenant = agent.tenant_id
+    assert list(ScheduleService.list_schedules(tenant, {"agent_id": agent.id})) == [schedule]
+    assert not ScheduleService.list_schedules(tenant, {"agent_id": uuid4()}).exists()
+    assert list(ScheduleService.list_schedules(tenant, {"status": "pending"})) == [schedule]
+    assert not ScheduleService.list_schedules(tenant, {"status": "completed"}).exists()
+    assert list(
+        ScheduleService.list_schedules(
+            tenant,
+            {
+                "scheduled_after": timezone.now(),
+                "scheduled_before": timezone.now() + timedelta(hours=2),
+            },
+        )
+    ) == [schedule]
+    assert not ScheduleService.list_schedules(tenant, {"scheduled_after": timezone.now() + timedelta(hours=2)}).exists()
+    assert not ScheduleService.list_schedules(
+        tenant, {"scheduled_before": timezone.now() - timedelta(hours=1)}
+    ).exists()
+    with pytest.raises(ValidationError):
+        ScheduleService.list_schedules(tenant, {"ordering": "status"}).exists()
+
+
+@pytest.mark.django_db
+def test_tool_list_filters_by_is_active_and_owning_module(tenant_id, tool):
+    assert list(ToolService.list_tools(tenant_id, {"is_active": True})) == [tool]
+    assert not ToolService.list_tools(tenant_id, {"is_active": False}).exists()
+    assert not ToolService.list_tools(tenant_id, {"side_effect_class": "read_only"}).exists()
+    assert list(ToolService.list_tools(tenant_id, {"side_effect_class": "data_mutation"})) == [tool]
+
+
+@pytest.mark.django_db
 def test_sod_evaluates_immutable_audit_history(execution, tenant_id, actor_id):
     SoDService.create_policy(
         tenant_id,
@@ -541,6 +680,76 @@ def test_sod_record_violation_reports_exact_invalid_tenant_field() -> None:
     with pytest.raises(ValidationError) as invalid_tenant:
         SoDService.record_violation("not-a-uuid")  # type: ignore[arg-type]
     assert invalid_tenant.value.message_dict == {"tenant_id": ["Must be a valid UUID."]}
+
+
+@pytest.mark.django_db
+def test_sod_record_violation_persists_a_durable_row(execution, tenant_id, actor_id):
+    policy = SoDService.create_policy(
+        tenant_id,
+        actor_id,
+        {"name": "separate release", "action_1": "approve", "action_2": "release"},
+    )
+    now = timezone.now()
+    violation = SoDService.record_violation(
+        tenant_id,
+        policy=policy,
+        agent_execution=execution,
+        action_1_user=actor_id,
+        action_2_user=uuid4(),
+        action_1_timestamp=now,
+        action_2_timestamp=now,
+    )
+    assert violation.tenant_id == tenant_id
+    assert violation.policy_id == policy.id
+    assert violation.pk is not None
+
+
+@pytest.mark.django_db
+def test_sod_evaluates_counterpart_from_the_second_action_side(execution, tenant_id, actor_id):
+    SoDService.create_policy(
+        tenant_id,
+        actor_id,
+        {"name": "separate release", "action_1": "approve", "action_2": "release"},
+    )
+    AuditService.record_event(
+        tenant_id,
+        "approve",
+        actor_id,
+        uuid4(),
+        "success",
+        request_id=uuid4(),
+        agent_execution=execution,
+    )
+    # Evaluating from the "release" side (policy.action_2) must resolve its
+    # counterpart to policy.action_1 ("approve"), not merely re-check action_1.
+    denied = SoDService.evaluate(tenant_id, actor_id, "release", execution.id)
+    assert denied.status == "failed"
+    assert denied.error_code == "SOD_VIOLATION"
+
+
+@pytest.mark.django_db
+def test_sod_evaluation_skips_entirely_when_counterpart_detection_disabled(execution, tenant_id, actor_id):
+    SoDService.create_policy(
+        tenant_id,
+        actor_id,
+        {"name": "separate release", "action_1": "approve", "action_2": "release"},
+    )
+    AuditService.record_event(
+        tenant_id,
+        "release",
+        actor_id,
+        uuid4(),
+        "success",
+        request_id=uuid4(),
+        agent_execution=execution,
+    )
+    disabled_document = ConfigurationService.defaults()
+    disabled_document["separation_of_duties"]["counterpart_detection_enabled"] = False
+    ConfigurationService.replace(tenant_id, actor_id, uuid4(), disabled_document, expected_version=1)
+
+    result = SoDService.evaluate(tenant_id, actor_id, "approve", execution.id)
+    assert result.status == "succeeded"
+    assert result.evidence == {"policy": "counterpart_detection_disabled"}
 
 
 @pytest.mark.django_db
@@ -627,6 +836,57 @@ def test_tool_lifecycle_filters_and_validation_diagnostics_are_policy_bound(tool
 
     assert list(ToolService.list_tools(tenant_id, {"owning_module": "ai_agent_management", "search": "test"})) == [tool]
     assert ToolService.deactivate_tool(tenant_id, actor_id, tool.id).is_active is False
+
+
+@pytest.mark.django_db
+def test_tool_invoke_requires_approval_for_non_read_only_and_is_idempotent(execution, tool, actor_id):
+    definition = ToolDefinition(
+        name=tool.name,
+        owning_module=tool.owning_module,
+        required_permissions=list(tool.required_permissions),
+        input_schema=ToolSchema(type="object"),
+        output_schema=ToolSchema(type="object"),
+        side_effect_class=tool.side_effect_class,
+        version=tool.version,
+    )
+
+    def handler(context, input_data):
+        return {"ok": True}
+
+    global_tool_registry.register_tool(definition, handler)
+    try:
+        accepted = ToolService.invoke(tool.tenant_id, actor_id, execution.id, tool.id, {"value": 1}, "invoke:awaiting")
+        invocation = accepted.unwrap()
+        assert invocation.status == "awaiting_approval"
+
+        replay = ToolService.invoke(tool.tenant_id, actor_id, execution.id, tool.id, {"value": 1}, "invoke:awaiting")
+        assert replay.unwrap().id == invocation.id
+        assert accepted.evidence["async_job_id"]
+        assert ToolInvocation.objects.filter(tenant_id=tool.tenant_id, idempotency_key="invoke:awaiting").count() == 1
+    finally:
+        global_tool_registry.unregister_tool(tool.name, tool.version)
+
+
+@pytest.mark.django_db
+def test_tool_invoke_read_only_tool_is_requested_without_approval(execution, tool, actor_id):
+    tool.side_effect_class = "read_only"
+    tool.save(update_fields=("side_effect_class", "updated_at"))
+    definition = ToolDefinition(
+        name=tool.name,
+        owning_module=tool.owning_module,
+        required_permissions=list(tool.required_permissions),
+        input_schema=ToolSchema(type="object"),
+        output_schema=ToolSchema(type="object"),
+        side_effect_class=tool.side_effect_class,
+        version=tool.version,
+    )
+    global_tool_registry.register_tool(definition, lambda context, input_data: {"ok": True})
+    try:
+        accepted = ToolService.invoke(tool.tenant_id, actor_id, execution.id, tool.id, {"value": 1}, "invoke:read-only")
+        invocation = accepted.unwrap()
+        assert invocation.status == "requested"
+    finally:
+        global_tool_registry.unregister_tool(tool.name, tool.version)
 
 
 @pytest.mark.django_db
@@ -739,6 +999,52 @@ def test_expired_secret_denies_without_access_evidence(execution, tenant_id, act
         SecretService.resolve_for_execution(tenant_id, actor_id, secret.id, execution.id, "provider-call")
     assert caught.value.code == "SECRET_UNAVAILABLE"
     assert not SecretAccess.objects.filter(secret=secret).exists()
+
+
+@pytest.mark.django_db
+def test_enqueue_cost_recalculation_corrects_a_mismatched_correlation_id(tenant_id, actor_id, monkeypatch):
+    import src.core.async_jobs.services as async_job_services
+
+    ambient = uuid4()
+    monkeypatch.setattr(async_job_services, "get_correlation_id", lambda: str(ambient))
+    explicit = uuid4()
+
+    job = UsageService.enqueue_cost_recalculation(
+        tenant_id,
+        actor_id,
+        {"idempotency_key": "cost:recalc:mismatch", "period_start": timezone.now()},
+        explicit,
+    )
+
+    assert str(job.correlation_id) == str(explicit)
+    assert str(job.correlation_id) != str(ambient)
+    job.refresh_from_db()
+    assert str(job.correlation_id) == str(explicit)
+
+
+@pytest.mark.django_db
+def test_enqueue_cost_recalculation_keeps_a_matching_correlation_id(tenant_id, actor_id, monkeypatch):
+    import src.core.async_jobs.services as async_job_services
+
+    explicit = uuid4()
+    monkeypatch.setattr(async_job_services, "get_correlation_id", lambda: str(explicit))
+
+    job = UsageService.enqueue_cost_recalculation(
+        tenant_id,
+        actor_id,
+        {"idempotency_key": "cost:recalc:matching", "period_start": timezone.now()},
+        explicit,
+    )
+
+    assert str(job.correlation_id) == str(explicit)
+
+
+@pytest.mark.django_db
+def test_enqueue_cost_recalculation_requires_a_bounded_idempotency_key(tenant_id, actor_id):
+    with pytest.raises(ValidationError):
+        UsageService.enqueue_cost_recalculation(tenant_id, actor_id, {"idempotency_key": ""}, uuid4())
+    with pytest.raises(ValidationError):
+        UsageService.enqueue_cost_recalculation(tenant_id, actor_id, {"idempotency_key": "x" * 300}, uuid4())
 
 
 @pytest.mark.django_db
@@ -933,6 +1239,33 @@ def test_egress_rule_update_list_deactivate_and_dns_failure_are_explicit(executi
 
 
 @pytest.mark.django_db
+def test_egress_cidr_rule_matches_a_resolved_address_within_the_network(execution, tenant_id, actor_id, monkeypatch):
+    assert EgressService.normalize("cidr", "93.184.216.0/24", tenant_id) == "93.184.216.0/24"
+    rule = EgressService.create_rule(
+        tenant_id,
+        actor_id,
+        {
+            "name": "Example CIDR",
+            "destination_type": "cidr",
+            "destination": "93.184.216.0/24",
+            "port": None,
+            "protocol": "https",
+        },
+    )
+
+    monkeypatch.setattr(
+        service_module.socket,
+        "getaddrinfo",
+        lambda host, port: [(None, None, None, None, ("93.184.216.34", port))],
+    )
+
+    matched = EgressService.evaluate(tenant_id, execution.id, "https://example.com/resource", 443, "https")
+    assert matched.allowed is True
+    assert matched.reason_code == "ALLOWLIST_MATCH"
+    assert matched.matched_rule_id == rule.id
+
+
+@pytest.mark.django_db
 def test_kill_switch_is_tenant_scoped_and_enqueues_enforcement(tenant_id, other_tenant_id, actor_id):
     switch = KillSwitchService.activate(tenant_id, actor_id, "tenant", None, "incident", "kill:one")
     assert KillSwitchService.check(tenant_id).error_code == "KILL_SWITCH_ACTIVE"
@@ -942,6 +1275,37 @@ def test_kill_switch_is_tenant_scoped_and_enqueues_enforcement(tenant_id, other_
     switch.refresh_from_db()
     assert switch.status == "inactive"
     assert switch.deactivated_by == actor_id
+
+
+@pytest.mark.django_db
+def test_kill_switch_scope_validation_is_enforced_per_scope(tenant_id, actor_id, agent):
+    with pytest.raises(ValidationError) as tenant_with_scope_id:
+        KillSwitchService.activate(tenant_id, actor_id, "tenant", uuid4(), "bad", "kill:tenant-scoped")
+    assert "scope_id" in tenant_with_scope_id.value.message_dict
+
+    with pytest.raises(ValidationError) as agent_without_scope_id:
+        KillSwitchService.activate(tenant_id, actor_id, "agent", None, "bad", "kill:agent-unscoped")
+    assert "scope_id" in agent_without_scope_id.value.message_dict
+
+    with pytest.raises(ValidationError) as shard_without_scope_id:
+        KillSwitchService.activate(tenant_id, actor_id, "shard", None, "bad", "kill:shard-unscoped")
+    assert "scope_id" in shard_without_scope_id.value.message_dict
+
+
+@pytest.mark.django_db
+def test_kill_switch_agent_and_shard_scopes_are_independently_checked(tenant_id, actor_id, agent):
+    other_agent_id = uuid4()
+    shard_id = uuid4()
+
+    KillSwitchService.activate(tenant_id, actor_id, "agent", agent.id, "agent-incident", "kill:agent-scope")
+    assert KillSwitchService.check(tenant_id, agent_id=agent.id).error_code == "KILL_SWITCH_ACTIVE"
+    assert KillSwitchService.check(tenant_id, agent_id=other_agent_id).status == "succeeded"
+
+    KillSwitchService.activate(tenant_id, actor_id, "shard", shard_id, "shard-incident", "kill:shard-scope")
+    assert KillSwitchService.check(tenant_id, shard_id=shard_id).error_code == "KILL_SWITCH_ACTIVE"
+    assert KillSwitchService.check(tenant_id, shard_id=uuid4()).status == "succeeded"
+    # An unscoped check (no agent/shard filter) must not be tripped by scoped switches.
+    assert KillSwitchService.check(tenant_id).status == "succeeded"
 
 
 @pytest.mark.django_db
@@ -1040,6 +1404,27 @@ def test_audit_record_event_requires_exact_request_id_relation(tenant_id, actor_
             request_id=request_id,
         )
     assert invalid_subject.value.message_dict == {"subject_id": ["Must be a valid UUID."]}
+
+
+@pytest.mark.django_db
+def test_complete_trail_is_idempotent_and_defaults_unknown_outcome_to_failure(execution, actor_id):
+    request_id = uuid4()
+    AuditService.start_trail(execution.tenant_id, request_id, execution.id, actor_id)
+
+    completed = AuditService.complete_trail(execution.tenant_id, request_id, "success", {"final": "ok"})
+    assert AuditService.query_events(execution.tenant_id, {"event_type": "audit_trail_completed"}).count() == 1
+
+    replay = AuditService.complete_trail(execution.tenant_id, request_id, "success", {"final": "ignored-on-replay"})
+    assert replay.id == completed.id
+    assert AuditService.query_events(execution.tenant_id, {"event_type": "audit_trail_completed"}).count() == 1
+
+    other_request_id = uuid4()
+    AuditService.start_trail(execution.tenant_id, other_request_id, execution.id, actor_id)
+    AuditService.complete_trail(execution.tenant_id, other_request_id, "unrecognized-outcome")
+    events = AuditService.query_events(execution.tenant_id, {"event_type": "audit_trail_completed"})
+    matching = [item for item in events if item.request_id == other_request_id]
+    assert matching[0].outcome == "failure"
+    assert matching[0].outcome_details == {"final_outcome": "unrecognized-outcome"}
 
 
 @pytest.mark.django_db

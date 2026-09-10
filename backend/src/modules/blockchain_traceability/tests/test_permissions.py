@@ -56,9 +56,7 @@ class TestSessionAuthentication401:
 class TestActionAccessMixinTenantCoercion:
     def test_valid_tenant_id_is_coerced_to_uuid(self, monkeypatch):
         tenant_uuid = uuid4()
-        monkeypatch.setattr(
-            permissions_module, "get_user_tenant_id", lambda user: str(tenant_uuid)
-        )
+        monkeypatch.setattr(permissions_module, "get_user_tenant_id", lambda user: str(tenant_uuid))
         view = _View()
         view.action = "retrieve"
         view.http_method_names = ("get",)
@@ -82,9 +80,7 @@ class TestActionAccessMixinTenantCoercion:
 
     def test_invalid_tenant_id_fails_closed_to_none(self, monkeypatch):
         # Truthy but not a valid UUID string -> UUID() raises ValueError.
-        monkeypatch.setattr(
-            permissions_module, "get_user_tenant_id", lambda user: "not-a-uuid"
-        )
+        monkeypatch.setattr(permissions_module, "get_user_tenant_id", lambda user: "not-a-uuid")
         view = _View()
         view.action = "retrieve"
         view.http_method_names = ("get",)
@@ -94,9 +90,7 @@ class TestActionAccessMixinTenantCoercion:
 
         assert view.request.tenant_id is None
 
-    def test_non_string_truthy_tenant_id_that_fails_uuid_parsing_fails_closed(
-        self, monkeypatch
-    ):
+    def test_non_string_truthy_tenant_id_that_fails_uuid_parsing_fails_closed(self, monkeypatch):
         # Truthy int whose str() is not a valid UUID -> ValueError caught.
         monkeypatch.setattr(permissions_module, "get_user_tenant_id", lambda user: 12345)
         view = _View()
@@ -116,9 +110,7 @@ class TestActionAccessMixinPermissionResolution:
         pass
 
     def _view_with_tenant(self, monkeypatch, tenant_id=None):
-        monkeypatch.setattr(
-            permissions_module, "get_user_tenant_id", lambda user: tenant_id
-        )
+        monkeypatch.setattr(permissions_module, "get_user_tenant_id", lambda user: tenant_id)
         return _View()
 
     def test_known_action_resolves_declared_permission(self, monkeypatch):
@@ -133,9 +125,7 @@ class TestActionAccessMixinPermissionResolution:
         assert view.required_permission == ASSET_READ
         assert view.required_entitlement == ASSET_READ
 
-    def test_unmapped_action_with_disallowed_method_falls_back_to_unsupported(
-        self, monkeypatch
-    ):
+    def test_unmapped_action_with_disallowed_method_falls_back_to_unsupported(self, monkeypatch):
         view = self._view_with_tenant(monkeypatch)
         view.action = "destroy"
         view.action_permissions = {}
@@ -147,9 +137,7 @@ class TestActionAccessMixinPermissionResolution:
 
         assert view.required_permission == "blockchain_traceability.asset:delete"
 
-    def test_unmapped_action_with_allowed_method_leaves_permission_none(
-        self, monkeypatch
-    ):
+    def test_unmapped_action_with_allowed_method_leaves_permission_none(self, monkeypatch):
         view = self._view_with_tenant(monkeypatch)
         view.action = "custom_action"
         view.action_permissions = {}
@@ -161,9 +149,7 @@ class TestActionAccessMixinPermissionResolution:
 
         assert view.required_permission is None
 
-    def test_mapped_action_skips_unsupported_fallback_even_if_method_disallowed(
-        self, monkeypatch
-    ):
+    def test_mapped_action_skips_unsupported_fallback_even_if_method_disallowed(self, monkeypatch):
         view = self._view_with_tenant(monkeypatch)
         view.action = "retrieve"
         view.action_permissions = {"retrieve": ASSET_READ}
@@ -175,9 +161,7 @@ class TestActionAccessMixinPermissionResolution:
 
         assert view.required_permission == ASSET_READ
 
-    def test_missing_http_method_names_defaults_to_empty_and_triggers_fallback(
-        self, monkeypatch
-    ):
+    def test_missing_http_method_names_defaults_to_empty_and_triggers_fallback(self, monkeypatch):
         view = self._view_with_tenant(monkeypatch)
         view.action = ""
         view.action_permissions = {}
@@ -215,9 +199,7 @@ class TestActionAccessMixinPermissionResolution:
 
 class TestActionAccessMixinQuotaResolution:
     def _view_with_tenant(self, monkeypatch, tenant_id=None):
-        monkeypatch.setattr(
-            permissions_module, "get_user_tenant_id", lambda user: tenant_id
-        )
+        monkeypatch.setattr(permissions_module, "get_user_tenant_id", lambda user: tenant_id)
         return _View()
 
     @pytest.mark.parametrize("read_action", ["list", "retrieve", "history"])

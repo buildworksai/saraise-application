@@ -10,17 +10,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
-import pytest
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 
 from src.core.access.permissions import RequiresAccess
-from src.modules.fixed_assets.permissions import (
-    PERMISSIONS,
-    READ_ACTIONS,
-    ActionAccessMixin,
-    SessionAuthentication401,
-)
+from src.modules.fixed_assets.permissions import PERMISSIONS, READ_ACTIONS, ActionAccessMixin, SessionAuthentication401
 
 
 def _view(*, action: str = "list", request: object | None = None) -> ActionAccessMixin:

@@ -16,11 +16,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from src.core.access.permissions import RequiresAccess
 from src.modules.project_management import permissions as permissions_module
-from src.modules.project_management.permissions import (
-    ActionAccessMixin,
-    IsProjectUser,
-    SessionAuthentication401,
-)
+from src.modules.project_management.permissions import ActionAccessMixin, IsProjectUser, SessionAuthentication401
 
 
 def _request(*, user=None, method="GET", path="/api/v2/project-management/projects/", query_params=None):

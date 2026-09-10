@@ -183,6 +183,7 @@ site/
 *~
 .cache/
 migration-backups-*/
+backend/process_mining/
 
 # ====================
 # Redis / Session storage (dev)

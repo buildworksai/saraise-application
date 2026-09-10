@@ -259,7 +259,7 @@ def test_permission_literal_values_are_pinned() -> None:
     assert WEBHOOK_DELETE == "integration_platform.webhook:delete"
     assert WEBHOOK_ACTIVATE == "integration_platform.webhook:activate"
     assert WEBHOOK_DEACTIVATE == "integration_platform.webhook:deactivate"
-    assert WEBHOOK_ROTATE_SECRET == "integration_platform.webhook:rotate_secret"
+    assert WEBHOOK_ROTATE_SECRET == "integration_platform.webhook:rotate_secret"  # pragma: allowlist secret
     assert DELIVERY_READ == "integration_platform.delivery:read"
     assert DELIVERY_REDRIVE == "integration_platform.delivery:redrive"
     assert MAPPING_CREATE == "integration_platform.mapping:create"

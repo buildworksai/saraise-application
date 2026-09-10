@@ -196,9 +196,7 @@ def test_action_access_top_level_keys_are_exactly_the_seven_governed_resources()
 
 
 @pytest.mark.parametrize("resource,action", sorted(EXPECTED_ACCESS.keys()))
-def test_every_governed_action_matches_its_pinned_access_requirement_exactly(
-    resource: str, action: str
-) -> None:
+def test_every_governed_action_matches_its_pinned_access_requirement_exactly(resource: str, action: str) -> None:
     expected_permission, expected_quota_resource, expected_quota_cost = EXPECTED_ACCESS[(resource, action)]
     requirement = requirement_for(resource, action)
     assert requirement is not None

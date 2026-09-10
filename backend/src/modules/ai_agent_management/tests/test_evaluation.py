@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.core.async_jobs.models import AsyncJob
+from src.core.async_jobs.models import AsyncJob, JobStatus
 from src.modules.ai_agent_management.evaluation.harness import (
     AgentEvaluationHarness,
     EvaluationResult,
@@ -163,6 +163,114 @@ def test_evaluation_job_persists_typed_result_evidence(
     assert result["metrics"][0]["name"] == "determinism"
     assert job.result == result
     assert job.status == "succeeded"
+
+
+@pytest.mark.django_db
+def test_evaluation_job_exception_transitions_job_to_failed(agent, actor_id, registered_runner):
+    evaluation_registry.unregister("raising.suite")
+    evaluation_registry.register("raising.suite", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+    try:
+        job = EvaluationService.start_evaluation(
+            agent.tenant_id,
+            actor_id,
+            agent.id,
+            "raising.suite",
+            "eval:raises",
+        ).unwrap()
+        with pytest.raises(RuntimeError, match="boom"):
+            EvaluationService.run_evaluation_job(agent.tenant_id, job.id)
+    finally:
+        evaluation_registry.unregister("raising.suite")
+    job.refresh_from_db()
+    assert job.status == JobStatus.FAILED
+    assert job.error_message == "Evaluation suite failed."
+
+
+@pytest.mark.django_db
+def test_evaluation_job_skips_lifecycle_transitions_when_not_owned(
+    agent, actor_id, registered_runner, registered_evaluation_suite
+):
+    accepted = EvaluationService.start_evaluation(
+        agent.tenant_id,
+        actor_id,
+        agent.id,
+        "test.suite",
+        "eval:not-owned",
+    )
+    job = accepted.unwrap()
+    AsyncJob._base_manager.filter(pk=job.pk).update(status=JobStatus.RUNNING)
+
+    result = EvaluationService.run_evaluation_job(agent.tenant_id, job.id)
+    job.refresh_from_db()
+    assert result["status"] == "passed"
+    # The worker did not own the lifecycle (job was already RUNNING, not QUEUED
+    # when claimed), so this call must not transition it to SUCCEEDED itself.
+    assert job.status == JobStatus.RUNNING
+    assert job.result != result
+
+
+@pytest.mark.django_db
+def test_evaluation_job_invalid_result_not_owned_does_not_transition(agent, actor_id, registered_runner):
+    evaluation_registry.unregister("invalid.not-owned")
+    evaluation_registry.register("invalid.not-owned", lambda **kwargs: {"message": "no metric evidence"})
+    try:
+        job = EvaluationService.start_evaluation(
+            agent.tenant_id,
+            actor_id,
+            agent.id,
+            "invalid.not-owned",
+            "eval:invalid-not-owned",
+        ).unwrap()
+        AsyncJob._base_manager.filter(pk=job.pk).update(status=JobStatus.RUNNING)
+        with pytest.raises(AgentServiceError) as caught:
+            EvaluationService.run_evaluation_job(agent.tenant_id, job.id)
+    finally:
+        evaluation_registry.unregister("invalid.not-owned")
+    assert caught.value.code == "INVALID_EVALUATION_RESULT"
+    job.refresh_from_db()
+    assert job.status == JobStatus.RUNNING
+
+
+@pytest.mark.django_db
+def test_start_red_team_requires_suite_and_runner_and_persists_isolation_flag(
+    agent, actor_id, registered_runner, registered_evaluation_suite
+):
+    evaluation_registry.unregister("missing.red-team-suite")
+    missing_suite = EvaluationService.start_red_team(
+        agent.tenant_id,
+        actor_id,
+        agent.id,
+        "missing.red-team-suite",
+        "red-team:missing-suite",
+    )
+    assert missing_suite.status == "unavailable"
+    assert "evaluation_suite" in missing_suite.detail["capability"]
+    assert not AsyncJob.objects.filter(tenant_id=agent.tenant_id).exists()
+
+    runner_registry.unregister(agent.runner_key)
+    missing_runner = EvaluationService.start_red_team(
+        agent.tenant_id,
+        actor_id,
+        agent.id,
+        "test.suite",
+        "red-team:missing-runner",
+    )
+    assert missing_runner.status == "unavailable"
+    assert "runner" in missing_runner.detail["capability"]
+    assert not AsyncJob.objects.filter(tenant_id=agent.tenant_id).exists()
+
+    runner_registry.register("test.runner", registered_runner)
+    accepted = EvaluationService.start_red_team(
+        agent.tenant_id,
+        actor_id,
+        agent.id,
+        "test.suite",
+        "red-team:one",
+    )
+    job = accepted.unwrap()
+    assert job.command == "ai_agent_management.red_team"
+    assert job.payload == {"agent_id": str(agent.id), "suite_key": "test.suite", "isolated": True}
+    assert accepted.evidence == {"async_job_id": str(job.id), "suite_key": "test.suite"}
 
 
 @pytest.mark.django_db
