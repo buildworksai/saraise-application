@@ -24,7 +24,8 @@ RUN apk upgrade --no-cache && \
 
 # Copy and install Python dependencies
 COPY pyproject.toml .
-RUN pip install --no-cache-dir --upgrade "setuptools>=83.0.0" "wheel>=0.46.2" "jaraco.context>=6.1.0"
+RUN pip install --no-cache-dir --upgrade "pip>=26.1.2" "setuptools>=83.0.0" "wheel>=0.46.2" "jaraco.context>=6.1.0" && \
+    rm -f /usr/local/lib/python3.11/site-packages/pip/_vendor/bom.cdx.json
 RUN pip install --no-cache-dir -e .
 
 # Copy application code
