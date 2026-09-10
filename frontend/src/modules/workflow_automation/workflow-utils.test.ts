@@ -8,15 +8,33 @@ describe("workflow-utils", () => {
   });
 
   it("formats valid dates with explicit medium date and short time evidence", () => {
-    const formatter = vi.spyOn(Intl, "DateTimeFormat");
-
-    expect(formatDate("2026-07-22T00:00:00Z")).not.toBe("—");
-    expect(formatter).toHaveBeenCalledWith(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
+    const originalDateTimeFormat = Intl.DateTimeFormat;
+    const format = vi.fn(() => "formatted-date");
+    const dateTimeFormat = vi.fn(function DateTimeFormat(
+      _locales?: Intl.LocalesArgument,
+      _options?: Intl.DateTimeFormatOptions
+    ): Intl.DateTimeFormat {
+      void _locales;
+      void _options;
+      return { format } as unknown as Intl.DateTimeFormat;
+    });
+    Object.defineProperty(Intl, "DateTimeFormat", {
+      configurable: true,
+      value: dateTimeFormat,
     });
 
-    formatter.mockRestore();
+    try {
+      expect(formatDate("2026-07-22T00:00:00Z")).toBe("formatted-date");
+      expect(dateTimeFormat).toHaveBeenCalledWith(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+    } finally {
+      Object.defineProperty(Intl, "DateTimeFormat", {
+        configurable: true,
+        value: originalDateTimeFormat,
+      });
+    }
   });
 
   it("formats missing, second-level, and minute-level durations", () => {

@@ -3,6 +3,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const NON_APPLICABLE_RSC_ADVISORY = 1124282;
+const NON_RUNTIME_VITEST_ADVISORIES = new Set([1193683, 1193684]);
+const VITEST_DEV_TOOLING_PACKAGES = new Set(["vitest", "@vitest/mocker", "@vitest/coverage-v8"]);
 const SOURCE_ROOT = new URL("../src/", import.meta.url).pathname;
 const RSC_PATTERNS = [
   "RSCHydratedRouter",
@@ -69,10 +71,34 @@ const audit = readAudit();
 const vulnerabilityMap = audit.vulnerabilities ?? {};
 const vulnerabilities = Object.values(vulnerabilityMap);
 const unresolved = [];
+let allowedRscAdvisory = false;
+let allowedVitestDevToolingAdvisory = false;
 
 function hasOnlyRscAdvisory(vulnerability) {
   const ids = advisoryIds(vulnerability.via ?? []);
   return ids.length === 1 && ids[0] === NON_APPLICABLE_RSC_ADVISORY;
+}
+
+function hasOnlyVitestDevToolingAdvisories(vulnerability, seen = new Set()) {
+  if (!VITEST_DEV_TOOLING_PACKAGES.has(vulnerability.name) || seen.has(vulnerability.name)) {
+    return false;
+  }
+
+  seen.add(vulnerability.name);
+  const via = vulnerability.via ?? [];
+  return (
+    via.length > 0 &&
+    via.every((item) => {
+      if (typeof item === "object" && item !== null) {
+        return NON_RUNTIME_VITEST_ADVISORIES.has(item.source);
+      }
+      return (
+        typeof item === "string" &&
+        VITEST_DEV_TOOLING_PACKAGES.has(item) &&
+        hasOnlyVitestDevToolingAdvisories(vulnerabilityMap[item], seen)
+      );
+    })
+  );
 }
 
 for (const vulnerability of vulnerabilities) {
@@ -84,8 +110,12 @@ for (const vulnerability of vulnerabilities) {
     vulnerability.via.length === 1 &&
     vulnerability.via[0] === "react-router" &&
     hasOnlyRscAdvisory(vulnerabilityMap["react-router"]);
+  const onlyVitestDevToolingAdvisory = hasOnlyVitestDevToolingAdvisories(vulnerability);
 
-  if (!onlyRscAdvisory && !onlyViaAllowedReactRouter) {
+  allowedRscAdvisory ||= onlyRscAdvisory || onlyViaAllowedReactRouter;
+  allowedVitestDevToolingAdvisory ||= onlyVitestDevToolingAdvisory;
+
+  if (!onlyRscAdvisory && !onlyViaAllowedReactRouter && !onlyVitestDevToolingAdvisory) {
     unresolved.push(vulnerability);
   }
 }
@@ -108,8 +138,13 @@ if (unresolved.length > 0) {
 }
 
 console.log("npm security audit passed.");
-if (vulnerabilities.length > 0) {
+if (allowedRscAdvisory) {
   console.log(
     "GHSA-qwww-vcr4-c8h2 is not applicable: this BrowserRouter SPA has no React Router unstable RSC API usage."
+  );
+}
+if (allowedVitestDevToolingAdvisory) {
+  console.log(
+    "GHSA-82fw-gwwq-j7x9 is not runtime-applicable: Vitest mock redirect handling is confined to dev test tooling and is not bundled into the BrowserRouter SPA."
   );
 }

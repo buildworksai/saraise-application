@@ -9,14 +9,12 @@ function ExplodingChild(): ReactElement {
 }
 
 describe("ErrorBoundary", () => {
-  let consoleError: ReturnType<typeof vi.spyOn>;
-
   beforeEach(() => {
-    consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
   });
 
   afterEach(() => {
-    consoleError.mockRestore();
+    vi.restoreAllMocks();
   });
 
   it("renders children while healthy", () => {

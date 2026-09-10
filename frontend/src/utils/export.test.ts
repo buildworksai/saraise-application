@@ -5,7 +5,11 @@ import { exportTimeseriesToCSV, exportToCSV } from "./export";
 describe("export utilities", () => {
   const createObjectURL = vi.fn<(blob: Blob) => string>(() => "blob:export");
   const revokeObjectURL = vi.fn();
-  let clickSpy: ReturnType<typeof vi.spyOn>;
+  const clickMock = vi.fn<() => void>();
+  const originalClickDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLAnchorElement.prototype,
+    "click"
+  );
   class FakeBlob {
     constructor(
       private readonly parts: string[],
@@ -20,13 +24,18 @@ describe("export utilities", () => {
   beforeEach(() => {
     createObjectURL.mockClear();
     revokeObjectURL.mockClear();
+    clickMock.mockClear();
     vi.stubGlobal("Blob", FakeBlob as unknown as typeof Blob);
     vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
-    clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    HTMLAnchorElement.prototype.click = function click() {
+      clickMock();
+    };
   });
 
   afterEach(() => {
-    clickSpy.mockRestore();
+    if (originalClickDescriptor) {
+      Object.defineProperty(HTMLAnchorElement.prototype, "click", originalClickDescriptor);
+    }
     vi.unstubAllGlobals();
   });
 
@@ -52,7 +61,7 @@ describe("export utilities", () => {
       ["name", "active", "count", "payload", "missing", "callback"]
     );
 
-    expect(clickSpy).toHaveBeenCalledOnce();
+    expect(clickMock).toHaveBeenCalledOnce();
     expect(createObjectURL).toHaveBeenCalledOnce();
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:export");
     expect(exportedBlob).toBeDefined();
@@ -65,7 +74,7 @@ describe("export utilities", () => {
     exportToCSV([], "empty-export");
 
     expect(createObjectURL).not.toHaveBeenCalled();
-    expect(clickSpy).not.toHaveBeenCalled();
+    expect(clickMock).not.toHaveBeenCalled();
   });
 
   it("exports timeseries values with stable default filename and blank null samples", async () => {
@@ -77,9 +86,9 @@ describe("export utilities", () => {
       exportedBlob = blob;
       return "blob:timeseries";
     });
-    clickSpy.mockImplementation(function click(this: HTMLAnchorElement) {
+    HTMLAnchorElement.prototype.click = function click(this: HTMLAnchorElement) {
       downloadName = this.download;
-    });
+    };
 
     exportTimeseriesToCSV(
       [
