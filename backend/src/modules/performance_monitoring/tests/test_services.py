@@ -24,6 +24,7 @@ from src.modules.performance_monitoring.models import (
     MonitoringEnvironment,
     PerformanceMonitoringConfigurationAudit,
     PerformanceMonitoringConfigurationVersion,
+    ServiceLevelObjective,
     Severity,
     SLADefinition,
     SLAWindow,
@@ -50,6 +51,8 @@ from src.modules.performance_monitoring.services import (
     SLANotFoundError,
     SLOMonitoringService,
     TelemetryService,
+    _compare,
+    _percentile,
     deliver_alert_notification_job,
 )
 
@@ -1174,3 +1177,191 @@ def test_metric_collection_rejects_missing_relations_ranges_and_idempotency_conf
         {"start": point.timestamp - timedelta(seconds=1), "end": point.timestamp + timedelta(seconds=1)},
     )
     assert result.data[0].value == 10.5
+
+
+def test_compare_supports_every_configured_operator_and_fails_closed_on_unknown():
+    assert _compare(5, Comparison.GT, 3) is True
+    assert _compare(3, Comparison.GT, 3) is False
+    assert _compare(3, Comparison.GTE, 3) is True
+    assert _compare(2, Comparison.GTE, 3) is False
+    assert _compare(2, Comparison.LT, 3) is True
+    assert _compare(3, Comparison.LT, 3) is False
+    assert _compare(3, Comparison.LTE, 3) is True
+    assert _compare(4, Comparison.LTE, 3) is False
+    assert _compare(3, Comparison.EQ, 3) is True
+    assert _compare(3, Comparison.EQ, 4) is False
+    assert _compare(3, Comparison.NE, 4) is True
+    assert _compare(3, Comparison.NE, 3) is False
+    # An unrecognized comparison must fail closed rather than raise or match.
+    assert _compare(3, "not-a-real-comparison", 3) is False
+
+
+def test_percentile_interpolates_between_ranks_and_rejects_an_empty_series():
+    assert _percentile([10], 50) == 10
+    assert _percentile([1, 2, 3, 4], 50) == pytest.approx(2.5)
+    assert _percentile([5, 3, 1, 4, 2], 0) == 1
+    assert _percentile([5, 3, 1, 4, 2], 100) == 5
+    with pytest.raises(ValueError):
+        _percentile([], 50)
+
+
+def test_slo_budget_minutes_floors_and_never_goes_negative():
+    # Normal, in-policy math: 1 day * 1% error budget = 14.4 minutes, floored to 14.
+    assert SLOMonitoringService._budget_minutes(1, 99) == 14
+    # A perfect objective yields an exact zero-minute budget.
+    assert SLOMonitoringService._budget_minutes(30, 100) == 0
+    # Business validation forbids objective_percentage > 100, but the raw
+    # calculation must still fail closed to zero rather than go negative if
+    # this internal helper is ever reached with an out-of-policy value.
+    assert SLOMonitoringService._budget_minutes(30, 101) == 0
+
+
+@pytest.mark.django_db
+def test_alert_rate_of_change_condition_computes_per_minute_delta():
+    tenant = uuid.uuid4()
+    metrics = MetricsCollectionService()
+    metric = metrics.define_metric(tenant, "queue.depth.rate", MetricType.GAUGE)
+    now = timezone.now()
+    metrics.record_metric(tenant, metric.metric_name, 10, timestamp=now - timedelta(minutes=2))
+    metrics.record_metric(tenant, metric.metric_name, 100, timestamp=now)
+    alerts = AlertingService()
+    rule = alerts.create_alert_rule(
+        tenant,
+        metric.metric_name,
+        AlertCondition.RATE,
+        10,
+        {"channels": ["in_app"], "recipients": ["ops"]},
+        evaluation_window_minutes=5,
+        name="Rate of change",
+    )
+
+    alert = alerts.evaluate_alert_rule(tenant, rule.id)
+
+    assert alert is not None
+    assert alert.condition == AlertCondition.RATE
+    assert alert.triggered_value == pytest.approx(45.0)
+
+    below_threshold_rule = alerts.create_alert_rule(
+        tenant,
+        metric.metric_name,
+        AlertCondition.RATE,
+        1000,
+        {"channels": ["in_app"], "recipients": ["ops"]},
+        evaluation_window_minutes=5,
+        name="Rate of change below threshold",
+    )
+    assert alerts.evaluate_alert_rule(tenant, below_threshold_rule.id) is None
+
+
+@pytest.mark.django_db
+def test_evaluate_alerts_runs_every_active_rule_and_skips_non_triggering_ones():
+    tenant = uuid.uuid4()
+    metrics = MetricsCollectionService()
+    triggering = metrics.define_metric(tenant, "svc.a.latency", MetricType.GAUGE)
+    quiet = metrics.define_metric(tenant, "svc.b.latency", MetricType.GAUGE)
+    metrics.record_metric(tenant, triggering.metric_name, 900)
+    metrics.record_metric(tenant, quiet.metric_name, 10)
+    alerts = AlertingService(notification_sender=lambda *_args: "test-delivery")
+    alerts.create_alert_rule(
+        tenant,
+        triggering.metric_name,
+        AlertCondition.ABOVE,
+        500,
+        {"channels": ["in_app"], "recipients": ["ops"]},
+        name="A",
+    )
+    alerts.create_alert_rule(
+        tenant,
+        quiet.metric_name,
+        AlertCondition.ABOVE,
+        500,
+        {"channels": ["in_app"], "recipients": ["ops"]},
+        name="B",
+    )
+
+    results = alerts.evaluate_alerts(tenant)
+
+    assert len(results) == 1
+    assert results[0].metric_name == triggering.metric_name
+
+
+@pytest.mark.django_db
+def test_update_sla_rejects_cadence_outside_safe_limits():
+    tenant = uuid.uuid4()
+    metric = MetricsCollectionService().define_metric(tenant, "service.cadence.availability", MetricType.GAUGE)
+    service = SLAMonitoringService()
+    sla = service.define_sla(tenant, "Orders", metric.metric_name, 99, "rolling_1h", comparison="gte")
+
+    with pytest.raises(MonitoringError, match="cadence"):
+        service.update_sla(tenant, sla.id, expected_interval_seconds=999999)
+
+
+@pytest.mark.django_db
+def test_query_metrics_auto_interval_selects_the_configured_bucket_by_span():
+    tenant = uuid.uuid4()
+    service = MetricsCollectionService()
+    service.define_metric(tenant, "auto.bucket.metric", MetricType.GAUGE)
+    now = timezone.now()
+    service.record_metric(tenant, "auto.bucket.metric", 5, timestamp=now)
+
+    short_result = service.query_metrics(
+        tenant, "auto.bucket.metric", start=now - timedelta(minutes=1), end=now + timedelta(seconds=1)
+    )
+    assert short_result.interval == "1m"
+
+    long_result = service.query_metrics(
+        tenant, "auto.bucket.metric", start=now - timedelta(days=89), end=now + timedelta(seconds=1)
+    )
+    assert long_result.interval == "1d"
+
+
+@pytest.mark.django_db
+def test_alert_rule_evaluation_returns_none_when_metric_has_no_recent_points():
+    tenant = uuid.uuid4()
+    metric = MetricsCollectionService().define_metric(tenant, "svc.silent.metric", MetricType.GAUGE)
+    rule = AlertingService().create_alert_rule(
+        tenant,
+        metric.metric_name,
+        AlertCondition.ABOVE,
+        500,
+        {"channels": ["in_app"], "recipients": ["ops"]},
+        name="Silent metric",
+    )
+
+    assert AlertingService().evaluate_alert_rule(tenant, rule.id) is None
+    assert not Alert.objects.for_tenant(tenant).filter(alert_rule=rule).exists()
+
+
+@pytest.mark.django_db
+def test_monitoring_catalog_updates_service_level_objective_through_the_generic_path():
+    tenant = uuid.uuid4()
+    actor = uuid.uuid4()
+    environment = MonitoringEnvironment.objects.create(tenant_id=tenant, created_by=actor, name="Prod", slug="prod")
+    monitored = MonitoredService.objects.create(
+        tenant_id=tenant, created_by=actor, environment=environment, name="Checkout", slug="checkout"
+    )
+    metric = MetricsCollectionService().define_metric(tenant, "checkout.catalog.success", MetricType.GAUGE)
+    catalog = MonitoringCatalogService()
+
+    slo = catalog.create(
+        tenant,
+        ServiceLevelObjective,
+        {
+            "name": "Checkout SLO",
+            "service": monitored,
+            "indicator_metric": metric,
+            "comparison": Comparison.GTE,
+            "threshold": 99,
+            "objective_percentage": 99,
+            "window_days": 30,
+            "expected_interval_seconds": 60,
+        },
+        created_by=actor,
+    )
+    assert slo.name == "Checkout SLO"
+
+    updated = catalog.update(tenant, ServiceLevelObjective, slo.id, {"name": "Checkout SLO renamed"})
+    assert updated.name == "Checkout SLO renamed"
+
+    with pytest.raises(MonitoringError, match="Unsupported catalog fields"):
+        catalog.update(tenant, ServiceLevelObjective, slo.id, {"tenant_id": uuid.uuid4()})
