@@ -288,6 +288,7 @@ jobs:
 
       # Container Security Scanning - Trivy (SARAISE-01006)
       - name: Scan backend container image (Trivy)
+        id: trivy_backend
         if: ${{ hashFiles('backend/Dockerfile') != '' }}
         uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297
         with:
@@ -299,7 +300,7 @@ jobs:
           ignore-unfixed: false
 
       - name: Upload Trivy backend SARIF
-        if: always() && hashFiles('backend/Dockerfile') != ''
+        if: always() && steps.trivy_backend.outcome != 'skipped'
         uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63
         with:
           sarif_file: trivy-backend.sarif
@@ -318,6 +319,7 @@ jobs:
 
       # Container Security Scanning - Trivy (SARAISE-01006)
       - name: Scan frontend container image (Trivy)
+        id: trivy_frontend
         uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297
         with:
           image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:test
@@ -328,7 +330,7 @@ jobs:
           ignore-unfixed: false
 
       - name: Upload Trivy frontend SARIF
-        if: always()
+        if: always() && steps.trivy_frontend.outcome != 'skipped'
         uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63
         with:
           sarif_file: trivy-frontend.sarif

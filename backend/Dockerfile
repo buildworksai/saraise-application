@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-alpine
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -8,28 +8,24 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install system dependencies
-# Note: Additional packages for WeasyPrint (PDF generation)
-RUN apt-get update && apt-get install -y \
+# Install system dependencies.
+# Note: pango/cairo/gdk-pixbuf/shared-mime-info support WeasyPrint PDF generation.
+RUN apk upgrade --no-cache && \
+    apk add --no-cache \
     postgresql-client \
     tesseract-ocr \
-    gcc \
-    python3-dev \
-    libpq-dev \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libpangoft2-1.0-0 \
-    libharfbuzz0b \
-    libcairo2 \
-    libgdk-pixbuf-2.0-0 \
-    libglib2.0-0 \
-    libffi-dev \
-    shared-mime-info \
-    && rm -rf /var/lib/apt/lists/*
+    tesseract-ocr-data-eng \
+    pango \
+    cairo \
+    gdk-pixbuf \
+    glib \
+    harfbuzz \
+    shared-mime-info
 
 # Copy and install Python dependencies
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e .[dev]
+RUN pip install --no-cache-dir --upgrade "setuptools>=83.0.0" "wheel>=0.46.2" "jaraco.context>=6.1.0"
+RUN pip install --no-cache-dir -e .
 
 # Copy application code
 COPY . .
@@ -45,7 +41,8 @@ RUN mkdir -p /app/static /app/media /app/logs \
     /app/runtime/bdr/restore
 
 # Create non-root user for security
-RUN useradd -m -u 1000 appuser && \
+RUN addgroup -S appuser && \
+    adduser -S -D -H -u 1000 -G appuser appuser && \
     chown -R appuser:appuser /app
 
 # Switch to non-root user
