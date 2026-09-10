@@ -110,7 +110,6 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -e .[dev,test]
-          pip install safety
 
       - name: "🔒 Lint: Flake8 (Line Length 120)"
         if: ${{ steps.backend.outputs.present == 'true' }}
@@ -149,7 +148,8 @@ jobs:
         if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           pip install 'setuptools>=83.0.0'
-          safety check
+          pip install pip-audit
+          pip-audit --desc --strict
 
       - name: Collect GCR Data
         if: always() && steps.backend.outputs.present == 'true'
