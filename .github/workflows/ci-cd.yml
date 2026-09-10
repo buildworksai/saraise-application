@@ -21,17 +21,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag -- reviewed false positive; scope enforced by surrounding domain policy.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c
         with:
           python-version: '3.10'
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '20.17.0'
           cache: 'npm'
@@ -159,13 +159,13 @@ jobs:
         continue-on-error: false
 
       # Security Scanning - SARAISE-01003, SARAISE-01004
-      - name: Python security audit (safety)
+      - name: Python security audit (pip-audit)
         if: ${{ steps.backend.outputs.present == 'true' }}
         run: |
           cd backend
           pip install 'setuptools>=83.0.0'
-          pip install safety
-          safety check || (echo "❌ Security vulnerabilities found" && exit 1)
+          pip install pip-audit
+          pip-audit --desc --strict || (echo "❌ Python dependency vulnerabilities found" && exit 1)
 
       - name: Node.js security audit
         run: |
@@ -176,28 +176,42 @@ jobs:
       - name: SAST Scan (Semgrep)
         run: |
           pip install semgrep
+          SEMGREP_EXIT=0
           semgrep --config=auto --config=.semgrep/custom-rules.yaml \
             --json --output=semgrep-results.json \
-            --error || true
+            --error || SEMGREP_EXIT=$?
 
-          # Check for critical/high findings
-          if [ -f semgrep-results.json ]; then
-            CRITICAL=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' semgrep-results.json)
-            if [ "$CRITICAL" -gt 0 ]; then
-              echo "❌ SAST found $CRITICAL critical/high findings. Blocking merge."
-              cat semgrep-results.json | jq '.results[] | select(.extra.severity == "ERROR")'
-              exit 1
-            else
-              echo "✅ SAST scan passed (no critical/high findings)"
-            fi
+          if [ ! -f semgrep-results.json ]; then
+            echo "❌ SAST scan did not produce semgrep-results.json"
+            exit 1
           fi
+
+          ERROR_COUNT=$(jq '(.errors // []) | length' semgrep-results.json)
+          if [ "$ERROR_COUNT" -gt 0 ]; then
+            echo "⚠️ SAST scan reported $ERROR_COUNT nonfatal Semgrep parser diagnostics."
+            jq '.errors' semgrep-results.json
+          fi
+
+          BLOCKING=$(jq '[((.results // [])[]) | select(.extra.is_ignored != true)] | length' semgrep-results.json)
+          if [ "$BLOCKING" -gt 0 ]; then
+            echo "❌ SAST found $BLOCKING blocking findings. Blocking merge."
+            jq '.results[] | select(.extra.is_ignored != true)' semgrep-results.json
+            exit 1
+          fi
+
+          if [ "$SEMGREP_EXIT" -ne 0 ]; then
+            echo "❌ SAST scan failed with Semgrep exit code $SEMGREP_EXIT"
+            exit "$SEMGREP_EXIT"
+          fi
+
+          echo "✅ SAST scan passed (no blocking findings or scan errors)"
 
           # Upload SARIF for GitHub Security tab
           semgrep --config=auto --config=.semgrep/custom-rules.yaml \
             --sarif --output=semgrep-results.sarif || true
 
       - name: Upload Semgrep SARIF
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63
         if: always() && hashFiles('semgrep-results.sarif') != ''
         with:
           sarif_file: semgrep-results.sarif
@@ -209,10 +223,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@7f4fc3e22c37d6ff65e88745f38bd3157c663f7c
         with:
           python-version: '3.10'
 
@@ -248,13 +262,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
       - name: Log in to Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ${{ env.DOCKER_REGISTRY }}
           username: ${{ github.actor }}
@@ -263,7 +277,7 @@ jobs:
       # Build backend image
       - name: Build backend image
         if: ${{ hashFiles('backend/Dockerfile') != '' }}
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
         with:
           context: ./backend
           push: false
@@ -275,7 +289,7 @@ jobs:
       # Container Security Scanning - Trivy (SARAISE-01006)
       - name: Scan backend container image (Trivy)
         if: ${{ hashFiles('backend/Dockerfile') != '' }}
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297
         with:
           image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}-api:test
           format: 'sarif'
@@ -286,14 +300,14 @@ jobs:
 
       - name: Upload Trivy backend SARIF
         if: always() && hashFiles('backend/Dockerfile') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63
         with:
           sarif_file: trivy-backend.sarif
           wait-for-processing: false
 
       # Build frontend image
       - name: Build frontend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25
         with:
           context: ./frontend
           push: false
@@ -304,7 +318,7 @@ jobs:
 
       # Container Security Scanning - Trivy (SARAISE-01006)
       - name: Scan frontend container image (Trivy)
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297
         with:
           image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:test
           format: 'sarif'
@@ -315,7 +329,7 @@ jobs:
 
       - name: Upload Trivy frontend SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63
         with:
           sarif_file: trivy-frontend.sarif
           wait-for-processing: false
@@ -327,7 +341,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Check bundle sizes
         run: |
@@ -354,7 +368,7 @@ jobs:
     environment: staging
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Deploy to staging
         run: |
@@ -377,7 +391,7 @@ jobs:
     environment: production
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Deploy to production
         run: |

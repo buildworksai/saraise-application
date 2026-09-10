@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout main repository
-        uses: actions/checkout@v4  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag -- reviewed false positive; scope enforced by surrounding domain policy.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 1  # Only fetch latest commit, not full history
 
@@ -137,7 +137,7 @@ jobs:
           git push origin main --tags --force || git push -u origin main --tags
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
         with:
