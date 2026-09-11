@@ -12,6 +12,7 @@ WORKDIR /app
 # Note: pango/cairo/gdk-pixbuf/shared-mime-info support WeasyPrint PDF generation.
 RUN apk upgrade --no-cache && \
     apk add --no-cache \
+    bash \
     postgresql-client \
     tesseract-ocr \
     tesseract-ocr-data-eng \
@@ -26,7 +27,7 @@ RUN apk upgrade --no-cache && \
 COPY pyproject.toml .
 RUN pip install --no-cache-dir --upgrade "pip>=26.1.2" "setuptools>=83.0.0" "wheel>=0.46.2" "jaraco.context>=6.1.0" && \
     rm -f /usr/local/lib/python3.11/site-packages/pip/_vendor/bom.cdx.json
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e ".[dev]"
 
 # Copy application code
 COPY . .

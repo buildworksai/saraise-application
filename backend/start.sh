@@ -21,14 +21,6 @@ mkdir -p \
     /app/runtime/bdr/storage \
     /app/runtime/bdr/restore
 
-# Install dependencies
-echo "📦 Installing dependencies..."
-pip install -e .[dev] || {
-    echo "❌ Failed to install dependencies"
-    exit 1
-}
-echo "✅ Dependencies installed"
-
 # Wait for database to be ready (with timeout)
 echo "⏳ Waiting for database..."
 MAX_ATTEMPTS=30
