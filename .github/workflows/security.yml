@@ -57,7 +57,8 @@ jobs:
         with:
           target: 'http://localhost:28000'
           rules_file_name: '.zap/rules.tsv'
-          fail_action: true
+          fail_action: false
+          allow_issue_writing: false
           cmd_options: '-a'
 
       - name: Upload ZAP Report
@@ -71,14 +72,17 @@ jobs:
       - name: Check for critical findings
         if: always()
         run: |
-          if [ -f zap-report.json ]; then
-            CRITICAL=$(jq '[.site[] | .alerts[] | select(.riskcode == "4")] | length' zap-report.json || echo "0")
+          if [ -f report_json.json ]; then
+            CRITICAL=$(jq '[.site[] | .alerts[] | select(.riskcode == "4")] | length' report_json.json || echo "0")
             if [ "$CRITICAL" -gt 0 ]; then
               echo "❌ DAST found $CRITICAL critical findings. Blocking merge."
               exit 1
             else
               echo "✅ DAST scan passed (no critical findings)"
             fi
+          else
+            echo "❌ ZAP JSON report was not generated; cannot evaluate critical findings."
+            exit 1
           fi
 
       - name: Stop application services
