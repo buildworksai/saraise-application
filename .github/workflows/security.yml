@@ -53,7 +53,7 @@ jobs:
         run: docker compose -f docker-compose.dev.yml logs --no-color --tail=250 backend postgres redis
 
       - name: ZAP Baseline Scan
-        uses: zaproxy/action-baseline@1e1871e84428617b969d4a1f981a8255630d54b0
+        uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25
         with:
           target: 'http://localhost:28000'
           rules_file_name: '.zap/rules.tsv'
